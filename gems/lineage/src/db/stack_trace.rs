@@ -121,13 +121,7 @@ where
 
     storage.begin_transaction()?;
     let result = ingest_payloads(
-        storage,
-        normalizer,
-        git,
-        extractor,
-        payloads,
-        replace,
-        &mut stats,
+        storage, normalizer, git, extractor, payloads, replace, &mut stats,
     );
     match result {
         Ok(()) => {
@@ -221,7 +215,11 @@ fn parse_sentry_payload(value: &Value) -> Result<StackPayload> {
         .and_then(Value::as_i64)
         .unwrap_or_default();
     let error_class = string_at(value, &["error_class"])
-        .or_else(|| value.pointer("/exception/values/0/type").and_then(Value::as_str))
+        .or_else(|| {
+            value
+                .pointer("/exception/values/0/type")
+                .and_then(Value::as_str)
+        })
         .unwrap_or("Error")
         .to_string();
     let frames = value
@@ -252,9 +250,17 @@ fn parse_sentry_frame(value: &Value) -> Option<RawStackFrame> {
         .get("lineno")
         .or_else(|| value.get("line"))
         .and_then(Value::as_u64)? as u32;
-    let function = string_at(value, &["function"]).unwrap_or("(unknown)").to_string();
+    let function = string_at(value, &["function"])
+        .unwrap_or("(unknown)")
+        .to_string();
     let context_line = string_at(value, &["context_line"])
-        .or_else(|| value.get("pre_context").and_then(Value::as_array)?.last()?.as_str())
+        .or_else(|| {
+            value
+                .get("pre_context")
+                .and_then(Value::as_array)?
+                .last()?
+                .as_str()
+        })
         .map(str::to_string);
 
     Some(RawStackFrame {
@@ -266,7 +272,8 @@ fn parse_sentry_frame(value: &Value) -> Option<RawStackFrame> {
 }
 
 fn string_at<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    keys.iter().find_map(|key| value.get(*key).and_then(Value::as_str))
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
 }
 
 fn file_at_commit(git: &GitProvider, commit_hash: &str, path: &str) -> Result<Option<BlobFile>> {
@@ -335,12 +342,12 @@ mod tests {
         );
     }
 
-    use tempfile::tempdir;
-    use crate::storage::Storage;
-    use crate::git::GitProvider;
     use crate::extract::HeuristicExtractor;
+    use crate::git::GitProvider;
+    use crate::storage::Storage;
     use std::fs;
     use std::path::Path;
+    use tempfile::tempdir;
 
     fn create_commit(
         repo: &git2::Repository,
@@ -348,7 +355,9 @@ mod tests {
         files: &[(&str, &str)],
     ) -> Result<String, git2::Error> {
         let mut index = repo.index()?;
-        let workdir = repo.workdir().ok_or_else(|| git2::Error::from_str("no workdir"))?;
+        let workdir = repo
+            .workdir()
+            .ok_or_else(|| git2::Error::from_str("no workdir"))?;
         for (path, content) in files {
             let file_path = workdir.join(path);
             if let Some(parent_dir) = file_path.parent() {
@@ -360,9 +369,9 @@ mod tests {
         index.write()?;
         let tree_oid = index.write_tree()?;
         let tree = repo.find_tree(tree_oid)?;
-        
+
         let signature = git2::Signature::now("Test User", "test@example.com")?;
-        
+
         let parent = match repo.head() {
             Ok(head_ref) => {
                 let target = head_ref.target().unwrap();
@@ -370,12 +379,12 @@ mod tests {
             }
             Err(_) => None,
         };
-        
+
         let mut parents = Vec::new();
         if let Some(ref p) = parent {
             parents.push(p);
         }
-        
+
         let oid = repo.commit(
             Some("HEAD"),
             &signature,
@@ -391,15 +400,15 @@ mod tests {
     fn test_ingest_stack_traces_flow() {
         let dir = tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
-        
+
         let content = "def run\n  puts 'crash'\nend\n";
         let c1 = create_commit(&repo, "init", &[("src/demo.rb", content)]).unwrap();
-        
+
         let storage = Storage::open_memory().unwrap();
         let provider = GitProvider::open(dir.path()).unwrap();
         let normalizer = RepoPathNormalizer::new(dir.path());
         let extractor = HeuristicExtractor::default();
-        
+
         let payload = json!({
             "event_id": "evt-1",
             "commit_hash": c1,
@@ -437,12 +446,14 @@ mod tests {
         assert!(err.is_err());
 
         // Insert commit & logical units into storage
-        storage.insert_metadata(&crate::model::CommitMetadata {
-            hash: c1.clone(),
-            message: "init".to_string(),
-            timestamp: 123456,
-        }).unwrap();
-        
+        storage
+            .insert_metadata(&crate::model::CommitMetadata {
+                hash: c1.clone(),
+                message: "init".to_string(),
+                timestamp: 123456,
+            })
+            .unwrap();
+
         let units = extractor.extract_units(&crate::model::BlobFile {
             path: "src/demo.rb".to_string(),
             contents: content.to_string(),
@@ -460,7 +471,8 @@ mod tests {
             &extractor,
             &payload.to_string(),
             false,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(stats.payloads, 1);
         assert_eq!(stats.frames, 2);
@@ -476,15 +488,16 @@ mod tests {
             &extractor,
             &payload.to_string(),
             true,
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         assert_eq!(stats_replace.events, 2);
     }
 
     #[test]
     fn test_sentry_provider_variations() {
         let provider = SentryProvider;
-        
+
         // 1. Array format
         let array_payload = json!([{
             "commit_hash": "c1",
@@ -501,7 +514,9 @@ mod tests {
                 "exception": { "values": [{ "stacktrace": { "frames": [] } }] }
             }]
         });
-        let res2 = provider.parse_payloads(&events_payload.to_string()).unwrap();
+        let res2 = provider
+            .parse_payloads(&events_payload.to_string())
+            .unwrap();
         assert_eq!(res2.len(), 1);
         assert_eq!(res2[0].commit_hash, "c2");
 
@@ -521,18 +536,27 @@ mod tests {
     #[test]
     fn test_repo_path_normalizer_extra_branches() {
         let normalizer = RepoPathNormalizer::new("/home/user/project");
-        
+
         // prefix stripping
-        assert_eq!(normalizer.normalize_path("/github/workspace/src/foo.rb"), "src/foo.rb");
-        assert_eq!(normalizer.normalize_path("/workspace/src/foo.rb"), "src/foo.rb");
+        assert_eq!(
+            normalizer.normalize_path("/github/workspace/src/foo.rb"),
+            "src/foo.rb"
+        );
+        assert_eq!(
+            normalizer.normalize_path("/workspace/src/foo.rb"),
+            "src/foo.rb"
+        );
         assert_eq!(normalizer.normalize_path("/app/src/foo.rb"), "src/foo.rb");
 
         // leading slash with multiple markers: best_match logic
-        assert_eq!(normalizer.normalize_path("/some/path/zig/sub/src/foo.rb"), "zig/sub/src/foo.rb");
-        
+        assert_eq!(
+            normalizer.normalize_path("/some/path/zig/sub/src/foo.rb"),
+            "zig/sub/src/foo.rb"
+        );
+
         // slash prefix with no markers
         assert_eq!(normalizer.normalize_path("/other/foo.rb"), "other/foo.rb");
-        
+
         // standard fallback
         assert_eq!(normalizer.normalize_path("./foo.rb"), "foo.rb");
     }

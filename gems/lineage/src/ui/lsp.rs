@@ -11,9 +11,9 @@ use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::{
     CodeLens, CodeLensOptions, CodeLensParams, Command, Diagnostic, DiagnosticSeverity,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-    HoverContents, HoverParams, InitializeParams, InitializeResult, InitializedParams, Location,
-    MarkupContent, MarkupKind, MessageType, OneOf, Position, Range, ServerCapabilities,
+    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent,
+    MarkupKind, MessageType, OneOf, Position, Range, ServerCapabilities,
     TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -167,7 +167,8 @@ impl LanguageServer for LineageLsp {
             Ok(Some(facts)) => Ok(hover_for_line(&facts, line)),
             Ok(None) => Ok(None),
             Err(error) => {
-                self.log_error(format!("lineage hover failed: {error:#}")).await;
+                self.log_error(format!("lineage hover failed: {error:#}"))
+                    .await;
                 Ok(None)
             }
         }
@@ -288,7 +289,11 @@ impl LineageLsp {
     /// The identifier under the cursor, from the tracked open-document text
     /// (falling back to disk if the document was never opened over LSP).
     fn word_at_position(&self, uri: &Url, position: Position) -> Option<String> {
-        let tracked = self.documents.lock().ok().and_then(|documents| documents.get(uri).cloned());
+        let tracked = self
+            .documents
+            .lock()
+            .ok()
+            .and_then(|documents| documents.get(uri).cloned());
         let text = tracked.or_else(|| {
             uri.to_file_path()
                 .ok()
@@ -299,7 +304,10 @@ impl LineageLsp {
     }
 
     fn uri_for_repo_path(&self, path: &str) -> Option<Url> {
-        let repo = self.repo.canonicalize().unwrap_or_else(|_| self.repo.clone());
+        let repo = self
+            .repo
+            .canonicalize()
+            .unwrap_or_else(|_| self.repo.clone());
         Url::from_file_path(repo.join(path)).ok()
     }
 
@@ -307,7 +315,10 @@ impl LineageLsp {
         let file_path = uri
             .to_file_path()
             .map_err(|_| anyhow::anyhow!("unsupported non-file URI {uri}"))?;
-        let repo = self.repo.canonicalize().unwrap_or_else(|_| self.repo.clone());
+        let repo = self
+            .repo
+            .canonicalize()
+            .unwrap_or_else(|_| self.repo.clone());
         let full = file_path
             .canonicalize()
             .unwrap_or_else(|_| file_path.clone());
@@ -597,7 +608,10 @@ fn hover_for_line(facts: &FileFacts, line: u32) -> Option<Hover> {
         .iter()
         .filter(|unit| unit.start_line <= line && line <= unit.end_line)
         .min_by_key(|unit| unit.end_line.saturating_sub(unit.start_line));
-    let annotation = facts.annotations.iter().find(|annotation| annotation.line == line);
+    let annotation = facts
+        .annotations
+        .iter()
+        .find(|annotation| annotation.line == line);
     if unit.is_none() && annotation.is_none() {
         return None;
     }
@@ -626,7 +640,10 @@ fn hover_for_line(facts: &FileFacts, line: u32) -> Option<Hover> {
             ));
         }
         if unit.reopened_count > 0 {
-            lines.push(format!("Reopened crash frames after fix: {}", unit.reopened_count));
+            lines.push(format!(
+                "Reopened crash frames after fix: {}",
+                unit.reopened_count
+            ));
         }
         if unit.hotness_tier.as_deref() == Some("critical") {
             lines.push(format!(
@@ -648,14 +665,21 @@ fn hover_for_line(facts: &FileFacts, line: u32) -> Option<Hover> {
             ));
         }
         if !annotation.test_types.is_empty() {
-            lines.push(format!("Line test types: {}", annotation.test_types.join(", ")));
+            lines.push(format!(
+                "Line test types: {}",
+                annotation.test_types.join(", ")
+            ));
         }
         for hazard in &annotation.hazards {
             lines.push(format!(
                 "Hazard: {} requires {} ({})",
                 hazard.hazard_type,
                 hazard.required_evidence,
-                if hazard.verified { "verified" } else { "missing" }
+                if hazard.verified {
+                    "verified"
+                } else {
+                    "missing"
+                }
             ));
         }
         for dark_arm in &annotation.dark_arms {
@@ -698,7 +722,10 @@ fn code_lenses_for_units(facts: &FileFacts) -> Vec<CodeLens> {
                 unit.reopened_count
             );
             if unit.hotness_tier.as_deref() == Some("critical") {
-                title.push_str(&format!(" | critical hotpath {:.1}%", unit.hotness_share * 100.0));
+                title.push_str(&format!(
+                    " | critical hotpath {:.1}%",
+                    unit.hotness_share * 100.0
+                ));
             }
             CodeLens {
                 range: range_for_line(unit.start_line),
@@ -818,7 +845,9 @@ mod tests {
         let mut warm = annotation();
         warm.hotness_tier = Some("warm".to_string());
         let warm_items = gutter_items_for_annotations(&[warm]);
-        assert!(!warm_items.iter().any(|item| item.kind == "hotness_critical"));
+        assert!(!warm_items
+            .iter()
+            .any(|item| item.kind == "hotness_critical"));
     }
 
     fn unit_fixture() -> LspUnit {
@@ -903,12 +932,16 @@ mod tests {
             panic!("expected markdown hover contents");
         };
         assert!(
-            markup.value.contains("Critical hotpath: 62.0% of runtime profile"),
+            markup
+                .value
+                .contains("Critical hotpath: 62.0% of runtime profile"),
             "hover was: {}",
             markup.value
         );
         assert!(
-            markup.value.contains("Runtime profile: critical - 62.0% cumulative (pprof:cpu)"),
+            markup
+                .value
+                .contains("Runtime profile: critical - 62.0% cumulative (pprof:cpu)"),
             "hover was: {}",
             markup.value
         );
@@ -922,7 +955,10 @@ mod tests {
         let hot_facts = file_facts_fixture(vec![hot_unit], Vec::new());
         let hot_lenses = code_lenses_for_units(&hot_facts);
         let hot_title = hot_lenses[0].command.as_ref().unwrap().title.clone();
-        assert!(hot_title.contains("critical hotpath 73.5%"), "title was: {hot_title}");
+        assert!(
+            hot_title.contains("critical hotpath 73.5%"),
+            "title was: {hot_title}"
+        );
 
         let cold_facts = file_facts_fixture(vec![unit_fixture()], Vec::new());
         let cold_lenses = code_lenses_for_units(&cold_facts);
@@ -986,7 +1022,10 @@ mod tests {
 
         let units = file_units(&storage, "src/worker.rb").unwrap();
         assert_eq!(units.len(), 1);
-        assert_eq!(units[0].start_line, 7, "must fall back to logical_units.start_line, not 1");
+        assert_eq!(
+            units[0].start_line, 7,
+            "must fall back to logical_units.start_line, not 1"
+        );
         // logical_units has no end_line column (only start_line survives the
         // upsert), so pre-first-event units degrade to a single-line range
         // rather than the true 7..=9 extent. Still strictly better than the

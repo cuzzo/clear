@@ -45,7 +45,7 @@ where
 
     pub fn run(&mut self, max_commits: Option<usize>) -> Result<EngineStats> {
         self.storage.begin_transaction()?;
-        match self.run_inner(max_commits) {
+        match self.run_inner(max_commits, None) {
             Ok(stats) => {
                 self.storage.commit_transaction()?;
                 Ok(stats)
@@ -57,8 +57,40 @@ where
         }
     }
 
-    fn run_inner(&mut self, max_commits: Option<usize>) -> Result<EngineStats> {
+    /// Indexes the first-parent history through one immutable revision. This
+    /// deliberately includes the revision's predecessors: logical-unit IDs
+    /// and rename lineage depend on their historical state.
+    pub fn run_through_revision(&mut self, revision: &str) -> Result<EngineStats> {
+        self.storage.begin_transaction()?;
+        match self.run_inner(None, Some(revision)) {
+            Ok(stats) => {
+                self.storage.commit_transaction()?;
+                Ok(stats)
+            }
+            Err(error) => {
+                let _ = self.storage.rollback_transaction();
+                Err(error)
+            }
+        }
+    }
+
+    fn run_inner(
+        &mut self,
+        max_commits: Option<usize>,
+        through_revision: Option<&str>,
+    ) -> Result<EngineStats> {
         let mut commits = self.provider.list_commits()?;
+        if let Some(revision) = through_revision {
+            let index = commits
+                .iter()
+                .position(|commit| commit.hash == revision)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "revision {revision} is not on the provider first-parent history"
+                    )
+                })?;
+            commits.truncate(index + 1);
+        }
         if let Some(max) = max_commits {
             if commits.len() > max {
                 commits = commits.split_off(commits.len() - max);
@@ -88,7 +120,10 @@ where
                     .entry((unit.kind, unit.name.clone()))
                     .or_default()
                     .push(unit.id.clone());
-                file_units.entry(unit.path.clone()).or_default().push(unit.clone());
+                file_units
+                    .entry(unit.path.clone())
+                    .or_default()
+                    .push(unit.clone());
             }
         }
 
@@ -106,11 +141,7 @@ where
                     Some(commits[idx - 1].hash.as_str())
                 };
                 let path_filter = |path: &str| extractor.supports_path(path);
-                provider.changes_at_commit(
-                    prev_commit_hash,
-                    &commit.hash,
-                    &path_filter,
-                )
+                provider.changes_at_commit(prev_commit_hash, &commit.hash, &path_filter)
             })
             .collect();
         let commits_changes = commits_changes?;
@@ -146,11 +177,7 @@ where
                 file_units.remove(path);
             }
 
-            let extracted_units = file_units
-                .values()
-                .flatten()
-                .cloned()
-                .collect::<Vec<_>>();
+            let extracted_units = file_units.values().flatten().cloned().collect::<Vec<_>>();
 
             let observed_current_ids = extracted_units
                 .iter()
@@ -193,9 +220,13 @@ where
                             EventType::Change => stats.changes += 1,
                         }
                     }
-                } else if let Some(prev) =
-                    find_moved_unit(&previous, &previous_by_name, &claimed_moves, &observed_current_ids, &unit)
-                {
+                } else if let Some(prev) = find_moved_unit(
+                    &previous,
+                    &previous_by_name,
+                    &claimed_moves,
+                    &observed_current_ids,
+                    &unit,
+                ) {
                     let previous_id = prev.id.clone();
                     let semantic_change = prev.normalized_hash != unit.normalized_hash;
                     let event = Event {
@@ -298,11 +329,15 @@ fn find_moved_unit<'a>(
         })
         .filter_map(|prev| {
             let similarity = block_similarity(prev, current);
-            let meaningful_len = get_meaningful_lines(prev).len().max(get_meaningful_lines(current).len());
+            let meaningful_len = get_meaningful_lines(prev)
+                .len()
+                .max(get_meaningful_lines(current).len());
             let threshold = get_similarity_threshold(meaningful_len);
             (similarity >= threshold).then_some((prev, similarity))
         })
-        .max_by(|(_, left), (_, right)| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, left), (_, right)| {
+            left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+        })
         .map(|(prev, _)| prev)
 }
 
@@ -320,17 +355,21 @@ fn get_similarity_threshold(block_size: usize) -> f64 {
 }
 
 fn is_meaningless_line(line: &str, path: &str) -> bool {
-    let ext = path.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default();
+    let ext = path
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return true;
     }
     match ext.as_str() {
         "rb" | "lua" => trimmed.eq_ignore_ascii_case("end"),
-        "go" | "rs" | "c" | "h" | "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" | "cs" | "java" | "kt" | "kts" | "swift" | "js" | "jsx" | "ts" | "tsx" | "zig" | "php" => {
+        "go" | "rs" | "c" | "h" | "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" | "cs" | "java"
+        | "kt" | "kts" | "swift" | "js" | "jsx" | "ts" | "tsx" | "zig" | "php" => {
             matches!(trimmed, "}" | "{" | "};" | "{}")
         }
-        _ => false
+        _ => false,
     }
 }
 
@@ -340,15 +379,26 @@ fn is_trivial_line(line: &str) -> bool {
         return true;
     }
     if clean.len() < 20 {
-        let has_chaining = clean.matches('.').count() >= 2 || clean.contains("|>") || clean.contains("->");
-        let has_closure = clean.contains("{|") || clean.contains("=>") || clean.contains("->") || clean.contains("||");
+        let has_chaining =
+            clean.matches('.').count() >= 2 || clean.contains("|>") || clean.contains("->");
+        let has_closure = clean.contains("{|")
+            || clean.contains("=>")
+            || clean.contains("->")
+            || clean.contains("||");
         let has_complex_op = clean.contains("&&") || clean.contains("==") || clean.contains("!=");
         if !has_chaining && !has_closure && !has_complex_op {
             return true;
         }
     }
     let lower = clean.to_lowercase();
-    if lower == "returntrue" || lower == "returnfalse" || lower == "returnnull" || lower == "return" || lower == "return;" || lower == "return0" || lower == "return1" {
+    if lower == "returntrue"
+        || lower == "returnfalse"
+        || lower == "returnnull"
+        || lower == "return"
+        || lower == "return;"
+        || lower == "return0"
+        || lower == "return1"
+    {
         return true;
     }
     false
@@ -383,7 +433,11 @@ fn get_meaningful_lines(unit: &LogicalUnit) -> Vec<&str> {
         .collect()
 }
 
-fn classify_event(previous: &LogicalUnit, current: &LogicalUnit, fix_commit: bool) -> Option<EventType> {
+fn classify_event(
+    previous: &LogicalUnit,
+    current: &LogicalUnit,
+    fix_commit: bool,
+) -> Option<EventType> {
     let moved = previous.path != current.path;
     let changed = previous.normalized_hash != current.normalized_hash;
 
@@ -473,7 +527,16 @@ mod tests {
 
     #[test]
     fn classifies_moves_without_counting_them_as_changes() {
-        let unit_a = LogicalUnit::new("run", UnitKind::Function, "src/a.rb", 1, 1, 3, "def run", "def run\n1\nend");
+        let unit_a = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/a.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
         let unit_b = LogicalUnit::new(
             "run",
             UnitKind::Function,
@@ -485,7 +548,10 @@ mod tests {
             "def run\n1\nend",
         );
 
-        assert_eq!(classify_event(&unit_a, &unit_b, false), Some(EventType::Move));
+        assert_eq!(
+            classify_event(&unit_a, &unit_b, false),
+            Some(EventType::Move)
+        );
     }
 
     #[test]
@@ -520,7 +586,11 @@ mod tests {
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.commits, 2);
@@ -562,7 +632,11 @@ mod tests {
         let db = dir.path().join("lineage.db");
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open(&db).unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(Some(2)).unwrap();
         let storage = Storage::open_existing(&db).unwrap();
 
@@ -604,7 +678,11 @@ mod tests {
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.events, 0);
@@ -644,7 +722,11 @@ mod tests {
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.events, 1);
@@ -685,7 +767,11 @@ mod tests {
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.moves, 0);
@@ -726,7 +812,11 @@ mod tests {
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.moves, 1);
@@ -761,13 +851,18 @@ mod tests {
             "c2".into(),
             vec![BlobFile {
                 path: "src/b.rb".into(),
-                contents: "def run(a, b, c)\nnetwork\nsocket\nretry\nfallback\nmetrics\nend\n".into(),
+                contents: "def run(a, b, c)\nnetwork\nsocket\nretry\nfallback\nmetrics\nend\n"
+                    .into(),
             }],
         );
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.events, 0);
@@ -813,7 +908,11 @@ mod tests {
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.events, 0);
@@ -824,22 +923,40 @@ mod tests {
     #[test]
     fn does_not_track_meaningless_line_moves() {
         let commits = vec![
-            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
-            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+            CommitMetadata {
+                hash: "c1".into(),
+                message: "init".into(),
+                timestamp: 1,
+            },
+            CommitMetadata {
+                hash: "c2".into(),
+                message: "move".into(),
+                timestamp: 2,
+            },
         ];
         let mut files = HashMap::new();
-        files.insert("c1".into(), vec![BlobFile {
-            path: "src/a.rb".into(),
-            contents: "def run\nend\n".into(),
-        }]);
-        files.insert("c2".into(), vec![BlobFile {
-            path: "src/b.rb".into(),
-            contents: "def run\nend\n".into(),
-        }]);
+        files.insert(
+            "c1".into(),
+            vec![BlobFile {
+                path: "src/a.rb".into(),
+                contents: "def run\nend\n".into(),
+            }],
+        );
+        files.insert(
+            "c2".into(),
+            vec![BlobFile {
+                path: "src/b.rb".into(),
+                contents: "def run\nend\n".into(),
+            }],
+        );
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.moves, 0);
@@ -848,22 +965,40 @@ mod tests {
     #[test]
     fn does_not_track_trivial_single_line_moves() {
         let commits = vec![
-            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
-            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+            CommitMetadata {
+                hash: "c1".into(),
+                message: "init".into(),
+                timestamp: 1,
+            },
+            CommitMetadata {
+                hash: "c2".into(),
+                message: "move".into(),
+                timestamp: 2,
+            },
         ];
         let mut files = HashMap::new();
-        files.insert("c1".into(), vec![BlobFile {
-            path: "src/a.rb".into(),
-            contents: "def run\n  run()\nend\n".into(),
-        }]);
-        files.insert("c2".into(), vec![BlobFile {
-            path: "src/b.rb".into(),
-            contents: "def run\n  run()\nend\n".into(),
-        }]);
+        files.insert(
+            "c1".into(),
+            vec![BlobFile {
+                path: "src/a.rb".into(),
+                contents: "def run\n  run()\nend\n".into(),
+            }],
+        );
+        files.insert(
+            "c2".into(),
+            vec![BlobFile {
+                path: "src/b.rb".into(),
+                contents: "def run\n  run()\nend\n".into(),
+            }],
+        );
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.moves, 0);
@@ -872,22 +1007,40 @@ mod tests {
     #[test]
     fn tracks_meaningful_single_line_moves() {
         let commits = vec![
-            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
-            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+            CommitMetadata {
+                hash: "c1".into(),
+                message: "init".into(),
+                timestamp: 1,
+            },
+            CommitMetadata {
+                hash: "c2".into(),
+                message: "move".into(),
+                timestamp: 2,
+            },
         ];
         let mut files = HashMap::new();
-        files.insert("c1".into(), vec![BlobFile {
-            path: "src/a.rb".into(),
-            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
-        }]);
-        files.insert("c2".into(), vec![BlobFile {
-            path: "src/b.rb".into(),
-            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
-        }]);
+        files.insert(
+            "c1".into(),
+            vec![BlobFile {
+                path: "src/a.rb".into(),
+                contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+            }],
+        );
+        files.insert(
+            "c2".into(),
+            vec![BlobFile {
+                path: "src/b.rb".into(),
+                contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+            }],
+        );
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.moves, 1);
@@ -896,22 +1049,40 @@ mod tests {
     #[test]
     fn tracks_block_moves_even_with_trivial_lines() {
         let commits = vec![
-            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
-            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+            CommitMetadata {
+                hash: "c1".into(),
+                message: "init".into(),
+                timestamp: 1,
+            },
+            CommitMetadata {
+                hash: "c2".into(),
+                message: "move".into(),
+                timestamp: 2,
+            },
         ];
         let mut files = HashMap::new();
-        files.insert("c1".into(), vec![BlobFile {
-            path: "src/a.rb".into(),
-            contents: "def run\n  foo();\n  bar();\n  baz();\nend\n".into(),
-        }]);
-        files.insert("c2".into(), vec![BlobFile {
-            path: "src/b.rb".into(),
-            contents: "def run\n  foo();\n  bar();\n  baz();\nend\n".into(),
-        }]);
+        files.insert(
+            "c1".into(),
+            vec![BlobFile {
+                path: "src/a.rb".into(),
+                contents: "def run\n  foo();\n  bar();\n  baz();\nend\n".into(),
+            }],
+        );
+        files.insert(
+            "c2".into(),
+            vec![BlobFile {
+                path: "src/b.rb".into(),
+                contents: "def run\n  foo();\n  bar();\n  baz();\nend\n".into(),
+            }],
+        );
 
         let provider = MemoryProvider { commits, files };
         let storage = Storage::open_memory().unwrap();
-        let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+        let mut engine = LineageEngine::new(
+            provider,
+            crate::extract::HeuristicExtractor::default(),
+            storage,
+        );
         let stats = engine.run(None).unwrap();
 
         assert_eq!(stats.moves, 1);
@@ -919,23 +1090,35 @@ mod tests {
 
     #[test]
     fn incremental_indexing_resumes_state() {
-        let commits1 = vec![
-            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
-        ];
+        let commits1 = vec![CommitMetadata {
+            hash: "c1".into(),
+            message: "init".into(),
+            timestamp: 1,
+        }];
         let mut files1 = HashMap::new();
-        files1.insert("c1".into(), vec![BlobFile {
-            path: "src/a.rb".into(),
-            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
-        }]);
+        files1.insert(
+            "c1".into(),
+            vec![BlobFile {
+                path: "src/a.rb".into(),
+                contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+            }],
+        );
 
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("lineage.db");
 
         // Run 1: process c1
         {
-            let provider = MemoryProvider { commits: commits1, files: files1 };
+            let provider = MemoryProvider {
+                commits: commits1,
+                files: files1,
+            };
             let storage = Storage::open(&db_path).unwrap();
-            let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+            let mut engine = LineageEngine::new(
+                provider,
+                crate::extract::HeuristicExtractor::default(),
+                storage,
+            );
             let stats = engine.run(None).unwrap();
             assert_eq!(stats.commits, 1);
             assert_eq!(stats.moves, 0);
@@ -943,23 +1126,44 @@ mod tests {
 
         // Run 2: process c1 and c2 (incremental)
         let commits2 = vec![
-            CommitMetadata { hash: "c1".into(), message: "init".into(), timestamp: 1 },
-            CommitMetadata { hash: "c2".into(), message: "move".into(), timestamp: 2 },
+            CommitMetadata {
+                hash: "c1".into(),
+                message: "init".into(),
+                timestamp: 1,
+            },
+            CommitMetadata {
+                hash: "c2".into(),
+                message: "move".into(),
+                timestamp: 2,
+            },
         ];
         let mut files2 = HashMap::new();
-        files2.insert("c1".into(), vec![BlobFile {
-            path: "src/a.rb".into(),
-            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
-        }]);
-        files2.insert("c2".into(), vec![BlobFile {
-            path: "src/b.rb".into(),
-            contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
-        }]);
+        files2.insert(
+            "c1".into(),
+            vec![BlobFile {
+                path: "src/a.rb".into(),
+                contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+            }],
+        );
+        files2.insert(
+            "c2".into(),
+            vec![BlobFile {
+                path: "src/b.rb".into(),
+                contents: "def run\n  foo.bar.baz.map { |x| x.to_s }\nend\n".into(),
+            }],
+        );
 
         {
-            let provider = MemoryProvider { commits: commits2, files: files2 };
+            let provider = MemoryProvider {
+                commits: commits2,
+                files: files2,
+            };
             let storage = Storage::open_existing(&db_path).unwrap();
-            let mut engine = LineageEngine::new(provider, crate::extract::HeuristicExtractor::default(), storage);
+            let mut engine = LineageEngine::new(
+                provider,
+                crate::extract::HeuristicExtractor::default(),
+                storage,
+            );
             let stats = engine.run(None).unwrap();
             // Should skip c1, and only process c2 (1 commit)
             assert_eq!(stats.commits, 1);

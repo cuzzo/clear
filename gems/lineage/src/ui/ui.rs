@@ -1,7 +1,7 @@
+use crate::architecture::{architecture_search, node_neighborhood, owner_inventory, state_access};
 use crate::extract::{
     is_production_source_path, BoundaryExtractor, HeuristicExtractor, SourceFilter,
 };
-use crate::architecture::{architecture_search, node_neighborhood, owner_inventory, state_access};
 use crate::git::GitProvider;
 use crate::model::BlobFile;
 use crate::storage::Storage;
@@ -232,7 +232,13 @@ enum FirstPartyFindingTool {
 
 impl FirstPartyFindingTool {
     fn all() -> &'static [Self] {
-        &[Self::Decomplex, Self::SqlCov, Self::Espalier, Self::NilKill, Self::Lint]
+        &[
+            Self::Decomplex,
+            Self::SqlCov,
+            Self::Espalier,
+            Self::NilKill,
+            Self::Lint,
+        ]
     }
 
     fn key(self) -> &'static str {
@@ -884,17 +890,6 @@ struct ArchitectureSearchQuery {
     q: Option<String>,
 }
 
-
-
-
-
-
-
-
-
-
-
-
 pub fn file_index(storage: &Storage, repo: Option<&Path>) -> Result<Vec<UiFile>> {
     file_index_with_scope(storage, &CoverageScope::all(), repo)
 }
@@ -911,21 +906,15 @@ pub fn file_index_with_scope(
         read_model_file_index_with_scope(storage, scope, &sarif_counts, &dark_arm_counts)?
     {
         profile_log("file_index.read_model_total", total_start);
-        append_sarif_only_files(
-            files,
-            scope,
-            &sarif_counts,
-            &dark_arm_counts,
-            true,
-        )
+        append_sarif_only_files(files, scope, &sarif_counts, &dark_arm_counts, true)
     } else {
         let line_start = Instant::now();
         let line_stats = line_coverage_by_file(storage, scope)?;
         profile_log("file_index.line_coverage_by_file", line_start);
         let query_start = Instant::now();
-        let mut stmt = storage.connection().prepare(
-            include_str!("../../sql/ui/runtime/file_index_with_scope.sql"),
-        )?;
+        let mut stmt = storage.connection().prepare(include_str!(
+            "../../sql/ui/runtime/file_index_with_scope.sql"
+        ))?;
         let rows = stmt.query_map([], |row| {
             let path = row.get::<_, String>(0)?;
             let fallback_line_coverage = row.get::<_, f64>(5)?;
@@ -968,13 +957,7 @@ pub fn file_index_with_scope(
             .collect();
         profile_log("file_index.current_units", query_start);
         profile_log("file_index.total", total_start);
-        append_sarif_only_files(
-            files,
-            scope,
-            &sarif_counts,
-            &dark_arm_counts,
-            false,
-        )
+        append_sarif_only_files(files, scope, &sarif_counts, &dark_arm_counts, false)
     };
 
     if let Some(r) = repo {
@@ -1052,10 +1035,12 @@ fn append_sarif_only_files(
 }
 
 fn sarif_dark_arm_counts_by_file(storage: &Storage) -> Result<HashMap<String, i64>> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/sarif_dark_arm_counts_by_file.sql"),
-    )?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/sarif_dark_arm_counts_by_file.sql"
+    ))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
     Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
 }
 
@@ -1069,9 +1054,9 @@ fn read_model_file_index_with_scope(
     if storage.count_rows("ui_file_summaries")? == 0 {
         return Ok(None);
     }
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/read_model_file_index_with_scope.sql"),
-    )?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/read_model_file_index_with_scope.sql"
+    ))?;
     let rows = stmt.query_map([], |row| {
         let path = row.get::<_, String>(0)?;
         let sarif_findings = sarif_counts.get(&path).copied().unwrap_or_default();
@@ -1162,17 +1147,31 @@ impl CoverageScope {
                 .include_prefixes
                 .iter()
                 .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")));
-        included && !self.ignore_patterns.iter().any(|pattern| ignore_matches(pattern, &path))
+        included
+            && !self
+                .ignore_patterns
+                .iter()
+                .any(|pattern| ignore_matches(pattern, &path))
     }
 }
 
 fn yaml_list_value(trimmed: &str) -> Option<String> {
     let value = trimmed.strip_prefix("- ")?;
-    Some(value.trim().trim_matches('"').trim_matches('\'').to_string())
+    Some(
+        value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string(),
+    )
 }
 
 fn ignore_matches(pattern: &str, path: &str) -> bool {
-    let pattern = pattern.trim().trim_matches('"').trim_matches('\'').trim_start_matches("./");
+    let pattern = pattern
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_start_matches("./");
     if pattern.is_empty() {
         return false;
     }
@@ -1220,9 +1219,9 @@ fn line_coverage_by_file(
     scope: &CoverageScope,
 ) -> Result<HashMap<String, LineCoverageStats>> {
     let mut by_file = HashMap::<String, LineCoverageStats>::new();
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/line_coverage_by_file.sql"),
-    )?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/line_coverage_by_file.sql"
+    ))?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -1250,7 +1249,13 @@ fn line_coverage_by_file(
 }
 
 pub fn dashboard_summary(storage: &Storage) -> Result<UiDashboard> {
-    dashboard_summary_for_directory_with_scope_and_repo(storage, "", &CoverageScope::all(), None, 12)
+    dashboard_summary_for_directory_with_scope_and_repo(
+        storage,
+        "",
+        &CoverageScope::all(),
+        None,
+        12,
+    )
 }
 
 pub fn dashboard_summary_for_directory(storage: &Storage, directory: &str) -> Result<UiDashboard> {
@@ -1302,7 +1307,10 @@ fn dashboard_summary_for_directory_with_scope_and_repo(
         dashboard_line_counts_from_files(&files, &directory)
     } else {
         let mut line_counts = dashboard_line_counts(storage, &directory, scope)?;
-        for file in files.iter().filter(|file| path_in_directory(&file.path, &directory)) {
+        for file in files
+            .iter()
+            .filter(|file| path_in_directory(&file.path, &directory))
+        {
             line_counts.tracked += file.tracked_lines;
             line_counts.covered += file.covered_lines;
         }
@@ -1432,9 +1440,9 @@ fn analyzer_health(
     )?;
     let count_findings = finding_high_watermark <= 50_000;
     if count_findings {
-        let mut findings = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/analyzer_health.sql"),
-        )?;
+        let mut findings = storage
+            .connection()
+            .prepare(include_str!("../../sql/ui/runtime/analyzer_health.sql"))?;
         let rows = findings.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -1452,9 +1460,9 @@ fn analyzer_health(
             scoped_counts.clone_from(&total_counts);
         } else {
             let prefix = format!("{directory}/%");
-            let mut scoped = storage.connection().prepare(
-                include_str!("../../sql/ui/runtime/analyzer_health_2.sql"),
-            )?;
+            let mut scoped = storage
+                .connection()
+                .prepare(include_str!("../../sql/ui/runtime/analyzer_health_2.sql"))?;
             let rows = scoped.query_map(params![directory, prefix], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -1476,9 +1484,9 @@ fn analyzer_health(
         [],
         |row| row.get(0),
     )?;
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/analyzer_health_3.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/analyzer_health_3.sql"))?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -1493,17 +1501,30 @@ fn analyzer_health(
         let (source, tool, commit, timestamp) = row?;
         let analyzer = canonical_analyzer_name(&source, &tool);
         present.insert(analyzer.clone());
-        let scoped_findings = scoped_counts.get(&analyzer).copied().unwrap_or(if count_findings { 0 } else { -1 });
-        let total_findings = total_counts.get(&analyzer).copied().unwrap_or(if count_findings { 0 } else { -1 });
+        let scoped_findings = scoped_counts
+            .get(&analyzer)
+            .copied()
+            .unwrap_or(if count_findings { 0 } else { -1 });
+        let total_findings = total_counts
+            .get(&analyzer)
+            .copied()
+            .unwrap_or(if count_findings { 0 } else { -1 });
         let reached_default_cap = analyzer == "Decomplex" && total_findings == 1_000;
         let stale = !current_commit.is_empty() && commit != current_commit;
         let (status, detail) = if stale {
             (
                 "stale",
-                format!("artifact is for {}, not current {}", short_hash(&commit), short_hash(&current_commit)),
+                format!(
+                    "artifact is for {}, not current {}",
+                    short_hash(&commit),
+                    short_hash(&current_commit)
+                ),
             )
         } else if reached_default_cap {
-            ("degraded", "artifact reached the default 1,000-finding cap".to_string())
+            (
+                "degraded",
+                "artifact reached the default 1,000-finding cap".to_string(),
+            )
         } else if total_findings == 0 {
             ("healthy", "completed with no findings".to_string())
         } else {
@@ -1543,9 +1564,9 @@ fn review_next_items(
 ) -> Result<Vec<UiReviewNextItem>> {
     let directory = normalize_directory(directory);
     let prefix = format!("{directory}/%");
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/review_next_items.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/review_next_items.sql"))?;
     let rows = stmt.query_map(params![directory, prefix], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -1562,7 +1583,18 @@ fn review_next_items(
     })?;
     let mut items = Vec::new();
     for row in rows {
-        let (path, start_line, title, tools, findings, warnings, dark_arms, example, tool_count, score) = row?;
+        let (
+            path,
+            start_line,
+            title,
+            tools,
+            findings,
+            warnings,
+            dark_arms,
+            example,
+            tool_count,
+            score,
+        ) = row?;
         if !scope.allows(&path) || !is_production_source_path(&path) {
             continue;
         }
@@ -1645,9 +1677,9 @@ fn warnings_for_path(storage: &Storage, path: &str) -> Result<Vec<UiWarning>> {
 fn warning_units(storage: &Storage) -> Result<Vec<WarningUnit>> {
     let start = Instant::now();
     if storage.count_rows("ui_warning_units")? > 0 {
-        let mut stmt = storage.connection().prepare(
-            include_str!("../../sql/ui/runtime/warning_units.sql"),
-        )?;
+        let mut stmt = storage
+            .connection()
+            .prepare(include_str!("../../sql/ui/runtime/warning_units.sql"))?;
         let rows = stmt.query_map([], |row| {
             Ok(WarningUnit {
                 current_path: row.get(0)?,
@@ -1665,9 +1697,9 @@ fn warning_units(storage: &Storage) -> Result<Vec<WarningUnit>> {
         profile_log("warnings.read_model_query", start);
         return Ok(units);
     }
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/warning_units_2.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/warning_units_2.sql"))?;
     let rows = stmt.query_map([], |row| {
         Ok(WarningUnit {
             current_path: row.get(0)?,
@@ -1689,15 +1721,11 @@ fn warning_units(storage: &Storage) -> Result<Vec<WarningUnit>> {
 fn warnings_for_units(units: &[WarningUnit]) -> Vec<UiWarning> {
     let coverage_stale = units
         .iter()
-        .filter(|unit| {
-            unit.last_test_exposure_at > 0 && unit.changes_after_test_exposure > 0
-        })
+        .filter(|unit| unit.last_test_exposure_at > 0 && unit.changes_after_test_exposure > 0)
         .collect::<Vec<_>>();
     let mutant_stale = units
         .iter()
-        .filter(|unit| {
-            unit.last_mutant_run_at > 0 && unit.semantic_changes_after_mutant_run > 0
-        })
+        .filter(|unit| unit.last_mutant_run_at > 0 && unit.semantic_changes_after_mutant_run > 0)
         .collect::<Vec<_>>();
     let missing_mutant = units
         .iter()
@@ -1748,7 +1776,9 @@ fn warnings_for_units(units: &[WarningUnit]) -> Vec<UiWarning> {
         warnings.push(UiWarning {
             level: "notice".to_string(),
             label: "Mutation verification is missing".to_string(),
-            detail: format!("{missing_mutant} covered units have no mutant-verified test exposure."),
+            detail: format!(
+                "{missing_mutant} covered units have no mutant-verified test exposure."
+            ),
         });
     }
     if !reopened.is_empty() {
@@ -1830,7 +1860,8 @@ fn unit_hotspots(
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| {
-        right.2
+        right
+            .2
             .partial_cmp(&left.2)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| right.1.hazards.cmp(&left.1.hazards))
@@ -1939,9 +1970,9 @@ fn top_architecture_risks(
     directory: &str,
     scope: &CoverageScope,
 ) -> Result<Vec<UiArchitectureRisk>> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/top_architecture_risks.sql"),
-    )?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/top_architecture_risks.sql"
+    ))?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -1971,17 +2002,21 @@ fn top_architecture_risks(
             .unwrap_or("owner")
             .to_string();
         let key = (path.clone(), owner.clone());
-        let entry = risks.entry(key).or_insert_with(|| ArchitectureRiskAccumulator {
-            path: path.clone(),
-            owner: owner.clone(),
-            owner_kind: owner_kind.clone(),
-            start_line: 0,
-            ..ArchitectureRiskAccumulator::default()
-        });
+        let entry = risks
+            .entry(key)
+            .or_insert_with(|| ArchitectureRiskAccumulator {
+                path: path.clone(),
+                owner: owner.clone(),
+                owner_kind: owner_kind.clone(),
+                start_line: 0,
+                ..ArchitectureRiskAccumulator::default()
+            });
         if entry.owner_kind == "owner" && owner_kind != "owner" {
             entry.owner_kind = owner_kind;
         }
-        let line = espalier_finding_start_line(&properties).unwrap_or(start_line).max(1);
+        let line = espalier_finding_start_line(&properties)
+            .unwrap_or(start_line)
+            .max(1);
         if entry.start_line == 0 || line < entry.start_line {
             entry.start_line = line;
         }
@@ -2042,9 +2077,9 @@ fn top_complexity_functions(
     directory: &str,
     scope: &CoverageScope,
 ) -> Result<Vec<UiComplexityFunction>> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/top_complexity_functions.sql"),
-    )?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/top_complexity_functions.sql"
+    ))?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -2103,13 +2138,20 @@ fn top_complexity_functions(
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let trigger = complexity.get("triggers").and_then(|value| {
-            value.as_str().map(str::to_string).or_else(|| {
-                value.as_array().map(|items| {
-                    items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")
+        let trigger = complexity
+            .get("triggers")
+            .and_then(|value| {
+                value.as_str().map(str::to_string).or_else(|| {
+                    value.as_array().map(|items| {
+                        items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
                 })
             })
-        }).unwrap_or_default();
+            .unwrap_or_default();
         let basis = string_field(complexity, &["basis"]).unwrap_or("unspecified");
         let subject_kind = string_field(complexity, &["subject_kind"]).unwrap_or("function");
 
@@ -2118,14 +2160,29 @@ fn top_complexity_functions(
         if rank > 10 {
             seen.insert(key);
             let hotness = hottest_profile_match(&hotness_rows, &path, &name);
-            functions.push((path, start_line, name, subject_kind.to_string(), big_o, big_o_space, is_dynamic, trigger, basis.to_string(), tool_name, rank, hotness));
+            functions.push((
+                path,
+                start_line,
+                name,
+                subject_kind.to_string(),
+                big_o,
+                big_o_space,
+                is_dynamic,
+                trigger,
+                basis.to_string(),
+                tool_name,
+                rank,
+                hotness,
+            ));
         }
     }
 
     // Rank by Big-O first, then by measured runtime share: among equally
     // expensive bounds, profiled-critical functions surface first.
     functions.sort_by(|left, right| {
-        right.10.cmp(&left.10)
+        right
+            .10
+            .cmp(&left.10)
             .then_with(|| {
                 let left_share = left.11.as_ref().map(|h| h.cum_share).unwrap_or(0.0);
                 let right_share = right.11.as_ref().map(|h| h.cum_share).unwrap_or(0.0);
@@ -2139,35 +2196,53 @@ fn top_complexity_functions(
 
     let result = functions
         .into_iter()
-        .map(|(path, start_line, name, subject_kind, big_o, big_o_space, is_dynamic, trigger, basis, tool_name, _, hotness)| {
-            let complexity_type = if is_dynamic {
-                if !trigger.is_empty() {
-                    format!("Dynamic, triggered by {}", trigger)
-                } else {
-                    "Dynamic".to_string()
-                }
-            } else {
-                "Static/Fixed".to_string()
-            };
-            let mut detail = format!("Runtime: {} ({}) | Space: {} | Basis: {} ({})", big_o, complexity_type, big_o_space, basis, tool_name);
-            if let Some(hotness) = &hotness {
-                detail.push_str(&format!(
-                    " | Profile: {} {:.1}% ({})",
-                    hotness.tier,
-                    hotness.cum_share * 100.0,
-                    hotness.source
-                ));
-            }
-            UiComplexityFunction {
-                name,
-                subject_kind,
+        .map(
+            |(
                 path,
                 start_line,
-                runtime_complexity: big_o,
-                space_complexity: big_o_space,
-                detail,
-            }
-        })
+                name,
+                subject_kind,
+                big_o,
+                big_o_space,
+                is_dynamic,
+                trigger,
+                basis,
+                tool_name,
+                _,
+                hotness,
+            )| {
+                let complexity_type = if is_dynamic {
+                    if !trigger.is_empty() {
+                        format!("Dynamic, triggered by {}", trigger)
+                    } else {
+                        "Dynamic".to_string()
+                    }
+                } else {
+                    "Static/Fixed".to_string()
+                };
+                let mut detail = format!(
+                    "Runtime: {} ({}) | Space: {} | Basis: {} ({})",
+                    big_o, complexity_type, big_o_space, basis, tool_name
+                );
+                if let Some(hotness) = &hotness {
+                    detail.push_str(&format!(
+                        " | Profile: {} {:.1}% ({})",
+                        hotness.tier,
+                        hotness.cum_share * 100.0,
+                        hotness.source
+                    ));
+                }
+                UiComplexityFunction {
+                    name,
+                    subject_kind,
+                    path,
+                    start_line,
+                    runtime_complexity: big_o,
+                    space_complexity: big_o_space,
+                    detail,
+                }
+            },
+        )
         .collect();
 
     Ok(result)
@@ -2226,10 +2301,12 @@ fn complexity_display_rank(complexity: &str) -> u32 {
     }
 }
 
-
 fn espalier_owner_name(properties: &Value, message: &str) -> Option<String> {
     string_field(properties, &["module"])
-        .or_else(|| object_field(properties, &["function"]).and_then(|function| string_field(function, &["owner"])))
+        .or_else(|| {
+            object_field(properties, &["function"])
+                .and_then(|function| string_field(function, &["owner"]))
+        })
         .map(str::trim)
         .filter(|owner| !owner.is_empty())
         .map(str::to_string)
@@ -2248,8 +2325,10 @@ fn espalier_finding_start_line(properties: &Value) -> Option<u32> {
     u32_field(properties, &["line"])
         .or_else(|| span_field(properties, &["span"]).map(|span| span[0]))
         .or_else(|| {
-            object_field(properties, &["function"])
-                .and_then(|function| u32_field(function, &["line"]).or_else(|| span_field(function, &["span"]).map(|span| span[0])))
+            object_field(properties, &["function"]).and_then(|function| {
+                u32_field(function, &["line"])
+                    .or_else(|| span_field(function, &["span"]).map(|span| span[0]))
+            })
         })
 }
 
@@ -2385,7 +2464,10 @@ fn unit_hotspot_score(summary: &crate::storage::UnitSummary, signal: &UnitSignal
 
 fn dashboard_line_counts_from_files(files: &[UiFile], directory: &str) -> DashboardLineCounts {
     let mut counts = DashboardLineCounts::default();
-    for file in files.iter().filter(|file| path_in_directory(&file.path, directory)) {
+    for file in files
+        .iter()
+        .filter(|file| path_in_directory(&file.path, directory))
+    {
         counts.tracked += file.tracked_lines;
         counts.covered += file.covered_lines;
         counts.mutant_verified += file.mutant_verified_covered_lines;
@@ -2420,9 +2502,9 @@ fn dashboard_line_counts(
     let total_start = Instant::now();
     let mut counts = DashboardLineCounts::default();
     let exposure_start = Instant::now();
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/dashboard_line_counts.sql"),
-    )?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/dashboard_line_counts.sql"
+    ))?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -2491,10 +2573,12 @@ fn dashboard_coverage_line_counts(
 ) -> Result<DashboardLineCounts> {
     let start = Instant::now();
     let mut counts = DashboardLineCounts::default();
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/dashboard_coverage_line_counts.sql"),
-    )?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)))?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/dashboard_coverage_line_counts.sql"
+    ))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+    })?;
     for row in rows {
         let (path, hits) = row?;
         if !scope.allows(&path)
@@ -2521,9 +2605,9 @@ fn dashboard_hazard_counts(
     let mut active = 0;
     let mut evidence_covered = 0;
     let mut verified = 0;
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/dashboard_hazard_counts.sql"),
-    )?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/dashboard_hazard_counts.sql"
+    ))?;
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -2554,7 +2638,10 @@ fn dashboard_hazard_counts(
 pub fn directory_index(files: &[UiFile], directory: &str) -> Vec<UiDirectory> {
     let directory = normalize_directory(directory);
     let mut dirs = BTreeMap::<String, DirectoryBuilder>::new();
-    for file in files.iter().filter(|file| path_in_directory(&file.path, &directory)) {
+    for file in files
+        .iter()
+        .filter(|file| path_in_directory(&file.path, &directory))
+    {
         let Some(child) = immediate_child_directory(&file.path, &directory) else {
             continue;
         };
@@ -2652,7 +2739,11 @@ pub fn source_payload_with_overlays(
     let read_start = Instant::now();
     let file = read_source(repo, path, commit)?;
     profile_log("source.read_source", read_start);
-    let lines = file.contents.lines().map(str::to_string).collect::<Vec<_>>();
+    let lines = file
+        .contents
+        .lines()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     let annotation_start = Instant::now();
     let mut annotations = line_annotations(storage, path, overlays)?;
     annotate_sarif_freshness(repo, path, &file.contents, &mut annotations);
@@ -2717,7 +2808,10 @@ fn annotate_sarif_freshness(
         .iter_mut()
         .flat_map(|annotation| annotation.findings.iter_mut())
     {
-        finding.stale = stale_by_commit.get(&finding.commit).copied().unwrap_or(false);
+        finding.stale = stale_by_commit
+            .get(&finding.commit)
+            .copied()
+            .unwrap_or(false);
     }
 }
 
@@ -2735,7 +2829,6 @@ impl UiOverlays {
     }
 }
 
-
 #[derive(Debug, serde::Deserialize)]
 struct DefinitionQuery {
     name: String,
@@ -2749,13 +2842,20 @@ struct DefinitionResult {
     line: u32,
 }
 
-
 fn error_response(status: StatusCode, error: impl std::fmt::Display) -> Response<Body> {
-    (status, Html(format!("<p>{}</p>", html_escape(&error.to_string())))).into_response()
+    (
+        status,
+        Html(format!("<p>{}</p>", html_escape(&error.to_string()))),
+    )
+        .into_response()
 }
 
 fn error_json(status: StatusCode, error: impl std::fmt::Display) -> Response<Body> {
-    (status, Json(serde_json::json!({ "error": error.to_string() }))).into_response()
+    (
+        status,
+        Json(serde_json::json!({ "error": error.to_string() })),
+    )
+        .into_response()
 }
 
 fn read_source(repo: &Path, path: &str, commit: Option<&str>) -> Result<BlobFile> {
@@ -2786,9 +2886,9 @@ fn safe_join(repo: &Path, path: &str) -> Result<PathBuf> {
 }
 
 fn file_versions(storage: &Storage, path: &str) -> Result<Vec<UiVersion>> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/file_versions.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/file_versions.sql"))?;
     let rows = stmt.query_map(params![path], |row| {
         Ok(UiVersion {
             commit_hash: row.get(0)?,
@@ -2818,7 +2918,14 @@ fn source_symbols_from_current_file(file: &BlobFile) -> Vec<UiSourceSymbol> {
     extractor
         .extract_units(file)
         .into_iter()
-        .map(|unit| empty_source_symbol(unit.kind.as_str(), unit.name, unit.start_line, unit.end_line))
+        .map(|unit| {
+            empty_source_symbol(
+                unit.kind.as_str(),
+                unit.name,
+                unit.start_line,
+                unit.end_line,
+            )
+        })
         .collect()
 }
 
@@ -2854,9 +2961,9 @@ fn empty_source_symbol(
 }
 
 fn persisted_source_symbols(storage: &Storage, path: &str) -> Result<Vec<UiSourceSymbol>> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/persisted_source_symbols.sql"),
-    )?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/persisted_source_symbols.sql"
+    ))?;
     let rows = stmt.query_map(params![path], |row| {
         Ok(empty_source_symbol(
             row.get::<_, String>(0)?,
@@ -2869,49 +2976,95 @@ fn persisted_source_symbols(storage: &Storage, path: &str) -> Result<Vec<UiSourc
 }
 
 fn apply_architecture_symbol_links(storage: &Storage, path: &str, symbols: &mut [UiSourceSymbol]) {
-    let Ok(mut stmt) = storage.connection().prepare(ARCHITECTURE_SYMBOLS_FOR_PATH_SQL) else {
+    let Ok(mut stmt) = storage
+        .connection()
+        .prepare(ARCHITECTURE_SYMBOLS_FOR_PATH_SQL)
+    else {
         return;
     };
     let Ok(rows) = stmt.query_map(params![path], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?, row.get::<_, u32>(4)?, row.get::<_, u32>(5)?,
-            row.get::<_, f64>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?, row.get::<_, String>(9)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, u32>(4)?,
+            row.get::<_, u32>(5)?,
+            row.get::<_, f64>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
+            row.get::<_, String>(9)?,
+        ))
     }) else {
         return;
     };
     let records = rows.filter_map(std::result::Result::ok).collect::<Vec<_>>();
     for symbol in symbols {
-        let wanted_kind = if is_outline_container(symbol) { "owner" } else { "function" };
+        let wanted_kind = if is_outline_container(symbol) {
+            "owner"
+        } else {
+            "function"
+        };
         let short_name = outline_short_name(&symbol.name);
-        let matched = records.iter().filter(|record| record.2 == wanted_kind).min_by_key(|record| {
-            let name_penalty = if record.3 == symbol.name || record.3 == short_name { 0 } else { 10_000 };
-            name_penalty + record.4.abs_diff(symbol.start_line)
-        });
+        let matched = records
+            .iter()
+            .filter(|record| record.2 == wanted_kind)
+            .min_by_key(|record| {
+                let name_penalty = if record.3 == symbol.name || record.3 == short_name {
+                    0
+                } else {
+                    10_000
+                };
+                name_penalty + record.4.abs_diff(symbol.start_line)
+            });
         if let Some((id, owner_id, _, _, _, _, score, band, reads, writes)) = matched {
             symbol.architecture_id = Some(id.clone());
             symbol.architecture_owner_id = owner_id.clone().or_else(|| Some(id.clone()));
             symbol.architecture_pressure = *score;
             symbol.architecture_band = band.clone();
             if wanted_kind == "function" {
-                let reads = reads.split(',').filter(|value| !value.is_empty()).collect::<Vec<_>>();
-                let writes = writes.split(',').filter(|value| !value.is_empty()).collect::<Vec<_>>();
+                let reads = reads
+                    .split(',')
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>();
+                let writes = writes
+                    .split(',')
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>();
                 symbol.effect_known = true;
                 symbol.impure = !writes.is_empty();
                 symbol.effect_summary.clear();
-                if !reads.is_empty() { symbol.effect_summary.push(format!("reads {}", reads.join(", "))); }
-                if !writes.is_empty() { symbol.effect_summary.push(format!("writes {}", writes.join(", "))); }
-                if reads.is_empty() && writes.is_empty() { symbol.effect_summary.push("pure (no state effects)".to_string()); }
+                if !reads.is_empty() {
+                    symbol
+                        .effect_summary
+                        .push(format!("reads {}", reads.join(", ")));
+                }
+                if !writes.is_empty() {
+                    symbol
+                        .effect_summary
+                        .push(format!("writes {}", writes.join(", ")));
+                }
+                if reads.is_empty() && writes.is_empty() {
+                    symbol
+                        .effect_summary
+                        .push("pure (no state effects)".to_string());
+                }
             }
         }
     }
 }
 
 fn architecture_owner_id_by_name(storage: &Storage, path: &str, owner: &str) -> Option<String> {
-    storage.connection().query_row(
-        ARCHITECTURE_OWNER_BY_NAME_SQL,
-        params![path, owner, format!("%{owner}")],
-        |row| row.get(0),
-    ).optional().ok().flatten()
+    storage
+        .connection()
+        .query_row(
+            ARCHITECTURE_OWNER_BY_NAME_SQL,
+            params![path, owner, format!("%{owner}")],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
 }
 
 fn source_blame(
@@ -2983,9 +3136,12 @@ fn source_blame(
 }
 
 fn resolve_commit_oid(repository: &Repository, commit: &str) -> Option<Oid> {
-    Oid::from_str(commit)
-        .ok()
-        .or_else(|| repository.revparse_single(commit).ok().map(|object| object.id()))
+    Oid::from_str(commit).ok().or_else(|| {
+        repository
+            .revparse_single(commit)
+            .ok()
+            .map(|object| object.id())
+    })
 }
 
 fn commit_author(repository: &Repository, commit_hash: &str) -> Option<String> {
@@ -3035,10 +3191,7 @@ impl EspalierFunctionEffect {
     }
 }
 
-fn espalier_function_effects(
-    storage: &Storage,
-    path: &str,
-) -> Result<Vec<EspalierFunctionEffect>> {
+fn espalier_function_effects(storage: &Storage, path: &str) -> Result<Vec<EspalierFunctionEffect>> {
     let mut effects = storage
         .sarif_findings_for_path(path)?
         .into_iter()
@@ -3118,7 +3271,8 @@ fn normalized_effect_list(function: &Value, effect_keys: &[&str], key: &str) -> 
 }
 
 fn object_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
-    keys.iter().find_map(|key| value.get(*key).filter(|child| child.is_object()))
+    keys.iter()
+        .find_map(|key| value.get(*key).filter(|child| child.is_object()))
 }
 
 fn string_list_field(value: &Value, key: &str) -> Vec<String> {
@@ -3172,10 +3326,9 @@ fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAn
         let mut bug_weight = 0.0_f64;
         let mut semantic_churn = 0.0_f64;
 
-        for annotation in annotations
-            .iter()
-            .filter(|annotation| annotation.line >= symbol.start_line && annotation.line <= end_line)
-        {
+        for annotation in annotations.iter().filter(|annotation| {
+            annotation.line >= symbol.start_line && annotation.line <= end_line
+        }) {
             let lint_count = annotation
                 .findings
                 .iter()
@@ -3183,7 +3336,10 @@ fn apply_symbol_hotspots(symbols: &mut [UiSourceSymbol], annotations: &[UiLineAn
                 .count() as i64;
             lint_findings += lint_count;
             sarif_findings += annotation.findings.len() as i64 - lint_count;
-            dark_arms += annotation.dark_arms.len().max(annotation.dark_arm_spans.len()) as i64;
+            dark_arms += annotation
+                .dark_arms
+                .len()
+                .max(annotation.dark_arm_spans.len()) as i64;
             hazards += annotation.hazards.len() as i64;
             unverified_hazards += annotation
                 .hazards
@@ -3274,14 +3430,16 @@ fn apply_espalier_effect_spans(
             };
             let mut spans = Vec::new();
             for (kind, label, token) in &tokens {
-                spans.extend(find_effect_token_ranges(path, source, token).into_iter().map(
-                    |(start, end)| UiEffectSpan {
-                        kind: kind.clone(),
-                        label: label.clone(),
-                        start,
-                        end,
-                    },
-                ));
+                spans.extend(
+                    find_effect_token_ranges(path, source, token)
+                        .into_iter()
+                        .map(|(start, end)| UiEffectSpan {
+                            kind: kind.clone(),
+                            label: label.clone(),
+                            start,
+                            end,
+                        }),
+                );
             }
             if spans.is_empty() {
                 continue;
@@ -3334,7 +3492,9 @@ fn find_effect_token_ranges(path: &str, source: &str, token: &str) -> Vec<(usize
     while let Some(relative) = source[offset..].find(token) {
         let start = offset + relative;
         let end = start + token.len();
-        if token_boundaries_ok(source, start, end) && !is_in_string_or_comment(path, source, start, end) {
+        if token_boundaries_ok(source, start, end)
+            && !is_in_string_or_comment(path, source, start, end)
+        {
             ranges.push((start, end));
         }
         offset = end;
@@ -3342,7 +3502,12 @@ fn find_effect_token_ranges(path: &str, source: &str, token: &str) -> Vec<(usize
     ranges
 }
 
-fn is_in_string_or_comment(path: &str, source: &str, range_start: usize, _range_end: usize) -> bool {
+fn is_in_string_or_comment(
+    path: &str,
+    source: &str,
+    range_start: usize,
+    _range_end: usize,
+) -> bool {
     let language = syntax_language(path);
     if language == SyntaxLanguage::Plain {
         return false;
@@ -3631,9 +3796,9 @@ fn apply_unit_quality(
     lines: &mut BTreeMap<u32, AnnotationBuilder>,
     paint_line_coverage: bool,
 ) -> Result<()> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/apply_unit_quality.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/apply_unit_quality.sql"))?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((
             row.get::<_, u32>(0)?,
@@ -3655,7 +3820,11 @@ fn apply_unit_quality(
             if mutant_cov > 0.0 {
                 entry.mutant_coverage = Some(entry.mutant_coverage.unwrap_or(0.0).max(mutant_cov));
             }
-            for test_type in test_types.split(',').map(str::trim).filter(|value| !value.is_empty()) {
+            for test_type in test_types
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
                 entry.test_types.insert(test_type.to_string());
             }
         }
@@ -3668,11 +3837,15 @@ fn apply_line_coverage(
     path: &str,
     lines: &mut BTreeMap<u32, AnnotationBuilder>,
 ) -> Result<bool> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/apply_line_coverage.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/apply_line_coverage.sql"))?;
     let rows = stmt.query_map(params![path], |row| {
-        Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?, row.get::<_, i64>(2)?))
+        Ok((
+            row.get::<_, u32>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
     })?;
 
     let mut has_exact_line_coverage = false;
@@ -3697,9 +3870,9 @@ fn apply_test_exposure(
     lines: &mut BTreeMap<u32, AnnotationBuilder>,
     paint_line_coverage: bool,
 ) -> Result<()> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/apply_test_exposure.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/apply_test_exposure.sql"))?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((
             row.get::<_, u32>(0)?,
@@ -3742,9 +3915,9 @@ fn apply_hazards(
     path: &str,
     lines: &mut BTreeMap<u32, AnnotationBuilder>,
 ) -> Result<()> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/apply_hazards.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/apply_hazards.sql"))?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((
             row.get::<_, u32>(0)?,
@@ -3797,9 +3970,9 @@ fn apply_semantic_churn(
     fix_last_timestamp: i64,
     discount_old_fixes_after_quality_jumps: bool,
 ) -> Result<()> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/apply_semantic_churn.sql"),
-    )?;
+    let mut stmt = storage.connection().prepare(include_str!(
+        "../../sql/ui/runtime/apply_semantic_churn.sql"
+    ))?;
     let quality_discount_enabled = if discount_old_fixes_after_quality_jumps {
         1
     } else {
@@ -3888,9 +4061,9 @@ fn apply_crash_history(
     first_timestamp: i64,
     last_timestamp: i64,
 ) -> Result<()> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/apply_crash_history.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/apply_crash_history.sql"))?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((
             row.get::<_, u32>(0)?,
@@ -3936,11 +4109,7 @@ fn apply_crash_history(
                 timestamp,
                 path: crash_path,
                 line: crash_line,
-                label: bug_event_label(
-                    "crash",
-                    &function,
-                    &format!("{error_class} {provider_id}"),
-                ),
+                label: bug_event_label("crash", &function, &format!("{error_class} {provider_id}")),
                 weight,
             },
         );
@@ -3949,16 +4118,16 @@ fn apply_crash_history(
 }
 
 fn decay_bounds(storage: &Storage) -> Result<(i64, i64)> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/decay_bounds.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/decay_bounds.sql"))?;
     Ok(stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?)))?)
 }
 
 fn fix_decay_bounds(storage: &Storage) -> Result<Option<(i64, i64)>> {
-    let mut stmt = storage.connection().prepare(
-        include_str!("../../sql/ui/runtime/fix_decay_bounds.sql"),
-    )?;
+    let mut stmt = storage
+        .connection()
+        .prepare(include_str!("../../sql/ui/runtime/fix_decay_bounds.sql"))?;
     let (first, last) = stmt.query_row([], |row| {
         Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?))
     })?;
@@ -4031,11 +4200,7 @@ fn fix_event_label(name: &str, message: &str) -> String {
     }
 }
 
-fn apply_overlays(
-    path: &str,
-    overlays: &UiOverlays,
-    lines: &mut BTreeMap<u32, AnnotationBuilder>,
-) {
+fn apply_overlays(path: &str, overlays: &UiOverlays, lines: &mut BTreeMap<u32, AnnotationBuilder>) {
     if let Some(by_line) = overlays.dark_arms.get(path) {
         for (line, arms) in by_line {
             for arm in arms {
@@ -4087,10 +4252,7 @@ fn apply_sarif_findings(
             .push(ui_finding);
 
         if finding.is_dark_arm {
-            let arm = UiDarkArm {
-                label,
-                span,
-            };
+            let arm = UiDarkArm { label, span };
             let (first_line, last_line) = span
                 .map(|span| (span[0], span[2].max(span[0])))
                 .unwrap_or((finding.start_line, finding.start_line));
@@ -4133,15 +4295,12 @@ fn sarif_finding_label(rule_id: &str, category: &str, message: &str) -> String {
 
 fn sarif_finding_tier(properties_json: &str) -> Option<i64> {
     let properties = serde_json::from_str::<Value>(properties_json).ok()?;
-    properties
-        .get("tier")
-        .and_then(Value::as_i64)
-        .or_else(|| {
-            properties
-                .get("decomplex_finding")
-                .and_then(|finding| finding.get("tier"))
-                .and_then(Value::as_i64)
-        })
+    properties.get("tier").and_then(Value::as_i64).or_else(|| {
+        properties
+            .get("decomplex_finding")
+            .and_then(|finding| finding.get("tier"))
+            .and_then(Value::as_i64)
+    })
 }
 
 fn collect_overlay_value(value: &Value, overlays: &mut UiOverlays) {
@@ -4239,7 +4398,12 @@ fn collect_sarif_result(value: &Value, overlays: &mut UiOverlays) {
 }
 
 fn overlay_label(value: &Value) -> Option<String> {
-    let label = string_field(value, &["category", "kind", "rule_id", "ruleId", "message", "finding"])?;
+    let label = string_field(
+        value,
+        &[
+            "category", "kind", "rule_id", "ruleId", "message", "finding",
+        ],
+    )?;
     overlay_label_text(label)
 }
 
@@ -4278,7 +4442,10 @@ fn sarif_overlay_label(value: &Value) -> Option<String> {
     let result = [
         string_field(value, &["ruleId"]),
         message_text,
-        string_field(properties, &["category", "arm_category", "kind", "rule_id", "ruleId"]),
+        string_field(
+            properties,
+            &["category", "arm_category", "kind", "rule_id", "ruleId"],
+        ),
     ]
     .into_iter()
     .flatten()
@@ -4287,7 +4454,8 @@ fn sarif_overlay_label(value: &Value) -> Option<String> {
 }
 
 fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    keys.iter().find_map(|key| value.get(*key).and_then(Value::as_str))
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
 }
 
 fn u32_field(value: &Value, keys: &[&str]) -> Option<u32> {
@@ -4333,7 +4501,10 @@ fn profile_enabled() -> bool {
 
 fn profile_log(label: &str, start: Instant) {
     if profile_enabled() {
-        eprintln!("lineage ui profile {label}: {:.3}s", start.elapsed().as_secs_f64());
+        eprintln!(
+            "lineage ui profile {label}: {:.3}s",
+            start.elapsed().as_secs_f64()
+        );
     }
 }
 
@@ -4532,7 +4703,11 @@ fn render_sidebar_file_links(args: &DashboardSidebarArgs<'_>) -> String {
     out
 }
 
-fn render_source_sidebar(payload: &UiSourcePayload, current_directory: &str, filter: &str) -> String {
+fn render_source_sidebar(
+    payload: &UiSourcePayload,
+    current_directory: &str,
+    filter: &str,
+) -> String {
     let nav = render_sidebar_navigation(current_directory, filter);
     let outline = render_source_outline(payload);
     render_template_string(
@@ -4547,7 +4722,10 @@ fn render_source_sidebar(payload: &UiSourcePayload, current_directory: &str, fil
 }
 
 fn render_source_unavailable(error: &str) -> String {
-    render_template_string(SourceUnavailableTemplate { error }, "source unavailable template")
+    render_template_string(
+        SourceUnavailableTemplate { error },
+        "source unavailable template",
+    )
 }
 
 fn render_template_string<T: Template>(template: T, name: &str) -> String {
@@ -4560,7 +4738,9 @@ fn filtered_files<'a>(files: &'a [UiFile], filter: &str) -> Vec<&'a UiFile> {
     let normalized = filter.trim().to_ascii_lowercase();
     files
         .iter()
-        .filter(|file| normalized.is_empty() || file.path.to_ascii_lowercase().contains(&normalized))
+        .filter(|file| {
+            normalized.is_empty() || file.path.to_ascii_lowercase().contains(&normalized)
+        })
         .collect()
 }
 
@@ -4595,7 +4775,10 @@ fn normalize_directory(directory: &str) -> String {
 }
 
 fn normalize_source_path(path: &str) -> String {
-    path.trim().trim_start_matches("./").trim_matches('/').to_string()
+    path.trim()
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .to_string()
 }
 
 fn path_in_directory(path: &str, directory: &str) -> bool {
@@ -4622,7 +4805,10 @@ fn immediate_child_directory(path: &str, directory: &str) -> Option<String> {
 }
 
 fn parent_directory(path: &str) -> String {
-    path.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("").to_string()
+    path.rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn directory_label_suffix(directory: &str) -> String {
@@ -4642,7 +4828,10 @@ fn render_sidebar_navigation(directory: &str, filter: &str) -> String {
     out.push_str("\">Root</a>");
     if !directory.is_empty() {
         out.push_str("<a class=\"home-link\" href=\"");
-        out.push_str(&html_escape(&directory_href(&parent_directory(&directory), filter)));
+        out.push_str(&html_escape(&directory_href(
+            &parent_directory(&directory),
+            filter,
+        )));
         out.push_str("\">Up</a><a class=\"home-link\" href=\"");
         out.push_str(&html_escape(&directory_href(&directory, filter)));
         out.push_str("\">Directory</a>");
@@ -4656,7 +4845,10 @@ fn render_search_options(files: &[UiFile], directories: &[UiDirectory], director
     for directory in directories {
         values.insert(format!("{}/", directory.path));
     }
-    for file in files.iter().filter(|file| path_in_directory(&file.path, directory)) {
+    for file in files
+        .iter()
+        .filter(|file| path_in_directory(&file.path, directory))
+    {
         values.insert(file.path.clone());
         if let Some(name) = file.path.rsplit('/').next() {
             values.insert(name.to_string());
@@ -4764,7 +4956,11 @@ fn outline_functions<'a>(
                 .or_else(|| containing_outline_owner(symbol, containers));
             let depth = owner
                 .as_ref()
-                .and_then(|owner| containers.iter().find(|container| &container.full_name == owner))
+                .and_then(|owner| {
+                    containers
+                        .iter()
+                        .find(|container| &container.full_name == owner)
+                })
                 .map(|container| container.depth + 1)
                 .unwrap_or(0);
             OutlineFunction {
@@ -4821,7 +5017,11 @@ fn resolve_outline_owner(owner: &str, containers: &[OutlineContainer<'_>]) -> Op
                 .iter()
                 .find(|container| container.full_name.ends_with(&format!(".{normalized}")))
         })
-        .or_else(|| containers.iter().find(|container| container.display_name == normalized))
+        .or_else(|| {
+            containers
+                .iter()
+                .find(|container| container.display_name == normalized)
+        })
         .map(|container| container.full_name.clone())
 }
 
@@ -4894,7 +5094,13 @@ fn render_outline_entry(
 ) {
     match entry {
         OutlineEntry::Container(container) => {
-            render_outline_symbol_link(out, container.symbol, &container.display_name, container.depth, payload);
+            render_outline_symbol_link(
+                out,
+                container.symbol,
+                &container.display_name,
+                container.depth,
+                payload,
+            );
             for child in child_outline_entries(&container.full_name, containers, functions) {
                 render_outline_entry(out, child, containers, functions, payload);
             }
@@ -4919,20 +5125,31 @@ fn render_outline_symbol_link(
     payload: &UiSourcePayload,
 ) {
     let is_fn = symbol.kind == "function" || symbol.kind == "method";
-    let is_reentrant = is_fn && (symbol.start_line as usize..=symbol.end_line as usize)
-        .take(4)
-        .any(|l| {
-            payload.lines.get(l - 1)
-                .map(|line| line.to_uppercase().contains("REENTRANT"))
-                .unwrap_or(false)
-        });
+    let is_reentrant = is_fn
+        && (symbol.start_line as usize..=symbol.end_line as usize)
+            .take(4)
+            .any(|l| {
+                payload
+                    .lines
+                    .get(l - 1)
+                    .map(|line| line.to_uppercase().contains("REENTRANT"))
+                    .unwrap_or(false)
+            });
     let is_private = is_fn && {
         let path = &payload.path;
         if path.ends_with(".zig") {
-            let def_line = payload.lines.get(symbol.start_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+            let def_line = payload
+                .lines
+                .get(symbol.start_line as usize - 1)
+                .map(|s| s.trim())
+                .unwrap_or("");
             def_line.contains("fn ") && !def_line.contains("pub fn")
         } else if path.ends_with(".clear") {
-            let def_line = payload.lines.get(symbol.start_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+            let def_line = payload
+                .lines
+                .get(symbol.start_line as usize - 1)
+                .map(|s| s.trim())
+                .unwrap_or("");
             let upper = def_line.to_uppercase();
             upper.contains("FN ") && !upper.contains("PUB FN")
         } else if path.ends_with(".rb") {
@@ -4948,7 +5165,10 @@ fn render_outline_symbol_link(
                             found_private = true;
                             break;
                         }
-                        if trimmed.starts_with("class ") || trimmed.starts_with("module ") || trimmed.starts_with("def ") {
+                        if trimmed.starts_with("class ")
+                            || trimmed.starts_with("module ")
+                            || trimmed.starts_with("def ")
+                        {
                             break;
                         }
                     }
@@ -4985,7 +5205,11 @@ fn render_outline_symbol_link(
     out.push_str(" outline-depth-");
     out.push_str(&depth.min(4).to_string());
     out.push_str("\"><span class=\"outline-rail\"><span class=\"outline-impure\" aria-label=\"");
-    out.push_str(if symbol.impure { "impure" } else { "no recorded effects" });
+    out.push_str(if symbol.impure {
+        "impure"
+    } else {
+        "no recorded effects"
+    });
     out.push_str("\">");
     if symbol.impure {
         out.push_str("<i class=\"fa-solid fa-link\" aria-hidden=\"true\"></i>");
@@ -5210,7 +5434,10 @@ fn line_quality_segments(bar: LineQualityBar) -> LineQualitySegments {
         mutant_multi: percent(mutant_multi_lines, tracked_lines),
         mutant_covered: percent(mutant_covered_lines, tracked_lines),
         mutant_partial: percent(mutant_partial_lines, tracked_lines),
-        mutant_gap: percent(tracked_lines.saturating_sub(mutant_painted_lines), tracked_lines),
+        mutant_gap: percent(
+            tracked_lines.saturating_sub(mutant_painted_lines),
+            tracked_lines,
+        ),
     }
 }
 
@@ -5251,14 +5478,7 @@ fn render_dashboard(
         files.len(),
         dashboard.sarif_findings
     );
-    let code_tree = render_code_tree_table(
-        dashboard,
-        &directory,
-        directories,
-        files,
-        filter,
-        sort,
-    );
+    let code_tree = render_code_tree_table(dashboard, &directory, directories, files, filter, sort);
     render_template_string(
         DashboardTemplate {
             branch_context: &branch_context,
@@ -5304,7 +5524,8 @@ fn render_weak_tests_section(storage: &Storage, directory: &str) -> String {
                 if !path_in_directory(&path, directory) {
                     continue;
                 }
-                let properties: Value = serde_json::from_str(&properties_json).unwrap_or(Value::Null);
+                let properties: Value =
+                    serde_json::from_str(&properties_json).unwrap_or(Value::Null);
                 let name = properties
                     .get("testName")
                     .or_else(|| properties.get("testId"))
@@ -5316,14 +5537,18 @@ fn render_weak_tests_section(storage: &Storage, directory: &str) -> String {
                     .and_then(Value::as_str)
                     .unwrap_or_else(|| rule_id.strip_prefix("test-miser.").unwrap_or(&rule_id))
                     .to_string();
-                let group_size = properties.get("groupSize").and_then(Value::as_i64).unwrap_or(0);
+                let group_size = properties
+                    .get("groupSize")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
                 rows.push((path, name, line, kind, group_size));
             }
         }
     }
 
     let body = if rows.is_empty() {
-        "<p class=\"empty-inline\">No weak-test audit candidates are recorded in this scope.</p>".to_string()
+        "<p class=\"empty-inline\">No weak-test audit candidates are recorded in this scope.</p>"
+            .to_string()
     } else {
         let mut out = String::from(
             "<table class=\"weak-tests\"><thead><tr><th>Test</th><th>File</th><th>Line</th><th>Finding</th></tr></thead><tbody>",
@@ -5357,15 +5582,17 @@ fn render_review_next_section(dashboard: &UiDashboard, directory: &str, filter: 
         .review_next
         .iter()
         .take(10)
-        .map(|item| {
-            HotspotItem {
-                href: format!("{}#L{}", page_href(&item.path, None, filter), item.start_line),
-                kind: "review".to_string(),
-                name: item.title.clone(),
-                path: item.path.clone(),
-                detail: item.detail.clone(),
-                score: format!("{:.1}", item.score),
-            }
+        .map(|item| HotspotItem {
+            href: format!(
+                "{}#L{}",
+                page_href(&item.path, None, filter),
+                item.start_line
+            ),
+            kind: "review".to_string(),
+            name: item.title.clone(),
+            path: item.path.clone(),
+            detail: item.detail.clone(),
+            score: format!("{:.1}", item.score),
         })
         .collect::<Vec<_>>();
     let mut body = render_template_string(
@@ -5404,7 +5631,11 @@ fn render_test_next_section(dashboard: &UiDashboard, directory: &str, filter: &s
         .into_iter()
         .take(10)
         .map(|(unit, test_type, rationale, priority)| HotspotItem {
-            href: format!("{}#L{}", page_href(&unit.path, None, filter), unit.start_line),
+            href: format!(
+                "{}#L{}",
+                page_href(&unit.path, None, filter),
+                unit.start_line
+            ),
             kind: test_type.to_string(),
             name: unit.name.clone(),
             path: unit.path.clone(),
@@ -5442,9 +5673,21 @@ fn test_next_recommendation(unit: &UiUnitHotspot) -> Option<(&'static str, Strin
             "integration",
             format!(
                 "critical path; {}; {}; {} - add integration tests",
-                if uncovered { "uncovered" } else { "coverage is incomplete" },
-                if historically_buggy { "historically buggy" } else { "high-risk behavior" },
-                if only_sparse_unit_tests { "only sparse unit tests" } else { "integration coverage is weak" },
+                if uncovered {
+                    "uncovered"
+                } else {
+                    "coverage is incomplete"
+                },
+                if historically_buggy {
+                    "historically buggy"
+                } else {
+                    "high-risk behavior"
+                },
+                if only_sparse_unit_tests {
+                    "only sparse unit tests"
+                } else {
+                    "integration coverage is weak"
+                },
             ),
             base + 8.0,
         ));
@@ -5452,7 +5695,10 @@ fn test_next_recommendation(unit: &UiUnitHotspot) -> Option<(&'static str, Strin
     if unit.reopened_count > 0 {
         return Some((
             "regression",
-            format!("{} fixes reopened; add a regression test for the failing workflow", unit.reopened_count),
+            format!(
+                "{} fixes reopened; add a regression test for the failing workflow",
+                unit.reopened_count
+            ),
             base + 7.0,
         ));
     }
@@ -5462,7 +5708,10 @@ fn test_next_recommendation(unit: &UiUnitHotspot) -> Option<(&'static str, Strin
     {
         return Some((
             "property",
-            format!("{} uncovered branch arms; add property or fuzz tests", unit.dark_arms),
+            format!(
+                "{} uncovered branch arms; add property or fuzz tests",
+                unit.dark_arms
+            ),
             base + 5.0,
         ));
     }
@@ -5476,7 +5725,14 @@ fn test_next_recommendation(unit: &UiUnitHotspot) -> Option<(&'static str, Strin
     if uncovered || unit.distinct_tests == 0 {
         return Some((
             "unit",
-            format!("{}; add focused unit tests before refactoring", if historically_buggy { "historically buggy and uncovered" } else { "uncovered behavior" }),
+            format!(
+                "{}; add focused unit tests before refactoring",
+                if historically_buggy {
+                    "historically buggy and uncovered"
+                } else {
+                    "uncovered behavior"
+                }
+            ),
             base + 2.0,
         ));
     }
@@ -5518,7 +5774,11 @@ fn render_queue_page(
             .iter()
             .take(QUEUE_RESULT_LIMIT)
             .map(|item| HotspotItem {
-                href: format!("{}#L{}", page_href(&item.path, None, filter), item.start_line),
+                href: format!(
+                    "{}#L{}",
+                    page_href(&item.path, None, filter),
+                    item.start_line
+                ),
                 kind: "review".to_string(),
                 name: item.title.clone(),
                 path: item.path.clone(),
@@ -5552,7 +5812,11 @@ fn render_queue_page(
             .into_iter()
             .take(QUEUE_RESULT_LIMIT)
             .map(|(unit, test_type, rationale, priority)| HotspotItem {
-                href: format!("{}#L{}", page_href(&unit.path, None, filter), unit.start_line),
+                href: format!(
+                    "{}#L{}",
+                    page_href(&unit.path, None, filter),
+                    unit.start_line
+                ),
                 kind: test_type.to_string(),
                 name: unit.name.clone(),
                 path: unit.path.clone(),
@@ -5706,9 +5970,7 @@ fn render_finding_changes_section(dashboard: &UiDashboard) -> String {
             "<strong>{}</strong> persisted",
             "</p>"
         ),
-        dashboard.new_findings,
-        dashboard.resolved_findings,
-        dashboard.persisted_findings,
+        dashboard.new_findings, dashboard.resolved_findings, dashboard.persisted_findings,
     );
     render_dashboard_disclosure("Finding Changes", false, &body)
 }
@@ -5716,11 +5978,7 @@ fn render_finding_changes_section(dashboard: &UiDashboard) -> String {
 fn render_dashboard_disclosure(title: &str, open: bool, body: &str) -> String {
     let id = dashboard_panel_id(title);
     render_template_string(
-        DashboardDisclosureTemplate {
-            id,
-            open,
-            body,
-        },
+        DashboardDisclosureTemplate { id, open, body },
         "dashboard disclosure template",
     )
 }
@@ -5778,11 +6036,7 @@ fn render_highest_hazard_files_section(dashboard: &UiDashboard, filter: &str) ->
         DashboardHazardFilesTemplate { files: &files },
         "dashboard hazard files template",
     );
-    render_dashboard_disclosure(
-        "Hazard Files",
-        false,
-        &body,
-    )
+    render_dashboard_disclosure("Hazard Files", false, &body)
 }
 
 fn render_dashboard_ratio_bar_row(
@@ -5875,7 +6129,10 @@ fn source_coverage_context(payload: &UiSourcePayload) -> UiCoverageContext {
             if has_exact_line_hits {
                 annotation.line_hits.unwrap_or(0) > 0
             } else {
-                annotation.line_hits.unwrap_or(if annotation.covered { 1 } else { 0 }) > 0
+                annotation
+                    .line_hits
+                    .unwrap_or(if annotation.covered { 1 } else { 0 })
+                    > 0
             }
         })
         .count() as i64;
@@ -5883,8 +6140,7 @@ fn source_coverage_context(payload: &UiSourcePayload) -> UiCoverageContext {
         .annotations
         .iter()
         .filter(|annotation| {
-            (!has_exact_line_hits || annotation.line_hits.is_some())
-                && annotation.is_partial
+            (!has_exact_line_hits || annotation.line_hits.is_some()) && annotation.is_partial
         })
         .count() as i64;
     let partial_lines = partial_lines.clamp(0, covered_lines);
@@ -5943,7 +6199,10 @@ fn annotation_counts_for_coverage_context(
     if has_exact_line_hits {
         annotation.line_hits.unwrap_or(0) > 0
     } else {
-        annotation.line_hits.unwrap_or(if annotation.covered { 1 } else { 0 }) > 0
+        annotation
+            .line_hits
+            .unwrap_or(if annotation.covered { 1 } else { 0 })
+            > 0
     }
 }
 
@@ -6039,8 +6298,10 @@ fn render_code_tree_table(
 ) -> String {
     let name_header = render_sort_link("Name", CoverageSort::Path, sort, directory, filter);
     let total_header = render_sort_link("Total", CoverageSort::Total, sort, directory, filter);
-    let covered_header = render_sort_link("Covered", CoverageSort::Covered, sort, directory, filter);
-    let partial_header = render_sort_link("Partial", CoverageSort::Partial, sort, directory, filter);
+    let covered_header =
+        render_sort_link("Covered", CoverageSort::Covered, sort, directory, filter);
+    let partial_header =
+        render_sort_link("Partial", CoverageSort::Partial, sort, directory, filter);
     let missed_header = render_sort_link("Missed", CoverageSort::Missed, sort, directory, filter);
     let percent_header = render_sort_link("%", CoverageSort::Percent, sort, directory, filter);
     let directory_status = render_directory_analyzer_status(dashboard);
@@ -6166,10 +6427,17 @@ fn sorted_code_tree_entries<'a>(
             .cmp(&left.covered_lines())
             .then_with(|| code_tree_entry_kind_rank(left).cmp(&code_tree_entry_kind_rank(right)))
             .then_with(|| left.path_for_tiebreak().cmp(right.path_for_tiebreak())),
-        CoverageSort::Partial => partial_line_count(right.covered_lines(), right.partial_findings())
-            .cmp(&partial_line_count(left.covered_lines(), left.partial_findings()))
-            .then_with(|| code_tree_entry_kind_rank(left).cmp(&code_tree_entry_kind_rank(right)))
-            .then_with(|| left.path_for_tiebreak().cmp(right.path_for_tiebreak())),
+        CoverageSort::Partial => {
+            partial_line_count(right.covered_lines(), right.partial_findings())
+                .cmp(&partial_line_count(
+                    left.covered_lines(),
+                    left.partial_findings(),
+                ))
+                .then_with(|| {
+                    code_tree_entry_kind_rank(left).cmp(&code_tree_entry_kind_rank(right))
+                })
+                .then_with(|| left.path_for_tiebreak().cmp(right.path_for_tiebreak()))
+        }
         CoverageSort::Missed => right
             .missed_lines()
             .cmp(&left.missed_lines())
@@ -6219,7 +6487,9 @@ fn render_sort_link(
         out.push_str(" active-sort");
     }
     out.push_str("\" href=\"");
-    out.push_str(&html_escape(&directory_sort_href(directory, filter, target)));
+    out.push_str(&html_escape(&directory_sort_href(
+        directory, filter, target,
+    )));
     out.push_str("\">");
     out.push_str(&html_escape(label));
     if target == active {
@@ -6301,18 +6571,22 @@ fn render_unit_hotspots(units: &[UiUnitHotspot], filter: &str) -> String {
     let items = units
         .iter()
         .map(|unit| HotspotItem {
-            href: format!("{}#L{}", page_href(&unit.path, None, filter), unit.start_line),
+            href: format!(
+                "{}#L{}",
+                page_href(&unit.path, None, filter),
+                unit.start_line
+            ),
             kind: unit_kind_label(&unit.kind, &unit.name),
             name: unit.name.clone(),
             path: unit.path.clone(),
             detail: format!(
-            "{} SARIF, {} partial, {} hazards, {} fixes, {} tests, {} killed",
-            unit.sarif_findings,
-            unit.dark_arms,
-            unit.hazards,
-            unit.fixes,
-            unit.distinct_tests,
-            unit.mutant_killed_tests
+                "{} SARIF, {} partial, {} hazards, {} fixes, {} tests, {} killed",
+                unit.sarif_findings,
+                unit.dark_arms,
+                unit.hazards,
+                unit.fixes,
+                unit.distinct_tests,
+                unit.mutant_killed_tests
             ),
             score: format!("{:.1}", unit.score),
         })
@@ -6331,17 +6605,27 @@ fn render_architecture_risks(risks: &[UiArchitectureRisk], filter: &str) -> Stri
     let items = risks
         .iter()
         .map(|risk| HotspotItem {
-            href: risk.architecture_id.as_ref().map(|id| format!("/architecture/unit/{}", percent_encode(id))).unwrap_or_else(|| format!("{}#L{}", page_href(&risk.path, None, filter), risk.start_line)),
+            href: risk
+                .architecture_id
+                .as_ref()
+                .map(|id| format!("/architecture/unit/{}", percent_encode(id)))
+                .unwrap_or_else(|| {
+                    format!(
+                        "{}#L{}",
+                        page_href(&risk.path, None, filter),
+                        risk.start_line
+                    )
+                }),
             kind: unit_kind_label(&risk.owner_kind, &risk.owner),
             name: risk.owner.clone(),
             path: risk.path.clone(),
             detail: format!(
-            "{} Espalier, {} states, {} functions, {} impure, {} privacy",
-            risk.findings,
-            risk.states,
-            risk.functions,
-            risk.impure_functions,
-            risk.privacy_candidates
+                "{} Espalier, {} states, {} functions, {} impure, {} privacy",
+                risk.findings,
+                risk.states,
+                risk.functions,
+                risk.impure_functions,
+                risk.privacy_candidates
             ),
             score: format!("{:.1}", risk.score),
         })
@@ -6361,7 +6645,11 @@ fn render_complexity_functions_section(dashboard: &UiDashboard, filter: &str) ->
         .top_complexity_functions
         .iter()
         .map(|func| HotspotItem {
-            href: format!("{}#L{}", page_href(&func.path, None, filter), func.start_line),
+            href: format!(
+                "{}#L{}",
+                page_href(&func.path, None, filter),
+                func.start_line
+            ),
             kind: unit_kind_label(&func.subject_kind, &func.name),
             name: func.name.clone(),
             path: func.path.clone(),
@@ -6379,11 +6667,7 @@ fn render_complexity_functions_section(dashboard: &UiDashboard, filter: &str) ->
         "complexity operations template",
     );
 
-    render_dashboard_disclosure(
-        "Expensive Operations",
-        false,
-        &body,
-    )
+    render_dashboard_disclosure("Expensive Operations", false, &body)
 }
 
 fn unit_kind_label(kind: &str, name: &str) -> String {
@@ -6581,15 +6865,15 @@ fn render_warning_banner(warnings: &[UiWarning]) -> String {
         .iter()
         .enumerate()
         .map(|(index, warning)| {
-        let key = warning_dismiss_key(warning);
-        let input_id = format!("warning-dismiss-{index}-{}", stable_slug(&key));
-        WarningBannerItem {
-            input_id,
-            key,
-            level: warning.level.clone(),
-            label: warning.label.clone(),
-            detail: warning.detail.clone(),
-        }
+            let key = warning_dismiss_key(warning);
+            let input_id = format!("warning-dismiss-{index}-{}", stable_slug(&key));
+            WarningBannerItem {
+                input_id,
+                key,
+                level: warning.level.clone(),
+                label: warning.label.clone(),
+                detail: warning.detail.clone(),
+            }
         })
         .collect::<Vec<_>>();
     render_template_string(
@@ -6632,7 +6916,9 @@ fn render_source_view(
         .collect::<BTreeMap<_, _>>();
     let comment_folds = detect_comment_folds(&payload.path, &payload.lines);
     let comment_fold_lines = comment_fold_lines(&comment_folds);
-    let fn_folds = payload.symbols.iter()
+    let fn_folds = payload
+        .symbols
+        .iter()
         .filter(|symbol| {
             (symbol.kind == "function" || symbol.kind == "method")
                 && symbol.start_line < symbol.end_line
@@ -6642,10 +6928,18 @@ fn render_source_view(
             let is_private = {
                 let path = &payload.path;
                 if path.ends_with(".zig") {
-                    let def_line = payload.lines.get(symbol.start_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+                    let def_line = payload
+                        .lines
+                        .get(symbol.start_line as usize - 1)
+                        .map(|s| s.trim())
+                        .unwrap_or("");
                     def_line.contains("fn ") && !def_line.contains("pub fn")
                 } else if path.ends_with(".clear") {
-                    let def_line = payload.lines.get(symbol.start_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+                    let def_line = payload
+                        .lines
+                        .get(symbol.start_line as usize - 1)
+                        .map(|s| s.trim())
+                        .unwrap_or("");
                     let upper = def_line.to_uppercase();
                     upper.contains("FN ") && !upper.contains("PUB FN")
                 } else if path.ends_with(".rb") {
@@ -6660,10 +6954,13 @@ fn render_source_view(
                                 if trimmed == "private" {
                                     found_private = true;
                                     break;
-                               }
-                               if trimmed.starts_with("class ") || trimmed.starts_with("module ") || trimmed.starts_with("def ") {
-                                   break;
-                               }
+                                }
+                                if trimmed.starts_with("class ")
+                                    || trimmed.starts_with("module ")
+                                    || trimmed.starts_with("def ")
+                                {
+                                    break;
+                                }
                             }
                         }
                         found_private
@@ -6674,7 +6971,11 @@ fn render_source_view(
             };
             let closing_token = {
                 if symbol.end_line as usize <= payload.lines.len() {
-                    let last_line = payload.lines.get(symbol.end_line as usize - 1).map(|s| s.trim()).unwrap_or("");
+                    let last_line = payload
+                        .lines
+                        .get(symbol.end_line as usize - 1)
+                        .map(|s| s.trim())
+                        .unwrap_or("");
                     if last_line == "}" || last_line == "end" {
                         last_line.to_string()
                     } else if last_line.ends_with('}') {
@@ -6747,11 +7048,8 @@ fn render_source_view(
         covered, mutant, hazards, dark_arms, findings
     );
     let layers_menu = render_layers_menu();
-    let branch_context = render_branch_context(
-        branch_context,
-        &source_coverage_context(payload),
-        filter,
-    );
+    let branch_context =
+        render_branch_context(branch_context, &source_coverage_context(payload), filter);
     let warnings = render_warning_banner(&payload.warnings);
     let mut code_lines = String::new();
     for (index, line) in payload.lines.iter().enumerate() {
@@ -6814,7 +7112,11 @@ fn render_history(payload: &UiSourcePayload, filter: &str) -> String {
             "{}-{} {}",
             version.start_line,
             version.end_line,
-            if version.semantic_change { "semantic" } else { "non-semantic" }
+            if version.semantic_change {
+                "semantic"
+            } else {
+                "non-semantic"
+            }
         ));
         out.push_str("</span>");
         out.push_str("</a>");
@@ -6839,13 +7141,19 @@ fn render_code_line(
     if annotation.map(|a| a.mutant_tested).unwrap_or(false) {
         classes.push("mutant");
     }
-    if annotation.map(|a| a.covered && a.is_partial).unwrap_or(false) {
+    if annotation
+        .map(|a| a.covered && a.is_partial)
+        .unwrap_or(false)
+    {
         classes.push("dark-arm");
     }
     if annotation.map(|a| a.semantic_churn > 0.0).unwrap_or(false) {
         classes.push("has-churn");
     }
-    if annotation.map(|a| !a.bug_events.is_empty()).unwrap_or(false) {
+    if annotation
+        .map(|a| !a.bug_events.is_empty())
+        .unwrap_or(false)
+    {
         classes.push("has-bugs");
     }
     if comment_fold.map(|fold| !fold.is_start).unwrap_or(false) {
@@ -6883,7 +7191,9 @@ fn render_code_line(
     let bug_id = format!("L{line_no}-fixes");
     let meta_id = format!("L{line_no}-details");
     let hazard_id = format!("L{line_no}-hazards");
-    let has_bug_history = annotation.map(|a| !a.bug_events.is_empty()).unwrap_or(false);
+    let has_bug_history = annotation
+        .map(|a| !a.bug_events.is_empty())
+        .unwrap_or(false);
     let has_line_details = annotation.map(line_has_details).unwrap_or(false);
     let has_hazards = annotation.map(|a| !a.hazards.is_empty()).unwrap_or(false);
     let finding_tools = annotation
@@ -6920,7 +7230,12 @@ fn render_code_line(
         out.push('.');
         out.push_str(&line_no.to_string());
         out.push_str("\" data-fold-id=\"");
-        out.push_str(&comment_fold.map(|fold| fold.id).unwrap_or_default().to_string());
+        out.push_str(
+            &comment_fold
+                .map(|fold| fold.id)
+                .unwrap_or_default()
+                .to_string(),
+        );
         out.push_str("\">");
     }
     if let Some(input_id) = &fn_fold_input_id {
@@ -7001,7 +7316,9 @@ fn render_code_line(
     } else if let (Some(input_id), Some(_fold)) = (&fn_fold_input_id, fn_fold) {
         out.push_str("<label class=\"fn-fold-control\" for=\"");
         out.push_str(&html_escape(input_id));
-        out.push_str("\" title=\"expand/collapse function\"><span class=\"fn-fold-arrow\"></span></label>");
+        out.push_str(
+            "\" title=\"expand/collapse function\"><span class=\"fn-fold-arrow\"></span></label>",
+        );
     } else {
         out.push_str("<span class=\"comment-fold-slot\"></span>");
     }
@@ -7079,11 +7396,7 @@ fn render_blame_cell(blame: Option<&UiLineBlame>) -> String {
     let commits_after = blame.total_commits.saturating_sub(blame.ordinal);
     let title = format!(
         "commit #{} of {}; {} commit(s) after this in file blame\n{}\n{}",
-        blame.ordinal,
-        blame.total_commits,
-        commits_after,
-        blame.commit_hash,
-        blame.author
+        blame.ordinal, blame.total_commits, commits_after, blame.commit_hash, blame.author
     );
     let mut out = String::new();
     out.push_str("<span class=\"blame-cell\" title=\"");
@@ -7653,9 +7966,13 @@ fn is_tool_finding(finding: &UiFinding, tool: FirstPartyFindingTool) -> bool {
         return is_lint_finding(finding);
     }
     let needle = tool.key();
-    [finding.source.as_str(), finding.tool.as_str(), finding.rule_id.as_str()]
-        .iter()
-        .any(|value| value.to_ascii_lowercase().contains(needle))
+    [
+        finding.source.as_str(),
+        finding.tool.as_str(),
+        finding.rule_id.as_str(),
+    ]
+    .iter()
+    .any(|value| value.to_ascii_lowercase().contains(needle))
 }
 
 fn is_lint_finding(finding: &UiFinding) -> bool {
@@ -7739,7 +8056,8 @@ fn coverage_background(annotation: &UiLineAnnotation, gutter: bool) -> String {
         } else {
             "rgba(31, 41, 55, 0.16)".to_string()
         }
-    } else if annotation.covered && (annotation.mutant_tested || annotation.mutant_killed_tests > 0) {
+    } else if annotation.covered && (annotation.mutant_tested || annotation.mutant_killed_tests > 0)
+    {
         if gutter {
             "rgba(22, 101, 52, 0.34)".to_string()
         } else {
@@ -7781,7 +8099,12 @@ fn hazard_rail_title(annotation: &UiLineAnnotation) -> String {
         .hazards
         .iter()
         .filter(|hazard| !hazard.verified)
-        .map(|hazard| format!("{} requires {}", hazard.hazard_type, hazard.required_evidence))
+        .map(|hazard| {
+            format!(
+                "{} requires {}",
+                hazard.hazard_type, hazard.required_evidence
+            )
+        })
         .collect::<Vec<_>>();
     hazards.join("\n")
 }
@@ -7824,7 +8147,12 @@ fn line_has_details(annotation: &UiLineAnnotation) -> bool {
 
 fn dark_arm_labels(annotation: &UiLineAnnotation) -> Vec<String> {
     let mut labels = annotation.dark_arms.clone();
-    labels.extend(annotation.dark_arm_spans.iter().map(|arm| arm.label.clone()));
+    labels.extend(
+        annotation
+            .dark_arm_spans
+            .iter()
+            .map(|arm| arm.label.clone()),
+    );
     labels.sort();
     labels.dedup();
     labels
@@ -7890,11 +8218,16 @@ fn highlight_source_line_with_dark_arms(
             out.push_str(&highlight_source_line(path, &source[cursor..range.start]));
         }
         out.push_str("<span class=\"");
-        out.push_str(&html_escape(&range.classes.into_iter().collect::<Vec<_>>().join(" ")));
+        out.push_str(&html_escape(
+            &range.classes.into_iter().collect::<Vec<_>>().join(" "),
+        ));
         out.push_str("\" title=\"");
         out.push_str(&html_escape(&range.labels.join("\n")));
         out.push_str("\">");
-        out.push_str(&highlight_source_line(path, &source[range.start..range.end]));
+        out.push_str(&highlight_source_line(
+            path,
+            &source[range.start..range.end],
+        ));
         out.push_str("</span>");
         cursor = range.end;
     }
@@ -7932,10 +8265,7 @@ fn inline_overlay_ranges(
         (end > start).then(|| InlineOverlayRange {
             start,
             end,
-            classes: BTreeSet::from([
-                "effect-span".to_string(),
-                format!("effect-{}", span.kind),
-            ]),
+            classes: BTreeSet::from(["effect-span".to_string(), format!("effect-{}", span.kind)]),
             labels: vec![span.label.clone()],
         })
     }));
@@ -8046,7 +8376,10 @@ fn highlight_source_line(path: &str, source: &str) -> String {
 }
 
 fn syntax_language(path: &str) -> SyntaxLanguage {
-    match Path::new(path).extension().and_then(|extension| extension.to_str()) {
+    match Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+    {
         Some("rb") => SyntaxLanguage::Ruby,
         Some("py") => SyntaxLanguage::Python,
         Some("js" | "mjs" | "cjs" | "jsx") => SyntaxLanguage::JavaScript,
@@ -8087,7 +8420,11 @@ fn comment_prefix(language: SyntaxLanguage) -> Option<&'static str> {
 }
 
 fn is_string_delimiter(language: SyntaxLanguage, ch: char) -> bool {
-    matches!(ch, '"' | '\'') || matches!(language, SyntaxLanguage::JavaScript | SyntaxLanguage::TypeScript) && ch == '`'
+    matches!(ch, '"' | '\'')
+        || matches!(
+            language,
+            SyntaxLanguage::JavaScript | SyntaxLanguage::TypeScript
+        ) && ch == '`'
 }
 
 fn scan_string(
@@ -8124,7 +8461,10 @@ fn scan_while(
         chars.next();
     }
 
-    chars.peek().map(|(index, _)| *index).unwrap_or(source.len())
+    chars
+        .peek()
+        .map(|(index, _)| *index)
+        .unwrap_or(source.len())
 }
 
 fn is_identifier_start(ch: char) -> bool {
@@ -8193,15 +8533,7 @@ fn next_non_whitespace(source: &str, end: usize) -> Option<char> {
 fn is_type_declaration_keyword(word: &str) -> bool {
     matches!(
         word,
-        "class"
-            | "module"
-            | "struct"
-            | "enum"
-            | "union"
-            | "interface"
-            | "trait"
-            | "type"
-            | "impl"
+        "class" | "module" | "struct" | "enum" | "union" | "interface" | "trait" | "type" | "impl"
     )
 }
 
@@ -8244,11 +8576,46 @@ fn push_token(out: &mut String, kind: &str, value: &str) {
 fn keywords(language: SyntaxLanguage) -> &'static [&'static str] {
     match language {
         SyntaxLanguage::Ruby => &[
-            "alias", "and", "begin", "break", "case", "class", "def", "defined?", "do", "else",
-            "elsif", "end", "ensure", "false", "for", "if", "in", "module", "next", "nil", "not",
-            "or", "private", "protected", "public", "redo", "require", "require_relative",
-            "rescue", "retry", "return", "self", "super", "then", "true", "unless", "until",
-            "when", "while", "yield",
+            "alias",
+            "and",
+            "begin",
+            "break",
+            "case",
+            "class",
+            "def",
+            "defined?",
+            "do",
+            "else",
+            "elsif",
+            "end",
+            "ensure",
+            "false",
+            "for",
+            "if",
+            "in",
+            "module",
+            "next",
+            "nil",
+            "not",
+            "or",
+            "private",
+            "protected",
+            "public",
+            "redo",
+            "require",
+            "require_relative",
+            "rescue",
+            "retry",
+            "return",
+            "self",
+            "super",
+            "then",
+            "true",
+            "unless",
+            "until",
+            "when",
+            "while",
+            "yield",
         ],
         SyntaxLanguage::Python => &[
             "False", "None", "True", "and", "as", "async", "await", "break", "class", "continue",
@@ -8257,17 +8624,83 @@ fn keywords(language: SyntaxLanguage) -> &'static [&'static str] {
             "while", "with", "yield",
         ],
         SyntaxLanguage::JavaScript | SyntaxLanguage::TypeScript => &[
-            "as", "async", "await", "break", "case", "catch", "class", "const", "continue",
-            "default", "delete", "do", "else", "export", "extends", "false", "finally", "for",
-            "from", "function", "if", "import", "in", "instanceof", "interface", "let", "new",
-            "null", "of", "private", "protected", "public", "return", "static", "super", "switch",
-            "this", "throw", "true", "try", "type", "typeof", "undefined", "var", "void", "while",
+            "as",
+            "async",
+            "await",
+            "break",
+            "case",
+            "catch",
+            "class",
+            "const",
+            "continue",
+            "default",
+            "delete",
+            "do",
+            "else",
+            "export",
+            "extends",
+            "false",
+            "finally",
+            "for",
+            "from",
+            "function",
+            "if",
+            "import",
+            "in",
+            "instanceof",
+            "interface",
+            "let",
+            "new",
+            "null",
+            "of",
+            "private",
+            "protected",
+            "public",
+            "return",
+            "static",
+            "super",
+            "switch",
+            "this",
+            "throw",
+            "true",
+            "try",
+            "type",
+            "typeof",
+            "undefined",
+            "var",
+            "void",
+            "while",
             "yield",
         ],
         SyntaxLanguage::Go => &[
-            "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough",
-            "false", "for", "func", "go", "goto", "if", "import", "interface", "map", "nil",
-            "package", "range", "return", "select", "struct", "switch", "true", "type", "var",
+            "break",
+            "case",
+            "chan",
+            "const",
+            "continue",
+            "default",
+            "defer",
+            "else",
+            "fallthrough",
+            "false",
+            "for",
+            "func",
+            "go",
+            "goto",
+            "if",
+            "import",
+            "interface",
+            "map",
+            "nil",
+            "package",
+            "range",
+            "return",
+            "select",
+            "struct",
+            "switch",
+            "true",
+            "type",
+            "var",
         ],
         SyntaxLanguage::Rust => &[
             "Self", "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else",
@@ -8276,73 +8709,415 @@ fn keywords(language: SyntaxLanguage) -> &'static [&'static str] {
             "trait", "true", "type", "unsafe", "use", "where", "while",
         ],
         SyntaxLanguage::Lua => &[
-            "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if",
-            "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+            "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto",
+            "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until",
+            "while",
         ],
         SyntaxLanguage::Zig => &[
-            "align", "allowzero", "and", "anyerror", "asm", "async", "await", "break", "catch",
-            "comptime", "const", "continue", "defer", "else", "enum", "errdefer", "error", "export",
-            "extern", "false", "fn", "for", "if", "inline", "noalias", "nosuspend", "null", "or",
-            "orelse", "packed", "pub", "return", "resume", "struct", "suspend", "switch", "test",
-            "threadlocal", "true", "try", "union", "unreachable", "usingnamespace", "var", "volatile",
+            "align",
+            "allowzero",
+            "and",
+            "anyerror",
+            "asm",
+            "async",
+            "await",
+            "break",
+            "catch",
+            "comptime",
+            "const",
+            "continue",
+            "defer",
+            "else",
+            "enum",
+            "errdefer",
+            "error",
+            "export",
+            "extern",
+            "false",
+            "fn",
+            "for",
+            "if",
+            "inline",
+            "noalias",
+            "nosuspend",
+            "null",
+            "or",
+            "orelse",
+            "packed",
+            "pub",
+            "return",
+            "resume",
+            "struct",
+            "suspend",
+            "switch",
+            "test",
+            "threadlocal",
+            "true",
+            "try",
+            "union",
+            "unreachable",
+            "usingnamespace",
+            "var",
+            "volatile",
             "while",
         ],
         SyntaxLanguage::C => &[
-            "auto", "bool", "break", "case", "char", "const", "continue", "default", "do", "double",
-            "else", "enum", "extern", "false", "float", "for", "goto", "if", "inline", "int",
-            "long", "NULL", "register", "restrict", "return", "short", "signed", "sizeof", "static",
-            "struct", "switch", "true", "typedef", "union", "unsigned", "void", "volatile", "while",
+            "auto", "bool", "break", "case", "char", "const", "continue", "default", "do",
+            "double", "else", "enum", "extern", "false", "float", "for", "goto", "if", "inline",
+            "int", "long", "NULL", "register", "restrict", "return", "short", "signed", "sizeof",
+            "static", "struct", "switch", "true", "typedef", "union", "unsigned", "void",
+            "volatile", "while",
         ],
         SyntaxLanguage::Cpp => &[
-            "auto", "bool", "break", "case", "char", "class", "const", "continue", "default", "delete",
-            "do", "double", "else", "enum", "explicit", "export", "extern", "false", "float", "for",
-            "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new", "operator",
-            "private", "protected", "public", "register", "reinterpret_cast", "return", "short",
-            "signed", "sizeof", "static", "struct", "switch", "template", "this", "throw", "true",
-            "try", "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual", "void",
-            "volatile", "wchar_t", "while",
+            "auto",
+            "bool",
+            "break",
+            "case",
+            "char",
+            "class",
+            "const",
+            "continue",
+            "default",
+            "delete",
+            "do",
+            "double",
+            "else",
+            "enum",
+            "explicit",
+            "export",
+            "extern",
+            "false",
+            "float",
+            "for",
+            "friend",
+            "goto",
+            "if",
+            "inline",
+            "int",
+            "long",
+            "mutable",
+            "namespace",
+            "new",
+            "operator",
+            "private",
+            "protected",
+            "public",
+            "register",
+            "reinterpret_cast",
+            "return",
+            "short",
+            "signed",
+            "sizeof",
+            "static",
+            "struct",
+            "switch",
+            "template",
+            "this",
+            "throw",
+            "true",
+            "try",
+            "typedef",
+            "typeid",
+            "typename",
+            "union",
+            "unsigned",
+            "using",
+            "virtual",
+            "void",
+            "volatile",
+            "wchar_t",
+            "while",
         ],
         SyntaxLanguage::Java => &[
-            "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
-            "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
-            "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native",
-            "new", "null", "package", "private", "protected", "public", "return", "short", "static",
-            "strictfp", "super", "switch", "synchronized", "this", "throw", "throws", "transient", "true",
-            "try", "void", "volatile", "while",
+            "abstract",
+            "assert",
+            "boolean",
+            "break",
+            "byte",
+            "case",
+            "catch",
+            "char",
+            "class",
+            "const",
+            "continue",
+            "default",
+            "do",
+            "double",
+            "else",
+            "enum",
+            "extends",
+            "final",
+            "finally",
+            "float",
+            "for",
+            "goto",
+            "if",
+            "implements",
+            "import",
+            "instanceof",
+            "int",
+            "interface",
+            "long",
+            "native",
+            "new",
+            "null",
+            "package",
+            "private",
+            "protected",
+            "public",
+            "return",
+            "short",
+            "static",
+            "strictfp",
+            "super",
+            "switch",
+            "synchronized",
+            "this",
+            "throw",
+            "throws",
+            "transient",
+            "true",
+            "try",
+            "void",
+            "volatile",
+            "while",
         ],
         SyntaxLanguage::Kotlin => &[
-            "as", "as?", "break", "class", "val", "var", "fun", "for", "if", "else", "while", "do",
-            "return", "this", "super", "try", "catch", "finally", "throw", "package", "import", "object",
-            "interface", "typealias", "typeof", "when", "is", "!is", "in", "!in", "true", "false", "null",
+            "as",
+            "as?",
+            "break",
+            "class",
+            "val",
+            "var",
+            "fun",
+            "for",
+            "if",
+            "else",
+            "while",
+            "do",
+            "return",
+            "this",
+            "super",
+            "try",
+            "catch",
+            "finally",
+            "throw",
+            "package",
+            "import",
+            "object",
+            "interface",
+            "typealias",
+            "typeof",
+            "when",
+            "is",
+            "!is",
+            "in",
+            "!in",
+            "true",
+            "false",
+            "null",
         ],
         SyntaxLanguage::Swift => &[
-            "associatedtype", "class", "deinit", "enum", "extension", "fileprivate", "func", "import",
-            "init", "inout", "internal", "let", "open", "operator", "private", "protocol", "public",
-            "rethrows", "static", "struct", "subscript", "typealias", "var", "break", "case", "continue",
-            "default", "defer", "do", "else", "fallthrough", "for", "guard", "if", "in", "repeat",
-            "return", "switch", "where", "while", "as", "any", "false", "is", "nil", "self", "super",
-            "true", "try",
+            "associatedtype",
+            "class",
+            "deinit",
+            "enum",
+            "extension",
+            "fileprivate",
+            "func",
+            "import",
+            "init",
+            "inout",
+            "internal",
+            "let",
+            "open",
+            "operator",
+            "private",
+            "protocol",
+            "public",
+            "rethrows",
+            "static",
+            "struct",
+            "subscript",
+            "typealias",
+            "var",
+            "break",
+            "case",
+            "continue",
+            "default",
+            "defer",
+            "do",
+            "else",
+            "fallthrough",
+            "for",
+            "guard",
+            "if",
+            "in",
+            "repeat",
+            "return",
+            "switch",
+            "where",
+            "while",
+            "as",
+            "any",
+            "false",
+            "is",
+            "nil",
+            "self",
+            "super",
+            "true",
+            "try",
         ],
         SyntaxLanguage::CSharp => &[
-            "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
-            "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
-            "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float", "for",
-            "foreach", "goto", "if", "implicit", "in", "int", "interface", "internal", "is", "lock",
-            "long", "namespace", "new", "null", "object", "operator", "out", "override", "params",
-            "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed", "short",
-            "sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true",
-            "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort", "using", "virtual",
-            "void", "volatile", "while",
+            "abstract",
+            "as",
+            "base",
+            "bool",
+            "break",
+            "byte",
+            "case",
+            "catch",
+            "char",
+            "checked",
+            "class",
+            "const",
+            "continue",
+            "decimal",
+            "default",
+            "delegate",
+            "do",
+            "double",
+            "else",
+            "enum",
+            "event",
+            "explicit",
+            "extern",
+            "false",
+            "finally",
+            "fixed",
+            "float",
+            "for",
+            "foreach",
+            "goto",
+            "if",
+            "implicit",
+            "in",
+            "int",
+            "interface",
+            "internal",
+            "is",
+            "lock",
+            "long",
+            "namespace",
+            "new",
+            "null",
+            "object",
+            "operator",
+            "out",
+            "override",
+            "params",
+            "private",
+            "protected",
+            "public",
+            "readonly",
+            "ref",
+            "return",
+            "sbyte",
+            "sealed",
+            "short",
+            "sizeof",
+            "stackalloc",
+            "static",
+            "string",
+            "struct",
+            "switch",
+            "this",
+            "throw",
+            "true",
+            "try",
+            "typeof",
+            "uint",
+            "ulong",
+            "unchecked",
+            "unsafe",
+            "ushort",
+            "using",
+            "virtual",
+            "void",
+            "volatile",
+            "while",
         ],
         SyntaxLanguage::Php => &[
-            "__halt_compiler", "abstract", "and", "array", "as", "break", "callable", "case", "catch",
-            "class", "clone", "const", "continue", "declare", "default", "die", "do", "echo", "else",
-            "elsif", "empty", "enddeclare", "endfor", "endforeach", "endif", "endswitch", "endwhile",
-            "eval", "exit", "extends", "final", "finally", "fn", "for", "foreach", "function", "global",
-            "goto", "if", "implements", "include", "include_once", "instanceof", "insteadof",
-            "interface", "isset", "list", "match", "namespace", "new", "or", "print", "private",
-            "protected", "public", "readonly", "require", "require_once", "return", "static", "switch",
-            "throw", "trait", "try", "unset", "use", "var", "while", "xor", "yield",
+            "__halt_compiler",
+            "abstract",
+            "and",
+            "array",
+            "as",
+            "break",
+            "callable",
+            "case",
+            "catch",
+            "class",
+            "clone",
+            "const",
+            "continue",
+            "declare",
+            "default",
+            "die",
+            "do",
+            "echo",
+            "else",
+            "elsif",
+            "empty",
+            "enddeclare",
+            "endfor",
+            "endforeach",
+            "endif",
+            "endswitch",
+            "endwhile",
+            "eval",
+            "exit",
+            "extends",
+            "final",
+            "finally",
+            "fn",
+            "for",
+            "foreach",
+            "function",
+            "global",
+            "goto",
+            "if",
+            "implements",
+            "include",
+            "include_once",
+            "instanceof",
+            "insteadof",
+            "interface",
+            "isset",
+            "list",
+            "match",
+            "namespace",
+            "new",
+            "or",
+            "print",
+            "private",
+            "protected",
+            "public",
+            "readonly",
+            "require",
+            "require_once",
+            "return",
+            "static",
+            "switch",
+            "throw",
+            "trait",
+            "try",
+            "unset",
+            "use",
+            "var",
+            "while",
+            "xor",
+            "yield",
         ],
         SyntaxLanguage::Plain => &[],
     }
@@ -8454,39 +9229,44 @@ mod tests {
     #[test]
     fn weak_tests_panel_reads_test_miser_sarif_without_indexed_test_code() {
         let storage = Storage::open_memory().unwrap();
-        let artifact_id = storage.insert_sarif_artifact(&SarifArtifact {
-            source: "test-miser".into(),
-            tool_name: "Test Miser".into(),
-            run_format: "test-miser.report.sarif.v1".into(),
-            artifact_path: "tmp/test-miser.sarif#run0".into(),
-            artifact_sha256: "weak-tests".into(),
-            commit_hash: "abc".into(),
-            timestamp: 20,
-            payload_json: "{}".into(),
-        }).unwrap();
-        storage.insert_sarif_finding(&SarifFinding {
-            artifact_id,
-            finding_key: "weak-1".into(),
-            source: "test-miser".into(),
-            tool_name: "Test Miser".into(),
-            run_format: "test-miser.report.sarif.v1".into(),
-            commit_hash: "abc".into(),
-            timestamp: 20,
-            rule_id: "test-miser.zero-kill".into(),
-            level: "warning".into(),
-            message: "ExampleTest#test_empty kills no mutants".into(),
-            path: "test/example_test.rb".into(),
-            start_line: 12,
-            start_column: None,
-            end_line: None,
-            end_column: None,
-            category: "weak-test".into(),
-            is_dark_arm: false,
-            unit_id: None,
-            fingerprint: "test-empty".into(),
-            properties_json: r#"{"kind":"zero-kill","testName":"ExampleTest#test_empty"}"#.into(),
-            raw_json: "{}".into(),
-        }).unwrap();
+        let artifact_id = storage
+            .insert_sarif_artifact(&SarifArtifact {
+                source: "test-miser".into(),
+                tool_name: "Test Miser".into(),
+                run_format: "test-miser.report.sarif.v1".into(),
+                artifact_path: "tmp/test-miser.sarif#run0".into(),
+                artifact_sha256: "weak-tests".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
+        storage
+            .insert_sarif_finding(&SarifFinding {
+                artifact_id,
+                finding_key: "weak-1".into(),
+                source: "test-miser".into(),
+                tool_name: "Test Miser".into(),
+                run_format: "test-miser.report.sarif.v1".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                rule_id: "test-miser.zero-kill".into(),
+                level: "warning".into(),
+                message: "ExampleTest#test_empty kills no mutants".into(),
+                path: "test/example_test.rb".into(),
+                start_line: 12,
+                start_column: None,
+                end_line: None,
+                end_column: None,
+                category: "weak-test".into(),
+                is_dark_arm: false,
+                unit_id: None,
+                fingerprint: "test-empty".into(),
+                properties_json: r#"{"kind":"zero-kill","testName":"ExampleTest#test_empty"}"#
+                    .into(),
+                raw_json: "{}".into(),
+            })
+            .unwrap();
         storage.refresh_current_sarif_findings_view().unwrap();
 
         let html = render_weak_tests_section(&storage, "");
@@ -8521,8 +9301,15 @@ mod tests {
         let tree_id = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let parent = repo.find_commit(analyzed_commit).unwrap();
-        repo.commit(Some("HEAD"), &signature, &signature, "unrelated", &tree, &[&parent])
-            .unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "unrelated",
+            &tree,
+            &[&parent],
+        )
+        .unwrap();
         drop(tree);
 
         let mut annotation = empty_annotation(1);
@@ -8549,8 +9336,14 @@ mod tests {
     #[test]
     fn standalone_architecture_ui_sql_prepares_against_the_real_schema() {
         let storage = Storage::open_memory().unwrap();
-        storage.connection().prepare(ARCHITECTURE_SYMBOLS_FOR_PATH_SQL).unwrap();
-        storage.connection().prepare(ARCHITECTURE_OWNER_BY_NAME_SQL).unwrap();
+        storage
+            .connection()
+            .prepare(ARCHITECTURE_SYMBOLS_FOR_PATH_SQL)
+            .unwrap();
+        storage
+            .connection()
+            .prepare(ARCHITECTURE_OWNER_BY_NAME_SQL)
+            .unwrap();
     }
 
     #[test]
@@ -8633,7 +9426,11 @@ mod tests {
             .unwrap();
 
         let payload = source_payload(&storage, dir.path(), "zig/runtime/a.zig", None).unwrap();
-        let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+        let line = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 2)
+            .unwrap();
 
         assert_eq!(payload.lines.len(), 3);
         assert_eq!(payload.versions.len(), 1);
@@ -8730,16 +9527,15 @@ mod tests {
         assert!(outline.contains("href=\"#L8\""));
         assert!(outline.contains("href=\"#L13\""));
 
-        let hotspots =
-            unit_hotspots(
-                &storage,
-                "src",
-                &CoverageScope::all(),
-                Some(dir.path()),
-                12,
-                false,
-            )
-            .unwrap();
+        let hotspots = unit_hotspots(
+            &storage,
+            "src",
+            &CoverageScope::all(),
+            Some(dir.path()),
+            12,
+            false,
+        )
+        .unwrap();
         let closest_hotspot = hotspots
             .iter()
             .find(|unit| unit.name == "closest_name")
@@ -8783,7 +9579,11 @@ mod tests {
         let payload =
             source_payload_with_overlays(&storage, dir.path(), "src/demo.rb", None, &overlays)
                 .unwrap();
-        let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+        let line = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 2)
+            .unwrap();
 
         assert_eq!(line.dark_arms, vec!["genuine gap"]);
     }
@@ -8847,7 +9647,11 @@ mod tests {
         let payload =
             source_payload_with_overlays(&storage, dir.path(), "src/demo.rb", None, &overlays)
                 .unwrap();
-        let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+        let line = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 2)
+            .unwrap();
 
         assert_eq!(line.dark_arms, vec!["dark arm: genuine"]);
         assert_eq!(line.dark_arms.len(), 1);
@@ -8884,9 +9688,7 @@ mod tests {
         assert!(outline.contains("<span class=\"outline-name\">to_json</span>"));
         assert!(outline.contains("<span class=\"outline-name\">to_sarif</span>"));
         assert!(!outline.contains("SlopCop.DarkArmOverlay.build"));
-        assert!(
-            outline.find(">build</span>").unwrap() < outline.find(">to_json</span>").unwrap()
-        );
+        assert!(outline.find(">build</span>").unwrap() < outline.find(">to_json</span>").unwrap());
         assert!(
             outline.find(">to_json</span>").unwrap() < outline.find(">to_sarif</span>").unwrap()
         );
@@ -8989,10 +9791,19 @@ mod tests {
 
         storage.refresh_current_sarif_findings_view().unwrap();
 
-        let payload =
-            source_payload_with_overlays(&storage, dir.path(), "src/demo.rb", None, &UiOverlays::default())
-                .unwrap();
-        let line = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+        let payload = source_payload_with_overlays(
+            &storage,
+            dir.path(),
+            "src/demo.rb",
+            None,
+            &UiOverlays::default(),
+        )
+        .unwrap();
+        let line = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 2)
+            .unwrap();
         let dashboard = dashboard_summary(&storage).unwrap();
         let files = file_index(&storage, None).unwrap();
         let scoped_review = review_next_items(&storage, "src", &CoverageScope::all()).unwrap();
@@ -9011,7 +9822,9 @@ mod tests {
         assert!(scoped_review[0].detail.contains("SlopCop"));
         assert_eq!(slopcop_health.scoped_findings, 1);
         assert_eq!(slopcop_health.total_findings, 2);
-        assert!(files.iter().any(|file| file.path == "other/other.rb" && file.sarif_findings == 1));
+        assert!(files
+            .iter()
+            .any(|file| file.path == "other/other.rb" && file.sarif_findings == 1));
     }
 
     #[test]
@@ -9167,7 +9980,11 @@ mod tests {
         storage.refresh_current_sarif_findings_view().unwrap();
 
         let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
-        let pure_symbol = payload.symbols.iter().find(|symbol| symbol.name == "pure").unwrap();
+        let pure_symbol = payload
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "pure")
+            .unwrap();
         let prepare_symbol = payload
             .symbols
             .iter()
@@ -9178,10 +9995,26 @@ mod tests {
             .iter()
             .find(|symbol| symbol.name == "read_state")
             .unwrap();
-        let run_symbol = payload.symbols.iter().find(|symbol| symbol.name == "run").unwrap();
-        let read_line = payload.annotations.iter().find(|line| line.line == 5).unwrap();
-        let state_line = payload.annotations.iter().find(|line| line.line == 8).unwrap();
-        let call_line = payload.annotations.iter().find(|line| line.line == 11).unwrap();
+        let run_symbol = payload
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "run")
+            .unwrap();
+        let read_line = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 5)
+            .unwrap();
+        let state_line = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 8)
+            .unwrap();
+        let call_line = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 11)
+            .unwrap();
         let read_call_line = payload.annotations.iter().find(|line| line.line == 12);
         let read_labels = effect_span_labels(read_line);
         let state_labels = effect_span_labels(state_line);
@@ -9302,9 +10135,21 @@ mod tests {
             })
             .unwrap();
         let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
-        let line_one = payload.annotations.iter().find(|line| line.line == 1).unwrap();
-        let line_two = payload.annotations.iter().find(|line| line.line == 2).unwrap();
-        let line_three = payload.annotations.iter().find(|line| line.line == 3).unwrap();
+        let line_one = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 1)
+            .unwrap();
+        let line_two = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 2)
+            .unwrap();
+        let line_three = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 3)
+            .unwrap();
         let coverage = source_coverage_context(&payload);
 
         assert!(!line_one.covered);
@@ -9373,8 +10218,16 @@ mod tests {
             .unwrap();
 
         let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
-        let line_one = payload.annotations.iter().find(|line| line.line == 1).unwrap();
-        let line_two = payload.annotations.iter().find(|line| line.line == 2).unwrap();
+        let line_one = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 1)
+            .unwrap();
+        let line_two = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 2)
+            .unwrap();
 
         assert_eq!(line_one.semantic_churn_events, 1);
         assert_eq!(line_two.semantic_churn_events, 2);
@@ -9451,7 +10304,11 @@ mod tests {
             .unwrap();
 
         let payload = source_payload(&storage, dir.path(), "src/demo.rb", None).unwrap();
-        let line = payload.annotations.iter().find(|line| line.line == 1).unwrap();
+        let line = payload
+            .annotations
+            .iter()
+            .find(|line| line.line == 1)
+            .unwrap();
 
         assert_eq!(line.bug_events.len(), 1);
         assert!(
@@ -9487,7 +10344,11 @@ mod tests {
                 covered: true,
                 is_partial: false,
                 mutant_tested: false,
-                test_types: vec!["fuzz".to_string(), "integration".to_string(), "unit".to_string()],
+                test_types: vec![
+                    "fuzz".to_string(),
+                    "integration".to_string(),
+                    "unit".to_string(),
+                ],
                 distinct_tests: 9,
                 mutant_verified_tests: 0,
                 mutant_killed_tests: 0,
@@ -9517,7 +10378,8 @@ mod tests {
                         tool: "sql-cov-hazards".to_string(),
                         rule_id: "SQL007".to_string(),
                         level: "warning".to_string(),
-                        message: "nullable join equality has an implicit UNKNOWN policy".to_string(),
+                        message: "nullable join equality has an implicit UNKNOWN policy"
+                            .to_string(),
                         category: "nullable_join_key".to_string(),
                         tier: None,
                         span: Some([2, 2, 2, 12]),
@@ -9553,7 +10415,9 @@ mod tests {
                         tool: "Nil-Kill".to_string(),
                         rule_id: "nil-kill.static.untyped-signature".to_string(),
                         level: "warning".to_string(),
-                        message: "static signature includes an untyped or unknown type for Demo#run".to_string(),
+                        message:
+                            "static signature includes an untyped or unknown type for Demo#run"
+                                .to_string(),
                         category: "nil-kill.static.untyped-signature".to_string(),
                         tier: None,
                         span: None,
@@ -9658,9 +10522,7 @@ mod tests {
         assert!(html.contains("bug-history"));
         assert!(html.contains("decayed fix history"));
         assert!(html.contains("<i class=\"fa-solid fa-bug\" aria-hidden=\"true\"></i>"));
-        assert!(
-            html.contains("<i class=\"fa-solid fa-circle-info\" aria-hidden=\"true\"></i>")
-        );
+        assert!(html.contains("<i class=\"fa-solid fa-circle-info\" aria-hidden=\"true\"></i>"));
         assert!(html.contains("<i class=\"fa-solid fa-puzzle-piece\" aria-hidden=\"true\"></i>"));
         assert!(html.contains("<i class=\"fa-solid fa-tree\" aria-hidden=\"true\"></i>"));
         assert!(html.contains("<i class=\"fa-solid fa-skull\" aria-hidden=\"true\"></i>"));
@@ -9684,7 +10546,9 @@ mod tests {
         assert!(html.contains("SQL-COV SARIF signals"));
         assert!(html.contains("out of date: source changed since SARIF ingestion"));
         assert!(html.contains("class=\"finding-stale-badge\">out of date</span>"));
-        assert!(html.contains("<strong>SQL007</strong>: nullable join equality has an implicit UNKNOWN policy"));
+        assert!(html.contains(
+            "<strong>SQL007</strong>: nullable join equality has an implicit UNKNOWN policy"
+        ));
         assert!(html.contains("Espalier SARIF signals"));
         assert!(html.contains("Nil-Kill SARIF signals"));
         assert!(html.contains("Lint SARIF signals"));
@@ -9712,7 +10576,9 @@ mod tests {
         assert!(html.contains("<pre class=\"source-text\">"));
         assert!(STYLE.contains("#mode-coverage:checked ~ .viewer .source-text"));
         assert!(STYLE.contains("#mode-churn:checked ~ .viewer .source-text"));
-        assert!(STYLE.contains("#layer-gutter-highlights:checked ~ #mode-coverage:checked ~ .viewer .gutter"));
+        assert!(STYLE.contains(
+            "#layer-gutter-highlights:checked ~ #mode-coverage:checked ~ .viewer .gutter"
+        ));
         assert!(STYLE.contains("#layer-gutter-icons:not(:checked) ~ .viewer .line-icon"));
         assert!(STYLE.contains("#layer-blame:checked ~ .viewer .blame-cell"));
         assert!(STYLE.contains(".source-view.layer-blame-on .viewer .blame-cell"));
@@ -10115,16 +10981,7 @@ mod tests {
         for (name, path) in [("inside", "src/inside.rb"), ("outside", "other/outside.rb")] {
             let signature = format!("def {name}");
             let body = format!("def {name}\n1\nend");
-            let unit = LogicalUnit::new(
-                name,
-                UnitKind::Function,
-                path,
-                1,
-                1,
-                3,
-                signature,
-                &body,
-            );
+            let unit = LogicalUnit::new(name, UnitKind::Function, path, 1, 1, 3, signature, &body);
             storage.upsert_logical_unit(&unit, 10).unwrap();
             storage
                 .insert_event(&Event {
@@ -10143,7 +11000,8 @@ mod tests {
                 .unwrap();
         }
 
-        let review = unit_hotspots(&storage, "src", &CoverageScope::all(), None, 12, false).unwrap();
+        let review =
+            unit_hotspots(&storage, "src", &CoverageScope::all(), None, 12, false).unwrap();
         let test = test_next_hotspots(&storage, "src", &CoverageScope::all(), None, 200).unwrap();
         assert_eq!(review.len(), 1);
         assert_eq!(test.len(), 1);
@@ -10165,11 +11023,18 @@ mod tests {
     #[test]
     fn top_complexity_reads_provider_neutral_sql_cov_observations() {
         let storage = Storage::open_memory().unwrap();
-        let artifact_id = storage.insert_sarif_artifact(&SarifArtifact {
-            source: "sql-cov".into(), tool_name: "SQL-COV".into(),
-            run_format: "sql-cov.plan.sarif.v1".into(), artifact_path: "tmp/sql-plan.sarif#run0".into(),
-            artifact_sha256: "plan-sha".into(), commit_hash: "abc".into(), timestamp: 20, payload_json: "{}".into(),
-        }).unwrap();
+        let artifact_id = storage
+            .insert_sarif_artifact(&SarifArtifact {
+                source: "sql-cov".into(),
+                tool_name: "SQL-COV".into(),
+                run_format: "sql-cov.plan.sarif.v1".into(),
+                artifact_path: "tmp/sql-plan.sarif#run0".into(),
+                artifact_sha256: "plan-sha".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
         storage.insert_sarif_finding(&SarifFinding {
             artifact_id, finding_key: "orders-by-customer".into(), source: "sql-cov".into(),
             tool_name: "SQL-COV".into(), run_format: "sql-cov.plan.sarif.v1".into(), commit_hash: "abc".into(),
@@ -10197,25 +11062,48 @@ mod tests {
     #[test]
     fn top_complexity_sorts_by_big_o_then_profile_hotness() {
         let storage = Storage::open_memory().unwrap();
-        let artifact_id = storage.insert_sarif_artifact(&SarifArtifact {
-            source: "first-party".into(), tool_name: "Espalier".into(),
-            run_format: "espalier.manifest.sarif.v1".into(), artifact_path: "tmp/espalier.sarif#run0".into(),
-            artifact_sha256: "sha".into(), commit_hash: "abc".into(), timestamp: 20, payload_json: "{}".into(),
-        }).unwrap();
+        let artifact_id = storage
+            .insert_sarif_artifact(&SarifArtifact {
+                source: "first-party".into(),
+                tool_name: "Espalier".into(),
+                run_format: "espalier.manifest.sarif.v1".into(),
+                artifact_path: "tmp/espalier.sarif#run0".into(),
+                artifact_sha256: "sha".into(),
+                commit_hash: "abc".into(),
+                timestamp: 20,
+                payload_json: "{}".into(),
+            })
+            .unwrap();
         let mut insert = |name: &str, path: &str, time: &str, key: &str| {
-            storage.insert_sarif_finding(&SarifFinding {
-                artifact_id, finding_key: key.into(), source: "first-party".into(),
-                tool_name: "Espalier".into(), run_format: "espalier.manifest.sarif.v1".into(),
-                commit_hash: "abc".into(), timestamp: 20, rule_id: "complexity.observation".into(),
-                level: "note".into(), message: format!("{name} has estimated runtime {time}"),
-                path: path.into(), start_line: 1, start_column: Some(1), end_line: None, end_column: None,
-                category: "complexity".into(), is_dark_arm: false, unit_id: None,
-                fingerprint: key.into(),
-                properties_json: serde_json::json!({"complexity": {
-                    "subject_kind": "function", "subject_name": name, "time": time,
-                    "auxiliary_space": "O(1)", "dynamic": false, "basis": "espalier-static"
-                }}).to_string(), raw_json: "{}".into(),
-            }).unwrap();
+            storage
+                .insert_sarif_finding(&SarifFinding {
+                    artifact_id,
+                    finding_key: key.into(),
+                    source: "first-party".into(),
+                    tool_name: "Espalier".into(),
+                    run_format: "espalier.manifest.sarif.v1".into(),
+                    commit_hash: "abc".into(),
+                    timestamp: 20,
+                    rule_id: "complexity.observation".into(),
+                    level: "note".into(),
+                    message: format!("{name} has estimated runtime {time}"),
+                    path: path.into(),
+                    start_line: 1,
+                    start_column: Some(1),
+                    end_line: None,
+                    end_column: None,
+                    category: "complexity".into(),
+                    is_dark_arm: false,
+                    unit_id: None,
+                    fingerprint: key.into(),
+                    properties_json: serde_json::json!({"complexity": {
+                        "subject_kind": "function", "subject_name": name, "time": time,
+                        "auxiliary_space": "O(1)", "dynamic": false, "basis": "espalier-static"
+                    }})
+                    .to_string(),
+                    raw_json: "{}".into(),
+                })
+                .unwrap();
         };
         insert("Cold#scan", "src/cold.rb", "O(N^2)", "cold-scan");
         insert("Hot#scan", "src/hot.rb", "O(N^2)", "hot-scan");
@@ -10223,7 +11111,17 @@ mod tests {
         storage.refresh_current_sarif_findings_view().unwrap();
 
         storage
-            .insert_unit_hotness(Some("src/hot.rb"), "Hot#scan", Some(1), 0.4, 0.6, "critical", "pprof:cpu", None, "declared")
+            .insert_unit_hotness(
+                Some("src/hot.rb"),
+                "Hot#scan",
+                Some(1),
+                0.4,
+                0.6,
+                "critical",
+                "pprof:cpu",
+                None,
+                "declared",
+            )
             .unwrap();
 
         let findings = top_complexity_functions(&storage, "", &CoverageScope::all()).unwrap();
@@ -10231,7 +11129,9 @@ mod tests {
         // Worst Big-O first regardless of hotness; within the O(N^2) tier the
         // profiled-critical function outranks the cold one.
         assert_eq!(names, vec!["Mild#worse", "Hot#scan", "Cold#scan"]);
-        assert!(findings[1].detail.contains("Profile: critical 60.0% (pprof:cpu)"));
+        assert!(findings[1]
+            .detail
+            .contains("Profile: critical 60.0% (pprof:cpu)"));
     }
 
     #[test]
@@ -10241,7 +11141,9 @@ mod tests {
         annotation.hotness_share = 0.61;
         annotation.hotness_source = Some("pprof:cpu".to_string());
         let rows = line_detail_rows(&annotation);
-        assert!(rows.iter().any(|row| row == "runtime profile: critical - 61.0% cumulative (pprof:cpu)"));
+        assert!(rows
+            .iter()
+            .any(|row| row == "runtime profile: critical - 61.0% cumulative (pprof:cpu)"));
     }
 
     #[test]
@@ -10264,7 +11166,10 @@ mod tests {
         let outline = render_source_outline(&payload);
 
         assert!(outline.contains("fa-fire"), "missing fire icon: {outline}");
-        assert!(outline.contains("60.0% of runtime profile"), "missing title: {outline}");
+        assert!(
+            outline.contains("60.0% of runtime profile"),
+            "missing title: {outline}"
+        );
         assert_eq!(outline.matches("fa-fire").count(), 1);
     }
 
@@ -10603,7 +11508,12 @@ mod tests {
         ];
 
         let root = directory_index(&files, "");
-        assert_eq!(root.iter().map(|directory| directory.path.as_str()).collect::<Vec<_>>(), vec!["src", "zig"]);
+        assert_eq!(
+            root.iter()
+                .map(|directory| directory.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src", "zig"]
+        );
         assert_eq!(root[0].files, 2);
         assert_eq!(root[0].hazards, 3);
         assert_eq!(root[0].tracked_lines, 40);
@@ -10856,10 +11766,8 @@ flags:
             .iter()
             .find(|annotation| annotation.line == 2)
             .unwrap();
-        assert!(
-            render_line_details_panel(line_two)
-                .contains("covered as part of a multi-line statement")
-        );
+        assert!(render_line_details_panel(line_two)
+            .contains("covered as part of a multi-line statement"));
     }
 
     #[test]
@@ -11007,11 +11915,17 @@ flags:
             span: Some([0, 0, 0, 5]),
         }];
 
-        let html = highlight_source_line_with_dark_arms("src/demo.rb", 1, "return x;", Some(&annotation));
+        let html =
+            highlight_source_line_with_dark_arms("src/demo.rb", 1, "return x;", Some(&annotation));
         assert!(!html.contains("dark-arm-span"));
     }
 
-    fn ui_file_for_sort(path: &str, tracked_lines: i64, covered_lines: i64, partial: i64) -> UiFile {
+    fn ui_file_for_sort(
+        path: &str,
+        tracked_lines: i64,
+        covered_lines: i64,
+        partial: i64,
+    ) -> UiFile {
         UiFile {
             path: path.to_string(),
             units: 1,

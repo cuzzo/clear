@@ -18,6 +18,7 @@ pub mod git;
 pub mod hazard;
 #[path = "db/hotness.rs"]
 pub mod hotness;
+pub mod ingest_service;
 #[path = "ui/lsp.rs"]
 pub mod lsp;
 #[path = "ui/mcp.rs"]

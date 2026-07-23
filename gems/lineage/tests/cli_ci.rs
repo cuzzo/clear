@@ -848,6 +848,79 @@ fn ingest_run_rejects_malformed_sarif_before_recording_complete_evidence() {
         "{}",
         String::from_utf8_lossy(&ingest.stderr)
     );
+    assert!(
+        !directory.path().join(".lineage/fresh.db").exists(),
+        "invalid SARIF must be rejected before snapshot creation mutates a fresh database"
+    );
+}
+
+#[test]
+fn ingest_run_rejects_invalid_complete_scope_before_indexing_a_fresh_database() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
+    let revision = commit_all(&repository, &signature, "initial").to_string();
+    let run = directory.path().join("incoming");
+    fs::create_dir_all(run.join("artifacts")).unwrap();
+    let sarif = br#"{"version":"2.1.0","runs":[]}"#;
+    fs::write(run.join("artifacts/findings.sarif"), sarif).unwrap();
+    write_external_sarif_manifest(&run, &revision, "scanner", "sarif", sarif, directory.path());
+    let manifest_path = run.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["artifacts"][0]["evidence_scope"]["selection"] = serde_json::json!("");
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/fresh.db",
+            "--run",
+            "incoming/manifest.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!ingest.status.success());
+    assert!(
+        String::from_utf8_lossy(&ingest.stderr).contains("evidence_scope"),
+        "{}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+    assert!(
+        !directory.path().join(".lineage/fresh.db").exists(),
+        "manifest validation must happen before a fresh database is indexed"
+    );
+}
+
+#[test]
+fn ingest_run_rolls_back_complete_sarif_when_results_cannot_be_represented() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
+    let revision = commit_all(&repository, &signature, "initial").to_string();
+    let run = directory.path().join("incoming");
+    fs::create_dir_all(run.join("artifacts")).unwrap();
+    let sarif = br#"{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"scanner"}},"results":[{"ruleId":"unanchored","message":{"text":"cannot represent this result"}}]}]}"#;
+    fs::write(run.join("artifacts/findings.sarif"), sarif).unwrap();
+    write_external_sarif_manifest(&run, &revision, "scanner", "sarif", sarif, directory.path());
+
+    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/fresh.db",
+            "--run",
+            "incoming/manifest.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!ingest.status.success());
+    assert!(String::from_utf8_lossy(&ingest.stderr).contains("complete SARIF"));
     let connection =
         rusqlite::Connection::open(directory.path().join(".lineage/fresh.db")).unwrap();
     let scopes: i64 = connection
@@ -855,7 +928,7 @@ fn ingest_run_rejects_malformed_sarif_before_recording_complete_evidence() {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(scopes, 0, "invalid SARIF must not create complete evidence");
+    assert_eq!(scopes, 0);
 }
 
 #[test]
@@ -1020,6 +1093,234 @@ fn direct_ingest_coverage_matches_the_documented_kind_format_commit_workflow() {
         .scoped_coverage_artifact("direct-coverage", &scope, &["lib.rs".into()])
         .unwrap()
         .is_some());
+}
+
+#[test]
+fn direct_ingest_indexes_the_requested_historical_revision_in_a_fresh_database() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn value() -> u8 { 1 }\n",
+    )
+    .unwrap();
+    let historical = commit_all(&repository, &signature, "historical").to_string();
+    fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn value() -> u8 { 2 }\n",
+    )
+    .unwrap();
+    let head = commit_all(&repository, &signature, "head").to_string();
+    fs::write(
+        directory.path().join("coverage.json"),
+        r#"{"files":[{"path":"lib.rs","coverage":100.0,"line_hits":[{"line":1,"hits":1}]}]}"#,
+    )
+    .unwrap();
+
+    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/lineage.db",
+            "--kind",
+            "coverage",
+            "--format",
+            "generic",
+            "--input",
+            "coverage.json",
+            "--commit",
+            &historical,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+    let storage = lineage::Storage::open(directory.path().join(".lineage/lineage.db")).unwrap();
+    assert!(storage.commit_exists(&historical).unwrap());
+    assert!(
+        !storage.commit_exists(&head).unwrap(),
+        "targeted snapshot indexing must not silently substitute the current HEAD"
+    );
+}
+
+#[test]
+fn direct_mutant_and_sarif_ingestion_record_complete_family_scopes() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn value() -> u8 { 1 }\n",
+    )
+    .unwrap();
+    let revision = commit_all(&repository, &signature, "initial").to_string();
+    fs::write(
+        directory.path().join("mutants.json"),
+        r#"{"schema":"mutant-facts/v1","source":"test","language":"rust","subjects":[{"file":"lib.rs","method":"value","mutations":1,"killed":1,"alive":0}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("findings.sarif"),
+        r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"scanner"}},"results":[{"ruleId":"R001","level":"warning","message":{"text":"finding"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"lib.rs"},"region":{"startLine":1}}}]}]}]}"#,
+    )
+    .unwrap();
+
+    let mutant = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/lineage.db",
+            "--kind",
+            "mutants",
+            "--format",
+            "mutant-facts",
+            "--input",
+            "mutants.json",
+            "--commit",
+            &revision,
+            "--source",
+            "direct-mutants",
+            "--selection",
+            "full",
+            "--mutant-corpus",
+            "corpus",
+            "--test-set",
+            "unit",
+            "--complete",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        mutant.status.success(),
+        "{}",
+        String::from_utf8_lossy(&mutant.stderr)
+    );
+
+    let sarif = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/lineage.db",
+            "--kind",
+            "sarif",
+            "--format",
+            "sarif",
+            "--input",
+            "findings.sarif",
+            "--commit",
+            &revision,
+            "--source",
+            "direct-sarif",
+            "--selection",
+            "full",
+            "--test-set",
+            "unit",
+            "--complete",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        sarif.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sarif.stderr)
+    );
+
+    let connection =
+        rusqlite::Connection::open(directory.path().join(".lineage/lineage.db")).unwrap();
+    let scopes: Vec<(String, String, i64)> = connection
+        .prepare("SELECT family, source, complete FROM evidence_artifact_scopes ORDER BY family")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        scopes,
+        vec![
+            ("mutation".into(), "corpus".into(), 1),
+            ("sarif".into(), "direct-sarif".into(), 1),
+        ]
+    );
+}
+
+#[test]
+fn complete_direct_imports_rollback_when_coverage_mutants_or_sarif_skip_evidence() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
+    let revision = commit_all(&repository, &signature, "initial").to_string();
+    fs::write(
+        directory.path().join("coverage.json"),
+        r#"{"files":[{"path":"missing.rs","coverage":100.0,"line_hits":[{"line":1,"hits":1}]}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("mutants.json"),
+        r#"{"schema":"mutant-facts/v1","source":"test","language":"rust","subjects":[{"file":"missing.rs","method":"value","mutations":1,"killed":1,"alive":0}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("findings.sarif"),
+        r#"{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"scanner"}},"results":[{"ruleId":"missing-location","message":{"text":"cannot anchor"}}]}]}"#,
+    )
+    .unwrap();
+    for (kind, format, input, extra) in [
+        ("coverage", "generic", "coverage.json", Vec::<&str>::new()),
+        (
+            "mutants",
+            "mutant-facts",
+            "mutants.json",
+            vec!["--mutant-corpus", "corpus"],
+        ),
+        ("sarif", "sarif", "findings.sarif", Vec::new()),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lineage"));
+        command.args(["ingest", "--repo"]);
+        command.arg(directory.path());
+        command.args([
+            "--db",
+            ".lineage/lineage.db",
+            "--kind",
+            kind,
+            "--format",
+            format,
+            "--input",
+            input,
+            "--commit",
+            &revision,
+            "--selection",
+            "full",
+            "--test-set",
+            "unit",
+            "--complete",
+        ]);
+        command.args(extra);
+        let output = command.output().unwrap();
+        assert!(
+            !output.status.success(),
+            "{kind} unexpectedly accepted skipped complete evidence"
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("complete"));
+    }
+    let connection =
+        rusqlite::Connection::open(directory.path().join(".lineage/lineage.db")).unwrap();
+    let scopes: i64 = connection
+        .query_row("SELECT COUNT(*) FROM evidence_artifact_scopes", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        scopes, 0,
+        "rolled-back complete imports must leave no exact scope"
+    );
 }
 
 fn write_external_sarif_manifest(

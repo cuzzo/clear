@@ -144,7 +144,10 @@ fn tool_defs() -> Vec<Tool> {
 impl ServerHandler for LineageMcp {
     fn get_info(&self) -> rmcp::model::ServerInfo {
         InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("lineage-mcp", env!("CARGO_PKG_VERSION")))
+            .with_server_info(Implementation::new(
+                "lineage-mcp",
+                env!("CARGO_PKG_VERSION"),
+            ))
     }
 
     async fn list_tools(
@@ -168,13 +171,17 @@ impl ServerHandler for LineageMcp {
         let storage = self.storage.lock().unwrap();
         let tool_name = request.name.as_ref();
         if tool_defs().iter().all(|t| t.name != tool_name) {
-            return Err(McpError::invalid_params(format!("unknown tool: {tool_name}"), None));
+            return Err(McpError::invalid_params(
+                format!("unknown tool: {tool_name}"),
+                None,
+            ));
         }
         let dispatch = || -> Result<Value, String> {
             match tool_name {
-                "lineage_file_risk" => {
-                    file_risk(require_db(&storage, "lineage_file_risk")?, arg_str(&args, "path")?)
-                }
+                "lineage_file_risk" => file_risk(
+                    require_db(&storage, "lineage_file_risk")?,
+                    arg_str(&args, "path")?,
+                ),
                 "lineage_unit_context" => unit_context(
                     storage.as_ref(),
                     &self.repo,
@@ -267,9 +274,12 @@ fn query_rows(
     let conn = storage.connection();
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params_from_iter(params.iter()), |row| row_to_object(row, names))
+        .query_map(params_from_iter(params.iter()), |row| {
+            row_to_object(row, names)
+        })
         .map_err(|e| e.to_string())?;
-    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())
 }
 
 /// Joins `path` onto `repo` and verifies the result cannot escape `repo` -
@@ -299,7 +309,10 @@ fn resolve_repo_relative_path(repo: &Path, path: &str) -> Option<PathBuf> {
 /// reinterpreted as wildcards instead of matched literally, silently
 /// broadening the query beyond the directory scope the caller asked for.
 fn escape_like_pattern(input: &str) -> String {
-    input.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    input
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 /// Try an exact-path match; if empty, retry as a `path%` prefix (directory
@@ -397,7 +410,9 @@ fn file_risk(storage: &Storage, path: &str) -> Result<Value, String> {
         &names,
     )?;
     if rows.is_empty() {
-        return Err(format!("no tracked units under {path:?} (run `lineage build` first?)"));
+        return Err(format!(
+            "no tracked units under {path:?} (run `lineage build` first?)"
+        ));
     }
 
     let is_prefix = matched.ends_with('*');
@@ -406,7 +421,11 @@ fn file_risk(storage: &Storage, path: &str) -> Result<Value, String> {
     } else {
         "SELECT path, COUNT(*) AS hazards FROM unit_hazards WHERE is_active = 1 AND path = ?1 GROUP BY path"
     };
-    let hazard_arg = if is_prefix { format!("{}%", escape_like_pattern(path)) } else { path.to_string() };
+    let hazard_arg = if is_prefix {
+        format!("{}%", escape_like_pattern(path))
+    } else {
+        path.to_string()
+    };
     let hazard_rows = query_rows(storage, hazard_sql, &[&hazard_arg], &["path", "hazards"])?;
     let hazards_by_path: std::collections::HashMap<String, Value> = hazard_rows
         .into_iter()
@@ -419,7 +438,10 @@ fn file_risk(storage: &Storage, path: &str) -> Result<Value, String> {
     let files: Vec<Value> = rows
         .into_iter()
         .map(|mut row| {
-            let path = row.get("current_path").and_then(Value::as_str).unwrap_or_default();
+            let path = row
+                .get("current_path")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let hazards = hazards_by_path.get(path).cloned().unwrap_or(json!(0));
             row.insert("open_hazards".to_string(), hazards);
             Value::Object(row)
@@ -434,10 +456,30 @@ fn verification_gaps(storage: Option<&Storage>, repo: &Path, path: &str) -> Resu
         return Ok(live_verification_gaps(repo, path));
     };
 
-    let is_prefix = query_rows(storage, "SELECT 1 AS x FROM unit_hazards WHERE path = ?1 LIMIT 1", &[path], &["x"])?.is_empty()
-        && query_rows(storage, "SELECT 1 AS x FROM current_sarif_findings WHERE path = ?1 LIMIT 1", &[path], &["x"])?.is_empty();
-    let arg = if is_prefix { format!("{}%", escape_like_pattern(path)) } else { path.to_string() };
-    let op = if is_prefix { "LIKE ?1 ESCAPE '\\'" } else { "= ?1" };
+    let is_prefix = query_rows(
+        storage,
+        "SELECT 1 AS x FROM unit_hazards WHERE path = ?1 LIMIT 1",
+        &[path],
+        &["x"],
+    )?
+    .is_empty()
+        && query_rows(
+            storage,
+            "SELECT 1 AS x FROM current_sarif_findings WHERE path = ?1 LIMIT 1",
+            &[path],
+            &["x"],
+        )?
+        .is_empty();
+    let arg = if is_prefix {
+        format!("{}%", escape_like_pattern(path))
+    } else {
+        path.to_string()
+    };
+    let op = if is_prefix {
+        "LIKE ?1 ESCAPE '\\'"
+    } else {
+        "= ?1"
+    };
     let hazard_sql = format!(
         "SELECT path, line, hazard_type, required_evidence, symbol, source AS snippet \
          FROM unit_hazards WHERE is_active = 1 AND path {op}"
@@ -450,9 +492,21 @@ fn verification_gaps(storage: Option<&Storage>, repo: &Path, path: &str) -> Resu
         storage,
         &hazard_sql,
         &[&arg],
-        &["path", "line", "hazard_type", "required_evidence", "symbol", "snippet"],
+        &[
+            "path",
+            "line",
+            "hazard_type",
+            "required_evidence",
+            "symbol",
+            "snippet",
+        ],
     )?;
-    let dark_arms = query_rows(storage, &finding_sql, &[&arg], &["path", "start_line", "rule_id", "message"])?;
+    let dark_arms = query_rows(
+        storage,
+        &finding_sql,
+        &[&arg],
+        &["path", "start_line", "rule_id", "message"],
+    )?;
 
     let mut out = json!({
         "scope": if is_prefix { format!("{path}*") } else { path.to_string() },
@@ -474,7 +528,14 @@ fn change_history(storage: &Storage, path: &str, limit: u32) -> Result<Value, St
         "SELECT commit_hash, event_type, timestamp, semantic_change, lines_added, lines_removed \
          FROM events WHERE path = ?1 ORDER BY timestamp DESC LIMIT ?2",
         &[path, &limit_str],
-        &["commit_hash", "event_type", "timestamp", "semantic_change", "lines_added", "lines_removed"],
+        &[
+            "commit_hash",
+            "event_type",
+            "timestamp",
+            "semantic_change",
+            "lines_added",
+            "lines_removed",
+        ],
     )?;
     let crashes = query_rows(
         storage,
@@ -492,7 +553,9 @@ fn find_definition(
     path: Option<&str>,
     commit: Option<&str>,
 ) -> Result<Value, String> {
-    let rows = storage.find_definitions(name, commit, path).map_err(|e| e.to_string())?;
+    let rows = storage
+        .find_definitions(name, commit, path)
+        .map_err(|e| e.to_string())?;
     let definitions: Vec<Value> = rows
         .into_iter()
         .take(100)
@@ -501,12 +564,19 @@ fn find_definition(
     Ok(json!({"definitions": definitions}))
 }
 
-fn unit_context(storage: Option<&Storage>, repo: &Path, path: &str, line: u32) -> Result<Value, String> {
+fn unit_context(
+    storage: Option<&Storage>,
+    repo: &Path,
+    path: &str,
+    line: u32,
+) -> Result<Value, String> {
     let Some(storage) = storage else {
         return Ok(live_unit_context(repo, path, line));
     };
 
-    let spans = storage.current_unit_spans_for_path(path).map_err(|e| e.to_string())?;
+    let spans = storage
+        .current_unit_spans_for_path(path)
+        .map_err(|e| e.to_string())?;
     let containing = spans
         .iter()
         .filter(|s| line >= s.start_line && line <= s.end_line)
@@ -520,12 +590,24 @@ fn unit_context(storage: Option<&Storage>, repo: &Path, path: &str, line: u32) -
          current_mutant_killed_tests, is_hard_gated FROM logical_units WHERE id = ?1",
         &[containing.id.as_str()],
         &[
-            "id", "name", "type", "original_path", "start_line", "current_line_cov",
-            "current_mutant_cov", "current_distinct_tests", "current_test_types",
-            "current_mutant_verified_tests", "current_mutant_killed_tests", "is_hard_gated",
+            "id",
+            "name",
+            "type",
+            "original_path",
+            "start_line",
+            "current_line_cov",
+            "current_mutant_cov",
+            "current_distinct_tests",
+            "current_test_types",
+            "current_mutant_verified_tests",
+            "current_mutant_killed_tests",
+            "is_hard_gated",
         ],
     )?;
-    let unit = unit_rows.into_iter().next().ok_or_else(|| format!("unit {} vanished", containing.id))?;
+    let unit = unit_rows
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("unit {} vanished", containing.id))?;
 
     let event_rows = query_rows(
         storage,
@@ -545,7 +627,14 @@ fn unit_context(storage: Option<&Storage>, repo: &Path, path: &str, line: u32) -
         storage,
         include_str!("../../sql/ui/runtime/apply_hazards.sql"),
         &[path],
-        &["line", "hazard_type", "required_evidence", "source", "evidence_present", "verified"],
+        &[
+            "line",
+            "hazard_type",
+            "required_evidence",
+            "source",
+            "evidence_present",
+            "verified",
+        ],
     )?;
     let hazards: Vec<Value> = hazard_rows
         .into_iter()
@@ -556,10 +645,22 @@ fn unit_context(storage: Option<&Storage>, repo: &Path, path: &str, line: u32) -
         .map(|mut r| {
             let mut out = Map::new();
             out.insert("line".to_string(), r.remove("line").unwrap_or(Value::Null));
-            out.insert("hazard_type".to_string(), r.remove("hazard_type").unwrap_or(Value::Null));
-            out.insert("required_evidence".to_string(), r.remove("required_evidence").unwrap_or(Value::Null));
-            out.insert("verified".to_string(), r.remove("verified").unwrap_or(Value::Null));
-            out.insert("snippet".to_string(), r.remove("source").unwrap_or(Value::Null));
+            out.insert(
+                "hazard_type".to_string(),
+                r.remove("hazard_type").unwrap_or(Value::Null),
+            );
+            out.insert(
+                "required_evidence".to_string(),
+                r.remove("required_evidence").unwrap_or(Value::Null),
+            );
+            out.insert(
+                "verified".to_string(),
+                r.remove("verified").unwrap_or(Value::Null),
+            );
+            out.insert(
+                "snippet".to_string(),
+                r.remove("source").unwrap_or(Value::Null),
+            );
             Value::Object(out)
         })
         .collect();
@@ -568,7 +669,14 @@ fn unit_context(storage: Option<&Storage>, repo: &Path, path: &str, line: u32) -
         storage,
         include_str!("../../sql/ui/runtime/apply_hotness.sql"),
         &[path],
-        &["function", "line", "flat_share", "cum_share", "tier", "source"],
+        &[
+            "function",
+            "line",
+            "flat_share",
+            "cum_share",
+            "tier",
+            "source",
+        ],
     )?;
     let hotness: Vec<Value> = hotness_rows
         .into_iter()
@@ -611,7 +719,9 @@ fn unit_context(storage: Option<&Storage>, repo: &Path, path: &str, line: u32) -
     // it as a distinct `live_hazards` field rather than silently merging it
     // into (possibly stale) `hazards`. See docs/agents/mcp.md.
     if let Some(status) = git_dirty_status(repo, path) {
-        if let Some(live) = live_rescan_hazards(repo, path, containing.start_line, containing.end_line) {
+        if let Some(live) =
+            live_rescan_hazards(repo, path, containing.start_line, containing.end_line)
+        {
             out["dirty"] = json!(status);
             out["live_hazards"] = json!(live);
             out["note"] = json!(
@@ -666,7 +776,10 @@ fn hazard_scan_fn(path: &str) -> Option<fn(&str, &str) -> Vec<HazardSite>> {
         Some(scan_zig_sites)
     } else if lower.ends_with(".c") || lower.ends_with(".h") {
         Some(scan_c_sites)
-    } else if [".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx"].iter().any(|s| lower.ends_with(s)) {
+    } else if [".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx"]
+        .iter()
+        .any(|s| lower.ends_with(s))
+    {
         Some(scan_cpp_sites)
     } else if lower.ends_with(".cs") {
         Some(scan_csharp_sites)
@@ -675,7 +788,12 @@ fn hazard_scan_fn(path: &str) -> Option<fn(&str, &str) -> Vec<HazardSite>> {
     }
 }
 
-fn live_rescan_hazards(repo: &Path, path: &str, start_line: u32, end_line: u32) -> Option<Vec<Value>> {
+fn live_rescan_hazards(
+    repo: &Path,
+    path: &str,
+    start_line: u32,
+    end_line: u32,
+) -> Option<Vec<Value>> {
     let scan = hazard_scan_fn(path)?;
     let contents = fs::read_to_string(resolve_repo_relative_path(repo, path)?).ok()?;
     Some(
@@ -708,7 +826,10 @@ fn live_unit_context(repo: &Path, path: &str, line: u32) -> Value {
         Err(e) => return json!({"error": format!("cannot read {path}: {e}")}),
     };
     let extractor = HeuristicExtractor::new(SourceFilter::code_defaults());
-    let blob = BlobFile { path: path.to_string(), contents: contents.clone() };
+    let blob = BlobFile {
+        path: path.to_string(),
+        contents: contents.clone(),
+    };
     let containing = extractor
         .extract_units(&blob)
         .into_iter()
@@ -842,7 +963,10 @@ mod tests {
         commit(dir.path(), "init");
         write(dir.path(), "src/lib.rs", "fn f() {}\n");
         // Never `git add`ed: untracked.
-        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), Some("added-not-committed"));
+        assert_eq!(
+            git_dirty_status(dir.path(), "src/lib.rs"),
+            Some("added-not-committed")
+        );
     }
 
     #[test]
@@ -852,7 +976,10 @@ mod tests {
         commit(dir.path(), "init");
         write(dir.path(), "src/lib.rs", "fn f() {}\n");
         git(dir.path(), &["add", "src/lib.rs"]);
-        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), Some("added-not-committed"));
+        assert_eq!(
+            git_dirty_status(dir.path(), "src/lib.rs"),
+            Some("added-not-committed")
+        );
     }
 
     #[test]
@@ -861,7 +988,10 @@ mod tests {
         write(dir.path(), "src/lib.rs", "fn f() {}\n");
         commit(dir.path(), "init");
         write(dir.path(), "src/lib.rs", "fn f() { 1 }\n");
-        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), Some("uncommitted-changes"));
+        assert_eq!(
+            git_dirty_status(dir.path(), "src/lib.rs"),
+            Some("uncommitted-changes")
+        );
     }
 
     #[test]
@@ -871,7 +1001,10 @@ mod tests {
         commit(dir.path(), "init");
         write(dir.path(), "src/lib.rs", "fn f() { 1 }\n");
         git(dir.path(), &["add", "src/lib.rs"]);
-        assert_eq!(git_dirty_status(dir.path(), "src/lib.rs"), Some("uncommitted-changes"));
+        assert_eq!(
+            git_dirty_status(dir.path(), "src/lib.rs"),
+            Some("uncommitted-changes")
+        );
     }
 
     #[test]
@@ -920,7 +1053,8 @@ mod tests {
             ),
         ];
         for (path, source, expected_hazard) in cases {
-            let scan = hazard_scan_fn(path).unwrap_or_else(|| panic!("expected a scanner for {path}"));
+            let scan =
+                hazard_scan_fn(path).unwrap_or_else(|| panic!("expected a scanner for {path}"));
             let sites = scan(path, source);
             assert!(
                 sites.iter().any(|s| s.hazard_type == *expected_hazard),
@@ -946,10 +1080,18 @@ mod tests {
         // check git status itself), but matches how it's actually called -
         // only after git_dirty_status has already said "dirty".
         let all = live_rescan_hazards(dir.path(), "src/lib.rs", 1, 100).unwrap();
-        assert_eq!(all.len(), 2, "expected one unsafe block per function, got {all:?}");
+        assert_eq!(
+            all.len(),
+            2,
+            "expected one unsafe block per function, got {all:?}"
+        );
 
         let scoped = live_rescan_hazards(dir.path(), "src/lib.rs", 1, 4).unwrap();
-        assert_eq!(scoped.len(), 1, "line-range filter must exclude b()'s hazard: {scoped:?}");
+        assert_eq!(
+            scoped.len(),
+            1,
+            "line-range filter must exclude b()'s hazard: {scoped:?}"
+        );
         assert_eq!(scoped[0]["hazard_type"], "rust_unsafe_block");
         assert_eq!(scoped[0]["line"], 3);
         assert_eq!(scoped[0]["snippet"], "unsafe { *p }");
@@ -959,13 +1101,19 @@ mod tests {
     fn live_rescan_hazards_is_none_for_an_unsupported_language() {
         let dir = init_repo();
         write(dir.path(), "src/worker.rb", "def run\n  1\nend\n");
-        assert_eq!(live_rescan_hazards(dir.path(), "src/worker.rb", 1, 10), None);
+        assert_eq!(
+            live_rescan_hazards(dir.path(), "src/worker.rb", 1, 10),
+            None
+        );
     }
 
     #[test]
     fn live_rescan_hazards_is_none_when_the_file_does_not_exist_on_disk() {
         let dir = init_repo();
-        assert_eq!(live_rescan_hazards(dir.path(), "src/missing.rs", 1, 10), None);
+        assert_eq!(
+            live_rescan_hazards(dir.path(), "src/missing.rs", 1, 10),
+            None
+        );
     }
 
     // --- path containment (resolve_repo_relative_path) -----------------
@@ -991,7 +1139,10 @@ mod tests {
         // proving this fails because of containment, not a missing file.
         let outside = dir.path().parent().unwrap().join("outside-secret.txt");
         fs::write(&outside, "outside\n").unwrap();
-        assert_eq!(resolve_repo_relative_path(dir.path(), "../outside-secret.txt"), None);
+        assert_eq!(
+            resolve_repo_relative_path(dir.path(), "../outside-secret.txt"),
+            None
+        );
         let _ = fs::remove_file(&outside);
     }
 
@@ -1008,8 +1159,15 @@ mod tests {
         let dir = init_repo();
         write(dir.path(), "src/lib.rs", "fn f() {}\n");
         let outside = dir.path().parent().unwrap().join("outside.rs");
-        fs::write(&outside, "fn g() { let p = &0 as *const i32; unsafe { *p }; }\n").unwrap();
-        assert_eq!(live_rescan_hazards(dir.path(), "../outside.rs", 1, 10), None);
+        fs::write(
+            &outside,
+            "fn g() { let p = &0 as *const i32; unsafe { *p }; }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            live_rescan_hazards(dir.path(), "../outside.rs", 1, 10),
+            None
+        );
         let _ = fs::remove_file(&outside);
     }
 
@@ -1055,7 +1213,11 @@ mod tests {
     #[test]
     fn unit_context_flags_dirty_and_live_rescans_for_a_supported_language() {
         let dir = init_repo();
-        write(dir.path(), "src/lib.rs", "pub fn risky() -> i32 {\n    0\n}\n");
+        write(
+            dir.path(),
+            "src/lib.rs",
+            "pub fn risky() -> i32 {\n    0\n}\n",
+        );
         commit(dir.path(), "init");
         write(
             dir.path(),
@@ -1087,13 +1249,20 @@ mod tests {
         let context = unit_context(Some(&storage), dir.path(), "src/worker.rb", 2).unwrap();
         assert_eq!(context["dirty"], "uncommitted-changes");
         assert!(context.get("live_hazards").is_none());
-        assert!(context["note"].as_str().unwrap().contains("No in-process live scanner"));
+        assert!(context["note"]
+            .as_str()
+            .unwrap()
+            .contains("No in-process live scanner"));
     }
 
     #[test]
     fn unit_context_has_no_dirty_field_for_a_clean_file() {
         let dir = init_repo();
-        write(dir.path(), "src/lib.rs", "pub fn risky() -> i32 {\n    0\n}\n");
+        write(
+            dir.path(),
+            "src/lib.rs",
+            "pub fn risky() -> i32 {\n    0\n}\n",
+        );
         commit(dir.path(), "init");
 
         let storage = Storage::open_memory().unwrap();
@@ -1130,7 +1299,10 @@ mod tests {
 
         let result = file_risk(&storage, "src%unusual").unwrap();
         let files = result["files"].as_array().unwrap();
-        let paths: Vec<&str> = files.iter().filter_map(|f| f["current_path"].as_str()).collect();
+        let paths: Vec<&str> = files
+            .iter()
+            .filter_map(|f| f["current_path"].as_str())
+            .collect();
         assert_eq!(paths, vec!["src%unusual/mod.rs"]);
     }
 }

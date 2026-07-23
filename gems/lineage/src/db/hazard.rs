@@ -38,9 +38,14 @@ pub fn ingest_hazards(
         "c" => ingest_c_hazards(storage, repo.as_ref(), commit, timestamp),
         "cpp" => ingest_cpp_hazards(storage, repo.as_ref(), commit, timestamp),
         "csharp" => ingest_csharp_hazards(storage, repo.as_ref(), commit, timestamp),
-        "ruby" | "python" | "javascript" | "typescript" | "java" | "kotlin" | "swift" | "lua" | "php" => {
+        "ruby" | "python" | "javascript" | "typescript" | "java" | "kotlin" | "swift" | "lua"
+        | "php" => {
             storage.deactivate_active_hazards(provider)?;
-            Ok(HazardIngestStats { scanned_files: 0, hazards: 0, events: 0 })
+            Ok(HazardIngestStats {
+                scanned_files: 0,
+                hazards: 0,
+                events: 0,
+            })
         }
         other => anyhow::bail!("unsupported hazard provider {other:?}"),
     }
@@ -52,7 +57,15 @@ fn ingest_zig_hazards(
     commit: &str,
     timestamp: Option<i64>,
 ) -> Result<HazardIngestStats> {
-    ingest_language_hazards(storage, repo, commit, timestamp, "zig", zig_source_files, scan_zig_sites)
+    ingest_language_hazards(
+        storage,
+        repo,
+        commit,
+        timestamp,
+        "zig",
+        zig_source_files,
+        scan_zig_sites,
+    )
 }
 
 fn ingest_go_hazards(
@@ -61,7 +74,15 @@ fn ingest_go_hazards(
     commit: &str,
     timestamp: Option<i64>,
 ) -> Result<HazardIngestStats> {
-    ingest_language_hazards(storage, repo, commit, timestamp, "go", go_source_files, scan_go_sites)
+    ingest_language_hazards(
+        storage,
+        repo,
+        commit,
+        timestamp,
+        "go",
+        go_source_files,
+        scan_go_sites,
+    )
 }
 
 fn ingest_rust_hazards(
@@ -70,7 +91,15 @@ fn ingest_rust_hazards(
     commit: &str,
     timestamp: Option<i64>,
 ) -> Result<HazardIngestStats> {
-    ingest_language_hazards(storage, repo, commit, timestamp, "rust", rust_source_files, scan_rust_sites)
+    ingest_language_hazards(
+        storage,
+        repo,
+        commit,
+        timestamp,
+        "rust",
+        rust_source_files,
+        scan_rust_sites,
+    )
 }
 
 fn ingest_c_hazards(
@@ -79,7 +108,15 @@ fn ingest_c_hazards(
     commit: &str,
     timestamp: Option<i64>,
 ) -> Result<HazardIngestStats> {
-    ingest_language_hazards(storage, repo, commit, timestamp, "c", c_source_files, scan_c_sites)
+    ingest_language_hazards(
+        storage,
+        repo,
+        commit,
+        timestamp,
+        "c",
+        c_source_files,
+        scan_c_sites,
+    )
 }
 
 fn ingest_cpp_hazards(
@@ -88,7 +125,15 @@ fn ingest_cpp_hazards(
     commit: &str,
     timestamp: Option<i64>,
 ) -> Result<HazardIngestStats> {
-    ingest_language_hazards(storage, repo, commit, timestamp, "cpp", cpp_source_files, scan_cpp_sites)
+    ingest_language_hazards(
+        storage,
+        repo,
+        commit,
+        timestamp,
+        "cpp",
+        cpp_source_files,
+        scan_cpp_sites,
+    )
 }
 
 fn ingest_csharp_hazards(
@@ -283,8 +328,10 @@ fn collect_zig_files(repo: &Path, rel_dir: &Path, out: &mut Vec<String>) -> Resu
 
 fn excluded_go_dir(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
-    matches!(name, ".git" | "vendor" | "testdata" | "node_modules" | "tmp" | "dist")
-        || name.starts_with('.')
+    matches!(
+        name,
+        ".git" | "vendor" | "testdata" | "node_modules" | "tmp" | "dist"
+    ) || name.starts_with('.')
 }
 
 fn excluded_common_dir(path: &str) -> bool {
@@ -346,7 +393,10 @@ fn excluded_zig_file(path: &str) -> bool {
         || name.ends_with("-bench.zig")
         || name.starts_with("vopr-")
         || name.starts_with("loom-")
-        || matches!(name, "all-tests.zig" | "all-fuzz.zig" | "size_check.zig" | "runtime-header.zig")
+        || matches!(
+            name,
+            "all-tests.zig" | "all-fuzz.zig" | "size_check.zig" | "runtime-header.zig"
+        )
 }
 
 // Both scanners consume the same contract resolver. The old Lineage copy
@@ -366,7 +416,11 @@ fn go_reflect_import_aliases(
     root: tree_sitter::Node,
     source: &[u8],
 ) -> std::collections::HashSet<String> {
-    fn visit(node: tree_sitter::Node, source: &[u8], aliases: &mut std::collections::HashSet<String>) {
+    fn visit(
+        node: tree_sitter::Node,
+        source: &[u8],
+        aliases: &mut std::collections::HashSet<String>,
+    ) {
         if node.kind() == "import_spec"
             && node
                 .child_by_field_name("path")
@@ -400,7 +454,9 @@ fn go_identifier_is_binding(node: tree_sitter::Node, source: &[u8], name: &str) 
             .strip_prefix("var")
             .or_else(|| text.strip_prefix("const"))
             .unwrap_or(text)
-            .split('=').next().unwrap_or(text),
+            .split('=')
+            .next()
+            .unwrap_or(text),
         "type_declaration" => text.strip_prefix("type").unwrap_or(text),
         _ => return false,
     };
@@ -531,7 +587,7 @@ fn query_hazards(
                     .unwrap_or("")
                     .trim()
                     .to_string();
-                
+
                 let policy = hazard_policy(hazard_type).unwrap_or_else(|| {
                     panic!("hazard query capture {hazard_type:?} has no contract policy")
                 });
@@ -562,7 +618,10 @@ fn query_hazards(
     }
     let mut unique_sites = Vec::new();
     for site in sites {
-        if !unique_sites.iter().any(|s: &HazardSite| s.line == site.line && s.hazard_type == site.hazard_type) {
+        if !unique_sites
+            .iter()
+            .any(|s: &HazardSite| s.line == site.line && s.hazard_type == site.hazard_type)
+        {
             unique_sites.push(site);
         }
     }
@@ -570,7 +629,12 @@ fn query_hazards(
 }
 
 pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    let sites = query_hazards(path, contents, tree_sitter_zig::LANGUAGE.into(), ZIG_HAZARDS);
+    let sites = query_hazards(
+        path,
+        contents,
+        tree_sitter_zig::LANGUAGE.into(),
+        ZIG_HAZARDS,
+    );
 
     let mut final_sites = Vec::new();
     let mut in_loom_exclude = false;
@@ -591,7 +655,7 @@ pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
         if line.contains("VOPR-EXCLUDE-END") {
             in_vopr_exclude = false;
         }
-        
+
         let mut retry_triggered = false;
         let mut retry_ended = false;
         let mut vopr_retry_direct = false;
@@ -607,7 +671,15 @@ pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
             vopr_retry_direct = true;
         }
 
-        line_states.push((in_loom_exclude, in_vopr_exclude, retry_depth > 0, retry_triggered, retry_ended, vopr_retry_direct, line));
+        line_states.push((
+            in_loom_exclude,
+            in_vopr_exclude,
+            retry_depth > 0,
+            retry_triggered,
+            retry_ended,
+            vopr_retry_direct,
+            line,
+        ));
     }
 
     for site in sites {
@@ -623,7 +695,9 @@ pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
         }
     }
 
-    for (idx, &(_loom_ex, vopr_ex, retry, start_retry, _, retry_direct, line)) in line_states.iter().enumerate() {
+    for (idx, &(_loom_ex, vopr_ex, retry, start_retry, _, retry_direct, line)) in
+        line_states.iter().enumerate()
+    {
         let line_no = (idx + 1) as u32;
         if line.contains("HAMMER-WAIT-LOOP-BEGIN") {
             final_sites.push(site(path, line_no, line, "zig_wait_loop"));
@@ -634,7 +708,9 @@ pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
         if start_retry || retry_direct {
             final_sites.push(site(path, line_no, line, "zig_vopr_retry"));
         } else if retry && executable_zig_retry_line(line) && !line.contains("VOPR-") {
-            let has_structural_vopr = final_sites.iter().any(|s| s.line == line_no && s.hazard_type.starts_with("zig_vopr_"));
+            let has_structural_vopr = final_sites
+                .iter()
+                .any(|s| s.line == line_no && s.hazard_type.starts_with("zig_vopr_"));
             if !has_structural_vopr {
                 final_sites.push(site(path, line_no, line, "zig_vopr_retry_body"));
             }
@@ -656,7 +732,12 @@ pub(crate) fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
 }
 
 pub(crate) fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_rust::LANGUAGE.into(), RUST_HAZARDS)
+    query_hazards(
+        path,
+        contents,
+        tree_sitter_rust::LANGUAGE.into(),
+        RUST_HAZARDS,
+    )
 }
 
 pub(crate) fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
@@ -664,7 +745,12 @@ pub(crate) fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
 }
 
 pub(crate) fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
-    query_hazards(path, contents, tree_sitter_cpp::LANGUAGE.into(), CPP_HAZARDS)
+    query_hazards(
+        path,
+        contents,
+        tree_sitter_cpp::LANGUAGE.into(),
+        CPP_HAZARDS,
+    )
 }
 
 // C# reflection flow is owned by FactMine. Lineage keeps the same narrow site
@@ -687,15 +773,9 @@ pub(crate) fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     .collect()
 }
 
-fn site(
-    path: &str,
-    line: u32,
-    source: &str,
-    hazard_type: &str,
-) -> HazardSite {
-    let policy = hazard_policy(hazard_type).unwrap_or_else(|| {
-        panic!("synthetic hazard {hazard_type:?} has no contract policy")
-    });
+fn site(path: &str, line: u32, source: &str, hazard_type: &str) -> HazardSite {
+    let policy = hazard_policy(hazard_type)
+        .unwrap_or_else(|| panic!("synthetic hazard {hazard_type:?} has no contract policy"));
     HazardSite {
         path: path.to_string(),
         line,
@@ -704,8 +784,6 @@ fn site(
         required_evidence: policy.evidence_provider.clone(),
     }
 }
-
-
 
 pub fn unit_for_site(blob: &BlobFile, units: &[LogicalUnit], line: u32) -> LogicalUnit {
     units
@@ -792,13 +870,17 @@ mod tests {
             "worker.go",
             "package demo\nimport r \"reflect\"\nfunc run(value interface{}, name string) {\n  r.ValueOf(value).MethodByName(name).Call(nil)\n}",
         );
-        assert!(aliased.iter().any(|site| site.hazard_type == "go_reflection"));
+        assert!(aliased
+            .iter()
+            .any(|site| site.hazard_type == "go_reflection"));
 
         let shadowed = scan_go_sites(
             "worker.go",
             "package demo\nimport \"reflect\"\nfunc run(value interface{}, name string) {\n  reflect := fakeReflect{}\n  reflect.ValueOf(value).MethodByName(name).Call(nil)\n}",
         );
-        assert!(!shadowed.iter().any(|site| site.hazard_type == "go_reflection"));
+        assert!(!shadowed
+            .iter()
+            .any(|site| site.hazard_type == "go_reflection"));
     }
 
     #[test]
@@ -867,9 +949,15 @@ mod tests {
             .filter(|site| site.hazard_type == "csharp_metaprogramming")
             .collect();
         assert_eq!(reflection.len(), 3, "{reflection:?}");
-        assert!(reflection.iter().any(|site| site.source.contains("target.GetMethod")));
-        assert!(reflection.iter().any(|site| site.source.contains("method.Invoke")));
-        assert!(reflection.iter().any(|site| site.source.contains("Assembly.Load")));
+        assert!(reflection
+            .iter()
+            .any(|site| site.source.contains("target.GetMethod")));
+        assert!(reflection
+            .iter()
+            .any(|site| site.source.contains("method.Invoke")));
+        assert!(reflection
+            .iter()
+            .any(|site| site.source.contains("Assembly.Load")));
 
         let shadowed = r#"
             class Type { public object GetMethod(string name) { return null; } }
@@ -912,7 +1000,10 @@ mod tests {
         let storage = Storage::open_memory().unwrap();
         let stats = ingest_hazards(&storage, dir.path(), "unsupported_lang", "abc", Some(10));
         assert!(stats.is_err());
-        assert!(stats.unwrap_err().to_string().contains("unsupported hazard provider"));
+        assert!(stats
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported hazard provider"));
     }
 
     #[test]
@@ -934,14 +1025,17 @@ mod tests {
             
             // VOPR-RETRY
         "#;
-        
+
         let sites = scan_zig_sites("test.zig", zig_code);
         let types = hazard_types(sites);
-        
+
         assert_eq!(types.iter().filter(|t| *t == "zig_loom_atomic").count(), 1);
         assert_eq!(types.iter().filter(|t| *t == "zig_vopr_time").count(), 1);
         assert_eq!(types.iter().filter(|t| *t == "zig_vopr_retry").count(), 2);
-        assert_eq!(types.iter().filter(|t| *t == "zig_vopr_retry_body").count(), 1);
+        assert_eq!(
+            types.iter().filter(|t| *t == "zig_vopr_retry_body").count(),
+            1
+        );
     }
 
     #[test]
@@ -961,9 +1055,15 @@ mod tests {
         "#;
 
         let sites = scan_zig_sites("test.zig", zig_code);
-        assert!(sites.iter().any(|s| s.hazard_type == "zig_vopr_retry_body" && s.source.contains("outer_after")));
-        assert!(sites.iter().any(|s| s.hazard_type == "zig_wait_loop" && s.required_evidence == "hammer"));
-        assert!(sites.iter().any(|s| s.hazard_type == "zig_loom_atomic" && s.source.contains("cmpxchgWeak")));
+        assert!(sites
+            .iter()
+            .any(|s| s.hazard_type == "zig_vopr_retry_body" && s.source.contains("outer_after")));
+        assert!(sites
+            .iter()
+            .any(|s| s.hazard_type == "zig_wait_loop" && s.required_evidence == "hammer"));
+        assert!(sites
+            .iter()
+            .any(|s| s.hazard_type == "zig_loom_atomic" && s.source.contains("cmpxchgWeak")));
     }
 
     #[test]
@@ -977,13 +1077,11 @@ mod tests {
             ("clock_gettime()", "zig_vopr_time"),
             ("milliTimestamp()", "zig_vopr_time"),
             ("nanoTimestamp()", "zig_vopr_time"),
-            
             ("std.crypto.random", "zig_vopr_random"),
             ("std.Random", "zig_vopr_random"),
             ("std.rand", "zig_vopr_random"),
             ("getrandom()", "zig_vopr_random"),
             ("Random.DefaultPrng", "zig_vopr_random"),
-            
             ("posix.recv()", "zig_vopr_net_io"),
             ("posix.send()", "zig_vopr_net_io"),
             ("posix.connect()", "zig_vopr_net_io"),
@@ -1000,7 +1098,6 @@ mod tests {
             ("linux.IoUring.send()", "zig_vopr_net_io"),
             ("linux.IoUring.accept()", "zig_vopr_net_io"),
             ("linux.IoUring.connect()", "zig_vopr_net_io"),
-            
             ("posix.open()", "zig_vopr_fs_io"),
             ("posix.openat()", "zig_vopr_fs_io"),
             ("posix.read()", "zig_vopr_fs_io"),
@@ -1018,7 +1115,6 @@ mod tests {
             ("linux.IoUring.fsync()", "zig_vopr_fs_io"),
             ("linux.IoUring.openat()", "zig_vopr_fs_io"),
             ("linux.IoUring.close()", "zig_vopr_fs_io"),
-            
             ("self.ring.read()", "zig_vopr_ring_io"),
             ("self.ring.write()", "zig_vopr_ring_io"),
             ("self.ring.recv()", "zig_vopr_ring_io"),
@@ -1036,7 +1132,7 @@ mod tests {
             ("ring.accept()", "zig_vopr_ring_io"),
             ("ring.connect()", "zig_vopr_ring_io"),
         ];
-        
+
         for (code, expected_type) in codes_and_cats {
             let sites = scan_zig_sites("test.zig", code);
             assert!(
@@ -1071,10 +1167,10 @@ mod tests {
                 // outside unsafe block, no unsafe operation
             }
         "#;
-        
+
         let sites = scan_rust_sites("src/lib.rs", rust_code);
         let types = hazard_types(sites);
-        
+
         assert!(types.contains(&"rust_unsafe_impl".to_string()));
         assert!(types.contains(&"rust_unsafe_fn".to_string()));
         assert!(types.contains(&"rust_unsafe_block".to_string()));
@@ -1084,7 +1180,7 @@ mod tests {
     #[test]
     fn test_excluded_common_directories_and_files() {
         let dir = tempdir().unwrap();
-        
+
         // Excluded folders: vendor, third_party,cmake-build-debug, etc.
         let excluded_dirs = vec![
             "vendor",
@@ -1105,23 +1201,20 @@ mod tests {
             "examples",
             ".hidden_dir",
         ];
-        
+
         for d in excluded_dirs {
             let path = dir.path().join(d);
             fs::create_dir_all(&path).unwrap();
             fs::write(path.join("lib.rs"), "unsafe fn foo() {}").unwrap();
         }
-        
+
         // Included folders
         fs::create_dir_all(dir.path().join("src")).unwrap();
-        fs::write(
-            dir.path().join("src/lib.rs"),
-            "unsafe fn foo() {}",
-        ).unwrap();
-        
+        fs::write(dir.path().join("src/lib.rs"), "unsafe fn foo() {}").unwrap();
+
         let storage = Storage::open_memory().unwrap();
         let stats = ingest_hazards(&storage, dir.path(), "rust", "abc", Some(10)).unwrap();
-        
+
         // Only src/lib.rs should be scanned
         assert_eq!(stats.scanned_files, 1);
         assert_eq!(stats.hazards, 1);
@@ -1130,7 +1223,7 @@ mod tests {
     #[test]
     fn test_excluded_go_directories_and_files() {
         let dir = tempdir().unwrap();
-        
+
         let excluded_go_dirs = vec![
             "vendor",
             "testdata",
@@ -1139,29 +1232,31 @@ mod tests {
             "dist",
             ".hidden_dir",
         ];
-        
+
         for d in excluded_go_dirs {
             let path = dir.path().join(d);
             fs::create_dir_all(&path).unwrap();
             fs::write(path.join("file.go"), "package foo\nfunc run() { go bar() }").unwrap();
         }
-        
+
         // Excluded file pattern: _test.go
         fs::create_dir_all(dir.path().join("pkg")).unwrap();
         fs::write(
             dir.path().join("pkg/helper_test.go"),
             "package pkg\nfunc run() { go bar() }",
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         // Valid go files
         fs::write(
             dir.path().join("pkg/helper.go"),
             "package pkg\nfunc run() {\n    go bar()\n}",
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let storage = Storage::open_memory().unwrap();
         let stats = ingest_hazards(&storage, dir.path(), "go", "abc", Some(10)).unwrap();
-        
+
         assert_eq!(stats.scanned_files, 1);
         assert_eq!(stats.hazards, 1);
     }
@@ -1170,7 +1265,7 @@ mod tests {
     fn test_excluded_zig_files() {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("zig/runtime")).unwrap();
-        
+
         let excluded_names = vec![
             "foo-test.zig",
             "foo-vopr.zig",
@@ -1183,23 +1278,25 @@ mod tests {
             "size_check.zig",
             "runtime-header.zig",
         ];
-        
+
         for name in excluded_names {
             fs::write(
                 dir.path().join("zig/runtime").join(name),
                 "fn run() void { @cmpxchgStrong(i32, &x, 0, 1, .seq_cst, .seq_cst); }",
-            ).unwrap();
+            )
+            .unwrap();
         }
-        
+
         // Valid zig file
         fs::write(
             dir.path().join("zig/runtime/valid.zig"),
             "fn run() void { @cmpxchgStrong(i32, &x, 0, 1, .seq_cst, .seq_cst); }",
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let storage = Storage::open_memory().unwrap();
         let stats = ingest_hazards(&storage, dir.path(), "zig", "abc", Some(10)).unwrap();
-        
+
         assert_eq!(stats.scanned_files, 1);
         assert_eq!(stats.hazards, 1);
     }
@@ -1211,9 +1308,21 @@ mod tests {
     #[test]
     fn test_ingest_c_cpp_csharp_and_timestamp_fallback() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("test.c"), "void foo() { char *p = malloc(10); free(p); }").unwrap();
-        fs::write(dir.path().join("test.cpp"), "void foo() { auto p = new int; delete p; }").unwrap();
-        fs::write(dir.path().join("test.cs"), "public unsafe class Bar { void Baz() { fixed (int* p = &x) {} } }").unwrap();
+        fs::write(
+            dir.path().join("test.c"),
+            "void foo() { char *p = malloc(10); free(p); }",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("test.cpp"),
+            "void foo() { auto p = new int; delete p; }",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("test.cs"),
+            "public unsafe class Bar { void Baz() { fixed (int* p = &x) {} } }",
+        )
+        .unwrap();
 
         let storage = Storage::open_memory().unwrap();
 
@@ -1223,29 +1332,55 @@ mod tests {
         let stats_cpp = ingest_hazards(&storage, dir.path(), "cpp", "commit_cpp", None).unwrap();
         assert_eq!(stats_cpp.scanned_files, 1);
 
-        let stats_csharp = ingest_hazards(&storage, dir.path(), "csharp", "commit_cs", None).unwrap();
+        let stats_csharp =
+            ingest_hazards(&storage, dir.path(), "csharp", "commit_cs", None).unwrap();
         assert_eq!(stats_csharp.scanned_files, 1);
     }
 
     #[test]
     fn test_query_hazards_invalid_query_error() {
-        let sites = query_hazards("test.rs", "pub fn foo() {}", tree_sitter_rust::LANGUAGE.into(), "(invalid_pattern");
+        let sites = query_hazards(
+            "test.rs",
+            "pub fn foo() {}",
+            tree_sitter_rust::LANGUAGE.into(),
+            "(invalid_pattern",
+        );
         assert!(sites.is_empty());
     }
 
     #[test]
     fn hazard_policy_comes_from_shared_contract() {
-        assert_eq!(hazard_policy("zig_allocator").unwrap().evidence_provider, "allocator");
-        assert_eq!(hazard_policy("zig_vopr_time").unwrap().evidence_provider, "vopr");
+        assert_eq!(
+            hazard_policy("zig_allocator").unwrap().evidence_provider,
+            "allocator"
+        );
+        assert_eq!(
+            hazard_policy("zig_vopr_time").unwrap().evidence_provider,
+            "vopr"
+        );
         assert!(hazard_policy("unknown_hazard").is_none());
     }
 
     #[test]
     fn unsafe_hazards_are_not_classified_by_substrings() {
-        assert_eq!(hazard_policy("rust_unsafe_block").unwrap().evidence_provider, "miri");
-        assert_eq!(hazard_policy("rust_unsafe_fn").unwrap().evidence_provider, "miri");
-        assert_eq!(hazard_policy("go_race_lock").unwrap().evidence_provider, "race");
-        assert_eq!(hazard_policy("go_race_atomic").unwrap().evidence_provider, "race");
+        assert_eq!(
+            hazard_policy("rust_unsafe_block")
+                .unwrap()
+                .evidence_provider,
+            "miri"
+        );
+        assert_eq!(
+            hazard_policy("rust_unsafe_fn").unwrap().evidence_provider,
+            "miri"
+        );
+        assert_eq!(
+            hazard_policy("go_race_lock").unwrap().evidence_provider,
+            "race"
+        );
+        assert_eq!(
+            hazard_policy("go_race_atomic").unwrap().evidence_provider,
+            "race"
+        );
     }
 
     #[test]
@@ -1263,8 +1398,8 @@ mod tests {
     // copies, so a local edit cannot quietly create a second policy owner.
     #[test]
     fn vendored_hazard_queries_match_fact_mines_originals() {
-        let originals_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../fact-mine/src/syntax");
+        let originals_dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fact-mine/src/syntax");
         if !originals_dir.is_dir() {
             eprintln!("skipping: fact-mine sibling tree not present (not a monorepo checkout)");
             return;
@@ -1284,7 +1419,10 @@ mod tests {
                     .join(name),
             )
             .unwrap_or_else(|_| panic!("lineage generated query {name} is missing"));
-            assert_eq!(vendored_text, generated_copy, "lineage generated {name} drifted from hazard-contract");
+            assert_eq!(
+                vendored_text, generated_copy,
+                "lineage generated {name} drifted from hazard-contract"
+            );
             let original = fs::read_to_string(originals_dir.join(name))
                 .unwrap_or_else(|_| panic!("fact-mine original {name} is missing"));
             assert_eq!(

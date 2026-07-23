@@ -337,6 +337,16 @@ enum DirectIngestKind {
     Sarif,
 }
 
+impl From<DirectIngestKind> for lineage::ingest_service::DirectArtifactKind {
+    fn from(kind: DirectIngestKind) -> Self {
+        match kind {
+            DirectIngestKind::Coverage => Self::Coverage,
+            DirectIngestKind::Mutants => Self::Mutants,
+            DirectIngestKind::Sarif => Self::Sarif,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct DiffCommandRequest {
     repo: PathBuf,
@@ -370,7 +380,7 @@ fn main() -> Result<()> {
             let config = analysis_config(&repo, &profile, trust_current_config)?;
             let git = GitProvider::open(&repo)?;
             let revision = if ingest {
-                ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
+                ensure_profile_clean_worktree(&repo, &config, &profile, Some(&db))?;
                 git.resolve_commit("HEAD")?
             } else {
                 lineage::git::WORKTREE_REVISION.into()
@@ -379,7 +389,7 @@ fn main() -> Result<()> {
             let completed =
                 execution.execute(&profile, &revision, ProfileRunKind::StandaloneAnalysis)?;
             if ingest {
-                ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
+                ensure_profile_clean_worktree(&repo, &config, &profile, Some(&db))?;
                 ensure_revision_snapshot(&db, &repo, &revision)?;
                 ingest_run_manifest(&db, &repo, &completed.directory.join("manifest.json"))?;
                 Storage::open(&db)?.refresh_ui_summaries()?;
@@ -419,12 +429,12 @@ fn main() -> Result<()> {
             // tree. It must happen under the execution lock so two CI processes
             // cannot race a pending publication.
             reconcile_pending_publications(&repo, &config, &db)?;
-            ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
+            ensure_profile_clean_worktree(&repo, &config, &profile, Some(&db))?;
             let revision = git.resolve_commit("HEAD")?;
             ensure_revision_snapshot(&db, &repo, &revision)?;
             let completed =
                 execution.execute(&profile, &revision, ProfileRunKind::CiPublication)?;
-            ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
+            ensure_profile_clean_worktree(&repo, &config, &profile, Some(&db))?;
             let run = completed.directory.join("manifest.json");
             write_publication_state(&completed.directory, PublicationState::Ingesting)?;
             record_run_state(&db, &run, "ingesting")?;
@@ -851,22 +861,25 @@ fn main() -> Result<()> {
                 let format = format.context("--kind requires --format")?;
                 let git = GitProvider::open(&repo)?;
                 let commit = git.resolve_commit(&commit.context("--kind requires --commit")?)?;
+                lineage::ingest_service::validate_direct_artifact(kind.into(), &input, &format)?;
                 ensure_revision_snapshot(&db, &repo, &commit)?;
-                ingest_direct_artifact(DirectArtifactIngest {
-                    kind,
-                    db: &db,
-                    repo: &repo,
-                    input: &input,
-                    format: &format,
-                    commit: &commit,
-                    source,
-                    timestamp,
-                    selection,
-                    mutant_corpus,
-                    test_set,
-                    complete,
-                    replace,
-                })?;
+                lineage::ingest_service::ingest_direct_artifact(
+                    lineage::ingest_service::DirectArtifactIngest {
+                        kind: kind.into(),
+                        db: &db,
+                        repo: &repo,
+                        input: &input,
+                        format: &format,
+                        commit: &commit,
+                        source,
+                        timestamp,
+                        selection,
+                        mutant_corpus,
+                        test_set,
+                        complete,
+                        replace,
+                    },
+                )?;
                 Storage::open(&db)?.refresh_ui_summaries()?;
                 return Ok(());
             }
@@ -888,7 +901,7 @@ fn main() -> Result<()> {
                     Some(run) => repository_path(&repo, &run),
                     None => latest_run_directory(&repo, &load_config(&repo)?).join("manifest.json"),
                 };
-                let manifest = load_run_manifest(&run)?;
+                let manifest = validate_run_manifest_for_ingestion(&repo, &run)?;
                 ensure_revision_snapshot(&db, &repo, &manifest.revision)?;
                 ingest_run_manifest(&db, &repo, &run)?;
                 Storage::open(&db)?.refresh_ui_summaries()?;
@@ -1196,10 +1209,47 @@ fn reconcile_pending_publications(
     Ok(())
 }
 
+#[cfg(test)]
 fn ensure_clean_worktree(
     repo: &std::path::Path,
     artifact_directory: &std::path::Path,
     database: Option<&std::path::Path>,
+) -> Result<()> {
+    ensure_clean_worktree_with_scope(repo, artifact_directory, database, false)
+}
+
+/// Command producers may consume sibling projects, lockfiles, or workspace
+/// tooling outside a selected monorepo subdirectory. Until they execute in an
+/// isolated worktree, their provenance is sound only when the entire Git
+/// worktree is clean. Embedded Lineage providers can retain narrower checks.
+fn ensure_profile_clean_worktree(
+    repo: &Path,
+    config: &lineage::LineageConfig,
+    profile_name: &str,
+    database: Option<&Path>,
+) -> Result<()> {
+    let profile = config
+        .profiles
+        .get(profile_name)
+        .with_context(|| format!("unknown Lineage profile {profile_name:?}"))?;
+    let requires_full_worktree = profile.producers.iter().any(|name| {
+        config.producers.get(name).is_some_and(|producer| {
+            producer.executor == lineage::pipeline::ProducerExecutor::Command
+        })
+    });
+    ensure_clean_worktree_with_scope(
+        repo,
+        &config.artifacts.directory,
+        database,
+        requires_full_worktree,
+    )
+}
+
+fn ensure_clean_worktree_with_scope(
+    repo: &std::path::Path,
+    artifact_directory: &std::path::Path,
+    database: Option<&std::path::Path>,
+    require_full_worktree: bool,
 ) -> Result<()> {
     let repository_root = ProcessCommand::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -1247,7 +1297,7 @@ fn ensure_clean_worktree(
                     "{}/",
                     repository_prefix.to_string_lossy().replace('\\', "/")
                 ));
-            inside_selected_repo
+            (require_full_worktree || inside_selected_repo)
                 && path != &artifact_prefix
                 && !path.starts_with(&format!("{artifact_prefix}/"))
                 && database_path.as_deref() != Some(path)
@@ -1303,7 +1353,8 @@ fn ensure_revision_snapshot(
     }
     let provider = GitProvider::open(repo)?;
     let storage = Storage::open(db)?;
-    LineageEngine::new(provider, HeuristicExtractor::default(), storage).run(Some(1))?;
+    LineageEngine::new(provider, HeuristicExtractor::default(), storage)
+        .run_through_revision(revision)?;
     if !Storage::open(db)?.commit_exists(revision)? {
         anyhow::bail!("could not index selected revision {revision}");
     }
@@ -1389,7 +1440,7 @@ fn build_analysis_overlay(
                 "diff --analyse can only execute the current checkout; checkout {resolved} before analysing a historical revision"
             );
         }
-        ensure_clean_worktree(repo, &config.artifacts.directory, None)?;
+        ensure_profile_clean_worktree(repo, &config, "analyse", None)?;
         resolved
     } else {
         lineage::git::WORKTREE_REVISION.into()
@@ -1807,167 +1858,19 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
     Ok(())
 }
 
-struct DirectArtifactIngest<'a> {
-    kind: DirectIngestKind,
-    db: &'a Path,
-    repo: &'a Path,
-    input: &'a Path,
-    format: &'a str,
-    commit: &'a str,
-    source: Option<String>,
-    timestamp: Option<i64>,
-    selection: Option<String>,
-    mutant_corpus: Option<String>,
-    test_set: Option<String>,
-    complete: bool,
-    replace: bool,
-}
-
-fn ingest_direct_artifact(request: DirectArtifactIngest<'_>) -> Result<()> {
-    let scope = direct_evidence_scope(
-        request.kind,
-        request.commit,
-        request.selection,
-        request.mutant_corpus.clone(),
-        request.test_set,
-        request.complete,
-    )?;
-    let storage = Storage::open(request.db)?;
-    match request.kind {
-        DirectIngestKind::Coverage => {
-            let payload = fs::read_to_string(request.input)?;
-            let source = request.source.unwrap_or_else(|| "coverage".into());
-            let stats = ingest_coverage_json_with_options(
-                &storage,
-                &payload,
-                request.format,
-                request.commit,
-                request.timestamp,
-                request.replace,
-                &CoverageIngestOptions {
-                    line_source: source,
-                    evidence_scope: scope,
-                    complete: request.complete,
-                },
-            )?;
-            println!(
-                "ingested coverage: files={} units={} events={} line_events={} skipped_files={}",
-                stats.files, stats.units, stats.events, stats.line_events, stats.skipped_files
-            );
-        }
-        DirectIngestKind::Mutants => {
-            if request.format != "mutant-facts" {
-                anyhow::bail!("mutants direct ingestion requires --format mutant-facts");
-            }
-            let payload = fs::read_to_string(request.input)?;
-            let git = GitProvider::open(request.repo)?;
-            let normalizer = RepoPathNormalizer::new(request.repo);
-            let test_set = scope
-                .as_ref()
-                .map(|scope| scope.test_set.clone())
-                .unwrap_or_else(|| "unit".into());
-            let stats = ingest_mutant_facts_json_with_options(
-                &storage,
-                &normalizer,
-                &git,
-                &HeuristicExtractor::default(),
-                &payload,
-                request.commit,
-                request.timestamp,
-                &test_set,
-                &MutantIngestOptions {
-                    mutation_corpus: request.mutant_corpus.unwrap_or_default(),
-                    evidence_scope: scope,
-                    complete: request.complete,
-                },
-            )?;
-            println!(
-                "ingested mutant facts: facts={} units={} quality_events={} exposure_events={} skipped_files={} skipped_facts={}",
-                stats.facts,
-                stats.units,
-                stats.quality_events,
-                stats.exposure_events,
-                stats.skipped_files,
-                stats.skipped_facts
-            );
-        }
-        DirectIngestKind::Sarif => {
-            if request.format != "sarif" {
-                anyhow::bail!("SARIF direct ingestion requires --format sarif");
-            }
-            let payload = fs::read(request.input)?;
-            lineage::pipeline::validate_sarif_document(&payload)?;
-            let source = request.source.unwrap_or_else(|| "sarif".into());
-            let stats = ingest_sarif_paths(
-                &storage,
-                request.repo,
-                &[request.input.to_path_buf()],
-                &source,
-                request.commit,
-                request.timestamp,
-                request.replace,
-            )?;
-            if let Some(scope) = scope {
-                storage.record_evidence_artifact_scope(&EvidenceArtifactScope {
-                    family: "sarif".into(),
-                    source,
-                    scope,
-                    complete: request.complete,
-                    expected_lines: Default::default(),
-                })?;
-            }
-            println!(
-                "ingested SARIF: artifacts={} findings={} skipped_files={} skipped_results={}",
-                stats.artifacts, stats.findings, stats.skipped_files, stats.skipped_results
-            );
-        }
-    }
-    Ok(())
-}
-
-fn direct_evidence_scope(
-    kind: DirectIngestKind,
-    commit: &str,
-    selection: Option<String>,
-    mutant_corpus: Option<String>,
-    test_set: Option<String>,
-    complete: bool,
-) -> Result<Option<EvidenceScopeFingerprint>> {
-    match (selection, test_set) {
-        (None, None) => {
-            if complete {
-                anyhow::bail!("--complete requires --selection and --test-set");
-            }
-            if mutant_corpus.is_some() {
-                anyhow::bail!("--mutant-corpus requires --selection and --test-set");
-            }
-            Ok(None)
-        }
-        (Some(selection), Some(test_set)) => {
-            let mutant_corpus = match kind {
-                DirectIngestKind::Mutants => mutant_corpus
-                    .filter(|value| !value.trim().is_empty())
-                    .context("mutation evidence with a scope requires --mutant-corpus")?,
-                DirectIngestKind::Coverage | DirectIngestKind::Sarif => {
-                    mutant_corpus.unwrap_or_else(|| "not-applicable".into())
-                }
-            };
-            Ok(Some(EvidenceScopeFingerprint {
-                revision: commit.into(),
-                selection,
-                mutant_corpus,
-                test_set,
-            }))
-        }
-        _ => anyhow::bail!("--selection and --test-set must be supplied together"),
-    }
-}
-
 fn ingest_run_manifest(
     db: &std::path::Path,
     repo: &std::path::Path,
     manifest_path: &std::path::Path,
 ) -> Result<()> {
+    let manifest = validate_run_manifest_for_ingestion(repo, manifest_path)?;
+    ingest_validated_run_manifest(db, repo, manifest_path, manifest)
+}
+
+fn validate_run_manifest_for_ingestion(
+    repo: &std::path::Path,
+    manifest_path: &std::path::Path,
+) -> Result<lineage::pipeline::RunManifest> {
     let manifest = load_run_manifest(manifest_path)?;
     let git = GitProvider::open(repo)?;
     validate_manifest_provenance(repo, &git, &manifest)?;
@@ -1979,6 +1882,22 @@ fn ingest_run_manifest(
     // transaction. In particular, a SARIF document that the importer would
     // ignore must never be recorded as complete evidence.
     validate_run_artifacts(run_directory, &manifest)?;
+    for artifact in &manifest.artifacts {
+        let _ = artifact_evidence_scope(artifact, &manifest.revision)?;
+    }
+    Ok(manifest)
+}
+
+fn ingest_validated_run_manifest(
+    db: &std::path::Path,
+    repo: &std::path::Path,
+    manifest_path: &std::path::Path,
+    manifest: lineage::pipeline::RunManifest,
+) -> Result<()> {
+    let git = GitProvider::open(repo)?;
+    let run_directory = manifest_path
+        .parent()
+        .context("run manifest has no parent directory")?;
     let storage = Storage::open(db)?;
     let extractor = HeuristicExtractor::default();
     let normalizer = RepoPathNormalizer::new(repo);
@@ -2006,7 +1925,7 @@ fn ingest_run_manifest(
                 ArtifactKind::Coverage => {
                     let payload =
                         normalize_manifest_coverage_paths(&payload, &artifact.format, &normalizer)?;
-                    ingest_coverage_json_with_options(
+                    let stats = ingest_coverage_json_with_options(
                         &storage,
                         std::str::from_utf8(&payload)?,
                         &artifact.format,
@@ -2019,9 +1938,16 @@ fn ingest_run_manifest(
                             complete: artifact.complete,
                         },
                     )?;
+                    if artifact.complete && stats.skipped_files > 0 {
+                        anyhow::bail!(
+                            "complete coverage artifact from producer {:?} skipped {} file(s)",
+                            artifact.producer,
+                            stats.skipped_files
+                        );
+                    }
                 }
                 ArtifactKind::Mutants => {
-                    ingest_mutant_facts_json_with_options(
+                    let stats = ingest_mutant_facts_json_with_options(
                         &storage,
                         &normalizer,
                         &git,
@@ -2043,6 +1969,14 @@ fn ingest_run_manifest(
                             complete: artifact.complete,
                         },
                     )?;
+                    if artifact.complete && (stats.skipped_files > 0 || stats.skipped_facts > 0) {
+                        anyhow::bail!(
+                            "complete mutation artifact from producer {:?} skipped {} file(s) and {} fact(s)",
+                            artifact.producer,
+                            stats.skipped_files,
+                            stats.skipped_facts
+                        );
+                    }
                 }
                 ArtifactKind::Sarif => {
                     // Keep temporary names independent of external manifest
@@ -2067,7 +2001,7 @@ fn ingest_run_manifest(
             }
         }
         for (source, inputs) in sarif_inputs {
-            ingest_sarif_paths(
+            let stats = ingest_sarif_paths(
                 &storage,
                 repo,
                 &inputs,
@@ -2076,6 +2010,17 @@ fn ingest_run_manifest(
                 None,
                 true,
             )?;
+            let requested_complete = sarif_scopes
+                .get(&source)
+                .and_then(|scopes| scopes.first())
+                .is_some_and(|(_, complete)| *complete);
+            if requested_complete && (stats.skipped_files > 0 || stats.skipped_results > 0) {
+                anyhow::bail!(
+                    "complete SARIF artifact source {source:?} skipped {} file(s) and {} result(s)",
+                    stats.skipped_files,
+                    stats.skipped_results
+                );
+            }
             if let Some((scope, complete)) = sarif_scopes
                 .remove(&source)
                 .unwrap_or_default()
@@ -2286,6 +2231,19 @@ fn artifact_evidence_scope(
             "complete artifact from producer {:?} lacks evidence_scope",
             artifact.producer
         );
+    }
+    if let Some(scope) = scope {
+        if scope.selection.trim().is_empty()
+            || scope.test_set.trim().is_empty()
+            || (artifact.kind == ArtifactKind::Mutants
+                && (scope.mutant_corpus.trim().is_empty()
+                    || scope.mutant_corpus == "not-applicable"))
+        {
+            anyhow::bail!(
+                "artifact from producer {:?} has an invalid evidence_scope",
+                artifact.producer
+            );
+        }
     }
     Ok(scope.map(|scope| EvidenceScopeFingerprint {
         revision: revision.into(),
@@ -2645,6 +2603,37 @@ mod tests {
                 .to_string()
                 .contains("gems/demo/dirty.rb")
         );
+    }
+
+    #[test]
+    fn command_profiles_require_the_entire_monorepo_to_be_clean() {
+        let directory = tempdir().unwrap();
+        let repository = git2::Repository::init(directory.path()).unwrap();
+        let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+        let project = directory.path().join("gems/demo");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("tracked.rb"), "puts :ok\n").unwrap();
+        let mut index = repository.index().unwrap();
+        index
+            .add_path(std::path::Path::new("gems/demo/tracked.rb"))
+            .unwrap();
+        index.write().unwrap();
+        let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+        repository
+            .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+
+        let config = lineage::load_config_contents(
+            "version: 1\nprofiles:\n  ci:\n    producers: [command]\nproducers:\n  command:\n    executor: command\n    argv: [true]\n",
+            Some("yml"),
+        )
+        .unwrap();
+        fs::write(directory.path().join("unrelated.md"), "outside project\n").unwrap();
+
+        assert!(ensure_profile_clean_worktree(&project, &config, "ci", None)
+            .unwrap_err()
+            .to_string()
+            .contains("unrelated.md"));
     }
 
     #[test]

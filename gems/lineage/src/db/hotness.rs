@@ -43,10 +43,9 @@ pub struct HotnessIngestStats {
 /// Method-name tails too generic for symbol matching: a unique project
 /// definition proves nothing about a profiler frame with one of these names.
 const GENERIC_TAILS: &[&str] = &[
-    "new", "init", "main", "run", "call", "get", "set", "next", "len", "size",
-    "insert", "remove", "push", "pop", "clear", "clone", "drop", "free",
-    "alloc", "read", "write", "open", "close", "parse", "format", "hash",
-    "eq", "cmp", "index", "iter", "lock", "unlock", "update", "build",
+    "new", "init", "main", "run", "call", "get", "set", "next", "len", "size", "insert", "remove",
+    "push", "pop", "clear", "clone", "drop", "free", "alloc", "read", "write", "open", "close",
+    "parse", "format", "hash", "eq", "cmp", "index", "iter", "lock", "unlock", "update", "build",
 ];
 
 /// Reduce a profiler symbol to (owner_tail, method_tail).
@@ -135,11 +134,19 @@ impl UnitIndex {
             }
             paths.insert(path);
         }
-        Ok(Self { by_tail, paths, by_basename })
+        Ok(Self {
+            by_tail,
+            paths,
+            by_basename,
+        })
     }
 
     /// Resolve one entry to (path, line, resolution tier).
-    fn resolve(&self, entry: &HotnessEntry, normalized_path: Option<&str>) -> (Option<String>, Option<i64>, &'static str) {
+    fn resolve(
+        &self,
+        entry: &HotnessEntry,
+        normalized_path: Option<&str>,
+    ) -> (Option<String>, Option<i64>, &'static str) {
         // Tier 1: the profile's own path is a known project path. A
         // repo-relative path (contains a separator, not absolute) is kept
         // even without a matching unit - stackprof/pprof/cpuprofile paths
@@ -173,7 +180,11 @@ impl UnitIndex {
                         .filter(|(path, _, _)| project_paths.contains(path))
                         .collect();
                     if let [only] = matching.as_slice() {
-                        return (Some(only.0.clone()), entry.line.or(Some(only.2)), "basename");
+                        return (
+                            Some(only.0.clone()),
+                            entry.line.or(Some(only.2)),
+                            "basename",
+                        );
                     }
                 }
             }
@@ -192,7 +203,9 @@ impl UnitIndex {
             let cleaned = entry.function.replace("(*", "").replace(')', "");
             let mut segments: Vec<String> = cleaned
                 .split(|c| c == ':' || c == '.' || c == '#' || c == '$')
-                .filter(|segment| segment.len() > 2 && segment.chars().all(|c| c.is_alphanumeric() || c == '_'))
+                .filter(|segment| {
+                    segment.len() > 2 && segment.chars().all(|c| c.is_alphanumeric() || c == '_')
+                })
                 .map(|segment| segment.to_lowercase())
                 .collect();
             segments.pop();
@@ -205,7 +218,8 @@ impl UnitIndex {
             if !module_qualified || qualifiers.len() < 2 {
                 return true;
             }
-            let haystack = format!("{} {}", path.to_lowercase(), name.to_lowercase()).replace('-', "_");
+            let haystack =
+                format!("{} {}", path.to_lowercase(), name.to_lowercase()).replace('-', "_");
             qualifiers.iter().any(|segment| haystack.contains(segment))
         };
 
@@ -378,12 +392,24 @@ mod tests {
     #[test]
     fn symbol_tails_normalize_supported_profiler_spellings() {
         let cases = [
-            ("fact_mine_rust::syntax::hazards::extract_hazards::h1a2b3c4d5e6f7a8b", Some("hazards"), Some("extract_hazards")),
-            ("Thread.PosixThreadImpl.spawn__anon_54996.Instance.entryFn", Some("Instance"), Some("entryFn")),
+            (
+                "fact_mine_rust::syntax::hazards::extract_hazards::h1a2b3c4d5e6f7a8b",
+                Some("hazards"),
+                Some("extract_hazards"),
+            ),
+            (
+                "Thread.PosixThreadImpl.spawn__anon_54996.Instance.entryFn",
+                Some("Instance"),
+                Some("entryFn"),
+            ),
             ("main.(*Server).handle", Some("Server"), Some("handle")),
             ("com.example.Widget.render", Some("Widget"), Some("render")),
             ("Namespace.Type::Method", Some("Type"), Some("Method")),
-            ("<alloc::vec::Vec<T> as Extend<T>>::extend", None, Some("extend")),
+            (
+                "<alloc::vec::Vec<T> as Extend<T>>::extend",
+                None,
+                Some("extend"),
+            ),
             ("parse", None, Some("parse")),
         ];
         for (symbol, owner, method) in cases {
@@ -406,7 +432,16 @@ mod tests {
             ("handle", "src/client.go", 9),
             ("parse", "src/parse.rs", 5),
         ] {
-            let unit = LogicalUnit::new(name, UnitKind::Function, path, 1, line, line + 5, "sig", "body");
+            let unit = LogicalUnit::new(
+                name,
+                UnitKind::Function,
+                path,
+                1,
+                line,
+                line + 5,
+                "sig",
+                "body",
+            );
             storage.upsert_logical_unit(&unit, 10).unwrap();
         }
 
@@ -437,14 +472,19 @@ mod tests {
         let by_function: std::collections::HashMap<_, _> =
             rows.iter().map(|row| (row.function.clone(), row)).collect();
         assert_eq!(
-            by_function["fact_mine_rust::syntax::hazards::extract_hazards::hdeadbeefdeadbeef"].path.as_deref(),
+            by_function["fact_mine_rust::syntax::hazards::extract_hazards::hdeadbeefdeadbeef"]
+                .path
+                .as_deref(),
             Some("src/syntax/hazards.rs")
         );
         assert_eq!(
             by_function["Thread.Pool__anon_1.entryFn"].path.as_deref(),
             Some("zig/lib/parking-lot.zig")
         );
-        assert_eq!(by_function["main.(*Server).handle"].path.as_deref(), Some("src/server.go"));
+        assert_eq!(
+            by_function["main.(*Server).handle"].path.as_deref(),
+            Some("src/server.go")
+        );
         assert_eq!(by_function["parse"].path, None);
         assert_eq!(by_function["clone3"].path, None);
         assert_eq!(

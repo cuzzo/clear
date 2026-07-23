@@ -1,12 +1,12 @@
 use crate::model::{BlobFile, LogicalUnit, UnitKind};
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use tree_sitter::{Language, Node, Parser};
 use streaming_iterator::StreamingIterator;
+use tree_sitter::{Language, Node, Parser};
 
 pub const DEFAULT_CODE_EXTENSIONS: &[&str] = &[
-    "rb", "zig", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "lua", "c", "h", "cc", "cpp",
-    "cxx", "hh", "hpp", "hxx", "cs", "java", "swift", "kt", "kts", "go", "rs", "php", "sql", "S",
+    "rb", "zig", "py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "lua", "c", "h", "cc", "cpp", "cxx",
+    "hh", "hpp", "hxx", "cs", "java", "swift", "kt", "kts", "go", "rs", "php", "sql", "S",
 ];
 const DEFAULT_IGNORED_COMPONENTS: &[&str] = &[
     ".git",
@@ -229,11 +229,19 @@ fn sql_candidates(file: &BlobFile, lines: &[&str]) -> Vec<Candidate> {
             .map(str::trim)
             .filter(|value| !value.is_empty())
     });
-    let fallback = file.path.rsplit('/').next().unwrap_or(&file.path)
-        .strip_suffix(".sql").unwrap_or(&file.path);
-    let signature = lines.iter().map(|line| line.trim())
+    let fallback = file
+        .path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&file.path)
+        .strip_suffix(".sql")
+        .unwrap_or(&file.path);
+    let signature = lines
+        .iter()
+        .map(|line| line.trim())
         .find(|line| !line.is_empty() && !line.starts_with("--"))
-        .unwrap_or("SQL query").to_string();
+        .unwrap_or("SQL query")
+        .to_string();
     vec![Candidate {
         name: query_id.unwrap_or(fallback).to_string(),
         kind: UnitKind::Function,
@@ -359,125 +367,151 @@ fn candidate_from_capture(
             let owner_kinds = match adapter {
                 TreeSitterAdapter::Ruby => &["class", "module"][..],
                 TreeSitterAdapter::Python => &["class_definition"][..],
-                TreeSitterAdapter::JavaScript | TreeSitterAdapter::TypeScript | TreeSitterAdapter::Tsx => {
+                TreeSitterAdapter::JavaScript
+                | TreeSitterAdapter::TypeScript
+                | TreeSitterAdapter::Tsx => {
                     &["class_declaration", "abstract_class_declaration"][..]
                 }
                 TreeSitterAdapter::Go => &["type_spec", "type_alias"][..],
                 TreeSitterAdapter::C | TreeSitterAdapter::Cpp => &[][..],
-                TreeSitterAdapter::CSharp => &["class_declaration", "struct_declaration", "record_declaration", "namespace_declaration"][..],
-                TreeSitterAdapter::Rust => &["struct_item", "enum_item", "trait_item", "union_item", "mod_item"][..],
-                TreeSitterAdapter::Zig => &["struct_declaration", "enum_declaration", "union_declaration", "variable_declaration"][..],
-                TreeSitterAdapter::Java => &["class_declaration", "interface_declaration", "enum_declaration", "record_declaration"][..],
+                TreeSitterAdapter::CSharp => &[
+                    "class_declaration",
+                    "struct_declaration",
+                    "record_declaration",
+                    "namespace_declaration",
+                ][..],
+                TreeSitterAdapter::Rust => &[
+                    "struct_item",
+                    "enum_item",
+                    "trait_item",
+                    "union_item",
+                    "mod_item",
+                ][..],
+                TreeSitterAdapter::Zig => &[
+                    "struct_declaration",
+                    "enum_declaration",
+                    "union_declaration",
+                    "variable_declaration",
+                ][..],
+                TreeSitterAdapter::Java => &[
+                    "class_declaration",
+                    "interface_declaration",
+                    "enum_declaration",
+                    "record_declaration",
+                ][..],
                 TreeSitterAdapter::Kotlin => &["class_declaration", "object_declaration"][..],
                 TreeSitterAdapter::Lua => &[][..],
-                TreeSitterAdapter::Php => &["class_declaration", "interface_declaration", "trait_declaration", "namespace_definition"][..],
+                TreeSitterAdapter::Php => &[
+                    "class_declaration",
+                    "interface_declaration",
+                    "trait_declaration",
+                    "namespace_definition",
+                ][..],
                 TreeSitterAdapter::Swift => &["class_declaration", "protocol_declaration"][..],
             };
             qualified_name(node, name, source, owner_kinds)
         }
-        UnitKind::Function => {
-            match adapter {
-                TreeSitterAdapter::Ruby => {
-                    let name = if node.kind() == "singleton_method" {
-                        let object = field_text(node, "object", source).unwrap_or("self");
-                        format!("{}.{}", clean_owner_name(object), name)
-                    } else {
-                        name.to_string()
-                    };
-                    qualified_name(node, &name, source, &["class", "module", "method", "singleton_method"])
-                }
-                TreeSitterAdapter::Python => {
-                    qualified_name(node, name, source, &["class_definition", "function_definition"])
-                }
-                TreeSitterAdapter::JavaScript | TreeSitterAdapter::TypeScript | TreeSitterAdapter::Tsx => {
-                    qualified_name(node, name, source, &["class_declaration", "abstract_class_declaration", "function_declaration"])
-                }
-                TreeSitterAdapter::Go => {
-                    if node.kind() == "method_declaration" {
-                        go_qualified_method_name(node, name, source)
-                    } else {
-                        name.to_string()
-                    }
-                }
-                TreeSitterAdapter::C => name.to_string(),
-                TreeSitterAdapter::Cpp => {
-                    qualified_name(node, name, source, &["class_specifier", "namespace_definition"])
-                }
-                TreeSitterAdapter::CSharp => {
-                    qualified_name(
-                        node,
-                        name,
-                        source,
-                        &[
-                            "class_declaration",
-                            "struct_declaration",
-                            "interface_declaration",
-                            "record_declaration",
-                            "namespace_declaration",
-                        ],
-                    )
-                }
-                TreeSitterAdapter::Rust => {
-                    rust_method_owner(node, source)
-                        .map(|owner| format!("{owner}.{name}"))
-                        .unwrap_or_else(|| name.to_string())
-                }
-                TreeSitterAdapter::Zig => {
-                    zig_container_owner(node, source)
-                        .map(|owner| format!("{owner}.{name}"))
-                        .unwrap_or_else(|| name.to_string())
-                }
-                TreeSitterAdapter::Java => {
-                    qualified_name(
-                        node,
-                        name,
-                        source,
-                        &[
-                            "class_declaration",
-                            "interface_declaration",
-                            "enum_declaration",
-                            "record_declaration",
-                        ],
-                    )
-                }
-                TreeSitterAdapter::Kotlin => {
-                    qualified_name(
-                        node,
-                        name,
-                        source,
-                        &[
-                            "class_declaration",
-                            "object_declaration",
-                        ],
-                    )
-                }
-                TreeSitterAdapter::Lua => name.to_string(),
-                TreeSitterAdapter::Php => {
-                    qualified_name(
-                        node,
-                        name,
-                        source,
-                        &[
-                            "class_declaration",
-                            "interface_declaration",
-                            "trait_declaration",
-                            "namespace_definition",
-                        ],
-                    )
-                }
-                TreeSitterAdapter::Swift => {
-                    qualified_name(
-                        node,
-                        name,
-                        source,
-                        &[
-                            "class_declaration",
-                            "protocol_declaration",
-                        ],
-                    )
+        UnitKind::Function => match adapter {
+            TreeSitterAdapter::Ruby => {
+                let name = if node.kind() == "singleton_method" {
+                    let object = field_text(node, "object", source).unwrap_or("self");
+                    format!("{}.{}", clean_owner_name(object), name)
+                } else {
+                    name.to_string()
+                };
+                qualified_name(
+                    node,
+                    &name,
+                    source,
+                    &["class", "module", "method", "singleton_method"],
+                )
+            }
+            TreeSitterAdapter::Python => qualified_name(
+                node,
+                name,
+                source,
+                &["class_definition", "function_definition"],
+            ),
+            TreeSitterAdapter::JavaScript
+            | TreeSitterAdapter::TypeScript
+            | TreeSitterAdapter::Tsx => qualified_name(
+                node,
+                name,
+                source,
+                &[
+                    "class_declaration",
+                    "abstract_class_declaration",
+                    "function_declaration",
+                ],
+            ),
+            TreeSitterAdapter::Go => {
+                if node.kind() == "method_declaration" {
+                    go_qualified_method_name(node, name, source)
+                } else {
+                    name.to_string()
                 }
             }
-        }
+            TreeSitterAdapter::C => name.to_string(),
+            TreeSitterAdapter::Cpp => qualified_name(
+                node,
+                name,
+                source,
+                &["class_specifier", "namespace_definition"],
+            ),
+            TreeSitterAdapter::CSharp => qualified_name(
+                node,
+                name,
+                source,
+                &[
+                    "class_declaration",
+                    "struct_declaration",
+                    "interface_declaration",
+                    "record_declaration",
+                    "namespace_declaration",
+                ],
+            ),
+            TreeSitterAdapter::Rust => rust_method_owner(node, source)
+                .map(|owner| format!("{owner}.{name}"))
+                .unwrap_or_else(|| name.to_string()),
+            TreeSitterAdapter::Zig => zig_container_owner(node, source)
+                .map(|owner| format!("{owner}.{name}"))
+                .unwrap_or_else(|| name.to_string()),
+            TreeSitterAdapter::Java => qualified_name(
+                node,
+                name,
+                source,
+                &[
+                    "class_declaration",
+                    "interface_declaration",
+                    "enum_declaration",
+                    "record_declaration",
+                ],
+            ),
+            TreeSitterAdapter::Kotlin => qualified_name(
+                node,
+                name,
+                source,
+                &["class_declaration", "object_declaration"],
+            ),
+            TreeSitterAdapter::Lua => name.to_string(),
+            TreeSitterAdapter::Php => qualified_name(
+                node,
+                name,
+                source,
+                &[
+                    "class_declaration",
+                    "interface_declaration",
+                    "trait_declaration",
+                    "namespace_definition",
+                ],
+            ),
+            TreeSitterAdapter::Swift => qualified_name(
+                node,
+                name,
+                source,
+                &["class_declaration", "protocol_declaration"],
+            ),
+        },
     };
 
     tree_sitter_candidate(node, qualified, kind, source, lines)
@@ -563,7 +597,16 @@ fn tree_sitter_candidates(
                     }
                     TreeSitterAdapter::CSharp => {
                         if n.kind() == "constructor_declaration" {
-                            nearest_owner_name(n, &file.contents, &["class_declaration", "struct_declaration", "record_declaration"]).unwrap_or_default()
+                            nearest_owner_name(
+                                n,
+                                &file.contents,
+                                &[
+                                    "class_declaration",
+                                    "struct_declaration",
+                                    "record_declaration",
+                                ],
+                            )
+                            .unwrap_or_default()
                         } else {
                             String::new()
                         }
@@ -574,7 +617,9 @@ fn tree_sitter_candidates(
                 name
             };
 
-            if adapter as usize == TreeSitterAdapter::Zig as usize && n.kind() == "variable_declaration" {
+            if adapter as usize == TreeSitterAdapter::Zig as usize
+                && n.kind() == "variable_declaration"
+            {
                 if let Some(cand) = zig_container_declaration_candidate(n, &file.contents, lines) {
                     candidates.push(cand);
                 }
@@ -674,16 +719,27 @@ fn nearest_owner_name(mut node: Node<'_>, source: &str, owner_kinds: &[&str]) ->
 
 fn owner_name(node: Node<'_>, source: &str) -> Option<String> {
     match node.kind() {
-        "class" | "module" | "class_definition" | "class_declaration" | "abstract_class_declaration"
-        | "interface_declaration" | "record_declaration" | "struct_declaration" | "enum_declaration"
-        | "namespace_definition" | "namespace_declaration" | "internal_module" | "object_declaration"
-        | "trait_declaration" | "protocol_declaration" => {
-            field_text(node, "name", source).map(clean_owner_name)
-        }
-        "function_definition" | "function_declaration" | "method" | "method_definition"
-        | "method_declaration" | "singleton_method" => {
-            field_text(node, "name", source).map(clean_owner_name)
-        }
+        "class"
+        | "module"
+        | "class_definition"
+        | "class_declaration"
+        | "abstract_class_declaration"
+        | "interface_declaration"
+        | "record_declaration"
+        | "struct_declaration"
+        | "enum_declaration"
+        | "namespace_definition"
+        | "namespace_declaration"
+        | "internal_module"
+        | "object_declaration"
+        | "trait_declaration"
+        | "protocol_declaration" => field_text(node, "name", source).map(clean_owner_name),
+        "function_definition"
+        | "function_declaration"
+        | "method"
+        | "method_definition"
+        | "method_declaration"
+        | "singleton_method" => field_text(node, "name", source).map(clean_owner_name),
         "function_item" => field_text(node, "name", source).map(clean_owner_name),
         "type_spec" | "type_alias" => field_text(node, "name", source).map(clean_owner_name),
         "class_specifier" | "struct_specifier" | "union_specifier" | "enum_specifier" => {
@@ -715,8 +771,6 @@ fn c_like_function_name(node: Node<'_>, source: &str) -> Option<String> {
     declarator_name(declarator, source).map(|name| clean_owner_name(&name))
 }
 
-
-
 fn c_like_typedef_name(node: Node<'_>, source: &str) -> Option<String> {
     node.child_by_field_name("declarator")
         .and_then(|declarator| declarator_name(declarator, source))
@@ -727,7 +781,10 @@ fn c_like_typedef_name(node: Node<'_>, source: &str) -> Option<String> {
 fn c_like_type_name(node: Node<'_>, source: &str) -> Option<String> {
     field_text(node, "name", source)
         .map(clean_owner_name)
-        .or_else(|| first_descendant_text(node, source, &["type_identifier", "identifier"]).map(|text| clean_owner_name(&text)))
+        .or_else(|| {
+            first_descendant_text(node, source, &["type_identifier", "identifier"])
+                .map(|text| clean_owner_name(&text))
+        })
 }
 
 fn declarator_name(node: Node<'_>, source: &str) -> Option<String> {
@@ -736,7 +793,11 @@ fn declarator_name(node: Node<'_>, source: &str) -> Option<String> {
     }
     if matches!(
         node.kind(),
-        "identifier" | "field_identifier" | "type_identifier" | "qualified_identifier" | "scoped_identifier"
+        "identifier"
+            | "field_identifier"
+            | "type_identifier"
+            | "qualified_identifier"
+            | "scoped_identifier"
     ) {
         return node.utf8_text(source.as_bytes()).ok().map(str::to_string);
     }
@@ -866,8 +927,6 @@ fn clean_owner_name(name: &str) -> String {
     name.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-
-
 fn extension(path: &str) -> Option<String> {
     path.rsplit_once('.').map(|(_, ext)| ext.to_string())
 }
@@ -888,7 +947,8 @@ mod tests {
     fn extracts_standalone_sql_query_as_a_logical_unit() {
         let file = BlobFile {
             path: "gems/lineage/sql/demo.sql".into(),
-            contents: "-- query-id: demo.lookup.v1\nSELECT value FROM demo WHERE value <> 0;\n".into(),
+            contents: "-- query-id: demo.lookup.v1\nSELECT value FROM demo WHERE value <> 0;\n"
+                .into(),
         };
         let extractor = HeuristicExtractor::default();
         let units = extractor.extract_units(&file);
@@ -1006,7 +1066,9 @@ fn helper() {}
         assert!(names.contains(&(UnitKind::Function, "Store.open")));
         assert!(names.contains(&(UnitKind::Function, "Store.insert_row")));
         assert!(names.contains(&(UnitKind::Function, "helper")));
-        assert!(units.iter().any(|unit| unit.name == "Store.open" && unit.start_line == 8));
+        assert!(units
+            .iter()
+            .any(|unit| unit.name == "Store.open" && unit.start_line == 8));
     }
 
     #[test]
@@ -1197,7 +1259,9 @@ export class Worker {
         assert!(is_test_source_path("src/test_foo.py"));
 
         assert!(is_production_source_path("src/ast/type.rb"));
-        assert!(is_production_source_path("gems/decomplex/lib/decomplex/report.rb"));
+        assert!(is_production_source_path(
+            "gems/decomplex/lib/decomplex/report.rb"
+        ));
         assert!(is_production_source_path("gems/lineage/src/ui.rs"));
         assert!(is_production_source_path("zig/lib/atomic.zig"));
     }
@@ -1226,11 +1290,14 @@ export class Worker {
         };
         let csharp = BlobFile {
             path: "src/Program.cs".into(),
-            contents: "public sealed class Program {}\nprivate static int Run(int x) { return x; }\n".into(),
+            contents:
+                "public sealed class Program {}\nprivate static int Run(int x) { return x; }\n"
+                    .into(),
         };
         let java = BlobFile {
             path: "src/Main.java".into(),
-            contents: "public interface Handler {}\npublic int handle(int x) { return x; }\n".into(),
+            contents: "public interface Handler {}\npublic int handle(int x) { return x; }\n"
+                .into(),
         };
         let swift = BlobFile {
             path: "Sources/App.swift".into(),
@@ -1238,7 +1305,8 @@ export class Worker {
         };
         let kotlin = BlobFile {
             path: "src/main.kt".into(),
-            contents: "data class Box(val value: Int)\nsuspend fun run(value: Int): Int = value\n".into(),
+            contents: "data class Box(val value: Int)\nsuspend fun run(value: Int): Int = value\n"
+                .into(),
         };
 
         let cpp_names: Vec<_> = extractor
@@ -1275,7 +1343,7 @@ export class Worker {
     #[test]
     fn test_tree_sitter_additional_scenarios() {
         std::env::set_var("LINEAGE_DEBUG_EXTRACT", "1");
-        
+
         // 1. Python type alias
         let py_file = BlobFile {
             path: "demo.py".into(),
@@ -1297,7 +1365,8 @@ export class Worker {
                 function normal_func() {}
                 function* normal_gen() {}
                 let my_class_var = class MyClassVar {};
-            "#.into(),
+            "#
+            .into(),
         };
         let js_units = HeuristicExtractor::default().extract_units(&js_file);
         let js_names: Vec<_> = js_units.iter().map(|u| u.name.as_str()).collect();
@@ -1318,7 +1387,8 @@ export class Worker {
                     public my_field_arrow = (v) => { return v; };
                     public my_val = 1;
                 }
-            "#.into(),
+            "#
+            .into(),
         };
         let ts_units = HeuristicExtractor::default().extract_units(&ts_file);
         let ts_names: Vec<_> = ts_units.iter().map(|u| u.name.as_str()).collect();
@@ -1333,7 +1403,8 @@ export class Worker {
                 func (w *MyType) PointerRec() {}
                 func (w MyType) ValueRec() {}
                 type Alias = int
-            "#.into(),
+            "#
+            .into(),
         };
         let go_units = HeuristicExtractor::default().extract_units(&go_file);
         let go_names: Vec<_> = go_units.iter().map(|u| u.name.as_str()).collect();
@@ -1351,7 +1422,8 @@ export class Worker {
                     union Data { int i; float f; };
                     enum Color { RED, GREEN };
                 }
-            "#.into(),
+            "#
+            .into(),
         };
         let cpp_units = HeuristicExtractor::default().extract_units(&cpp_file);
         let cpp_names: Vec<_> = cpp_units.iter().map(|u| u.name.as_str()).collect();
@@ -1369,7 +1441,8 @@ export class Worker {
                         public Calculator() {}
                     }
                 }
-            "#.into(),
+            "#
+            .into(),
         };
         let cs_units = HeuristicExtractor::default().extract_units(&cs_file);
         let cs_names: Vec<_> = cs_units.iter().map(|u| u.name.as_str()).collect();
@@ -1383,7 +1456,8 @@ export class Worker {
                 trait Show { fn show(&self); }
                 union Maybe { x: i32 }
                 type Number = i64;
-            "#.into(),
+            "#
+            .into(),
         };
         let rs_units = HeuristicExtractor::default().extract_units(&rs_file);
         let rs_names: Vec<_> = rs_units.iter().map(|u| u.name.as_str()).collect();
@@ -1398,7 +1472,8 @@ export class Worker {
             contents: r#"
                 const Direction = enum { north, south };
                 const Payload = union { integer: i32, boolean: bool };
-            "#.into(),
+            "#
+            .into(),
         };
         let zig_units = HeuristicExtractor::default().extract_units(&zig_file);
         let zig_names: Vec<_> = zig_units.iter().map(|u| u.name.as_str()).collect();
@@ -1420,7 +1495,8 @@ export class Worker {
                 const Component = () => {
                     return <div />;
                 };
-            "#.into(),
+            "#
+            .into(),
         };
         let tsx_units = HeuristicExtractor::default().extract_units(&tsx_file);
         let tsx_names: Vec<_> = tsx_units.iter().map(|u| u.name.as_str()).collect();
@@ -1437,7 +1513,8 @@ export class Worker {
                 interface MyInterface {}
                 enum MyEnum {}
                 record MyRecord(int x) {}
-            "#.into(),
+            "#
+            .into(),
         };
         let java_units = HeuristicExtractor::default().extract_units(&java_file);
         let java_names: Vec<_> = java_units.iter().map(|u| u.name.as_str()).collect();
@@ -1457,7 +1534,8 @@ export class Worker {
                 }
                 object MyObject {}
                 interface MyInterface {}
-            "#.into(),
+            "#
+            .into(),
         };
         let kotlin_units = HeuristicExtractor::default().extract_units(&kotlin_file);
         let kotlin_names: Vec<_> = kotlin_units.iter().map(|u| u.name.as_str()).collect();
@@ -1472,7 +1550,8 @@ export class Worker {
             contents: r#"
                 local function myLocal() end
                 function myGlobal() end
-            "#.into(),
+            "#
+            .into(),
         };
         let lua_units = HeuristicExtractor::default().extract_units(&lua_file);
         let lua_names: Vec<_> = lua_units.iter().map(|u| u.name.as_str()).collect();
@@ -1491,7 +1570,8 @@ export class Worker {
                     function myMethod() {}
                 }
                 function myFunc() {}
-            "#.into(),
+            "#
+            .into(),
         };
         let php_units = HeuristicExtractor::default().extract_units(&php_file);
         let php_names: Vec<_> = php_units.iter().map(|u| u.name.as_str()).collect();
@@ -1514,7 +1594,8 @@ export class Worker {
                 protocol MyProto {}
                 extension MyClass {}
                 func myFunc() {}
-            "#.into(),
+            "#
+            .into(),
         };
         let swift_units = HeuristicExtractor::default().extract_units(&swift_file);
         let swift_names: Vec<_> = swift_units.iter().map(|u| u.name.as_str()).collect();
@@ -1530,8 +1611,10 @@ export class Worker {
             path: "demo.unsupported".into(),
             contents: "def foo\nend\n".into(),
         };
-        assert!(HeuristicExtractor::default().extract_units(&unsupported_file).is_empty());
-        
+        assert!(HeuristicExtractor::default()
+            .extract_units(&unsupported_file)
+            .is_empty());
+
         std::env::remove_var("LINEAGE_DEBUG_EXTRACT");
     }
 
@@ -1547,13 +1630,24 @@ export class Worker {
 
         // Tree-sitter C declarator fallbacks
         let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_c::LANGUAGE.into()).unwrap();
-        let _tree = parser.parse("typedef int (*FuncPtr)(int); typedef int IntArray[10];", None).unwrap();
+        parser
+            .set_language(&tree_sitter_c::LANGUAGE.into())
+            .unwrap();
+        let _tree = parser
+            .parse(
+                "typedef int (*FuncPtr)(int); typedef int IntArray[10];",
+                None,
+            )
+            .unwrap();
         let candidates = tree_sitter_candidates(
-            &BlobFile { path: "demo.c".into(), contents: "typedef int (*FuncPtr)(int); typedef int IntArray[10];".into() },
+            &BlobFile {
+                path: "demo.c".into(),
+                contents: "typedef int (*FuncPtr)(int); typedef int IntArray[10];".into(),
+            },
             "c",
-            &["typedef int (*FuncPtr)(int);", "typedef int IntArray[10];"]
-        ).unwrap();
+            &["typedef int (*FuncPtr)(int);", "typedef int IntArray[10];"],
+        )
+        .unwrap();
         let cand_names: Vec<_> = candidates.iter().map(|c| c.name.as_str()).collect();
         assert!(cand_names.contains(&"FuncPtr"));
         assert!(cand_names.contains(&"IntArray"));

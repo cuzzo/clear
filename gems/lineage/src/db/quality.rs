@@ -113,7 +113,14 @@ pub fn ingest_coverage_json_with_options(
             storage.delete_coverage_lines_for_commit_source(commit_hash, &options.line_source)?;
         }
     }
-    let result = ingest_records(storage, records, commit_hash, timestamp, &mut stats, options);
+    let result = ingest_records(
+        storage,
+        records,
+        commit_hash,
+        timestamp,
+        &mut stats,
+        options,
+    );
     match result {
         Ok(()) => {
             if owns_transaction {
@@ -203,9 +210,14 @@ fn ingest_records(
             anyhow::bail!("coverage evidence scope revision must match commit");
         }
         storage.record_evidence_artifact_scope(&EvidenceArtifactScope {
-            family: "coverage".into(), source: options.line_source.clone(), scope: scope.clone(),
+            family: "coverage".into(),
+            source: options.line_source.clone(),
+            scope: scope.clone(),
             complete: options.complete,
-            expected_lines: bulk_lines.iter().map(|line| (line.path.clone(), line.line)).collect(),
+            expected_lines: bulk_lines
+                .iter()
+                .map(|line| (line.path.clone(), line.line))
+                .collect(),
         })?;
     }
     Ok(())
@@ -231,40 +243,87 @@ pub fn parse_coverage_records(value: &Value, format: &str) -> Result<Vec<Coverag
 }
 
 fn parse_sqlcov_records(value: &Value) -> Vec<CoverageRecord> {
-    let Some(path) = value.get("file_path").and_then(Value::as_str) else { return Vec::new() };
+    let Some(path) = value.get("file_path").and_then(Value::as_str) else {
+        return Vec::new();
+    };
     let mut lines = std::collections::BTreeMap::<u32, CoverageLineHit>::new();
-    for statement in value.get("statements").and_then(Value::as_array).into_iter().flatten() {
-        let Some(start) = statement.get("start_line").and_then(Value::as_u64)
-            .and_then(|line| u32::try_from(line).ok()) else { continue };
-        let end = statement.get("end_line").and_then(Value::as_u64)
-            .and_then(|line| u32::try_from(line).ok()).unwrap_or(start).max(start);
-        let hits = statement.get("hit_count").and_then(Value::as_u64).unwrap_or(0);
+    for statement in value
+        .get("statements")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(start) = statement
+            .get("start_line")
+            .and_then(Value::as_u64)
+            .and_then(|line| u32::try_from(line).ok())
+        else {
+            continue;
+        };
+        let end = statement
+            .get("end_line")
+            .and_then(Value::as_u64)
+            .and_then(|line| u32::try_from(line).ok())
+            .unwrap_or(start)
+            .max(start);
+        let hits = statement
+            .get("hit_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         let hits = u32::try_from(hits).unwrap_or(u32::MAX);
         for line in start..=end {
-            lines.insert(line, CoverageLineHit {
+            lines.insert(
                 line,
-                hits,
-                is_partial: false,
-                coverage_percent: Some(if hits > 0 { 100.0 } else { 0.0 }),
-            });
+                CoverageLineHit {
+                    line,
+                    hits,
+                    is_partial: false,
+                    coverage_percent: Some(if hits > 0 { 100.0 } else { 0.0 }),
+                },
+            );
         }
     }
-    let metrics = value.get("metrics").and_then(Value::as_array).into_iter().flatten()
+    let metrics = value
+        .get("metrics")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
         .filter(|metric| metric.get("measurable").and_then(Value::as_bool) != Some(false));
     let mut covered_branches = 0_u64;
     let mut total_branches = 0_u64;
     let mut branches_by_line = std::collections::BTreeMap::<u32, (u64, u64)>::new();
     for metric in metrics {
-        let Some(line) = metric.pointer("/span/start_line").and_then(Value::as_u64)
-            .and_then(|line| u32::try_from(line).ok()) else { continue };
-        let nullable = metric.pointer("/span/nullable").and_then(Value::as_bool).unwrap_or(true);
+        let Some(line) = metric
+            .pointer("/span/start_line")
+            .and_then(Value::as_u64)
+            .and_then(|line| u32::try_from(line).ok())
+        else {
+            continue;
+        };
+        let nullable = metric
+            .pointer("/span/nullable")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         let counts = [
-            metric.get("hit_true_count").and_then(Value::as_u64).unwrap_or(0),
-            metric.get("hit_false_count").and_then(Value::as_u64).unwrap_or(0),
-            metric.get("hit_unknown_count").and_then(Value::as_u64).unwrap_or(0),
+            metric
+                .get("hit_true_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            metric
+                .get("hit_false_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            metric
+                .get("hit_unknown_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
         ];
         let branch_count = if nullable { 3 } else { 2 };
-        let covered = counts.iter().take(branch_count).filter(|count| **count > 0).count() as u64;
+        let covered = counts
+            .iter()
+            .take(branch_count)
+            .filter(|count| **count > 0)
+            .count() as u64;
         covered_branches += covered;
         total_branches += branch_count as u64;
         let branch_totals = branches_by_line.entry(line).or_default();
@@ -283,10 +342,15 @@ fn parse_sqlcov_records(value: &Value) -> Vec<CoverageRecord> {
             entry.coverage_percent = (total > 0).then_some(covered as f64 * 100.0 / total as f64);
         }
     }
-    if lines.is_empty() { return Vec::new() }
+    if lines.is_empty() {
+        return Vec::new();
+    }
     let line_coverage = lines
         .values()
-        .map(|line| line.coverage_percent.unwrap_or(if line.hits > 0 { 100.0 } else { 0.0 }))
+        .map(|line| {
+            line.coverage_percent
+                .unwrap_or(if line.hits > 0 { 100.0 } else { 0.0 })
+        })
         .sum::<f64>()
         / lines.len() as f64;
     vec![CoverageRecord {
@@ -482,9 +546,12 @@ fn line_hits_from_generic_node(node: &Value) -> Vec<CoverageLineHit> {
         .iter()
         .filter_map(|line| {
             if let Some(number) = line.as_u64() {
-                return u32::try_from(number)
-                    .ok()
-                    .map(|line| CoverageLineHit { line, hits: 1, is_partial: false, coverage_percent: None });
+                return u32::try_from(number).ok().map(|line| CoverageLineHit {
+                    line,
+                    hits: 1,
+                    is_partial: false,
+                    coverage_percent: None,
+                });
             }
 
             let line_no = line
@@ -521,7 +588,10 @@ fn parse_cobertura_records(input: &str) -> Result<Vec<CoverageRecord>> {
     let mut records = Vec::new();
 
     let mut sources = Vec::new();
-    for source in document.descendants().filter(|node| node.has_tag_name("source")) {
+    for source in document
+        .descendants()
+        .filter(|node| node.has_tag_name("source"))
+    {
         if let Some(text) = source.text() {
             let t = text.trim();
             if !t.is_empty() {
@@ -530,7 +600,10 @@ fn parse_cobertura_records(input: &str) -> Result<Vec<CoverageRecord>> {
         }
     }
 
-    for class in document.descendants().filter(|node| node.has_tag_name("class")) {
+    for class in document
+        .descendants()
+        .filter(|node| node.has_tag_name("class"))
+    {
         let Some(raw_filename) = class.attribute("filename") else {
             continue;
         };
@@ -727,10 +800,23 @@ mod tests {
         assert_eq!(records[0].path, "gems/lineage/sql/demo.sql");
         assert!((records[0].line_coverage.unwrap() - 250.0 / 3.0).abs() < 0.000_001);
         assert_eq!(records[0].integration_coverage, Some(200.0 / 3.0));
-        assert_eq!(records[0].line_hits, vec![
-            CoverageLineHit { line: 2, hits: 1, is_partial: true, coverage_percent: Some(200.0 / 3.0) },
-            CoverageLineHit { line: 3, hits: 1, is_partial: false, coverage_percent: Some(100.0) },
-        ]);
+        assert_eq!(
+            records[0].line_hits,
+            vec![
+                CoverageLineHit {
+                    line: 2,
+                    hits: 1,
+                    is_partial: true,
+                    coverage_percent: Some(200.0 / 3.0)
+                },
+                CoverageLineHit {
+                    line: 3,
+                    hits: 1,
+                    is_partial: false,
+                    coverage_percent: Some(100.0)
+                },
+            ]
+        );
     }
     use crate::model::{CommitMetadata, LogicalUnit, UnitKind};
     use serde_json::json;
@@ -774,8 +860,7 @@ mod tests {
 
         assert!(records
             .iter()
-            .any(|record| record.path == "src/ast/type.rb"
-                && record.line_coverage == Some(99.78)));
+            .any(|record| record.path == "src/ast/type.rb" && record.line_coverage == Some(99.78)));
     }
 
     #[test]
@@ -794,8 +879,24 @@ mod tests {
         let records = parse_coverage_records(&value, "generic").unwrap();
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].line_hits[0], CoverageLineHit { line: 1, hits: 2, is_partial: false, coverage_percent: None });
-        assert_eq!(records[0].line_hits[1], CoverageLineHit { line: 2, hits: 0, is_partial: false, coverage_percent: None });
+        assert_eq!(
+            records[0].line_hits[0],
+            CoverageLineHit {
+                line: 1,
+                hits: 2,
+                is_partial: false,
+                coverage_percent: None
+            }
+        );
+        assert_eq!(
+            records[0].line_hits[1],
+            CoverageLineHit {
+                line: 2,
+                hits: 0,
+                is_partial: false,
+                coverage_percent: None
+            }
+        );
     }
 
     #[test]
@@ -819,8 +920,24 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].path, "src/demo.rb");
         assert_eq!(records[0].line_coverage, Some(50.0));
-        assert_eq!(records[0].line_hits[0], CoverageLineHit { line: 1, hits: 3, is_partial: false, coverage_percent: None });
-        assert_eq!(records[0].line_hits[1], CoverageLineHit { line: 2, hits: 0, is_partial: false, coverage_percent: None });
+        assert_eq!(
+            records[0].line_hits[0],
+            CoverageLineHit {
+                line: 1,
+                hits: 3,
+                is_partial: false,
+                coverage_percent: None
+            }
+        );
+        assert_eq!(
+            records[0].line_hits[1],
+            CoverageLineHit {
+                line: 2,
+                hits: 0,
+                is_partial: false,
+                coverage_percent: None
+            }
+        );
     }
 
     #[test]
@@ -874,9 +991,24 @@ mod tests {
         assert_eq!(
             records[0].line_hits,
             vec![
-                CoverageLineHit { line: 2, hits: 2, is_partial: false, coverage_percent: None },
-                CoverageLineHit { line: 3, hits: 3, is_partial: false, coverage_percent: None },
-                CoverageLineHit { line: 5, hits: 1, is_partial: false, coverage_percent: None },
+                CoverageLineHit {
+                    line: 2,
+                    hits: 2,
+                    is_partial: false,
+                    coverage_percent: None
+                },
+                CoverageLineHit {
+                    line: 3,
+                    hits: 3,
+                    is_partial: false,
+                    coverage_percent: None
+                },
+                CoverageLineHit {
+                    line: 5,
+                    hits: 1,
+                    is_partial: false,
+                    coverage_percent: None
+                },
             ]
         );
         assert_eq!(records[0].line_coverage, Some(100.0));
@@ -891,8 +1023,18 @@ mod tests {
             mutant_coverage: None,
             hard_gated: None,
             line_hits: vec![
-                CoverageLineHit { line: 1, hits: 2, is_partial: false, coverage_percent: None },
-                CoverageLineHit { line: 2, hits: 0, is_partial: false, coverage_percent: None },
+                CoverageLineHit {
+                    line: 1,
+                    hits: 2,
+                    is_partial: false,
+                    coverage_percent: None,
+                },
+                CoverageLineHit {
+                    line: 2,
+                    hits: 0,
+                    is_partial: false,
+                    coverage_percent: None,
+                },
             ],
         }];
 
@@ -908,9 +1050,15 @@ mod tests {
         let hits = value.get("hits").and_then(Value::as_array).unwrap();
 
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].get("file").and_then(Value::as_str), Some("src/demo.rb"));
+        assert_eq!(
+            hits[0].get("file").and_then(Value::as_str),
+            Some("src/demo.rb")
+        );
         assert_eq!(hits[0].get("line").and_then(Value::as_u64), Some(1));
-        assert_eq!(hits[0].get("test_type").and_then(Value::as_str), Some("unit"));
+        assert_eq!(
+            hits[0].get("test_type").and_then(Value::as_str),
+            Some("unit")
+        );
         assert_eq!(
             hits[0].get("mutation_status").and_then(Value::as_str),
             Some("killed")
@@ -949,9 +1097,15 @@ mod tests {
           }]
         });
 
-        let stats =
-            ingest_coverage_json(&storage, &payload.to_string(), "codecov", "abc", None, false)
-                .unwrap();
+        let stats = ingest_coverage_json(
+            &storage,
+            &payload.to_string(),
+            "codecov",
+            "abc",
+            None,
+            false,
+        )
+        .unwrap();
 
         assert_eq!(stats.files, 1);
         assert_eq!(stats.units, 1);
@@ -993,7 +1147,8 @@ mod tests {
           </coverage>
         "#;
 
-        let stats = ingest_coverage_json(&storage, payload, "cobertura", "abc", None, false).unwrap();
+        let stats =
+            ingest_coverage_json(&storage, payload, "cobertura", "abc", None, false).unwrap();
 
         assert_eq!(stats.files, 1);
         assert_eq!(stats.units, 1);
@@ -1002,7 +1157,9 @@ mod tests {
         assert_eq!(storage.count_rows("coverage_line_events").unwrap(), 2);
         let stored_path: String = storage
             .connection()
-            .query_row("SELECT path FROM coverage_line_events LIMIT 1", [], |row| row.get(0))
+            .query_row("SELECT path FROM coverage_line_events LIMIT 1", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(stored_path, "src/demo.rb");
     }
@@ -1152,7 +1309,11 @@ mod tests {
         assert_eq!(stats.line_events, 1);
         let source: String = storage
             .connection()
-            .query_row("SELECT source FROM coverage_line_events LIMIT 1", [], |row| row.get(0))
+            .query_row(
+                "SELECT source FROM coverage_line_events LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(source, "coverage:unit");
     }
@@ -1169,19 +1330,36 @@ mod tests {
             }]
         });
 
-        let err = ingest_coverage_json(&storage, &payload_generic.to_string(), "generic", "nonexistent", None, false);
+        let err = ingest_coverage_json(
+            &storage,
+            &payload_generic.to_string(),
+            "generic",
+            "nonexistent",
+            None,
+            false,
+        );
         assert!(err.is_err());
 
         let err_format = ingest_coverage_json(&storage, "{}", "bad_format", "abc", None, false);
         assert!(err_format.is_err());
 
-        storage.insert_metadata(&CommitMetadata {
-            hash: "abc".into(),
-            message: "coverage".into(),
-            timestamp: 10,
-        }).unwrap();
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "coverage".into(),
+                timestamp: 10,
+            })
+            .unwrap();
 
-        let stats_skipped = ingest_coverage_json(&storage, &payload_generic.to_string(), "generic", "abc", None, false).unwrap();
+        let stats_skipped = ingest_coverage_json(
+            &storage,
+            &payload_generic.to_string(),
+            "generic",
+            "abc",
+            None,
+            false,
+        )
+        .unwrap();
         assert_eq!(stats_skipped.skipped_files, 1);
 
         let unit = LogicalUnit::new(
@@ -1209,7 +1387,8 @@ mod tests {
             None,
             true,
             &options,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(stats.files, 1);
         assert_eq!(stats.line_events, 2);
 
@@ -1227,7 +1406,8 @@ mod tests {
             </classes></package></packages>
           </coverage>
         "#;
-        let stats_xml = ingest_coverage_json(&storage, xml_payload, "cobertura", "abc", None, false).unwrap();
+        let stats_xml =
+            ingest_coverage_json(&storage, xml_payload, "cobertura", "abc", None, false).unwrap();
         assert_eq!(stats_xml.files, 1);
         assert_eq!(stats_xml.line_events, 1);
     }

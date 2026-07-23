@@ -1,6 +1,6 @@
-use crate::storage::Storage;
 use crate::extract::{BoundaryExtractor, HeuristicExtractor};
-use crate::model::{BlobFile, LogicalUnit, HazardEvent};
+use crate::model::{BlobFile, HazardEvent, LogicalUnit};
+use crate::storage::Storage;
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
@@ -14,7 +14,8 @@ const INSERT_NODE_SQL: &str = include_str!("../../sql/architecture/insert_node.s
 const INSERT_EDGE_SQL: &str = include_str!("../../sql/architecture/insert_edge.sql");
 const INSERT_EDGE_SPAN_SQL: &str = include_str!("../../sql/architecture/insert_edge_span.sql");
 const INSERT_PRESSURE_SQL: &str = include_str!("../../sql/architecture/insert_pressure.sql");
-const RECONCILE_LOGICAL_UNIT_SQL: &str = include_str!("../../sql/architecture/reconcile_logical_unit.sql");
+const RECONCILE_LOGICAL_UNIT_SQL: &str =
+    include_str!("../../sql/architecture/reconcile_logical_unit.sql");
 const SEARCH_SQL: &str = include_str!("../../sql/architecture/search.sql");
 const LATEST_ARTIFACT_SQL: &str = include_str!("../../sql/architecture/latest_artifact.sql");
 const ARTIFACT_HEALTH_SQL: &str = include_str!("../../sql/architecture/artifact_health.sql");
@@ -75,7 +76,16 @@ pub fn ingest_architecture_json(
     tx.execute(DELETE_SNAPSHOT_SQL, params![analyzer, commit])?;
     tx.execute(
         INSERT_ARTIFACT_SQL,
-        params![analyzer, analyzer_version, schema_version, commit, root, complete as i64, generated_at, payload],
+        params![
+            analyzer,
+            analyzer_version,
+            schema_version,
+            commit,
+            root,
+            complete as i64,
+            generated_at,
+            payload
+        ],
     )?;
     let artifact_id = tx.last_insert_rowid();
     let mut stats = ArchitectureIngestStats {
@@ -110,10 +120,21 @@ pub fn ingest_architecture_json(
         tx.execute(
             INSERT_NODE_SQL,
             params![
-                artifact_id, id, logical_unit_id, optional_text(node, "owner_id"), kind, name,
-                optional_text(node, "owner"), optional_text(node, "language"), path, start_line,
-                integer(node, "start_column"), integer(node, "end_line"), integer(node, "end_column"),
-                confidence, metadata.to_string()
+                artifact_id,
+                id,
+                logical_unit_id,
+                optional_text(node, "owner_id"),
+                kind,
+                name,
+                optional_text(node, "owner"),
+                optional_text(node, "language"),
+                path,
+                start_line,
+                integer(node, "start_column"),
+                integer(node, "end_line"),
+                integer(node, "end_column"),
+                confidence,
+                metadata.to_string()
             ],
         )?;
         stats.nodes += 1;
@@ -129,10 +150,18 @@ pub fn ingest_architecture_json(
         tx.execute(
             INSERT_EDGE_SQL,
             params![
-                artifact_id, edge_id, text(edge, "source"), text(edge, "target"), text(edge, "kind"),
-                boolean(edge, "conditional") as i64, integer(edge, "weight").max(1),
+                artifact_id,
+                edge_id,
+                text(edge, "source"),
+                text(edge, "target"),
+                text(edge, "kind"),
+                boolean(edge, "conditional") as i64,
+                integer(edge, "weight").max(1),
                 optional_text(edge, "confidence").unwrap_or_else(|| "high".into()),
-                edge.get("metadata").cloned().unwrap_or_else(|| json!({})).to_string()
+                edge.get("metadata")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}))
+                    .to_string()
             ],
         )?;
         stats.edges += 1;
@@ -170,22 +199,40 @@ pub fn ingest_architecture_json(
             .unwrap_or_else(|| json!({}));
         tx.execute(
             INSERT_PRESSURE_SQL,
-            params![artifact_id, text(pressure, "node_id"), number(pressure, "score"), text(pressure, "band"),
-                number(&components, "collaboration"), number(&components, "state"),
-                number(&components, "implementation"), number(&components, "operational"),
-                pressure.get("explanation").cloned().unwrap_or_else(|| json!({})).to_string()],
+            params![
+                artifact_id,
+                text(pressure, "node_id"),
+                number(pressure, "score"),
+                text(pressure, "band"),
+                number(&components, "collaboration"),
+                number(&components, "state"),
+                number(&components, "implementation"),
+                number(&components, "operational"),
+                pressure
+                    .get("explanation")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}))
+                    .to_string()
+            ],
         )?;
     }
     let mut file_cache: HashMap<String, (BlobFile, Vec<LogicalUnit>)> = HashMap::new();
     let extractor = HeuristicExtractor::default();
     let repo_path = Path::new(&root);
-    let timestamp = storage.commit_timestamp(commit).ok().flatten().unwrap_or_else(crate::hazard::now_timestamp);
+    let timestamp = storage
+        .commit_timestamp(commit)
+        .ok()
+        .flatten()
+        .unwrap_or_else(crate::hazard::now_timestamp);
 
     let mut deactivated_languages = std::collections::HashSet::new();
     let mut corpus_languages_set = std::collections::HashSet::new();
 
     if complete {
-        if let Some(langs) = document.pointer("/corpus/languages").and_then(Value::as_array) {
+        if let Some(langs) = document
+            .pointer("/corpus/languages")
+            .and_then(Value::as_array)
+        {
             for lang_val in langs {
                 if let Some(lang_str) = lang_val.as_str() {
                     if !lang_str.is_empty() {
@@ -219,7 +266,10 @@ pub fn ingest_architecture_json(
         let provider = {
             let p = text(hazard, "provider");
             if p.is_empty() {
-                let ext = Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or("");
+                let ext = Path::new(&path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
                 match ext {
                     "rs" => "rust",
                     "go" => "go",
@@ -237,13 +287,18 @@ pub fn ingest_architecture_json(
                     "cpp" => "cpp",
                     "cs" => "csharp",
                     _ => "",
-                }.to_string()
+                }
+                .to_string()
             } else {
                 p
             }
         };
 
-        if complete && corpus_languages_set.is_empty() && !provider.is_empty() && deactivated_languages.insert(provider.clone()) {
+        if complete
+            && corpus_languages_set.is_empty()
+            && !provider.is_empty()
+            && deactivated_languages.insert(provider.clone())
+        {
             storage.deactivate_active_hazards(&provider)?;
         }
 
@@ -454,10 +509,11 @@ fn artifact_health(storage: &Storage, artifact_id: i64) -> Result<Value> {
 }
 
 fn load_node(storage: &Storage, artifact_id: i64, id: &str) -> Result<Option<Value>> {
-    storage.connection().query_row(
-        LOAD_NODE_SQL,
-        params![artifact_id, id], node_from_row,
-    ).optional().map_err(Into::into)
+    storage
+        .connection()
+        .query_row(LOAD_NODE_SQL, params![artifact_id, id], node_from_row)
+        .optional()
+        .map_err(Into::into)
 }
 
 fn load_nodes_for_owner(storage: &Storage, artifact_id: i64, owner_id: &str) -> Result<Vec<Value>> {
@@ -525,21 +581,31 @@ mod tests {
     fn standalone_architecture_sql_prepares_against_the_real_schema() {
         let storage = Storage::open_memory().unwrap();
         for sql in [
-            DELETE_SNAPSHOT_SQL, INSERT_ARTIFACT_SQL, INSERT_NODE_SQL, INSERT_EDGE_SQL,
-            INSERT_EDGE_SPAN_SQL, INSERT_PRESSURE_SQL, RECONCILE_LOGICAL_UNIT_SQL,
-            SEARCH_SQL, LATEST_ARTIFACT_SQL, ARTIFACT_HEALTH_SQL, LOAD_NODE_SQL,
-            OWNER_INVENTORY_SQL, LOAD_EDGES_SQL,
+            DELETE_SNAPSHOT_SQL,
+            INSERT_ARTIFACT_SQL,
+            INSERT_NODE_SQL,
+            INSERT_EDGE_SQL,
+            INSERT_EDGE_SPAN_SQL,
+            INSERT_PRESSURE_SQL,
+            RECONCILE_LOGICAL_UNIT_SQL,
+            SEARCH_SQL,
+            LATEST_ARTIFACT_SQL,
+            ARTIFACT_HEALTH_SQL,
+            LOAD_NODE_SQL,
+            OWNER_INVENTORY_SQL,
+            LOAD_EDGES_SQL,
         ] {
-            storage.connection().prepare(sql).unwrap_or_else(|error| {
-                panic!("standalone SQL failed to prepare: {error}\n{sql}")
-            });
+            storage
+                .connection()
+                .prepare(sql)
+                .unwrap_or_else(|error| panic!("standalone SQL failed to prepare: {error}\n{sql}"));
         }
     }
 
     #[test]
     fn ingests_and_queries_focused_architecture() {
         let storage = Storage::open_memory().unwrap();
-        
+
         let dir = tempfile::tempdir().unwrap();
         let demo_path = dir.path().join("demo.rb");
         fs::write(
@@ -584,7 +650,10 @@ mod tests {
         assert_eq!(storage.count_rows("unit_hazards").unwrap(), 1);
 
         // Verify correct provider and required_evidence are stored
-        let mut stmt = storage.connection().prepare("SELECT language, required_evidence, is_active FROM unit_hazards").unwrap();
+        let mut stmt = storage
+            .connection()
+            .prepare("SELECT language, required_evidence, is_active FROM unit_hazards")
+            .unwrap();
         let mut rows = stmt.query(params![]).unwrap();
         let row = rows.next().unwrap().unwrap();
         let language: String = row.get(0).unwrap();
@@ -611,11 +680,14 @@ mod tests {
 
         ingest_architecture_json(&storage, &payload_empty_hazards).unwrap();
         // Since it was complete scan and contained language: ruby in nodes, old ruby hazard is deactivated!
-        let is_active_after_empty: i32 = storage.connection().query_row(
-            "SELECT is_active FROM unit_hazards WHERE language = 'ruby'",
-            params![],
-            |r| r.get(0)
-        ).unwrap();
+        let is_active_after_empty: i32 = storage
+            .connection()
+            .query_row(
+                "SELECT is_active FROM unit_hazards WHERE language = 'ruby'",
+                params![],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(is_active_after_empty, 0);
 
         // 2. Verify replacement rather than duplication (we insert a new hazard, it is active, old remains inactive)
@@ -643,18 +715,24 @@ mod tests {
         }).to_string();
 
         ingest_architecture_json(&storage, &payload_new_hazard).unwrap();
-        let active_count: i32 = storage.connection().query_row(
-            "SELECT COUNT(*) FROM unit_hazards WHERE language = 'ruby' AND is_active = 1",
-            params![],
-            |r| r.get(0)
-        ).unwrap();
+        let active_count: i32 = storage
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM unit_hazards WHERE language = 'ruby' AND is_active = 1",
+                params![],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(active_count, 1); // Only the new one is active!
-        
-        let total_count: i32 = storage.connection().query_row(
-            "SELECT COUNT(*) FROM unit_hazards WHERE language = 'ruby'",
-            params![],
-            |r| r.get(0)
-        ).unwrap();
+
+        let total_count: i32 = storage
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM unit_hazards WHERE language = 'ruby'",
+                params![],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(total_count, 2); // 2 rows exist total (old deactivated one and new active one)
 
         // 3. Verify rollback on insertion failure
@@ -676,11 +754,14 @@ mod tests {
 
         assert!(ingest_architecture_json(&storage, &payload_broken).is_err());
         // Verify no changes committed - active count is still 1!
-        let active_count_after_fail: i32 = storage.connection().query_row(
-            "SELECT COUNT(*) FROM unit_hazards WHERE language = 'ruby' AND is_active = 1",
-            params![],
-            |r| r.get(0)
-        ).unwrap();
+        let active_count_after_fail: i32 = storage
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM unit_hazards WHERE language = 'ruby' AND is_active = 1",
+                params![],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(active_count_after_fail, 1);
     }
 }

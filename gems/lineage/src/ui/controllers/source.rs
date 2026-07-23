@@ -45,7 +45,10 @@ async fn api_definition_handler(
         Ok(storage) => storage,
         Err(error) => return error_json(StatusCode::INTERNAL_SERVER_ERROR, error),
     };
-    let commit = query.commit.as_deref().filter(|value| !value.is_empty() && *value != "current");
+    let commit = query
+        .commit
+        .as_deref()
+        .filter(|value| !value.is_empty() && *value != "current");
     match storage.find_definitions(&query.name, commit, query.path.as_deref()) {
         Ok(definitions) => {
             let results: Vec<DefinitionResult> = definitions
