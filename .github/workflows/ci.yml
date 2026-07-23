@@ -1609,7 +1609,11 @@ jobs:
     # SARIF, they do not block merges.
     name: Architecture SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # FactMine performs whole-corpus structural analysis. Keep one bounded
+    # job-level deadline, rather than killing its Ruby parent mid-subprocess
+    # and leaving Open3 reader threads to report a misleading stream-closed
+    # error.
+    timeout-minutes: 45
     needs:
       - changes
       - sarif-rust-binaries
@@ -1636,11 +1640,11 @@ jobs:
           mkdir -p tmp
           export FACT_MINE_RUST_BINARY=$PWD/tmp/sarif-binaries/fact-mine-rust
           base="origin/${{ github.event.pull_request.base.ref }}"
-          timeout 8m ruby gems/espalier/tools/cycle_report.rb . \
+          ruby gems/espalier/tools/cycle_report.rb . \
             --base="$base" --sarif=tmp/arch-cycles.sarif
-          timeout 8m ruby gems/espalier/tools/reach_through_report.rb . \
+          ruby gems/espalier/tools/reach_through_report.rb . \
             --base="$base" --sarif=tmp/arch-reach-through.sarif
-          timeout 8m ruby gems/lineage/tools/change_coupling.rb . 8 \
+          ruby gems/lineage/tools/change_coupling.rb . 8 \
             --base="$base" --sarif=tmp/arch-change-coupling.sarif
       - name: Upload cycles SARIF
         uses: github/codeql-action/upload-sarif@v4
