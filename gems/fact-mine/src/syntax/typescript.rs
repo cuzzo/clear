@@ -8,7 +8,7 @@ use super::normalized_behavior::{
     configured_collection_operation, configured_intrinsic_call_complexity,
     eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
     NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect,
+    NormalizedNilGuardFact, NormalizedNullableOperation, NormalizedSemanticEffect,
 };
 use super::CallSite;
 use super::{ExternalCallComplexity, StateDeclaration};
@@ -31,6 +31,20 @@ const TYPESCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct TypeScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        (node.r#type == "CALL")
+            .then(|| node.children.first().and_then(crate::ast::node))
+            .flatten()
+            .filter(|receiver| receiver.r#type == "LVAR")
+            .map(|receiver| receiver.text.trim().to_string())
+            .filter(|subject| !subject.is_empty())
+            .map(|subject| NormalizedNullableOperation {
+                subject,
+                operation_kind: "receiver_member_access",
+                nil_behavior: "type_error",
+            })
+    }
+
     fn nested_function_is_local_callable(&self, _function: &Node) -> bool {
         true
     }
@@ -200,6 +214,10 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         )
     }
 
+    fn nil_comparison_operator(&self, operator: &str) -> bool {
+        matches!(operator, "==" | "!=" | "===" | "!==")
+    }
+
     fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
         eliminable_guard_from_call(call, TYPESCRIPT_GUARD_MIDS)
             .or_else(|| effect_from_call_with_lexicon(call, &javascript::JAVASCRIPT_EFFECT_LEXICON))
@@ -270,8 +288,11 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         // parameters live inside its DEFN subtree, so this walk visits them
         // with in_method already true, even though they are a declaration
         // site, not a use inside the method body.
-        let is_parameter_property =
-            has_modifier && matches!(node.r#type.as_str(), "REQUIRED_PARAMETER" | "OPTIONAL_PARAMETER");
+        let is_parameter_property = has_modifier
+            && matches!(
+                node.r#type.as_str(),
+                "REQUIRED_PARAMETER" | "OPTIONAL_PARAMETER"
+            );
 
         if is_parameter_property {
             // fall through to the shared structured-children extraction below
@@ -335,7 +356,12 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
             let before_eq = lasgn.text.split('=').next().unwrap_or(&lasgn.text).trim();
             let (raw_name, type_text) = before_eq
                 .split_once(':')
-                .map(|(n, t)| (n.trim(), Some(t.trim().to_string()).filter(|t| !t.is_empty())))
+                .map(|(n, t)| {
+                    (
+                        n.trim(),
+                        Some(t.trim().to_string()).filter(|t| !t.is_empty()),
+                    )
+                })
                 .unwrap_or((before_eq, None));
             let name = raw_name.strip_prefix("this.").unwrap_or(raw_name);
             if is_simple_name(name) {
@@ -501,7 +527,7 @@ fn is_simple_name(name: &str) -> bool {
         && name
             .chars()
             .next()
-            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
         && name
             .chars()
             .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
@@ -653,6 +679,8 @@ mod tests {
             .is_some());
 
         assert!(b.nil_guard_fact("isNull", "x").is_some());
+        assert!(b.nil_comparison_operator("==="));
+        assert!(b.nil_comparison_operator("!=="));
 
         assert!(b
             .semantic_effect_for_call(&CallSite {
@@ -713,7 +741,7 @@ mod tests {
         assert_eq!(decl.as_ref().unwrap().r#type, Some("number".to_string()));
 
         // Test fallback split text branch in state_declaration_from_node with modifier stripping
-        let mut fallback_decl = node(
+        let fallback_decl = node(
             "PUBLIC_FIELD_DEFINITION",
             "public readonly myField: string = 'hello';",
         );
@@ -726,8 +754,7 @@ mod tests {
         );
 
         // Test fallback split text branch with 'this.' prefix stripping
-        let mut fallback_this_decl =
-            node("PUBLIC_FIELD_DEFINITION", "this.myField: string = 'hello';");
+        let fallback_this_decl = node("PUBLIC_FIELD_DEFINITION", "this.myField: string = 'hello';");
         let fallback_this_res =
             b.state_declaration_from_node(&fallback_this_decl, "MyClass", false);
         assert!(fallback_this_res.is_some());

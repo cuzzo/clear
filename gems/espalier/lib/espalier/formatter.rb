@@ -89,14 +89,16 @@ module Espalier
     end
 
     def to_sarif_hash(manifest)
+      results = sarif_results(manifest)
       Decomplex::Sarif.document(
         tool_name: "Espalier",
         information_uri: "https://github.com/codeforreno/litedb",
         rules: sarif_rules,
-        results: sarif_results(manifest),
+        results: results,
         properties: {
           "format" => "espalier.manifest.sarif.v1",
-          "espalier.manifest" => Decomplex::Sarif.json_safe_value(manifest)
+          "espalier.manifest" => Decomplex::Sarif.json_safe_value(manifest),
+          Decomplex::Sarif::PROOF_BOUNDARY_SUMMARY_PROPERTY => Decomplex::Sarif.proof_boundary_summary(results)
         }
       )
     end
@@ -151,7 +153,16 @@ module Espalier
             "reads" => reads,
             "writes" => writes
           },
-          "source_format" => "espalier.manifest.v1"
+          "source_format" => "espalier.manifest.v1",
+          Decomplex::Sarif::PROOF_BOUNDARY_PROPERTY => Decomplex::Sarif.proof_boundary(
+            input_completeness: input_completeness_for(mod),
+            claim_status: "observed",
+            coverage_discharge: "not_applicable",
+            authority: ["fact_mine_normalized_ast"],
+            claim_kind: "function_effect_observation",
+            scope: { kind: "function", closed: false },
+            blockers: input_blockers_for(mod)
+          )
         }
       )
     end
@@ -166,8 +177,6 @@ module Espalier
       known_space = metrics[:big_o_space_known_component] || metrics["big_o_space_known_component"] || space
       time_complete = metrics.key?(:big_o_complete) ? metrics[:big_o_complete] : metrics["big_o_complete"]
       space_complete = metrics.key?(:big_o_space_complete) ? metrics[:big_o_space_complete] : metrics["big_o_space_complete"]
-      time_complete = time != "unknown" if time_complete.nil?
-      space_complete = space != "unknown" if space_complete.nil?
       return nil if time.to_s.empty?
 
       dynamic = metrics.key?(:big_o_dynamic) ? metrics[:big_o_dynamic] : metrics["big_o_dynamic"]
@@ -204,6 +213,12 @@ module Espalier
             "known_auxiliary_space_component" => known_space,
             "time_complete" => time_complete,
             "auxiliary_space_complete" => space_complete,
+            # This measures Espalier's complexity model, not whether
+            # FactMine supplied complete source input for the finding.
+            "model_completeness" => complexity_model_completeness(time_complete, space_complete),
+            "model_blockers" => complexity_model_blockers(
+              input_completeness_for(mod), unknowns, warnings, time_complete, space_complete
+            ),
             "dynamic" => dynamic,
             "basis" => "espalier-static",
             "confidence" => time_complete && space_complete ? "static-lower-bound" : "partial",
@@ -211,12 +226,57 @@ module Espalier
             "warnings" => warnings,
             "unknown_operations" => unknowns,
             "variables" => variables
-          }
+          },
+          Decomplex::Sarif::PROOF_BOUNDARY_PROPERTY => Decomplex::Sarif.proof_boundary(
+            # Big-O completeness describes Espalier's estimate, not the
+            # completeness of the FactMine input. The extractor supplies the
+            # latter explicitly through the projected module boundary.
+            input_completeness: input_completeness_for(mod),
+            claim_status: "observed",
+            coverage_discharge: "not_applicable",
+            authority: ["fact_mine_normalized_ast", "espalier_static"],
+            claim_kind: "function_complexity",
+            scope: { kind: "function", closed: false },
+            blockers: input_blockers_for(mod)
+          )
         }
       )
       related = complexity_related_locations(variables)
       result["relatedLocations"] = related unless related.empty?
       result
+    end
+
+    def complexity_model_blockers(input_completeness, unknowns, warnings, time_complete, space_complete)
+      return [] if time_complete && space_complete
+
+      blockers = []
+      blockers << { "kind" => "call_resolution" } unless unknowns.empty?
+      blockers << { "kind" => "missing_evidence" } unless warnings.empty?
+      blockers << { "kind" => (input_completeness == "unknown" ? "unknown" : "missing_evidence") } if blockers.empty?
+      blockers.uniq
+    end
+
+    def complexity_model_completeness(time_complete, space_complete)
+      return "complete" if time_complete && space_complete
+      return "partial" if time_complete == false || space_complete == false
+
+      "unknown"
+    end
+
+    def input_completeness_for(mod)
+      boundary = mod[:proof_boundary] || mod["proof_boundary"] || {}
+      value = boundary[:input_completeness] || boundary["input_completeness"]
+      %w[complete partial unknown].include?(value.to_s) ? value.to_s : "unknown"
+    end
+
+    def input_blockers_for(mod)
+      boundary = mod[:proof_boundary] || mod["proof_boundary"] || {}
+      blockers = Array(boundary[:input_blockers] || boundary["input_blockers"])
+      raise ArgumentError, "input blockers must use proof-boundary objects" unless blockers.all? { |blocker| blocker.is_a?(Hash) }
+
+      normalized = blockers.map { |blocker| blocker.transform_keys(&:to_s) }
+      normalized << { "kind" => "unknown" } if normalized.empty? && input_completeness_for(mod) == "unknown"
+      normalized.uniq.sort_by { |blocker| JSON.generate(blocker) }
     end
 
     def complexity_related_locations(variables)

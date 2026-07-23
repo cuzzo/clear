@@ -320,7 +320,8 @@ mod tests {
                     "span": [8, 2, 8, 12]
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
         let rows = scan_documents(&[doc]);
         assert_eq!(rows.len(), 1);
@@ -345,7 +346,10 @@ end
         .unwrap();
 
         let rows = scan_files(&[file], Language::Ruby).unwrap();
-        let details = rows.iter().map(|row| row.detail.as_str()).collect::<Vec<_>>();
+        let details = rows
+            .iter()
+            .map(|row| row.detail.as_str())
+            .collect::<Vec<_>>();
 
         assert!(!details.contains(&"text!"));
         assert!(details.contains(&"sort!"));

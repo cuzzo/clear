@@ -242,7 +242,11 @@ fn direct_write_value(
     if node.role != "linear_statement" {
         return None;
     }
-    effects.get(node_id)?.write_value_hints.get(place_id).cloned()
+    effects
+        .get(node_id)?
+        .write_value_hints
+        .get(place_id)
+        .cloned()
 }
 
 fn reachable_nodes(start: &str, successors: &BTreeMap<String, Vec<String>>) -> BTreeSet<String> {

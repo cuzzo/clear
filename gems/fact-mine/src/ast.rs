@@ -39,6 +39,15 @@ pub struct RawNode {
     pub children: Vec<RawNode>,
 }
 
+/// A source-parser node that the active adapter classifies as a call before
+/// normalized extraction. Kept as parser evidence so coverage can distinguish
+/// a deliberate language representation difference from a dropped call.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct RawCallSite {
+    pub span: Span,
+    pub kind: String,
+}
+
 pub fn normalize_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -141,31 +150,42 @@ pub fn normalize_tree(root: TreeSitterNode<'_>, source: &str, language: Language
     TreeSitterNormalizer::new(source, language).normalize(root)
 }
 
-pub(crate) fn raw_call_spans(
+/// Returns the normalized tree plus exact parser-call identities captured by
+/// the normalizer before adapters transform source nodes.
+pub(crate) fn normalize_tree_with_call_origins(
     root: TreeSitterNode<'_>,
     source: &str,
     language: Language,
-) -> Vec<Span> {
+) -> (Node, Vec<(Span, Span)>) {
+    TreeSitterNormalizer::new(source, language).normalize_with_call_origins(root)
+}
+
+pub(crate) fn raw_call_sites(
+    root: TreeSitterNode<'_>,
+    source: &str,
+    language: Language,
+) -> Vec<RawCallSite> {
     fn visit(
         node: TreeSitterNode<'_>,
         normalizer: &TreeSitterNormalizer<'_>,
-        spans: &mut std::collections::BTreeSet<Span>,
+        sites: &mut std::collections::BTreeMap<Span, String>,
     ) {
         if normalizer.call_node(node) {
-            let start = node.start_position();
-            let end = node.end_position();
-            spans.insert([start.row + 1, start.column, end.row + 1, end.column]);
+            sites.insert(span(node), node.kind().to_string());
         }
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            visit(child, normalizer, spans);
+            visit(child, normalizer, sites);
         }
     }
 
     let normalizer = TreeSitterNormalizer::new(source, language);
-    let mut spans = std::collections::BTreeSet::new();
-    visit(root, &normalizer, &mut spans);
-    spans.into_iter().collect()
+    let mut sites = std::collections::BTreeMap::new();
+    visit(root, &normalizer, &mut sites);
+    sites
+        .into_iter()
+        .map(|(span, kind)| RawCallSite { span, kind })
+        .collect()
 }
 
 pub(crate) fn symbol_scope(
@@ -276,6 +296,30 @@ pub fn flatten_and(node: &Node) -> Vec<&Node> {
         .iter()
         .filter_map(self::node)
         .flat_map(flatten_and)
+        .collect()
+}
+
+/// Returns every operand of a normalized disjunction. A false disjunction
+/// proves every operand false, just as a true conjunction proves every
+/// operand true.
+pub fn flatten_or(node: &Node) -> Vec<&Node> {
+    if matches!(node.r#type.as_str(), "CONDITION_CLAUSE") {
+        let children = node
+            .children
+            .iter()
+            .filter_map(self::node)
+            .collect::<Vec<_>>();
+        if children.len() == 1 {
+            return flatten_or(children[0]);
+        }
+    }
+    if node.r#type != "OR" {
+        return vec![node];
+    }
+    node.children
+        .iter()
+        .filter_map(self::node)
+        .flat_map(flatten_or)
         .collect()
 }
 
@@ -698,7 +742,7 @@ fn exact_bare_identifier_text(text: &str) -> bool {
     true
 }
 
-fn exact_integer_text(text: &str) -> bool {
+pub(crate) fn exact_integer_text(text: &str) -> bool {
     let digits = text.strip_prefix('-').unwrap_or(text);
     !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit())
 }

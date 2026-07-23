@@ -1,7 +1,7 @@
 use super::{
     cfg, clone_similarity, complexity, effects, local_flow,
     normalized_behavior::{NormalizedLanguageBehavior, SyntaxMetadata},
-    normalized_extractor, path_condition, protocols, redundant_nil_guard, visibility,
+    normalized_extractor, nullable, path_condition, protocols, redundant_nil_guard, visibility,
     CloneCandidate, LocalComplexityScore, PathConditionSite, ProtocolMethodEffect,
     ProtocolMethodPath,
 };
@@ -47,6 +47,11 @@ pub(crate) struct StatefulSyntaxMetadata {
     pub(crate) protocol_call_paths: Vec<ProtocolMethodPath>,
     pub(crate) clone_candidates: Vec<CloneCandidate>,
     pub(crate) redundant_nil_guards: Vec<redundant_nil_guard::RedundantNilGuardRow>,
+    pub(crate) nullable_refinements: Vec<nullable::NullableRefinement>,
+    pub(crate) nullable_states: Vec<nullable::NullableState>,
+    pub(crate) nullable_summaries: Vec<nullable::NullableSummary>,
+    pub(crate) nullable_operations: Vec<nullable::NullableOperation>,
+    pub(crate) presence_correlations: Vec<nullable::PresenceCorrelation>,
     pub(crate) syntax: SyntaxMetadata,
 }
 
@@ -141,11 +146,29 @@ impl<'a> StatefulSyntaxPass<'a> {
         );
         let clone_candidates =
             clone_similarity::clone_candidates_from_normalized(&file, self.normalized_root);
-        let redundant_nil_guards = redundant_nil_guard::scan_normalized(
+        let nil_guard_facts = redundant_nil_guard::normalized_facts_from_normalized(
             &file,
             self.lines,
             self.normalized_root,
             self.behavior,
+        );
+        let raw_nullable_states = nullable::project_states(&control_flow);
+        let nullable_refinements = nullable::project_refinements(
+            &nil_guard_facts.refinements,
+            &control_flow,
+            &raw_nullable_states,
+        );
+        let nullable_states =
+            nullable::apply_refinements(&raw_nullable_states, &nullable_refinements, &control_flow);
+        let nullable_summaries = nullable::project_summaries(&control_flow, &nullable_states);
+        let nullable_operations = nullable::project_operations(
+            &facts.nullable_operation_seeds,
+            &control_flow,
+            &nullable_states,
+        );
+        let presence_correlations = nullable::project_presence_correlations(
+            &facts.presence_correlation_seeds,
+            &control_flow,
         );
 
         StatefulSyntaxMetadata {
@@ -159,7 +182,12 @@ impl<'a> StatefulSyntaxPass<'a> {
             protocol_method_effects,
             protocol_call_paths,
             clone_candidates,
-            redundant_nil_guards,
+            redundant_nil_guards: nil_guard_facts.redundant_guards,
+            nullable_refinements,
+            nullable_states,
+            nullable_summaries,
+            nullable_operations,
+            presence_correlations,
             syntax,
         }
     }

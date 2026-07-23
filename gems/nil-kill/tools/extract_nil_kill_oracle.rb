@@ -46,7 +46,6 @@ module NilKill
       # Run the rest
       build_flow_graph
       build_fallibility_pressure
-      build_hidden_enum_pressure
       build_actions
 
       output_state = {

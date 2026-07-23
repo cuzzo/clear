@@ -1,4 +1,4 @@
-use super::super::named_children;
+use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
 use regex::Regex;
 use tree_sitter::Node as TreeSitterNode;
@@ -11,7 +11,9 @@ impl AstNormalizationAdapter for CAstAdapter {
     }
 
     fn source_preprocessing(&self, source: &str) -> Option<String> {
-        Some(strip_linkage_macros_before_type_name(source))
+        Some(strip_native_nullability_annotations(
+            &strip_linkage_macros_before_type_name(source),
+        ))
     }
 
     fn case_arm_body_nodes<'tree>(
@@ -49,6 +51,16 @@ impl AstNormalizationAdapter for CAstAdapter {
         }
         None
     }
+
+    fn assignment_target_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        if node.kind() != "pointer_declarator" {
+            return None;
+        }
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "identifier")
+            .map(|child| node_text(child, source).to_string())
+    }
 }
 
 /// A C/C++ linkage/visibility macro (`class MYLIB_API Foo`, `struct
@@ -75,12 +87,42 @@ pub(super) fn strip_linkage_macros_before_type_name(source: &str) -> String {
         .expect("static regex is valid");
     let mut result = source.as_bytes().to_vec();
     for caps in pattern.captures_iter(&masked) {
-        let macro_token = caps.get(1).expect("group 1 always matches with the outer match");
+        let macro_token = caps
+            .get(1)
+            .expect("group 1 always matches with the outer match");
         for pos in macro_token.range() {
             result[pos] = b' ';
         }
     }
     String::from_utf8(result).unwrap_or_else(|_| source.to_string())
+}
+
+/// tree-sitter-c/cpp do not consistently accept Clang's declaration-only
+/// `_Nullable`/`_Nonnull` spelling.  The normalized analysis still needs the
+/// original spelling to derive its reviewed contract, so blank only the
+/// annotation token in the parser buffer.  This preserves every byte offset;
+/// normalizers continue to read the untouched source and retain the type
+/// annotation in the emitted declared-type fact.
+///
+/// Restricting the rewrite to pointer declarators avoids treating an ordinary
+/// identifier named `_Nullable` as an annotation.  Comments and literals are
+/// masked before matching for the same reason as linkage-macro preprocessing.
+pub(super) fn strip_native_nullability_annotations(source: &str) -> String {
+    let masked = mask_comments_and_strings(source);
+    let pattern = Regex::new(r"\*[ \t]*(?:_Nullable|_Nonnull|__nullable|__nonnull)\b")
+        .expect("static regex is valid");
+    let mut result = source.as_bytes().to_vec();
+    for matched in pattern.find_iter(&masked) {
+        let annotation_start = matched
+            .as_str()
+            .find('_')
+            .expect("native annotation match contains an underscore");
+        let start = matched.start() + annotation_start;
+        for byte in &mut result[start..matched.end()] {
+            *byte = b' ';
+        }
+    }
+    String::from_utf8(result).expect("replacing ASCII annotation bytes preserves valid UTF-8")
 }
 
 /// Replaces the body of `//`/`/* */` comments and `"..."`/`'...'` literals
@@ -179,11 +221,19 @@ mod tests {
 
     #[test]
     fn strips_linkage_macro_and_preserves_byte_length_and_positions() {
-        let source = "class PLOG_LINKAGE Logger : public IAppender {\npublic:\n    void write() {}\n};\n";
+        let source =
+            "class PLOG_LINKAGE Logger : public IAppender {\npublic:\n    void write() {}\n};\n";
         let stripped = strip_linkage_macros_before_type_name(source);
-        assert_eq!(stripped.len(), source.len(), "must preserve total byte length");
+        assert_eq!(
+            stripped.len(),
+            source.len(),
+            "must preserve total byte length"
+        );
         assert!(
-            stripped.contains(&format!("class {} Logger : public IAppender {{", " ".repeat("PLOG_LINKAGE".len()))),
+            stripped.contains(&format!(
+                "class {} Logger : public IAppender {{",
+                " ".repeat("PLOG_LINKAGE".len())
+            )),
             "expected the macro token blanked with equal-length spaces, got {stripped:?}"
         );
         // Everything after the macro token keeps its original byte offset.
@@ -222,6 +272,44 @@ mod tests {
             strip_linkage_macros_before_type_name(source),
             source,
             "the macro-before-name pattern must only match on a single line"
+        );
+    }
+
+    #[test]
+    fn strips_pointer_nullability_annotations_and_preserves_offsets() {
+        let source = "Widget * _Nullable value; Widget * __nonnull other;\n";
+        let stripped = strip_native_nullability_annotations(source);
+        assert_eq!(stripped.len(), source.len());
+        assert_eq!(stripped.find("value"), source.find("value"));
+        assert_eq!(stripped.find("other"), source.find("other"));
+        assert!(!stripped.contains("_Nullable"));
+        assert!(!stripped.contains("__nonnull"));
+    }
+
+    #[test]
+    fn does_not_strip_annotation_words_outside_pointer_declarations() {
+        let source = "const char *label = \"_Nullable\"; // _Nonnull\nint _Nullable = 1;\n";
+        assert_eq!(strip_native_nullability_annotations(source), source);
+    }
+
+    #[test]
+    fn uses_pointer_declarator_identifier_as_assignment_target() {
+        let source = "Widget * _Nullable value = load_widget();";
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_c::LANGUAGE.into())
+            .unwrap();
+        let buffer = strip_native_nullability_annotations(source);
+        let tree = parser.parse(&buffer, None).unwrap();
+        fn find_pointer(node: TreeSitterNode<'_>) -> Option<TreeSitterNode<'_>> {
+            (node.kind() == "pointer_declarator")
+                .then_some(node)
+                .or_else(|| named_children(node).into_iter().find_map(find_pointer))
+        }
+        let pointer = find_pointer(tree.root_node()).expect("pointer declarator");
+        assert_eq!(
+            CAstAdapter.assignment_target_name(pointer, source),
+            Some("value".to_string())
         );
     }
 }

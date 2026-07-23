@@ -20,6 +20,27 @@ const TYPESCRIPT_TERNARY_KINDS: &[&str] = &[
 pub(crate) struct TypeScriptAstAdapter;
 
 impl AstNormalizationAdapter for TypeScriptAstAdapter {
+    fn named_field<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        name: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() == "variable_declarator" {
+            match name {
+                "left" => return node.child_by_field_name("name"),
+                "right" => return node.child_by_field_name("value"),
+                _ => {}
+            }
+        }
+        node.child_by_field_name(name)
+    }
+
+    fn absence_literal(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        self.check_node_role(node, "nil")
+            || (node_text(node, source).trim() == "undefined"
+                && !typescript_undefined_is_shadowed(node, source))
+    }
+
     // `abstract class Foo { ... }` is a distinct grammar node
     // (abstract_class_declaration), not `class_declaration` - the default
     // class_node matcher never recognized it, so an abstract base class
@@ -30,7 +51,11 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
     fn class_node(&self, node: TreeSitterNode<'_>) -> bool {
         matches!(
             node.kind(),
-            "class" | "class_definition" | "class_declaration" | "class_specifier" | "abstract_class_declaration"
+            "class"
+                | "class_definition"
+                | "class_declaration"
+                | "class_specifier"
+                | "abstract_class_declaration"
         )
     }
 
@@ -388,9 +413,10 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
         };
         let Some(constructor) = named_children(body).into_iter().find(|member| {
             member.kind() == "method_definition"
-                && member
-                    .child_by_field_name("name")
-                    .is_some_and(|name| name.kind() == "property_identifier" && node_text(name, _source) == "constructor")
+                && member.child_by_field_name("name").is_some_and(|name| {
+                    name.kind() == "property_identifier"
+                        && node_text(name, _source) == "constructor"
+                })
         }) else {
             return Vec::new();
         };
@@ -401,12 +427,71 @@ impl AstNormalizationAdapter for TypeScriptAstAdapter {
             .into_iter()
             .filter(|param| matches!(param.kind(), "required_parameter" | "optional_parameter"))
             .filter(|param| {
-                named_children(*param)
-                    .iter()
-                    .any(|child| child.kind() == "accessibility_modifier" || node_text(*child, _source) == "readonly")
+                named_children(*param).iter().any(|child| {
+                    child.kind() == "accessibility_modifier"
+                        || node_text(*child, _source) == "readonly"
+                })
             })
             .collect()
     }
+}
+
+fn typescript_undefined_is_shadowed(node: TreeSitterNode<'_>, source: &str) -> bool {
+    let mut ancestor = node.parent();
+    while let Some(scope) = ancestor {
+        if matches!(scope.kind(), "statement_block" | "program")
+            && typescript_scope_declares_undefined(scope, source, true)
+        {
+            return true;
+        }
+        if matches!(
+            scope.kind(),
+            "function_declaration" | "method_definition" | "arrow_function" | "function_expression"
+        ) && typescript_scope_declares_undefined(scope, source, false)
+        {
+            return true;
+        }
+        ancestor = scope.parent();
+    }
+    false
+}
+
+fn typescript_scope_declares_undefined(
+    node: TreeSitterNode<'_>,
+    source: &str,
+    include_local_declarations: bool,
+) -> bool {
+    if matches!(node.kind(), "required_parameter" | "optional_parameter")
+        && typescript_declares_undefined(node, source)
+    {
+        return true;
+    }
+    if include_local_declarations
+        && node.kind() == "variable_declarator"
+        && typescript_declares_undefined(node, source)
+    {
+        return true;
+    }
+    named_children(node).into_iter().any(|child| {
+        !matches!(
+            child.kind(),
+            "statement_block"
+                | "function_declaration"
+                | "method_definition"
+                | "arrow_function"
+                | "function_expression"
+        ) && typescript_scope_declares_undefined(child, source, include_local_declarations)
+    })
+}
+
+fn typescript_declares_undefined(node: TreeSitterNode<'_>, source: &str) -> bool {
+    node.child_by_field_name("name")
+        .or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "identifier")
+        })
+        .is_some_and(|name| node_text(name, source).trim() == "undefined")
 }
 
 /// TypeScript represents `const f = (...) => ...` and
@@ -431,4 +516,39 @@ fn typescript_bound_callable_name(node: TreeSitterNode<'_>, source: &str) -> Opt
     let name = parent.child_by_field_name("name")?;
     let text = node_text(name, source).trim();
     (!text.is_empty()).then(|| text.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    #[test]
+    fn variable_declarators_map_assignment_fields_without_hiding_other_fields() {
+        let source = "const value: string | null = null;";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let mut nodes = vec![tree.root_node()];
+        let declarator = loop {
+            let node = nodes.pop().unwrap();
+            if node.kind() == "variable_declarator" {
+                break node;
+            }
+            nodes.extend((0..node.child_count()).filter_map(|index| node.child(index)));
+        };
+
+        let adapter = TypeScriptAstAdapter;
+        assert_eq!(
+            node_text(adapter.named_field(declarator, "left").unwrap(), source),
+            "value"
+        );
+        assert_eq!(
+            node_text(adapter.named_field(declarator, "right").unwrap(), source),
+            "null"
+        );
+        assert!(adapter.named_field(declarator, "missing").is_none());
+    }
 }

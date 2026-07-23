@@ -13,7 +13,6 @@ use super::normalized_behavior::{
 };
 use super::StateDeclaration;
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
-use crate::ast::Child;
 use crate::ast::{Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
 use crate::type_inference::TypeExpr;
@@ -235,9 +234,11 @@ impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
     }
 
     fn cardinality_call_semantics(&self, message: &str) -> CardinalityCallSemantics {
-        (message == "count")
-            .then_some(CardinalityCallSemantics::MeasuresReceiver)
-            .unwrap_or(CardinalityCallSemantics::Unknown)
+        if message == "count" {
+            CardinalityCallSemantics::MeasuresReceiver
+        } else {
+            CardinalityCallSemantics::Unknown
+        }
     }
 
     fn function_visibility(&self, _name: &str, node: &Node, _lines: &[String]) -> String {
@@ -253,8 +254,7 @@ impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
         let before_colon = text.split_once(':')?.0.trim();
         before_colon
             .split_whitespace()
-            .filter(|part| *part != "_")
-            .next_back()
+            .rfind(|part| *part != "_")
             .filter(|name| simple_identifier(name))
             .map(ToString::to_string)
     }
@@ -496,7 +496,7 @@ fn is_simple_name(name: &str) -> bool {
         && name
             .chars()
             .next()
-            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
         && name
             .chars()
             .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())

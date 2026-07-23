@@ -7,13 +7,14 @@ use super::normalized_behavior::{
     balanced_selector_name, configured_collection_operation, configured_intrinsic_call_complexity,
     configured_non_call_construct, configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
-    scip_global_parts, type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
-    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
-    NormalizedStateRead,
+    eliminable_guard_from_call, exact_direct_call_name, native_pointer_nullability_contract,
+    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
+    type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
+    NormalizedSemanticEffect, NormalizedStateRead,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
-use crate::ast::{Node, Span};
+use crate::ast::{Child, Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
 use crate::type_inference::TypeExpr;
 
@@ -182,7 +183,102 @@ const CPP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 
 pub(crate) struct CppNormalizedBehavior;
 
+/// C++ normalizes `static_cast<T>(call())` as an FCALL. The cast only changes
+/// the static view of the result, so a reviewed nullable result contract still
+/// belongs to the exact inner call.
+fn transparent_static_cast_argument(node: &Node) -> Option<&Node> {
+    let Child::Symbol(name) = node.children.first()? else {
+        return None;
+    };
+    if node.r#type != "FCALL" || !name.starts_with("static_cast<") {
+        return None;
+    }
+    let arguments = node.children.get(1).and_then(crate::ast::node)?;
+    if arguments.r#type != "LIST" {
+        return None;
+    }
+    let mut children = arguments.children.iter().filter_map(crate::ast::node);
+    let only = children.next()?;
+    children.next().is_none().then_some(only)
+}
+
+fn nullable_contract_call(node: &Node) -> &Node {
+    if let Some(argument) = transparent_static_cast_argument(node) {
+        return nullable_contract_call(argument);
+    }
+    if node.r#type == "LIST" {
+        let mut children = node.children.iter().filter_map(crate::ast::node);
+        let only = children.next();
+        if children.next().is_none() {
+            if let Some(only) = only {
+                return nullable_contract_call(only);
+            }
+        }
+    }
+    node
+}
+
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        if node.r#type == "VCALL" {
+            return local_call_subject(node).map(|subject| NormalizedNullableOperation {
+                subject,
+                operation_kind: "function_pointer_call",
+                nil_behavior: "undefined_behavior",
+            });
+        }
+        if node.r#type == "CALL" {
+            return node
+                .children
+                .first()
+                .and_then(crate::ast::node)
+                .filter(|receiver| receiver.r#type == "LVAR")
+                .map(|receiver| receiver.text.trim().to_string())
+                .filter(|subject| !subject.is_empty())
+                .map(|subject| NormalizedNullableOperation {
+                    subject,
+                    operation_kind: "pointer_selector",
+                    nil_behavior: "undefined_behavior",
+                });
+        }
+        let subject = (node.r#type == "POINTER_EXPRESSION"
+            && node.text.trim_start().starts_with('*'))
+        .then(|| node.children.first().and_then(crate::ast::node))
+        .flatten()
+        .filter(|subject| subject.r#type == "LVAR")?
+        .text
+        .trim()
+        .to_string();
+        (!subject.is_empty()).then_some(NormalizedNullableOperation {
+            subject,
+            operation_kind: "pointer_dereference",
+            nil_behavior: "undefined_behavior",
+        })
+    }
+
+    fn function_value_calls_are_local_reads(&self) -> bool {
+        true
+    }
+
+    fn nullable_call_result_contract(&self, node: &Node) -> Option<&'static str> {
+        let call = nullable_contract_call(node);
+        if call.r#type == "NEW_EXPRESSION" && call.text.contains("std::nothrow") {
+            return Some("nullable_nothrow_allocation");
+        }
+        exact_direct_call_name(call).and_then(|name| match name {
+            "malloc" | "calloc" => Some("nullable_allocation"),
+            "realloc" => Some("nullable_reallocation_preserves_input"),
+            name if name.starts_with("dynamic_cast<") && name.contains('*') => {
+                Some("nullable_pointer_dynamic_cast")
+            }
+            _ => None,
+        })
+    }
+
+    fn nullable_declared_type_contract(&self, type_name: &str) -> Option<&'static str> {
+        native_pointer_nullability_contract(type_name)
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
@@ -293,8 +389,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         node.text
             .trim_end_matches(';')
             .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-            .filter(|part| simple_identifier(part))
-            .next_back()
+            .rfind(|part| simple_identifier(part))
             .map(str::to_string)
     }
 
@@ -351,7 +446,11 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
             if let Some(end) = param[start..].find(')') {
                 let inner = &param[start + 2..start + end];
                 let name = inner.trim_start_matches('*').trim();
-                if !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                if !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                {
                     return Some(name.to_string());
                 }
             }
@@ -362,8 +461,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         }
         let text = text.split('=').next().unwrap_or(text).trim();
         text.split(|ch: char| !(ch == '_' || ch == '?' || ch.is_ascii_alphanumeric()))
-            .filter(|part| !part.is_empty())
-            .next_back()
+            .rfind(|part| !part.is_empty())
             .map(|part| part.trim_end_matches('?').to_string())
     }
 
@@ -439,9 +537,11 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.starts_with("std::optional<") {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.starts_with("std::optional<")
+        {
             type_text.to_string()
         } else {
             format!("std::optional<{}>", type_text)
@@ -458,6 +558,15 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
     fn untyped_hash_type(&self) -> String {
         "std::unordered_map<std::string, std::any>".to_string()
+    }
+}
+
+fn local_call_subject(node: &Node) -> Option<String> {
+    match node.children.first()? {
+        Child::Symbol(subject) | Child::String(subject) => {
+            (!subject.trim().is_empty()).then(|| subject.trim().to_string())
+        }
+        _ => None,
     }
 }
 
@@ -506,13 +615,16 @@ fn cpp_member_selector_is_invoked(source: &str, message: &str) -> Option<bool> {
         })
         .max();
     let offset = explicit_offset.or_else(|| {
-        source.match_indices(selector).filter_map(|(offset, _)| {
-            let before = source[..offset].chars().next_back();
-            let end = offset + selector.len();
-            let after = source[end..].chars().next();
-            let identifier = |character: char| character == '_' || character.is_alphanumeric();
-            (!before.is_some_and(identifier) && !after.is_some_and(identifier)).then_some(end)
-        }).last()
+        source
+            .match_indices(selector)
+            .filter_map(|(offset, _)| {
+                let before = source[..offset].chars().next_back();
+                let end = offset + selector.len();
+                let after = source[end..].chars().next();
+                let identifier = |character: char| character == '_' || character.is_alphanumeric();
+                (!before.is_some_and(identifier) && !after.is_some_and(identifier)).then_some(end)
+            })
+            .last()
     })?;
     let suffix = source[offset..].trim_start();
     if !suffix.starts_with('<') {
@@ -571,6 +683,102 @@ mod tests {
             last_column: 20,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn function_pointer_operations_require_a_symbol_callee() {
+        let callback = Node {
+            children: vec![Child::Symbol("callback".to_string())],
+            ..node("VCALL", "callback()")
+        };
+        assert_eq!(local_call_subject(&callback), Some("callback".to_string()));
+        let malformed = Node {
+            children: vec![Child::Nil],
+            ..node("VCALL", "callback()")
+        };
+        assert_eq!(local_call_subject(&malformed), None);
+        assert!(CppNormalizedBehavior.function_value_calls_are_local_reads());
+
+        let address = Node {
+            children: vec![Child::Node(Box::new(node("LVAR", "value")))],
+            ..node("POINTER_EXPRESSION", "&value")
+        };
+        assert!(CppNormalizedBehavior.nullable_operation(&address).is_none());
+    }
+
+    #[test]
+    fn allocator_contracts_require_exact_bare_call_identity() {
+        let behavior = CppNormalizedBehavior;
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "malloc(sizeof(int))")),
+            Some("nullable_allocation")
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "realloc(value, 8)")),
+            Some("nullable_reallocation_preserves_input")
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "custom_malloc(value)")),
+            None
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "object.malloc()")),
+            None
+        );
+
+        let allocation = Node {
+            children: vec![
+                Child::Symbol("static_cast<int *>".to_string()),
+                Child::Node(Box::new(Node {
+                    children: vec![Child::Node(Box::new(Node {
+                        children: vec![Child::Symbol("malloc".to_string())],
+                        ..node("FCALL", "malloc(sizeof(int))")
+                    }))],
+                    ..node("LIST", "malloc(sizeof(int))")
+                })),
+            ],
+            ..node("FCALL", "static_cast<int *>(malloc(sizeof(int)))")
+        };
+        assert_eq!(
+            behavior.nullable_call_result_contract(&allocation),
+            Some("nullable_allocation")
+        );
+
+        let nested_allocation = Node {
+            children: vec![Child::Node(Box::new(Node {
+                children: vec![Child::Symbol("malloc".to_string())],
+                ..node("FCALL", "malloc(sizeof(int))")
+            }))],
+            ..node("LIST", "malloc(sizeof(int))")
+        };
+        assert_eq!(
+            behavior.nullable_call_result_contract(&nested_allocation),
+            Some("nullable_allocation")
+        );
+
+        let malformed_cast = Node {
+            children: vec![
+                Child::Symbol("static_cast<int *>".to_string()),
+                Child::Node(Box::new(node("PAREN", ""))),
+            ],
+            ..node("FCALL", "static_cast<int *>(value)")
+        };
+        assert_eq!(
+            behavior.nullable_call_result_contract(&malformed_cast),
+            None
+        );
+        assert_eq!(
+            behavior.nullable_declared_type_contract("gsl::not_null<Widget *>"),
+            Some("non_null_declared_type")
+        );
+        assert_eq!(
+            behavior.nullable_declared_type_contract("std::unique_ptr<Widget>"),
+            None
+        );
+        assert_eq!(
+            behavior.declared_local_type("gsl::not_null<Widget *> value = load_widget()", "value"),
+            Some("gsl::not_null<Widget *>".to_string())
+        );
     }
 
     #[test]

@@ -207,6 +207,68 @@ class AggregatorTest < Minitest::Test
         result.dig("properties", "function", "name") == "sort_names"
     }
     assert_equal "espalier.manifest.sarif.v1", run.dig("properties", "format")
+    assert_equal "unknown", complexity.dig("properties", "fact_mine.proof_boundary", "input_completeness")
+    assert_equal "observed", complexity.dig("properties", "fact_mine.proof_boundary", "claim_status")
+    fixture = JSON.parse(File.read(File.expand_path("../../hazard-contract/fixtures/proof-boundary.v3.json", __dir__)))
+    assert_equal fixture.dig("representative", "espalier"), complexity.dig("properties", "fact_mine.proof_boundary")
+    assert_equal 3, run.dig("properties", "fact_mine.proof_boundary_summary", "results_with_boundary")
+    assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "invalid_boundaries")
+    assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "missing_boundaries")
+    assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "complete")
+    assert_equal 3, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "unknown")
+  end
+
+  def test_formatter_sarif_marks_incomplete_complexity_as_partial
+    manifest = [{
+      module: "Parser",
+      file: "lib/parser.rb",
+      proof_boundary: {
+        input_completeness: "complete",
+        input_blockers: []
+      },
+      functions: [{
+        name: "parse",
+        line: 3,
+        quality_metrics: {
+          big_o: "unknown",
+          big_o_space: "O(1)",
+          big_o_complete: false,
+          big_o_space_complete: true,
+          big_o_unknowns: ["dispatch target unresolved"]
+        }
+      }]
+    }]
+
+    run = JSON.parse(Espalier::Formatter.to_sarif(manifest)).fetch("runs").first
+    result = run.fetch("results").first
+    boundary = result.dig("properties", "fact_mine.proof_boundary")
+    assert_equal "complete", boundary.fetch("input_completeness")
+    assert_equal "observed", boundary.fetch("claim_status")
+    assert_equal "partial", result.dig("properties", "complexity", "model_completeness")
+    assert_includes result.dig("properties", "complexity", "model_blockers"), { "kind" => "call_resolution" }
+    assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "complete")
+  end
+
+  def test_formatter_sarif_preserves_extractor_input_boundary
+    manifest = [{
+      module: "Parser",
+      file: "lib/parser.rb",
+      proof_boundary: {
+        input_completeness: "partial",
+        input_blockers: [{ "kind" => "missing_evidence" }]
+      },
+      functions: [{
+        name: "parse",
+        line: 3,
+        quality_metrics: { big_o: "O(N)", big_o_space: "O(1)", big_o_complete: true, big_o_space_complete: true }
+      }]
+    }]
+
+    run = JSON.parse(Espalier::Formatter.to_sarif(manifest)).fetch("runs").first
+    boundary = run.fetch("results").first.dig("properties", "fact_mine.proof_boundary")
+    assert_equal "partial", boundary.fetch("input_completeness")
+    assert_equal [{ "kind" => "missing_evidence" }], boundary.fetch("blockers")
+    assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "partial")
   end
 
   def test_delegations_mapped_to_concrete_type_when_available

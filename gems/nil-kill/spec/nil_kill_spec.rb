@@ -338,6 +338,240 @@ RSpec.describe NilKill do
         "ruleId" => "nil-kill.static.untyped-field",
         "message" => a_hash_including("text" => include("CurrentUnitSpan#id")),
       ))
+      static_result = results.find { |result| result.fetch("ruleId") == "nil-kill.static.untyped-signature" }
+      expect(static_result.fetch("properties")).not_to have_key("proof_boundary")
+      expect(static_result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("unknown")
+      expect(static_result.dig("properties", "fact_mine.proof_boundary", "claim_status")).to eq("review")
+      expect(static_result.dig("properties", "fact_mine.proof_boundary", "blockers")).to include({ "kind" => "missing_evidence" })
+      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")).to be_positive
+      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "invalid_boundaries")).to eq(0)
+      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "missing_boundaries")).to eq(0)
+    end
+
+    it "distinguishes complete static proofs from partial static evidence in SARIF" do
+      evidence = {
+        "schema_version" => 2,
+        "languages" => ["ruby"],
+        "static" => {
+          "files" => [],
+          "methods" => [
+            { "path" => "lib/x.rb", "line" => 3, "owner" => "Parser", "name" => "parse", "kind" => "method", "language" => "ruby", "signature" => "sig { returns(T.nilable(String)) }" },
+            { "path" => "lib/x.rb", "line" => 7, "owner" => "Parser", "name" => "optional", "kind" => "method", "language" => "ruby", "signature" => "sig { returns(T.nilable(String)) }" }
+          ],
+          "fields" => [],
+          "facts" => {
+            "return_origins" => [{
+              "path" => "lib/x.rb", "class" => "Parser", "method" => "parse", "confidence" => "strong", "blockers" => [],
+              "candidate_type" => { "kind" => "Primitive", "data" => "String" },
+              "sources" => [{ "line" => 4, "type" => { "kind" => "Primitive", "data" => "String" } }]
+            }]
+          }
+        },
+        "runtime" => {},
+        "actions" => [],
+        "diagnostics" => []
+      }
+
+      sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
+      claims = sarif.dig("runs", 0, "results").map { |result| result.dig("properties", "fact_mine.proof_boundary", "claim_status") }.compact
+      expect(claims).to include("proven", "review")
+      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "claim_status", "review")).to be_positive
+      partial_boundary = described_class.new.send(:static_review_boundary, "static_nil_finding", blockers: [{ "kind" => "call_resolution" }])
+      expect(partial_boundary.fetch("input_completeness")).to eq("partial")
+      expect(partial_boundary.fetch("blockers")).to eq([{ "kind" => "call_resolution" }])
+    end
+
+    it "explains unknown static review input as missing coverage evidence" do
+      boundary = described_class.new.send(:static_review_boundary, "static_nil_finding")
+
+      expect(boundary).to include(
+        "input_completeness" => "unknown",
+        "blockers" => [{ "kind" => "missing_evidence" }]
+      )
+    end
+
+    it "explains an unclassified corpus-coverage record as missing evidence" do
+      coverage = described_class.new.send(
+        :corpus_boundary_attributes,
+        { "static" => { "input_coverage" => { "complete" => "unclassified" } } }
+      )
+
+      expect(coverage).to eq(
+        input_completeness: "unknown",
+        blockers: [{ "kind" => "missing_evidence" }]
+      )
+    end
+
+    it "does not treat complete inputs as a proven static claim" do
+      boundary = described_class.new.send(
+        :static_proof_boundary,
+        { "complete" => true, "proof_tier" => "review" },
+        "legacy_static_nil_finding",
+        { "static" => { "input_coverage" => { "complete" => true } } }
+      )
+
+      expect(boundary).to include(
+        "input_completeness" => "complete",
+        "claim_status" => "review"
+      )
+    end
+
+    it "does not let fact-local completeness override partial corpus input" do
+      reporter = described_class.new
+      fact_boundary = NilKill::Sarif.proof_boundary(
+        input_completeness: "complete",
+        claim_status: "proven",
+        coverage_discharge: "unsatisfiable",
+        authority: ["fact_mine_normalized_ast", "nil_kill_static"],
+        claim_kind: "static_nullable_return",
+        scope: { kind: "local", closed: false }
+      )
+
+      boundary = reporter.send(
+        :static_proof_boundary,
+        { "proof_boundary" => fact_boundary },
+        "static_nullable_return",
+        { "static" => { "input_coverage" => { "complete" => false, "reason" => "parser_recovery" } } }
+      )
+
+      expect(boundary.fetch("input_completeness")).to eq("partial")
+      expect(boundary.fetch("claim_status")).to eq("proven")
+      expect(boundary.fetch("blockers")).to include({ "kind" => "missing_evidence" })
+    end
+
+    it "downgrades an invalid incoming proof boundary instead of preserving it" do
+      boundary = described_class.new.send(
+        :static_proof_boundary,
+        {
+          "proof_boundary" => {
+            "schema" => "fact-mine.proof-boundary.v3",
+            "input_completeness" => "complete",
+            "claim_status" => "proven",
+            "coverage_discharge" => "unsatisfiable",
+            "authority" => ["nil_kill_static"],
+            "claim_kind" => "static_nullable_return",
+            "scope" => { "kind" => "local", "closed" => false },
+            "blockers" => [{ "kind" => "unknown" }]
+          }
+        },
+        "static_nullable_return"
+      )
+
+      expect(boundary).to include(
+        "input_completeness" => "unknown",
+        "claim_status" => "review",
+        "claim_kind" => "static_nullable_return",
+        "blockers" => [{ "kind" => "unknown" }]
+      )
+    end
+
+    it "does not promote a canonical unknown boundary from corpus completeness" do
+      reporter = described_class.new
+      finding = {
+        "kind" => "primitive_record",
+        "message" => "pressure",
+        "path" => "lib/x.rb",
+        "line" => 3,
+        "proof_boundary" => reporter.send(:static_review_boundary, "primitive_record_pressure")
+      }
+
+      result = reporter.send(
+        :sarif_pressure_result,
+        finding,
+        { "static" => { "input_coverage" => { "complete" => true } } }
+      )
+
+      expect(result.fetch("properties")).not_to have_key("proof_boundary")
+      expect(result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("unknown")
+      expect(result.dig("properties", "fact_mine.proof_boundary", "blockers")).to include({ "kind" => "missing_evidence" })
+    end
+
+    it "adds a coverage blocker to an incoming unexplained unknown boundary" do
+      reporter = described_class.new
+      incoming = NilKill::Sarif.proof_boundary(
+        input_completeness: "unknown",
+        claim_status: "proven",
+        coverage_discharge: "unsatisfiable",
+        authority: ["fact_mine_normalized_ast"],
+        claim_kind: "static_nullable_return",
+        scope: { kind: "local", closed: false }
+      )
+
+      boundary = reporter.send(:static_proof_boundary, { "proof_boundary" => incoming }, "static_nullable_return", {})
+
+      expect(boundary).to include(
+        "input_completeness" => "unknown",
+        "claim_status" => "proven",
+        "blockers" => [{ "kind" => "missing_evidence" }]
+      )
+    end
+
+    it "keeps static primitive-domain actions review-only in SARIF" do
+      action = {
+        "kind" => "report_static_primitive_domain",
+        "confidence" => "review",
+        "path" => "job.rb",
+        "line" => 8,
+        "message" => "state @attempt has a closed-looking Integer domain across 2 decision sites",
+        "data" => { "slot" => "@attempt", "values" => ["1", "2"] }
+      }
+
+      result = described_class.new.send(:sarif_action_result, action, {})
+      boundary = result.dig("properties", "fact_mine.proof_boundary")
+      expect(boundary).to include(
+        "input_completeness" => "unknown",
+        "claim_status" => "observed",
+        "coverage_discharge" => "not_applicable",
+        "claim_kind" => "nil_kill_action",
+        "blockers" => [{ "kind" => "missing_evidence" }]
+      )
+    end
+
+    it "conforms to the shared proof-boundary fixture" do
+      fixture_path = File.join(NilKill::ROOT, "gems/hazard-contract/fixtures/proof-boundary.v3.json")
+      fixture = JSON.parse(File.read(fixture_path))
+      valid = fixture.fetch("valid")
+
+      boundary = NilKill::Sarif.proof_boundary(
+        input_completeness: valid.fetch("input_completeness"),
+        claim_status: valid.fetch("claim_status"),
+        coverage_discharge: valid.fetch("coverage_discharge"),
+        authority: valid.fetch("authority"),
+        scope: valid.fetch("scope"),
+        blockers: valid.fetch("blockers"),
+        claim_kind: valid.fetch("claim_kind")
+      )
+
+      expect(boundary).to eq(valid)
+      expect(boundary).to eq(fixture.dig("representative", "nil_kill"))
+      ([valid] + fixture.fetch("representative").values).each do |candidate|
+        expect(FactMine::ProofBoundary.parse_validate_normalize(candidate)).to eq(candidate)
+      end
+      fixture.fetch("invalid").each_value do |candidate|
+        expect { FactMine::ProofBoundary.parse_validate_normalize(candidate) }.to raise_error(ArgumentError)
+      end
+      expect {
+        FactMine::ProofBoundary.parse_validate_normalize("kind" => "unknown")
+      }.to raise_error(ArgumentError)
+      expect {
+        FactMine::ProofBoundary.build(
+          input_completeness: "partial",
+          claim_status: "review",
+          coverage_discharge: "unsatisfiable",
+          authority: ["fact_mine"],
+          claim_kind: "test",
+          scope: "local"
+        )
+      }.to raise_error(ArgumentError, /scope must be a hash/)
+
+      summary = FactMine::ProofBoundary.summary([
+        { "properties" => { FactMine::ProofBoundary::PROOF_BOUNDARY_PROPERTY => valid } },
+        { "properties" => { FactMine::ProofBoundary::PROOF_BOUNDARY_PROPERTY => fixture.fetch("invalid").fetch("complete_with_blocker") } }
+      ])
+      expect(summary.fetch("result_count")).to eq(2)
+      expect(summary.fetch("results_with_boundary")).to eq(1)
+      expect(summary.fetch("invalid_boundaries")).to eq(1)
+      expect(summary.fetch("missing_boundaries")).to eq(0)
     end
 
     it "joins relative method paths to absolute return-origin paths" do
@@ -380,32 +614,17 @@ RSpec.describe NilKill do
       sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
       results = sarif.fetch("runs").first.fetch("results")
 
-      expect(results).to include(a_hash_including(
-        "ruleId" => "nil-kill.static.false-nullable-return",
-        "message" => a_hash_including("text" => include("false-nilable return")),
-      ))
+      result = results.find do |candidate|
+        candidate["ruleId"] == "nil-kill.static.false-nullable-return"
+      end
+      expect(result.fetch("ruleId")).to eq("nil-kill.static.false-nullable-return")
+      expect(result.dig("message", "text")).to include("false-nilable return")
+      expect(result.dig("properties", "fact_mine.proof_boundary", "blockers")).to include({ "kind" => "missing_evidence" })
     end
 
     it "renders pressure facts as actionable SARIF findings" do
       evidence = {
         "facts" => {
-          "hidden_enum_pressure" => [{
-            "path" => "src/workflow.rb",
-            "line" => 10,
-            "owner" => "Workflow",
-            "method" => "label",
-            "method_kind" => "instance",
-            "kind" => "param",
-            "slot" => "status",
-            "confidence" => "high",
-            "score" => 12,
-            "values" => %w[:active :pending],
-            "decision_pressure" => 2,
-            "runtime" => {"calls" => 5, "classes" => ["Symbol"]},
-            "blockers" => [],
-            "suggestion" => "review for a named Status enum or literal-union contract",
-            "decisions" => [],
-          }],
           "fallibility_pressure" => [{
             "label" => "Parser#parse",
             "path" => "src/parser.rb",
@@ -432,7 +651,18 @@ RSpec.describe NilKill do
           "param_origins" => [],
           "return_origins" => [],
         },
-        "actions" => [],
+        "actions" => [{
+          "kind" => "report_static_primitive_domain",
+          "confidence" => "review",
+          "path" => "src/workflow.rb",
+          "line" => 10,
+          "message" => "state @status has a closed-looking string domain across 1 decision sites",
+          "data" => {
+            "slot" => "@status",
+            "values" => ['"active"', '"pending"'],
+            "decision_sites" => ["src/workflow.rb:11"],
+          },
+        }],
         "diagnostics" => [],
       }
 
@@ -440,8 +670,8 @@ RSpec.describe NilKill do
       results = sarif.fetch("runs").first.fetch("results")
 
       expect(results).to include(a_hash_including(
-        "ruleId" => "nil-kill.pressure.hidden-enum",
-        "message" => a_hash_including("text" => include("hidden enum pressure: Workflow#label param `status`")),
+        "ruleId" => "nil-kill.action.report-static-primitive-domain",
+        "message" => a_hash_including("text" => include("report_static_primitive_domain [review]")),
       ))
       expect(results).to include(a_hash_including(
         "ruleId" => "nil-kill.pressure.fallibility",

@@ -31,6 +31,7 @@ module Espalier
     def self.project_modules(evidence, source_roles: ["production"])
       return [] unless evidence && evidence["methods"]
 
+      input_boundary = proof_boundary_from_input_coverage(evidence["input_coverage"])
       allowed_roles = Array(source_roles).map(&:to_s).to_set
       roles_by_path = Array(evidence["files"]).each_with_object({}) do |file, roles|
         path = file["path"].to_s
@@ -289,8 +290,28 @@ module Espalier
           ivar_types: module_like ? {} : fields_by_owner[owner].to_h { |field| [field["name"], field["declared_type"]] }.compact,
           ivar_properties: {},
           declared_fields: declared_fields,
+          proof_boundary: input_boundary,
           methods: methods_by_owner[owner]
         }
+      end
+    end
+
+    # Corpus completeness belongs to the extractor, not to a later report
+    # formatter. Keep the narrow input dimension alongside every projected
+    # module so downstream analyses can preserve it without guessing from
+    # their own estimate-specific flags.
+    def self.proof_boundary_from_input_coverage(coverage)
+      coverage = Hash(coverage || {})
+      complete = coverage["complete"]
+      reason = coverage["reason"].to_s
+      if complete == true
+        { input_completeness: "complete", input_blockers: [] }
+      elsif complete == false
+        # Input-coverage prose is retained elsewhere for humans; the shared
+        # proof contract transports only its canonical machine-readable kind.
+        { input_completeness: "partial", input_blockers: [{ "kind" => "missing_evidence" }] }
+      else
+        { input_completeness: "unknown", input_blockers: [] }
       end
     end
 
@@ -325,14 +346,15 @@ module Espalier
 
     def self.source_role(path)
       text = path.to_s.tr("\\", "/")
-      parts = text.split("/").reject(&:empty?)
+      parts = text.split("/").reject(&:empty?).map(&:downcase)
       basename = parts.last.to_s
       return "vcs_metadata" if (parts & %w[.git .hg .svn]).any?
       return "vendored" if (parts & %w[vendor vendors third_party third-party]).any?
       return "generated" if (parts & %w[generated gen dist]).any?
       return "benchmark" if (parts & %w[benchmark benchmarks bench benches]).any?
       return "example" if (parts & %w[example examples sample samples]).any?
-      return "test" if (parts & %w[test tests spec specs __tests__]).any?
+      return "test" if (parts & %w[test tests spec specs __tests__ jvmtest androidtest commontest nativetest nonwasmtest wasmtest integrationtest unittest uitest functionaltest]).any?
+      return "test" if parts.any? { |part| part.end_with?("test") && part.match?(/\A(?:android|common|functional|integration|jvm|native|nonwasm|unit|ui|wasm)/) }
       return "test" if basename.match?(/(?:\A|[_\.])test(?:[_\.]|\z)|(?:\A|[_\.])spec(?:[_\.]|\z)/)
       # Test-helper products are executable support code, not production
       # library surface. Match common portable path spellings, including the
@@ -457,6 +479,11 @@ module Espalier
       return_usage_sites = Array(facts["return_usage_sites"])
       return_direct_usage_sites = Array(facts["return_direct_usage_sites"])
       hidden_enum_observations = Array(facts["hidden_enum_observations"])
+      nullable_refinements = Array(facts["nullable_refinements"])
+      nullable_states = Array(facts["nullable_states"])
+      nullable_summaries = Array(facts["nullable_summaries"])
+      nullable_operations = Array(facts["nullable_operations"])
+      presence_correlations = Array(facts["presence_correlations"])
       dispatcher_inferences = Array(facts["dispatcher_inferences"])
       hash_record_member_calls = Array(facts["hash_record_member_calls"])
       complexity_facts = Array(facts["complexity_facts"])
@@ -529,6 +556,7 @@ module Espalier
         "languages" => project_languages.map(&:to_s),
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
+        "input_coverage" => input_coverage_metadata(facts),
         "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => files.map { |file| file_record(file) },
@@ -576,6 +604,11 @@ module Espalier
           "return_usage_sites" => return_usage_sites.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "return_direct_usage_sites" => return_direct_usage_sites.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "hidden_enum_observations" => hidden_enum_observations.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
+          "nullable_refinements" => nullable_refinements.sort_by { |f| [f["condition_node_id"].to_s, f["place_id"].to_s] },
+          "nullable_states" => nullable_states.sort_by { |f| [f["node_id"].to_s, f["place_id"].to_s] },
+          "nullable_summaries" => nullable_summaries.sort_by { |f| [f["owner"].to_s, f["function"].to_s] },
+          "nullable_operations" => nullable_operations.sort_by { |f| [f["path"].to_s, f["span"].to_s, f["node_id"].to_s] },
+          "presence_correlations" => presence_correlations.sort_by { |f| f["group_id"].to_s },
           "dispatcher_inferences" => dispatcher_inferences.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "hash_record_member_calls" => hash_record_member_calls.sort_by { |f| [f["path"].to_s, f["line"].to_i] },
           "struct_field_hash_shapes" => facts["struct_field_hash_shapes"] || {},
@@ -632,6 +665,7 @@ module Espalier
         "root" => @root,
         "target_dirs" => target_dirs.map { |dir| rel(dir) },
         "target_exclude_dirs" => Espalier.target_exclude_dirs(root: @root).map { |dir| rel(dir) },
+        "input_coverage" => input_coverage_metadata({}),
         "corpus" => corpus_metadata,
         "runtime_fields" => false,
         "files" => [],
@@ -665,6 +699,28 @@ module Espalier
         else
           "the selected target is not a proven closed corpus"
         end
+      }
+    end
+
+    def input_coverage_metadata(facts)
+      coverage = Hash(facts["input_coverage"])
+      selected = coverage["selected_files"]
+      parsed = coverage["parsed_files"]
+      recovered = Array(coverage["parse_recovery_files"])
+      return { "complete" => nil, "scope" => "selected_source_files", "reason" => "FactMine did not provide input coverage metadata" } unless selected.is_a?(Numeric) && parsed.is_a?(Numeric)
+
+      complete = selected == parsed && recovered.empty?
+      {
+        "complete" => complete,
+        "scope" => "selected_source_files",
+        "reason" => if complete
+          "all selected supported source files were parsed without recovery"
+        elsif recovered.empty?
+          "FactMine did not parse every selected supported source file"
+        else
+          "tree-sitter recovered from syntax errors in #{recovered.size} selected source file(s)"
+        end,
+        "parse_recovery_files" => recovered.sort
       }
     end
 

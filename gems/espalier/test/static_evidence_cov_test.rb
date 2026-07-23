@@ -51,6 +51,21 @@ class StaticEvidenceCovTest < Minitest::Test
         "collection_index_lookups" => [
           { "path" => file_path, "line" => 21, "code" => "foo[:bar]" }
         ],
+        "nullable_refinements" => [
+          { "condition_node_id" => "condition:1", "place_id" => "place:cache:value", "state_on_edge" => "definitely_non_null" }
+        ],
+        "nullable_states" => [
+          { "node_id" => "node:1", "place_id" => "place:cache:value", "state" => "definitely_null", "complete" => true }
+        ],
+        "nullable_summaries" => [
+          { "owner" => "Cov", "function" => "lookup", "return_state" => "definitely_null", "complete" => true }
+        ],
+        "nullable_operations" => [
+          { "path" => file_path, "span" => [24, 2, 24, 9], "node_id" => "node:deref", "place_id" => "place:cache:value", "operation_kind" => "pointer_dereference", "nil_behavior" => "undefined_behavior", "complete" => true }
+        ],
+        "presence_correlations" => [
+          { "group_id" => "presence:cache", "value_place_id" => "place:cache:value", "presence_place_id" => "place:cache:ok", "semantics" => "map_presence" }
+        ],
         "methods" => [
           { "id" => "fn:Cov#method1", "name" => "method1", "owner" => "Cov", "path" => file_path, "line" => 5 }
         ],
@@ -69,6 +84,9 @@ class StaticEvidenceCovTest < Minitest::Test
         assert_equal 1, evidence.dig("facts", "state_protocol_records").length
         assert_equal 1, evidence.dig("facts", "state_param_origin_records").length
         assert_equal 1, evidence.dig("facts", "collection_index_lookups").length
+        assert_equal "definitely_null", evidence.dig("facts", "nullable_states", 0, "state")
+        assert_equal "undefined_behavior", evidence.dig("facts", "nullable_operations", 0, "nil_behavior")
+        assert_equal "presence:cache", evidence.dig("facts", "presence_correlations", 0, "group_id")
       ensure
         ENV.delete("FACT_MINE_FACTS_FILE")
       end

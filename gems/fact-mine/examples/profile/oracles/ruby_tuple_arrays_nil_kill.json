@@ -81,10 +81,12 @@
     "exact_project_targets": 0,
     "functions_with_unresolved_calls": 0,
     "modeled_without_project_target": 0,
-    "normalized_calls_without_raw_span": 4,
+    "normalized_calls_without_raw_span": 2,
     "outside_executable_function": 0,
     "owners_with_supertypes": 0,
-    "raw_calls_not_normalized": 3,
+    "raw_calls_not_normalized": 0,
+    "raw_calls_not_normalized_inside_function": 0,
+    "raw_calls_not_normalized_outside_function": 0,
     "raw_parser_call_sites": 9,
     "semantically_accounted_call_percent": 0.0,
     "semantically_accounted_call_sites": 0,
@@ -730,6 +732,30 @@
       "visibility": "public"
     }
   ],
+  "nullable_operations": [],
+  "nullable_states": [
+    {
+      "complete": false,
+      "node_id": "cfg:TupleArrayEvidence#build:stmt:2:9:4",
+      "place_id": "place:TupleArrayEvidence#build:local:name",
+      "source_definition_ids": [],
+      "state": "unknown",
+      "unknown_reasons": [
+        "unresolved_nullable_producer"
+      ]
+    },
+    {
+      "complete": false,
+      "node_id": "cfg:TupleArrayEvidence#build:stmt:2:9:4",
+      "place_id": "place:TupleArrayEvidence#build:local:node",
+      "source_definition_ids": [],
+      "state": "unknown",
+      "unknown_reasons": [
+        "unresolved_nullable_producer"
+      ]
+    }
+  ],
+  "nullable_summaries": [],
   "owners": [
     {
       "confidence": "high",
@@ -1003,6 +1029,7 @@
       "unknown_reasons": []
     }
   ],
+  "presence_correlations": [],
   "return_direct_usage_sites": [
     {
       "code": "extend T::Sig",

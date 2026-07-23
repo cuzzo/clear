@@ -190,14 +190,16 @@ module SlopCop
     end
 
     def to_sarif_hash
+      results = sarif_results
       SlopCop::Sarif.document(
         tool_name: "SlopCop",
         information_uri: "https://github.com/codeforreno/litedb",
         rules: sarif_rules,
-        results: sarif_results,
+        results: results,
         properties: {
           "format" => "slopcop.report.sarif.v1",
-          "slopcop.report" => to_h
+          "slopcop.report" => to_h,
+          SlopCop::Sarif::PROOF_BOUNDARY_SUMMARY_PROPERTY => SlopCop::Sarif.proof_boundary_summary(results)
         }
       )
     end
@@ -240,7 +242,16 @@ module SlopCop
           properties: stringify_keys(gap).merge(
             "dark_arm" => true,
             "category" => "genuine",
-            "source_format" => "slopcop.report.v1"
+            "source_format" => "slopcop.report.v1",
+            SlopCop::Sarif::PROOF_BOUNDARY_PROPERTY => SlopCop::Sarif.proof_boundary(
+              input_completeness: "unknown",
+              claim_status: "observed",
+              coverage_discharge: "satisfiable",
+              authority: ["slopcop_coverage"],
+              claim_kind: "coverage_gap",
+              scope: { kind: "project", closed: false },
+              blockers: [{ kind: "unknown" }]
+            )
           )
         )
       end
@@ -262,7 +273,16 @@ module SlopCop
           properties: stringify_keys(arm).merge(
             "dark_arm" => true,
             "category" => "dark arm: #{category}",
-            "source_format" => "slopcop.report.v1"
+            "source_format" => "slopcop.report.v1",
+            SlopCop::Sarif::PROOF_BOUNDARY_PROPERTY => SlopCop::Sarif.proof_boundary(
+              input_completeness: "unknown",
+              claim_status: "observed",
+              coverage_discharge: "satisfiable",
+              authority: ["slopcop_coverage"],
+              claim_kind: "coverage_gap",
+              scope: { kind: "project", closed: false },
+              blockers: [{ kind: "unknown" }]
+            )
           )
         )
       end

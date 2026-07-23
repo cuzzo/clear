@@ -4,13 +4,14 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_intrinsic_call_complexity, eliminable_guard_from_call, nil_guard_from_predicates,
-    scip_descriptor_owner, scip_global_parts, NormalizedCallComplexity, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
-    NormalizedSemanticEffect,
+    configured_intrinsic_call_complexity, eliminable_guard_from_call, exact_direct_call_name,
+    native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, type_before_parameter_name, NormalizedCallComplexity, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedNullableOperation, NormalizedOwner, NormalizedSemanticEffect,
 };
 use super::{CallSite, ExternalSymbolMetadata};
-use crate::ast::{Node, Span};
+use crate::ast::{Child, Node, Span};
 use std::collections::BTreeMap;
 
 const C_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
@@ -62,7 +63,11 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
     // global came from libc rather than a project header. Preserve that
     // uncertainty instead of turning a familiar spelling into fake proof.
     ExternalSymbolMetadata {
-        scope: if package == "." { "external" } else { "dependency" },
+        scope: if package == "." {
+            "external"
+        } else {
+            "dependency"
+        },
         missing_cost_kind: "dependency_cost_model_missing".to_string(),
         parametric_cost: None,
     }
@@ -83,6 +88,53 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        if node.r#type == "VCALL" {
+            return local_call_subject(node).map(|subject| NormalizedNullableOperation {
+                subject,
+                operation_kind: "function_pointer_call",
+                nil_behavior: "undefined_behavior",
+            });
+        }
+        let subject = (node.r#type == "POINTER_EXPRESSION"
+            && node.text.trim_start().starts_with('*'))
+        .then(|| node.children.first().and_then(crate::ast::node))
+        .flatten()
+        .filter(|subject| subject.r#type == "LVAR")?
+        .text
+        .trim()
+        .to_string();
+        (!subject.is_empty()).then_some(NormalizedNullableOperation {
+            subject,
+            operation_kind: "pointer_dereference",
+            nil_behavior: "undefined_behavior",
+        })
+    }
+
+    fn function_value_calls_are_local_reads(&self) -> bool {
+        true
+    }
+
+    fn nullable_call_result_contract(&self, node: &Node) -> Option<&'static str> {
+        exact_direct_call_name(node).and_then(|name| match name {
+            "malloc" | "calloc" => Some("nullable_allocation"),
+            "realloc" => Some("nullable_reallocation_preserves_input"),
+            _ => None,
+        })
+    }
+
+    fn nullable_declared_type_contract(&self, type_name: &str) -> Option<&'static str> {
+        native_pointer_nullability_contract(type_name)
+    }
+
+    fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
+        super::normalized_behavior::type_before_local_name(source, name)
+    }
+
+    fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
+        type_before_parameter_name(parameter)
+    }
+
     fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
         external_symbol_metadata(symbol)
     }
@@ -137,9 +189,11 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 
     fn state_identity(&self, owner: &str, field: &str) -> String {
-        (!owner.is_empty())
-            .then(|| format!("{owner}::{field}"))
-            .unwrap_or_default()
+        if !owner.is_empty() {
+            format!("{owner}::{field}")
+        } else {
+            Default::default()
+        }
     }
 
     fn suppress_state_read_for_call(
@@ -247,7 +301,11 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
             if let Some(end) = param[start..].find(')') {
                 let inner = &param[start + 2..start + end];
                 let name = inner.trim_start_matches('*').trim();
-                if !name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                if !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                {
                     return Some(name.to_string());
                 }
             }
@@ -258,8 +316,7 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         }
         let text = text.split('=').next().unwrap_or(text).trim();
         text.split(|ch: char| !(ch == '_' || ch == '?' || ch.is_ascii_alphanumeric()))
-            .filter(|part| !part.is_empty())
-            .next_back()
+            .rfind(|part| !part.is_empty())
             .map(|part| part.trim_end_matches('?').to_string())
     }
 
@@ -323,8 +380,7 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         node.text
             .trim_end_matches(';')
             .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-            .filter(|part| simple_identifier(part))
-            .next_back()
+            .rfind(|part| simple_identifier(part))
             .map(str::to_string)
     }
     fn format_array_type(&self, elem: &str) -> String {
@@ -340,9 +396,11 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.ends_with('*') {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.ends_with('*')
+        {
             type_text.to_string()
         } else {
             format!("{}*", type_text)
@@ -362,12 +420,22 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 }
 
+fn local_call_subject(node: &Node) -> Option<String> {
+    match node.children.first()? {
+        Child::Symbol(subject) | Child::String(subject) => {
+            (!subject.trim().is_empty()).then(|| subject.trim().to_string())
+        }
+        _ => None,
+    }
+}
+
 static BEHAVIOR: CNormalizedBehavior = CNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
 }
 
+#[cfg(test)]
 fn span(node: &Node) -> Span {
     [
         node.first_lineno,
@@ -384,7 +452,18 @@ fn typed_pointer_owner(parameter: &str) -> Option<String> {
     let normalized = parameter.replace(['*', '&'], " ");
     let tokens = normalized
         .split_whitespace()
-        .filter(|token| !matches!(*token, "const" | "volatile" | "struct"))
+        .filter(|token| {
+            !matches!(
+                *token,
+                "const"
+                    | "volatile"
+                    | "struct"
+                    | "_Nullable"
+                    | "_Nonnull"
+                    | "__nullable"
+                    | "__nonnull"
+            )
+        })
         .collect::<Vec<_>>();
     if tokens.len() < 2 {
         return None;
@@ -431,6 +510,7 @@ fn simple_identifier(name: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
+#[cfg(test)]
 fn is_simple_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains(' ')
@@ -441,7 +521,7 @@ fn is_simple_name(name: &str) -> bool {
         && name
             .chars()
             .next()
-            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
         && name
             .chars()
             .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
@@ -461,6 +541,78 @@ mod tests {
             last_column: 20,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn function_pointer_operations_require_a_symbol_callee() {
+        let callback = Node {
+            children: vec![Child::Symbol("callback".to_string())],
+            ..node("VCALL", "callback()")
+        };
+        assert_eq!(local_call_subject(&callback), Some("callback".to_string()));
+        let malformed = Node {
+            children: vec![Child::Nil],
+            ..node("VCALL", "callback()")
+        };
+        assert_eq!(local_call_subject(&malformed), None);
+        assert!(CNormalizedBehavior.function_value_calls_are_local_reads());
+
+        let address = Node {
+            children: vec![Child::Node(Box::new(node("LVAR", "value")))],
+            ..node("POINTER_EXPRESSION", "&value")
+        };
+        assert!(CNormalizedBehavior.nullable_operation(&address).is_none());
+    }
+
+    #[test]
+    fn allocator_contracts_require_exact_bare_call_identity() {
+        let behavior = CNormalizedBehavior;
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "malloc(sizeof(int))")),
+            Some("nullable_allocation")
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "realloc(value, 8)")),
+            Some("nullable_reallocation_preserves_input")
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "custom_malloc(value)")),
+            None
+        );
+        assert_eq!(
+            behavior.nullable_call_result_contract(&node("CALL", "object.malloc()")),
+            None
+        );
+        assert_eq!(
+            behavior.nullable_declared_type_contract("Widget * _Nullable"),
+            Some("nullable_declared_type")
+        );
+        assert_eq!(behavior.nullable_declared_type_contract("Widget *"), None);
+        assert_eq!(
+            behavior.declared_local_type("Widget * _Nullable value = load_widget()", "value"),
+            Some("Widget * _Nullable".to_string())
+        );
+    }
+
+    #[test]
+    fn typed_pointer_owner_ignores_nullability_annotations() {
+        assert_eq!(
+            typed_pointer_owner("Widget * _Nullable value"),
+            Some("Widget".to_string())
+        );
+        assert_eq!(
+            typed_pointer_owner("Widget * _Nonnull value"),
+            Some("Widget".to_string())
+        );
+        assert_eq!(typed_pointer_owner("* value"), None);
+    }
+
+    #[test]
+    fn c_parameter_type_preserves_nullability_annotation() {
+        assert_eq!(
+            CNormalizedBehavior.parameter_type_from_signature("Widget * _Nullable value"),
+            Some("Widget * _Nullable".to_string())
+        );
     }
 
     #[test]

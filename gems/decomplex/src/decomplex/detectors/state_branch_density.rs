@@ -188,7 +188,9 @@ fn method_parameter_type(document: &Document, function: &str, param: &str) -> Op
         .filter_map(|(_, params)| params.get(param))
         .cloned()
         .collect::<BTreeSet<_>>();
-    (candidates.len() == 1).then(|| candidates.into_iter().next()).flatten()
+    (candidates.len() == 1)
+        .then(|| candidates.into_iter().next())
+        .flatten()
 }
 
 fn filter_wrapper_decisions(decisions: Vec<Decision>) -> Vec<Decision> {
@@ -309,7 +311,8 @@ mod tests {
             "method_param_types": {
                 "foo": { "obj": "AliasType" }
             }
-        })).unwrap();
+        }))
+        .unwrap();
 
         let params = doc.method_param_types.remove("foo").unwrap();
         doc.method_param_types
@@ -335,7 +338,9 @@ mod tests {
         let mut loop_doc = doc.clone();
         loop_doc.method_param_types.insert(
             "loop_fn".to_string(),
-            vec![("obj".to_string(), "Loop1".to_string())].into_iter().collect(),
+            vec![("obj".to_string(), "Loop1".to_string())]
+                .into_iter()
+                .collect(),
         );
         let metadata_loop = BranchMetadata::from_documents(&[loop_doc.clone()]);
         assert!(!metadata_loop.immutable_state_ref(&loop_doc, "loop_fn", "obj.a"));
@@ -376,18 +381,14 @@ end
 "#,
         ]
         .concat();
-        fs::write(
-            &file,
-            source,
-        )
-        .unwrap();
+        fs::write(&file, source).unwrap();
 
         let rows = scan_files(&[file], Language::Ruby).unwrap();
 
         assert!(!rows.iter().any(|row| row.method == "from_const"));
-        assert!(rows.iter().any(|row| {
-            row.method == "from_prop" && row.state_refs == ["options.dirty"]
-        }));
+        assert!(rows
+            .iter()
+            .any(|row| { row.method == "from_prop" && row.state_refs == ["options.dirty"] }));
     }
 
     #[test]

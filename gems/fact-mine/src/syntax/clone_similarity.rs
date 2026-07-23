@@ -334,9 +334,9 @@ fn normalized_identifier_text(text: &str) -> bool {
 }
 
 const NORMALIZED_CLONE_CANDIDATE_TYPES: &[&str] = &[
-    "DEFN", "DEFS", "BLOCK", "IF", "UNLESS", "CASE", "CASE2", "MATCH", "MATCH2", "MATCH3", "WHEN", "AND", "OR", "FOR", "WHILE",
-    "UNTIL", "ITER", "CALL", "QCALL", "FCALL", "VCALL", "OPCALL", "OP_ASGN1", "OP_ASGN2",
-    "ATTRASGN", "HASH", "LIST",
+    "DEFN", "DEFS", "BLOCK", "IF", "UNLESS", "CASE", "CASE2", "MATCH", "MATCH2", "MATCH3", "WHEN",
+    "AND", "OR", "FOR", "WHILE", "UNTIL", "ITER", "CALL", "QCALL", "FCALL", "VCALL", "OPCALL",
+    "OP_ASGN1", "OP_ASGN2", "ATTRASGN", "HASH", "LIST",
 ];
 const NORMALIZED_CLONE_SKIP_TYPES: &[&str] = &["ROOT", "SCOPE", "ARGS", "ZLIST"];
 const NORMALIZED_CLONE_IDENTIFIER_TYPES: &[&str] =

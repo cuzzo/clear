@@ -105,6 +105,10 @@ pub fn replace_deterministic_guard(input: &InputState) -> Vec<Action> {
 use crate::schemas::{Action, InputState, MethodRecord, SourceRecord};
 use std::collections::HashMap;
 
+mod fact_helpers;
+mod primitive_domains;
+mod static_nil_pressure;
+
 pub fn propose_sig(input: &InputState) -> Vec<Action> {
     let mut actions = Vec::new();
     for m in &input.methods {
@@ -430,7 +434,7 @@ fn runtime_return_type_candidate(m: &MethodRecord) -> String {
     } else if observed == "Hash" {
         let keys = m
             .return_kv
-            .get(0)
+            .first()
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
@@ -443,7 +447,7 @@ fn runtime_return_type_candidate(m: &MethodRecord) -> String {
 
         let mut key_shapes = Vec::new();
         let mut val_shapes = Vec::new();
-        if let Some(kv_shapes_arr) = m.return_kv_shapes.get(0).and_then(|v| v.as_array()) {
+        if let Some(kv_shapes_arr) = m.return_kv_shapes.first().and_then(|v| v.as_array()) {
             key_shapes = kv_shapes_arr.clone();
         }
         if let Some(kv_shapes_arr) = m.return_kv_shapes.get(1).and_then(|v| v.as_array()) {
@@ -489,7 +493,7 @@ fn report_union_candidates(m: &MethodRecord, src: &SourceRecord, actions: &mut V
             };
             if let Some(sites_for_param) = sites.get(name) {
                 for (site, count) in sites_for_param {
-                    let class_name = site.split(':').last().unwrap_or("");
+                    let class_name = site.split(':').next_back().unwrap_or("");
                     if others.iter().any(|c| c == class_name) {
                         callsites.insert(site.clone(), serde_json::Value::Number((*count).into()));
                     }
@@ -618,7 +622,7 @@ fn generic_candidate_type(
         let mut key = None;
         let mut val = None;
         if let Some(shapes_arr) = kv_shapes.and_then(|v| v.as_array()) {
-            if let Some(k_shapes) = shapes_arr.get(0).and_then(|v| v.as_array()) {
+            if let Some(k_shapes) = shapes_arr.first().and_then(|v| v.as_array()) {
                 key = shape_union_type(k_shapes);
             }
             if let Some(v_shapes) = shapes_arr.get(1).and_then(|v| v.as_array()) {
@@ -627,7 +631,7 @@ fn generic_candidate_type(
         }
         if key.is_none() {
             if let Some(classes_arr) = kv_classes.and_then(|v| v.as_array()) {
-                if let Some(k_classes) = classes_arr.get(0).and_then(|v| v.as_array()) {
+                if let Some(k_classes) = classes_arr.first().and_then(|v| v.as_array()) {
                     key = conservative_element_type_json(k_classes);
                 }
             }
@@ -919,7 +923,7 @@ pub fn validate_sig(
                             .cloned()
                             .unwrap_or(serde_json::Value::Array(Vec::new()));
 
-                        let has_blockers = blockers.as_array().map_or(false, |b| !b.is_empty());
+                        let has_blockers = blockers.as_array().is_some_and(|b| !b.is_empty());
 
                         let mut is_high = conf == "strong" && !has_blockers;
                         if is_high {
@@ -950,7 +954,7 @@ pub fn validate_sig(
                                             is_high = false;
                                             break;
                                         }
-                                        if s_obj.get("stdlib").map_or(false, |v| {
+                                        if s_obj.get("stdlib").is_some_and(|v| {
                                             !v.is_null() && v.as_bool() != Some(false)
                                         }) {
                                             continue;
@@ -968,7 +972,7 @@ pub fn validate_sig(
                                                 .unwrap_or("");
                                             if kind == "static" {
                                                 let is_stdlib =
-                                                    s_obj.get("stdlib").map_or(false, |v| {
+                                                    s_obj.get("stdlib").is_some_and(|v| {
                                                         !v.is_null() && v.as_bool() != Some(false)
                                                     });
                                                 if !is_stdlib {
@@ -986,7 +990,7 @@ pub fn validate_sig(
                                                         || code == "nil"
                                                         || code.contains(".new(");
                                                     let starts_with_digit =
-                                                        code.chars().next().map_or(false, |c| {
+                                                        code.chars().next().is_some_and(|c| {
                                                             c.is_ascii_digit() || c == '-'
                                                         });
                                                     if !is_self_evident && !starts_with_digit {
@@ -1022,10 +1026,8 @@ pub fn validate_sig(
                             serde_json::Value::String(conf.to_string()),
                         );
 
-                        let mut final_blockers = blockers
-                            .as_array()
-                            .map(|v| v.clone())
-                            .unwrap_or_else(Vec::new);
+                        let mut final_blockers =
+                            blockers.as_array().cloned().unwrap_or_else(Vec::new);
                         final_blockers.truncate(8);
                         data.insert(
                             "blockers".to_string(),
@@ -1039,11 +1041,10 @@ pub fn validate_sig(
                                 && c != "NilClass"
                                 && !c.contains("#")
                                 && !c.starts_with("Sorbet::Private::")
+                                && cand == "void"
                             {
-                                if cand == "void" {
-                                    contradicts_void = true;
-                                    break;
-                                }
+                                contradicts_void = true;
+                                break;
                             }
                         }
 
@@ -1112,10 +1113,8 @@ fn extract_param_entries(sig: &str) -> Vec<(String, String)> {
                 token.push(c);
             }
         }
-        if parsing_type {
-            if !current_name.is_empty() {
-                params.push((current_name, token.trim().to_string()));
-            }
+        if parsing_type && !current_name.is_empty() {
+            params.push((current_name, token.trim().to_string()));
         }
     }
     params
@@ -1478,7 +1477,7 @@ fn propose_static_param_backflow_actions(
                     kind: "fix_sig_param".to_string(),
                     confidence: "review".to_string(),
                     path: path.to_string(),
-                    line: line,
+                    line,
                     message: format!(
                         "static callsites prove param {} is {}; {} static callsite(s) agree",
                         param_name,
@@ -1631,7 +1630,7 @@ fn runtime_record_for_signature<'a>(
             .iter()
             .map(|value| value.as_str().unwrap_or("").to_string())
             .collect();
-        key_strings.get(0).map(String::as_str) == Some(owner)
+        key_strings.first().map(String::as_str) == Some(owner)
             && key_strings.get(1).map(String::as_str) == Some(method)
             && key_strings.get(2).map(String::as_str) == Some(kind)
             && record.key.get(4).and_then(|value| value.as_i64()) == Some(line)
@@ -1820,11 +1819,17 @@ fn rewriteable_field_type(current_type: &str, candidate: &str) -> bool {
 }
 
 fn propose_false_nilable_return_actions(input: &InputState) -> Vec<Action> {
-    let Some(existing_sigs) = input.facts.get("existing_sigs").and_then(|value| value.as_array())
+    let Some(existing_sigs) = input
+        .facts
+        .get("existing_sigs")
+        .and_then(|value| value.as_array())
     else {
         return Vec::new();
     };
-    let Some(return_origins) = input.facts.get("return_origins").and_then(|value| value.as_array())
+    let Some(return_origins) = input
+        .facts
+        .get("return_origins")
+        .and_then(|value| value.as_array())
     else {
         return Vec::new();
     };
@@ -1906,7 +1911,12 @@ fn propose_false_nilable_return_actions(input: &InputState) -> Vec<Action> {
 }
 
 fn fact_location(value: &serde_json::Value) -> String {
-    let text = |key| value.get(key).and_then(|item| item.as_str()).unwrap_or_default();
+    let text = |key| {
+        value
+            .get(key)
+            .and_then(|item| item.as_str())
+            .unwrap_or_default()
+    };
     let line = value
         .get("line")
         .and_then(|item| item.as_i64())
@@ -2062,7 +2072,7 @@ fn propose_forwarded_return_chain_actions(input: &InputState) -> Vec<Action> {
                     kind: "fix_sig_return".to_string(),
                     confidence: confidence.to_string(),
                     path: path.to_string(),
-                    line: line,
+                    line,
                     message: format!(
                         "existing sig return is T.untyped; forwarded-return chain resolves to {}",
                         candidate
@@ -2576,6 +2586,8 @@ pub fn build_actions(input: &InputState) -> Vec<Action> {
     actions.extend(propose_false_nilable_return_actions(input));
     actions.extend(propose_forwarded_return_chain_actions(input));
     actions.extend(propose_struct_field_sig_actions(input));
+    actions.extend(static_nil_pressure::report(input));
+    actions.extend(primitive_domains::report(input));
 
     actions
 }
@@ -2633,6 +2645,327 @@ mod tests {
     }
 
     #[test]
+    fn reports_closed_string_domains_for_state_observations_only() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "hidden_enum_observations": [
+                    {
+                        "event": "decision", "kind": "state", "key": "state:status",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "site": {"path": "post.rb", "line": 4},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:status",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "site": {"path": "post.rb", "line": 8},
+                        "values": [{"kind": "String", "value": "\"published\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "param", "key": "param:status",
+                        "path": "post.rb", "line": 12, "slot": "status",
+                        "site": {"path": "post.rb", "line": 13},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:ignored",
+                        "path": "post.rb", "line": 16, "slot": "@ignored",
+                        "values": [{"kind": "Integer", "value": "1"}, {"kind": "String"}]
+                    }
+                ]
+            }
+        }));
+        let actions = primitive_domains::report(&input);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].kind, "report_static_primitive_domain");
+        assert_eq!(
+            actions[0].data["values"],
+            serde_json::json!(["\"draft\"", "\"published\""])
+        );
+        assert_eq!(
+            actions[0].data["decision_sites"],
+            serde_json::json!(["post.rb:4", "post.rb:8"])
+        );
+    }
+
+    #[test]
+    fn reports_closed_symbol_and_integer_domains_without_opening_params() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [], "facts": { "hidden_enum_observations": [
+                {"event":"decision","kind":"state","key":"state:phase","path":"job.rb","line":2,"slot":"@phase","site":{"path":"job.rb","line":3},"values":[{"kind":"Symbol","value":":queued"}]},
+                {"event":"decision","kind":"state","key":"state:phase","path":"job.rb","line":2,"slot":"@phase","site":{"path":"job.rb","line":4},"values":[{"kind":"Symbol","value":":done"}]},
+                {"event":"decision","kind":"local","key":"local:attempt","path":"job.rb","line":8,"slot":"attempt","site":{"path":"job.rb","line":9},"values":[{"kind":"Integer","value":"1"}]},
+                {"event":"decision","kind":"local","key":"local:attempt","path":"job.rb","line":8,"slot":"attempt","site":{"path":"job.rb","line":10},"values":[{"kind":"Integer","value":"2"}]},
+                {"event":"decision","kind":"param","key":"param:phase","path":"job.rb","line":12,"slot":"phase","site":{"path":"job.rb","line":13},"values":[{"kind":"Symbol","value":":queued"}]}
+            ]}
+        }));
+        let actions = primitive_domains::report(&input);
+        assert_eq!(actions.len(), 2);
+        assert!(actions.iter().any(|action| action.data["slot"] == "@phase"));
+        assert!(actions
+            .iter()
+            .any(|action| action.data["slot"] == "attempt"));
+    }
+
+    #[test]
+    fn malformed_primitive_domain_observations_fail_closed() {
+        for values in [
+            serde_json::Value::Null,
+            serde_json::json!([]),
+            serde_json::json!([{"kind": "Integer"}]),
+        ] {
+            let first = if values.is_null() {
+                serde_json::json!({
+                    "event":"decision", "kind":"state", "key":"state:attempt",
+                    "path":"job.rb", "line":2, "slot":"@attempt",
+                    "site":{"path":"job.rb", "line":3}
+                })
+            } else {
+                serde_json::json!({
+                    "event":"decision", "kind":"state", "key":"state:attempt",
+                    "path":"job.rb", "line":2, "slot":"@attempt",
+                    "site":{"path":"job.rb", "line":3}, "values": values
+                })
+            };
+            let input = input_from_json(serde_json::json!({
+                "methods": [], "facts": { "hidden_enum_observations": [
+                    first,
+                    {"event":"decision","kind":"state","key":"state:attempt","path":"job.rb","line":2,"slot":"@attempt","site":{"path":"job.rb","line":4},"values":[{"kind":"Integer","value":"2"}]}
+                ]}
+            }));
+            assert!(primitive_domains::report(&input).is_empty());
+        }
+    }
+
+    #[test]
+    fn excludes_open_world_unrelated_and_unsupported_domain_observations() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "hidden_enum_observations": [
+                    {
+                        "event": "decision", "kind": "state",
+                        "path": "ignored.rb", "line": 1, "slot": "@ignored",
+                        "site": {"path": "ignored.rb", "line": 1},
+                        "values": [{"kind": "String", "value": "\"ignored\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "site": {"path": "post.rb", "line": 4, "kind": "if"},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "site": {"path": "post.rb", "line": 8},
+                        "values": [{"kind": "String", "value": "\"published\""}]
+                    },
+                    {
+                        "event": "blocker", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "site": {"path": "post.rb", "line": 3, "kind": "open-world producer"}
+                    },
+                    {
+                        "event": "producer", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status",
+                        "values": [{"kind": "String", "value": "\"abandoned\""}]
+                    },
+                    {
+                        "event": "note", "kind": "state", "key": "state:open",
+                        "path": "post.rb", "line": 2, "slot": "@status"
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:first",
+                        "path": "first.rb", "line": 2, "slot": "status",
+                        "site": {"path": "first.rb", "line": 4},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:second",
+                        "path": "second.rb", "line": 2, "slot": "status",
+                        "site": {"path": "second.rb", "line": 4},
+                        "values": [{"kind": "String", "value": "\"published\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "param", "key": "param:status",
+                        "path": "post.rb", "line": 12, "slot": "status",
+                        "site": {"path": "post.rb", "line": 13},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "param", "key": "param:status",
+                        "path": "post.rb", "line": 12, "slot": "status",
+                        "site": {"path": "post.rb", "line": 14},
+                        "values": [{"kind": "String", "value": "\"published\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:flags",
+                        "path": "post.rb", "line": 16, "slot": "@flags",
+                        "site": {"path": "post.rb", "line": 17},
+                        "values": [{"kind": "Integer", "value": "1"}]
+                    },
+                    {
+                        "event": "decision", "kind": "state", "key": "state:flags",
+                        "path": "post.rb", "line": 16, "slot": "@flags",
+                        "site": {"path": "post.rb", "line": 18},
+                        "values": [{"kind": "Integer", "value": "2"}]
+                    }
+                ]
+            }
+        }));
+
+        let actions = primitive_domains::report(&input);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].data["slot"], "@flags");
+        assert_eq!(actions[0].data["values"], serde_json::json!(["1", "2"]));
+    }
+
+    #[test]
+    fn reports_a_closed_switch_with_a_literal_producer() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "hidden_enum_observations": [
+                    {
+                        "event": "decision", "kind": "state", "key": "state:workflow",
+                        "path": "workflow.rb", "line": 2, "slot": "@state",
+                        "site": {"path": "workflow.rb", "line": 8, "kind": "case"},
+                        "values": [
+                            {"kind": "String", "value": "\"draft\""},
+                            {"kind": "String", "value": "\"sent\""}
+                        ]
+                    },
+                    {
+                        "event": "producer", "kind": "state", "key": "state:workflow",
+                        "path": "workflow.rb", "line": 2, "slot": "@state",
+                        "site": {"path": "workflow.rb", "line": 4, "kind": "producer"},
+                        "values": [{"kind": "String", "value": "\"archived\""}]
+                    }
+                ]
+            }
+        }));
+
+        let actions = primitive_domains::report(&input);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0].data["values"],
+            serde_json::json!(["\"archived\"", "\"draft\"", "\"sent\""])
+        );
+        assert_eq!(
+            actions[0].data["decision_sites"],
+            serde_json::json!(["workflow.rb:8"])
+        );
+    }
+
+    #[test]
+    fn local_domains_use_callable_qualified_factmine_identity() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "hidden_enum_observations": [
+                    {
+                        "event": "decision", "kind": "local", "key": "local:first:status",
+                        "path": "workflow.rb", "line": 2, "slot": "status",
+                        "site": {"path": "workflow.rb", "line": 4},
+                        "values": [{"kind": "String", "value": "\"draft\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "local", "key": "local:first:status",
+                        "path": "workflow.rb", "line": 2, "slot": "status",
+                        "site": {"path": "workflow.rb", "line": 5},
+                        "values": [{"kind": "String", "value": "\"sent\""}]
+                    },
+                    {
+                        "event": "decision", "kind": "local", "key": "local:second:status",
+                        "path": "workflow.rb", "line": 10, "slot": "status",
+                        "site": {"path": "workflow.rb", "line": 12},
+                        "values": [{"kind": "String", "value": "\"queued\""}]
+                    }
+                ]
+            }
+        }));
+
+        let actions = primitive_domains::report(&input);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].line, 2);
+        assert!(actions[0]
+            .message
+            .starts_with("local status has a closed-looking String domain"));
+        assert_eq!(
+            actions[0].data["values"],
+            serde_json::json!(["\"draft\"", "\"sent\""])
+        );
+    }
+
+    #[test]
+    fn static_nil_pressure_uses_nullable_public_facts_not_hazard_sites() {
+        let input = input_from_json(serde_json::json!({
+            "methods": [],
+            "facts": {
+                "hazard_sites": [{
+                    "hazard_type": "c_null_pointer_dereference",
+                    "path": "cache.c",
+                    "line": 12,
+                    "evidence": "nil-kill"
+                }]
+            }
+        }));
+
+        assert!(static_nil_pressure::report(&input).is_empty());
+    }
+
+    #[test]
+    fn static_nil_pressure_has_no_source_analysis_dependency() {
+        let manifest = include_str!("../Cargo.toml");
+        let runtime_dependencies = manifest
+            .split("[dev-dependencies]")
+            .next()
+            .unwrap_or(manifest);
+
+        assert!(!runtime_dependencies.contains("tree-sitter"));
+        assert!(!runtime_dependencies.contains("fact-mine"));
+    }
+
+    #[test]
+    fn static_nil_pressure_disappears_when_the_root_is_total_or_unknown() {
+        for state in ["definitely_non_null", "unknown"] {
+            let input = input_from_json(serde_json::json!({
+                "methods": [],
+                "facts": {
+                    "nullable_states": [{
+                        "state": state,
+                        "complete": state == "definitely_non_null",
+                        "place_id": "place:cache:value",
+                        "source_definition_ids": ["definition:cache_lookup"]
+                    }],
+                    "nullable_operations": [{
+                        "place_id": "place:cache:value",
+                        "node_id": "deref:1",
+                        "operation_kind": "pointer_dereference",
+                        "nil_behavior": "undefined_behavior",
+                        "complete": true
+                    }]
+                }
+            }));
+
+            assert!(static_nil_pressure::report(&input).is_empty(), "{state}");
+        }
+    }
+
+    #[test]
+    fn static_nil_pressure_ignores_guarded_non_null_operations() {
+        let input = input_from_json(serde_json::json!({
+            "facts": {
+                "nullable_states": [{"place_id": "place:value", "state": "maybe_null", "complete": true, "source_definition_ids": ["definition:value"]}],
+                "nullable_operations": [{"path": "guarded.cs", "span": [7, 0, 7, 12], "node_id": "operation", "operation_kind": "receiver_member_access", "nil_behavior": "null_reference_exception", "state_at_operation": "definitely_non_null", "complete": true, "source_definition_ids": ["definition:value"]}]
+            }
+        }));
+        assert!(static_nil_pressure::report(&input).is_empty());
+    }
+
+    #[test]
     fn strong_static_return_can_remove_false_nilability() {
         let input = input_from_json(serde_json::json!({
             "methods": [],
@@ -2676,6 +3009,235 @@ mod tests {
                 && action.data.get("from").and_then(|value| value.as_str())
                     == Some("T.nilable(Token)")
         }));
+    }
+
+    #[test]
+    fn static_nil_pressure_groups_only_proven_obligations_by_root() {
+        let input = input_from_json(serde_json::json!({
+            "facts": {
+                "nullable_states": [
+                    {
+                        "state": "definitely_null",
+                        "complete": true,
+                        "place_id": "place:cache:value",
+                        "source_definition_ids": ["definition:cache_lookup"]
+                    },
+                    {
+                        "state": "unknown",
+                        "complete": false,
+                        "place_id": "place:cache:unknown",
+                        "source_definition_ids": ["definition:unknown"]
+                    },
+                    {
+                        "state": "definitely_null",
+                        "complete": true,
+                        "source_definition_ids": ["definition:missing_place"]
+                    }
+                ],
+                "nullable_refinements": [
+                    {
+                        "place_id": "place:cache:value",
+                        "condition_node_id": "guard:1",
+                        "source_definition_ids": ["definition:cache_lookup"],
+                        "complete": true
+                    },
+                    {
+                        "condition_node_id": "missing-place"
+                    },
+                    {
+                        "place_id": "place:other:value",
+                        "condition_node_id": "other-place"
+                    },
+                    {
+                        "place_id": "place:cache:value",
+                        "condition_node_id": "guard:1",
+                        "source_definition_ids": ["definition:cache_lookup"],
+                        "complete": true
+                    }
+                ],
+                "nullable_summaries": [
+                    {
+                        "owner": "Cache",
+                        "function": "lookup",
+                        "return_state": "definitely_null",
+                        "complete": true,
+                        "source_definition_ids": ["definition:cache_lookup"]
+                    },
+                    {
+                        "owner": "Cache",
+                        "function": "unknown_lookup",
+                        "return_state": "unknown",
+                        "complete": false,
+                        "source_definition_ids": ["definition:unknown"]
+                    }
+                ],
+                "nullable_operations": [
+                    {
+                        "place_id": "place:cache:value",
+                        "node_id": "deref:1",
+                        "path": "cache.c",
+                        "span": [14, 2, 14, 8],
+                        "operation_kind": "pointer_dereference",
+                        "nil_behavior": "undefined_behavior",
+                        "state_at_operation": "definitely_null",
+                        "complete": true,
+                        "source_definition_ids": ["definition:cache_lookup"]
+                    },
+                    {
+                        "node_id": "missing-place",
+                        "operation_kind": "pointer_dereference",
+                        "nil_behavior": "undefined_behavior",
+                        "complete": true
+                    },
+                    {
+                        "place_id": "place:cache:value",
+                        "node_id": "safe:1",
+                        "operation_kind": "map_read",
+                        "nil_behavior": "safe",
+                        "complete": true
+                    }
+                ]
+            }
+        }));
+
+        let actions = super::static_nil_pressure::report(&input);
+
+        assert_eq!(actions.len(), 1);
+        let action = &actions[0];
+        assert_eq!(action.kind, "report_static_nil_pressure");
+        assert_eq!(action.path, "cache.c");
+        assert_eq!(action.line, 14);
+        assert_eq!(action.data["pressure"], 3);
+        assert_eq!(
+            action.data["guard_clusters"],
+            serde_json::json!(["place:cache:value:guard:1"])
+        );
+        assert_eq!(
+            action.data["nullable_returns"],
+            serde_json::json!(["Cache#lookup"])
+        );
+        assert_eq!(
+            action.data["unsafe_operations"],
+            serde_json::json!(["pointer_dereference:deref:1"])
+        );
+    }
+
+    #[test]
+    fn static_nil_pressure_keeps_reassigned_reaching_roots_separate() {
+        let input = input_from_json(serde_json::json!({
+            "facts": {
+                "nullable_states": [
+                    {"node_id": "after_a", "place_id": "place:value", "state": "maybe_null", "complete": true, "source_definition_ids": ["definition:a"]},
+                    {"node_id": "after_b", "place_id": "place:value", "state": "maybe_null", "complete": true, "source_definition_ids": ["definition:b"]}
+                ],
+                "nullable_refinements": [
+                    {"place_id": "place:value", "condition_node_id": "guard:a", "complete": true, "source_definition_ids": ["definition:a"]},
+                    {"place_id": "place:value", "condition_node_id": "guard:b", "complete": true, "source_definition_ids": ["definition:b"]}
+                ],
+                "nullable_operations": [
+                    {"path": "reassign.c", "span": [10, 0, 10, 5], "node_id": "operation:a", "operation_kind": "pointer_dereference", "nil_behavior": "undefined_behavior", "state_at_operation": "maybe_null", "complete": true, "source_definition_ids": ["definition:a"]},
+                    {"path": "reassign.c", "span": [20, 0, 20, 5], "node_id": "operation:b", "operation_kind": "pointer_dereference", "nil_behavior": "undefined_behavior", "state_at_operation": "maybe_null", "complete": true, "source_definition_ids": ["definition:b"]}
+                ]
+            }
+        }));
+
+        let actions = static_nil_pressure::report(&input);
+        assert_eq!(actions.len(), 2);
+        let action_for = |root: &str| {
+            actions
+                .iter()
+                .find(|action| {
+                    action
+                        .data
+                        .get("root_definition_id")
+                        .and_then(|value| value.as_str())
+                        == Some(root)
+                })
+                .unwrap()
+        };
+        let a = action_for("definition:a");
+        let b = action_for("definition:b");
+        assert_eq!(a.data["pressure"], 2);
+        assert_eq!(b.data["pressure"], 2);
+        assert_eq!(
+            a.data["guard_clusters"],
+            serde_json::json!(["place:value:guard:a"])
+        );
+        assert_eq!(
+            b.data["guard_clusters"],
+            serde_json::json!(["place:value:guard:b"])
+        );
+        assert_eq!(
+            a.data["unsafe_operations"],
+            serde_json::json!(["pointer_dereference:operation:a"])
+        );
+        assert_eq!(
+            b.data["unsafe_operations"],
+            serde_json::json!(["pointer_dereference:operation:b"])
+        );
+    }
+
+    #[test]
+    fn static_nil_pressure_fails_closed_for_incomplete_or_malformed_refinements() {
+        let input = input_from_json(serde_json::json!({
+            "facts": {
+                "nullable_states": [{"place_id": "place:value", "state": "maybe_null", "complete": true, "source_definition_ids": ["definition:a"]}],
+                "nullable_refinements": [
+                    {"place_id": "place:value", "condition_node_id": "incomplete", "complete": false, "source_definition_ids": ["definition:a"]},
+                    {"place_id": "place:value", "complete": true, "source_definition_ids": ["definition:a"]},
+                    {"place_id": "place:value", "condition_node_id": "missing-roots", "complete": true}
+                ],
+                "nullable_operations": [{"path": "guard.c", "span": [8, 0, 8, 4], "node_id": "operation", "operation_kind": "pointer_dereference", "nil_behavior": "undefined_behavior", "state_at_operation": "maybe_null", "complete": true, "source_definition_ids": ["definition:a"]}]
+            }
+        }));
+
+        let actions = static_nil_pressure::report(&input);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].data["pressure"], 1);
+        assert_eq!(actions[0].data["guard_clusters"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn static_nil_pressure_requires_an_anchored_unsafe_operation() {
+        let input = input_from_json(serde_json::json!({
+            "facts": {
+                "nullable_states": [
+                    {
+                        "state": "definitely_null",
+                        "complete": true,
+                        "place_id": "place:cleanup:sentinel",
+                        "source_definition_ids": ["definition:cleanup_sentinel"]
+                    },
+                    {
+                        "state": "maybe_null",
+                        "complete": true,
+                        "place_id": "place:missing:location",
+                        "source_definition_ids": ["definition:missing_location"]
+                    }
+                ],
+                "nullable_refinements": [
+                    {
+                        "place_id": "place:cleanup:sentinel",
+                        "condition_node_id": "guard:cleanup"
+                    },
+                    {
+                        "place_id": "place:cleanup:sentinel",
+                        "condition_node_id": "guard:release"
+                    }
+                ],
+                "nullable_operations": [
+                    {
+                        "place_id": "place:missing:location",
+                        "node_id": "deref:unknown-location",
+                        "operation_kind": "pointer_dereference",
+                        "nil_behavior": "undefined_behavior",
+                        "complete": true
+                    }
+                ]
+            }
+        }));
+
+        assert!(super::static_nil_pressure::report(&input).is_empty());
     }
 
     #[test]
@@ -2838,16 +3400,16 @@ mod tests {
     #[test]
     fn test_runtime_field_candidate_ignores_static_untyped_and_normalizes_boolean() {
         assert_eq!(
-            super::runtime_field_candidate(&vec!["String".to_string()], &[]),
+            super::runtime_field_candidate(&["String".to_string()], &[]),
             Some("String".to_string())
         );
         assert_eq!(
-            super::runtime_field_candidate(&vec!["FalseClass".to_string()], &[]),
+            super::runtime_field_candidate(&["FalseClass".to_string()], &[]),
             Some("T::Boolean".to_string())
         );
         assert_eq!(
             super::runtime_field_candidate(
-                &vec!["AST::Identifier".to_string(), "AST::Literal".to_string()],
+                &["AST::Identifier".to_string(), "AST::Literal".to_string()],
                 &[]
             ),
             Some("T.any(AST::Identifier, AST::Literal)".to_string())
@@ -2858,39 +3420,39 @@ mod tests {
     fn test_field_candidate_helper_edges() {
         assert_eq!(super::runtime_field_candidate(&[], &[]), None);
         assert_eq!(
-            super::runtime_field_candidate(&vec!["Array".to_string()], &vec!["String".to_string()]),
+            super::runtime_field_candidate(&["Array".to_string()], &["String".to_string()]),
             Some("T::Array[String]".to_string())
         );
         assert_eq!(
             super::runtime_field_candidate(
-                &vec![
+                &[
                     "String".to_string(),
                     "Integer".to_string(),
                     "Symbol".to_string(),
-                    "Float".to_string(),
+                    "Float".to_string()
                 ],
                 &[]
             ),
             None
         );
         assert_eq!(
-            super::runtime_field_candidate(&vec!["MIR::CallableContract".to_string()], &[]),
+            super::runtime_field_candidate(&["MIR::CallableContract".to_string()], &[]),
             Some("MIR::CallableContract".to_string())
         );
         assert_eq!(
             super::runtime_field_candidate(
-                &vec!["AST::Identifier".to_string(), "AST::Literal".to_string()],
+                &["AST::Identifier".to_string(), "AST::Literal".to_string()],
                 &[]
             ),
             Some("T.any(AST::Identifier, AST::Literal)".to_string())
         );
         assert_eq!(
             super::runtime_field_candidate(
-                &vec![
+                &[
                     "AST::Identifier".to_string(),
                     "AST::Literal".to_string(),
                     "AST::FuncCall".to_string(),
-                    "AST::MethodCall".to_string(),
+                    "AST::MethodCall".to_string()
                 ],
                 &[]
             ),
@@ -2898,7 +3460,7 @@ mod tests {
         );
         assert_eq!(
             super::runtime_field_candidate(
-                &vec!["MIR::Ident".to_string(), "NilClass".to_string()],
+                &["MIR::Ident".to_string(), "NilClass".to_string()],
                 &[]
             ),
             None
@@ -2906,15 +3468,15 @@ mod tests {
 
         assert_eq!(super::static_field_candidate(&[]), None);
         assert_eq!(
-            super::static_field_candidate(&vec!["FalseClass".to_string(), "TrueClass".to_string()]),
+            super::static_field_candidate(&["FalseClass".to_string(), "TrueClass".to_string()]),
             Some("T::Boolean".to_string())
         );
         assert_eq!(
-            super::static_field_candidate(&vec!["String".to_string()]),
+            super::static_field_candidate(&["String".to_string()]),
             Some("String".to_string())
         );
         assert_eq!(
-            super::static_field_candidate(&vec!["T.untyped".to_string()]),
+            super::static_field_candidate(&["T.untyped".to_string()]),
             None
         );
 
@@ -3333,7 +3895,7 @@ mod tests {
             }
         ]);
         let shapes = hash_shapes.as_array().unwrap();
-        let res = super::shape_union_type(&shapes);
+        let res = super::shape_union_type(shapes);
         assert_eq!(res, Some("T::Hash[String, Integer]".to_string()));
 
         let kv_shapes = json!([
@@ -3368,7 +3930,7 @@ mod tests {
                 ]
             }
         ]);
-        let res = super::shape_union_type(&set_shapes.as_array().unwrap());
+        let res = super::shape_union_type(set_shapes.as_array().unwrap());
         assert_eq!(res, Some("T::Set[Float]".to_string()));
 
         let arr_shapes = json!([
@@ -3379,7 +3941,7 @@ mod tests {
                 ]
             }
         ]);
-        let res2 = super::shape_union_type(&arr_shapes.as_array().unwrap());
+        let res2 = super::shape_union_type(arr_shapes.as_array().unwrap());
         assert_eq!(res2, Some("T::Array[Float]".to_string()));
     }
 

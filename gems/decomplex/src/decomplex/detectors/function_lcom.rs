@@ -49,7 +49,6 @@ struct FunctionLcom<'a> {
     min_components: usize,
     min_locals: usize,
     min_statements: usize,
-    min_score: usize,
 }
 
 impl<'a> FunctionLcom<'a> {
@@ -59,7 +58,6 @@ impl<'a> FunctionLcom<'a> {
             min_components: 2,
             min_locals: 5,
             min_statements: 5,
-            min_score: 40,
         }
     }
 
@@ -319,7 +317,8 @@ mod tests {
         let m_empty: local_flow::MethodSummary = serde_json::from_value(json!({
             "id": "3", "owner": "C", "name": "empty", "file": "a.rb", "line": 20, "span": [1,2,3,4],
             "statements": [], "boundaries": []
-        })).unwrap();
+        }))
+        .unwrap();
 
         let m_low_score: local_flow::MethodSummary = serde_json::from_value(json!({
             "id": "4", "owner": "C", "name": "low", "file": "a.rb", "line": 30, "span": [1,2,3,4],
@@ -368,9 +367,17 @@ mod tests {
             ], "boundaries": []
         })).unwrap();
 
-        let summaries = vec![m_few_locals, m_short, m_empty, m_low_score, m_high1, m_high2, m_high3];
+        let summaries = vec![
+            m_few_locals,
+            m_short,
+            m_empty,
+            m_low_score,
+            m_high1,
+            m_high2,
+            m_high3,
+        ];
         let res = scan_summaries(&summaries);
-        
+
         assert_eq!(res.len(), 3);
         assert_eq!(res[0].file, "a.rb");
         assert_eq!(res[0].line, 40);
@@ -383,7 +390,8 @@ mod tests {
             "file": "a.rb",
             "language": "ruby",
             "local_methods": summaries
-        })).unwrap();
+        }))
+        .unwrap();
         let doc_res = scan_documents(&[doc]);
         assert_eq!(doc_res.len(), 3);
     }

@@ -22,12 +22,14 @@ macro_rules! eprintln {
 
 use crate::syntax::{Document, Language};
 
-use crate::ast::{Child, Node, Span};
+#[cfg(test)]
+use crate::ast::Child;
+use crate::ast::Span;
+#[cfg(test)]
+use crate::profile::split_top_level_params;
 use crate::profile::{
-    call_arguments, child_nodes, child_symbol, owner_name, receiver_state_field,
-    split_top_level_params, state_key, ArrayShape, CallGraphEdge, FieldRecord, HashShape,
-    MethodRecord, StateParamOriginRecord, StateProtocolRecord, StateTypeEdge, StateTypeRecord,
-    StructDeclaration, TypeDefinition,
+    call_arguments, child_nodes, child_symbol, owner_name, state_key, HashShape, StateTypeRecord,
+    StructDeclaration,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -343,15 +345,13 @@ fn get_empty_node() -> &'static crate::ast::Node {
     })
 }
 
-fn match_call<'a>(
-    node: &'a crate::ast::Node,
-) -> Option<(&'a crate::ast::Node, String, &'a crate::ast::Node)> {
+fn match_call(node: &crate::ast::Node) -> Option<(&crate::ast::Node, String, &crate::ast::Node)> {
     if node.r#type == "CALL"
         || node.r#type == "QCALL"
         || node.r#type == "OPCALL"
         || node.r#type == "ATTRASGN"
     {
-        let receiver = match node.children.get(0)? {
+        let receiver = match node.children.first()? {
             crate::ast::Child::Node(n) => n.as_ref(),
             _ => return None,
         };
@@ -440,11 +440,11 @@ fn return_control_shape(
     }
     if explicit
         .iter()
-        .any(|expr| branching_return_expression(*expr))
+        .any(|expr| branching_return_expression(expr))
     {
         return "branching";
     }
-    if implicit_present && implicit.is_some_and(|expr| branching_return_expression(expr)) {
+    if implicit_present && implicit.is_some_and(branching_return_expression) {
         return "branching";
     }
     "branchless"
@@ -459,7 +459,7 @@ fn branching_return_expression(node: &crate::ast::Node) -> bool {
     }
     child_nodes(node)
         .into_iter()
-        .any(|child| branching_return_expression(child))
+        .any(branching_return_expression)
 }
 
 fn return_syntax(explicit_empty: bool, implicit_present: bool) -> &'static str {
@@ -601,6 +601,7 @@ pub(crate) struct TypeInferenceVisitor<'a> {
     pub(crate) behavior:
         &'static dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
     pub(crate) document: &'a Document,
+    #[allow(dead_code)] // Retained source lines are part of the visitor's test fixture API.
     pub(crate) lines: &'a [String],
     pub(crate) path: &'a str,
     pub(crate) current_owners: Vec<String>,
@@ -682,11 +683,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         let parsed = TypeExpr::parse(s, self.document.language.as_str());
         self.expand_type_aliases(parsed, &mut BTreeSet::new())
     }
-    fn expand_type_aliases(
-        &self,
-        parsed: TypeExpr,
-        seen: &mut BTreeSet<String>,
-    ) -> TypeExpr {
+    fn expand_type_aliases(&self, parsed: TypeExpr, seen: &mut BTreeSet<String>) -> TypeExpr {
         match parsed {
             TypeExpr::Primitive(name) => {
                 let Some(target) = self.type_alias_target(&name) else {
@@ -702,15 +699,13 @@ impl<'a> TypeInferenceVisitor<'a> {
                 seen.remove(&name);
                 expanded
             }
-            TypeExpr::Nilable(inner) => TypeExpr::Nilable(Box::new(
-                self.expand_type_aliases(*inner, seen),
-            )),
-            TypeExpr::Array(inner) => TypeExpr::Array(Box::new(
-                self.expand_type_aliases(*inner, seen),
-            )),
-            TypeExpr::Set(inner) => TypeExpr::Set(Box::new(
-                self.expand_type_aliases(*inner, seen),
-            )),
+            TypeExpr::Nilable(inner) => {
+                TypeExpr::Nilable(Box::new(self.expand_type_aliases(*inner, seen)))
+            }
+            TypeExpr::Array(inner) => {
+                TypeExpr::Array(Box::new(self.expand_type_aliases(*inner, seen)))
+            }
+            TypeExpr::Set(inner) => TypeExpr::Set(Box::new(self.expand_type_aliases(*inner, seen))),
             TypeExpr::Hash { key, value } => TypeExpr::Hash {
                 key: Box::new(self.expand_type_aliases(*key, seen)),
                 value: Box::new(self.expand_type_aliases(*value, seen)),
@@ -737,6 +732,9 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     pub(crate) fn visit(&mut self, node: &crate::ast::Node) {
+        if !self.is_prepass && self.current_method.is_some() {
+            self.collect_hidden_enum_observation_at_node(node);
+        }
         match node.r#type.as_str() {
             "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => {
                 self.visit_class_or_module(node);
@@ -909,7 +907,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                         "line": node.first_lineno,
                         "declared_type": self.param_types.get(param_name),
                     });
-                    self.local_container_origins.insert(param_name.clone(), origin);
+                    self.local_container_origins
+                        .insert(param_name.clone(), origin);
 
                     if let Some(shape) = self
                         .get_method_param_hash_shape(&owner, &func_name, param_name)
@@ -944,7 +943,6 @@ impl<'a> TypeInferenceVisitor<'a> {
                             "params": params_list,
                         });
                         self.collect_type_normalizers(body_node, &record);
-                        self.collect_hidden_enum_observations(body_node, &record);
                         self.inspect_dispatcher(body_node, node.first_lineno);
                     }
                 }
@@ -1253,7 +1251,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     if let Some(receiver_type) = self.expression_type(rec) {
                         if let Some(info) = collection_type_info(&receiver_type) {
                             if info.kind == "hash" {
-                                if let Some(p0) = param_names.get(0) {
+                                if let Some(p0) = param_names.first() {
                                     if let Some(ref key_ty) = info.element {
                                         if useful_type(key_ty) {
                                             self.local_types.insert(p0.clone(), key_ty.clone());
@@ -1268,7 +1266,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                     }
                                 }
                             } else {
-                                if let Some(p0) = param_names.get(0) {
+                                if let Some(p0) = param_names.first() {
                                     if let Some(ref elem_ty) = info.element {
                                         if useful_type(elem_ty) {
                                             self.local_types.insert(p0.clone(), elem_ty.clone());
@@ -1279,7 +1277,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                         }
                     }
 
-                    if let Some(p0) = param_names.get(0) {
+                    if let Some(p0) = param_names.first() {
                         if let Some(shape) = self.array_element_shape_for_receiver(Some(rec)) {
                             self.local_hash_shapes.insert(p0.clone(), shape);
                         }
@@ -1476,7 +1474,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             let arg_nodes = call_arguments(args_node);
                             if let Some(type_node) = arg_nodes.get(1) {
                                 resolved_type = Some(TypeExpr::parse(
-                                    &type_node.text.trim(),
+                                    type_node.text.trim(),
                                     self.document.language.as_str(),
                                 ));
                             }
@@ -1546,7 +1544,9 @@ impl<'a> TypeInferenceVisitor<'a> {
                     }));
                 } else if method == "must" && receiver.text == "T" {
                     let arg_nodes = call_arguments(args_node);
-                    if let Some(subject) = arg_nodes.first().filter(|arg| self.provably_non_nil(arg)) {
+                    if let Some(subject) =
+                        arg_nodes.first().filter(|arg| self.provably_non_nil(arg))
+                    {
                         self.facts.dead_nil_checks.push(json!({
                             "path": self.path,
                             "line": node.first_lineno,
@@ -1566,16 +1566,14 @@ impl<'a> TypeInferenceVisitor<'a> {
                             "reason": format!("{} is provably non-nil", receiver.text),
                         }));
                     }
-                } else if self.behavior.is_nil_check(&method) {
-                    if self.provably_non_nil(receiver) {
-                        self.facts.dead_nil_checks.push(json!({
+                } else if self.behavior.is_nil_check(&method) && self.provably_non_nil(receiver) {
+                    self.facts.dead_nil_checks.push(json!({
                             "path": self.path,
                             "line": node.first_lineno,
                             "kind": "nil_check",
                             "code": node.text.clone(),
                             "reason": format!("{} is provably non-nil; .nil? is always false", receiver.text),
                         }));
-                    }
                 }
             }
         }
@@ -2117,8 +2115,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(value) {
                     if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(value) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes.first().and_then(|arg| {
@@ -2190,8 +2188,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(value) {
                     if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(value) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes.first().and_then(|arg| {
@@ -2231,15 +2229,15 @@ impl<'a> TypeInferenceVisitor<'a> {
                             let mut p0_name = None;
                             if let Some(block) = child_node(value, 1) {
                                 let mut args_node = None;
-                                for child in child_nodes(&block) {
+                                for child in child_nodes(block) {
                                     if child.r#type == "ARGS" {
                                         args_node = Some(child);
                                         break;
                                     }
                                 }
                                 if let Some(args) = args_node {
-                                    let param_names = collect_block_param_names(&args);
-                                    if let Some(p0) = param_names.get(0) {
+                                    let param_names = collect_block_param_names(args);
+                                    if let Some(p0) = param_names.first() {
                                         p0_name = Some(p0.clone());
                                     }
                                 }
@@ -2319,8 +2317,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(receiver) {
                     if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(receiver) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes.first().and_then(|arg| {
@@ -2369,6 +2367,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         None
     }
 
+    #[cfg(test)]
     fn hash_shape_index_type_readonly(
         &self,
         receiver: &crate::ast::Node,
@@ -2452,17 +2451,14 @@ impl<'a> TypeInferenceVisitor<'a> {
                         non_nil.push(r.clone());
                     }
                 }
-                let mut normalized = non_nil
-                    .iter()
-                    .map(|ty| strip_nilable_type(ty))
-                    .collect::<Vec<_>>();
+                let mut normalized = non_nil.iter().map(strip_nilable_type).collect::<Vec<_>>();
                 normalized.sort();
                 normalized.dedup();
                 if normalized.len() == 1 && useful_type(&normalized[0]) {
                     return Some(normalized[0].clone());
                 }
 
-                if left == right && left.as_ref().is_some_and(|l| useful_type(l)) {
+                if left == right && left.as_ref().is_some_and(useful_type) {
                     return left;
                 }
                 None
@@ -2644,7 +2640,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some(ref receiver_type) = receiver_type {
                     if let Some(info) = collection_type_info(receiver_type) {
                         if info.kind == "hash" {
-                            if let Some(p0) = param_names.get(0) {
+                            if let Some(p0) = param_names.first() {
                                 if let Some(key_ty) = info.element.as_ref() {
                                     if useful_type(key_ty) {
                                         next_locals.insert(p0.clone(), key_ty.clone());
@@ -2659,7 +2655,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 }
                             }
                         } else {
-                            if let Some(p0) = param_names.get(0) {
+                            if let Some(p0) = param_names.first() {
                                 if let Some(elem_ty) = info.element.as_ref() {
                                     if useful_type(elem_ty) {
                                         next_locals.insert(p0.clone(), elem_ty.clone());
@@ -2675,7 +2671,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                         let body_expr = implicit_return_expression(body_node).unwrap_or(body_node);
 
                         let mut next_hash_shapes = extra_hash_shapes.clone();
-                        if let Some(p0) = param_names.get(0) {
+                        if let Some(p0) = param_names.first() {
                             if let Some(rec) = receiver {
                                 if let Some(shape) = self.array_element_shape_for_receiver_readonly(
                                     Some(rec),
@@ -2859,7 +2855,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             || key_node.r#type == "LIT"
                                 && !text.starts_with('"')
                                 && !text.starts_with('\'')
-                                && !text.parse::<f64>().is_ok()
+                                && text.parse::<f64>().is_err()
                         {
                             key_ty = TypeExpr::Primitive("Symbol".to_string());
                         }
@@ -2894,7 +2890,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             || key_node.r#type == "LIT"
                                 && !text.starts_with('"')
                                 && !text.starts_with('\'')
-                                && !text.parse::<f64>().is_ok()
+                                && text.parse::<f64>().is_err()
                         {
                             key_ty = TypeExpr::Primitive("Symbol".to_string());
                         }
@@ -3262,7 +3258,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if node.r#type == "ATTRASGN" {
             if let Some(args_node) = child_node(node, 2) {
                 let arg_children = call_arguments(args_node);
-                let val_node = arg_children.last().map(|n| *n).unwrap_or(args_node);
+                let val_node = arg_children.last().copied().unwrap_or(args_node);
                 return self.return_sources_for(val_node, body, blockers);
             }
         }
@@ -3397,7 +3393,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if (node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "OPCALL")
             && node_symbol(node)
                 .as_deref()
-                .map_or(false, |m| self.behavior.is_type_guard(m))
+                .is_some_and(|m| self.behavior.is_type_guard(m))
         {
             if let Some((receiver, _, args_node)) = match_call(node) {
                 let arg_nodes = call_arguments(args_node);
@@ -3437,7 +3433,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
                 if depth == 0 {
                     if let Some(rhs) = assigns.get(&name) {
-                        return self.classify_origin(*rhs, param_names, assigns, depth + 1);
+                        return self.classify_origin(rhs, param_names, assigns, depth + 1);
                     }
                 }
                 ("local".to_string(), Value::Null)
@@ -3474,29 +3470,27 @@ impl<'a> TypeInferenceVisitor<'a> {
         }
     }
 
-    fn collect_hidden_enum_observations(&mut self, body: &crate::ast::Node, record: &Value) {
-        let params = value_array(record.get("params"))
-            .into_iter()
-            .filter_map(|param| {
-                let name = param.get("name").and_then(Value::as_str)?.to_string();
-                Some((name, param))
-            })
-            .collect::<BTreeMap<_, _>>();
-        self.collect_hidden_enum_observations_node(body, record, &params);
-    }
-
-    fn collect_hidden_enum_observations_node(
-        &mut self,
-        node: &crate::ast::Node,
-        record: &Value,
-        params: &BTreeMap<String, Value>,
-    ) {
+    /// Records one decision while the main normalized visitor is already at
+    /// that node.  Hidden-enum collection must not replay an entire method
+    /// body after type inference has finished walking it.
+    fn collect_hidden_enum_observation_at_node(&mut self, node: &crate::ast::Node) {
+        // The existing normalized hidden-enum visitor is Ruby-oriented.
+        // Native named constants and enums require language-owned semantic
+        // suppression before they can safely participate in this report.
+        if self.document.language != Language::Ruby {
+            return;
+        }
         match node.r#type.as_str() {
+            "LASGN" | "DASGN" | "IASGN" | "CVASGN" => self.collect_hidden_enum_stable_write(node),
             "CASE" | "CASE2" => {
                 if let Some(condition) = child_node(node, 0) {
-                    if let Some(slot) = self.hidden_enum_slot_for(condition, record, params) {
-                        let values = case_literal_values(node);
-                        self.record_hidden_enum_observation(slot, values, node, "case");
+                    if let Some(slot) = self.hidden_enum_slot_for_current(condition) {
+                        self.record_hidden_enum_observation(
+                            slot,
+                            case_literal_values(node),
+                            node,
+                            "case",
+                        );
                     }
                 }
             }
@@ -3507,8 +3501,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                         let arg_nodes = call_arguments(args_node);
                         if arg_nodes.len() == 1 {
                             let arg = arg_nodes[0];
-                            if let Some(slot) = self.hidden_enum_slot_for(receiver, record, params)
-                            {
+                            if let Some(slot) = self.hidden_enum_slot_for_current(receiver) {
                                 self.record_hidden_enum_observation(
                                     slot,
                                     hidden_enum_literal_values(arg),
@@ -3516,7 +3509,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                     &name,
                                 );
                             }
-                            if let Some(slot) = self.hidden_enum_slot_for(arg, record, params) {
+                            if let Some(slot) = self.hidden_enum_slot_for_current(arg) {
                                 self.record_hidden_enum_observation(
                                     slot,
                                     hidden_enum_literal_values(receiver),
@@ -3531,7 +3524,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                         let arg_nodes = call_arguments(args_node);
                         if arg_nodes.len() == 1 {
                             let arg = arg_nodes[0];
-                            if let Some(slot) = self.hidden_enum_slot_for(arg, record, params) {
+                            if let Some(slot) = self.hidden_enum_slot_for_current(arg) {
                                 self.record_hidden_enum_observation(
                                     slot,
                                     hidden_enum_literal_values(receiver),
@@ -3545,66 +3538,142 @@ impl<'a> TypeInferenceVisitor<'a> {
             }
             _ => {}
         }
-        for child in child_nodes(node) {
-            self.collect_hidden_enum_observations_node(child, record, params);
+    }
+
+    /// Records an exact literal producer or an explicit open-world blocker for
+    /// a stable state or local slot. This runs as part of the primary
+    /// normalized walk: hidden-domain evidence must not reconstruct
+    /// assignments in NilKill or replay a second source traversal after type
+    /// inference.
+    fn collect_hidden_enum_stable_write(&mut self, node: &crate::ast::Node) {
+        let Some(name) = node_symbol(node) else {
+            return;
+        };
+        let Some(slot) = self.hidden_enum_assignment_slot(node, &name) else {
+            return;
+        };
+        let Some(value) = child_node(node, 1) else {
+            return;
+        };
+        let values = hidden_enum_scalar_literal_values(value);
+        if values.is_empty() {
+            self.record_hidden_enum_event(
+                slot,
+                values,
+                node,
+                "assignment",
+                "blocker",
+                Some("nonliteral_assignment"),
+            );
+        } else {
+            self.record_hidden_enum_event(slot, values, node, "assignment", "producer", None);
         }
     }
 
-    fn hidden_enum_slot_for(
-        &self,
-        node: &crate::ast::Node,
-        record: &Value,
-        params: &BTreeMap<String, Value>,
-    ) -> Option<Value> {
+    fn hidden_enum_slot_for_current(&self, node: &crate::ast::Node) -> Option<Value> {
         match node.r#type.as_str() {
             "LVAR" | "DVAR" => {
                 let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
-                let param = params.get(&name)?;
-                let key = [
-                    "param".to_string(),
-                    record["path"].as_str().unwrap_or("").to_string(),
-                    record["class"].as_str().unwrap_or("").to_string(),
-                    record["kind"].as_str().unwrap_or("instance").to_string(),
-                    record["method"].as_str().unwrap_or("").to_string(),
-                    record["line"].as_i64().unwrap_or(0).to_string(),
-                    name.clone(),
-                ]
-                .join("\0");
-                Some(json!({
-                    "key": key,
-                    "kind": "param",
-                    "path": record["path"],
-                    "line": record["line"],
-                    "owner": record["class"],
-                    "method": record["method"],
-                    "method_kind": record["kind"],
-                    "slot": name,
-                    "type": param.get("type").and_then(get_type_str).unwrap_or_default(),
-                }))
+                if self.current_params.contains(&name) {
+                    self.hidden_enum_param_slot(&name)
+                } else {
+                    self.hidden_enum_local_slot(&name)
+                }
             }
-            "IVAR" | "CVAR" => {
-                let name = node_symbol(node).unwrap_or_else(|| node.text.trim().to_string());
-                let key = [
-                    "state".to_string(),
-                    record["path"].as_str().unwrap_or("").to_string(),
-                    record["class"].as_str().unwrap_or("").to_string(),
-                    name.clone(),
-                ]
-                .join("\0");
-                Some(json!({
-                    "key": key,
-                    "kind": "state",
-                    "path": record["path"],
-                    "line": node.first_lineno,
-                    "owner": record["class"],
-                    "method": Value::Null,
-                    "method_kind": Value::Null,
-                    "slot": name,
-                    "type": "",
-                }))
-            }
+            "IVAR" | "CVAR" => self.hidden_enum_state_slot(
+                &node_symbol(node).unwrap_or_else(|| node.text.trim().to_string()),
+                node.first_lineno,
+            ),
             _ => None,
         }
+    }
+
+    fn hidden_enum_assignment_slot(&self, node: &crate::ast::Node, name: &str) -> Option<Value> {
+        match node.r#type.as_str() {
+            "LASGN" | "DASGN" if self.current_params.iter().any(|param| param == name) => {
+                self.hidden_enum_param_slot(name)
+            }
+            "LASGN" | "DASGN" => self.hidden_enum_local_slot(name),
+            "IASGN" | "CVASGN" => self.hidden_enum_state_slot(name, node.first_lineno),
+            _ => None,
+        }
+    }
+
+    fn hidden_enum_param_slot(&self, name: &str) -> Option<Value> {
+        let owner = self.current_owners.join("::");
+        let method = self.current_method.as_deref()?;
+        let key = [
+            "param".to_string(),
+            self.path.to_string(),
+            owner.clone(),
+            self.current_method_kind.clone(),
+            method.to_string(),
+            self.current_method_line.to_string(),
+            name.to_string(),
+        ]
+        .join("\0");
+        Some(json!({
+            "key": key,
+            "kind": "param",
+            "path": self.path,
+            "line": self.current_method_line,
+            "owner": owner,
+            "method": method,
+            "method_kind": self.current_method_kind,
+            "slot": name,
+            "type": self.param_types.get(name).map(ToString::to_string).unwrap_or_default(),
+        }))
+    }
+
+    fn hidden_enum_local_slot(&self, name: &str) -> Option<Value> {
+        let owner = self.current_owners.join("::");
+        let method = self.current_method.as_deref()?;
+        let key = [
+            "local".to_string(),
+            self.path.to_string(),
+            owner.clone(),
+            self.current_method_kind.clone(),
+            method.to_string(),
+            self.current_method_line.to_string(),
+            name.to_string(),
+        ]
+        .join("\0");
+        Some(json!({
+            "key": key,
+            "kind": "local",
+            "path": self.path,
+            "line": self.current_method_line,
+            "owner": owner,
+            "method": method,
+            "method_kind": self.current_method_kind,
+            "slot": name,
+            "type": self.local_types.get(name).map(ToString::to_string).unwrap_or_default(),
+        }))
+    }
+
+    fn hidden_enum_state_slot(&self, name: &str, line: usize) -> Option<Value> {
+        if name.is_empty() {
+            return None;
+        }
+        let owner = self.current_owners.join("::");
+        let key = [
+            "state".to_string(),
+            self.path.to_string(),
+            owner.clone(),
+            name.to_string(),
+        ]
+        .join("\0");
+        Some(json!({
+            "key": key,
+            "kind": "state",
+            "path": self.path,
+            "line": line,
+            "owner": owner,
+            "method": Value::Null,
+            "method_kind": Value::Null,
+            "slot": name,
+            "type": "",
+        }))
     }
 
     fn record_hidden_enum_observation(
@@ -3614,6 +3683,18 @@ impl<'a> TypeInferenceVisitor<'a> {
         site: &crate::ast::Node,
         kind: &str,
     ) {
+        self.record_hidden_enum_event(slot, values, site, kind, "decision", None);
+    }
+
+    fn record_hidden_enum_event(
+        &mut self,
+        slot: Value,
+        values: Vec<Value>,
+        site: &crate::ast::Node,
+        kind: &str,
+        event: &str,
+        reason: Option<&str>,
+    ) {
         let values = values
             .into_iter()
             .filter(|value| {
@@ -3621,12 +3702,15 @@ impl<'a> TypeInferenceVisitor<'a> {
                 !raw.is_empty() && raw.len() <= 80
             })
             .collect::<Vec<_>>();
-        if values.is_empty() {
+        if event != "blocker" && values.is_empty() {
             return;
         }
         let mut obs = slot;
-        object_insert(&mut obs, "event", json!("decision"));
+        object_insert(&mut obs, "event", json!(event));
         object_insert(&mut obs, "values", json!(values));
+        if let Some(reason) = reason {
+            object_insert(&mut obs, "reason", json!(reason));
+        }
 
         let first_line = site.text.lines().next().unwrap_or("").trim().to_string();
         object_insert(
@@ -4148,33 +4232,33 @@ impl<'a> TypeInferenceVisitor<'a> {
                     }
                 }
             }
-            if node.r#type == "ARRAY" || node.r#type == "LIST" {
-                if child_nodes(node).into_iter().any(|child| {
+            if (node.r#type == "ARRAY" || node.r#type == "LIST")
+                && child_nodes(node).into_iter().any(|child| {
                     (child.r#type == "LVAR" || child.r#type == "DVAR")
                         && node_symbol(child).as_deref() == Some(name)
-                }) {
-                    let mut is_non_escaping_arg_list = false;
-                    if let Some(parent) = self.find_parent(root, node) {
-                        if parent.r#type == "FCALL" || parent.r#type == "VCALL" {
-                            if let Some(callee) = node_symbol(parent) {
-                                if self.current_method.as_ref() == Some(&callee) {
-                                    is_non_escaping_arg_list = true;
-                                }
-                            }
-                        } else if parent.r#type == "CALL" || parent.r#type == "QCALL" {
-                            if let Some((_, callee, _)) = match_call(parent) {
-                                if self.current_method.as_ref() == Some(&callee) {
-                                    is_non_escaping_arg_list = true;
-                                }
+                })
+            {
+                let mut is_non_escaping_arg_list = false;
+                if let Some(parent) = self.find_parent(root, node) {
+                    if parent.r#type == "FCALL" || parent.r#type == "VCALL" {
+                        if let Some(callee) = node_symbol(parent) {
+                            if self.current_method.as_ref() == Some(&callee) {
+                                is_non_escaping_arg_list = true;
                             }
                         }
-                        if self.noreturn_call(parent) {
-                            is_non_escaping_arg_list = true;
+                    } else if parent.r#type == "CALL" || parent.r#type == "QCALL" {
+                        if let Some((_, callee, _)) = match_call(parent) {
+                            if self.current_method.as_ref() == Some(&callee) {
+                                is_non_escaping_arg_list = true;
+                            }
                         }
                     }
-                    if !is_non_escaping_arg_list {
-                        escapes = true;
+                    if self.noreturn_call(parent) {
+                        is_non_escaping_arg_list = true;
                     }
+                }
+                if !is_non_escaping_arg_list {
+                    escapes = true;
                 }
             }
         });
@@ -4202,7 +4286,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             )) {
                 return Some(shape.clone());
             }
-            if class_name != "" {
+            if !class_name.is_empty() {
                 if let Some(shape) = self.method_param_hash_shapes.get(&(
                     "".to_string(),
                     m.clone(),
@@ -4253,7 +4337,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             )) {
                 return Some(shape.clone());
             }
-            if class_name != "" {
+            if !class_name.is_empty() {
                 if let Some(shape) = self.method_param_array_shapes.get(&(
                     "".to_string(),
                     m.clone(),
@@ -4294,7 +4378,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         {
             return Some(shape.clone());
         }
-        if class_name != "" {
+        if !class_name.is_empty() {
             if let Some(shape) = self
                 .method_return_hash_shapes
                 .get(&("".to_string(), method_name.to_string()))
@@ -4331,7 +4415,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         {
             return Some(shape.clone());
         }
-        if class_name != "" {
+        if !class_name.is_empty() {
             if let Some(shape) = self
                 .method_return_array_shapes
                 .get(&("".to_string(), method_name.to_string()))
@@ -4417,7 +4501,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             return;
         };
 
-        if callee == "defined?" || callee == "" {
+        if callee == "defined?" || callee.is_empty() {
             return;
         }
 
@@ -4482,7 +4566,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             } else {
                 let record = self.param_origin_record(
                     node,
-                    *arg,
+                    arg,
                     &callee,
                     "positional",
                     &positional_idx.to_string(),
@@ -4495,14 +4579,14 @@ impl<'a> TypeInferenceVisitor<'a> {
                     &callee,
                     "positional",
                     &positional_idx.to_string(),
-                    *arg,
+                    arg,
                 );
                 self.record_callsite_array_element_shape(
                     &class_name,
                     &callee,
                     "positional",
                     &positional_idx.to_string(),
-                    *arg,
+                    arg,
                 );
                 positional_idx += 1;
             }
@@ -4715,9 +4799,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         node: &crate::ast::Node,
         receiver_type: Option<&TypeExpr>,
     ) -> Option<TypeExpr> {
-        let Some((receiver, _, args_node)) = match_call(node) else {
-            return None;
-        };
+        let (receiver, _, args_node) = match_call(node)?;
         let args = call_arguments(args_node);
         if args.len() != 1 {
             return None;
@@ -4810,8 +4892,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(receiver) {
                     if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(receiver) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes
@@ -4873,8 +4955,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(receiver) {
                     if receiver.r#type != "FCALL" && receiver.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(receiver) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes.first().and_then(|arg| {
@@ -5145,7 +5227,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if receiver_name == "fetch" && args.len() > 1 {
             return;
         }
-        let Some(key) = args.first().and_then(|arg| hash_key_name(*arg)) else {
+        let Some(key) = args.first().and_then(|arg| hash_key_name(arg)) else {
             return;
         };
 
@@ -5318,7 +5400,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             if method.ends_with('=') {
                 let field = method.trim_end_matches('=').to_string();
                 let arg_children = call_arguments(args_node);
-                let val_node = arg_children.last().map(|n| *n).unwrap_or(args_node);
+                let val_node = arg_children.last().copied().unwrap_or(args_node);
                 let class_name = if let Some(receiver_type) = self.expression_type(rec) {
                     receiver_type.strip_nilable().to_sorbet_string()
                 } else {
@@ -5501,19 +5583,17 @@ impl<'a> TypeInferenceVisitor<'a> {
     }
 
     fn check_local_escapes_and_mutations(&mut self, node: &crate::ast::Node) {
-        if let Some((rec, method, args_node)) = match_call(node) {
+        if let Some((rec, method, _args_node)) = match_call(node) {
             if rec.r#type == "LVAR" || rec.r#type == "DVAR" {
                 if let Some(name) = node_symbol(rec) {
                     if matches!(
                         method.as_str(),
                         "[]=" | "merge!" | "update" | "delete" | "clear" | "shift"
-                    ) {
-                        if self.local_hash_shapes.contains_key(&name)
-                            || self.local_array_shapes.contains_key(&name)
-                        {
-                            self.local_hash_shapes.remove(&name);
-                            self.local_array_shapes.remove(&name);
-                        }
+                    ) && (self.local_hash_shapes.contains_key(&name)
+                        || self.local_array_shapes.contains_key(&name))
+                    {
+                        self.local_hash_shapes.remove(&name);
+                        self.local_array_shapes.remove(&name);
                     }
                 }
             }
@@ -5687,8 +5767,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(value) {
                     if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(value) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes
@@ -5758,8 +5838,8 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some((class_name, method, args_node)) = self.get_call_info(value) {
                     if value.r#type != "FCALL" && value.r#type != "VCALL" {
                         if let Some((rec, _, _)) = match_call(value) {
-                            if (self.behavior.is_type_normalizer(&rec.text, &method)
-                                || self.behavior.is_type_cast(&rec.text, &method))
+                            if self.behavior.is_type_normalizer(&rec.text, &method)
+                                || self.behavior.is_type_cast(&rec.text, &method)
                             {
                                 let arg_nodes = call_arguments(args_node);
                                 return arg_nodes
@@ -5805,15 +5885,15 @@ impl<'a> TypeInferenceVisitor<'a> {
                             let mut p0_name = None;
                             if let Some(block) = child_node(value, 1) {
                                 let mut args_node = None;
-                                for child in child_nodes(&block) {
+                                for child in child_nodes(block) {
                                     if child.r#type == "ARGS" {
                                         args_node = Some(child);
                                         break;
                                     }
                                 }
                                 if let Some(args) = args_node {
-                                    let param_names = collect_block_param_names(&args);
-                                    if let Some(p0) = param_names.get(0) {
+                                    let param_names = collect_block_param_names(args);
+                                    if let Some(p0) = param_names.first() {
                                         p0_name = Some(p0.clone());
                                     }
                                 }
@@ -5993,7 +6073,7 @@ fn case_literal_values(case_node: &crate::ast::Node) -> Vec<Value> {
                 children
                     .into_iter()
                     .take(count)
-                    .flat_map(|condition| hidden_enum_literal_values(condition))
+                    .flat_map(hidden_enum_literal_values)
                     .collect::<Vec<_>>()
             }
         })
@@ -6014,14 +6094,50 @@ fn hidden_enum_literal_values(node: &crate::ast::Node) -> Vec<Value> {
                 vec![json!({ "kind": "String", "value": value })]
             }
         }
+        "INT" | "INTEGER" | "INTEGER_LITERAL" => node
+            .text
+            .parse::<i64>()
+            .ok()
+            .map(|value| vec![json!({ "kind": "Integer", "value": value.to_string() })])
+            .unwrap_or_default(),
         "ARRAY" | "LIST" => child_nodes(node)
             .into_iter()
-            .flat_map(|child| hidden_enum_literal_values(child))
+            .flat_map(hidden_enum_literal_values)
             .collect(),
         "PAREN" => child_nodes(node)
             .into_iter()
-            .flat_map(|child| hidden_enum_literal_values(child))
+            .flat_map(hidden_enum_literal_values)
             .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// A producer proves a state domain only when the assigned value itself is a
+/// scalar literal. Collection literals are useful *decision* evidence (for
+/// example, `allowed.include?(state)`), but assigning a collection to a state
+/// slot does not prove that the slot is a scalar string domain.
+fn hidden_enum_scalar_literal_values(node: &crate::ast::Node) -> Vec<Value> {
+    match node.r#type.as_str() {
+        "INT" | "INTEGER" | "INTEGER_LITERAL" => node
+            .text
+            .parse::<i64>()
+            .ok()
+            .map(|value| vec![json!({ "kind": "Integer", "value": value.to_string() })])
+            .unwrap_or_default(),
+        "SYM" | "SYMBOL" | "LIT" | "STR" | "STRING" | "STRING_LITERAL" => {
+            hidden_enum_literal_values(node)
+        }
+        "PAREN" => {
+            let values = child_nodes(node)
+                .into_iter()
+                .flat_map(hidden_enum_scalar_literal_values)
+                .collect::<Vec<_>>();
+            if values.len() == 1 {
+                values
+            } else {
+                Default::default()
+            }
+        }
         _ => Vec::new(),
     }
 }
@@ -6105,6 +6221,7 @@ fn flow_hint_type(hint: &str, language: &str) -> Option<TypeExpr> {
     languages::flow_hint(hint, language)
 }
 
+#[cfg(test)]
 fn nilable_type(type_text: &str) -> String {
     if type_text == "NilClass" || type_text.starts_with("T.nilable(") {
         type_text.to_string()
@@ -6218,6 +6335,7 @@ fn collect_block_param_names(args_node: &crate::ast::Node) -> Vec<String> {
     names
 }
 
+#[cfg(test)]
 fn extract_param_entries(sig: &str) -> Vec<(String, String)> {
     let Some(params) = extract_call_args(sig, "params") else {
         return Vec::new();
@@ -6365,10 +6483,8 @@ fn tuple_confidence(types: &[TypeExpr]) -> &'static str {
         .collect::<Vec<_>>();
     let namespaces = constants
         .iter()
-        .filter_map(|ty| {
-            ty.contains("::")
-                .then(|| ty.split("::").next().unwrap_or(""))
-        })
+        .filter(|&ty| ty.contains("::"))
+        .map(|ty| ty.split("::").next().unwrap_or(""))
         .collect::<BTreeSet<_>>();
     if namespaces.len() == 1 && constants.len() == types.len() {
         return "review";

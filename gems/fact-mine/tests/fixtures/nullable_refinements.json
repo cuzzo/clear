@@ -1,0 +1,22 @@
+[
+  {
+    "edge": "else",
+    "proof_kind": "nil_comparison",
+    "state_on_edge": "definitely_non_null"
+  },
+  {
+    "edge": "then",
+    "proof_kind": "nil_comparison",
+    "state_on_edge": "definitely_null"
+  },
+  {
+    "edge": "else",
+    "proof_kind": "nil_comparison",
+    "state_on_edge": "definitely_null"
+  },
+  {
+    "edge": "then",
+    "proof_kind": "nil_comparison",
+    "state_on_edge": "definitely_non_null"
+  }
+]

@@ -83,6 +83,8 @@
       "visibility": "public"
     }
   ],
+  "nullable_operations": [],
+  "nullable_summaries": [],
   "owners": [
     {
       "confidence": "high",
@@ -100,6 +102,7 @@
       ]
     }
   ],
+  "presence_correlations": [],
   "signatures": {},
   "state_param_origins": {},
   "state_protocols": {},

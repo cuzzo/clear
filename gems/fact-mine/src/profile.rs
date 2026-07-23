@@ -42,6 +42,10 @@ pub enum Profile {
 /// The enriched output matching what Ruby's EspalierProfile::Builder.build returns.
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct ProfileOutput {
+    /// Extraction coverage owned by FactMine. This describes parser input
+    /// availability only; semantic certainty remains in per-fact evidence.
+    #[serde(default, skip_serializing_if = "InputCoverage::is_empty")]
+    pub input_coverage: InputCoverage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<OwnerRecord>,
     pub methods: Vec<MethodRecord>,
@@ -117,6 +121,15 @@ pub struct ProfileOutput {
     pub hash_record_escape_sites: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_enum_observations: Vec<serde_json::Value>,
+    /// Stable branch-local proofs emitted by FactMine's normalized CFG pass.
+    /// NilKill consumes these directly and never reparses conditions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_refinements: Vec<syntax::nullable::NullableRefinement>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_states: Vec<syntax::nullable::NullableState>,
+    pub nullable_summaries: Vec<syntax::nullable::NullableSummary>,
+    pub nullable_operations: Vec<syntax::nullable::NullableOperation>,
+    pub presence_correlations: Vec<syntax::nullable::PresenceCorrelation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dispatcher_inferences: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -133,6 +146,31 @@ pub struct ProfileOutput {
     pub hazard_sites: Vec<syntax::HazardSite>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imports: Vec<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct InputCoverage {
+    pub selected_files: usize,
+    pub parsed_files: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parse_recovery_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parse_recoveries: Vec<ParseRecovery>,
+}
+
+impl InputCoverage {
+    pub fn is_empty(&self) -> bool {
+        self.selected_files == 0
+            && self.parsed_files == 0
+            && self.parse_recovery_files.is_empty()
+            && self.parse_recoveries.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ParseRecovery {
+    pub path: String,
+    pub spans: Vec<[usize; 4]>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -288,6 +326,18 @@ pub struct CallResolutionCounts {
     pub calls_with_project_candidate_set: usize,
 }
 
+/// A bounded diagnostic sample of a parser call with no matched normalized
+/// call. Consumers must not treat it as a hazard; it exists to make extractor
+/// coverage regressions reviewable at an anchored source location.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RawCallNormalizationGap {
+    pub path: String,
+    pub language: String,
+    pub span: [usize; 4],
+    pub kind: String,
+    pub inside_executable_function: bool,
+}
+
 /// Honest call-target coverage for one merged profile.
 ///
 /// `eligible_call_sites` contains calls whose source is an emitted executable
@@ -302,6 +352,22 @@ pub struct CallResolutionCoverage {
     pub raw_parser_call_sites: usize,
     /// Parser call spans for which normalization emitted no call record.
     pub raw_calls_not_normalized: usize,
+    /// The executable-function subset of `raw_calls_not_normalized`. These
+    /// calls can affect function-scoped consumers; top-level/declaration calls
+    /// are retained separately so a source-scope policy is not misreported as
+    /// a function extractor defect.
+    pub raw_calls_not_normalized_inside_function: usize,
+    /// Raw parser calls outside every extracted executable function.
+    pub raw_calls_not_normalized_outside_function: usize,
+    /// Grammar-node kinds for the raw-call subset with no normalized call at
+    /// the same span. This exposes extractor loss without treating every
+    /// syntax-level representation difference as an analyzer defect.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub raw_calls_not_normalized_by_kind: BTreeMap<String, usize>,
+    /// Representative unmatched parser calls, capped so coverage diagnostics
+    /// cannot dominate ordinary FactMine profile artifacts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_call_normalization_gap_samples: Vec<RawCallNormalizationGap>,
     /// Normalized calls without an identical parser-call span (for example,
     /// language-defined synthetic/operator calls).
     pub normalized_calls_without_raw_span: usize,
@@ -344,6 +410,15 @@ pub struct CallResolutionCoverage {
     pub unresolved_with_ambiguous_inherited_targets: usize,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inherited_target_opportunities_by_language: BTreeMap<String, usize>,
+}
+
+/// Compact, FactMine-owned evidence for consumers that need to know whether a
+/// call-sensitive finding depends on an unresolved call target.  This avoids
+/// running a full Espalier profile merely to reconstruct that single boundary.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct CallResolutionEvidence {
+    pub call_resolution_coverage: CallResolutionCoverage,
+    pub unresolved_function_spans_by_file: BTreeMap<String, Vec<[usize; 4]>>,
 }
 
 impl CallResolutionCoverage {
@@ -585,6 +660,68 @@ pub struct StructDeclaration {
 // Extraction
 // ---------------------------------------------------------------------------
 
+/// Resolve only the call facts needed to establish consumer proof boundaries.
+///
+/// This intentionally avoids AST re-parsing, flow inference, shape analysis,
+/// and every other Espalier profile output.  It operates on the normalized
+/// `Document` artifact already produced by FactMine and retains resolution
+/// ownership here rather than asking each consumer to replay it.
+pub fn call_resolution_evidence(documents: &[Document]) -> CallResolutionEvidence {
+    let mut owners = Vec::new();
+    let mut methods = Vec::new();
+    let mut type_definitions = Vec::new();
+    let mut calls = Vec::new();
+
+    for document in documents {
+        let language = document.language.as_str().to_string();
+        let path = document.file.clone();
+        let lines = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .lines()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        owners.extend(extract_owners(document, &language, &path));
+        methods.extend(extract_methods(&lines, document, &language, &path));
+        type_definitions.extend(extract_type_definitions(&lines, document, &language, &path));
+        calls.extend(extract_calls(document, &language, &path));
+    }
+
+    owners.sort_by(|left, right| left.id.cmp(&right.id));
+    owners.dedup_by(|left, right| left.id == right.id);
+    methods.sort_by(|left, right| left.id.cmp(&right.id));
+    methods.dedup_by(|left, right| left.id == right.id);
+    type_definitions.sort_by(|left, right| left.id.cmp(&right.id));
+    type_definitions.dedup_by(|left, right| left.id == right.id);
+    resolve_project_calls(&owners, &methods, &type_definitions, &mut calls);
+    calls.sort_by(|left, right| left.id.cmp(&right.id));
+    calls.dedup_by(|left, right| left.id == right.id);
+    annotate_call_resolution_proofs(&owners, &methods, &mut calls);
+
+    let unresolved_sources = calls
+        .iter()
+        .filter(|call| call.resolution_missing_proof.is_some())
+        .map(|call| call.source.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut unresolved_function_spans_by_file = BTreeMap::new();
+    for document in documents {
+        let mut spans = methods
+            .iter()
+            .filter(|method| {
+                method.path == document.file && unresolved_sources.contains(method.id.as_str())
+            })
+            .filter_map(|method| method.span)
+            .collect::<Vec<_>>();
+        spans.sort_unstable();
+        spans.dedup();
+        unresolved_function_spans_by_file.insert(document.file.clone(), spans);
+    }
+
+    CallResolutionEvidence {
+        call_resolution_coverage: summarize_call_resolution(&owners, &methods, &calls),
+        unresolved_function_spans_by_file,
+    }
+}
+
 /// Extract enriched facts from a set of documents.
 pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     let language = document.language.as_str().to_string();
@@ -622,7 +759,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
                 &path,
                 &mut Vec::new(),
                 &mut struct_declarations,
-                &*behavior,
+                behavior,
             );
             crate::type_inference::collect_tlet_sites(&root, &path, &mut tlet_sites);
             // The field inventory keeps one representative write per state
@@ -681,7 +818,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
 
     let mut struct_declarations = extract_struct_declarations(document, &language, &path);
     let behavior = crate::syntax::normalized_behavior::behavior(
-        crate::syntax::Language::parse(&document.language.as_str())
+        crate::syntax::Language::parse(document.language.as_str())
             .unwrap_or(crate::syntax::Language::Ruby),
     );
     if let Some(ref root) = root_node {
@@ -690,7 +827,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
             &path,
             &mut Vec::new(),
             &mut struct_declarations,
-            &*behavior,
+            behavior,
         );
     }
     let state_type_edges = extract_state_type_edges(document, &language, &path);
@@ -931,21 +1068,76 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     }
 
     let raw_call_spans = document
-        .raw_call_spans
+        .raw_call_sites
         .iter()
-        .copied()
+        .map(|site| site.span)
         .collect::<BTreeSet<_>>();
     let normalized_call_spans = calls.iter().map(|call| call.span).collect::<BTreeSet<_>>();
+    let (raw_calls_not_normalized, normalized_calls_without_raw_span) = unmatched_call_origins(
+        &raw_call_spans,
+        &normalized_call_spans,
+        &document.normalization_call_origins,
+        &document.call_raw_origin_projections,
+    );
+    let raw_call_kinds = document
+        .raw_call_sites
+        .iter()
+        .map(|site| (site.span, site.kind.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let raw_calls_not_normalized_inside_function = raw_calls_not_normalized
+        .iter()
+        .filter(|span| {
+            document
+                .function_defs
+                .iter()
+                .any(|function| span_contains(function.span, **span))
+        })
+        .count();
+    let raw_calls_not_normalized_by_kind = raw_calls_not_normalized
+        .iter()
+        .map(|span| {
+            raw_call_kinds
+                .get(span)
+                .copied()
+                .unwrap_or("unknown_raw_call_kind")
+                .to_string()
+        })
+        .fold(BTreeMap::new(), |mut counts, kind| {
+            *counts.entry(kind).or_default() += 1;
+            counts
+        });
+    let raw_call_normalization_gap_samples = raw_calls_not_normalized
+        .iter()
+        .take(32)
+        .map(|span| RawCallNormalizationGap {
+            path: path.clone(),
+            language: language.clone(),
+            span: *span,
+            kind: raw_call_kinds
+                .get(span)
+                .copied()
+                .unwrap_or("unknown_raw_call_kind")
+                .to_string(),
+            inside_executable_function: document
+                .function_defs
+                .iter()
+                .any(|function| span_contains(function.span, *span)),
+        })
+        .collect();
     let call_resolution_coverage = CallResolutionCoverage {
         raw_parser_call_sites: raw_call_spans.len(),
-        raw_calls_not_normalized: raw_call_spans.difference(&normalized_call_spans).count(),
-        normalized_calls_without_raw_span: normalized_call_spans
-            .difference(&raw_call_spans)
-            .count(),
+        raw_calls_not_normalized: raw_calls_not_normalized.len(),
+        raw_calls_not_normalized_inside_function,
+        raw_calls_not_normalized_outside_function: raw_calls_not_normalized.len()
+            - raw_calls_not_normalized_inside_function,
+        raw_calls_not_normalized_by_kind,
+        raw_call_normalization_gap_samples,
+        normalized_calls_without_raw_span: normalized_calls_without_raw_span.len(),
         ..CallResolutionCoverage::default()
     };
 
     ProfileOutput {
+        input_coverage: InputCoverage::default(),
         owners,
         methods,
         fields,
@@ -982,6 +1174,31 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         return_direct_usage_sites,
         hash_record_escape_sites,
         hidden_enum_observations,
+        nullable_refinements: if nil_kill {
+            document.nullable_refinements.clone()
+        } else {
+            Vec::new()
+        },
+        nullable_states: if nil_kill {
+            document.nullable_states.clone()
+        } else {
+            Vec::new()
+        },
+        nullable_summaries: if nil_kill {
+            document.nullable_summaries.clone()
+        } else {
+            Vec::new()
+        },
+        nullable_operations: if nil_kill {
+            document.nullable_operations.clone()
+        } else {
+            Vec::new()
+        },
+        presence_correlations: if nil_kill {
+            document.presence_correlations.clone()
+        } else {
+            Vec::new()
+        },
         dispatcher_inferences,
         hash_record_member_calls,
         param_origins,
@@ -1045,6 +1262,11 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut return_direct_usage_sites = Vec::new();
     let mut hash_record_escape_sites = Vec::new();
     let mut hidden_enum_observations = Vec::new();
+    let mut nullable_refinements = Vec::new();
+    let mut nullable_states = Vec::new();
+    let mut nullable_summaries = Vec::new();
+    let mut nullable_operations = Vec::new();
+    let mut presence_correlations = Vec::new();
     let mut dispatcher_inferences = Vec::new();
     let mut hash_record_member_calls = Vec::new();
     let mut param_origins = Vec::new();
@@ -1055,6 +1277,10 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut import_facts = Vec::new();
     let mut raw_parser_call_sites = 0usize;
     let mut raw_calls_not_normalized = 0usize;
+    let mut raw_calls_not_normalized_inside_function = 0usize;
+    let mut raw_calls_not_normalized_outside_function = 0usize;
+    let mut raw_calls_not_normalized_by_kind = BTreeMap::new();
+    let mut raw_call_normalization_gap_samples = Vec::new();
     let mut normalized_calls_without_raw_span = 0usize;
 
     for output in outputs {
@@ -1062,6 +1288,23 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         import_facts.extend(output.imports);
         raw_parser_call_sites += output.call_resolution_coverage.raw_parser_call_sites;
         raw_calls_not_normalized += output.call_resolution_coverage.raw_calls_not_normalized;
+        raw_calls_not_normalized_inside_function += output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function;
+        raw_calls_not_normalized_outside_function += output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_outside_function;
+        for (kind, count) in output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_by_kind
+        {
+            *raw_calls_not_normalized_by_kind.entry(kind).or_default() += count;
+        }
+        raw_call_normalization_gap_samples.extend(
+            output
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples,
+        );
         normalized_calls_without_raw_span += output
             .call_resolution_coverage
             .normalized_calls_without_raw_span;
@@ -1112,6 +1355,11 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
             return_direct_usage_sites.extend(output.return_direct_usage_sites);
             hash_record_escape_sites.extend(output.hash_record_escape_sites);
             hidden_enum_observations.extend(output.hidden_enum_observations);
+            nullable_refinements.extend(output.nullable_refinements);
+            nullable_states.extend(output.nullable_states);
+            nullable_summaries.extend(output.nullable_summaries);
+            nullable_operations.extend(output.nullable_operations);
+            presence_correlations.extend(output.presence_correlations);
             dispatcher_inferences.extend(output.dispatcher_inferences);
             hash_record_member_calls.extend(output.hash_record_member_calls);
             param_origins.extend(output.param_origins);
@@ -1146,6 +1394,21 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut call_resolution_coverage = summarize_call_resolution(&owners, &methods, &calls);
     call_resolution_coverage.raw_parser_call_sites = raw_parser_call_sites;
     call_resolution_coverage.raw_calls_not_normalized = raw_calls_not_normalized;
+    call_resolution_coverage.raw_calls_not_normalized_inside_function =
+        raw_calls_not_normalized_inside_function;
+    call_resolution_coverage.raw_calls_not_normalized_outside_function =
+        raw_calls_not_normalized_outside_function;
+    call_resolution_coverage.raw_calls_not_normalized_by_kind = raw_calls_not_normalized_by_kind;
+    raw_call_normalization_gap_samples.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.span.cmp(&right.span))
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    raw_call_normalization_gap_samples.dedup();
+    raw_call_normalization_gap_samples.truncate(64);
+    call_resolution_coverage.raw_call_normalization_gap_samples =
+        raw_call_normalization_gap_samples;
     call_resolution_coverage.normalized_calls_without_raw_span = normalized_calls_without_raw_span;
     state_accesses.sort_by(|a, b| a.id.cmp(&b.id));
     state_accesses.dedup_by(|a, b| a.id == b.id);
@@ -1155,6 +1418,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     type_dependencies.dedup_by(|left, right| left["id"] == right["id"]);
 
     ProfileOutput {
+        input_coverage: InputCoverage::default(),
         owners,
         methods,
         fields,
@@ -1191,6 +1455,11 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         return_direct_usage_sites,
         hash_record_escape_sites,
         hidden_enum_observations,
+        nullable_refinements,
+        nullable_states,
+        nullable_summaries,
+        nullable_operations,
+        presence_correlations,
         dispatcher_inferences,
         hash_record_member_calls,
         param_origins,
@@ -1890,6 +2159,74 @@ fn percentage(numerator: usize, denominator: usize) -> f64 {
         return 0.0;
     }
     ((numerator as f64 * 10_000.0 / denominator as f64).round()) / 100.0
+}
+
+fn span_contains(outer: [usize; 4], inner: [usize; 4]) -> bool {
+    (outer[0], outer[1]) <= (inner[0], inner[1]) && (inner[2], inner[3]) <= (outer[2], outer[3])
+}
+
+/// Match calls only through an origin recorded during normalization. A
+/// normalized call can deliberately retain a callable-access span
+/// (`receiver.member`) rather than its parser invocation (`receiver.member()`).
+/// Reconstructing that relation from span overlap can pair nested or adjacent
+/// calls incorrectly and hide a dropped call.
+fn unmatched_call_origins(
+    raw: &BTreeSet<[usize; 4]>,
+    normalized: &BTreeSet<[usize; 4]>,
+    normalization_origins: &[syntax::CallRawOriginProjection],
+    emitted_call_origins: &[syntax::CallRawOriginProjection],
+) -> (Vec<[usize; 4]>, Vec<[usize; 4]>) {
+    let mut unmatched_raw = raw.clone();
+    let mut unmatched_normalized = normalized.clone();
+    let mut normalized_nodes_by_raw = BTreeMap::<syntax::Span, BTreeSet<syntax::Span>>::new();
+    for origin in normalization_origins {
+        if raw.contains(&origin.raw_call_span) {
+            normalized_nodes_by_raw
+                .entry(origin.raw_call_span)
+                .or_default()
+                .insert(origin.normalized_call_span);
+        }
+    }
+    for (raw_span, normalized_nodes) in normalized_nodes_by_raw {
+        if normalized_nodes.len() == 1 {
+            unmatched_raw.remove(&raw_span);
+        }
+    }
+
+    let mut normalized_by_raw = BTreeMap::<syntax::Span, BTreeSet<syntax::Span>>::new();
+    let mut raw_by_normalized = BTreeMap::<syntax::Span, BTreeSet<syntax::Span>>::new();
+    for origin in emitted_call_origins {
+        if !raw.contains(&origin.raw_call_span)
+            || !normalized.contains(&origin.normalized_call_span)
+        {
+            continue;
+        }
+        normalized_by_raw
+            .entry(origin.raw_call_span)
+            .or_default()
+            .insert(origin.normalized_call_span);
+        raw_by_normalized
+            .entry(origin.normalized_call_span)
+            .or_default()
+            .insert(origin.raw_call_span);
+    }
+    for (raw_span, normalized_spans) in normalized_by_raw {
+        if normalized_spans.len() != 1 {
+            continue;
+        }
+        let normalized_span = *normalized_spans.first().expect("one normalized origin");
+        if raw_by_normalized
+            .get(&normalized_span)
+            .is_some_and(|raw_spans| raw_spans.len() == 1)
+        {
+            unmatched_raw.remove(&raw_span);
+            unmatched_normalized.remove(&normalized_span);
+        }
+    }
+    (
+        unmatched_raw.into_iter().collect(),
+        unmatched_normalized.into_iter().collect(),
+    )
 }
 
 fn resolve_project_calls(
@@ -2928,18 +3265,19 @@ fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {
     let mut header = String::new();
     let mut open_parens = 0;
     let mut has_parens = false;
-    for i in start_idx..std::cmp::min(lines.len(), start_idx + 10) {
-        let line = &lines[i];
+    for line in lines
+        .iter()
+        .take(std::cmp::min(lines.len(), start_idx + 10))
+        .skip(start_idx)
+    {
         header.push_str(line);
         header.push('\n');
         for c in line.chars() {
             if c == '(' {
                 open_parens += 1;
                 has_parens = true;
-            } else if c == ')' {
-                if open_parens > 0 {
-                    open_parens -= 1;
-                }
+            } else if c == ')' && open_parens > 0 {
+                open_parens -= 1;
             }
         }
         if has_parens && open_parens == 0 {
@@ -3084,7 +3422,12 @@ fn extract_methods(
             MethodRecord {
                 id: function_id(language, path, fn_def),
                 semantic_symbol: None,
-                owner_id: owner_id(language, path, structural_owner, owner_span(document, structural_owner)),
+                owner_id: owner_id(
+                    language,
+                    path,
+                    structural_owner,
+                    owner_span(document, structural_owner),
+                ),
                 key: vec![owner.clone(), name.clone(), kind.clone()],
                 symbol_owner: canonical_symbol_owner(document, structural_owner, Some(fn_def.span)),
                 lexical_symbol: (kind == "top"
@@ -3926,11 +4269,17 @@ pub fn extract_declaration_type_pressures(document: &Document) -> Vec<Declaratio
     declaration_type_pressures_from_definitions(&definitions)
 }
 
-fn declaration_type_pressures_from_definitions(definitions: &[TypeDefinition]) -> Vec<DeclarationTypePressure> {
+fn declaration_type_pressures_from_definitions(
+    definitions: &[TypeDefinition],
+) -> Vec<DeclarationTypePressure> {
     let mut out = Vec::new();
     for definition in definitions {
         if let Some(declared_type) = &definition.return_type {
-            out.push(type_pressure_row(definition, "return", declared_type.clone()));
+            out.push(type_pressure_row(
+                definition,
+                "return",
+                declared_type.clone(),
+            ));
         }
         if let Some(declared_type) = &definition.declared_type {
             out.push(type_pressure_row(
@@ -3947,10 +4296,18 @@ fn declaration_type_pressures_from_definitions(definitions: &[TypeDefinition]) -
             ));
         }
         for param in &definition.params {
-            let Some(name) = param.get("name").and_then(Value::as_str) else { continue };
-            let Some(value) = param.get("type") else { continue };
+            let Some(name) = param.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(value) = param.get("type") else {
+                continue;
+            };
             if let Ok(declared_type) = serde_json::from_value::<TypeExpr>(value.clone()) {
-                out.push(type_pressure_row(definition, &format!("param:{name}"), declared_type));
+                out.push(type_pressure_row(
+                    definition,
+                    &format!("param:{name}"),
+                    declared_type,
+                ));
             }
         }
     }
@@ -3969,7 +4326,11 @@ struct TypePressureMetrics {
     nilable_collection: bool,
 }
 
-fn type_pressure_row(definition: &TypeDefinition, slot: &str, declared_type: TypeExpr) -> DeclarationTypePressure {
+fn type_pressure_row(
+    definition: &TypeDefinition,
+    slot: &str,
+    declared_type: TypeExpr,
+) -> DeclarationTypePressure {
     let mut metrics = TypePressureMetrics::default();
     measure_type_pressure(&declared_type, 0, false, &mut metrics);
     DeclarationTypePressure {
@@ -3991,13 +4352,21 @@ fn type_pressure_row(definition: &TypeDefinition, slot: &str, declared_type: Typ
     }
 }
 
-fn measure_type_pressure(value: &TypeExpr, collection_depth: usize, inside_union: bool, metrics: &mut TypePressureMetrics) {
+fn measure_type_pressure(
+    value: &TypeExpr,
+    collection_depth: usize,
+    inside_union: bool,
+    metrics: &mut TypePressureMetrics,
+) {
     match value {
         TypeExpr::Untyped => metrics.unknown_leaves += 1,
         TypeExpr::NilClass | TypeExpr::Primitive(_) => {}
         TypeExpr::Nilable(inner) => {
             metrics.nilable = true;
-            if matches!(inner.as_ref(), TypeExpr::Array(_) | TypeExpr::Hash { .. } | TypeExpr::Set(_)) {
+            if matches!(
+                inner.as_ref(),
+                TypeExpr::Array(_) | TypeExpr::Hash { .. } | TypeExpr::Set(_)
+            ) {
                 metrics.nilable_collection = true;
             }
             measure_type_pressure(inner, collection_depth, inside_union, metrics);
@@ -4473,7 +4842,7 @@ fn type_reference_candidates(type_text: &str) -> Vec<String> {
         if word
             .chars()
             .next()
-            .map_or(false, |c| c.is_uppercase() || c == '_')
+            .is_some_and(|c| c.is_uppercase() || c == '_')
         {
             out.push(word.to_string());
         }
@@ -4538,7 +4907,6 @@ fn collect_braced_block(lines: &[String], start: usize) -> Option<(String, usize
     let mut depth = 0u32;
     let mut started = false;
     let mut buf = String::new();
-    let mut end_line = start;
     for (offset, line) in lines.iter().enumerate().skip(start) {
         for ch in line.chars() {
             match ch {
@@ -4550,8 +4918,7 @@ fn collect_braced_block(lines: &[String], start: usize) -> Option<(String, usize
                     depth = depth.saturating_sub(1);
                     buf.push(ch);
                     if depth == 0 && started {
-                        end_line = offset;
-                        return Some((buf, end_line));
+                        return Some((buf, offset));
                     }
                     continue;
                 }
@@ -4562,7 +4929,6 @@ fn collect_braced_block(lines: &[String], start: usize) -> Option<(String, usize
         if started {
             buf.push(' ');
         }
-        end_line = offset;
     }
     None
 }
@@ -4707,6 +5073,7 @@ fn collect_array_shapes_from_ast(
     }
 }
 
+#[allow(clippy::if_same_then_else)] // Quote forms intentionally share extraction after syntax validation.
 fn collect_hash_shapes_from_ast(
     node: &crate::ast::Node,
     language: &str,
@@ -4784,8 +5151,8 @@ fn collect_hash_shapes_from_ast(
     }
 }
 
-fn collect_struct_declarations<'a>(
-    node: &'a crate::ast::Node,
+fn collect_struct_declarations(
+    node: &crate::ast::Node,
     path: &str,
     namespace: &mut Vec<String>,
     struct_declarations: &mut Vec<StructDeclaration>,
@@ -4909,7 +5276,7 @@ fn infer_literal_type(value: &str, language: &str) -> String {
     if value.starts_with("%s") {
         return "Symbol".to_string();
     }
-    if value.chars().next().map_or(false, |c| c.is_uppercase()) {
+    if value.chars().next().is_some_and(|c| c.is_uppercase()) {
         return value.to_string();
     }
     if lang == "javascript" || lang == "typescript" {
@@ -5532,8 +5899,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                             .intrinsic_call_complexity(None, &call.message)
                             .or_else(|| {
                                 behavior.intrinsic_call_complexity(
-                                    (!call.receiver.is_empty())
-                                        .then_some(call.receiver.as_str()),
+                                    (!call.receiver.is_empty()).then_some(call.receiver.as_str()),
                                     &call.message,
                                 )
                             })
@@ -5671,12 +6037,13 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             } else {
                 "unbound"
             };
-            let callback_receiver = parametric_cost.is_some() || source_definition.is_some_and(|definition| {
-                definition
-                    .callback_params
-                    .iter()
-                    .any(|parameter| parameter == &call.receiver)
-            });
+            let callback_receiver = parametric_cost.is_some()
+                || source_definition.is_some_and(|definition| {
+                    definition
+                        .callback_params
+                        .iter()
+                        .any(|parameter| parameter == &call.receiver)
+                });
             let dispatch_boundary = document
                 .semantic_effect_sites
                 .iter()
@@ -5787,10 +6154,17 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .or_else(|| parametric_complexity.map(|cost| cost.1.to_string())),
                 complexity_provenance: known_complexity
                     .map(|_| "language_stdlib_registry".to_string())
-                    .or_else(|| parametric_complexity.map(|_| "parametric_declared_receiver_contract".to_string())),
+                    .or_else(|| {
+                        parametric_complexity
+                            .map(|_| "parametric_declared_receiver_contract".to_string())
+                    }),
                 complexity_bound_quality: known_complexity
                     .map(|_| "upper_bound_declared_receiver".to_string())
-                    .or_else(|| parametric_cost.as_ref().map(|kind| format!("upper_bound_parametric_{kind}"))),
+                    .or_else(|| {
+                        parametric_cost
+                            .as_ref()
+                            .map(|kind| format!("upper_bound_parametric_{kind}"))
+                    }),
                 complexity_candidates: Vec::new(),
                 complexity_assumptions: Vec::new(),
                 message: call.message.clone(),
@@ -5912,13 +6286,17 @@ pub(crate) mod tests {
     use super::*;
 
     use crate::syntax::Language;
+    #[cfg(test)]
+    use std::io::Write;
 
     pub(crate) fn test_document() -> Document {
         Document {
             file: "test.rb".to_string(),
             language: Language::Ruby,
             source_digest: String::new(),
-            raw_call_spans: Vec::new(),
+            parse_recovered: false,
+            parse_recovery_spans: Vec::new(),
+            raw_call_sites: Vec::new(),
             symbol_scope: syntax::SymbolScope::default(),
             function_defs: vec![syntax::FunctionDef {
                 file: "test.rb".to_string(),
@@ -5949,6 +6327,8 @@ pub(crate) mod tests {
                 line: 1,
                 span: [1, 0, 1, 16],
             }],
+            normalization_call_origins: Vec::new(),
+            call_raw_origin_projections: Vec::new(),
             state_declarations: vec![syntax::StateDeclaration {
                 field: "@name".to_string(),
                 owner: "Greeter".to_string(),
@@ -5998,6 +6378,11 @@ pub(crate) mod tests {
             protocol_call_paths: vec![],
             clone_candidates: vec![],
             redundant_nil_guards: vec![],
+            nullable_refinements: vec![],
+            nullable_states: vec![],
+            nullable_summaries: vec![],
+            nullable_operations: vec![],
+            presence_correlations: vec![],
             immutable_struct_readers: Default::default(),
             immutable_struct_reader_types: Default::default(),
             type_aliases: Default::default(),
@@ -6025,6 +6410,186 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn raw_call_loss_is_grouped_by_parser_node_kind_and_survives_merge() {
+        let mut document = test_document();
+        let span = [4, 2, 4, 9];
+        document.raw_call_sites = vec![crate::ast::RawCallSite {
+            span,
+            kind: "call_expression".to_string(),
+        }];
+
+        let output = extract(&document, Profile::Espalier);
+        assert_eq!(output.call_resolution_coverage.raw_calls_not_normalized, 1);
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            0
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_outside_function,
+            1
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_by_kind
+                .get("call_expression"),
+            Some(&1)
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples,
+            vec![RawCallNormalizationGap {
+                path: "test.rb".to_string(),
+                language: "ruby".to_string(),
+                span,
+                kind: "call_expression".to_string(),
+                inside_executable_function: false,
+            }]
+        );
+
+        let merged = merge(vec![output], Profile::Espalier);
+        assert_eq!(
+            merged
+                .call_resolution_coverage
+                .raw_calls_not_normalized_by_kind
+                .get("call_expression"),
+            Some(&1)
+        );
+        assert_eq!(
+            merged
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn call_coverage_matches_access_spans_without_hiding_missing_outer_calls() {
+        let raw = BTreeSet::from([
+            [1, 0, 1, 20],  // outer_call(inner())
+            [1, 11, 1, 18], // inner()
+        ]);
+        let normalized = BTreeSet::from([[1, 11, 1, 16]]); // inner callable access
+
+        let origins = vec![syntax::CallRawOriginProjection {
+            raw_call_span: [1, 11, 1, 18],
+            normalized_call_span: [1, 11, 1, 16],
+        }];
+        let (unmatched_raw, unmatched_normalized) =
+            unmatched_call_origins(&raw, &normalized, &origins, &origins);
+
+        assert_eq!(unmatched_raw, vec![[1, 0, 1, 20]]);
+        assert!(unmatched_normalized.is_empty());
+    }
+
+    #[test]
+    fn call_coverage_matches_a_normalized_access_within_its_parser_call() {
+        let raw = BTreeSet::from([[1, 0, 1, 16]]); // receiver.member()
+        let normalized = BTreeSet::from([[1, 0, 1, 15]]); // receiver.member
+
+        let origins = vec![syntax::CallRawOriginProjection {
+            raw_call_span: [1, 0, 1, 16],
+            normalized_call_span: [1, 0, 1, 15],
+        }];
+        let (unmatched_raw, unmatched_normalized) =
+            unmatched_call_origins(&raw, &normalized, &origins, &origins);
+
+        assert!(unmatched_raw.is_empty());
+        assert!(unmatched_normalized.is_empty());
+    }
+
+    #[test]
+    fn call_coverage_does_not_treat_partial_overlap_as_a_shared_origin() {
+        let raw = BTreeSet::from([[1, 0, 1, 12]]);
+        let normalized = BTreeSet::from([[1, 8, 1, 18]]);
+
+        let (unmatched_raw, unmatched_normalized) =
+            unmatched_call_origins(&raw, &normalized, &[], &[]);
+
+        assert_eq!(unmatched_raw, vec![[1, 0, 1, 12]]);
+        assert_eq!(unmatched_normalized, vec![[1, 8, 1, 18]]);
+    }
+
+    #[test]
+    fn call_coverage_keeps_synthetic_receiver_calls_unmatched() {
+        let raw = BTreeSet::from([[1, 0, 1, 16]]); // lookup[key]
+        let normalized = BTreeSet::from([
+            [1, 0, 1, 6],  // synthetic receiver VCALL: lookup
+            [1, 0, 1, 16], // emitted index call
+        ]);
+        let origins = vec![syntax::CallRawOriginProjection {
+            raw_call_span: [1, 0, 1, 16],
+            normalized_call_span: [1, 0, 1, 16],
+        }];
+
+        let (unmatched_raw, unmatched_normalized) =
+            unmatched_call_origins(&raw, &normalized, &origins, &origins);
+
+        assert!(unmatched_raw.is_empty());
+        assert_eq!(unmatched_normalized, vec![[1, 0, 1, 6]]);
+    }
+
+    #[test]
+    fn compact_call_resolution_evidence_matches_full_espalier_resolution() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class ResolverFixture
+  def known
+  end
+
+  def caller
+    known
+    external_boundary
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let documents = syntax::parse_files(&[file.path().to_path_buf()], Language::Ruby)
+            .expect("parse Ruby source");
+
+        let full = merge(
+            documents
+                .iter()
+                .map(|document| extract(document, Profile::Espalier))
+                .collect(),
+            Profile::Espalier,
+        );
+        let compact = call_resolution_evidence(&documents);
+
+        assert_eq!(
+            compact.call_resolution_coverage.exact_project_targets,
+            full.call_resolution_coverage.exact_project_targets
+        );
+        assert_eq!(
+            compact
+                .call_resolution_coverage
+                .modeled_without_project_target,
+            full.call_resolution_coverage.modeled_without_project_target
+        );
+        assert_eq!(
+            compact.call_resolution_coverage.unresolved_call_sites,
+            full.call_resolution_coverage.unresolved_call_sites
+        );
+        assert_eq!(
+            compact
+                .unresolved_function_spans_by_file
+                .get(&documents[0].file)
+                .map(Vec::len),
+            Some(1)
+        );
+    }
+
     pub(crate) fn extracts_methods_impl() {
         let doc = test_document();
         let output = extract(&doc, Profile::Espalier);
@@ -6037,7 +6602,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn top_level_function_whose_fallback_owner_name_collides_with_a_real_owner_is_not_linked_to_it() {
+    fn top_level_function_whose_fallback_owner_name_collides_with_a_real_owner_is_not_linked_to_it()
+    {
         let mut doc = test_document();
         doc.function_defs.push(syntax::FunctionDef {
             file: "test.rb".to_string(),
@@ -6061,10 +6627,21 @@ pub(crate) mod tests {
         });
         let output = extract(&doc, Profile::Espalier);
 
-        let real_member = output.methods.iter().find(|m| m.name == "hello").expect("real method");
-        let free_function = output.methods.iter().find(|m| m.name == "helper").expect("free function");
+        let real_member = output
+            .methods
+            .iter()
+            .find(|m| m.name == "hello")
+            .expect("real method");
+        let free_function = output
+            .methods
+            .iter()
+            .find(|m| m.name == "helper")
+            .expect("free function");
 
-        assert_eq!(free_function.owner, "Greeter", "the display owner (file-stem fallback) is unchanged");
+        assert_eq!(
+            free_function.owner, "Greeter",
+            "the display owner (file-stem fallback) is unchanged"
+        );
         assert_ne!(
             free_function.owner_id, real_member.owner_id,
             "a free function must never share owner_id with an unrelated real owner of the same name"
@@ -6114,10 +6691,10 @@ pub(crate) mod tests {
         assert!(r.is_none());
         assert!(p.is_empty());
 
-        let (r, p) = parse_python_signature("def my_func(a: int");
+        let (r, _p) = parse_python_signature("def my_func(a: int");
         assert!(r.is_none());
 
-        let (r, p) = parse_python_signature("def my_func(self, cls, , a, b: ) -> str:");
+        let (_r, p) = parse_python_signature("def my_func(self, cls, , a, b: ) -> str:");
         assert_eq!(p.len(), 0);
     }
 
@@ -6137,18 +6714,22 @@ pub(crate) mod tests {
         assert!(r.is_none());
         assert!(p.is_empty());
 
-        let (r, p) = parse_typescript_signature("(a: number");
+        let (r, _p) = parse_typescript_signature("(a: number");
         assert!(r.is_none());
 
-        let (r, p) = parse_typescript_signature("( , a, b: ): void");
+        let (_r, p) = parse_typescript_signature("( , a, b: ): void");
         assert_eq!(p.len(), 0);
     }
 
     pub(crate) fn test_nil_kill_profile_merge_impl() {
-        let mut p1 = ProfileOutput::default();
-        p1.collection_index_lookups = vec![serde_json::json!({"test": 1})];
-        let mut p2 = ProfileOutput::default();
-        p2.collection_index_lookups = vec![serde_json::json!({"test": 2})];
+        let p1 = ProfileOutput {
+            collection_index_lookups: vec![serde_json::json!({"test": 1})],
+            ..ProfileOutput::default()
+        };
+        let p2 = ProfileOutput {
+            collection_index_lookups: vec![serde_json::json!({"test": 2})],
+            ..ProfileOutput::default()
+        };
 
         let merged = merge(vec![p1, p2], Profile::NilKill);
         assert_eq!(merged.collection_index_lookups.len(), 2);
@@ -6639,7 +7220,7 @@ def py_fn(a: int) -> str:
     }
 
     pub(crate) fn test_sorbet_signature_parsing_impl() {
-        let (r, p) = parse_sorbet_signature("def foo");
+        let (r, _p) = parse_sorbet_signature("def foo");
         assert!(r.is_none());
 
         let (r, p) = parse_sorbet_signature("sig { .params(x: Integer).returns(String) }");
@@ -6654,7 +7235,7 @@ def py_fn(a: int) -> str:
         assert_eq!(r, Some("String".to_string()));
         assert_eq!(p.len(), 2);
 
-        let (r, p) = parse_sorbet_signature("sig { .params(x: Integer");
+        let (r, _p) = parse_sorbet_signature("sig { .params(x: Integer");
         assert!(r.is_none());
     }
 
@@ -7090,6 +7671,23 @@ def py_fn(a: int) -> str:
             "func F[T interface{ ~int }](x T) error "
         );
     }
+
+    #[test]
+    fn normalize_paths_normalizes_compound_identity_keys() {
+        let root = std::path::Path::new("/workspace/clear");
+        let mut value = serde_json::json!({
+            "hidden_enum_observations": [{
+                "key": "local\u{0}/workspace/clear/gems/fact-mine/example.rb\u{0}Owner"
+            }]
+        });
+
+        super::normalize_paths(&mut value, root);
+
+        assert_eq!(
+            value["hidden_enum_observations"][0]["key"],
+            "local\u{0}gems/fact-mine/example.rb\u{0}Owner"
+        );
+    }
 }
 
 pub fn run_profile_tests() {
@@ -7191,7 +7789,7 @@ pub(crate) fn child_nodes(node: &crate::ast::Node) -> Vec<&crate::ast::Node> {
         .collect()
 }
 
-pub(crate) fn call_arguments<'a>(args_node: &'a crate::ast::Node) -> Vec<&'a crate::ast::Node> {
+pub(crate) fn call_arguments(args_node: &crate::ast::Node) -> Vec<&crate::ast::Node> {
     let t = args_node.r#type.as_str();
     if t == "argument_list"
         || t == "arguments"
@@ -7228,8 +7826,8 @@ fn get_receiver_alias(text: &str) -> Option<String> {
     let t = text.trim_start();
     if let Some(rest) = t.strip_prefix("func") {
         let rest = rest.trim_start();
-        if rest.starts_with('(') {
-            if let Some((receiver_part, _)) = rest[1..].split_once(')') {
+        if let Some(receiver_body) = rest.strip_prefix('(') {
+            if let Some((receiver_part, _)) = receiver_body.split_once(')') {
                 let parts: Vec<&str> = receiver_part.split_whitespace().collect();
                 if !parts.is_empty() {
                     let r = parts[0].trim_start_matches('*').to_string();
@@ -7333,7 +7931,7 @@ impl<'a> StateParamVisitor<'a> {
                     let mut owner = self.current_owners.last().cloned().unwrap_or_default();
                     let mut final_func_name = func_name.clone();
                     if owner.is_empty() {
-                        if let Some(pos) = func_name.rfind(|c| c == ':' || c == '.') {
+                        if let Some(pos) = func_name.rfind([':', '.']) {
                             owner = func_name[..pos].to_string();
                             final_func_name = func_name[pos + 1..].to_string();
                         }
@@ -7458,7 +8056,7 @@ impl<'a> StateParamVisitor<'a> {
                 Some(field_symbol),
                 Some(crate::ast::Child::Node(args_node)),
             ) = (
-                node.children.get(0),
+                node.children.first(),
                 child_symbol(node, 1),
                 node.children.get(2),
             ) {
@@ -7478,10 +8076,7 @@ impl<'a> StateParamVisitor<'a> {
 
                 if let Some(field) = field_name {
                     let arg_children = call_arguments(args_node);
-                    let val_node = arg_children
-                        .last()
-                        .map(|n| *n)
-                        .unwrap_or(args_node.as_ref());
+                    let val_node = arg_children.last().copied().unwrap_or(args_node.as_ref());
                     if let Some(param_name) = find_param_ref(val_node, &fn_def.params) {
                         self.origins.push(crate::syntax::StateParamOrigin {
                             field,
@@ -7512,18 +8107,24 @@ impl<'a> StateParamVisitor<'a> {
 
 fn normalize_string(s: &str, root: &std::path::Path) -> String {
     if s.contains('\x00') {
-        let parts: Vec<String> = s.split('\x00').map(|part| normalize_string(part, root)).collect();
+        let parts: Vec<String> = s
+            .split('\x00')
+            .map(|part| normalize_string(part, root))
+            .collect();
         parts.join("\x00")
     } else if s.contains(':') {
-        let parts: Vec<String> = s.split(':').map(|part| {
-            let path = std::path::Path::new(part);
-            if path.is_absolute() {
-                if let Ok(rel) = path.strip_prefix(root) {
-                    return rel.to_string_lossy().to_string();
+        let parts: Vec<String> = s
+            .split(':')
+            .map(|part| {
+                let path = std::path::Path::new(part);
+                if path.is_absolute() {
+                    if let Ok(rel) = path.strip_prefix(root) {
+                        return rel.to_string_lossy().to_string();
+                    }
                 }
-            }
-            part.to_string()
-        }).collect();
+                part.to_string()
+            })
+            .collect();
         parts.join(":")
     } else {
         let path = std::path::Path::new(s);
@@ -7540,7 +8141,11 @@ pub fn normalize_paths(v: &mut serde_json::Value, root: &std::path::Path) {
     match v {
         serde_json::Value::Object(map) => {
             for (key, val) in map.iter_mut() {
-                if key == "path" || key == "file" || key == "id" {
+                // Stable identities can embed paths in a compound key (for
+                // example hidden-enum local keys use NUL-separated fields).
+                // Normalize those exactly as IDs so profile oracles remain
+                // portable across checkouts.
+                if key == "path" || key == "file" || key == "id" || key == "key" {
                     if let serde_json::Value::String(s) = val {
                         *val = serde_json::Value::String(normalize_string(s, root));
                     }

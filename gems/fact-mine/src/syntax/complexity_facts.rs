@@ -528,6 +528,7 @@ fn collect_block_invocations(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // The fact mirrors the independently extracted method evidence.
 fn fact_for_method(
     document: &Document,
     path: &str,
@@ -577,8 +578,7 @@ fn fact_for_method(
     collect_deferred_regions(node, &mut deferred_regions, behavior);
     let state_replays = collect_state_replays(node, &mut domain_registry, behavior);
     let state_progress = collect_state_progress(node, &mut domain_registry, behavior);
-    let state_cursor_domains =
-        collect_state_cursor_domains(node, &mut domain_registry, behavior);
+    let state_cursor_domains = collect_state_cursor_domains(node, &mut domain_registry, behavior);
     let mut collection_growth = BTreeMap::new();
     visit_loops(
         node,
@@ -1003,6 +1003,7 @@ fn collect_deferred_regions(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Allocation analysis consumes independent flow maps.
 fn collect_allocations(
     node: &Node,
     params: &BTreeSet<String>,
@@ -1106,6 +1107,7 @@ fn collect_allocations(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Loop analysis requires the full immutable analysis context.
 fn visit_loops(
     node: &Node,
     params: &BTreeSet<String>,
@@ -1330,9 +1332,7 @@ fn visit_loops(
                 })
             });
         let mut power = parent.power;
-        if parent.collapse_direct_child && !refs.is_empty() {
-            power = parent.power;
-        } else if parent.absorb_next {
+        if (parent.collapse_direct_child && !refs.is_empty()) || parent.absorb_next {
             power = parent.power;
         } else if !fixed {
             let inferred_block_power = if node.r#type == "ITER" {
@@ -1350,11 +1350,7 @@ fn visit_loops(
                 parent.power + growth_power
             } else if !locals.is_disjoint(&parent.independent_collection_bindings) {
                 parent.power + inferred_block_power
-            } else if refs.is_empty() && independent_nested_domain {
-                parent.power + inferred_block_power
-            } else if refs.is_empty() {
-                power.max(1)
-            } else if amortized {
+            } else if refs.is_empty() || amortized {
                 power.max(1)
             } else {
                 power + inferred_block_power
@@ -2213,6 +2209,7 @@ fn call_argument_progress(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Recursion evidence is accumulated from independent control-flow inputs.
 fn collect_recursion(
     node: &Node,
     function: &str,
@@ -2576,7 +2573,11 @@ mod tests {
         facts(&document)
     }
 
-    fn language_facts(source: &str, language: Language, suffix: &str) -> Vec<MethodComplexityFacts> {
+    fn language_facts(
+        source: &str,
+        language: Language,
+        suffix: &str,
+    ) -> Vec<MethodComplexityFacts> {
         let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
         file.write_all(source.as_bytes()).unwrap();
         let document = syntax::parse_file(file.path().to_path_buf(), language).unwrap();
@@ -2623,10 +2624,19 @@ class ReplayCursor:
             let replay = rows.iter().find(|row| row.function == "speculate").unwrap();
             assert_eq!(replay.state_replays.len(), 1);
             assert_eq!(replay.state_replays[0].checkpoint_local, "checkpoint");
-            assert_eq!(replay.state_replays[0].replayed_calls[0].message, "parse_value");
-            let value = rows.iter().find(|row| row.function == "parse_value").unwrap();
+            assert_eq!(
+                replay.state_replays[0].replayed_calls[0].message,
+                "parse_value"
+            );
+            let value = rows
+                .iter()
+                .find(|row| row.function == "parse_value")
+                .unwrap();
             assert_eq!(value.state_cursor_domains.len(), 1);
-            assert_eq!(value.state_cursor_domains[0].cursor_domain, "state:ReplayCursor:@cursor");
+            assert_eq!(
+                value.state_cursor_domains[0].cursor_domain,
+                "state:ReplayCursor:@cursor"
+            );
             assert_eq!(value.state_progress.len(), 1, "{value:#?}");
         }
 
@@ -2680,10 +2690,13 @@ class Cursor:
 
         for rows in [&ruby, &python] {
             let scan = rows.iter().find(|row| row.function == "scan").unwrap();
-            assert!(scan.state_cursor_domains.iter().any(|cursor| {
-                cursor.cursor_domain == "state:Cursor:@position"
-                    && cursor.collection_domain == "state:Cursor:@items"
-            }), "{scan:#?}");
+            assert!(
+                scan.state_cursor_domains.iter().any(|cursor| {
+                    cursor.cursor_domain == "state:Cursor:@position"
+                        && cursor.collection_domain == "state:Cursor:@items"
+                }),
+                "{scan:#?}"
+            );
         }
     }
 
@@ -2828,7 +2841,10 @@ func search(left, right int) int {
         assert_eq!(iteration.execution_multiplicity, "O(N)");
         assert_eq!(iteration.evidence_gap, None);
         assert!(iteration.symbolic_time.as_ref().unwrap().complete);
-        assert_eq!(symbolic_factors(&rows, "search"), [("left + right".to_string(), 1)]);
+        assert_eq!(
+            symbolic_factors(&rows, "search"),
+            [("left + right".to_string(), 1)]
+        );
     }
 
     #[test]

@@ -1,0 +1,106 @@
+{
+  "valid": {
+    "schema": "fact-mine.proof-boundary.v3",
+    "input_completeness": "partial",
+    "claim_status": "review",
+    "coverage_discharge": "unsatisfiable",
+    "authority": ["fact_mine_normalized_ast", "nil_kill_static"],
+    "claim_kind": "static_nil_pressure",
+    "scope": {"kind": "local", "closed": false},
+    "blockers": [{"kind": "unknown"}]
+  },
+  "representative": {
+    "nil_kill": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "partial",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast", "nil_kill_static"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": [{"kind": "unknown"}]
+    },
+    "decomplex": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "partial",
+      "claim_status": "review",
+      "coverage_discharge": "not_applicable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "false_simplicity",
+      "scope": {"kind": "function", "closed": false},
+      "blockers": [{"kind": "call_resolution", "path": "lib/example.rb", "span": [12, 0, 12, 0]}]
+    },
+    "espalier": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "unknown",
+      "claim_status": "observed",
+      "coverage_discharge": "not_applicable",
+      "authority": ["espalier_static", "fact_mine_normalized_ast"],
+      "claim_kind": "function_complexity",
+      "scope": {"kind": "function", "closed": false},
+      "blockers": [{"kind": "unknown"}]
+    },
+    "slopcop": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "unknown",
+      "claim_status": "observed",
+      "coverage_discharge": "satisfiable",
+      "authority": ["slopcop_coverage"],
+      "claim_kind": "coverage_gap",
+      "scope": {"kind": "project", "closed": false},
+      "blockers": [{"kind": "unknown"}]
+    }
+  },
+  "invalid": {
+    "invalid_enum": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "certain",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": []
+    },
+    "complete_with_blocker": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "complete",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": [{"kind": "unknown"}]
+    },
+    "open_corpus_partial": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "partial",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": [{"kind": "open_corpus"}]
+    },
+    "empty_path": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "partial",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": [{"kind": "call_resolution", "path": ""}]
+    },
+    "reversed_span": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "partial",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": [{"kind": "call_resolution", "path": "lib/example.rb", "span": [3, 2, 3, 1]}]
+    }
+  }
+}

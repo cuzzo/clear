@@ -93,9 +93,7 @@ fn lua_function_name_at(source: &str, line: usize) -> Option<String> {
         .split('(')
         .next()?
         .trim();
-    let name = callable
-        .rsplit(['.', ':'])
-        .find(|part| !part.is_empty())?;
+    let name = callable.rsplit(['.', ':']).find(|part| !part.is_empty())?;
     (!name.is_empty()
         && name
             .chars()

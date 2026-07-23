@@ -118,9 +118,7 @@ pub fn rollup(sections: &[ReportSection], min_detectors: usize) -> Vec<Unit> {
     units
 }
 
-fn independent_detector_groups(
-    roots: &BTreeMap<String, BTreeSet<String>>,
-) -> Vec<Vec<String>> {
+fn independent_detector_groups(roots: &BTreeMap<String, BTreeSet<String>>) -> Vec<Vec<String>> {
     let detectors = roots.keys().cloned().collect::<Vec<_>>();
     let mut parents = (0..detectors.len()).collect::<Vec<_>>();
 
@@ -276,26 +274,34 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].n_detectors, 2);
         assert_eq!(rows[0].score, 5);
-        assert!(rows[0].detectors.contains(&"Decision Pressure + False Simplicity".to_string()));
+        assert!(rows[0]
+            .detectors
+            .contains(&"Decision Pressure + False Simplicity".to_string()));
     }
 
     #[test]
     fn test_rollup_edge_cases() {
-        let sections = vec![
-            ReportSection::new("A", 1, "", vec![
-                json!({"at": "foo"}), // parts.len() < 2
-                json!({"at": ":m:1"}), // empty file
-                json!({"at": "a.rb::1"}), // empty method
-                json!({"at": "a.rb:m"}), // no line number
+        let sections = vec![ReportSection::new(
+            "A",
+            1,
+            "",
+            vec![
+                json!({"at": "foo"}),              // parts.len() < 2
+                json!({"at": ":m:1"}),             // empty file
+                json!({"at": "a.rb::1"}),          // empty method
+                json!({"at": "a.rb:m"}),           // no line number
                 json!({"at": "a.rb:m:notdigits"}), // not all digits line
-            ]),
-        ];
+            ],
+        )];
         let rows = rollup(&sections, 1);
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().any(|u| u.file == "a.rb" && u.method == "m" && u.at == "a.rb:m"));
-        assert!(rows.iter().any(|u| u.file == "a.rb:m" && u.method == "notdigits" && u.at == "a.rb:m:notdigits"));
+        assert!(rows
+            .iter()
+            .any(|u| u.file == "a.rb" && u.method == "m" && u.at == "a.rb:m"));
+        assert!(rows
+            .iter()
+            .any(|u| u.file == "a.rb:m" && u.method == "notdigits" && u.at == "a.rb:m:notdigits"));
     }
-
 
     #[test]
     fn test_rollup_sorting() {
@@ -304,7 +310,12 @@ mod tests {
             ReportSection::new("A", 1, "", vec![json!({"at": "y.rb:m:1"})]),
             ReportSection::new("B", 2, "", vec![json!({"at": "y.rb:m:2"})]),
             // Unit 2: file "x.rb", method "m", detectors [A, B] -> n_detectors = 2, score = 4 (3 + 1), findings = 3
-            ReportSection::new("C", 3, "", vec![json!({"at": "x.rb:m:1"}), json!({"at": "x.rb:m:2"})]),
+            ReportSection::new(
+                "C",
+                3,
+                "",
+                vec![json!({"at": "x.rb:m:1"}), json!({"at": "x.rb:m:2"})],
+            ),
             ReportSection::new("A", 1, "", vec![json!({"at": "x.rb:m:3"})]),
             // Unit 3: file "b.rb", method "m", detectors [A, B] -> n_detectors = 2, score = 4, findings = 2
             ReportSection::new("A", 1, "", vec![json!({"at": "b.rb:m:1"})]),

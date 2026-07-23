@@ -16,6 +16,7 @@ pub mod local_flow;
 pub(crate) mod lua;
 pub(crate) mod normalized_behavior;
 pub(crate) mod normalized_extractor;
+pub mod nullable;
 pub(crate) mod parser_grammar;
 pub(crate) mod passes;
 pub mod path_condition;
@@ -32,7 +33,7 @@ pub(crate) mod visibility;
 pub(crate) mod zig;
 
 use crate::ast::RawNode;
-pub use crate::ast::{Child, Node, Span};
+pub use crate::ast::{Child, Node, RawCallSite, Span};
 use crate::parallel;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -242,8 +243,20 @@ pub struct Document {
     pub language: Language,
     #[serde(default)]
     pub source_digest: String,
+    /// Tree-sitter recovered from one or more syntax errors. The document is
+    /// still useful, but consumers must not represent its extracted facts as
+    /// complete input coverage.
     #[serde(default)]
-    pub raw_call_spans: Vec<Span>,
+    pub parse_recovered: bool,
+    /// Exact parser recovery locations. Keeping these with the document makes
+    /// incomplete input coverage auditable instead of a file-level guess.
+    #[serde(default)]
+    pub parse_recovery_spans: Vec<[usize; 4]>,
+    /// Parser-classified calls retained with grammar-node kinds for
+    /// normalization-loss accounting. This is diagnostic evidence, not a
+    /// second call extractor.
+    #[serde(default)]
+    pub raw_call_sites: Vec<RawCallSite>,
     #[serde(default)]
     pub symbol_scope: SymbolScope,
     #[serde(default)]
@@ -252,6 +265,15 @@ pub struct Document {
     pub owner_defs: Vec<OwnerDef>,
     #[serde(default)]
     pub call_sites: Vec<CallSite>,
+    /// Exact parser-call origins retained by normalization. Coverage uses
+    /// these identities instead of re-matching source ranges heuristically.
+    #[serde(default)]
+    pub normalization_call_origins: Vec<CallRawOriginProjection>,
+    /// Exact parser origins for semantic calls emitted by the normalized
+    /// extractor. Calls deliberately suppressed as non-semantic remain in
+    /// `normalization_call_origins` but not here.
+    #[serde(default)]
+    pub call_raw_origin_projections: Vec<CallRawOriginProjection>,
     #[serde(default)]
     pub call_receiver_projections: Vec<CallReceiverProjection>,
     #[serde(default)]
@@ -315,6 +337,16 @@ pub struct Document {
     pub(crate) clone_candidates: Vec<CloneCandidate>,
     #[serde(default)]
     pub redundant_nil_guards: Vec<redundant_nil_guard::RedundantNilGuardRow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_refinements: Vec<nullable::NullableRefinement>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_states: Vec<nullable::NullableState>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_summaries: Vec<nullable::NullableSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nullable_operations: Vec<nullable::NullableOperation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presence_correlations: Vec<nullable::PresenceCorrelation>,
     #[serde(default)]
     pub immutable_struct_readers: BTreeMap<String, Vec<String>>,
     #[serde(default)]
@@ -474,6 +506,15 @@ pub struct CallSite {
     pub control: Option<String>,
     pub safe_navigation: bool,
     pub block: bool,
+}
+
+/// The parser call that produced a normalized call. `normalized_call_span`
+/// can be a callable-access span rather than the enclosing invocation, so it
+/// must not be reconstructed later from generic span overlap.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CallRawOriginProjection {
+    pub raw_call_span: Span,
+    pub normalized_call_span: Span,
 }
 
 /// Structural identity for a direct call used as another call's receiver.
@@ -757,6 +798,42 @@ mod tests {
         assert_eq!(docs[1].file, second.path().to_string_lossy());
         assert_eq!(docs[0].function_defs[0].name, "first");
         assert_eq!(docs[1].function_defs[0].name, "second");
+    }
+
+    #[test]
+    fn normalized_calls_retain_parser_call_origins() {
+        let doc = document("def run\n  receiver.call\nend\n", Language::Ruby);
+
+        assert!(!doc.raw_call_sites.is_empty());
+        assert!(!doc.call_sites.is_empty());
+        assert!(doc.call_raw_origin_projections.iter().any(|origin| {
+            doc.raw_call_sites
+                .iter()
+                .any(|raw| raw.span == origin.raw_call_span)
+                && doc
+                    .call_sites
+                    .iter()
+                    .any(|call| call.span == origin.normalized_call_span)
+        }));
+    }
+
+    #[test]
+    fn parser_recovery_is_retained_as_input_coverage_evidence() {
+        let doc = document("def broken(\n", Language::Ruby);
+
+        assert!(doc.parse_recovered);
+        assert!(!doc.parse_recovery_spans.is_empty());
+    }
+
+    #[test]
+    fn parses_rust_raw_identifier_without_recovery() {
+        let doc = document(
+            "fn sample() { let raw = 1; let _ = raw; }\n",
+            Language::Rust,
+        );
+
+        assert!(!doc.parse_recovered);
+        assert!(doc.parse_recovery_spans.is_empty());
     }
 
     #[test]

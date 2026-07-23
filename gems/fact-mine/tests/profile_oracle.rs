@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use fact_mine_rust::profile::{self, Profile};
 use fact_mine_rust::syntax::{self, Language};
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -88,6 +89,872 @@ fn declared_method_types_are_normalized_from_language_owned_syntax() -> Result<(
             .as_deref(),
         Some("T.nilable(string)")
     );
+    Ok(())
+}
+
+#[test]
+fn nullable_refinements_are_a_stable_nil_kill_public_fact() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_refinements.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let actual = output
+        .nullable_refinements
+        .iter()
+        .map(|row| {
+            json!({
+                "edge": row.edge,
+                "proof_kind": row.proof_kind,
+                "state_on_edge": row.state_on_edge,
+            })
+        })
+        .collect::<Vec<_>>();
+    let expected: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(fixture("nullable_refinements.json"))?)?;
+
+    assert_eq!(actual, expected);
+    assert!(output.nullable_refinements.iter().all(|row| {
+        row.place_id.starts_with("place:")
+            && row.condition_node_id.starts_with("cfg:")
+            && (!row.complete || !row.source_definition_ids.is_empty())
+    }));
+    Ok(())
+}
+
+#[test]
+fn nullable_states_follow_exact_nil_writes_and_direct_aliases() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_states.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let mut actual = output
+        .nullable_states
+        .iter()
+        .map(|row| json!({"complete": row.complete, "state": row.state}))
+        .collect::<Vec<_>>();
+    actual.sort_by_key(|row| row["state"].as_str().unwrap_or_default().to_string());
+    let expected: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(fixture("nullable_states.json"))?)?;
+
+    assert_eq!(actual, expected);
+    assert!(output
+        .nullable_states
+        .iter()
+        .filter(|row| row.state == "definitely_null")
+        .all(|row| row.source_definition_ids.len() == 1 && row.unknown_reasons.is_empty()));
+    Ok(())
+}
+
+#[test]
+fn nullable_return_summaries_follow_cfg_state_facts() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_states.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let mut actual = output
+        .nullable_summaries
+        .iter()
+        .map(|summary| {
+            serde_json::json!({
+                "complete": summary.complete,
+                "function": summary.function,
+                "return_state": summary.return_state,
+            })
+        })
+        .collect::<Vec<_>>();
+    actual.sort_by_key(|row| row["function"].as_str().unwrap().to_string());
+    let expected: Vec<serde_json::Value> =
+        serde_json::from_str(&fs::read_to_string(fixture("nullable_summaries.json"))?)?;
+    assert_eq!(actual, expected);
+    Ok(())
+}
+
+#[test]
+fn nullable_states_preserve_go_and_cpp_null_literals() -> Result<()> {
+    for (name, language) in [
+        ("nullable_states.go", Language::Go),
+        ("nullable_states.cpp", Language::Cpp),
+    ] {
+        let document = syntax::parse_file(fixture(name), language)?;
+        let output = profile::extract(&document, Profile::NilKill);
+        assert!(output.nullable_states.iter().any(|state| {
+            state.state == "definitely_null"
+                && state.complete
+                && !state.source_definition_ids.is_empty()
+        }));
+        assert!(output
+            .nullable_summaries
+            .iter()
+            .any(|summary| { summary.return_state == "definitely_null" && summary.complete }));
+    }
+    Ok(())
+}
+
+#[test]
+fn native_declared_non_null_contracts_reach_public_nullable_states() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_annotations.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("non_null_parameter")
+            && state.place_id.ends_with(":value")
+            && state.state == "definitely_non_null"
+            && state.complete
+    }));
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("non_null_local")
+            && state.place_id.ends_with(":value")
+            && state.state == "definitely_non_null"
+            && state.complete
+    }));
+    Ok(())
+}
+
+#[test]
+fn c_native_nullability_annotations_survive_parser_preprocessing() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_annotations.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("nullable_parameter")
+            && state.place_id.ends_with(":value")
+            && state.state == "maybe_null"
+            && state.complete
+    }));
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("non_null_parameter")
+            && state.place_id.ends_with(":value")
+            && state.state == "definitely_non_null"
+            && state.complete
+    }));
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("nullable_local")
+            && state.place_id.ends_with(":value")
+            && state.state == "maybe_null"
+            && state.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.path.ends_with("nullable_annotations.c")
+            && operation.operation_kind == "pointer_dereference"
+            && operation.state_at_operation == "maybe_null"
+            && operation.complete
+    }));
+    assert!(output.nullable_operations.iter().all(|operation| {
+        operation
+            .path
+            .ends_with("nullable_annotations.c")
+            .then_some(operation.operation_kind.as_str())
+            != Some("function_pointer_call")
+    }));
+    Ok(())
+}
+
+#[test]
+fn nullable_operations_join_native_dereferences_to_proven_null_states() -> Result<()> {
+    for (name, language, behavior) in [
+        ("nullable_operations.c", Language::C, "undefined_behavior"),
+        (
+            "nullable_operations.cpp",
+            Language::Cpp,
+            "undefined_behavior",
+        ),
+        ("nullable_operations.go", Language::Go, "panic"),
+    ] {
+        let document = syntax::parse_file(fixture(name), language)?;
+        let output = profile::extract(&document, Profile::NilKill);
+        assert_eq!(output.nullable_operations.len(), 1, "{name}");
+        assert!(output.nullable_operations.iter().any(|operation| {
+            operation.operation_kind == "pointer_dereference"
+                && operation.nil_behavior == behavior
+                && operation.state_at_operation == "definitely_null"
+                && operation.complete
+                && !operation.place_id.is_empty()
+                && operation.path.ends_with(name)
+                && operation.span[0] > 0
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn native_unevaluated_pointer_operands_do_not_create_nullable_operations() -> Result<()> {
+    for (name, language) in [
+        ("nullable_unevaluated.c", Language::C),
+        ("nullable_unevaluated.cpp", Language::Cpp),
+    ] {
+        let document = syntax::parse_file(fixture(name), language)?;
+        let output = profile::extract(&document, Profile::NilKill);
+        assert_eq!(output.nullable_operations.len(), 1, "{name}");
+        assert!(output.nullable_operations.iter().all(|operation| {
+            operation.operation_kind == "pointer_dereference"
+                && operation
+                    .place_id
+                    .contains("evaluated_dereference_is_reported")
+                && operation.span[0] > 0
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn java_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_java.java"), Language::Java)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("NullableJava#unsafe:local:value")
+            && state.state == "definitely_null"
+            && state.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.nil_behavior == "null_pointer_exception"
+            && operation.state_at_operation == "definitely_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableJava#unsafe:local:value")
+    }));
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableJava#guarded:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.state_at_operation == "definitely_non_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableJava#guarded:local:value")
+    }));
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableJava#guardedDisjunction:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.state_at_operation == "definitely_non_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableJava#guardedDisjunction:local:value")
+    }));
+    Ok(())
+}
+
+#[test]
+fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_csharp.cs"), Language::CSharp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("NullableCSharp#Unsafe:local:value")
+            && state.state == "definitely_null"
+            && state.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.nil_behavior == "null_reference_exception"
+            && operation.state_at_operation == "definitely_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableCSharp#Unsafe:local:value")
+    }));
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableCSharp#Guarded:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.state_at_operation == "definitely_non_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableCSharp#Guarded:local:value")
+    }));
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableCSharp#GuardedDisjunction:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.state_at_operation == "definitely_non_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableCSharp#GuardedDisjunction:local:value")
+    }));
+    Ok(())
+}
+
+#[test]
+fn typescript_null_and_undefined_receiver_operations_follow_direct_flow() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_typescript.ts"), Language::TypeScript)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    for function in ["unsafeNull", "unsafeUndefined"] {
+        assert!(output.nullable_states.iter().any(|state| {
+            state
+                .place_id
+                .contains(&format!("NullableTypeScript#{function}:local:value"))
+                && state.state == "definitely_null"
+                && state.complete
+        }));
+        assert!(output.nullable_operations.iter().any(|operation| {
+            operation.operation_kind == "receiver_member_access"
+                && operation.nil_behavior == "type_error"
+                && operation.state_at_operation == "definitely_null"
+                && operation.complete
+                && operation
+                    .place_id
+                    .contains(&format!("NullableTypeScript#{function}:local:value"))
+        }));
+    }
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableTypeScript#guarded:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.state_at_operation == "definitely_non_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableTypeScript#guarded:local:value")
+    }));
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableTypeScript#guardedDisjunction:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.state_at_operation == "definitely_non_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableTypeScript#guardedDisjunction:local:value")
+    }));
+    assert!(output.nullable_operations.iter().all(|operation| {
+        !operation
+            .place_id
+            .contains("NullableTypeScript#shadowedUndefined:local:undefined")
+    }));
+    Ok(())
+}
+
+#[test]
+fn ruby_case_equality_disjunction_refines_the_else_path() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_ruby.rb"), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableRuby#guarded_disjunction:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_states.iter().any(|state| {
+        state.state == "definitely_non_null"
+            && state.complete
+            && state
+                .place_id
+                .contains("NullableRuby#guarded_disjunction:local:value")
+    }));
+    let post_join_state = output
+        .nullable_states
+        .iter()
+        .filter(|state| {
+            state
+                .place_id
+                .contains("NullableRuby#refinement_must_not_survive_join:local:value")
+        })
+        .max_by_key(|state| state.node_id.as_str())
+        .expect("fixture must retain the post-join state");
+    assert_eq!(post_join_state.state, "definitely_null");
+    Ok(())
+}
+
+#[test]
+fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_presence.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    assert!(output.presence_correlations.iter().any(|correlation| {
+        correlation.semantics == "map_lookup"
+            && correlation.branch_refinement == "presence_on_true"
+            && correlation.complete
+            && correlation.value_place_id.ends_with(":value")
+            && correlation.presence_place_id.ends_with(":ok")
+    }));
+    assert!(output
+        .nullable_states
+        .iter()
+        .all(|state| !state.place_id.ends_with(":value") || state.state != "definitely_non_null"));
+    Ok(())
+}
+
+#[test]
+fn go_type_assertions_and_channel_receives_export_presence_without_payload_proofs() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_go_presence_pairs.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let semantics = output
+        .presence_correlations
+        .iter()
+        .map(|correlation| correlation.semantics.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        semantics,
+        vec![
+            "channel_receive",
+            "type_assertion",
+            "type_assertion",
+            "type_assertion",
+        ]
+    );
+    let closure_correlations = output
+        .presence_correlations
+        .iter()
+        .filter(|correlation| {
+            correlation.value_place_id.contains(":first")
+                || correlation.value_place_id.contains(":second")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(closure_correlations.len(), 2);
+    assert_eq!(closure_correlations[0].span[0], 15);
+    assert_eq!(closure_correlations[1].span[0], 17);
+    assert!(closure_correlations
+        .iter()
+        .all(|correlation| correlation.span[0] == correlation.span[2]));
+    assert!(output
+        .nullable_states
+        .iter()
+        .all(|state| !state.place_id.ends_with(":result") || state.state != "definitely_non_null"));
+    Ok(())
+}
+
+#[test]
+fn go_nullable_operations_distinguish_pointer_selectors_and_function_values() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_go_operations.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let operations = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.state_at_operation == "definitely_null" && operation.complete)
+        .map(|operation| {
+            (
+                operation.operation_kind.as_str(),
+                operation.nil_behavior.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        operations,
+        vec![
+            ("function_value_call", "panic"),
+            ("pointer_selector", "panic")
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn go_nullable_operations_cover_index_writes_and_channels() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_go_collections.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let operations = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.state_at_operation == "definitely_null" && operation.complete)
+        .map(|operation| {
+            (
+                operation.operation_kind.as_str(),
+                operation.nil_behavior.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        operations,
+        vec![
+            ("channel_close", "panic"),
+            ("channel_send", "blocks"),
+            ("indexed_write", "panic"),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn go_safe_nil_collection_operations_do_not_create_nullable_operations() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_go_safe_collections.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    assert!(output.nullable_operations.is_empty());
+    Ok(())
+}
+
+#[test]
+fn native_function_pointer_calls_are_nullable_operations() -> Result<()> {
+    for (fixture_name, language) in [
+        ("nullable_function_pointer.c", Language::C),
+        ("nullable_function_pointer.cpp", Language::Cpp),
+    ] {
+        let document = syntax::parse_file(fixture(fixture_name), language)?;
+        let output = profile::extract(&document, Profile::NilKill);
+        let calls = output
+            .nullable_operations
+            .iter()
+            .filter(|operation| operation.operation_kind == "function_pointer_call")
+            .map(|operation| {
+                (
+                    operation.nil_behavior.as_str(),
+                    operation.state_at_operation.as_str(),
+                    operation.complete,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            calls,
+            vec![
+                ("undefined_behavior", "definitely_null", true),
+                ("undefined_behavior", "unknown", false),
+            ],
+            "{fixture_name}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn hidden_enum_observations_use_the_primary_normalized_walk() -> Result<()> {
+    let document = syntax::parse_file(fixture("hidden_enum_state.rb"), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let observations = output
+        .hidden_enum_observations
+        .iter()
+        .filter(|observation| observation["kind"] == "state")
+        .collect::<Vec<_>>();
+    assert_eq!(observations.len(), 5);
+    assert!(observations
+        .iter()
+        .filter(|observation| observation["event"] == "decision")
+        .all(|observation| {
+            observation["key"]
+                .as_str()
+                .is_some_and(|key| key.starts_with("state\0") && key.contains("\0Workflow\0"))
+        }));
+    assert_eq!(
+        observations
+            .iter()
+            .filter(|observation| observation["event"] == "producer")
+            .count(),
+        2
+    );
+    assert_eq!(
+        observations
+            .iter()
+            .flat_map(|observation| observation["values"].as_array().into_iter().flatten())
+            .filter_map(|value| value["value"].as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["\"complete\"", "\"draft\""])
+    );
+    assert_eq!(
+        output
+            .hidden_enum_observations
+            .iter()
+            .filter(|observation| observation["kind"] == "param")
+            .count(),
+        3
+    );
+    Ok(())
+}
+
+#[test]
+fn hidden_enum_observations_preserve_closed_symbol_and_integer_domains() -> Result<()> {
+    let document = syntax::parse_file(fixture("hidden_enum_symbol_integer.rb"), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let values = output
+        .hidden_enum_observations
+        .iter()
+        .filter(|observation| observation["kind"] == "state")
+        .flat_map(|observation| observation["values"].as_array().into_iter().flatten())
+        .filter_map(|value| {
+            Some((
+                value["kind"].as_str()?.to_string(),
+                value["value"].as_str()?.to_string(),
+            ))
+        })
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        values,
+        BTreeSet::from([
+            ("Integer".to_string(), "1".to_string()),
+            ("Integer".to_string(), "2".to_string()),
+            ("Symbol".to_string(), ":done".to_string()),
+            ("Symbol".to_string(), ":queued".to_string()),
+        ])
+    );
+    Ok(())
+}
+
+#[test]
+fn hidden_enum_observations_mark_nonliteral_state_writes_open_world() -> Result<()> {
+    let document = syntax::parse_file(fixture("hidden_enum_open_world.rb"), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let events = output
+        .hidden_enum_observations
+        .iter()
+        .filter(|observation| observation["kind"] == "state")
+        .map(|observation| {
+            (
+                observation["event"].as_str().unwrap_or_default(),
+                observation["reason"].as_str(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    assert!(events.contains(&("producer", None)));
+    assert!(events.contains(&("blocker", Some("nonliteral_assignment"))));
+    assert!(events.contains(&("decision", None)));
+    assert_eq!(
+        output
+            .hidden_enum_observations
+            .iter()
+            .filter(|observation| observation["event"] == "producer")
+            .count(),
+        1,
+        "a collection assignment is an open-world blocker, not a scalar producer"
+    );
+    Ok(())
+}
+
+#[test]
+fn hidden_enum_observations_keep_same_spelled_locals_in_distinct_callables() -> Result<()> {
+    let document = syntax::parse_file(fixture("hidden_enum_unrelated_locals.rb"), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let locals = output
+        .hidden_enum_observations
+        .iter()
+        .filter(|observation| observation["kind"] == "local")
+        .collect::<Vec<_>>();
+
+    assert_eq!(locals.len(), 4);
+    assert_eq!(
+        locals
+            .iter()
+            .filter_map(|observation| observation["method"].as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["draft?", "sent?"])
+    );
+    assert!(locals.iter().all(|observation| {
+        observation["key"]
+            .as_str()
+            .is_some_and(|key| key.starts_with("local\0") && key.ends_with("\0state"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn hidden_enum_observations_scale_with_geometric_file_and_callable_growth() -> Result<()> {
+    use std::io::Write;
+
+    let dir = tempfile::tempdir()?;
+    for size in [1_usize, 4, 16] {
+        let mut outputs = Vec::new();
+        for file_index in 0..size {
+            let path = dir.path().join(format!("workflow_{size}_{file_index}.rb"));
+            let mut source = std::fs::File::create(&path)?;
+            source.write_all(format!("class Workflow{file_index}\n").as_bytes())?;
+            for callable_index in 0..size {
+                source.write_all(
+                    format!(
+                        "  def transition_{callable_index}\n    state = \"draft\"\n    state == \"draft\"\n  end\n"
+                    )
+                    .as_bytes(),
+                )?;
+            }
+            source.write_all(b"end\n")?;
+            let document = syntax::parse_file(path, Language::Ruby)?;
+            outputs.push(profile::extract(&document, Profile::NilKill));
+        }
+
+        let output = profile::merge(outputs, Profile::NilKill);
+        let locals = output
+            .hidden_enum_observations
+            .iter()
+            .filter(|observation| observation["kind"] == "local")
+            .collect::<Vec<_>>();
+        let callable_count = size * size;
+        assert_eq!(locals.len(), callable_count * 2, "size={size}");
+        assert_eq!(
+            locals
+                .iter()
+                .filter_map(|observation| observation["key"].as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            callable_count,
+            "size={size}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn native_deliberate_domains_do_not_emit_hidden_enum_observations() -> Result<()> {
+    for (fixture_name, language) in [
+        ("go/core.go", Language::Go),
+        ("c/core.c", Language::C),
+        ("cpp/core.cpp", Language::Cpp),
+    ] {
+        let document = syntax::parse_file(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("syntax-facts")
+                .join(fixture_name),
+            language,
+        )?;
+        let output = profile::extract(&document, Profile::NilKill);
+        assert!(
+            output.hidden_enum_observations.is_empty(),
+            "{fixture_name} must not turn native named constants or enums into primitive-domain candidates"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn native_pointer_slot_mutation_invalidates_the_original_null_proof() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_alias_mutation.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_states.iter().any(|state| {
+        state.place_id.contains("use_after_slot_update")
+            && state.place_id.ends_with(":value")
+            && state.state == "unknown"
+            && !state.complete
+    }));
+    assert!(output.nullable_operations.iter().all(|operation| {
+        operation.span[0] != 5 || operation.operation_kind != "pointer_dereference"
+    }));
+    Ok(())
+}
+
+#[test]
+fn c_allocator_contracts_seed_maybe_null_operation_states() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_allocators.c"), Language::C)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let operations = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.operation_kind == "pointer_dereference")
+        .collect::<Vec<_>>();
+    assert_eq!(operations.len(), 2);
+    assert!(operations.iter().all(|operation| {
+        operation.nil_behavior == "undefined_behavior"
+            && operation.state_at_operation == "maybe_null"
+            && operation.complete
+    }));
+    assert_eq!(
+        output
+            .nullable_states
+            .iter()
+            .filter(|state| state.state == "maybe_null" && state.complete)
+            .count(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_allocator_contracts_seed_maybe_null_operation_states() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_allocators.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let operations = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.operation_kind == "pointer_dereference")
+        .collect::<Vec<_>>();
+    assert_eq!(operations.len(), 2);
+    assert!(operations.iter().all(|operation| {
+        operation.nil_behavior == "undefined_behavior"
+            && operation.state_at_operation == "maybe_null"
+            && operation.complete
+    }));
+    Ok(())
+}
+
+#[test]
+fn cpp_special_nullable_sources_preserve_throwing_new_as_unknown() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_cpp_special_sources.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+    let complete = output
+        .nullable_operations
+        .iter()
+        .filter(|operation| operation.complete)
+        .map(|operation| {
+            (
+                operation.operation_kind.as_str(),
+                operation.state_at_operation.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        complete,
+        vec![
+            ("pointer_selector", "maybe_null"),
+            ("pointer_dereference", "maybe_null"),
+        ]
+    );
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "pointer_dereference"
+            && operation.state_at_operation == "unknown"
+            && !operation.complete
+    }));
+    Ok(())
+}
+
+#[test]
+fn cpp_macro_alias_template_and_overload_boundaries_stay_unknown() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_cpp_boundaries.cpp"), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    for function in ["macro_and_alias_boundary", "overload_boundary"] {
+        assert!(
+            output.nullable_operations.iter().any(|operation| {
+                operation.path.ends_with("nullable_cpp_boundaries.cpp")
+                    && operation.state_at_operation == "unknown"
+                    && !operation.complete
+                    && operation.operation_kind == "pointer_dereference"
+                    && operation.node_id.contains(function)
+            }),
+            "{function}"
+        );
+    }
     Ok(())
 }
 
@@ -388,6 +1255,77 @@ func run(value worker) {
 }
 
 #[test]
+fn go_zero_argument_receiver_calls_are_not_degraded_to_property_reads() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+type pool struct{}
+
+func (p *pool) IsClosed() bool { return false }
+func (p *pool) Running() int { return 0 }
+
+func (p *pool) ready() bool {
+    return !p.IsClosed() && p.Running() > 0
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.message == "IsClosed" || call.message == "Running")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 2, "{calls:#?}");
+    assert!(calls.iter().any(|call| {
+        call.receiver == "self" && call.message == "IsClosed" && call.argument_count == 0
+    }));
+    assert!(calls.iter().any(|call| {
+        call.receiver == "self" && call.message == "Running" && call.argument_count == 0
+    }));
+    Ok(())
+}
+
+#[test]
+fn go_if_initializer_calls_remain_in_the_normalized_condition_sequence() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+type pool struct{}
+
+func (p *pool) Next() *int { return nil }
+
+func (p *pool) ready() bool {
+    if next := p.Next(); next != nil {
+        return true
+    }
+    return false
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.message == "Next")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].receiver, "self");
+    assert_eq!(calls[0].function, "ready");
+    assert_eq!(calls[0].argument_count, 0);
+    Ok(())
+}
+
+#[test]
 fn go_local_bindings_retain_provable_interface_types() -> Result<()> {
     use std::io::Write;
 
@@ -500,10 +1438,6 @@ fn ruby_calculator_extracts_methods() -> Result<()> {
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
-    );
-    assert!(
-        !add_method.signature.is_empty() || true,
-        "signature optional without Sorbet sigs"
     );
 
     let result_method = output
@@ -835,7 +1769,7 @@ end
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
     let declared = document
         .method_param_types
-        .get("TypedInputs\0run\04")
+        .get(&format!("TypedInputs\0run\0{}", 4))
         .context("missing declared parameter shapes")?;
     assert_eq!(
         declared.get("weak").map(String::as_str),
@@ -1469,6 +2403,7 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
         profile::normalize_paths(&mut actual_json, &manifest_dir);
 
         let mut expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+        assert_oracle_paths_are_relative(&expected, &oracle_path)?;
         profile::normalize_paths(&mut expected, &manifest_dir);
 
         let normalized = normalize_for_oracle(&actual_json, &expected);
@@ -1486,6 +2421,38 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn assert_oracle_paths_are_relative(value: &Value, oracle_path: &std::path::Path) -> Result<()> {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                if matches!(key.as_str(), "path" | "file" | "id" | "key") {
+                    if let Value::String(identity) = child {
+                        for component in identity
+                            .split('\0')
+                            .flat_map(|component| component.split(':'))
+                        {
+                            if std::path::Path::new(component).is_absolute() {
+                                bail!(
+                                    "{} contains an absolute path in {key}: {component}",
+                                    oracle_path.display()
+                                );
+                            }
+                        }
+                    }
+                }
+                assert_oracle_paths_are_relative(child, oracle_path)?;
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                assert_oracle_paths_are_relative(child, oracle_path)?;
+            }
+        }
+        _ => {}
+    }
     Ok(())
 }
 

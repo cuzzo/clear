@@ -269,6 +269,8 @@
       "visibility": "public"
     }
   ],
+  "nullable_operations": [],
+  "nullable_summaries": [],
   "owners": [
     {
       "confidence": "high",
@@ -301,6 +303,7 @@
       ]
     }
   ],
+  "presence_correlations": [],
   "signatures": {
     "Greeter\u0000constructor": "constructor(db: Database) {",
     "Greeter\u0000hello": "public hello(name: string): string {"

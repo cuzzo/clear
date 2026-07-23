@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use decomplex_rust::decomplex::delta;
 use decomplex_rust::decomplex::detectors::{
     co_update, decision_pressure, derived_state, false_simplicity, fat_union, flay_similarity,
     function_lcom, implicit_control_flow, inconsistent_rename_clone, local_flow, locality_drag,
@@ -8,7 +9,6 @@ use decomplex_rust::decomplex::detectors::{
     weighted_inlined_cognitive_complexity,
 };
 use decomplex_rust::decomplex::parallel;
-use decomplex_rust::decomplex::delta;
 use decomplex_rust::decomplex::report::Report;
 use decomplex_rust::decomplex::report_facts::{
     self, Options as ReportFactsOptions, SourceRole, VcsFilter,
@@ -1088,7 +1088,9 @@ fn run_detector_on_fact_input(
         "path-condition" => Ok(json!({
             "neglected": path_condition::scan_documents(documents).neglected,
         })),
-        "sequence-mine" | "broken-protocol" => Ok(json!(sequence_mine::scan_documents(documents, 15))),
+        "sequence-mine" | "broken-protocol" => {
+            Ok(json!(sequence_mine::scan_documents(documents, 15)))
+        }
         "function-lcom" => {
             if input.local_methods.is_empty() {
                 Ok(json!(function_lcom::scan_documents(documents)))
@@ -1254,7 +1256,9 @@ fn parse_report_facts_args(args: Vec<String>, allow_format: bool) -> Result<Repo
             options.vcs = Some(parse_vcs_filter(value.to_string())?);
         } else if arg == "--source-role" {
             options.source_roles = parse_source_roles(
-                &cursor.next().with_context(|| "--source-role requires a value")?,
+                &cursor
+                    .next()
+                    .with_context(|| "--source-role requires a value")?,
             )?;
         } else if let Some(value) = arg.strip_prefix("--source-role=") {
             options.source_roles = parse_source_roles(value)?;
@@ -1306,16 +1310,17 @@ fn read_facts(input: Option<&PathBuf>, from_stdin: bool) -> Result<serde_json::V
 
 fn render_report(facts: &serde_json::Value, format: &str, output: Option<&PathBuf>) -> Result<()> {
     let temp_facts;
-    let facts = if facts.is_object() && facts.get("input").is_some() && facts.get("detectors").is_none() {
-        if let Some(input_val) = facts.get("input") {
-            temp_facts = input_val.clone();
-            &temp_facts
+    let facts =
+        if facts.is_object() && facts.get("input").is_some() && facts.get("detectors").is_none() {
+            if let Some(input_val) = facts.get("input") {
+                temp_facts = input_val.clone();
+                &temp_facts
+            } else {
+                facts
+            }
         } else {
             facts
-        }
-    } else {
-        facts
-    };
+        };
     let report = Report::from_facts(facts)?;
     let text = match format {
         "markdown" | "md" => report.to_markdown(),
@@ -1474,32 +1479,166 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let get_path = |p: &str| root.join(p).to_str().unwrap().to_string();
 
-        assert!(run_cli(&["state-writes", "--language", "ruby", &get_path("examples/ruby/co-update.rb")]).is_ok());
-        assert!(run_cli(&["co-update", "--language=ruby", &get_path("examples/ruby/co-update.rb")]).is_ok());
-        assert!(run_cli(&["predicate-aliases", "--language=ruby", &get_path("examples/ruby/predicate-alias.rb")]).is_ok());
-        assert!(run_cli(&["miner", "--language=ruby", &get_path("examples/ruby/miner.rb")]).is_ok());
-        assert!(run_cli(&["semantic-aliases", "--language=ruby", &get_path("examples/ruby/semantic-alias.rb")]).is_ok());
-        assert!(run_cli(&["decision-pressure", "--language=ruby", &get_path("examples/ruby/decision-pressure.rb")]).is_ok());
-        assert!(run_cli(&["state-branch-density", "--language=ruby", &get_path("examples/ruby/state-branch-density.rb")]).is_ok());
-        assert!(run_cli(&["temporal-ordering-pressure", "--language=ruby", &get_path("examples/ruby/temporal-ordering-pressure.rb")]).is_ok());
-        assert!(run_cli(&["redundant-nil-guard", "--language=ruby", &get_path("examples/ruby/redundant-nil-guard.rb")]).is_ok());
-        assert!(run_cli(&["state-mesh", "--language=ruby", &get_path("examples/ruby/state-mesh.rb")]).is_ok());
-        assert!(run_cli(&["inconsistent-rename-clone", "--language=ruby", &get_path("examples/ruby/inconsistent-rename-clone.rb")]).is_ok());
-        assert!(run_cli(&["derived-state", "--language=ruby", &get_path("examples/ruby/derived-state.rb")]).is_ok());
-        assert!(run_cli(&["superfluous-state", "--language=ruby", &get_path("examples/ruby/superfluous-state.rb")]).is_ok());
-        assert!(run_cli(&["implicit-control-flow", "--language=ruby", &get_path("examples/ruby/implicit-control-flow.rb")]).is_ok());
-        assert!(run_cli(&["weighted-inlined-complexity", "--language=ruby", &get_path("examples/ruby/weighted-inlined-complexity.rb")]).is_ok());
-        assert!(run_cli(&["locality-drag", "--language=ruby", &get_path("examples/ruby/locality-drag.rb")]).is_ok());
-        assert!(run_cli(&["operational-discontinuity", "--language=ruby", &get_path("examples/ruby/operational-discontinuity.rb")]).is_ok());
-        assert!(run_cli(&["structural-topology", "--language=ruby", &get_path("examples/ruby/structural-topology.rb")]).is_ok());
-        assert!(run_cli(&["local-flow", "--language=ruby", &get_path("examples/ruby/local-flow.rb")]).is_ok());
-        assert!(run_cli(&["flay-similarity", "--language=ruby", "--mass=10", "--fuzzy=2", "--jobs=2", &get_path("examples/ruby/flay-similarity.rb")]).is_ok());
-        assert!(run_cli(&["oversized-predicate", "--language=ruby", &get_path("examples/ruby/oversized-predicate.rb")]).is_ok());
-        assert!(run_cli(&["path-condition", "--language=ruby", &get_path("examples/ruby/path-condition.rb")]).is_ok());
-        assert!(run_cli(&["sequence-mine", "--language=ruby", &get_path("examples/ruby/sequence-mine.rb")]).is_ok());
-        assert!(run_cli(&["function-lcom", "--language=ruby", &get_path("examples/ruby/function-lcom.rb")]).is_ok());
-        assert!(run_cli(&["false-simplicity", "--language=ruby", &get_path("examples/ruby/false-simplicity.rb")]).is_ok());
-        assert!(run_cli(&["fat-union", "--language=ruby", &get_path("examples/ruby/fat-union.rb")]).is_ok());
+        assert!(run_cli(&[
+            "state-writes",
+            "--language",
+            "ruby",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "co-update",
+            "--language=ruby",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "predicate-aliases",
+            "--language=ruby",
+            &get_path("examples/ruby/predicate-alias.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "miner",
+            "--language=ruby",
+            &get_path("examples/ruby/miner.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "semantic-aliases",
+            "--language=ruby",
+            &get_path("examples/ruby/semantic-alias.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "decision-pressure",
+            "--language=ruby",
+            &get_path("examples/ruby/decision-pressure.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "state-branch-density",
+            "--language=ruby",
+            &get_path("examples/ruby/state-branch-density.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "temporal-ordering-pressure",
+            "--language=ruby",
+            &get_path("examples/ruby/temporal-ordering-pressure.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "redundant-nil-guard",
+            "--language=ruby",
+            &get_path("examples/ruby/redundant-nil-guard.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "state-mesh",
+            "--language=ruby",
+            &get_path("examples/ruby/state-mesh.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "inconsistent-rename-clone",
+            "--language=ruby",
+            &get_path("examples/ruby/inconsistent-rename-clone.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "derived-state",
+            "--language=ruby",
+            &get_path("examples/ruby/derived-state.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "superfluous-state",
+            "--language=ruby",
+            &get_path("examples/ruby/superfluous-state.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "implicit-control-flow",
+            "--language=ruby",
+            &get_path("examples/ruby/implicit-control-flow.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "weighted-inlined-complexity",
+            "--language=ruby",
+            &get_path("examples/ruby/weighted-inlined-complexity.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "locality-drag",
+            "--language=ruby",
+            &get_path("examples/ruby/locality-drag.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "operational-discontinuity",
+            "--language=ruby",
+            &get_path("examples/ruby/operational-discontinuity.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "structural-topology",
+            "--language=ruby",
+            &get_path("examples/ruby/structural-topology.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "local-flow",
+            "--language=ruby",
+            &get_path("examples/ruby/local-flow.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "flay-similarity",
+            "--language=ruby",
+            "--mass=10",
+            "--fuzzy=2",
+            "--jobs=2",
+            &get_path("examples/ruby/flay-similarity.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "oversized-predicate",
+            "--language=ruby",
+            &get_path("examples/ruby/oversized-predicate.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "path-condition",
+            "--language=ruby",
+            &get_path("examples/ruby/path-condition.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "sequence-mine",
+            "--language=ruby",
+            &get_path("examples/ruby/sequence-mine.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "function-lcom",
+            "--language=ruby",
+            &get_path("examples/ruby/function-lcom.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "false-simplicity",
+            "--language=ruby",
+            &get_path("examples/ruby/false-simplicity.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "fat-union",
+            "--language=ruby",
+            &get_path("examples/ruby/fat-union.rb")
+        ])
+        .is_ok());
     }
 
     #[test]
@@ -1507,11 +1646,36 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let get_path = |p: &str| root.join(p).to_str().unwrap().to_string();
 
-        assert!(run_cli(&["decision-miner", "--language=ruby", &get_path("examples/ruby/miner.rb")]).is_ok());
-        assert!(run_cli(&["semantic-alias", "--language=ruby", &get_path("examples/ruby/semantic-alias.rb")]).is_ok());
-        assert!(run_cli(&["state-heatmap", "--language=ruby", &get_path("examples/ruby/state-mesh.rb")]).is_ok());
-        assert!(run_cli(&["ordered-protocol-mine", "--language=ruby", &get_path("examples/ruby/implicit-control-flow.rb")]).is_ok());
-        assert!(run_cli(&["broken-protocol", "--language=ruby", &get_path("examples/ruby/sequence-mine.rb")]).is_ok());
+        assert!(run_cli(&[
+            "decision-miner",
+            "--language=ruby",
+            &get_path("examples/ruby/miner.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "semantic-alias",
+            "--language=ruby",
+            &get_path("examples/ruby/semantic-alias.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "state-heatmap",
+            "--language=ruby",
+            &get_path("examples/ruby/state-mesh.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "ordered-protocol-mine",
+            "--language=ruby",
+            &get_path("examples/ruby/implicit-control-flow.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "broken-protocol",
+            "--language=ruby",
+            &get_path("examples/ruby/sequence-mine.rb")
+        ])
+        .is_ok());
     }
 
     #[test]
@@ -1519,20 +1683,66 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let get_path = |p: &str| root.join(p).to_str().unwrap().to_string();
 
-        assert!(run_cli(&["facts", "--language=ruby", "--jobs", "2", "--exclude", "foo", "--exclude=bar", "--vcs", "git", &get_path("examples/ruby/co-update.rb")]).is_ok());
-        assert!(run_cli(&["report", "--language=ruby", "--jobs=2", "--format=markdown", &get_path("examples/ruby/co-update.rb")]).is_ok());
-        assert!(run_cli(&["render-report", "--input", &get_path("examples/facts/report/postprocess.json"), "--format", "markdown"]).is_ok());
-        assert!(run_cli(&["render-report", "--input", &get_path("examples/facts/report/postprocess.json"), "--format=sarif"]).is_ok());
+        assert!(run_cli(&[
+            "facts",
+            "--language=ruby",
+            "--jobs",
+            "2",
+            "--exclude",
+            "foo",
+            "--exclude=bar",
+            "--vcs",
+            "git",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "report",
+            "--language=ruby",
+            "--jobs=2",
+            "--format=markdown",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "render-report",
+            "--input",
+            &get_path("examples/facts/report/postprocess.json"),
+            "--format",
+            "markdown"
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "render-report",
+            "--input",
+            &get_path("examples/facts/report/postprocess.json"),
+            "--format=sarif"
+        ])
+        .is_ok());
         let baseline = tempfile::NamedTempFile::new().unwrap();
         assert!(run_cli(&[
-            "report", "--language=ruby", "--format=snapshot", "--output",
-            baseline.path().to_str().unwrap(), &get_path("examples/ruby/co-update.rb")
-        ]).is_ok());
-        assert!(run_cli(&[
-            "delta", baseline.path().to_str().unwrap(), "--language=ruby",
+            "report",
+            "--language=ruby",
+            "--format=snapshot",
+            "--output",
+            baseline.path().to_str().unwrap(),
             &get_path("examples/ruby/co-update.rb")
-        ]).is_ok());
-        assert!(run_cli(&["syntax-facts", "--language=ruby", "--jobs=1", &get_path("examples/ruby/co-update.rb")]).is_ok());
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "delta",
+            baseline.path().to_str().unwrap(),
+            "--language=ruby",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_ok());
+        assert!(run_cli(&[
+            "syntax-facts",
+            "--language=ruby",
+            "--jobs=1",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_ok());
     }
 
     #[test]
@@ -1555,13 +1765,34 @@ mod tests {
         let get_path = |p: &str| root.join(p).to_str().unwrap().to_string();
 
         let out_facts = tempfile::NamedTempFile::new().unwrap();
-        assert!(run_cli(&["facts", "--language=ruby", "--output", out_facts.path().to_str().unwrap(), &get_path("examples/ruby/co-update.rb")]).is_ok());
+        assert!(run_cli(&[
+            "facts",
+            "--language=ruby",
+            "--output",
+            out_facts.path().to_str().unwrap(),
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_ok());
 
         let out_report = tempfile::NamedTempFile::new().unwrap();
-        assert!(run_cli(&["report", "--language=ruby", "--output", out_report.path().to_str().unwrap(), &get_path("examples/ruby/co-update.rb")]).is_ok());
+        assert!(run_cli(&[
+            "report",
+            "--language=ruby",
+            "--output",
+            out_report.path().to_str().unwrap(),
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_ok());
 
         let out_render = tempfile::NamedTempFile::new().unwrap();
-        assert!(run_cli(&["render-report", "--input", &get_path("examples/facts/report/postprocess.json"), "--output", out_render.path().to_str().unwrap()]).is_ok());
+        assert!(run_cli(&[
+            "render-report",
+            "--input",
+            &get_path("examples/facts/report/postprocess.json"),
+            "--output",
+            out_render.path().to_str().unwrap()
+        ])
+        .is_ok());
     }
 
     #[test]
@@ -1585,11 +1816,37 @@ mod tests {
         // invalid options and values
         assert!(run_cli(&["render-report"]).is_err());
         assert!(run_cli(&["render-report", "--from-stdin"]).is_err());
-        assert!(run_cli(&["co-update", "--jobs=0", &get_path("examples/ruby/co-update.rb")]).is_err());
-        assert!(run_cli(&["co-update", "--jobs=invalid", &get_path("examples/ruby/co-update.rb")]).is_err());
-        assert!(run_cli(&["facts", "--format=markdown", &get_path("examples/ruby/co-update.rb")]).is_err());
-        assert!(run_cli(&["facts", "--vcs=invalid", &get_path("examples/ruby/co-update.rb")]).is_err());
-        assert!(run_cli(&["render-report", "--input", &get_path("examples/facts/report/postprocess.json"), "--format=invalid"]).is_err());
+        assert!(run_cli(&[
+            "co-update",
+            "--jobs=0",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "co-update",
+            "--jobs=invalid",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "facts",
+            "--format=markdown",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "facts",
+            "--vcs=invalid",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "render-report",
+            "--input",
+            &get_path("examples/facts/report/postprocess.json"),
+            "--format=invalid"
+        ])
+        .is_err());
 
         // detector-facts input missing/invalid
         assert!(run_cli(&["detector-facts", "--invalid-arg"]).is_err());
@@ -1597,24 +1854,79 @@ mod tests {
 
         // parse_report_facts_args other invalid options
         assert!(run_cli(&["facts", "--jobs", &get_path("examples/ruby/co-update.rb")]).is_err());
-        assert!(run_cli(&["facts", "--exclude", &get_path("examples/ruby/co-update.rb")]).is_err());
+        assert!(run_cli(&[
+            "facts",
+            "--exclude",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_err());
         assert!(run_cli(&["facts", "--output", &get_path("examples/ruby/co-update.rb")]).is_err());
         assert!(run_cli(&["facts", "--format", &get_path("examples/ruby/co-update.rb")]).is_err());
         assert!(run_cli(&["facts", "--mass", &get_path("examples/ruby/co-update.rb")]).is_err());
-        assert!(run_cli(&["facts", "--mass=invalid", &get_path("examples/ruby/co-update.rb")]).is_err());
+        assert!(run_cli(&[
+            "facts",
+            "--mass=invalid",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_err());
         assert!(run_cli(&["facts", "--fuzzy", &get_path("examples/ruby/co-update.rb")]).is_err());
-        assert!(run_cli(&["facts", "--fuzzy=invalid", &get_path("examples/ruby/co-update.rb")]).is_err());
+        assert!(run_cli(&[
+            "facts",
+            "--fuzzy=invalid",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_err());
         assert!(run_cli(&["facts", "--vcs", &get_path("examples/ruby/co-update.rb")]).is_err());
-        assert!(run_cli(&["facts", "--language", &get_path("examples/ruby/co-update.rb")]).is_err());
+        assert!(run_cli(&[
+            "facts",
+            "--language",
+            &get_path("examples/ruby/co-update.rb")
+        ])
+        .is_err());
 
         // flay-similarity specific option parse errors
-        assert!(run_cli(&["flay-similarity", "--language", &get_path("examples/ruby/flay-similarity.rb")]).is_err());
-        assert!(run_cli(&["flay-similarity", "--mass", &get_path("examples/ruby/flay-similarity.rb")]).is_err());
-        assert!(run_cli(&["flay-similarity", "--mass=invalid", &get_path("examples/ruby/flay-similarity.rb")]).is_err());
-        assert!(run_cli(&["flay-similarity", "--fuzzy", &get_path("examples/ruby/flay-similarity.rb")]).is_err());
-        assert!(run_cli(&["flay-similarity", "--fuzzy=invalid", &get_path("examples/ruby/flay-similarity.rb")]).is_err());
-        assert!(run_cli(&["flay-similarity", "--jobs", &get_path("examples/ruby/flay-similarity.rb")]).is_err());
-        assert!(run_cli(&["flay-similarity", "--jobs=invalid", &get_path("examples/ruby/flay-similarity.rb")]).is_err());
+        assert!(run_cli(&[
+            "flay-similarity",
+            "--language",
+            &get_path("examples/ruby/flay-similarity.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "flay-similarity",
+            "--mass",
+            &get_path("examples/ruby/flay-similarity.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "flay-similarity",
+            "--mass=invalid",
+            &get_path("examples/ruby/flay-similarity.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "flay-similarity",
+            "--fuzzy",
+            &get_path("examples/ruby/flay-similarity.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "flay-similarity",
+            "--fuzzy=invalid",
+            &get_path("examples/ruby/flay-similarity.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "flay-similarity",
+            "--jobs",
+            &get_path("examples/ruby/flay-similarity.rb")
+        ])
+        .is_err());
+        assert!(run_cli(&[
+            "flay-similarity",
+            "--jobs=invalid",
+            &get_path("examples/ruby/flay-similarity.rb")
+        ])
+        .is_err());
 
         // parse_render_report_args specific parse errors
         assert!(run_cli(&["render-report", "--input"]).is_err());

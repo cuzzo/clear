@@ -3,9 +3,10 @@ use super::{
         NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedOwner,
         NormalizedStateRead,
     },
+    nullable::{NullableOperationSeed, PresenceCorrelationSeed},
     BranchArm, BranchDecision, CallSite, ComparisonUse, DecisionSite, DispatchSite, FunctionDef,
-    OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite, StateDeclaration,
-    StateRead, StateWrite, HazardSite,
+    HazardSite, OwnerDef, PathConditionSite, PredicateAlias, RawNode, SemanticEffectSite,
+    StateDeclaration, StateRead, StateWrite,
 };
 use crate::ast::{self, Child, Node, Span};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -16,6 +17,10 @@ pub(crate) struct NormalizedFacts {
     pub(crate) function_defs: Vec<FunctionDef>,
     pub(crate) owner_defs: Vec<OwnerDef>,
     pub(crate) call_sites: Vec<CallSite>,
+    /// Connects an emitted semantic call to its normalized AST node. The
+    /// parser origin is joined later by the tree-sitter adapter; this pass
+    /// never guesses a raw parser identity from a normalized span.
+    pub(crate) call_node_projections: Vec<CallNodeProjection>,
     pub(crate) call_receiver_projections: Vec<super::CallReceiverProjection>,
     pub(crate) state_declarations: Vec<StateDeclaration>,
     pub(crate) state_reads: Vec<StateRead>,
@@ -35,6 +40,14 @@ pub(crate) struct NormalizedFacts {
     pub(crate) comparison_uses: Vec<ComparisonUse>,
     pub(crate) path_condition_sites: Vec<PathConditionSite>,
     pub(crate) hazard_sites: Vec<HazardSite>,
+    pub(crate) nullable_operation_seeds: Vec<NullableOperationSeed>,
+    pub(crate) presence_correlation_seeds: Vec<PresenceCorrelationSeed>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CallNodeProjection {
+    pub(crate) normalized_node_span: Span,
+    pub(crate) emitted_call_span: Span,
 }
 
 pub(crate) fn extract(
@@ -61,6 +74,7 @@ struct Extractor<'a> {
     decision_spans: Vec<Span>,
     receiver_aliases: Vec<BTreeMap<String, String>>,
     owner_fields: BTreeMap<String, Vec<String>>,
+    unevaluated_context_depth: usize,
     facts: NormalizedFacts,
     seen_calls: HashSet<(String, String, String, usize, Span)>,
     seen_reads: HashSet<(String, String, String, String, usize, Span)>,
@@ -89,6 +103,7 @@ impl<'a> Extractor<'a> {
             decision_spans: Vec::new(),
             receiver_aliases: Vec::new(),
             owner_fields: BTreeMap::new(),
+            unevaluated_context_depth: 0,
             facts: NormalizedFacts::default(),
             seen_calls: HashSet::new(),
             seen_reads: HashSet::new(),
@@ -112,14 +127,27 @@ impl<'a> Extractor<'a> {
             .call_receiver_projections
             .sort_by_key(|projection| (projection.outer_span, projection.receiver_call_span));
         self.facts.call_receiver_projections.dedup();
+        self.facts.call_node_projections.sort_by_key(|projection| {
+            (
+                projection.normalized_node_span,
+                projection.emitted_call_span,
+            )
+        });
+        self.facts.call_node_projections.dedup();
         self.facts.semantic_effect_sites.sort_by_key(effect_key);
         self.facts
     }
 
     fn scan(&mut self, node: &Node) {
+        if self.unevaluated_context_depth == 0 {
+            self.record_nullable_operation(node);
+        }
+        self.record_presence_correlation(node);
         self.record_behavior_node_reads(node);
         self.record_behavior_node_calls(node);
         self.record_behavior_initializer_writes(node);
+        let enters_unevaluated_context = is_unevaluated_context(node);
+        self.unevaluated_context_depth += usize::from(enters_unevaluated_context);
         match node.r#type.as_str() {
             "CLASS" | "MODULE" | "INTERFACE_DECLARATION" => self.scan_owner(node),
             "DEFN" | "DEFS" | "METHOD_SIGNATURE" => self.scan_function(node),
@@ -172,6 +200,40 @@ impl<'a> Extractor<'a> {
                 }
             }
         }
+        self.unevaluated_context_depth -= usize::from(enters_unevaluated_context);
+    }
+
+    fn record_nullable_operation(&mut self, node: &Node) {
+        let Some(operation) = self.behavior.nullable_operation(node) else {
+            return;
+        };
+        self.facts
+            .nullable_operation_seeds
+            .push(NullableOperationSeed {
+                function: self.current_function(),
+                span: span(node),
+                subject: operation.subject,
+                operation_kind: operation.operation_kind.to_string(),
+                nil_behavior: operation.nil_behavior.to_string(),
+            });
+    }
+
+    fn record_presence_correlation(&mut self, node: &Node) {
+        let Some(correlation) = self.behavior.presence_correlation(node) else {
+            return;
+        };
+        self.facts
+            .presence_correlation_seeds
+            .push(PresenceCorrelationSeed {
+                function: self.current_function(),
+                // Language adapters which need a raw parser origin replace
+                // this normalized span before CFG projection. The generic
+                // extractor never reparses language-specific source text.
+                span: span(node),
+                value_subject: correlation.value_subject,
+                presence_subject: correlation.presence_subject,
+                semantics: correlation.semantics.to_string(),
+            });
     }
 
     fn scan_children(&mut self, node: &Node) {
@@ -745,6 +807,7 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
+            self.record_call_node_projection(node, call.span);
             if let Some(receiver_call_span) = receiver_call_span {
                 self.facts
                     .call_receiver_projections
@@ -808,9 +871,22 @@ impl<'a> Extractor<'a> {
             call.span,
         );
         if self.seen_calls.insert(key) {
+            self.record_call_node_projection(node, call.span);
             self.record_call_receiver_projection(node, call.span);
             self.facts.call_sites.push(call);
         }
+    }
+
+    fn record_call_node_projection(&mut self, node: &Node, emitted_call_span: Span) {
+        self.facts.call_node_projections.push(CallNodeProjection {
+            normalized_node_span: [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ],
+            emitted_call_span,
+        });
     }
 
     fn record_call_receiver_projection(&mut self, node: &Node, outer_span: Span) {
@@ -1253,13 +1329,7 @@ impl<'a> Extractor<'a> {
         detail: &str,
         receiver_scope: &str,
     ) {
-        self.record_semantic_effect_at(
-            node.first_lineno,
-            span(node),
-            kind,
-            detail,
-            receiver_scope,
-        );
+        self.record_semantic_effect_at(node.first_lineno, span(node), kind, detail, receiver_scope);
     }
 
     fn record_semantic_effect_at(
@@ -1833,16 +1903,6 @@ impl<'a> Extractor<'a> {
         call: &NormalizedCallProjection,
         block: bool,
     ) -> bool {
-        if call.receiver == "self"
-            && call
-                .message
-                .chars()
-                .next()
-                .is_some_and(|ch| ch.is_ascii_uppercase())
-            && call.arguments.is_empty()
-        {
-            return true;
-        }
         if constant_receiver(&call.receiver)
             && !call.receiver.contains('(')
             && call.arguments.is_empty()
@@ -2191,7 +2251,7 @@ fn tail_return(node: &Node) -> Option<&Node> {
     if !predicate_container_node(node) {
         return None;
     }
-    for child in child_nodes(node).into_iter().rev() {
+    if let Some(child) = child_nodes(node).into_iter().next_back() {
         if child.r#type == "RETURN" {
             return Some(child);
         }
@@ -2483,13 +2543,24 @@ fn dispatch_member_name(call: &CallSite) -> String {
     call.message.trim_end_matches('=').to_string()
 }
 
+/// C and C++ retain expression-shaped operands in a few type-only contexts.
+/// Those operands are parsed as ordinary pointer expressions but are never
+/// evaluated, so they cannot be nullable-operation obligations.
+fn is_unevaluated_context(node: &Node) -> bool {
+    matches!(
+        node.r#type.as_str(),
+        "SIZEOF_EXPRESSION" | "ALIGNOF_EXPRESSION" | "DECLTYPE" | "NOEXCEPT"
+    ) || (node.r#type == "FCALL" && node.text.trim_start().starts_with("noexcept("))
+}
+
+type DispatchEqualityGroup<'a> = Vec<(&'a ComparisonUse, String)>;
+
 fn collect_equality_dispatch_sites(
     comparisons: &[ComparisonUse],
     call_sites: &[CallSite],
     out: &mut Vec<DispatchSite>,
 ) {
-    let mut groups: BTreeMap<(String, String, String), Vec<(&ComparisonUse, String)>> =
-        BTreeMap::new();
+    let mut groups: BTreeMap<(String, String, String), DispatchEqualityGroup<'_>> = BTreeMap::new();
     for comparison in comparisons {
         let Some((predicate, variant)) = dispatch_equality(&comparison.canon_source) else {
             continue;
@@ -2698,7 +2769,7 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
             }
         }
         let before_name = text[..idx].trim_end();
-        if let Some(last_part) = before_name.split(|c| c == '=' || c == ':').last() {
+        if let Some(last_part) = before_name.split(['=', ':']).next_back() {
             let last_part = last_part.trim();
             let mut parts = last_part.split_whitespace().collect::<Vec<_>>();
             while !parts.is_empty()
@@ -2762,6 +2833,7 @@ fn effect_key(site: &SemanticEffectSite) -> (String, String, String, usize, Span
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)] // Mock AST fixtures intentionally override one behavior at a time.
 mod tests {
     use super::*;
     use crate::ast::{Child, Node};
@@ -2979,7 +3051,7 @@ mod tests {
             enclosing_span: [1, 0, 1, 10],
         };
         let mut out = Vec::new();
-        collect_equality_dispatch_sites(&[c1.clone()], &[], &mut out);
+        collect_equality_dispatch_sites(std::slice::from_ref(&c1), &[], &mut out);
         assert!(out.is_empty());
 
         let c2 = ComparisonUse {
@@ -3409,7 +3481,7 @@ mod tests {
         let behavior = CustomBehavior::default();
         let extractor = Extractor::new(Path::new("test.rb"), &[], &behavior);
         let call = NormalizedCallProjection {
-            receiver: "self".to_string(),
+            receiver: "MyOwner".to_string(),
             message: "MyConstant".to_string(),
             arguments: Vec::new(),
             access_span: [1, 0, 1, 10],
@@ -3417,6 +3489,15 @@ mod tests {
         };
         let node = mock_node("LVAR", vec![], "");
         assert!(extractor.suppress_call_site(&node, &call, false));
+
+        let exported_self_method = NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: "ExportedMethod".to_string(),
+            arguments: Vec::new(),
+            access_span: [1, 0, 1, 10],
+            span: [1, 0, 1, 10],
+        };
+        assert!(!extractor.suppress_call_site(&node, &exported_self_method, false));
     }
 
     #[test]

@@ -2,7 +2,7 @@ use super::{
     normalized_behavior, parser_grammar::grammar_for_language, passes, Document, Language,
     SymbolScope,
 };
-use crate::ast::normalize_tree;
+use crate::ast::normalize_tree_with_call_origins;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -41,9 +41,12 @@ fn parse_normalized_file(
     total_started: Instant,
 ) -> Result<Document> {
     let started = Instant::now();
-    let raw_call_spans =
-        crate::ast::raw_call_spans(parsed.tree.root_node(), &parsed.source, language);
-    let normalized_root = normalize_tree(parsed.tree.root_node(), &parsed.source, language);
+    let raw_call_sites =
+        crate::ast::raw_call_sites(parsed.tree.root_node(), &parsed.source, language);
+    let parse_recovery_spans = parse_recovery_spans(parsed.tree.root_node());
+    let parse_recovered = !parse_recovery_spans.is_empty();
+    let (normalized_root, parser_call_origins) =
+        normalize_tree_with_call_origins(parsed.tree.root_node(), &parsed.source, language);
     let (mut namespace, mut explicit_imports) =
         crate::ast::symbol_scope(parsed.tree.root_node(), &parsed.source, language);
     let declaration_namespaces =
@@ -77,6 +80,42 @@ fn parse_normalized_file(
     let mut facts =
         passes::StatelessSyntaxPass::normalized(&parsed.file, &lines, &normalized_root, behavior)
             .run();
+    if language == Language::Go {
+        // Go function literals can normalize to a synthetic wrapper with the
+        // span of `return func`, rather than the comma-ok declaration. Keep
+        // source ownership in the Go adapter, which has the unmodified parser
+        // tree and can provide an exact node span without text recovery.
+        super::go::attach_raw_presence_correlation_spans(
+            parsed.tree.root_node(),
+            &parsed.source,
+            &mut facts.presence_correlation_seeds,
+        );
+    }
+    let normalization_call_origins = parser_call_origins
+        .into_iter()
+        .map(
+            |(raw_call_span, normalized_call_span)| super::CallRawOriginProjection {
+                raw_call_span,
+                normalized_call_span,
+            },
+        )
+        .collect::<Vec<_>>();
+    let parser_origins_by_normalized = normalization_call_origins
+        .iter()
+        .map(|origin| (origin.normalized_call_span, origin.raw_call_span))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let call_raw_origin_projections = facts
+        .call_node_projections
+        .iter()
+        .filter_map(|projection| {
+            parser_origins_by_normalized
+                .get(&projection.normalized_node_span)
+                .map(|raw| super::CallRawOriginProjection {
+                    raw_call_span: *raw,
+                    normalized_call_span: projection.emitted_call_span,
+                })
+        })
+        .collect();
     facts.hazard_sites = crate::syntax::hazards::extract_hazards(
         &parsed.file.to_string_lossy(),
         parsed.tree.root_node(),
@@ -100,7 +139,9 @@ fn parse_normalized_file(
         file: parsed.file.to_string_lossy().to_string(),
         language,
         source_digest: format!("sha256:{:x}", Sha256::digest(parsed.source.as_bytes())),
-        raw_call_spans,
+        parse_recovered,
+        parse_recovery_spans,
+        raw_call_sites,
         symbol_scope: SymbolScope {
             canonical: matches!(
                 language,
@@ -116,6 +157,8 @@ fn parse_normalized_file(
         function_defs: facts.function_defs,
         owner_defs: facts.owner_defs,
         call_sites: facts.call_sites,
+        normalization_call_origins,
+        call_raw_origin_projections,
         call_receiver_projections: facts.call_receiver_projections,
         state_declarations: facts.state_declarations,
         state_reads: facts.state_reads,
@@ -146,6 +189,11 @@ fn parse_normalized_file(
         protocol_call_paths: metadata.protocol_call_paths,
         clone_candidates: metadata.clone_candidates,
         redundant_nil_guards: metadata.redundant_nil_guards,
+        nullable_refinements: metadata.nullable_refinements,
+        nullable_states: metadata.nullable_states,
+        nullable_summaries: metadata.nullable_summaries,
+        nullable_operations: metadata.nullable_operations,
+        presence_correlations: metadata.presence_correlations,
         immutable_struct_readers: metadata.syntax.immutable_struct_readers,
         immutable_struct_reader_types: metadata.syntax.immutable_struct_reader_types,
         type_aliases: metadata.syntax.type_aliases,
@@ -179,6 +227,26 @@ fn parse_normalized_file(
         total_started.elapsed(),
     );
     Ok(document)
+}
+
+fn parse_recovery_spans(root: tree_sitter::Node<'_>) -> Vec<[usize; 4]> {
+    fn visit(node: tree_sitter::Node<'_>, spans: &mut Vec<[usize; 4]>) {
+        if node.is_error() || node.is_missing() {
+            let start = node.start_position();
+            let end = node.end_position();
+            spans.push([start.row + 1, start.column, end.row + 1, end.column]);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child, spans);
+        }
+    }
+
+    let mut spans = Vec::new();
+    visit(root, &mut spans);
+    spans.sort_unstable();
+    spans.dedup();
+    spans
 }
 
 fn python_module_namespace(file: &std::path::Path) -> String {

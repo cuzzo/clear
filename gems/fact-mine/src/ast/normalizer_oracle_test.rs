@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use crate::ast::{self, Node};
+use crate::ast;
 use crate::syntax::Language;
 use serde_json::Value;
 use std::fs;

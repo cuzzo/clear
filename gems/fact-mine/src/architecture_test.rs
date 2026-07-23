@@ -310,6 +310,7 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         "cfg/worklist.rs",
         "effects.rs",
         "local_flow.rs",
+        "nullable.rs",
         "normalized_behavior.rs",
         "c.rs",
         "cpp.rs",
@@ -452,7 +453,7 @@ fn language_specific_ast_files_live_only_in_ast_adapters() {
             }
             let file_name = path.file_name()?.to_str()?;
             (forbidden_names.contains(&file_name) || file_name.ends_with("_normalization.rs"))
-                .then(|| relative)
+                .then_some(relative)
         })
         .collect::<Vec<_>>();
 
@@ -638,7 +639,7 @@ fn parse_file_routes_all_languages_through_normalized_passes() {
     ];
     let missing = [
         "parse_normalized_file(",
-        "normalize_tree(",
+        "normalize_tree_with_call_origins(",
         "StatelessSyntaxPass::normalized",
         "StatefulSyntaxPass::new",
     ];

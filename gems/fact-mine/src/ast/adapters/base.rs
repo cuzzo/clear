@@ -117,7 +117,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
                     | "next"
                     | "continue_statement"
             ),
-            "nil" => matches!(kind, "nil" | "none" | "null"),
+            "nil" => matches!(kind, "nil" | "none" | "null" | "null_literal"),
             "true" => kind == "true",
             "false" => kind == "false",
             "identifier" => matches!(
@@ -235,6 +235,13 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         }
     }
 
+    /// Whether this node is a language-level absence literal. Most languages
+    /// express absence with a dedicated grammar node, while TypeScript's
+    /// `undefined` is an identifier that needs language-owned resolution.
+    fn absence_literal(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        self.check_node_role(node, "nil")
+    }
+
     fn tracks_dynamic_local_scope(&self) -> bool {
         false
     }
@@ -299,6 +306,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn conditional_node_type(&self, kind: &str) -> Option<&'static str> {
         self.if_node_kind(kind).then_some("IF")
+    }
+
+    /// Some languages allow a statement before an `if` predicate (for
+    /// example Go's `if value := next(); value != nil`).  The normalizer must
+    /// retain it in the condition sequence so its calls and local writes are
+    /// not silently lost.
+    fn if_initializer<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
     }
 
     fn conditional_keyword_node_type(&self, keyword: &str) -> Option<&'static str> {
@@ -768,12 +787,11 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             }
 
             let stripped = node_text(node, source).trim();
-            if stripped == node_text(child, source)
-                || stripped == format!("{};", node_text(child, source))
+            if (stripped == node_text(child, source)
+                || stripped == format!("{};", node_text(child, source)))
+                && ARRAY_LITERAL_NODE_KINDS.contains(&child.kind())
             {
-                if ARRAY_LITERAL_NODE_KINDS.contains(&child.kind()) {
-                    return Some(child);
-                }
+                return Some(child);
             }
         }
 
@@ -907,7 +925,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     }
 
     fn heredoc_body_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        self.heredoc_body_nodes(node).first().is_some()
+        !self.heredoc_body_nodes(node).is_empty()
     }
 
     fn heredoc_start_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
@@ -978,14 +996,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     fn concatenated_string_target<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
-        source: &str,
+        _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
         if self.concatenated_string_node(node) {
             return Some(node);
         }
         let children = named_children(node);
         if children.len() == 1 {
-            return self.concatenated_string_target(children[0], source);
+            return self.concatenated_string_target(children[0], _source);
         }
         None
     }
@@ -1371,6 +1389,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn member_assignment_target(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
         false
+    }
+
+    /// Returns a language-owned canonical assignment target when concrete
+    /// declaration syntax adds punctuation that is not part of the binding.
+    fn assignment_target_name(&self, _node: TreeSitterNode<'_>, _source: &str) -> Option<String> {
+        None
     }
 
     fn instance_variable(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {

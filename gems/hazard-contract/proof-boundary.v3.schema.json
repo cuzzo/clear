@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clear.tools/contracts/fact-mine/proof-boundary.v3.schema.json",
+  "title": "FactMine SARIF proof boundary v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "input_completeness", "claim_status", "coverage_discharge", "authority", "claim_kind", "scope", "blockers"],
+  "properties": {
+    "schema": {"const": "fact-mine.proof-boundary.v3"},
+    "input_completeness": {"enum": ["complete", "partial", "unknown"]},
+    "claim_status": {"enum": ["proven", "observed", "review"]},
+    "coverage_discharge": {"enum": ["satisfiable", "unsatisfiable", "not_applicable", "unknown"]},
+    "authority": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
+    "claim_kind": {"type": "string", "minLength": 1},
+    "scope": {"type": "object", "additionalProperties": false, "required": ["kind", "closed"], "properties": {"kind": {"enum": ["reported_span", "function", "owner", "file", "project", "closed_build_target", "local"]}, "closed": {"type": "boolean"}}},
+    "blockers": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"enum": ["parser_recovery", "call_resolution", "missing_evidence", "open_corpus", "unsupported_language", "unknown"]}, "path": {"type": "string", "minLength": 1}, "span": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}}}, "uniqueItems": true}
+  },
+  "allOf": [
+    {"if": {"properties": {"input_completeness": {"const": "complete"}}}, "then": {"properties": {"blockers": {"maxItems": 0}}}},
+    {"if": {"properties": {"blockers": {"contains": {"properties": {"kind": {"const": "open_corpus"}}, "required": ["kind"]}}}}, "then": {"properties": {"input_completeness": {"const": "unknown"}}}}
+  ]
+}

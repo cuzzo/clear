@@ -288,6 +288,8 @@
       "visibility": "public"
     }
   ],
+  "nullable_operations": [],
+  "nullable_summaries": [],
   "owners": [
     {
       "confidence": "high",
@@ -322,6 +324,7 @@
       "symbol": "python_sample.Greeter"
     }
   ],
+  "presence_correlations": [],
   "signatures": {
     "Database\u0000__init__": "def __init__(self):",
     "Greeter\u0000__init__": "def __init__(self, db: Database):",

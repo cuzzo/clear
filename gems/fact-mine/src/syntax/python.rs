@@ -143,11 +143,10 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
     }
 
     fn clean_receiver(&self, receiver: &str) -> String {
-        if receiver.starts_with("self.") {
-            receiver["self.".len()..].to_string()
-        } else {
-            receiver.to_string()
-        }
+        receiver
+            .strip_prefix("self.")
+            .unwrap_or(receiver)
+            .to_string()
     }
 
     fn yield_semantic_effect(&self, _node: &Node) -> bool {
@@ -551,7 +550,7 @@ fn is_simple_name(name: &str) -> bool {
         && name
             .chars()
             .next()
-            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
         && name
             .chars()
             .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
@@ -835,8 +834,10 @@ mod tests {
         use crate::syntax::{self, Language};
         use std::io::Write;
         let mut file = tempfile::Builder::new().suffix(".py").tempfile().unwrap();
-        file.write_all(b"class Foo:\n    def __init__(self):\n        self.tokens: int = 1\n").unwrap();
-        let documents = syntax::parse_files(&[file.path().to_path_buf()], Language::Python).unwrap();
+        file.write_all(b"class Foo:\n    def __init__(self):\n        self.tokens: int = 1\n")
+            .unwrap();
+        let documents =
+            syntax::parse_files(&[file.path().to_path_buf()], Language::Python).unwrap();
         let document = &documents[0];
 
         assert_eq!(document.state_declarations.len(), 1);

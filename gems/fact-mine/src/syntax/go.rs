@@ -7,17 +7,135 @@ use super::normalized_behavior::{
     configured_collection_operation, configured_external_latency_bound,
     configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    eliminable_guard_from_call, nil_guard_from_predicates, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedOwner,
-    method_param_types_from_signatures, NormalizedSemanticEffect, NormalizedStateRead,
+    eliminable_guard_from_call, method_param_types_from_signatures, nil_guard_from_predicates,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedNullableOperation, NormalizedOwner,
+    NormalizedPresenceCorrelation, NormalizedSemanticEffect, NormalizedStateRead,
     NormalizedStateWrite, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, FunctionDef};
-use crate::ast::{Node, Span};
+use crate::ast::{Child, Node, Span};
+use crate::syntax::nullable::PresenceCorrelationSeed;
 use crate::type_inference::TypeExpr;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RawPresenceCorrelation {
+    function: String,
+    span: Span,
+    value_subject: String,
+    presence_subject: String,
+    semantics: &'static str,
+}
+
+/// Replaces normalized Go comma-ok spans with the exact raw parser node span.
+/// This remains at the Go adapter boundary because only Go owns the comma-ok
+/// grammar and the returned-function-literal normalization quirk it repairs.
+pub(crate) fn attach_raw_presence_correlation_spans(
+    root: tree_sitter::Node<'_>,
+    source: &str,
+    seeds: &mut Vec<PresenceCorrelationSeed>,
+) {
+    let correlations = raw_presence_correlations(root, source);
+    seeds.retain_mut(|seed| {
+        let matches = correlations
+            .iter()
+            .filter(|correlation| {
+                correlation.function == seed.function
+                    && correlation.value_subject == seed.value_subject
+                    && correlation.presence_subject == seed.presence_subject
+                    && correlation.semantics == seed.semantics
+            })
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [correlation] => {
+                seed.span = correlation.span;
+                true
+            }
+            // Multiple raw declarations with the same function-local names
+            // cannot be joined without an origin ID. Omit rather than guess.
+            _ => false,
+        }
+    });
+}
+
+fn raw_presence_correlations(
+    root: tree_sitter::Node<'_>,
+    source: &str,
+) -> Vec<RawPresenceCorrelation> {
+    fn text<'source>(node: tree_sitter::Node<'_>, source: &'source str) -> Option<&'source str> {
+        source.get(node.byte_range())
+    }
+
+    fn identifier_list(node: tree_sitter::Node<'_>, source: &str) -> Vec<String> {
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor)
+            .filter(|child| child.kind() == "identifier")
+            .filter_map(|child| text(child, source).map(str::to_string))
+            .collect()
+    }
+
+    fn walk(
+        node: tree_sitter::Node<'_>,
+        source: &str,
+        function: &str,
+        rows: &mut Vec<RawPresenceCorrelation>,
+    ) {
+        let function = if node.kind() == "function_declaration" {
+            node.child_by_field_name("name")
+                .and_then(|name| text(name, source))
+                .unwrap_or(function)
+        } else {
+            function
+        };
+        if node.kind() == "short_var_declaration" {
+            let left = node.child_by_field_name("left");
+            let right = node.child_by_field_name("right");
+            let targets = left
+                .map(|left| identifier_list(left, source))
+                .unwrap_or_default();
+            let producer = right.and_then(|right| {
+                let mut cursor = right.walk();
+                let first = right.named_children(&mut cursor).next();
+                first
+            });
+            let semantics = producer.and_then(|producer| match producer.kind() {
+                "index_expression" => Some("map_lookup"),
+                "type_assertion_expression" => Some("type_assertion"),
+                "unary_expression"
+                    if text(producer, source)
+                        .is_some_and(|value| value.trim_start().starts_with("<-")) =>
+                {
+                    Some("channel_receive")
+                }
+                _ => None,
+            });
+            if let (Some(semantics), [value_subject, presence_subject]) =
+                (semantics, targets.as_slice())
+            {
+                let start = node.start_position();
+                let end = node.end_position();
+                rows.push(RawPresenceCorrelation {
+                    function: function.to_string(),
+                    span: [start.row + 1, start.column, end.row + 1, end.column],
+                    value_subject: value_subject.clone(),
+                    presence_subject: presence_subject.clone(),
+                    semantics,
+                });
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            walk(child, source, function, rows);
+        }
+    }
+
+    let mut rows = Vec::new();
+    walk(root, source, "(top-level)", &mut rows);
+    rows
+}
 
 fn scip_go_parts(symbol: &str) -> Option<(&str, &str)> {
     let rest = symbol.strip_prefix("scip-go gomod ")?;
@@ -190,6 +308,82 @@ const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        let (subject, operation_kind, nil_behavior) = match node.r#type.as_str() {
+            "UNARY_EXPRESSION" if node.text.trim_start().starts_with('*') => (
+                local_subject(node.children.first().and_then(crate::ast::node))?,
+                "pointer_dereference",
+                "panic",
+            ),
+            // Go field and method selectors both panic when their receiver is
+            // a nil pointer. The generic extractor later joins this local
+            // subject to CFG state; value receivers simply remain non-nil or
+            // unknown rather than becoming findings.
+            "CALL" => (
+                local_subject(node.children.first().and_then(crate::ast::node))?,
+                "pointer_selector",
+                "panic",
+            ),
+            // A bare local call can be a function value. Keeping the
+            // descriptor local to the normalized VCALL shape avoids treating
+            // declarations or named package functions as nullable values.
+            "VCALL" => (
+                local_symbol(node.children.first())?,
+                "function_value_call",
+                "panic",
+            ),
+            "LASGN" => (indexed_assignment_subject(node)?, "indexed_write", "panic"),
+            "SEND_STATEMENT" => (
+                local_subject(node.children.first().and_then(crate::ast::node))?,
+                "channel_send",
+                "blocks",
+            ),
+            "FCALL" if local_symbol(node.children.first())? == "close" => {
+                (single_local_argument(node)?, "channel_close", "panic")
+            }
+            _ => return None,
+        };
+        Some(NormalizedNullableOperation {
+            subject,
+            operation_kind,
+            nil_behavior,
+        })
+    }
+
+    fn presence_correlation(&self, node: &Node) -> Option<NormalizedPresenceCorrelation> {
+        if node.r#type != "SHORT_VAR_DECLARATION" {
+            return None;
+        }
+        let targets = node.children.first().and_then(crate::ast::node)?;
+        let source = node.children.get(1).and_then(crate::ast::node)?;
+        if targets.r#type != "EXPRESSION_LIST" || source.r#type != "EXPRESSION_LIST" {
+            return None;
+        }
+        let subjects = targets
+            .children
+            .iter()
+            .filter_map(crate::ast::node)
+            .filter(|target| target.r#type == "LVAR")
+            .map(|target| target.text.trim().to_string())
+            .collect::<Vec<_>>();
+        let producer = source.children.first().and_then(crate::ast::node)?;
+        let semantics = match producer.r#type.as_str() {
+            "INDEX_EXPRESSION" => "map_lookup",
+            "TYPE_ASSERTION_EXPRESSION" => "type_assertion",
+            "UNARY_EXPRESSION" if producer.text.trim_start().starts_with("<-") => "channel_receive",
+            _ => return None,
+        };
+        (subjects.len() == 2).then(|| NormalizedPresenceCorrelation {
+            value_subject: subjects[0].clone(),
+            presence_subject: subjects[1].clone(),
+            semantics,
+        })
+    }
+
+    fn function_value_calls_are_local_reads(&self) -> bool {
+        true
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
@@ -276,9 +470,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
 
     fn suppress_call_site(&self, node: &Node, call: &NormalizedCallProjection) -> bool {
         let receiver = call.receiver.trim_start();
-        if call.message == "call"
-            && (receiver.starts_with("func(") || receiver.starts_with('*'))
-        {
+        if call.message == "call" && (receiver.starts_with("func(") || receiver.starts_with('*')) {
             // Immediately-invoked function bodies and conversion arguments are
             // visited independently. The synthetic wrapper is not another
             // dynamically dispatched call.
@@ -332,7 +524,11 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         }
         if let Some(name) = first_lvar_child_name(node) {
             let ty = strip_struct_tag(
-                node.text.trim_start().strip_prefix(&name).unwrap_or("").trim(),
+                node.text
+                    .trim_start()
+                    .strip_prefix(&name)
+                    .unwrap_or("")
+                    .trim(),
             )
             .to_string();
             return (!ty.is_empty()).then(|| super::StateDeclaration {
@@ -353,7 +549,11 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         // function nor field_name_from_declaration (unset for Go) had
         // anything to find.
         let embedded_type = strip_struct_tag(node.text.trim());
-        let name = embedded_type.trim_start_matches('*').rsplit('.').next()?.to_string();
+        let name = embedded_type
+            .trim_start_matches('*')
+            .rsplit('.')
+            .next()?
+            .to_string();
         (simple_identifier(&name)).then(|| super::StateDeclaration {
             field: name,
             owner: String::new(),
@@ -711,9 +911,11 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.starts_with('*') {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.starts_with('*')
+        {
             type_text.to_string()
         } else {
             format!("*{}", type_text)
@@ -722,6 +924,48 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
 
     fn untyped_type(&self) -> String {
         "any".to_string()
+    }
+}
+
+fn indexed_assignment_subject(node: &Node) -> Option<String> {
+    let target = node.children.first().and_then(|child| match child {
+        Child::String(target) | Child::Symbol(target) => Some(target.as_str()),
+        _ => None,
+    })?;
+    let subject = target.split_once('[')?.0.trim();
+    is_simple_name(subject).then(|| subject.to_string())
+}
+
+fn single_local_argument(node: &Node) -> Option<String> {
+    let arguments = node.children.get(1).and_then(crate::ast::node)?;
+    let mut values = arguments.children.iter().filter_map(crate::ast::node);
+    let value = values.next()?;
+    values
+        .next()
+        .is_none()
+        .then(|| local_subject(Some(value)))
+        .flatten()
+}
+
+fn is_simple_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+}
+
+fn local_subject(node: Option<&Node>) -> Option<String> {
+    node.filter(|node| node.r#type == "LVAR")
+        .map(|node| node.text.trim().to_string())
+        .filter(|subject| !subject.is_empty())
+}
+
+fn local_symbol(child: Option<&Child>) -> Option<String> {
+    match child? {
+        Child::Symbol(symbol) | Child::String(symbol) => {
+            (!symbol.trim().is_empty()).then(|| symbol.trim().to_string())
+        }
+        _ => None,
     }
 }
 
@@ -806,12 +1050,14 @@ fn go_method_local_types(
             .expect("valid Go struct regex")
     });
     let field = FIELD.get_or_init(|| {
-        Regex::new(r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s+([^\s`]+)")
-            .expect("valid Go field regex")
+        Regex::new(r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s+([^\s`]+)").expect("valid Go field regex")
     });
 
     let mut field_types = BTreeMap::<String, BTreeSet<String>>::new();
-    for body in struct_body.captures_iter(source).filter_map(|row| row.get(1)) {
+    for body in struct_body
+        .captures_iter(source)
+        .filter_map(|row| row.get(1))
+    {
         for capture in field.captures_iter(body.as_str()) {
             field_types
                 .entry(capture[1].to_string())
@@ -860,7 +1106,11 @@ fn go_method_local_types(
                 let element = channel_elements
                     .get(&capture[2])
                     .map(String::as_str)
-                    .or_else(|| known.get(&capture[2]).and_then(|value| value.strip_prefix("chan ")));
+                    .or_else(|| {
+                        known
+                            .get(&capture[2])
+                            .and_then(|value| value.strip_prefix("chan "))
+                    });
                 if let Some(element) = element {
                     candidates
                         .entry(capture[1].to_string())
@@ -925,8 +1175,8 @@ fn span(node: &Node) -> Span {
 // exactly one tag.
 fn strip_struct_tag(text: &str) -> &str {
     let trimmed = text.trim_end();
-    if trimmed.ends_with('`') {
-        if let Some(start) = trimmed[..trimmed.len() - 1].rfind('`') {
+    if let Some(without_closing) = trimmed.strip_suffix('`') {
+        if let Some(start) = without_closing.rfind('`') {
             return trimmed[..start].trim_end();
         }
     }
@@ -982,7 +1232,7 @@ fn receiver_owner_from_go_function(source: &str) -> Option<String> {
             .unwrap_or(value)
             .to_string(),
     )
-        .filter(|value| !value.is_empty())
+    .filter(|value| !value.is_empty())
 }
 
 fn receiver_name_from_go_function(source: &str) -> Option<String> {
@@ -1099,6 +1349,42 @@ mod tests {
             last_column: text.lines().last().map(str::len).unwrap_or_default(),
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn nullable_collection_operations_require_direct_local_subjects() {
+        let behavior = GoNormalizedBehavior;
+        let indexed_write = Node {
+            children: vec![Child::String("values[key]".to_string())],
+            ..node("LASGN", "values[key] = 1")
+        };
+        let indexed = behavior.nullable_operation(&indexed_write).unwrap();
+        assert_eq!(indexed.subject, "values");
+        assert_eq!(indexed.operation_kind, "indexed_write");
+        assert_eq!(indexed.nil_behavior, "panic");
+        let field_write = Node {
+            children: vec![Child::String("object.values[key]".to_string())],
+            ..node("LASGN", "object.values[key] = 1")
+        };
+        assert!(behavior.nullable_operation(&field_write).is_none());
+
+        let close = Node {
+            children: vec![
+                Child::Symbol("close".to_string()),
+                Child::Node(Box::new(Node {
+                    children: vec![Child::Node(Box::new(Node {
+                        children: vec![Child::String("channel".to_string())],
+                        ..node("LVAR", "channel")
+                    }))],
+                    ..node("LIST", "channel")
+                })),
+            ],
+            ..node("FCALL", "close(channel)")
+        };
+        let close = behavior.nullable_operation(&close).unwrap();
+        assert_eq!(close.subject, "channel");
+        assert_eq!(close.operation_kind, "channel_close");
+        assert_eq!(close.nil_behavior, "panic");
     }
 
     #[test]
@@ -1307,8 +1593,7 @@ mod tests {
             "scip-go gomod github.com/golang/go/src go1.22 `crypto/rsa`/VerifyPSS().",
         ] {
             assert_eq!(
-                external_symbol_call_complexity(symbol, "verify")
-                    .map(|complexity| complexity.time),
+                external_symbol_call_complexity(symbol, "verify").map(|complexity| complexity.time),
                 Some("O(N^3)"),
                 "{symbol}"
             );
@@ -1334,18 +1619,14 @@ mod tests {
             &node("CALL", "(*uint32)(value)"),
             &projection("*uint32", "call")
         ));
-        assert!(!behavior.suppress_call_site(
-            &node("CALL", "fn()"),
-            &projection("fn", "call")
-        ));
+        assert!(!behavior.suppress_call_site(&node("CALL", "fn()"), &projection("fn", "call")));
         assert!(behavior.suppress_call_site(
             &node("CALL", "ecdsaKey.Curve.Params().BitSize"),
             &projection("ecdsaKey.Curve.Params()", "BitSize")
         ));
-        assert!(!behavior.suppress_call_site(
-            &node("CALL", "err.Error()"),
-            &projection("err", "Error")
-        ));
+        assert!(
+            !behavior.suppress_call_site(&node("CALL", "err.Error()"), &projection("err", "Error"))
+        );
     }
 
     #[test]
@@ -1372,11 +1653,23 @@ mod tests {
         );
         assert_eq!(lines.get("EvictCallback"), Some(&1));
         assert_eq!(
-            GoNormalizedBehavior.declared_callable_cost(
-                aliases.get("EvictCallback").unwrap()
-            ),
+            GoNormalizedBehavior.declared_callable_cost(aliases.get("EvictCallback").unwrap()),
             Some("callback_once".to_string())
         );
+    }
+
+    #[test]
+    fn function_value_operation_subjects_require_locals_and_symbols() {
+        assert_eq!(
+            local_symbol(Some(&Child::Symbol("callback".to_string()))),
+            Some("callback".to_string())
+        );
+        assert_eq!(local_symbol(Some(&Child::Nil)), None);
+        assert_eq!(
+            local_subject(Some(&node("LVAR", "callback"))),
+            Some("callback".to_string())
+        );
+        assert_eq!(local_subject(Some(&node("CONST", "Callback"))), None);
     }
 
     // Real bug, found auditing mapstructure's DecoderConfig: a plain
@@ -1387,9 +1680,13 @@ mod tests {
     #[test]
     fn struct_with_interface_typed_field_is_not_classified_as_interface() {
         let text = "type DecoderConfig struct {\n\tResult interface{}\n\tName string\n}\n";
-        assert!(!is_interface_declaration(text), "a struct field's own type must not leak into the declaration kind");
+        assert!(
+            !is_interface_declaration(text),
+            "a struct field's own type must not leak into the declaration kind"
+        );
 
-        let real_interface = "type DecodeHookFunc interface {\n\tDecode(from, to reflect.Value) error\n}\n";
+        let real_interface =
+            "type DecodeHookFunc interface {\n\tDecode(from, to reflect.Value) error\n}\n";
         assert!(is_interface_declaration(real_interface));
     }
 }

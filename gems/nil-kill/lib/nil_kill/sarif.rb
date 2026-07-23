@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 require "json"
+begin
+  require "fact_mine/proof_boundary"
+rescue LoadError
+  require_relative "../../../fact-mine/lib/fact_mine/proof_boundary"
+end
 
 module NilKill
   # Small SARIF 2.1.0 builder shared by the generalized gems. It keeps
@@ -10,6 +15,25 @@ module NilKill
     module_function
 
     SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
+    PROOF_BOUNDARY_PROPERTY = FactMine::ProofBoundary::PROOF_BOUNDARY_PROPERTY
+    PROOF_BOUNDARY_SUMMARY_PROPERTY = FactMine::ProofBoundary::PROOF_BOUNDARY_SUMMARY_PROPERTY
+    PROOF_BOUNDARY_SCHEMA = FactMine::ProofBoundary::SCHEMA
+
+    def proof_boundary(input_completeness:, claim_status:, coverage_discharge:, authority:, scope:, blockers: [], claim_kind: nil)
+      FactMine::ProofBoundary.build(
+        input_completeness: input_completeness,
+        claim_status: claim_status,
+        coverage_discharge: coverage_discharge,
+        authority: authority,
+        scope: scope.is_a?(Hash) ? scope : FactMine::ProofBoundary.legacy_scope(scope),
+        blockers: blockers,
+        claim_kind: claim_kind
+      )
+    end
+
+    def proof_boundary_summary(results)
+      FactMine::ProofBoundary.summary(results)
+    end
 
     def document(tool_name:, rules:, results:, information_uri: nil, properties: {})
       normalized_rules = unique_rules(rules)

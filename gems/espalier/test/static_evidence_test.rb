@@ -22,6 +22,19 @@ class StaticEvidenceTest < Minitest::Test
 
       assert_equal true, complete.dig("corpus", "complete")
       assert_equal false, partial.dig("corpus", "complete")
+      assert_equal true, complete.dig("input_coverage", "complete")
+      assert_equal true, partial.dig("input_coverage", "complete")
+    end
+  end
+
+  def test_marks_input_coverage_partial_when_fact_mine_recovers_from_syntax_error
+    Dir.mktmpdir("espalier-input-recovery") do |dir|
+      source = File.join(dir, "broken.rb")
+      File.write(source, "def broken(\n")
+
+      evidence = Espalier::StaticEvidence.build([source], root: dir)
+      assert_equal false, evidence.dig("input_coverage", "complete")
+      assert_equal [source], evidence.dig("input_coverage", "parse_recovery_files")
     end
   end
 
@@ -292,6 +305,9 @@ class StaticEvidenceTest < Minitest::Test
   def test_source_roles_are_language_neutral_path_facts
     assert_equal "test", Espalier::StaticEvidence.source_role("src/widget_test.go")
     assert_equal "test", Espalier::StaticEvidence.source_role("tests/test_widget.py")
+    assert_equal "test", Espalier::StaticEvidence.source_role("Tests/ArgumentParserTests/AnyArgumentTests.swift")
+    assert_equal "test", Espalier::StaticEvidence.source_role("src/jvmTest/kotlin/Foo.kt")
+    assert_equal "test", Espalier::StaticEvidence.source_role("src/nonWasmTest/kotlin/Foo.kt")
     assert_equal "benchmark", Espalier::StaticEvidence.source_role("benchmarks/widget.rs")
     assert_equal "example", Espalier::StaticEvidence.source_role("examples/widget.rb")
     assert_equal "production", Espalier::StaticEvidence.source_role("rich/console.py")

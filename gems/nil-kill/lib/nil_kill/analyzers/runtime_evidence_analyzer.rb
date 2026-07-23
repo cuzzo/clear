@@ -33,6 +33,7 @@ module NilKill
         facts = Hash(@static["facts"])
         actions = Array(facts["dead_nil_checks"]).filter_map { |fact| dead_nil_check_action(fact) }
         actions.concat(Array(facts["deterministic_guards"]).filter_map { |fact| deterministic_guard_action(fact) })
+        actions.concat(Array(facts["presence_correlations"]).filter_map { |fact| presence_correlation_action(fact) })
         actions.uniq { |action| action["id"] }
       end
 
@@ -62,6 +63,35 @@ module NilKill
           "deterministic_guard",
           "#{fact["code"]} is always #{fact["truth_value"]}: #{fact["reason"]}",
           fact
+        )
+      end
+
+      # Go's comma-ok forms prove presence only on the true branch. They do
+      # not prove that a present pointer/interface payload is non-nil, so this
+      # produces review evidence rather than a rewrite suggestion.
+      def presence_correlation_action(fact)
+        return unless fact.is_a?(Hash)
+        return unless fact["complete"] == true
+        return unless fact["branch_refinement"] == "presence_on_true"
+        return unless %w[map_lookup type_assertion channel_receive].include?(fact["semantics"])
+
+        path = fact["path"].to_s
+        line = Array(fact["span"]).first.to_i
+        return if path.empty? || line <= 0
+
+        semantics = fact.fetch("semantics")
+        Actions::Record.build(
+          kind: "refine_presence_guard",
+          language: "go",
+          confidence: REVIEW,
+          target: {
+            "path" => path,
+            "line" => line,
+            "symbol_id" => fact.fetch("group_id"),
+          },
+          message: "#{semantics.tr('_', ' ')} presence is proven on the `ok` branch; keep a separate nil check only when the payload type itself can be nil",
+          data: fact,
+          provenance: { "static_fact" => "presence_correlation" }
         )
       end
 

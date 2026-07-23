@@ -921,7 +921,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn clean_receiver(&self, receiver: &str) -> String {
-        let mut t = receiver.replace('@', "");
+        let t = receiver.replace('@', "");
         t.replace('$', "")
     }
 
@@ -985,7 +985,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
 
     fn static_return_type(&self, message: &str, receiver_type: Option<&str>) -> Option<String> {
         let r = receiver_type.unwrap_or("T.untyped");
-        let (receiver_bare, _) = if r.starts_with("T.nilable(") && r.ends_with(')') {
+        let (_receiver_bare, _) = if r.starts_with("T.nilable(") && r.ends_with(')') {
             let bare = r["T.nilable(".len()..r.len() - 1].to_string();
             (bare, true)
         } else {
@@ -1116,16 +1116,16 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         if message == "concat" || message == "push" || message == "unshift" || message == "append" {
             return receiver_type.map(|t| t.to_string());
         }
-        if message == "first"
+        if (message == "first"
             || message == "last"
             || message == "pop"
             || message == "shift"
-            || message == "sample"
+            || message == "sample")
+            && r.starts_with("T::Array[")
+            && r.ends_with(']')
         {
-            if r.starts_with("T::Array[") && r.ends_with(']') {
-                let inner = &r[9..r.len() - 1];
-                return Some(wrap_nilable(inner));
-            }
+            let inner = &r[9..r.len() - 1];
+            return Some(wrap_nilable(inner));
         }
         if message == "map"
             || message == "select"
@@ -1136,47 +1136,35 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         {
             return Some("T::Array[T.untyped]".to_string());
         }
-        if message == "compact" {
-            if r.starts_with("T::Array[") && r.ends_with(']') {
-                let inner = &r[9..r.len() - 1];
-                let no_nil = inner.trim_start_matches("T.nilable(").trim_end_matches(')');
-                return Some(format!("T::Array[{}]", no_nil));
+        if message == "compact" && r.starts_with("T::Array[") && r.ends_with(']') {
+            let inner = &r[9..r.len() - 1];
+            let no_nil = inner.trim_start_matches("T.nilable(").trim_end_matches(')');
+            return Some(format!("T::Array[{}]", no_nil));
+        }
+        if message == "flatten" && r.starts_with("T::Array[T::Array[") {
+            let inner = &r[18..r.len() - 2];
+            return Some(format!("T::Array[{}]", inner));
+        }
+        if message == "keys" && r.starts_with("T::Hash[") {
+            if let Some((k, _)) = r[8..r.len() - 1].split_once(", ") {
+                return Some(format!("T::Array[{}]", k));
             }
         }
-        if message == "flatten" {
-            if r.starts_with("T::Array[T::Array[") {
-                let inner = &r[18..r.len() - 2];
-                return Some(format!("T::Array[{}]", inner));
+        if message == "values" && r.starts_with("T::Hash[") {
+            if let Some((_, v)) = r[8..r.len() - 1].split_once(", ") {
+                return Some(format!("T::Array[{}]", v));
             }
         }
-        if message == "keys" {
-            if r.starts_with("T::Hash[") {
-                if let Some((k, _)) = r[8..r.len() - 1].split_once(", ") {
-                    return Some(format!("T::Array[{}]", k));
-                }
-            }
+        if message == "join" && (r.starts_with("T::Array[") || r == "Array") {
+            return Some("String".to_string());
         }
-        if message == "values" {
-            if r.starts_with("T::Hash[") {
-                if let Some((_, v)) = r[8..r.len() - 1].split_once(", ") {
-                    return Some(format!("T::Array[{}]", v));
-                }
-            }
+        if message == "to_a"
+            && (r.starts_with("T::Array[") || r.starts_with("T::Hash[") || r.starts_with("T::Set["))
+        {
+            return Some(r.to_string());
         }
-        if message == "join" {
-            if r.starts_with("T::Array[") || r == "Array" {
-                return Some("String".to_string());
-            }
-        }
-        if message == "to_a" {
-            if r.starts_with("T::Array[") || r.starts_with("T::Hash[") || r.starts_with("T::Set[") {
-                return Some(r.to_string());
-            }
-        }
-        if message == "to_h" {
-            if r.starts_with("T::Hash[") || r.starts_with("T::Array[") {
-                return Some(r.to_string());
-            }
+        if message == "to_h" && (r.starts_with("T::Hash[") || r.starts_with("T::Array[")) {
+            return Some(r.to_string());
         }
         None
     }
@@ -1326,6 +1314,10 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         })
     }
 
+    fn nil_comparison_operator(&self, operator: &str) -> bool {
+        matches!(operator, "==" | "!=" | "===")
+    }
+
     fn terminating_call_message(&self, message: &str) -> bool {
         matches!(message, "raise" | "fail" | "abort" | "exit" | "exit!")
     }
@@ -1334,10 +1326,11 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         eliminable_guard_from_call(call, RUBY_GUARD_MIDS)
             .or_else(|| effect_from_call_with_lexicon(call, &RUBY_EFFECT_LEXICON))
             .or_else(|| {
-                self.mutating_receiver_message(&call.message).then(|| NormalizedSemanticEffect {
-                    kind: "hidden_mutation".to_string(),
-                    detail: call.message.clone(),
-                })
+                self.mutating_receiver_message(&call.message)
+                    .then(|| NormalizedSemanticEffect {
+                        kind: "hidden_mutation".to_string(),
+                        detail: call.message.clone(),
+                    })
             })
     }
 
@@ -1573,10 +1566,10 @@ fn immutable_struct_reader_types(
         }
         if let Some(owner) = class_stack.last() {
             let mut line_rest = None;
-            if stripped.starts_with("const :") {
-                line_rest = Some(&stripped["const :".len()..]);
-            } else if stripped.starts_with("prop :") {
-                line_rest = Some(&stripped["prop :".len()..]);
+            if let Some(rest) = stripped.strip_prefix("const :") {
+                line_rest = Some(rest);
+            } else if let Some(rest) = stripped.strip_prefix("prop :") {
+                line_rest = Some(rest);
             }
             if let Some(rest) = line_rest {
                 let parts = split_top_level_params_local(rest);
@@ -2322,7 +2315,7 @@ mod tests {
         );
 
         // static_call_return_type for Arrays, Hashes, and Iters
-        let mut index_arg = Node {
+        let index_arg = Node {
             r#type: "RANGE".to_string(),
             children: Vec::new(),
             first_lineno: 10,
@@ -2331,7 +2324,7 @@ mod tests {
             last_column: 4,
             text: "1..3".to_string(),
         };
-        let mut args_node_array = Node {
+        let args_node_array = Node {
             r#type: "ARGS".to_string(),
             children: vec![Child::Node(Box::new(index_arg))],
             first_lineno: 10,
@@ -2340,7 +2333,7 @@ mod tests {
             last_column: 4,
             text: "(1..3)".to_string(),
         };
-        let mut lookup_node = Node {
+        let lookup_node = Node {
             r#type: "CALL".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "arr"))),
@@ -2396,7 +2389,7 @@ mod tests {
         assert_eq!(behavior.parameter_list_source("def foo(a"), "");
 
         // declarative_owner fallback paths
-        let mut invalid_lasgn = Node {
+        let invalid_lasgn = Node {
             r#type: "LASGN".to_string(),
             children: vec![Child::Integer(123)],
             first_lineno: 10,
@@ -2407,7 +2400,7 @@ mod tests {
         };
         assert!(behavior.declarative_owner(&invalid_lasgn, "").is_none());
 
-        let mut invalid_call = Node {
+        let invalid_call = Node {
             r#type: "CALL".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "Struct"))),
@@ -2419,7 +2412,7 @@ mod tests {
             last_column: 4,
             text: "Struct.new".to_string(),
         };
-        let mut lasgn_with_invalid_call = Node {
+        let lasgn_with_invalid_call = Node {
             r#type: "LASGN".to_string(),
             children: vec![
                 Child::Symbol("MyAlias".to_string()),
@@ -2436,7 +2429,7 @@ mod tests {
             .is_none());
 
         // struct_declaration_fields non-node children
-        let mut invalid_args = Node {
+        let invalid_args = Node {
             r#type: "ARGS".to_string(),
             children: vec![
                 Child::Integer(123),
@@ -2448,7 +2441,7 @@ mod tests {
             last_column: 4,
             text: "(123)".to_string(),
         };
-        let mut invalid_call_for_struct = Node {
+        let invalid_call_for_struct = Node {
             r#type: "CALL".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "new"))),
@@ -2461,7 +2454,7 @@ mod tests {
             last_column: 4,
             text: "new(123)".to_string(),
         };
-        let mut invalid_struct_node = Node {
+        let invalid_struct_node = Node {
             r#type: "LASGN".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "Struct"))),
@@ -2489,7 +2482,7 @@ mod tests {
         );
 
         // index lookup empty args
-        let mut empty_args_node = Node {
+        let empty_args_node = Node {
             r#type: "ARGS".to_string(),
             children: Vec::new(),
             first_lineno: 10,
@@ -2498,7 +2491,7 @@ mod tests {
             last_column: 4,
             text: "()".to_string(),
         };
-        let mut lookup_empty_args = Node {
+        let lookup_empty_args = Node {
             r#type: "CALL".to_string(),
             children: vec![
                 Child::Node(Box::new(node("IDENT", "arr"))),

@@ -522,6 +522,8 @@ class SlopcopReportCovTest < Minitest::Test
     
     sarif = JSON.parse(report.to_sarif)
     assert_equal "2.1.0", sarif["version"]
+    assert_equal 2, sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")
+    assert_equal "unknown", sarif.dig("runs", 0, "results", 0, "properties", "fact_mine.proof_boundary", "input_completeness")
   end
 
   # --- DarkArmOverlay Tests ---
@@ -581,6 +583,34 @@ class SlopcopReportCovTest < Minitest::Test
     assert_equal 5, SlopCop::Sarif.send(:positive_int, "5")
     assert_nil SlopCop::Sarif.send(:positive_int, -5)
     assert_equal 1, SlopCop::Sarif.send(:positive_int, -5, 1)
+  end
+
+  def test_sarif_proof_boundary_summary
+    results = [
+      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(input_completeness: "complete", claim_status: "proven", coverage_discharge: "not_applicable", authority: ["fact_mine"], claim_kind: "test_complete", scope: "local") } },
+      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(input_completeness: "partial", claim_status: "review", coverage_discharge: "unsatisfiable", authority: ["fact_mine"], claim_kind: "test_partial", scope: "local", blockers: [{ "kind" => "unknown" }]) } }
+    ]
+    summary = SlopCop::Sarif.proof_boundary_summary(results)
+    assert_equal 2, summary["results_with_boundary"]
+    assert_equal 0, summary["invalid_boundaries"]
+    assert_equal 0, summary["missing_boundaries"]
+    assert_equal 1, summary.dig("input_completeness", "complete")
+    assert_equal 1, summary.dig("claim_status", "review")
+  end
+
+  def test_sarif_proof_boundary_conforms_to_shared_slopcop_vector
+    fixture = JSON.parse(File.read(File.expand_path("../../hazard-contract/fixtures/proof-boundary.v3.json", __dir__)))
+    boundary = SlopCop::Sarif.proof_boundary(
+      input_completeness: "unknown",
+      claim_status: "observed",
+      coverage_discharge: "satisfiable",
+      authority: ["slopcop_coverage"],
+      claim_kind: "coverage_gap",
+      scope: { kind: "project", closed: false },
+      blockers: [{ kind: "unknown" }]
+    )
+
+    assert_equal fixture.dig("representative", "slopcop"), boundary
   end
 
   # --- Lexicons Tests ---

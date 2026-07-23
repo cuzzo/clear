@@ -1,8 +1,8 @@
-use std::sync::OnceLock;
-use crate::syntax::{Document, FunctionDef, HazardSite, Language, Span};
 use crate::syntax::parser_grammar::grammar_for_language;
-use tree_sitter::{Node, Query, QueryCursor};
+use crate::syntax::{Document, FunctionDef, HazardSite, Language, Span};
+use std::sync::OnceLock;
 use streaming_iterator::StreamingIterator;
+use tree_sitter::{Node, Query, QueryCursor};
 
 const C_HAZARDS: &str = hazard_contract::C_HAZARDS;
 const CPP_HAZARDS: &str = hazard_contract::CPP_HAZARDS;
@@ -24,12 +24,18 @@ fn get_cached_query(language: Language) -> Option<&'static Query> {
     macro_rules! cached_query {
         ($lang:expr, $query_str:expr) => {{
             static CACHE: OnceLock<Option<Query>> = OnceLock::new();
-            CACHE.get_or_init(|| {
-                let grammar = grammar_for_language($lang);
-                let q = Query::new(&grammar, $query_str)
-                    .unwrap_or_else(|e| panic!("Failed to compile bundled tree-sitter query for {:?}: {}", $lang, e));
-                Some(q)
-            }).as_ref()
+            CACHE
+                .get_or_init(|| {
+                    let grammar = grammar_for_language($lang);
+                    let q = Query::new(&grammar, $query_str).unwrap_or_else(|e| {
+                        panic!(
+                            "Failed to compile bundled tree-sitter query for {:?}: {}",
+                            $lang, e
+                        )
+                    });
+                    Some(q)
+                })
+                .as_ref()
         }};
     }
 
@@ -49,7 +55,6 @@ fn get_cached_query(language: Language) -> Option<&'static Query> {
         Language::Php => cached_query!(Language::Php, PHP_HAZARDS),
         Language::Kotlin => cached_query!(Language::Kotlin, KOTLIN_HAZARDS),
         Language::Swift => cached_query!(Language::Swift, SWIFT_HAZARDS),
-        _ => None,
     }
 }
 
@@ -160,10 +165,7 @@ fn ruby_call_is_user_defined(
         .is_some_and(|defined| defined.contains(method))
 }
 
-fn go_reflect_import_aliases(
-    root: Node,
-    source: &[u8],
-) -> std::collections::HashSet<String> {
+fn go_reflect_import_aliases(root: Node, source: &[u8]) -> std::collections::HashSet<String> {
     fn visit(node: Node, source: &[u8], aliases: &mut std::collections::HashSet<String>) {
         if node.kind() == "import_spec"
             && node
@@ -198,7 +200,9 @@ fn go_identifier_is_binding(node: Node, source: &[u8], name: &str) -> bool {
             .strip_prefix("var")
             .or_else(|| text.strip_prefix("const"))
             .unwrap_or(text)
-            .split('=').next().unwrap_or(text),
+            .split('=')
+            .next()
+            .unwrap_or(text),
         "type_declaration" => text.strip_prefix("type").unwrap_or(text),
         _ => return false,
     };
@@ -207,12 +211,7 @@ fn go_identifier_is_binding(node: Node, source: &[u8], name: &str) -> bool {
         .any(|word| word == name)
 }
 
-fn go_block_shadows_reflect(
-    block: Node,
-    call: Node,
-    source: &[u8],
-    alias: &str,
-) -> bool {
+fn go_block_shadows_reflect(block: Node, call: Node, source: &[u8], alias: &str) -> bool {
     fn visit(node: Node, call: Node, source: &[u8], alias: &str, block: Node) -> bool {
         if node.id() != block.id() && node.kind() == "block" {
             return false;
@@ -321,7 +320,12 @@ fn csharp_dynamic_call_is_declared(call: Node, source: &[u8]) -> bool {
     false
 }
 
-fn csharp_scope_declares_dynamic(scope: Node, call: Node, receiver_name: &str, source: &[u8]) -> bool {
+fn csharp_scope_declares_dynamic(
+    scope: Node,
+    call: Node,
+    receiver_name: &str,
+    source: &[u8],
+) -> bool {
     fn visit(node: Node, call: Node, receiver_name: &str, source: &[u8]) -> bool {
         if node.start_byte() >= call.start_byte() {
             return false;
@@ -341,7 +345,9 @@ fn csharp_scope_declares_dynamic(scope: Node, call: Node, receiver_name: &str, s
                     }
                     declaration
                         .trim_start()
-                        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+                        .split(|character: char| {
+                            !character.is_ascii_alphanumeric() && character != '_'
+                        })
                         .next()
                         .filter(|name| !name.is_empty())
                 })
@@ -589,52 +595,46 @@ fn reflection_result_kind(
         (Language::CSharp, Some(ReflectionValueKind::CSharpType), "GetType") => {
             Some(ReflectionValueKind::CSharpType)
         }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
-            if matches!(method, "GetMethod" | "GetMethods") =>
-        {
+        (Language::CSharp, Some(ReflectionValueKind::CSharpType), "GetMethod" | "GetMethods") => {
             Some(ReflectionValueKind::CSharpMethodInfo)
         }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
-            if matches!(method, "GetField" | "GetFields") =>
-        {
+        (Language::CSharp, Some(ReflectionValueKind::CSharpType), "GetField" | "GetFields") => {
             Some(ReflectionValueKind::CSharpFieldInfo)
         }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
-            if matches!(method, "GetProperty" | "GetProperties") =>
-        {
-            Some(ReflectionValueKind::CSharpPropertyInfo)
-        }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
-            if matches!(method, "GetConstructor" | "GetConstructors") =>
-        {
-            Some(ReflectionValueKind::CSharpConstructorInfo)
-        }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpAssembly), method)
-            if matches!(method, "Load" | "LoadFrom" | "LoadFile") =>
-        {
-            Some(ReflectionValueKind::CSharpAssembly)
-        }
+        (
+            Language::CSharp,
+            Some(ReflectionValueKind::CSharpType),
+            "GetProperty" | "GetProperties",
+        ) => Some(ReflectionValueKind::CSharpPropertyInfo),
+        (
+            Language::CSharp,
+            Some(ReflectionValueKind::CSharpType),
+            "GetConstructor" | "GetConstructors",
+        ) => Some(ReflectionValueKind::CSharpConstructorInfo),
+        (
+            Language::CSharp,
+            Some(ReflectionValueKind::CSharpAssembly),
+            "Load" | "LoadFrom" | "LoadFile",
+        ) => Some(ReflectionValueKind::CSharpAssembly),
         (Language::Java, Some(ReflectionValueKind::JavaClass), "forName") => {
             Some(ReflectionValueKind::JavaClass)
         }
         (Language::Java, Some(ReflectionValueKind::JavaClassLoader), "loadClass") => {
             Some(ReflectionValueKind::JavaClass)
         }
-        (Language::Java, Some(ReflectionValueKind::JavaClass), method)
-            if matches!(method, "getMethod" | "getDeclaredMethod") =>
-        {
-            Some(ReflectionValueKind::JavaMethod)
-        }
-        (Language::Java, Some(ReflectionValueKind::JavaClass), method)
-            if matches!(method, "getField" | "getDeclaredField") =>
-        {
+        (
+            Language::Java,
+            Some(ReflectionValueKind::JavaClass),
+            "getMethod" | "getDeclaredMethod",
+        ) => Some(ReflectionValueKind::JavaMethod),
+        (Language::Java, Some(ReflectionValueKind::JavaClass), "getField" | "getDeclaredField") => {
             Some(ReflectionValueKind::JavaField)
         }
-        (Language::Java, Some(ReflectionValueKind::JavaClass), method)
-            if matches!(method, "getConstructor" | "getDeclaredConstructor") =>
-        {
-            Some(ReflectionValueKind::JavaConstructor)
-        }
+        (
+            Language::Java,
+            Some(ReflectionValueKind::JavaClass),
+            "getConstructor" | "getDeclaredConstructor",
+        ) => Some(ReflectionValueKind::JavaConstructor),
         _ => None,
     }
 }
@@ -671,9 +671,7 @@ fn infer_reflection_value_kind(
             .ok()
             .and_then(|name| bindings.get(name).copied());
     }
-    let Some((receiver, method)) = reflection_call_parts(value, language, source) else {
-        return None;
-    };
+    let (receiver, method) = reflection_call_parts(value, language, source)?;
     let receiver_kind = if language == Language::Java && method == "getClass" {
         None
     } else {
@@ -698,12 +696,10 @@ fn reflection_declarator_value<'tree>(declarator: Node<'tree>) -> Option<Node<'t
     }
     let name_id = declarator.child_by_field_name("name").map(|name| name.id());
     let mut cursor = declarator.walk();
-    for child in declarator.children(&mut cursor) {
-        if child.is_named() && Some(child.id()) != name_id {
-            return Some(child);
-        }
-    }
-    None
+    let value = declarator
+        .children(&mut cursor)
+        .find(|&child| child.is_named() && Some(child.id()) != name_id);
+    value
 }
 
 type ReflectionBindings = std::collections::HashMap<String, ReflectionValueKind>;
@@ -717,11 +713,12 @@ fn is_reflection_scope(node: Node, language: Language) -> bool {
     match language {
         Language::CSharp => matches!(
             node.kind(),
-            "method_declaration"
-                | "constructor_declaration"
-                | "local_function_statement"
+            "method_declaration" | "constructor_declaration" | "local_function_statement"
         ),
-        Language::Java => matches!(node.kind(), "method_declaration" | "constructor_declaration"),
+        Language::Java => matches!(
+            node.kind(),
+            "method_declaration" | "constructor_declaration"
+        ),
         _ => false,
     }
 }
@@ -729,7 +726,10 @@ fn is_reflection_scope(node: Node, language: Language) -> bool {
 fn is_nested_reflection_scope(node: Node, scope: Node, language: Language) -> bool {
     node.id() != scope.id()
         && (is_reflection_scope(node, language)
-            || matches!(node.kind(), "lambda_expression" | "anonymous_method_expression"))
+            || matches!(
+                node.kind(),
+                "lambda_expression" | "anonymous_method_expression"
+            ))
 }
 
 fn update_reflection_binding(
@@ -752,8 +752,7 @@ fn update_reflection_binding(
 
     if matches!(
         (language, node.kind()),
-        (Language::CSharp, "variable_declaration")
-            | (Language::Java, "local_variable_declaration")
+        (Language::CSharp, "variable_declaration") | (Language::Java, "local_variable_declaration")
     ) {
         let explicit_kind = declaration_type.and_then(|type_text| {
             reflection_value_kind(language, type_text, java_user_types, csharp_user_types)
@@ -824,19 +823,22 @@ fn update_reflection_binding(
     }
 }
 
-fn merge_reflection_bindings(
-    branches: &[ReflectionBindings],
-) -> ReflectionBindings {
+fn merge_reflection_bindings(branches: &[ReflectionBindings]) -> ReflectionBindings {
     let Some(first) = branches.first() else {
         return ReflectionBindings::new();
     };
     first
         .iter()
-        .filter(|(name, kind)| branches.iter().all(|branch| branch.get(*name) == Some(*kind)))
+        .filter(|(name, kind)| {
+            branches
+                .iter()
+                .all(|branch| branch.get(*name) == Some(*kind))
+        })
         .map(|(name, kind)| (name.clone(), *kind))
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)] // Reflection propagation needs explicit language and shadowing context.
 fn process_reflection_flow_node(
     node: Node,
     scope: Node,
@@ -862,12 +864,9 @@ fn process_reflection_flow_node(
 
     if matches!(node.kind(), "invocation_expression" | "method_invocation") {
         let proven = match language {
-            Language::CSharp => csharp_reflection_call_is_proven(
-                node,
-                source,
-                bindings,
-                csharp_user_types,
-            ),
+            Language::CSharp => {
+                csharp_reflection_call_is_proven(node, source, bindings, csharp_user_types)
+            }
             Language::Java => {
                 java_reflection_call_is_proven(node, source, bindings, java_user_types)
             }
@@ -1129,8 +1128,7 @@ fn java_reflection_call_is_proven(
         java_user_types,
         &std::collections::HashSet::new(),
         source,
-    )
-    else {
+    ) else {
         return false;
     };
     java_method_is_reflection(kind, &method)
@@ -1161,7 +1159,7 @@ pub(crate) fn extract_hazards(
     } else {
         std::collections::HashSet::new()
     };
-    
+
     let mut sites = Vec::new();
     let mut recorded_lines = std::collections::HashSet::new();
 
@@ -1170,12 +1168,15 @@ pub(crate) fn extract_hazards(
     while let Some(m) = matches.next() {
         for cap in m.captures {
             let capture_name = query.capture_names()[cap.index as usize];
-            
+
             if !capture_name.starts_with("hazard.") {
                 continue;
             }
-            
-            let hazard_type = capture_name.strip_prefix("hazard.").unwrap_or("").to_string();
+
+            let hazard_type = capture_name
+                .strip_prefix("hazard.")
+                .unwrap_or("")
+                .to_string();
 
             // A receiver-qualified call to `self.send` is not enough to
             // establish Ruby's Kernel/Object implementation: a class may
@@ -1222,7 +1223,7 @@ pub(crate) fn extract_hazards(
             {
                 continue;
             }
-            
+
             let line = (cap.node.start_position().row + 1) as u32;
             let line_text = source_lines
                 .get((line as usize).saturating_sub(1))
@@ -1261,8 +1262,16 @@ pub(crate) fn extract_hazards(
             }
         }
     }
-    
-    sites.sort_by_key(|s| (s.line, s.start_column, s.end_line, s.end_column, s.hazard_type.clone()));
+
+    sites.sort_by_key(|s| {
+        (
+            s.line,
+            s.start_column,
+            s.end_line,
+            s.end_column,
+            s.hazard_type.clone(),
+        )
+    });
     sites
 }
 
@@ -1271,7 +1280,10 @@ pub(crate) fn extract_hazards(
 /// language-specific hazard queries and flow resolution.
 pub fn extract_file_hazards(file_path: &str, source: &str, language: Language) -> Vec<HazardSite> {
     let mut parser = tree_sitter::Parser::new();
-    if parser.set_language(&grammar_for_language(language)).is_err() {
+    if parser
+        .set_language(&grammar_for_language(language))
+        .is_err()
+    {
         return Vec::new();
     }
     let Some(tree) = parser.parse(source, None) else {
@@ -1429,8 +1441,7 @@ fn function_identity(function: &FunctionDef, file_stem: &str) -> FunctionIdentit
 }
 
 fn span_contains(outer: Span, inner: Span) -> bool {
-    (outer[0], outer[1]) <= (inner[0], inner[1])
-        && (outer[2], outer[3]) >= (inner[2], inner[3])
+    (outer[0], outer[1]) <= (inner[0], inner[1]) && (outer[2], outer[3]) >= (inner[2], inner[3])
 }
 
 fn function_for_span<'a>(
@@ -1449,8 +1460,7 @@ fn function_for_span<'a>(
         .filter(|function| {
             function.file == document.file
                 && function.name == name
-                && canonical_owner(&function.owner, file_stem)
-                    == canonical_owner(owner, file_stem)
+                && canonical_owner(&function.owner, file_stem) == canonical_owner(owner, file_stem)
                 && span_contains(function.span, span)
         })
         .min_by_key(|function| {
@@ -1467,9 +1477,10 @@ fn function_for_cfg_node<'a>(
     owner: &str,
     name: &str,
 ) -> Option<&'a FunctionDef> {
-    let node = document.control_flow_nodes.iter().find(|node| {
-        node.id == node_id && node.owner == owner && node.function == name
-    })?;
+    let node = document
+        .control_flow_nodes
+        .iter()
+        .find(|node| node.id == node_id && node.owner == owner && node.function == name)?;
     function_for_span(document, owner, name, node.span)
 }
 
@@ -1514,12 +1525,9 @@ fn compute_callback_origins(
             .any(|t| safe_typed_callback(document.language, declared_hint_type(t)))
         {
             if let Some(name) = place_name_from_id(&fact.place_id) {
-                if let Some(function) = function_for_cfg_node(
-                    document,
-                    &fact.node_id,
-                    &fact.owner,
-                    &fact.function,
-                ) {
+                if let Some(function) =
+                    function_for_cfg_node(document, &fact.node_id, &fact.owner, &fact.function)
+                {
                     origins
                         .entry(function_identity(function, &file_stem))
                         .or_default()
@@ -1553,12 +1561,9 @@ fn compute_callback_origins(
     loop {
         let mut changed = false;
         for effect in &document.node_effects {
-            let Some(function) = function_for_cfg_node(
-                document,
-                &effect.node_id,
-                &effect.owner,
-                &effect.function,
-            ) else {
+            let Some(function) =
+                function_for_cfg_node(document, &effect.node_id, &effect.owner, &effect.function)
+            else {
                 continue;
             };
             let key = function_identity(function, &file_stem);
@@ -1591,6 +1596,7 @@ fn compute_callback_origins(
     origins
 }
 
+#[allow(clippy::nonminimal_bool)] // Callback gating is deliberately spelled as independent conservative exclusions.
 pub fn detect_and_append_callback_hazards(document: &mut Document) {
     let file_stem = std::path::Path::new(&document.file)
         .file_stem()
@@ -1603,7 +1609,8 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
     let mut callback_hazards = Vec::new();
 
     for call in &document.call_sites {
-        let enclosing_fn = match function_for_span(document, &call.owner, &call.function, call.span) {
+        let enclosing_fn = match function_for_span(document, &call.owner, &call.function, call.span)
+        {
             Some(f) => f,
             None => continue,
         };
@@ -1613,7 +1620,8 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
 
         let mut is_callback = false;
 
-        let is_direct = call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
+        let is_direct =
+            call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
 
         if is_direct {
             // E.g., cb(), fp(), arr[10](), (*fp)()
@@ -1625,9 +1633,9 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                     .and_then(|params| params.get(&call.message).cloned());
                 let is_statically_typed = supports_interfaces(document.language)
                     && (origin.callable_typed.contains(&call.message)
-                        || param_type
-                            .as_deref()
-                            .is_some_and(|type_name| safe_typed_callback(document.language, type_name)));
+                        || param_type.as_deref().is_some_and(|type_name| {
+                            safe_typed_callback(document.language, type_name)
+                        }));
                 if call.receiver.is_empty() {
                     // A statically callable parameter is an ordinary typed
                     // callback boundary, not automatically a hazard. Native
@@ -1636,15 +1644,15 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                     is_var_call = !is_statically_typed;
                 } else {
                     let is_cb = !is_statically_typed
-                        && (is_callback_type_or_name(&call.message, param_type.as_deref(), document.language)
-                        || is_cb_name(&call.message)
-                        || matches!(
-                            call.message.as_str(),
-                            "blk" | "block"
-                                | "work"
-                                | "mapper"
-                                | "runner"
-                        ));
+                        && (is_callback_type_or_name(
+                            &call.message,
+                            param_type.as_deref(),
+                            document.language,
+                        ) || is_cb_name(&call.message)
+                            || matches!(
+                                call.message.as_str(),
+                                "blk" | "block" | "work" | "mapper" | "runner"
+                            ));
                     if is_cb {
                         is_var_call = true;
                     }
@@ -1683,13 +1691,13 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
             }
         } else {
             let mut is_cb_receiver = false;
-            if call.receiver != "self" && call.receiver != "this" {
-                if enclosing_fn.params.contains(&call.receiver)
+            if call.receiver != "self"
+                && call.receiver != "this"
+                && (enclosing_fn.params.contains(&call.receiver)
                     || enclosing_fn.callback_params.contains(&call.receiver)
-                    || origin.param_derived.contains(&call.receiver)
-                {
-                    is_cb_receiver = true;
-                }
+                    || origin.param_derived.contains(&call.receiver))
+            {
+                is_cb_receiver = true;
             }
 
             if is_cb_receiver {
@@ -1711,10 +1719,17 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                         | "notify"
                         | "emit"
                 ) || call.message.starts_with("on_")
-                  || (call.message.starts_with("on")
-                      && call.message.chars().nth(2).map_or(false, |c| c.is_ascii_uppercase()));
+                    || (call.message.starts_with("on")
+                        && call
+                            .message
+                            .chars()
+                            .nth(2)
+                            .is_some_and(|c| c.is_ascii_uppercase()));
 
-                let is_invoker = matches!(call.message.as_str(), "call" | "invoke" | "apply" | "run" | "perform");
+                let is_invoker = matches!(
+                    call.message.as_str(),
+                    "call" | "invoke" | "apply" | "run" | "perform"
+                );
 
                 let is_cb = if supports_interfaces(document.language) {
                     let type_str = method_type_map(&document.method_param_types, enclosing_fn)
@@ -1724,9 +1739,9 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                                 .and_then(|locals| locals.get(&call.receiver).cloned())
                         });
                     let is_statically_typed = origin.callable_typed.contains(&call.receiver)
-                        || type_str
-                            .as_deref()
-                            .is_some_and(|type_name| safe_typed_callback(document.language, type_name));
+                        || type_str.as_deref().is_some_and(|type_name| {
+                            safe_typed_callback(document.language, type_name)
+                        });
                     is_dispatch_name
                         && !is_statically_typed
                         && is_callback_type_or_name(
@@ -1746,19 +1761,19 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                 }
             }
         }
-        
+
         if is_callback {
             let snippet = if call.receiver.is_empty() {
                 format!("{}(...)", call.message)
             } else {
                 format!("{}.{}(...)", call.receiver, call.message)
             };
-            
+
             let hazard_type = format!("{}_callback_invocation", document.language.as_str());
             let policy = hazard_policy(&hazard_type).unwrap_or_else(|| {
                 panic!("callback hazard {hazard_type:?} has no contract policy")
             });
-            
+
             callback_hazards.push(HazardSite {
                 path: call.file.clone(),
                 line: call.line as u32,
@@ -1778,9 +1793,17 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
             });
         }
     }
-    
+
     document.hazard_sites.extend(callback_hazards);
-    document.hazard_sites.sort_by_key(|s| (s.line, s.start_column, s.end_line, s.end_column, s.hazard_type.clone()));
+    document.hazard_sites.sort_by_key(|s| {
+        (
+            s.line,
+            s.start_column,
+            s.end_line,
+            s.end_column,
+            s.hazard_type.clone(),
+        )
+    });
 }
 
 #[cfg(test)]
@@ -1798,9 +1821,11 @@ mod tests {
             }
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Zig)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Zig))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.zig", tree.root_node(), code, Language::Zig);
         assert_eq!(hazards.len(), 1);
         assert_eq!(hazards[0].hazard_type, "zig_loom_atomic");
@@ -1822,12 +1847,17 @@ mod tests {
             }
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Rust)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Rust))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.rs", tree.root_node(), code, Language::Rust);
         assert!(!hazards.is_empty());
-        let unsafe_hazard = hazards.iter().find(|h| h.hazard_type == "rust_unsafe_block").unwrap();
+        let unsafe_hazard = hazards
+            .iter()
+            .find(|h| h.hazard_type == "rust_unsafe_block")
+            .unwrap();
         assert_eq!(unsafe_hazard.required_evidence, "miri");
         assert_eq!(unsafe_hazard.snippet, "unsafe {");
     }
@@ -1851,13 +1881,17 @@ mod tests {
             end
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Ruby)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Ruby))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.rb", tree.root_node(), code, Language::Ruby);
         assert_eq!(hazards.len(), 6);
-        assert!(hazards.iter().all(|h| h.hazard_type == "ruby_metaprogramming"));
-        
+        assert!(hazards
+            .iter()
+            .all(|h| h.hazard_type == "ruby_metaprogramming"));
+
         let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
         assert!(snippets.contains(&"self.send(:hello2)"));
         assert!(snippets.contains(&"def method_missing(m, *args)"));
@@ -1874,7 +1908,10 @@ mod tests {
             shadowed_code,
             Language::Ruby,
         );
-        assert!(shadowed.is_empty(), "user-defined Ruby send must not be treated as Kernel.send");
+        assert!(
+            shadowed.is_empty(),
+            "user-defined Ruby send must not be treated as Kernel.send"
+        );
 
         let cross_scope_code = "class Shadowed\n  def send(value)\n  end\n  def run\n    self.send(:hello)\n  end\nend\nclass Real\n  def run\n    self.send(:hello)\n  end\nend";
         let cross_scope_tree = parser.parse(cross_scope_code, None).unwrap();
@@ -1902,13 +1939,17 @@ class Foo:
         type(self)
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Python)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Python))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.py", tree.root_node(), code, Language::Python);
         assert_eq!(hazards.len(), 6);
-        assert!(hazards.iter().all(|h| h.hazard_type == "python_metaprogramming"));
-        
+        assert!(hazards
+            .iter()
+            .all(|h| h.hazard_type == "python_metaprogramming"));
+
         let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
         assert!(snippets.contains(&"def __getattr__(self, name):"));
         assert!(snippets.contains(&"return getattr(self, '_' + name)"));
@@ -1935,13 +1976,17 @@ Reflect.apply(func, thisArg, args);
 RegExp.$1;
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::JavaScript)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::JavaScript))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.js", tree.root_node(), code, Language::JavaScript);
         assert_eq!(hazards.len(), 7);
-        assert!(hazards.iter().all(|h| h.hazard_type == "javascript_metaprogramming"));
-        
+        assert!(hazards
+            .iter()
+            .all(|h| h.hazard_type == "javascript_metaprogramming"));
+
         let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
         assert!(snippets.contains(&"eval('1 + 1');"));
         assert!(snippets.contains(&"new Function('a', 'b', 'return a + b');"));
@@ -1968,12 +2013,16 @@ Reflect.apply(func, thisArg, args);
 RegExp.$2;
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::TypeScript)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::TypeScript))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.ts", tree.root_node(), code, Language::TypeScript);
         assert_eq!(hazards.len(), 7);
-        assert!(hazards.iter().all(|h| h.hazard_type == "typescript_metaprogramming"));
+        assert!(hazards
+            .iter()
+            .all(|h| h.hazard_type == "typescript_metaprogramming"));
     }
 
     #[test]
@@ -1995,13 +2044,17 @@ local mt = {
 }
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Lua)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Lua))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.lua", tree.root_node(), code, Language::Lua);
         assert_eq!(hazards.len(), 14);
-        assert!(hazards.iter().all(|h| h.hazard_type == "lua_metaprogramming"));
-        
+        assert!(hazards
+            .iter()
+            .all(|h| h.hazard_type == "lua_metaprogramming"));
+
         let snippets: Vec<&str> = hazards.iter().map(|h| h.snippet.as_str()).collect();
         assert!(snippets.contains(&"load('x = 1')"));
         assert!(snippets.contains(&"loadstring('y = 2')"));
@@ -2028,12 +2081,16 @@ local mt = {
             }
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Java)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Java))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.java", tree.root_node(), code, Language::Java);
         assert_eq!(hazards.len(), 2);
-        assert!(hazards.iter().all(|h| h.hazard_type == "java_metaprogramming"));
+        assert!(hazards
+            .iter()
+            .all(|h| h.hazard_type == "java_metaprogramming"));
     }
 
     #[test]
@@ -2047,12 +2104,16 @@ local mt = {
             }
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Php)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Php))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.php", tree.root_node(), code, Language::Php);
         assert_eq!(hazards.len(), 3);
-        assert!(hazards.iter().all(|h| h.hazard_type == "php_metaprogramming"));
+        assert!(hazards
+            .iter()
+            .all(|h| h.hazard_type == "php_metaprogramming"));
     }
 
     #[test]
@@ -2068,21 +2129,34 @@ local mt = {
             }
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::CSharp)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::CSharp))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.cs", tree.root_node(), code, Language::CSharp);
-        let metaprog_hazards: Vec<_> = hazards.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
+        let metaprog_hazards: Vec<_> = hazards
+            .iter()
+            .filter(|h| h.hazard_type == "csharp_metaprogramming")
+            .collect();
         assert_eq!(metaprog_hazards.len(), 2);
-        let dynamic_hazards: Vec<_> = hazards.iter().filter(|h| h.hazard_type == "csharp_dynamic_dispatch").collect();
+        let dynamic_hazards: Vec<_> = hazards
+            .iter()
+            .filter(|h| h.hazard_type == "csharp_dynamic_dispatch")
+            .collect();
         assert_eq!(dynamic_hazards.len(), 1);
         assert_eq!(dynamic_hazards[0].snippet, "value.ToString();");
 
         let declaration_only = "class Foo { void Test() { dynamic value = 1; } }";
         let tree = parser.parse(declaration_only, None).unwrap();
-        assert!(extract_hazards("test.cs", tree.root_node(), declaration_only, Language::CSharp)
-            .iter()
-            .all(|hazard| hazard.hazard_type != "csharp_dynamic_dispatch"));
+        assert!(extract_hazards(
+            "test.cs",
+            tree.root_node(),
+            declaration_only,
+            Language::CSharp
+        )
+        .iter()
+        .all(|hazard| hazard.hazard_type != "csharp_dynamic_dispatch"));
 
         let qualified = "class Foo { void Test() { System.Type.GetType(\"Bar\"); } }";
         let tree = parser.parse(qualified, None).unwrap();
@@ -2200,8 +2274,12 @@ local mt = {
             .filter(|site| site.hazard_type == "java_metaprogramming")
             .collect();
         assert_eq!(java_reflection.len(), 4, "{java_reflection:?}");
-        assert!(java_reflection.iter().any(|site| site.snippet.contains("field.get")));
-        assert!(java_reflection.iter().any(|site| site.snippet.contains("field.set")));
+        assert!(java_reflection
+            .iter()
+            .any(|site| site.snippet.contains("field.get")));
+        assert!(java_reflection
+            .iter()
+            .any(|site| site.snippet.contains("field.set")));
 
         parser
             .set_language(&grammar_for_language(Language::CSharp))
@@ -2232,10 +2310,18 @@ local mt = {
             .filter(|site| site.hazard_type == "csharp_metaprogramming")
             .collect();
         assert_eq!(csharp_reflection.len(), 3, "{csharp_reflection:?}");
-        assert!(csharp_reflection.iter().any(|site| site.snippet.contains("target.GetMethod")));
-        assert!(csharp_reflection.iter().any(|site| site.snippet.contains("method.Invoke")));
-        assert!(csharp_reflection.iter().any(|site| site.snippet.contains("Assembly.Load")));
-        assert!(!csharp_reflection.iter().any(|site| site.snippet.contains("target.GetMethod") && site.line > 8));
+        assert!(csharp_reflection
+            .iter()
+            .any(|site| site.snippet.contains("target.GetMethod")));
+        assert!(csharp_reflection
+            .iter()
+            .any(|site| site.snippet.contains("method.Invoke")));
+        assert!(csharp_reflection
+            .iter()
+            .any(|site| site.snippet.contains("Assembly.Load")));
+        assert!(!csharp_reflection
+            .iter()
+            .any(|site| site.snippet.contains("target.GetMethod") && site.line > 8));
     }
 
     #[test]
@@ -2253,14 +2339,18 @@ local mt = {
             }
         "#;
         let sites = extract_file_hazards("Shadow.cs", source, Language::CSharp);
-        assert!(!sites.iter().any(|site| site.hazard_type == "csharp_metaprogramming"));
+        assert!(!sites
+            .iter()
+            .any(|site| site.hazard_type == "csharp_metaprogramming"));
     }
 
     #[test]
     fn test_extract_hazards_go_reflection_and_native_loaders() {
         let go_code = "package demo\nimport \"reflect\"\nfunc run(value interface{}, name string) {\n  reflect.ValueOf(value).MethodByName(name).Call(nil)\n}";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Go)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Go))
+            .unwrap();
         let tree = parser.parse(go_code, None).unwrap();
         let go_hazards = extract_hazards("test.go", tree.root_node(), go_code, Language::Go);
         assert!(go_hazards.iter().any(|hazard| {
@@ -2268,20 +2358,27 @@ local mt = {
         }));
         let go_without_import = "package demo\nfunc run(value interface{}, name string) {\n  reflect.ValueOf(value).MethodByName(name).Call(nil)\n}";
         let tree = parser.parse(go_without_import, None).unwrap();
-        assert!(extract_hazards("test.go", tree.root_node(), go_without_import, Language::Go).is_empty());
+        assert!(
+            extract_hazards("test.go", tree.root_node(), go_without_import, Language::Go)
+                .is_empty()
+        );
 
         let aliased_go = "package demo\nimport r \"reflect\"\nfunc run(value interface{}, name string) {\n  r.ValueOf(value).MethodByName(name).Call(nil)\n}";
         let tree = parser.parse(aliased_go, None).unwrap();
-        assert!(extract_hazards("test.go", tree.root_node(), aliased_go, Language::Go)
-            .iter()
-            .any(|hazard| hazard.hazard_type == "go_reflection"));
+        assert!(
+            extract_hazards("test.go", tree.root_node(), aliased_go, Language::Go)
+                .iter()
+                .any(|hazard| hazard.hazard_type == "go_reflection")
+        );
 
         let shadowed_go = "package demo\nimport \"reflect\"\nfunc run(value interface{}, name string) {\n  reflect := fakeReflect{}\n  reflect.ValueOf(value).MethodByName(name).Call(nil)\n}";
         let tree = parser.parse(shadowed_go, None).unwrap();
         assert!(extract_hazards("test.go", tree.root_node(), shadowed_go, Language::Go).is_empty());
 
         let c_code = "void load(void) { void *handle = dlopen(\"plugin.so\", 0); void *symbol = dlsym(handle, \"run\"); }";
-        parser.set_language(&grammar_for_language(Language::C)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::C))
+            .unwrap();
         let tree = parser.parse(c_code, None).unwrap();
         let c_hazards = extract_hazards("test.c", tree.root_node(), c_code, Language::C);
         assert_eq!(
@@ -2313,12 +2410,16 @@ local mt = {
             }
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Kotlin)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Kotlin))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.kt", tree.root_node(), code, Language::Kotlin);
         assert_eq!(hazards.len(), 2);
-        assert!(hazards.iter().all(|h| h.hazard_type == "kotlin_metaprogramming"));
+        assert!(hazards
+            .iter()
+            .all(|h| h.hazard_type == "kotlin_metaprogramming"));
     }
 
     #[test]
@@ -2330,13 +2431,17 @@ local mt = {
             }
         ";
         let mut parser = Parser::new();
-        parser.set_language(&grammar_for_language(Language::Swift)).unwrap();
+        parser
+            .set_language(&grammar_for_language(Language::Swift))
+            .unwrap();
         let tree = parser.parse(code, None).unwrap();
-        
+
         let hazards = extract_hazards("test.swift", tree.root_node(), code, Language::Swift);
         assert_eq!(hazards.len(), 2);
-        assert!(hazards.iter().all(|h| h.hazard_type == "swift_metaprogramming"));
-     }
+        assert!(hazards
+            .iter()
+            .all(|h| h.hazard_type == "swift_metaprogramming"));
+    }
 
     #[test]
     fn test_callback_invocation_hazards_all_languages() {
@@ -2344,7 +2449,11 @@ local mt = {
             let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
             std::io::Write::write_all(file.as_file_mut(), code.as_bytes()).unwrap();
             let document = crate::syntax::parse_file(file.path().to_path_buf(), language).unwrap();
-            document.hazard_sites.into_iter().filter(|h| h.hazard_type.ends_with("_callback_invocation")).collect()
+            document
+                .hazard_sites
+                .into_iter()
+                .filter(|h| h.hazard_type.ends_with("_callback_invocation"))
+                .collect()
         };
 
         // 1. Ruby
@@ -2358,91 +2467,215 @@ local mt = {
         let py_pos = check("def test(cb):\n    cb()\n", ".py", Language::Python);
         assert_eq!(py_pos.len(), 1);
         assert_eq!(py_pos[0].hazard_type, "python_callback_invocation");
-        let py_neg = check("def test(user):\n    user.get_name()\n", ".py", Language::Python);
+        let py_neg = check(
+            "def test(user):\n    user.get_name()\n",
+            ".py",
+            Language::Python,
+        );
         assert_eq!(py_neg.len(), 0);
 
         // 3. Go
-        let go_pos = check("package main\nfunc test(cb func()) {\n  cb()\n}", ".go", Language::Go);
+        let go_pos = check(
+            "package main\nfunc test(cb func()) {\n  cb()\n}",
+            ".go",
+            Language::Go,
+        );
         assert_eq!(go_pos.len(), 0, "typed Go callbacks are ordinary calls");
-        let go_neg = check("package main\nfunc helper() {}\nfunc test() {\n  helper()\n}", ".go", Language::Go);
+        let go_neg = check(
+            "package main\nfunc helper() {}\nfunc test() {\n  helper()\n}",
+            ".go",
+            Language::Go,
+        );
         assert_eq!(go_neg.len(), 0);
 
         // 4. Rust
         let rust_pos = check("fn test(cb: fn()) {\n  cb();\n}", ".rs", Language::Rust);
         assert_eq!(rust_pos.len(), 0, "typed Rust callbacks are ordinary calls");
-        let rust_neg = check("fn helper() {}\nfn test() {\n  helper();\n}", ".rs", Language::Rust);
+        let rust_neg = check(
+            "fn helper() {}\nfn test() {\n  helper();\n}",
+            ".rs",
+            Language::Rust,
+        );
         assert_eq!(rust_neg.len(), 0);
 
         // 5. PHP
-        let php_pos = check("<?php function test($cb) {\n  $cb();\n}", ".php", Language::Php);
+        let php_pos = check(
+            "<?php function test($cb) {\n  $cb();\n}",
+            ".php",
+            Language::Php,
+        );
         assert_eq!(php_pos.len(), 1);
         assert_eq!(php_pos[0].hazard_type, "php_callback_invocation");
-        let php_neg = check("<?php function helper() {}\nfunction test() {\n  helper();\n}", ".php", Language::Php);
+        let php_neg = check(
+            "<?php function helper() {}\nfunction test() {\n  helper();\n}",
+            ".php",
+            Language::Php,
+        );
         assert_eq!(php_neg.len(), 0);
 
         // 6. Java
         let java_pos = check("class Foo {\n  void test(Runnable cb, MyListener listener) {\n    cb.run();\n    listener.onEvent();\n  }\n}", ".java", Language::Java);
-        assert_eq!(java_pos.len(), 0, "typed Java callbacks are ordinary interface calls");
-        let java_neg = check("class Foo {\n  void test(User user) {\n    user.getName();\n  }\n}", ".java", Language::Java);
+        assert_eq!(
+            java_pos.len(),
+            0,
+            "typed Java callbacks are ordinary interface calls"
+        );
+        let java_neg = check(
+            "class Foo {\n  void test(User user) {\n    user.getName();\n  }\n}",
+            ".java",
+            Language::Java,
+        );
         assert_eq!(java_neg.len(), 0);
 
         // 7. Kotlin
-        let kt_pos = check("fun test(cb: () -> Unit) {\n  cb()\n}", ".kt", Language::Kotlin);
+        let kt_pos = check(
+            "fun test(cb: () -> Unit) {\n  cb()\n}",
+            ".kt",
+            Language::Kotlin,
+        );
         assert_eq!(kt_pos.len(), 0, "typed Kotlin callbacks are ordinary calls");
-        let kt_neg = check("fun test(user: User) {\n  user.getName()\n}", ".kt", Language::Kotlin);
+        let kt_neg = check(
+            "fun test(user: User) {\n  user.getName()\n}",
+            ".kt",
+            Language::Kotlin,
+        );
         assert_eq!(kt_neg.len(), 0);
 
         // 8. Swift
-        let swift_pos = check("func test(cb: () -> Void) {\n  cb()\n}", ".swift", Language::Swift);
-        assert_eq!(swift_pos.len(), 0, "typed Swift callbacks are ordinary calls");
-        let swift_neg = check("func test(user: User) {\n  user.getName()\n}", ".swift", Language::Swift);
+        let swift_pos = check(
+            "func test(cb: () -> Void) {\n  cb()\n}",
+            ".swift",
+            Language::Swift,
+        );
+        assert_eq!(
+            swift_pos.len(),
+            0,
+            "typed Swift callbacks are ordinary calls"
+        );
+        let swift_neg = check(
+            "func test(user: User) {\n  user.getName()\n}",
+            ".swift",
+            Language::Swift,
+        );
         assert_eq!(swift_neg.len(), 0);
 
         // 9. JavaScript
-        let js_pos = check("function test(cb) {\n  cb();\n}", ".js", Language::JavaScript);
+        let js_pos = check(
+            "function test(cb) {\n  cb();\n}",
+            ".js",
+            Language::JavaScript,
+        );
         assert_eq!(js_pos.len(), 1);
         assert_eq!(js_pos[0].hazard_type, "javascript_callback_invocation");
-        let js_neg = check("function test(user) {\n  user.getName();\n}", ".js", Language::JavaScript);
+        let js_neg = check(
+            "function test(user) {\n  user.getName();\n}",
+            ".js",
+            Language::JavaScript,
+        );
         assert_eq!(js_neg.len(), 0);
 
         // 10. Lua
         let lua_pos = check("function test(cb)\n  cb()\nend", ".lua", Language::Lua);
         assert_eq!(lua_pos.len(), 1);
         assert_eq!(lua_pos[0].hazard_type, "lua_callback_invocation");
-        let lua_neg = check("function test(user)\n  user.getName()\nend", ".lua", Language::Lua);
+        let lua_neg = check(
+            "function test(user)\n  user.getName()\nend",
+            ".lua",
+            Language::Lua,
+        );
         assert_eq!(lua_neg.len(), 0);
 
         // 11. C
-        let c_pos = check("void test(void (*cb)(void)) {\n  cb();\n}", ".c", Language::C);
+        let c_pos = check(
+            "void test(void (*cb)(void)) {\n  cb();\n}",
+            ".c",
+            Language::C,
+        );
         assert_eq!(c_pos.len(), 1);
         assert_eq!(c_pos[0].hazard_type, "c_callback_invocation");
-        let c_neg = check("void helper() {}\nvoid test() {\n  helper();\n}", ".c", Language::C);
+        let c_neg = check(
+            "void helper() {}\nvoid test() {\n  helper();\n}",
+            ".c",
+            Language::C,
+        );
         assert_eq!(c_neg.len(), 0);
 
         // 12. C++
-        let cpp_pos = check("void test(std::function<void()> cb) {\n  cb();\n}", ".cpp", Language::Cpp);
-        assert_eq!(cpp_pos.len(), 0, "std::function is a typed callback interface");
-        let cpp_native = check("void test(void (*cb)(void)) {\n  cb();\n}", ".cpp", Language::Cpp);
-        assert_eq!(cpp_native.len(), 1, "native C++ function pointers retain target-validity risk");
-        let cpp_neg = check("void helper() {}\nvoid test() {\n  helper();\n}", ".cpp", Language::Cpp);
+        let cpp_pos = check(
+            "void test(std::function<void()> cb) {\n  cb();\n}",
+            ".cpp",
+            Language::Cpp,
+        );
+        assert_eq!(
+            cpp_pos.len(),
+            0,
+            "std::function is a typed callback interface"
+        );
+        let cpp_native = check(
+            "void test(void (*cb)(void)) {\n  cb();\n}",
+            ".cpp",
+            Language::Cpp,
+        );
+        assert_eq!(
+            cpp_native.len(),
+            1,
+            "native C++ function pointers retain target-validity risk"
+        );
+        let cpp_neg = check(
+            "void helper() {}\nvoid test() {\n  helper();\n}",
+            ".cpp",
+            Language::Cpp,
+        );
         assert_eq!(cpp_neg.len(), 0);
 
         // 13. C#
-        let csharp_pos = check("class Foo {\n  void Test(Action cb) {\n    cb();\n  }\n}", ".cs", Language::CSharp);
-        assert_eq!(csharp_pos.len(), 0, "typed C# callbacks are ordinary delegate calls");
-        let csharp_neg = check("class Foo {\n  void Helper() {}\n  void Test() {\n    Helper();\n  }\n}", ".cs", Language::CSharp);
+        let csharp_pos = check(
+            "class Foo {\n  void Test(Action cb) {\n    cb();\n  }\n}",
+            ".cs",
+            Language::CSharp,
+        );
+        assert_eq!(
+            csharp_pos.len(),
+            0,
+            "typed C# callbacks are ordinary delegate calls"
+        );
+        let csharp_neg = check(
+            "class Foo {\n  void Helper() {}\n  void Test() {\n    Helper();\n  }\n}",
+            ".cs",
+            Language::CSharp,
+        );
         assert_eq!(csharp_neg.len(), 0);
 
         // 14. TypeScript
-        let ts_pos = check("function test(cb: () => void) {\n  cb();\n}", ".ts", Language::TypeScript);
-        assert_eq!(ts_pos.len(), 0, "typed TypeScript callbacks are ordinary calls");
-        let ts_neg = check("function test(user: User) {\n  user.getName();\n}", ".ts", Language::TypeScript);
+        let ts_pos = check(
+            "function test(cb: () => void) {\n  cb();\n}",
+            ".ts",
+            Language::TypeScript,
+        );
+        assert_eq!(
+            ts_pos.len(),
+            0,
+            "typed TypeScript callbacks are ordinary calls"
+        );
+        let ts_neg = check(
+            "function test(user: User) {\n  user.getName();\n}",
+            ".ts",
+            Language::TypeScript,
+        );
         assert_eq!(ts_neg.len(), 0);
 
         // 15. Zig
-        let zig_pos = check("fn test(cb: fn() void) void {\n  cb();\n}", ".zig", Language::Zig);
+        let zig_pos = check(
+            "fn test(cb: fn() void) void {\n  cb();\n}",
+            ".zig",
+            Language::Zig,
+        );
         assert_eq!(zig_pos.len(), 0, "typed Zig callbacks are ordinary calls");
-        let zig_neg = check("fn helper() void {}\nfn test() void {\n  helper();\n}", ".zig", Language::Zig);
+        let zig_neg = check(
+            "fn helper() void {}\nfn test() void {\n  helper();\n}",
+            ".zig",
+            Language::Zig,
+        );
         assert_eq!(zig_neg.len(), 0);
     }
 
@@ -2456,7 +2689,8 @@ local mt = {
         };
 
         // 1. Go WaitGroup positive and near-miss
-        let go_hazards = check_all("
+        let go_hazards = check_all(
+            "
             package main
             func main() {
                 var wg sync.WaitGroup
@@ -2464,55 +2698,89 @@ local mt = {
                 var d Door
                 d.Wait()
             }
-        ", ".go", Language::Go);
-        let wg_hazards: Vec<_> = go_hazards.iter().filter(|h| h.hazard_type == "go_concurrency_waitgroup").collect();
+        ",
+            ".go",
+            Language::Go,
+        );
+        let wg_hazards: Vec<_> = go_hazards
+            .iter()
+            .filter(|h| h.hazard_type == "go_concurrency_waitgroup")
+            .collect();
         assert_eq!(wg_hazards.len(), 1);
         assert_eq!(wg_hazards[0].snippet, "wg.Wait()");
 
         // 2. Rust Mutex positive and near-miss
-        let rust_hazards = check_all("
+        let rust_hazards = check_all(
+            "
             fn main() {
                 let lock = mutex.lock().unwrap();
                 let key = door.lock();
             }
-        ", ".rs", Language::Rust);
-        let loom_hazards: Vec<_> = rust_hazards.iter().filter(|h| h.hazard_type == "rust_loom_concurrency").collect();
+        ",
+            ".rs",
+            Language::Rust,
+        );
+        let loom_hazards: Vec<_> = rust_hazards
+            .iter()
+            .filter(|h| h.hazard_type == "rust_loom_concurrency")
+            .collect();
         assert_eq!(loom_hazards.len(), 1);
         assert!(loom_hazards[0].snippet.contains("mutex.lock()"));
 
         // Safe reference derefs are not unsafe operations; raw-pointer derefs
         // are already covered by the enclosing unsafe block.
-        let rust_deref = check_all("
+        let rust_deref = check_all(
+            "
             fn read(x: &i32) -> i32 {
                 let v = *x;
                 v
             }
-        ", ".rs", Language::Rust);
-        assert!(rust_deref.iter().all(|h| h.hazard_type != "rust_unsafe_operation"));
+        ",
+            ".rs",
+            Language::Rust,
+        );
+        assert!(rust_deref
+            .iter()
+            .all(|h| h.hazard_type != "rust_unsafe_operation"));
 
         // 3. Kotlin Reflection call vs normal function call
-        let kt_hazards = check_all("
+        let kt_hazards = check_all(
+            "
             fun test() {
                 val res = method.call()
             }
             fun call() {}
-        ", ".kt", Language::Kotlin);
-        let kt_metaprog: Vec<_> = kt_hazards.iter().filter(|h| h.hazard_type == "kotlin_metaprogramming").collect();
+        ",
+            ".kt",
+            Language::Kotlin,
+        );
+        let kt_metaprog: Vec<_> = kt_hazards
+            .iter()
+            .filter(|h| h.hazard_type == "kotlin_metaprogramming")
+            .collect();
         assert_eq!(kt_metaprog.len(), 1);
 
         // Ordinary .call() invocations on non-reflection receivers stay quiet.
-        let kt_service = check_all("
+        let kt_service = check_all(
+            "
             fun test(service: ApiService) {
                 service.call()
                 retry.call()
             }
-        ", ".kt", Language::Kotlin);
-        let kt_service_metaprog: Vec<_> = kt_service.iter().filter(|h| h.hazard_type == "kotlin_metaprogramming").collect();
+        ",
+            ".kt",
+            Language::Kotlin,
+        );
+        let kt_service_metaprog: Vec<_> = kt_service
+            .iter()
+            .filter(|h| h.hazard_type == "kotlin_metaprogramming")
+            .collect();
         assert_eq!(kt_service_metaprog.len(), 0);
 
         // C/C++ pointer member access and value casts are not sanitizer
         // hazards; dynamic arithmetic operations and pointer casts are.
-        let c_precision = check_all("
+        let c_precision = check_all(
+            "
             int scale(struct Cfg *cfg, int n, int d) {
                 int half = n / 2;
                 int mask = n << 3;
@@ -2521,31 +2789,59 @@ local mt = {
                 char *bytes = (char *)cfg;
                 return half + mask + total + ratio + bytes[0];
             }
-        ", ".c", Language::C);
-        assert!(c_precision.iter().all(|h| h.hazard_type != "c_asan_pointer"));
-        let c_arith: Vec<_> = c_precision.iter().filter(|h| h.hazard_type == "c_ubsan_arithmetic").collect();
+        ",
+            ".c",
+            Language::C,
+        );
+        assert!(c_precision
+            .iter()
+            .all(|h| h.hazard_type != "c_asan_pointer"));
+        let c_arith: Vec<_> = c_precision
+            .iter()
+            .filter(|h| h.hazard_type == "c_ubsan_arithmetic")
+            .collect();
         assert_eq!(c_arith.len(), 1);
         assert!(c_arith.iter().any(|h| h.snippet.contains("n / d")));
-        let c_casts: Vec<_> = c_precision.iter().filter(|h| h.hazard_type == "c_ubsan_cast").collect();
+        let c_casts: Vec<_> = c_precision
+            .iter()
+            .filter(|h| h.hazard_type == "c_ubsan_cast")
+            .collect();
         assert_eq!(c_casts.len(), 1);
         assert!(c_casts[0].snippet.contains("(char *)cfg"));
 
-        let cpp_precision = check_all("
+        let cpp_precision = check_all(
+            "
             int scale(Cfg *cfg, int n, int d) {
                 int half = n / 2;
                 int checked = static_cast<int>(n);
                 int punned = *reinterpret_cast<int *>(cfg);
                 return half + checked + punned + n / d;
             }
-        ", ".cpp", Language::Cpp);
-        assert!(cpp_precision.iter().all(|h| h.hazard_type != "cpp_asan_pointer_or_cast" || h.snippet.contains("reinterpret_cast")));
-        let cpp_arith: Vec<_> = cpp_precision.iter().filter(|h| h.hazard_type == "cpp_ubsan_arithmetic").collect();
+        ",
+            ".cpp",
+            Language::Cpp,
+        );
+        assert!(cpp_precision
+            .iter()
+            .all(|h| h.hazard_type != "cpp_asan_pointer_or_cast"
+                || h.snippet.contains("reinterpret_cast")));
+        let cpp_arith: Vec<_> = cpp_precision
+            .iter()
+            .filter(|h| h.hazard_type == "cpp_ubsan_arithmetic")
+            .collect();
         assert_eq!(cpp_arith.len(), 1);
         assert!(cpp_arith.iter().any(|h| h.snippet.contains("n / d")));
-        let cpp_casts: Vec<_> = cpp_precision.iter().filter(|h| h.hazard_type == "cpp_ubsan_cast").collect();
-        assert!(cpp_casts.iter().all(|h| h.snippet.contains("reinterpret_cast")));
+        let cpp_casts: Vec<_> = cpp_precision
+            .iter()
+            .filter(|h| h.hazard_type == "cpp_ubsan_cast")
+            .collect();
+        assert!(cpp_casts
+            .iter()
+            .all(|h| h.snippet.contains("reinterpret_cast")));
         assert!(!cpp_casts.is_empty());
-        assert!(cpp_precision.iter().all(|h| !h.snippet.contains("static_cast") || h.hazard_type != "cpp_ubsan_cast"));
+        assert!(cpp_precision
+            .iter()
+            .all(|h| !h.snippet.contains("static_cast") || h.hazard_type != "cpp_ubsan_cast"));
 
         // Literal operands must remain visible: zero division/modulo and an
         // oversized shift are exactly the constant cases UBSan diagnoses.
@@ -2575,7 +2871,8 @@ local mt = {
         }
 
         // 4. Java Real Class.forName vs shadowed class Class
-        let java_hazards = check_all("
+        let java_hazards = check_all(
+            "
             class Demo {
                 void test() {
                     Class.forName(\"Foo\");
@@ -2586,13 +2883,20 @@ local mt = {
             class Class {
                 void forName(String s) {}
             }
-        ", ".java", Language::Java);
-        let java_metaprog: Vec<_> = java_hazards.iter().filter(|h| h.hazard_type == "java_metaprogramming").collect();
+        ",
+            ".java",
+            Language::Java,
+        );
+        let java_metaprog: Vec<_> = java_hazards
+            .iter()
+            .filter(|h| h.hazard_type == "java_metaprogramming")
+            .collect();
         assert_eq!(java_metaprog.len(), 1);
         assert_eq!(java_metaprog[0].snippet, "Class.forName(\"Foo\");");
 
         // 5. C# Reflection type matching vs containing type
-        let cs_hazards = check_all("
+        let cs_hazards = check_all(
+            "
             class Demo {
                 void Test() {
                     typeof(Foo).GetMethod(\"Bar\");
@@ -2603,13 +2907,20 @@ local mt = {
             class TypeHelper {
                 public void GetMethod(string s) {}
             }
-        ", ".cs", Language::CSharp);
-        let cs_metaprog: Vec<_> = cs_hazards.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
+        ",
+            ".cs",
+            Language::CSharp,
+        );
+        let cs_metaprog: Vec<_> = cs_hazards
+            .iter()
+            .filter(|h| h.hazard_type == "csharp_metaprogramming")
+            .collect();
         assert_eq!(cs_metaprog.len(), 1);
 
         // Receiver-name heuristics are intentionally not reflection
         // provenance. Only explicit framework type identifiers are reported.
-        let cs_invoke = check_all("
+        let cs_invoke = check_all(
+            "
             class Demo {
                 void Test() {
                     mi.Invoke(null, null);
@@ -2618,8 +2929,14 @@ local mt = {
                     family.GetValue(null);
                 }
             }
-        ", ".cs", Language::CSharp);
-        let cs_invoke_metaprog: Vec<_> = cs_invoke.iter().filter(|h| h.hazard_type == "csharp_metaprogramming").collect();
+        ",
+            ".cs",
+            Language::CSharp,
+        );
+        let cs_invoke_metaprog: Vec<_> = cs_invoke
+            .iter()
+            .filter(|h| h.hazard_type == "csharp_metaprogramming")
+            .collect();
         assert_eq!(cs_invoke_metaprog.len(), 0);
 
         // 6. Callback compositions: neutral name, aliasing, hops, multiline, struct function pointers
@@ -2652,13 +2969,21 @@ local mt = {
                 void onEvent();
             }
         ";
-        let doc_hazards = check_all(compositions_code, ".java", Language::Java);
-        
+        let _doc_hazards = check_all(compositions_code, ".java", Language::Java);
+
         let mut file = tempfile::Builder::new().suffix(".java").tempfile().unwrap();
         std::io::Write::write_all(file.as_file_mut(), compositions_code.as_bytes()).unwrap();
         let doc = crate::syntax::parse_file(file.path().to_path_buf(), Language::Java).unwrap();
-        let java_callbacks: Vec<_> = doc.hazard_sites.iter().filter(|h| h.hazard_type == "java_callback_invocation").collect();
-        assert_eq!(java_callbacks.len(), 0, "typed Java callbacks are ordinary interface calls");
+        let java_callbacks: Vec<_> = doc
+            .hazard_sites
+            .iter()
+            .filter(|h| h.hazard_type == "java_callback_invocation")
+            .collect();
+        assert_eq!(
+            java_callbacks.len(),
+            0,
+            "typed Java callbacks are ordinary interface calls"
+        );
 
         // Overloaded methods have separate callback origins. The ordinary
         // User overload must not inherit Runnable's callback evidence.
@@ -2687,26 +3012,46 @@ local mt = {
 
         // 7. C struct function-pointer members / complex targets
         let mut c_file = tempfile::Builder::new().suffix(".c").tempfile().unwrap();
-        std::io::Write::write_all(c_file.as_file_mut(), "
+        std::io::Write::write_all(
+            c_file.as_file_mut(),
+            "
             struct Handler {
                 void (*cb)(void);
             };
             void test(struct Handler* h) {
                 (*h->cb)();
             }
-        ".as_bytes()).unwrap();
+        "
+            .as_bytes(),
+        )
+        .unwrap();
         let c_doc = crate::syntax::parse_file(c_file.path().to_path_buf(), Language::C).unwrap();
-        let c_callbacks: Vec<_> = c_doc.hazard_sites.iter().filter(|h| h.hazard_type == "c_callback_invocation").collect();
+        let c_callbacks: Vec<_> = c_doc
+            .hazard_sites
+            .iter()
+            .filter(|h| h.hazard_type == "c_callback_invocation")
+            .collect();
         assert_eq!(c_callbacks.len(), 1);
 
         // 8. C++ functor / std::function policy test
-        let cpp_compositions = check_all("
+        let cpp_compositions = check_all(
+            "
             void test(std::function<void()> cb) {
                 cb();
             }
-        ", ".cpp", Language::Cpp);
-        let cpp_callbacks: Vec<_> = cpp_compositions.iter().filter(|h| h.hazard_type == "cpp_callback_invocation").collect();
-        assert_eq!(cpp_callbacks.len(), 0, "std::function is a typed callback interface");
+        ",
+            ".cpp",
+            Language::Cpp,
+        );
+        let cpp_callbacks: Vec<_> = cpp_compositions
+            .iter()
+            .filter(|h| h.hazard_type == "cpp_callback_invocation")
+            .collect();
+        assert_eq!(
+            cpp_callbacks.len(),
+            0,
+            "std::function is a typed callback interface"
+        );
     }
 
     #[test]
@@ -2728,7 +3073,11 @@ local mt = {
             ".go",
             Language::Go,
         );
-        assert_eq!(go_alias.len(), 0, "typed Go callback aliases are ordinary calls");
+        assert_eq!(
+            go_alias.len(),
+            0,
+            "typed Go callback aliases are ordinary calls"
+        );
 
         let rb_alias = check(
             "def test(cb)\n  my_cb = cb\n  my_cb.call\nend",
@@ -2792,25 +3141,87 @@ local mt = {
     #[test]
     fn local_hazard_query_copies_match_the_contract_resources() {
         let queries = [
-            ("c", include_str!("c_hazards.scm"), hazard_contract::C_HAZARDS),
-            ("cpp", include_str!("cpp_hazards.scm"), hazard_contract::CPP_HAZARDS),
-            ("csharp", include_str!("csharp_hazards.scm"), hazard_contract::CSHARP_HAZARDS),
-            ("go", include_str!("go_hazards.scm"), hazard_contract::GO_HAZARDS),
-            ("rust", include_str!("rust_hazards.scm"), hazard_contract::RUST_HAZARDS),
-            ("zig", include_str!("zig_hazards.scm"), hazard_contract::ZIG_HAZARDS),
-            ("ruby", include_str!("ruby_hazards.scm"), hazard_contract::RUBY_HAZARDS),
-            ("python", include_str!("python_hazards.scm"), hazard_contract::PYTHON_HAZARDS),
-            ("javascript", include_str!("javascript_hazards.scm"), hazard_contract::JAVASCRIPT_HAZARDS),
-            ("typescript", include_str!("typescript_hazards.scm"), hazard_contract::TYPESCRIPT_HAZARDS),
-            ("lua", include_str!("lua_hazards.scm"), hazard_contract::LUA_HAZARDS),
-            ("java", include_str!("java_hazards.scm"), hazard_contract::JAVA_HAZARDS),
-            ("php", include_str!("php_hazards.scm"), hazard_contract::PHP_HAZARDS),
-            ("kotlin", include_str!("kotlin_hazards.scm"), hazard_contract::KOTLIN_HAZARDS),
-            ("swift", include_str!("swift_hazards.scm"), hazard_contract::SWIFT_HAZARDS),
+            (
+                "c",
+                include_str!("c_hazards.scm"),
+                hazard_contract::C_HAZARDS,
+            ),
+            (
+                "cpp",
+                include_str!("cpp_hazards.scm"),
+                hazard_contract::CPP_HAZARDS,
+            ),
+            (
+                "csharp",
+                include_str!("csharp_hazards.scm"),
+                hazard_contract::CSHARP_HAZARDS,
+            ),
+            (
+                "go",
+                include_str!("go_hazards.scm"),
+                hazard_contract::GO_HAZARDS,
+            ),
+            (
+                "rust",
+                include_str!("rust_hazards.scm"),
+                hazard_contract::RUST_HAZARDS,
+            ),
+            (
+                "zig",
+                include_str!("zig_hazards.scm"),
+                hazard_contract::ZIG_HAZARDS,
+            ),
+            (
+                "ruby",
+                include_str!("ruby_hazards.scm"),
+                hazard_contract::RUBY_HAZARDS,
+            ),
+            (
+                "python",
+                include_str!("python_hazards.scm"),
+                hazard_contract::PYTHON_HAZARDS,
+            ),
+            (
+                "javascript",
+                include_str!("javascript_hazards.scm"),
+                hazard_contract::JAVASCRIPT_HAZARDS,
+            ),
+            (
+                "typescript",
+                include_str!("typescript_hazards.scm"),
+                hazard_contract::TYPESCRIPT_HAZARDS,
+            ),
+            (
+                "lua",
+                include_str!("lua_hazards.scm"),
+                hazard_contract::LUA_HAZARDS,
+            ),
+            (
+                "java",
+                include_str!("java_hazards.scm"),
+                hazard_contract::JAVA_HAZARDS,
+            ),
+            (
+                "php",
+                include_str!("php_hazards.scm"),
+                hazard_contract::PHP_HAZARDS,
+            ),
+            (
+                "kotlin",
+                include_str!("kotlin_hazards.scm"),
+                hazard_contract::KOTLIN_HAZARDS,
+            ),
+            (
+                "swift",
+                include_str!("swift_hazards.scm"),
+                hazard_contract::SWIFT_HAZARDS,
+            ),
         ];
         for (language, local, canonical) in queries {
-            assert_eq!(local, canonical, "FactMine {language} hazard query drifted from hazard-contract");
+            assert_eq!(
+                local, canonical,
+                "FactMine {language} hazard query drifted from hazard-contract"
+            );
         }
     }
-
 }

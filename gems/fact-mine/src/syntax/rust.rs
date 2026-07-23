@@ -541,9 +541,11 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.starts_with("Option<") {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.starts_with("Option<")
+        {
             type_text.to_string()
         } else {
             format!("Option<{}>", type_text)
@@ -581,6 +583,22 @@ fn owner_after_keyword(text: &str, keyword: &str) -> Option<String> {
     rest.split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
         .find(|part| !part.is_empty())
         .map(str::to_string)
+}
+
+fn is_simple_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(' ')
+        && !name.contains('.')
+        && !name.contains('[')
+        && !name.contains('<')
+        && !name.contains('(')
+        && name
+            .chars()
+            .next()
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+        && name
+            .chars()
+            .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }
 
 #[cfg(test)]
@@ -831,20 +849,4 @@ mod tests {
         assert_eq!(metadata.parametric_cost.as_deref(), Some("callback_linear"));
         assert!(external_symbol_call_complexity(collect, "collect").is_none());
     }
-}
-
-fn is_simple_name(name: &str) -> bool {
-    !name.is_empty()
-        && !name.contains(' ')
-        && !name.contains('.')
-        && !name.contains('[')
-        && !name.contains('<')
-        && !name.contains('(')
-        && name
-            .chars()
-            .next()
-            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
-        && name
-            .chars()
-            .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())
 }

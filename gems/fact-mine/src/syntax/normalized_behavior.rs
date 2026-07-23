@@ -2,7 +2,7 @@ use super::{
     c, cpp, csharp, go, java, javascript, kotlin, lua, php, python, ruby, rust, swift, typescript,
     zig, CallSite, FunctionDef, Language, StateDeclaration,
 };
-use crate::ast::{Node, Span};
+use crate::ast::{Child, Node, Span};
 use crate::syntax::cfg::ControlFlowProfile;
 use crate::type_inference::TypeExpr;
 use std::collections::BTreeMap;
@@ -73,6 +73,23 @@ pub(crate) struct NormalizedVisibilityEvent {
 pub(crate) struct NormalizedNilGuardFact {
     pub(crate) local: String,
     pub(crate) non_nil_when_true: bool,
+}
+
+/// A language-owned interpretation of one already-normalized nullable
+/// operation. The shared extractor owns traversal and CFG joining; adapters
+/// only classify syntax whose nil behavior differs by language.
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedNullableOperation {
+    pub(crate) subject: String,
+    pub(crate) operation_kind: &'static str,
+    pub(crate) nil_behavior: &'static str,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedPresenceCorrelation {
+    pub(crate) value_subject: String,
+    pub(crate) presence_subject: String,
+    pub(crate) semantics: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -718,7 +735,51 @@ pub(crate) fn configured_collection_operation(
     })
 }
 
+/// Maps only explicit native nullability annotations to a CFG contract.
+/// Ordinary pointer spelling is intentionally absent: it says nothing about
+/// the current value and must remain unknown without another proven source.
+pub(crate) fn native_pointer_nullability_contract(type_name: &str) -> Option<&'static str> {
+    let normalized = type_name.to_ascii_lowercase();
+    let nullable = normalized.contains("_nullable") || normalized.contains("__nullable");
+    let non_null = normalized.contains("_nonnull")
+        || normalized.contains("__nonnull")
+        || normalized.contains("gsl::not_null<");
+    match (nullable, non_null) {
+        (true, false) => Some("nullable_declared_type"),
+        (false, true) => Some("non_null_declared_type"),
+        _ => None,
+    }
+}
+
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    fn nullable_operation(&self, _node: &Node) -> Option<NormalizedNullableOperation> {
+        None
+    }
+
+    fn presence_correlation(&self, _node: &Node) -> Option<NormalizedPresenceCorrelation> {
+        None
+    }
+
+    /// Whether a normalized bare call can read a local function value in this
+    /// language. Most adapters reserve VCALL for lexical dispatch; Go uses it
+    /// for both, so its CFG needs a local read when a matching place exists.
+    fn function_value_calls_are_local_reads(&self) -> bool {
+        false
+    }
+
+    /// A reviewed exact call-result contract. This is deliberately exposed at
+    /// the language boundary while the normalized call identity is still
+    /// available; CFG consumers receive only the contract fact.
+    fn nullable_call_result_contract(&self, _node: &Node) -> Option<&'static str> {
+        None
+    }
+
+    /// A reviewed declaration-level nullability contract. This stays at the
+    /// language boundary: the CFG sees the resulting contract but never has
+    /// to interpret native annotation spellings.
+    fn nullable_declared_type_contract(&self, _type_name: &str) -> Option<&'static str> {
+        None
+    }
     /// The configuration key for this source language. Keeping this at the
     /// adapter boundary ensures Fact-Mine owns native spellings while every
     /// downstream consumer sees only normalized complexity facts.
@@ -838,9 +899,11 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// default: two unrelated classes both having `config` or `kind` state
     /// must never be analyzed as one mutable field.
     fn state_identity(&self, owner: &str, field: &str) -> String {
-        (!owner.is_empty())
-            .then(|| format!("{owner}::{field}"))
-            .unwrap_or_default()
+        if !owner.is_empty() {
+            format!("{owner}::{field}")
+        } else {
+            Default::default()
+        }
     }
 
     fn empty_check_call(&self, _message: &str) -> bool {
@@ -1332,8 +1395,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         }
         let text = text.split('=').next().unwrap_or(text).trim();
         text.split(|ch: char| !(ch == '_' || ch == '?' || ch.is_ascii_alphanumeric()))
-            .filter(|part| !part.is_empty())
-            .next_back()
+            .rfind(|part| !part.is_empty())
             .map(|part| part.trim_end_matches('?').to_string())
     }
 
@@ -1389,6 +1451,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     /// Extract explicit 'this.' or 'self.' bindings
+    #[allow(dead_code)] // Extension hook retained for language adapters.
     fn literal_state_writes(&self, _node: &Node, _normalized_text: &str) -> Vec<String> {
         Vec::new()
     }
@@ -1466,6 +1529,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Whether this language treats the normalized operator as an equality
+    /// comparison against its null literal. Ruby deliberately does not accept
+    /// `===`: it is an overridable case-equality method there.
+    fn nil_comparison_operator(&self, operator: &str) -> bool {
+        matches!(operator, "==" | "!=")
+    }
+
     fn terminating_call_message(&self, _message: &str) -> bool {
         false
     }
@@ -1518,14 +1588,17 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         format!("T::Array[{}]", elem)
     }
 
+    #[allow(dead_code)] // Formatting is exercised by language-adapter conformance tests.
     fn format_hash_type(&self, key: &str, val: &str) -> String {
         format!("T::Hash[{}, {}]", key, val)
     }
 
+    #[allow(dead_code)] // Formatting is exercised by language-adapter conformance tests.
     fn format_set_type(&self, elem: &str) -> String {
         format!("T::Set[{}]", elem)
     }
 
+    #[allow(dead_code)] // Formatting is exercised by language-adapter conformance tests.
     fn format_nilable_type(&self, type_text: &str) -> String {
         if type_text.is_empty() || type_text == "nil" || type_text == "null" || type_text == "None"
         {
@@ -1549,6 +1622,23 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn untyped_hash_type(&self) -> String {
         "T::Hash[T.untyped, T.untyped]".to_string()
     }
+}
+
+/// Returns an exact normalized bare-call identifier, when one is preserved.
+/// This intentionally does not derive a contract from a receiver, type, or
+/// partial spelling: language descriptors may only match reviewed API names.
+pub(crate) fn exact_direct_call_name(node: &Node) -> Option<&str> {
+    if matches!(node.r#type.as_str(), "VCALL" | "FCALL") {
+        if let Some(Child::Symbol(name) | Child::String(name)) = node.children.first() {
+            return Some(name);
+        }
+    }
+    let name = node.text.trim().split_once('(')?.0.trim();
+    (name
+        .bytes()
+        .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+        && !name.is_empty())
+    .then_some(name)
 }
 
 pub(crate) fn nil_guard_from_predicates(
@@ -1878,6 +1968,9 @@ mod tests {
         assert!(b.literal_receiver_type(&node).is_none());
         assert_eq!(b.parameter_list_source("("), "");
         assert!(b.parameter_name_from_signature("").is_none());
+        assert!(b
+            .nullable_declared_type_contract("Widget * _Nullable")
+            .is_none());
         assert!(b.literal_state_refs(&node, "text").is_empty());
         assert!(b.nil_guard_fact("msg", "sub").is_none());
         assert!(!b.local_flow_declaration_keyword("key"));
@@ -1899,6 +1992,28 @@ mod tests {
             })
             .is_none());
         assert!(b.core_owner_names().is_empty());
+    }
+
+    #[test]
+    fn exact_direct_call_names_require_a_normalized_bare_identifier() {
+        let symbol_callee = Node {
+            r#type: "FCALL".to_string(),
+            children: vec![Child::Symbol("malloc".to_string())],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 8,
+            text: "malloc()".to_string(),
+        };
+        assert_eq!(exact_direct_call_name(&symbol_callee), Some("malloc"));
+
+        let non_identifier = Node {
+            r#type: "CALL".to_string(),
+            children: Vec::new(),
+            text: "object.malloc()".to_string(),
+            ..symbol_callee
+        };
+        assert_eq!(exact_direct_call_name(&non_identifier), None);
     }
 
     #[test]
@@ -2097,6 +2212,27 @@ mod tests {
             configured_intrinsic_operation("javascript", Some("Object"), "keys"),
             None,
             "generic JavaScript object operations may invoke proxy or getter hooks"
+        );
+    }
+
+    #[test]
+    fn native_pointer_nullability_requires_an_explicit_unambiguous_annotation() {
+        assert_eq!(
+            native_pointer_nullability_contract("Widget * _Nullable"),
+            Some("nullable_declared_type")
+        );
+        assert_eq!(
+            native_pointer_nullability_contract("Widget * __nonnull"),
+            Some("non_null_declared_type")
+        );
+        assert_eq!(
+            native_pointer_nullability_contract("gsl::not_null<Widget *>"),
+            Some("non_null_declared_type")
+        );
+        assert_eq!(native_pointer_nullability_contract("Widget *"), None);
+        assert_eq!(
+            native_pointer_nullability_contract("Widget * _Nullable _Nonnull"),
+            None
         );
     }
 }

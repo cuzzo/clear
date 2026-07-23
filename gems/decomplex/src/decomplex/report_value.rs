@@ -164,7 +164,10 @@ mod tests {
         assert_eq!(array_from(Some(&json!([1, 2]))).len(), 2);
         assert_eq!(array_from(None), &[] as &[Value]);
 
-        assert_eq!(array_strings(Some(&json!(["a", 123]))), vec!["a".to_string(), "123".to_string()]);
+        assert_eq!(
+            array_strings(Some(&json!(["a", 123]))),
+            vec!["a".to_string(), "123".to_string()]
+        );
 
         assert_eq!(field_array_strings(&val, "arr_str"), vec!["a", "b"]);
 
@@ -179,7 +182,10 @@ mod tests {
 
         assert_eq!(kind_is(&val, "str", "hello"), true);
 
-        assert_eq!(ruby_inspect_array(Some(&json!(["a", 42, true, false, null, [1]]))), r#"["a", 42, true, false, nil, [1]]"#);
+        assert_eq!(
+            ruby_inspect_array(Some(&json!(["a", 42, true, false, null, [1]]))),
+            r#"["a", 42, true, false, nil, [1]]"#
+        );
         assert_eq!(ruby_inspect_value(&json!({"x": 1})), r#"{"x":1}"#);
     }
 }

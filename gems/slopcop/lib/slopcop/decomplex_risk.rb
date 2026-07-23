@@ -298,7 +298,9 @@ module Decomplex
     end
   end
 
-  module Sarif
+  # Kept only as an internal compatibility builder for the legacy bridge.
+  # SlopCop's public SARIF and proof-boundary contracts live in SlopCop::Sarif.
+  module LegacySarif
     module_function
 
     SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -452,5 +454,4 @@ module Decomplex
     end
   end
 end
-
 

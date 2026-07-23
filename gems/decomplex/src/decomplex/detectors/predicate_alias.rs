@@ -125,10 +125,10 @@ mod tests {
                     "span": [1, 2, 3, 4]
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
 
         let res = scan_documents(&[doc]);
         assert!(res.alias_clusters.is_empty());
     }
 }
-

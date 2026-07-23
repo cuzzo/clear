@@ -9,7 +9,8 @@ use super::normalized_behavior::{
     configured_semantic_symbol_parametric_cost, eliminable_guard_from_call,
     nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
     type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
-    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedSemanticEffect,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
+    NormalizedSemanticEffect,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata, StateDeclaration};
 use crate::ast::{Node, Span};
@@ -46,8 +47,10 @@ fn declarator_before_initializer(text: &str) -> &str {
         }
         let previous = index.checked_sub(1).and_then(|i| bytes.get(i)).copied();
         let next = bytes.get(index + 1).copied();
-        if matches!(previous, Some(b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/'))
-            || matches!(next, Some(b'=' | b'>'))
+        if matches!(
+            previous,
+            Some(b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/')
+        ) || matches!(next, Some(b'=' | b'>'))
         {
             continue;
         }
@@ -203,6 +206,20 @@ const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
+        (node.r#type == "CALL")
+            .then(|| node.children.first().and_then(crate::ast::node))
+            .flatten()
+            .filter(|receiver| receiver.r#type == "LVAR")
+            .map(|receiver| receiver.text.trim().to_string())
+            .filter(|subject| !subject.is_empty())
+            .map(|subject| NormalizedNullableOperation {
+                subject,
+                operation_kind: "receiver_member_access",
+                nil_behavior: "null_reference_exception",
+            })
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
@@ -255,6 +272,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         format!("this.{message}")
     }
 
+    #[allow(clippy::never_loop)] // The nested AST walk may emit multiple writes despite sparse mock-node shapes.
     fn initializer_writes(
         &self,
         node: &Node,
@@ -383,8 +401,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         decl_part
             .trim_end_matches(';')
             .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-            .filter(|part| !part.is_empty())
-            .next_back()
+            .rfind(|part| !part.is_empty())
             .map(str::to_string)
     }
 
@@ -521,9 +538,11 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.ends_with('?') {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.ends_with('?')
+        {
             type_text.to_string()
         } else {
             format!("{}?", type_text)
@@ -567,10 +586,12 @@ fn interlocked_ref_argument_field(node: &Node) -> Option<String> {
         return None;
     }
     let argument = node.children.iter().find_map(|c| match c {
-        crate::ast::Child::Node(n) if n.r#type == "LIST" => n.children.iter().find_map(|a| match a {
-            crate::ast::Child::Node(a) if a.r#type == "ARGUMENT" => Some(a.text.trim()),
-            _ => None,
-        }),
+        crate::ast::Child::Node(n) if n.r#type == "LIST" => {
+            n.children.iter().find_map(|a| match a {
+                crate::ast::Child::Node(a) if a.r#type == "ARGUMENT" => Some(a.text.trim()),
+                _ => None,
+            })
+        }
         _ => None,
     })?;
     let reference = argument

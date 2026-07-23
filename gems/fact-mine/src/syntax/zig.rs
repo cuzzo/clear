@@ -424,9 +424,11 @@ impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.starts_with('?') {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.starts_with('?')
+        {
             type_text.to_string()
         } else {
             format!("?{}", type_text)

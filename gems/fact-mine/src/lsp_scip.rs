@@ -377,12 +377,8 @@ pub fn generate(
                 } else {
                     "dependency"
                 };
-                let descriptor = adapter.external_descriptor(
-                    call,
-                    &target_path,
-                    &target_source,
-                    target_range,
-                );
+                let descriptor =
+                    adapter.external_descriptor(call, &target_path, &target_source, target_range);
                 (
                     format!(
                         "{} {} {package} . {descriptor}",

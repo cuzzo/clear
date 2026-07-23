@@ -50,6 +50,16 @@ impl AstNormalizationAdapter for GoAstAdapter {
         go_statement_without_inner_call(node)
     }
 
+    fn if_initializer<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "if_statement")
+            .then(|| node.child_by_field_name("initializer"))
+            .flatten()
+    }
+
     fn intrinsic_call_name(&self, node: TreeSitterNode<'_>, _source: &str) -> Option<&'static str> {
         go_statement_without_inner_call(node).then_some("go")
     }
@@ -97,7 +107,6 @@ impl AstNormalizationAdapter for GoAstAdapter {
             .collect::<Vec<_>>();
         (!body.is_empty()).then_some(body)
     }
-
 }
 
 fn go_statement_without_inner_call(node: TreeSitterNode<'_>) -> bool {
@@ -119,9 +128,7 @@ fn go_statement_without_inner_call(node: TreeSitterNode<'_>) -> bool {
 /// not dropped - their alias just never happens to match a qualified call.
 fn go_import_alias_and_target(spec: TreeSitterNode<'_>, source: &str) -> Option<(String, String)> {
     let path_node = spec.child_by_field_name("path")?;
-    let target = node_text(path_node, source)
-        .trim_matches('"')
-        .to_string();
+    let target = node_text(path_node, source).trim_matches('"').to_string();
     if target.is_empty() {
         return None;
     }
@@ -185,7 +192,9 @@ mod tests {
     fn symbol_scope_extracts_grouped_and_single_import_declarations() {
         let source = "package main\n\nimport (\n\t\"fmt\"\n\tutil \"demo/util\"\n\t_ \"demo/sideeffect\"\n)\n\nimport \"os\"\n\nfunc main() {}\n";
         let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_go::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_go::LANGUAGE.into())
+            .unwrap();
         let tree = parser.parse(source, None).unwrap();
 
         let (package, imports) = GoAstAdapter.symbol_scope(tree.root_node(), source);

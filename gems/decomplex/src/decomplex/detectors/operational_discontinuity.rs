@@ -418,9 +418,15 @@ mod tests {
         assert_eq!(report[0].defn, "method_c");
         assert_eq!(report[0].score, 28);
         assert_eq!(report[0].confidence, "high");
-        assert!(report[0].confidence_reasons.contains(&"repeated_resets".to_string()));
-        assert!(report[0].confidence_reasons.contains(&"explicit_phase_marker".to_string()));
-        assert!(report[0].confidence_reasons.contains(&"high_score".to_string()));
+        assert!(report[0]
+            .confidence_reasons
+            .contains(&"repeated_resets".to_string()));
+        assert!(report[0]
+            .confidence_reasons
+            .contains(&"explicit_phase_marker".to_string()));
+        assert!(report[0]
+            .confidence_reasons
+            .contains(&"high_score".to_string()));
 
         assert_eq!(report[1].defn, "parse_method");
         assert_eq!(report[1].score, 20);

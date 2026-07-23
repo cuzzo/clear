@@ -86,13 +86,16 @@ fn block_from_method(method: &local_flow::MethodSummary) -> Option<Block> {
     })
 }
 
-fn tokenize_source(source: &str, skeleton: &mut Vec<Skeleton>, names: &mut Vec<String>, dialect: &dyn crate::decomplex::dialect::Dialect) {
+fn tokenize_source(
+    source: &str,
+    skeleton: &mut Vec<Skeleton>,
+    names: &mut Vec<String>,
+    dialect: &dyn crate::decomplex::dialect::Dialect,
+) {
     for token in token_re().find_iter(source).map(|match_| match_.as_str()) {
         if dialect.is_identifier(token) {
             skeleton.push(Skeleton::ID);
-            names.push(
-                dialect.clean_identifier(token)
-            );
+            names.push(dialect.clean_identifier(token));
         } else if literal_token(token) {
             skeleton.push(Skeleton::Node("LIT".to_string()));
         } else {

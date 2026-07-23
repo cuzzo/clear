@@ -352,7 +352,6 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
             let parts: Vec<&str> = text.split_whitespace().collect();
             if parts.len() >= 2 {
                 let name = name
-                    .trim()
                     .split_whitespace()
                     .last()
                     .unwrap_or("")
@@ -361,7 +360,7 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
                     && name
                         .chars()
                         .next()
-                        .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+                        .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
                 {
                     let type_text = parts[..parts.len() - 1].join(" ");
                     if !type_text.is_empty() {
@@ -389,7 +388,7 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
                 && name
                     .chars()
                     .next()
-                    .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+                    .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
             {
                 let type_text = parts[..parts.len() - 1].join(" ");
                 if !type_text.is_empty() {
@@ -421,9 +420,11 @@ impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.starts_with('?') {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.starts_with('?')
+        {
             type_text.to_string()
         } else {
             format!("?{}", type_text)
@@ -559,7 +560,7 @@ fn is_simple_name(name: &str) -> bool {
         && name
             .chars()
             .next()
-            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
         && name
             .chars()
             .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())

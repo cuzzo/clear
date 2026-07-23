@@ -1,0 +1,8 @@
+[
+  {"complete": true, "state": "definitely_null"},
+  {"complete": true, "state": "definitely_null"},
+  {"complete": true, "state": "definitely_null"},
+  {"complete": false, "state": "unknown"},
+  {"complete": false, "state": "unknown"},
+  {"complete": false, "state": "unknown"}
+]

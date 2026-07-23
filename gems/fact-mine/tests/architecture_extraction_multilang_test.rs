@@ -45,12 +45,18 @@ fn csharp_class_extraction_finds_owner_functions_and_state() {
         document.owner_defs
     );
     assert!(
-        document.function_defs.iter().any(|f| f.name == "Increment" && f.owner == "Widget"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "Increment" && f.owner == "Widget"),
         "expected Widget.Increment, got {:?}",
         document.function_defs
     );
     assert!(
-        document.state_declarations.iter().any(|s| s.field == "count" && s.owner == "Widget"),
+        document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "count" && s.owner == "Widget"),
         "expected a Widget.count state declaration, got {:?}",
         document.state_declarations
     );
@@ -77,12 +83,18 @@ fn lua_metatable_class_extraction_finds_owner_functions_and_state() {
     // is inferred per-function from the `Widget:method`/`Widget.method`
     // receiver prefix, not a separate owner_defs entry.
     assert!(
-        document.function_defs.iter().any(|f| f.name == "increment" && f.owner == "Widget"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "increment" && f.owner == "Widget"),
         "expected Widget:increment, got {:?}",
         document.function_defs
     );
     assert!(
-        document.function_defs.iter().any(|f| f.name == "new" && f.owner == "Widget"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "new" && f.owner == "Widget"),
         "expected Widget.new, got {:?}",
         document.function_defs
     );
@@ -112,7 +124,10 @@ fn kotlin_primary_constructor_property_is_recognized_as_state() {
     );
 
     assert!(
-        document.state_declarations.iter().any(|s| s.field == "count" && s.owner == "Widget"),
+        document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "count" && s.owner == "Widget"),
         "expected a Widget.count state declaration from the primary constructor, got {:?}",
         document.state_declarations
     );
@@ -140,7 +155,10 @@ fn swift_init_is_recognized_as_a_function() {
     );
 
     assert!(
-        document.function_defs.iter().any(|f| f.name == "init" && f.owner == "Widget"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "init" && f.owner == "Widget"),
         "expected Widget.init to be recognized as a function, got {:?}",
         document.function_defs
     );
@@ -170,7 +188,10 @@ fn typescript_constructor_parameter_property_is_recognized_as_state() {
     );
 
     assert!(
-        document.state_declarations.iter().any(|s| s.field == "count" && s.owner == "Widget"),
+        document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "count" && s.owner == "Widget"),
         "expected a Widget.count state declaration from the constructor parameter, got {:?}",
         document.state_declarations
     );
@@ -201,7 +222,10 @@ fn typescript_abstract_class_is_recognized_as_an_owner() {
         document.owner_defs
     );
     assert!(
-        document.function_defs.iter().any(|f| f.name == "increment" && f.owner == "Widget"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "increment" && f.owner == "Widget"),
         "expected Widget.increment, got {:?}",
         document.function_defs
     );
@@ -230,12 +254,18 @@ fn go_embedded_struct_field_is_recognized_as_state() {
     );
 
     assert!(
-        document.state_declarations.iter().any(|s| s.field == "Basic" && s.owner == "Embedded"),
+        document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "Basic" && s.owner == "Embedded"),
         "expected the embedded Basic field to be recognized as state, got {:?}",
         document.state_declarations
     );
     assert!(
-        document.state_declarations.iter().any(|s| s.field == "Vunique" && s.owner == "Embedded"),
+        document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "Vunique" && s.owner == "Embedded"),
         "expected the ordinary Vunique field to still be recognized, got {:?}",
         document.state_declarations
     );
@@ -259,12 +289,18 @@ fn java_comment_is_not_parsed_as_a_field_declaration() {
     );
 
     assert!(
-        !document.state_declarations.iter().any(|s| s.field == "wrong"),
+        !document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "wrong"),
         "a comment must never be parsed as a field declaration, got {:?}",
         document.state_declarations
     );
     assert!(
-        document.state_declarations.iter().any(|s| s.field == "realField"),
+        document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "realField"),
         "a real field declaration must still be recognized, got {:?}",
         document.state_declarations
     );
@@ -289,12 +325,18 @@ fn csharp_field_with_braceless_initializer_keeps_its_own_name() {
     );
 
     assert!(
-        document.state_declarations.iter().any(|s| s.field == "_enumOptions"),
+        document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "_enumOptions"),
         "expected _enumOptions to keep its own name, got {:?}",
         document.state_declarations
     );
     assert!(
-        !document.state_declarations.iter().any(|s| s.field == "ExecutionAndPublication"),
+        !document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "ExecutionAndPublication"),
         "the initializer's trailing identifier must not leak in as the field name, got {:?}",
         document.state_declarations
     );
@@ -317,12 +359,18 @@ fn python_enum_members_are_recognized_as_state() {
     );
 
     assert!(
-        document.state_declarations.iter().any(|s| s.field == "STANDARD" && s.owner == "ColorSystem"),
+        document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "STANDARD" && s.owner == "ColorSystem"),
         "expected STANDARD to be recognized as state, got {:?}",
         document.state_declarations
     );
     assert!(
-        document.state_declarations.iter().any(|s| s.field == "EIGHT_BIT" && s.owner == "ColorSystem"),
+        document
+            .state_declarations
+            .iter()
+            .any(|s| s.field == "EIGHT_BIT" && s.owner == "ColorSystem"),
         "expected EIGHT_BIT to be recognized as state, got {:?}",
         document.state_declarations
     );
@@ -352,12 +400,18 @@ fn cpp_operator_overloads_keep_their_own_name() {
     );
 
     assert!(
-        document.function_defs.iter().any(|f| f.name == "operator+="),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "operator+="),
         "expected operator+= to keep its own name, not a parameter name, got {:?}",
         document.function_defs
     );
     assert!(
-        document.function_defs.iter().any(|f| f.name == "operator bool"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "operator bool"),
         "expected the cast operator to be named 'operator bool', got {:?}",
         document.function_defs
     );
@@ -389,7 +443,10 @@ fn cpp_struct_with_methods_is_recognized_as_an_owner() {
         document.owner_defs
     );
     assert!(
-        document.function_defs.iter().any(|f| f.name == "increment" && f.owner == "Vec3"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "increment" && f.owner == "Vec3"),
         "expected Vec3.increment, got {:?}",
         document.function_defs
     );
@@ -437,7 +494,10 @@ fn cpp_linkage_macro_before_class_name_does_not_swallow_the_class_body() {
         document.owner_defs
     );
     assert!(
-        document.function_defs.iter().any(|f| f.name == "addAppender" && f.owner == "Logger"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "addAppender" && f.owner == "Logger"),
         "expected Logger.addAppender to survive the macro-corrupted parse, got {:?}",
         document.function_defs
     );
@@ -450,7 +510,8 @@ fn cpp_linkage_macro_before_class_name_does_not_swallow_the_class_body() {
 // content) silently start comparing against the wrong thing.
 #[test]
 fn source_digest_matches_the_real_file_even_when_the_parse_buffer_is_rewritten() {
-    let source = "class PLOG_LINKAGE Logger : public IAppender {\npublic:\n    void write() {}\n};\n";
+    let source =
+        "class PLOG_LINKAGE Logger : public IAppender {\npublic:\n    void write() {}\n};\n";
     let mut file = tempfile::Builder::new().suffix(".cpp").tempfile().unwrap();
     file.write_all(source.as_bytes()).unwrap();
     let documents = syntax::parse_files(&[file.path().to_path_buf()], Language::Cpp).unwrap();
@@ -491,12 +552,18 @@ fn javascript_increment_and_mutating_method_call_are_recognized_as_state_writes(
     );
 
     assert!(
-        document.state_writes.iter().any(|w| w.field == "items" && w.function == "add"),
+        document
+            .state_writes
+            .iter()
+            .any(|w| w.field == "items" && w.function == "add"),
         "expected this.items.push(x) to be recognized as a write to items, got {:?}",
         document.state_writes
     );
     assert!(
-        document.state_writes.iter().any(|w| w.field == "lastId" && w.function == "add"),
+        document
+            .state_writes
+            .iter()
+            .any(|w| w.field == "lastId" && w.function == "add"),
         "expected this.lastId++ to be recognized as a write to lastId, got {:?}",
         document.state_writes
     );
@@ -555,7 +622,10 @@ fn go_receiver_increment_is_recognized_as_a_state_write() {
     );
 
     assert!(
-        document.state_writes.iter().any(|w| w.field == "LastId" && w.owner == "Store"),
+        document
+            .state_writes
+            .iter()
+            .any(|w| w.field == "LastId" && w.owner == "Store"),
         "expected s.LastId++ to be recognized as a write to Store.LastId, got {:?}",
         document.state_writes
     );
@@ -585,12 +655,18 @@ fn javascript_object_literal_binding_registers_init_only_keys_as_state() {
     );
 
     assert!(
-        document.state_declarations.iter().any(|d| d.field == "timeout" && d.owner == "config"),
+        document
+            .state_declarations
+            .iter()
+            .any(|d| d.field == "timeout" && d.owner == "config"),
         "expected config.timeout to be declared as state, got {:?}",
         document.state_declarations
     );
     assert!(
-        document.state_declarations.iter().any(|d| d.field == "retries" && d.owner == "config"),
+        document
+            .state_declarations
+            .iter()
+            .any(|d| d.field == "retries" && d.owner == "config"),
         "expected the init-only field retries (never read or written again) to still be \
          declared as state, got {:?}",
         document.state_declarations
@@ -644,7 +720,10 @@ fn javascript_calls_do_not_produce_phantom_state_reads() {
         document.state_reads
     );
     assert!(
-        document.function_defs.iter().any(|f| f.name == "escalate" && f.owner == "Widget"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "escalate" && f.owner == "Widget"),
         "escalate must still be recognized as a real method, got {:?}",
         document.function_defs
     );
@@ -666,7 +745,10 @@ fn java_constructor_is_recognized_as_a_function_and_owns_its_field_writes() {
     );
 
     assert!(
-        document.function_defs.iter().any(|f| f.name == "Widget" && f.owner == "Widget"),
+        document
+            .function_defs
+            .iter()
+            .any(|f| f.name == "Widget" && f.owner == "Widget"),
         "the constructor must be recognized as a function, got {:?}",
         document.function_defs
     );
@@ -679,7 +761,10 @@ fn java_constructor_is_recognized_as_a_function_and_owns_its_field_writes() {
         document.state_writes
     );
     assert!(
-        !document.state_writes.iter().any(|w| w.function == "(top-level)"),
+        !document
+            .state_writes
+            .iter()
+            .any(|w| w.function == "(top-level)"),
         "no write should be left attributed to (top-level), got {:?}",
         document.state_writes
     );
@@ -782,7 +867,10 @@ fn typescript_field_with_initializer_is_recognized_as_state_with_correct_type() 
     );
 
     assert!(
-        document.state_declarations.iter().any(|d| d.field == "untyped" && d.r#type.is_none()),
+        document
+            .state_declarations
+            .iter()
+            .any(|d| d.field == "untyped" && d.r#type.is_none()),
         "an untyped field with an initializer must still be declared as state, got {:?}",
         document.state_declarations
     );
@@ -790,7 +878,12 @@ fn typescript_field_with_initializer_is_recognized_as_state_with_correct_type() 
         .state_declarations
         .iter()
         .find(|d| d.field == "typed")
-        .unwrap_or_else(|| panic!("typed field not found, got {:?}", document.state_declarations));
+        .unwrap_or_else(|| {
+            panic!(
+                "typed field not found, got {:?}",
+                document.state_declarations
+            )
+        });
     assert_eq!(
         typed.r#type,
         Some("number".to_string()),
@@ -812,7 +905,10 @@ fn csharp_interlocked_increment_is_recognized_as_a_state_write() {
     );
 
     assert!(
-        document.state_writes.iter().any(|w| w.field == "_count" && w.function == "Bump"),
+        document
+            .state_writes
+            .iter()
+            .any(|w| w.field == "_count" && w.function == "Bump"),
         "Interlocked.Increment(ref _count) must be recognized as a write to _count, got {:?}",
         document.state_writes
     );
@@ -828,12 +924,18 @@ fn lua_require_is_recognized_as_an_import() {
     );
 
     assert!(
-        document.imports.iter().any(|i| i.target == "widget" && i.kind == "file"),
+        document
+            .imports
+            .iter()
+            .any(|i| i.target == "widget" && i.kind == "file"),
         "require(\"widget\") must be recognized as a file import, got {:?}",
         document.imports
     );
     assert!(
-        document.imports.iter().any(|i| i.target == "other.thing" && i.kind == "file"),
+        document
+            .imports
+            .iter()
+            .any(|i| i.target == "other.thing" && i.kind == "file"),
         "require('other.thing') must be recognized as a file import, got {:?}",
         document.imports
     );
@@ -852,7 +954,10 @@ fn go_struct_tag_does_not_hide_an_embedded_field_or_leak_into_a_named_fields_typ
     );
 
     assert!(
-        document.state_declarations.iter().any(|d| d.field == "Base" && d.owner == "Widget"),
+        document
+            .state_declarations
+            .iter()
+            .any(|d| d.field == "Base" && d.owner == "Widget"),
         "an embedded field with a struct tag must still be declared as state, got {:?}",
         document.state_declarations
     );
@@ -860,7 +965,12 @@ fn go_struct_tag_does_not_hide_an_embedded_field_or_leak_into_a_named_fields_typ
         .state_declarations
         .iter()
         .find(|d| d.field == "Name")
-        .unwrap_or_else(|| panic!("Name field not found, got {:?}", document.state_declarations));
+        .unwrap_or_else(|| {
+            panic!(
+                "Name field not found, got {:?}",
+                document.state_declarations
+            )
+        });
     assert_eq!(
         name_field.r#type,
         Some("string".to_string()),

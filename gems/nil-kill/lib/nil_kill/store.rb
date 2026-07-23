@@ -17,7 +17,7 @@ module NilKill
                  "collection_runtime" => [], "ivar_runtime" => [], "collect_coverage" => {},
                  "type_normalizers" => [], "dispatcher_inferences" => [], "return_origins" => [], "param_origins" => [],
                  "rbi_field_types" => [], "noreturn_methods" => [],
-                 "runtime_call_edges" => [], "fallibility_pressure" => [], "hidden_enum_pressure" => [], "flow_graph" => nil,
+                 "runtime_call_edges" => [], "fallibility_pressure" => [], "flow_graph" => nil,
                  "flow_local_types" => [], "type_dependencies" => [],
                  "call_resolution_coverage" => {},
                  "static_evidence_summary" => {} }

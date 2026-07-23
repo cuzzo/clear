@@ -150,10 +150,17 @@ fn function_evidence(
     for document in documents {
         for call in &document.call_sites {
             let item = out
-                .entry((document.file.clone(), call.owner.clone(), call.function.clone()))
+                .entry((
+                    document.file.clone(),
+                    call.owner.clone(),
+                    call.function.clone(),
+                ))
                 .or_default();
             if call.receiver == "T"
-                && matches!(call.message.as_str(), "cast" | "must" | "assert_type!" | "unsafe")
+                && matches!(
+                    call.message.as_str(),
+                    "cast" | "must" | "assert_type!" | "unsafe"
+                )
             {
                 item.cast_assertions += 1;
             }
@@ -180,16 +187,24 @@ fn function_evidence(
         }
         for read in &document.state_reads {
             if read.receiver == "self" {
-                out.entry((document.file.clone(), read.owner.clone(), read.function.clone()))
-                    .or_default()
-                    .state_accesses += 1;
+                out.entry((
+                    document.file.clone(),
+                    read.owner.clone(),
+                    read.function.clone(),
+                ))
+                .or_default()
+                .state_accesses += 1;
             }
         }
         for write in &document.state_writes {
             if write.receiver == "self" {
-                out.entry((document.file.clone(), write.owner.clone(), write.function.clone()))
-                    .or_default()
-                    .state_accesses += 1;
+                out.entry((
+                    document.file.clone(),
+                    write.owner.clone(),
+                    write.function.clone(),
+                ))
+                .or_default()
+                .state_accesses += 1;
             }
         }
     }
@@ -205,9 +220,7 @@ fn owner_for_function(
         .function_defs
         .iter()
         .find(|definition| {
-            definition.name == function
-                && definition.span[0] <= line
-                && line <= definition.span[2]
+            definition.name == function && definition.span[0] <= line && line <= definition.span[2]
         })
         .map(|definition| definition.owner.clone())
         .unwrap_or_default()
@@ -230,7 +243,10 @@ fn related_function_keys(
             add_method_and_return_callers(consumer, documents, &mut out);
         }
     } else if row.declaration_kind == "state_field" {
-        for document in documents.iter().filter(|document| document.file == row.path) {
+        for document in documents
+            .iter()
+            .filter(|document| document.file == row.path)
+        {
             for access in document
                 .state_reads
                 .iter()
@@ -264,7 +280,10 @@ fn add_method_and_return_callers(
     if row.slot != "return" {
         return;
     }
-    for document in documents.iter().filter(|document| document.file == row.path) {
+    for document in documents
+        .iter()
+        .filter(|document| document.file == row.path)
+    {
         for call in document
             .call_sites
             .iter()

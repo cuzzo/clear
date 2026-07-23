@@ -27,6 +27,8 @@ struct RawEffect {
     write_value_hints: BTreeMap<String, String>,
     write_sources: BTreeMap<String, String>,
     write_call_sources: BTreeMap<String, Span>,
+    write_nullable_contracts: BTreeMap<String, String>,
+    return_state_hint: Option<String>,
     unknown_call: bool,
     complete: bool,
     unknown_reasons: Vec<String>,
@@ -91,6 +93,10 @@ pub(crate) fn extract(
                 if behavior.declared_type_hint_complete(type_name) {
                     raw.write_type_hints
                         .insert(name.clone(), format!("declared:{type_name}"));
+                    if let Some(contract) = behavior.nullable_declared_type_contract(type_name) {
+                        raw.write_nullable_contracts
+                            .insert(name.clone(), contract.to_string());
+                    }
                 }
             }
         }
@@ -99,7 +105,29 @@ pub(crate) fn extract(
             match find_syntax_node(&method.node, node.span, &node.role) {
                 Some(syntax_node) => {
                     let target = effect_target(syntax_node, &node.role, profile);
-                    collect(target, &mut raw);
+                    if node.role == "return" {
+                        raw.return_state_hint = direct_return_state_hint(target);
+                    }
+                    collect(
+                        target,
+                        &mut raw,
+                        behavior.function_value_calls_are_local_reads(),
+                    );
+                    for (name, producer_span) in raw.write_call_sources.clone() {
+                        let contract = [
+                            find_by_span_and_kind(target, producer_span, "FCALL")
+                                .or_else(|| find_by_span(target, producer_span, true)),
+                            direct_call_result_node(target),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .find_map(|producer| behavior.nullable_call_result_contract(producer));
+                        if let Some(contract) = contract {
+                            raw.write_nullable_contracts
+                                .insert(name, contract.to_string());
+                        }
+                    }
+                    apply_normalized_local_contract(method, node, &mut raw);
                     let declared_candidates = raw
                         .writes
                         .iter()
@@ -115,7 +143,13 @@ pub(crate) fn extract(
                                 raw.writes.insert(name.clone());
                                 raw.record_place(name.clone(), "local");
                                 raw.write_type_hints
-                                    .insert(name, format!("declared:{type_name}"));
+                                    .insert(name.clone(), format!("declared:{type_name}"));
+                                if let Some(contract) =
+                                    behavior.nullable_declared_type_contract(&type_name)
+                                {
+                                    raw.write_nullable_contracts
+                                        .insert(name, contract.to_string());
+                                }
                             }
                         }
                     }
@@ -213,6 +247,12 @@ pub(crate) fn extract(
                 .into_iter()
                 .map(|(target, producer_span)| (id_for(&target), producer_span))
                 .collect(),
+            write_nullable_contracts: raw
+                .write_nullable_contracts
+                .into_iter()
+                .map(|(target, contract)| (id_for(&target), contract))
+                .collect(),
+            return_state_hint: raw.return_state_hint,
             unknown_call: raw.unknown_call,
             complete: raw.complete,
             unknown_reasons: raw.unknown_reasons,
@@ -223,6 +263,38 @@ pub(crate) fn extract(
     facts
         .effects
         .sort_by(|left, right| left.node_id.cmp(&right.node_id));
+}
+
+/// Some adapters expose a direct assignment through the normalized local-flow
+/// statement contract before it becomes a `LASGN` in the CFG effect tree. Use
+/// that existing normalized fact only at its exact statement span; this fills
+/// the value hint without introducing a second source scanner.
+fn apply_normalized_local_contract(
+    method: &MethodSummary,
+    node: &ControlFlowNode,
+    effect: &mut RawEffect,
+) {
+    let contracts = crate::syntax::local_flow::local_contract_assignments(method);
+    let Some(statement) = method
+        .statements
+        .iter()
+        .find(|statement| statement.span == node.span && statement.writes.len() == 1)
+    else {
+        return;
+    };
+    let name = statement.writes.iter().next().expect("single local write");
+    if contracts.get(name).is_some_and(|value| value == "nil")
+        && !effect.write_value_hints.contains_key(name)
+    {
+        effect.writes.insert(name.clone());
+        effect.record_place(name.clone(), "local");
+        effect
+            .write_type_hints
+            .insert(name.clone(), "nil".to_string());
+        effect
+            .write_value_hints
+            .insert(name.clone(), "nil".to_string());
+    }
 }
 
 fn method_for_node<'a>(
@@ -296,7 +368,7 @@ fn effect_target<'a>(node: &'a Node, role: &str, profile: &ControlFlowProfile) -
 fn collect_control_bindings(node: &Node, role: &str, effect: &mut RawEffect) {
     if role == "for_loop" && node.r#type == "FOR" {
         if let Some(target) = node.children.first().and_then(ast::node) {
-            collect(target, effect);
+            collect(target, effect, false);
         }
         return;
     }
@@ -315,7 +387,7 @@ fn collect_scope_bindings(scope: Option<&Node>, effect: &mut RawEffect) {
         None
     };
     if let Some(args) = args {
-        collect(args, effect);
+        collect(args, effect, false);
     }
 }
 
@@ -333,7 +405,7 @@ fn collect_nested_bindings(node: &Node, effect: &mut RawEffect) {
     }
 }
 
-fn collect(node: &Node, effect: &mut RawEffect) {
+fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_reads: bool) {
     if NESTED_SCOPE_TYPES.contains(&node.r#type.as_str()) {
         return;
     }
@@ -341,12 +413,18 @@ fn collect(node: &Node, effect: &mut RawEffect) {
         if let Some(name) = node_name(node) {
             effect.writes.insert(name.clone());
             effect.record_place(name.clone(), place_kind_for_node(&node.r#type));
+            if let Some(base) = indexed_base_name(&name) {
+                effect.reads.insert(base.clone());
+                effect.record_place(base, "local");
+            }
             if !matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
                 effect.mutations.insert(name.clone());
             }
             if let Some(rhs) = node.children.iter().skip(1).find_map(ast::node) {
                 if let Some(hint) = value_type_hint(rhs) {
-                    effect.write_type_hints.insert(name.clone(), hint.to_string());
+                    effect
+                        .write_type_hints
+                        .insert(name.clone(), hint.to_string());
                     if let Some(value) = literal_value_hint(rhs) {
                         effect.write_value_hints.insert(name, value);
                     }
@@ -355,7 +433,7 @@ fn collect(node: &Node, effect: &mut RawEffect) {
                 } else if let Some(producer_span) = direct_call_result_span(rhs) {
                     effect.write_call_sources.insert(name, producer_span);
                 }
-                collect(rhs, effect);
+                collect(rhs, effect, function_value_calls_are_local_reads);
             }
         } else {
             effect.complete = false;
@@ -370,13 +448,30 @@ fn collect(node: &Node, effect: &mut RawEffect) {
             effect.reads.insert(name.clone());
             effect.record_place(name, place_kind_for_node(&node.r#type));
         }
+    } else if node.r#type == "VCALL" && function_value_calls_are_local_reads {
+        // A normalized bare invocation stores its callee as a symbol, not an
+        // LVAR child. Record that symbol as a local-value read so a function
+        // value invocation can use the existing reaching-definition lattice.
+        if let Some(Child::Symbol(name) | Child::String(name)) = node.children.first() {
+            effect.reads.insert(name.clone());
+            effect.record_place(name.clone(), "local");
+        }
     }
     if CALL_TYPES.contains(&node.r#type.as_str()) {
         effect.unknown_call = true;
     }
     for child in node.children.iter().filter_map(ast::node) {
-        collect(child, effect);
+        collect(child, effect, function_value_calls_are_local_reads);
     }
+}
+
+fn indexed_base_name(name: &str) -> Option<String> {
+    let base = name.split_once('[')?.0.trim();
+    (!base.is_empty()
+        && base
+            .bytes()
+            .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric()))
+    .then(|| base.to_string())
 }
 
 fn literal_value_hint(node: &Node) -> Option<String> {
@@ -394,6 +489,41 @@ fn literal_value_hint(node: &Node) -> Option<String> {
     }
 }
 
+/// Identifies only direct normalized literals at a return boundary. This is
+/// deliberately narrower than general expression evaluation: a literal may
+/// establish a nullable state, while calls and compound expressions must be
+/// accounted for through their reads/effects instead.
+fn direct_return_state_hint(node: &Node) -> Option<String> {
+    if ast::exact_integer_text(node.text.trim()) {
+        return Some("definitely_non_null".to_string());
+    }
+    match node.r#type.as_str() {
+        "RETURN" => {
+            let mut children = node.children.iter().filter_map(ast::node);
+            let value = children.next()?;
+            (children.next().is_none())
+                .then(|| direct_return_state_hint(value))
+                .flatten()
+        }
+        "PAREN" | "BEGIN" | "EXPRESSION_LIST" => {
+            let mut children = node.children.iter().filter_map(ast::node);
+            let value = children.next()?;
+            (children.next().is_none())
+                .then(|| direct_return_state_hint(value))
+                .flatten()
+        }
+        "NIL" => Some("definitely_null".to_string()),
+        "TRUE" | "FALSE" | "INTEGER" | "FLOAT" | "STR" | "STRING" | "ARRAY" | "LIST" | "HASH"
+        | "DICTIONARY" => Some("definitely_non_null".to_string()),
+        "LIT" => matches!(
+            node.children.first(),
+            Some(Child::Bool(_) | Child::Integer(_) | Child::Symbol(_))
+        )
+        .then(|| "definitely_non_null".to_string()),
+        _ => None,
+    }
+}
+
 /// Return a direct normalized call expression through transparent grouping
 /// only. Operations, containers, and member projections are not type-
 /// preserving assignment edges.
@@ -406,7 +536,7 @@ fn direct_call_result_span(node: &Node) -> Option<Span> {
                 .then(|| direct_call_result_span(only))
                 .flatten()
         }
-        "CALL" | "QCALL" | "FCALL" | "VCALL" => Some([
+        "CALL" | "QCALL" | "FCALL" | "VCALL" | "NEW_EXPRESSION" => Some([
             node.first_lineno,
             node.first_column,
             node.last_lineno,
@@ -414,6 +544,33 @@ fn direct_call_result_span(node: &Node) -> Option<Span> {
         ]),
         _ => None,
     }
+}
+
+fn direct_call_result_node(node: &Node) -> Option<&Node> {
+    if matches!(
+        node.r#type.as_str(),
+        "CALL" | "QCALL" | "FCALL" | "VCALL" | "NEW_EXPRESSION"
+    ) {
+        return Some(node);
+    }
+    if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
+        return node
+            .children
+            .iter()
+            .skip(1)
+            .find_map(ast::node)
+            .and_then(direct_call_result_node);
+    }
+    if matches!(node.r#type.as_str(), "PAREN" | "BEGIN" | "EXPRESSION_LIST") {
+        let mut children = node.children.iter().filter_map(ast::node);
+        let only = children.next()?;
+        return children
+            .next()
+            .is_none()
+            .then(|| direct_call_result_node(only))
+            .flatten();
+    }
+    None
 }
 
 fn value_type_hint(node: &Node) -> Option<&'static str> {
@@ -534,4 +691,127 @@ fn find_by_span_and_kind<'a>(node: &'a Node, span: Span, kind: &str) -> Option<&
         .iter()
         .filter_map(ast::node)
         .find_map(|child| find_by_span_and_kind(child, span, kind))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn node(kind: &str, children: Vec<Child>) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children,
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 1,
+            text: kind.to_string(),
+        }
+    }
+
+    #[test]
+    fn go_style_function_value_calls_are_local_reads_only_with_the_descriptor() {
+        let call = Node {
+            r#type: "VCALL".to_string(),
+            children: vec![Child::Symbol("callback".to_string())],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 10,
+            text: "callback()".to_string(),
+        };
+        let mut enabled = RawEffect::default();
+        collect(&call, &mut enabled, true);
+        assert!(enabled.reads.contains("callback"));
+        assert!(enabled.unknown_call);
+
+        let mut disabled = RawEffect::default();
+        collect(&call, &mut disabled, false);
+        assert!(disabled.reads.is_empty());
+        assert!(disabled.unknown_call);
+    }
+
+    #[test]
+    fn direct_call_results_only_unwrap_assignments_and_transparent_grouping() {
+        let call = node("FCALL", vec![Child::Symbol("malloc".to_string())]);
+        let assignment = node(
+            "LASGN",
+            vec![
+                Child::Symbol("value".to_string()),
+                Child::Node(Box::new(call.clone())),
+            ],
+        );
+        assert_eq!(direct_call_result_node(&call), Some(&call));
+        assert_eq!(
+            direct_call_result_node(&assignment).map(|node| node.r#type.as_str()),
+            Some("FCALL")
+        );
+
+        let grouped = node("PAREN", vec![Child::Node(Box::new(call.clone()))]);
+        assert_eq!(
+            direct_call_result_node(&grouped).map(|node| node.r#type.as_str()),
+            Some("FCALL")
+        );
+        let multi_expression = node(
+            "EXPRESSION_LIST",
+            vec![
+                Child::Node(Box::new(call.clone())),
+                Child::Node(Box::new(call)),
+            ],
+        );
+        assert_eq!(direct_call_result_node(&multi_expression), None);
+        assert_eq!(direct_call_result_node(&node("OPCALL", Vec::new())), None);
+    }
+
+    #[test]
+    fn direct_return_literals_have_exact_states_but_calls_do_not() {
+        let nil = node("NIL", Vec::new());
+        let integer = node("INTEGER", Vec::new());
+        let unknown_call = node("FCALL", vec![Child::Symbol("load".to_string())]);
+        let return_node = |value: Node| node("RETURN", vec![Child::Node(Box::new(value))]);
+
+        assert_eq!(
+            direct_return_state_hint(&return_node(nil)),
+            Some("definitely_null".to_string())
+        );
+        assert_eq!(
+            direct_return_state_hint(&return_node(integer)),
+            Some("definitely_non_null".to_string())
+        );
+        assert_eq!(direct_return_state_hint(&return_node(unknown_call)), None);
+    }
+
+    #[test]
+    fn normalized_java_literal_return_has_a_direct_state() {
+        let fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/nullable_java.java");
+        let (root, _) = crate::ast::parse(&fixture).expect("parse nullable fixture");
+        let mut stack = vec![&root];
+        let literal_return = loop {
+            let node = stack.pop().expect("fixture has return 0");
+            if node.text == "return 0;" {
+                break node;
+            }
+            stack.extend(node.children.iter().filter_map(ast::node));
+        };
+        assert_eq!(literal_return.r#type, "RETURN");
+        assert_eq!(
+            direct_return_state_hint(literal_return),
+            Some("definitely_non_null".to_string()),
+            "normalized literal return: {literal_return:#?}"
+        );
+    }
+
+    #[test]
+    fn indexed_base_reads_require_a_simple_local_receiver() {
+        assert_eq!(indexed_base_name("values[key]"), Some("values".to_string()));
+        assert_eq!(
+            indexed_base_name("items [ index ]"),
+            Some("items".to_string())
+        );
+        assert_eq!(indexed_base_name("object.values[key]"), None);
+        assert_eq!(indexed_base_name("values"), None);
+        assert_eq!(indexed_base_name("[key]"), None);
+    }
 }

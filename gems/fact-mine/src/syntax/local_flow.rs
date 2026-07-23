@@ -342,11 +342,21 @@ impl<'a> LocalFlow<'a> {
         } else {
             format!("{owner}::{name}")
         };
+        let identity_suffix = format!("\0{name}\0{line}");
         self.method_param_types
             .get(&line_key)
             .or_else(|| self.method_param_types.get(&null_key))
             .or_else(|| self.method_param_types.get(&colon_key))
             .or_else(|| self.method_param_types.get(name))
+            .or_else(|| {
+                let mut candidates = self
+                    .method_param_types
+                    .iter()
+                    .filter(|(key, _)| key.ends_with(&identity_suffix))
+                    .map(|(_, types)| types);
+                let candidate = candidates.next()?;
+                candidates.next().is_none().then_some(candidate)
+            })
             .cloned()
             .unwrap_or_default()
     }
@@ -475,7 +485,7 @@ impl<'a> LocalFlow<'a> {
 
     fn method_name(&self, node: &Node) -> String {
         let name = if node.r#type == "DEFS" {
-            let receiver = node.children.get(0).and_then(ast::node);
+            let receiver = node.children.first().and_then(ast::node);
             let prefix = receiver
                 .map(|receiver| {
                     if receiver.r#type == "SELF" {
@@ -856,13 +866,13 @@ fn identifiers_with_positions(source: &str) -> Vec<IdentifierSpan> {
     let mut out = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
-        let has_prefix = if index + 5 <= bytes.len() && &bytes[index..index + 5] == b"self." {
+        let has_prefix = if index + 5 <= bytes.len()
+            && matches!(&bytes[index..index + 5], b"self." | b"this.")
+        {
             Some(5)
-        } else if index + 5 <= bytes.len() && &bytes[index..index + 5] == b"this." {
-            Some(5)
-        } else if index + 6 <= bytes.len() && &bytes[index..index + 6] == b"self->" {
-            Some(6)
-        } else if index + 6 <= bytes.len() && &bytes[index..index + 6] == b"this->" {
+        } else if index + 6 <= bytes.len()
+            && matches!(&bytes[index..index + 6], b"self->" | b"this->")
+        {
             Some(6)
         } else if index + 7 <= bytes.len() && &bytes[index..index + 7] == b"$this->" {
             Some(7)
@@ -1060,6 +1070,34 @@ struct BoundaryText {
 mod tests {
     use super::*;
     use crate::syntax::Language;
+
+    #[test]
+    fn parameter_types_reconcile_only_a_unique_name_and_line_identity() {
+        let entry = BTreeMap::from([("value".to_string(), "gsl::not_null<Widget *>".to_string())]);
+        let mut types = BTreeMap::new();
+        types.insert(format!("fixture\0load\0{}", 12), entry.clone());
+        let flow = LocalFlow::new(
+            "fixture.cpp".to_string(),
+            Vec::new(),
+            BTreeMap::new(),
+            types,
+            crate::syntax::normalized_behavior::behavior(Language::Cpp),
+        );
+        assert_eq!(flow.param_types_for("(top-level)", "load", 12), entry);
+
+        let mut ambiguous = flow.method_param_types.clone();
+        ambiguous.insert(format!("other\0load\0{}", 12), BTreeMap::new());
+        let ambiguous_flow = LocalFlow::new(
+            "fixture.cpp".to_string(),
+            Vec::new(),
+            BTreeMap::new(),
+            ambiguous,
+            crate::syntax::normalized_behavior::behavior(Language::Cpp),
+        );
+        assert!(ambiguous_flow
+            .param_types_for("(top-level)", "load", 12)
+            .is_empty());
+    }
 
     #[test]
     fn test_empty_node() {
@@ -1434,14 +1472,22 @@ mod tests {
               }\n",
         )
         .unwrap();
-        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
+        let summaries =
+            scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
         let declaration = summaries[0]
             .statements
             .iter()
             .find(|statement| statement.source.contains("numevents = 0"))
             .expect("declaration statement");
-        assert!(declaration.reads.is_empty(), "reads should be empty, got {:?}", declaration.reads);
-        assert_eq!(declaration.writes, BTreeSet::from(["numevents".to_string()]));
+        assert!(
+            declaration.reads.is_empty(),
+            "reads should be empty, got {:?}",
+            declaration.reads
+        );
+        assert_eq!(
+            declaration.writes,
+            BTreeSet::from(["numevents".to_string()])
+        );
         assert!(declaration.dependencies.is_empty());
     }
 
@@ -1467,7 +1513,11 @@ mod tests {
               \x20       )\n",
         )
         .unwrap();
-        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::Python).unwrap();
+        let summaries = scan_files(
+            &[file.path().to_path_buf()],
+            crate::syntax::Language::Python,
+        )
+        .unwrap();
         let call_statement = summaries[0]
             .statements
             .iter()
@@ -1511,14 +1561,24 @@ mod tests {
               \x20       self._thread_local.last_nonce = nonce\n",
         )
         .unwrap();
-        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::Python).unwrap();
-        let all_statements = summaries.iter().flat_map(|summary| &summary.statements).collect::<Vec<_>>();
+        let summaries = scan_files(
+            &[file.path().to_path_buf()],
+            crate::syntax::Language::Python,
+        )
+        .unwrap();
+        let all_statements = summaries
+            .iter()
+            .flat_map(|summary| &summary.statements)
+            .collect::<Vec<_>>();
 
         let init_statement = all_statements
             .iter()
             .find(|statement| statement.source.contains("threading.local()"))
             .expect("declaration statement");
-        assert_eq!(init_statement.writes, BTreeSet::from(["@_thread_local".to_string()]));
+        assert_eq!(
+            init_statement.writes,
+            BTreeSet::from(["@_thread_local".to_string()])
+        );
 
         let mutation_statement = all_statements
             .iter()
@@ -1547,7 +1607,10 @@ mod tests {
     fn indexed_self_attribute_write_still_returns_its_writes() {
         let behavior = crate::syntax::python::behavior();
         let writes = textual_local_writes("self.cache[index].status = 1", behavior);
-        assert!(!writes.is_empty(), "expected the indexed write's targets to survive, got none");
+        assert!(
+            !writes.is_empty(),
+            "expected the indexed write's targets to survive, got none"
+        );
     }
 
     // Real bug, found auditing wrk/src/http_parser.c's http_parser_execute:
@@ -1572,7 +1635,8 @@ mod tests {
               }\n",
         )
         .unwrap();
-        let summaries = scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
+        let summaries =
+            scan_files(&[file.path().to_path_buf()], crate::syntax::Language::C).unwrap();
         let loop_statement = summaries[0]
             .statements
             .iter()

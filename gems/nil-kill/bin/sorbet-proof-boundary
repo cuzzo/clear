@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The repository-wide Sorbet configuration intentionally excludes NilKill and
+# has unrelated legacy errors. Keep the proof-boundary policy independently
+# type-checked until NilKill is fully migrated into the root configuration.
+repo_root=$(cd "$(dirname "$0")/../../.." && pwd)
+cd "$repo_root"
+exec bundle exec srb tc --no-config gems/nil-kill/lib/nil_kill/proof_boundary_input.rb
