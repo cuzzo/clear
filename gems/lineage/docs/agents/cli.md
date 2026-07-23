@@ -180,6 +180,12 @@ lineage ingest \
   --commit "$GITHUB_SHA"
 ```
 
+`--kind` accepts `coverage`, `mutants`, and `sarif`. Direct inputs are indexed
+against the resolved immutable commit and can carry an exact scope with
+`--selection`, `--test-set`, `--mutant-corpus` (for mutation evidence), and
+`--complete`. Use `--run` for a multi-producer run with provenance, hashes, and
+transactional ingestion.
+
 The preferred complete form consumes a run manifest:
 
 ```sh

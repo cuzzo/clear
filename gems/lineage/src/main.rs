@@ -298,6 +298,29 @@ enum Command {
         provider: String,
         #[arg(long)]
         replace: bool,
+        /// Directly ingest a coverage, mutation, or SARIF artifact. This is
+        /// independent of lineage.yml and complements --run manifests.
+        #[arg(long, value_enum)]
+        kind: Option<DirectIngestKind>,
+        /// Input encoding for --kind (for example cobertura, simplecov,
+        /// mutant-facts, or sarif).
+        #[arg(long)]
+        format: Option<String>,
+        /// Immutable commit that the direct artifact describes.
+        #[arg(long)]
+        commit: Option<String>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        timestamp: Option<i64>,
+        #[arg(long)]
+        selection: Option<String>,
+        #[arg(long)]
+        mutant_corpus: Option<String>,
+        #[arg(long)]
+        test_set: Option<String>,
+        #[arg(long)]
+        complete: bool,
     },
 }
 
@@ -305,6 +328,13 @@ enum Command {
 enum DiffFormat {
     Text,
     Json,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum DirectIngestKind {
+    Coverage,
+    Mutants,
+    Sarif,
 }
 
 #[derive(Debug)]
@@ -383,8 +413,11 @@ fn main() -> Result<()> {
             if require_complete {
                 ensure_profile_declares_complete_artifacts(&config, &profile)?;
             }
-            ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
             let execution = ProfileExecutionSession::begin(&repo, &config)?;
+            // Reconciliation can repair a previously ingested/published run and
+            // remove its own bookkeeping before we assess the caller's source
+            // tree. It must happen under the execution lock so two CI processes
+            // cannot race a pending publication.
             reconcile_pending_publications(&repo, &config, &db)?;
             ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
             let revision = git.resolve_commit("HEAD")?;
@@ -799,16 +832,69 @@ fn main() -> Result<()> {
             latest_run,
             provider,
             replace,
+            kind,
+            format,
+            commit,
+            source,
+            timestamp,
+            selection,
+            mutant_corpus,
+            test_set,
+            complete,
         } => {
-            if run.is_some() || latest_run || input.is_none() {
-                let run = match run {
-                    Some(run) => run,
-                    None => latest_run_directory(&repo, &load_config(&repo)?).join("manifest.json"),
-                };
-                ingest_run_manifest(&db, &repo, &run)?;
+            let db = repository_path(&repo, &db);
+            if let Some(kind) = kind {
+                if run.is_some() || latest_run {
+                    anyhow::bail!("--kind cannot be combined with --run or --latest-run");
+                }
+                let input = repository_path(&repo, &input.context("--kind requires --input")?);
+                let format = format.context("--kind requires --format")?;
+                let git = GitProvider::open(&repo)?;
+                let commit = git.resolve_commit(&commit.context("--kind requires --commit")?)?;
+                ensure_revision_snapshot(&db, &repo, &commit)?;
+                ingest_direct_artifact(DirectArtifactIngest {
+                    kind,
+                    db: &db,
+                    repo: &repo,
+                    input: &input,
+                    format: &format,
+                    commit: &commit,
+                    source,
+                    timestamp,
+                    selection,
+                    mutant_corpus,
+                    test_set,
+                    complete,
+                    replace,
+                })?;
+                Storage::open(&db)?.refresh_ui_summaries()?;
                 return Ok(());
             }
-            let input = input.expect("input checked above");
+            if format.is_some()
+                || commit.is_some()
+                || source.is_some()
+                || timestamp.is_some()
+                || selection.is_some()
+                || mutant_corpus.is_some()
+                || test_set.is_some()
+                || complete
+            {
+                anyhow::bail!(
+                    "--format, --commit, --source, --timestamp, scope flags, and --complete require --kind"
+                );
+            }
+            if run.is_some() || latest_run || input.is_none() {
+                let run = match run {
+                    Some(run) => repository_path(&repo, &run),
+                    None => latest_run_directory(&repo, &load_config(&repo)?).join("manifest.json"),
+                };
+                let manifest = load_run_manifest(&run)?;
+                ensure_revision_snapshot(&db, &repo, &manifest.revision)?;
+                ingest_run_manifest(&db, &repo, &run)?;
+                Storage::open(&db)?.refresh_ui_summaries()?;
+                return Ok(());
+            }
+            let input = repository_path(&repo, &input.expect("input checked above"));
             let storage = Storage::open(&db)?;
             let git = GitProvider::open(&repo)?;
             let extractor = HeuristicExtractor::default();
@@ -1155,7 +1241,14 @@ fn ensure_clean_worktree(
     let dirty = porcelain_v1_dirty_paths(&output.stdout)?
         .into_iter()
         .find(|path| {
-            path != &artifact_prefix
+            let inside_selected_repo = repository_prefix.as_os_str().is_empty()
+                || path == &repository_prefix.to_string_lossy().replace('\\', "/")
+                || path.starts_with(&format!(
+                    "{}/",
+                    repository_prefix.to_string_lossy().replace('\\', "/")
+                ));
+            inside_selected_repo
+                && path != &artifact_prefix
                 && !path.starts_with(&format!("{artifact_prefix}/"))
                 && database_path.as_deref() != Some(path)
                 && !database_sidecars
@@ -1714,6 +1807,162 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
     Ok(())
 }
 
+struct DirectArtifactIngest<'a> {
+    kind: DirectIngestKind,
+    db: &'a Path,
+    repo: &'a Path,
+    input: &'a Path,
+    format: &'a str,
+    commit: &'a str,
+    source: Option<String>,
+    timestamp: Option<i64>,
+    selection: Option<String>,
+    mutant_corpus: Option<String>,
+    test_set: Option<String>,
+    complete: bool,
+    replace: bool,
+}
+
+fn ingest_direct_artifact(request: DirectArtifactIngest<'_>) -> Result<()> {
+    let scope = direct_evidence_scope(
+        request.kind,
+        request.commit,
+        request.selection,
+        request.mutant_corpus.clone(),
+        request.test_set,
+        request.complete,
+    )?;
+    let storage = Storage::open(request.db)?;
+    match request.kind {
+        DirectIngestKind::Coverage => {
+            let payload = fs::read_to_string(request.input)?;
+            let source = request.source.unwrap_or_else(|| "coverage".into());
+            let stats = ingest_coverage_json_with_options(
+                &storage,
+                &payload,
+                request.format,
+                request.commit,
+                request.timestamp,
+                request.replace,
+                &CoverageIngestOptions {
+                    line_source: source,
+                    evidence_scope: scope,
+                    complete: request.complete,
+                },
+            )?;
+            println!(
+                "ingested coverage: files={} units={} events={} line_events={} skipped_files={}",
+                stats.files, stats.units, stats.events, stats.line_events, stats.skipped_files
+            );
+        }
+        DirectIngestKind::Mutants => {
+            if request.format != "mutant-facts" {
+                anyhow::bail!("mutants direct ingestion requires --format mutant-facts");
+            }
+            let payload = fs::read_to_string(request.input)?;
+            let git = GitProvider::open(request.repo)?;
+            let normalizer = RepoPathNormalizer::new(request.repo);
+            let test_set = scope
+                .as_ref()
+                .map(|scope| scope.test_set.clone())
+                .unwrap_or_else(|| "unit".into());
+            let stats = ingest_mutant_facts_json_with_options(
+                &storage,
+                &normalizer,
+                &git,
+                &HeuristicExtractor::default(),
+                &payload,
+                request.commit,
+                request.timestamp,
+                &test_set,
+                &MutantIngestOptions {
+                    mutation_corpus: request.mutant_corpus.unwrap_or_default(),
+                    evidence_scope: scope,
+                    complete: request.complete,
+                },
+            )?;
+            println!(
+                "ingested mutant facts: facts={} units={} quality_events={} exposure_events={} skipped_files={} skipped_facts={}",
+                stats.facts,
+                stats.units,
+                stats.quality_events,
+                stats.exposure_events,
+                stats.skipped_files,
+                stats.skipped_facts
+            );
+        }
+        DirectIngestKind::Sarif => {
+            if request.format != "sarif" {
+                anyhow::bail!("SARIF direct ingestion requires --format sarif");
+            }
+            let payload = fs::read(request.input)?;
+            lineage::pipeline::validate_sarif_document(&payload)?;
+            let source = request.source.unwrap_or_else(|| "sarif".into());
+            let stats = ingest_sarif_paths(
+                &storage,
+                request.repo,
+                &[request.input.to_path_buf()],
+                &source,
+                request.commit,
+                request.timestamp,
+                request.replace,
+            )?;
+            if let Some(scope) = scope {
+                storage.record_evidence_artifact_scope(&EvidenceArtifactScope {
+                    family: "sarif".into(),
+                    source,
+                    scope,
+                    complete: request.complete,
+                    expected_lines: Default::default(),
+                })?;
+            }
+            println!(
+                "ingested SARIF: artifacts={} findings={} skipped_files={} skipped_results={}",
+                stats.artifacts, stats.findings, stats.skipped_files, stats.skipped_results
+            );
+        }
+    }
+    Ok(())
+}
+
+fn direct_evidence_scope(
+    kind: DirectIngestKind,
+    commit: &str,
+    selection: Option<String>,
+    mutant_corpus: Option<String>,
+    test_set: Option<String>,
+    complete: bool,
+) -> Result<Option<EvidenceScopeFingerprint>> {
+    match (selection, test_set) {
+        (None, None) => {
+            if complete {
+                anyhow::bail!("--complete requires --selection and --test-set");
+            }
+            if mutant_corpus.is_some() {
+                anyhow::bail!("--mutant-corpus requires --selection and --test-set");
+            }
+            Ok(None)
+        }
+        (Some(selection), Some(test_set)) => {
+            let mutant_corpus = match kind {
+                DirectIngestKind::Mutants => mutant_corpus
+                    .filter(|value| !value.trim().is_empty())
+                    .context("mutation evidence with a scope requires --mutant-corpus")?,
+                DirectIngestKind::Coverage | DirectIngestKind::Sarif => {
+                    mutant_corpus.unwrap_or_else(|| "not-applicable".into())
+                }
+            };
+            Ok(Some(EvidenceScopeFingerprint {
+                revision: commit.into(),
+                selection,
+                mutant_corpus,
+                test_set,
+            }))
+        }
+        _ => anyhow::bail!("--selection and --test-set must be supplied together"),
+    }
+}
+
 fn ingest_run_manifest(
     db: &std::path::Path,
     repo: &std::path::Path,
@@ -1726,6 +1975,10 @@ fn ingest_run_manifest(
     let run_directory = manifest_path
         .parent()
         .context("run manifest has no parent directory")?;
+    // Validate the complete content-addressed run before opening a database
+    // transaction. In particular, a SARIF document that the importer would
+    // ignore must never be recorded as complete evidence.
+    validate_run_artifacts(run_directory, &manifest)?;
     let storage = Storage::open(db)?;
     let extractor = HeuristicExtractor::default();
     let normalizer = RepoPathNormalizer::new(repo);
@@ -1792,27 +2045,10 @@ fn ingest_run_manifest(
                     )?;
                 }
                 ArtifactKind::Sarif => {
-                    let document: serde_json::Value = serde_json::from_slice(&payload)
-                        .with_context(|| {
-                            format!("parse SARIF artifact from producer {:?}", artifact.producer)
-                        })?;
-                    if document
-                        .get("version")
-                        .and_then(serde_json::Value::as_str)
-                        .is_none()
-                        || document
-                            .get("runs")
-                            .and_then(serde_json::Value::as_array)
-                            .is_none()
-                    {
-                        anyhow::bail!(
-                            "producer {:?} emitted an invalid SARIF document",
-                            artifact.producer
-                        );
-                    }
-                    let unpacked = sarif_directory
-                        .join(format!("{index}-{}", artifact.producer))
-                        .with_extension("json");
+                    // Keep temporary names independent of external manifest
+                    // text. The producer identifier is a provenance key, not a
+                    // filesystem path component.
+                    let unpacked = sarif_directory.join(format!("sarif-{index}.json"));
                     fs::create_dir_all(
                         unpacked.parent().expect("unpacked artifact parent exists"),
                     )?;
@@ -1943,6 +2179,71 @@ fn validate_manifest_provenance(
     }
     if manifest.tree_fingerprint.is_empty() || manifest.tree_fingerprint != resolved {
         anyhow::bail!("run manifest tree fingerprint does not match its revision");
+    }
+    let mut declared = std::collections::BTreeSet::new();
+    for producer in &manifest.producers {
+        if !lineage::pipeline::is_safe_identifier(&producer.name) {
+            anyhow::bail!(
+                "run manifest contains unsafe producer identifier {:?}",
+                producer.name
+            );
+        }
+        if !declared.insert(producer.name.as_str()) {
+            anyhow::bail!(
+                "run manifest declares producer {:?} more than once",
+                producer.name
+            );
+        }
+        if producer.outcome != lineage::pipeline::ProducerOutcome::Succeeded {
+            anyhow::bail!(
+                "artifact manifest references non-successful producer {:?} ({:?})",
+                producer.name,
+                producer.outcome
+            );
+        }
+    }
+    for artifact in &manifest.artifacts {
+        if !lineage::pipeline::is_safe_identifier(&artifact.producer) {
+            anyhow::bail!(
+                "run manifest contains unsafe artifact producer {:?}",
+                artifact.producer
+            );
+        }
+        if !declared.contains(artifact.producer.as_str()) {
+            anyhow::bail!(
+                "artifact producer {:?} is not declared by a successful producer run",
+                artifact.producer
+            );
+        }
+        if artifact.format.trim().is_empty() {
+            anyhow::bail!(
+                "artifact from producer {:?} has an empty format",
+                artifact.producer
+            );
+        }
+        let format_matches_family = match artifact.kind {
+            ArtifactKind::Auxiliary => true,
+            ArtifactKind::Coverage => matches!(
+                artifact.format.as_str(),
+                "boobytrap"
+                    | "codecov"
+                    | "cobertura"
+                    | "generic"
+                    | "simplecov"
+                    | "sqlcov"
+                    | "sql-cov"
+            ),
+            ArtifactKind::Mutants => artifact.format == "mutant-facts",
+            ArtifactKind::Sarif => artifact.format == "sarif",
+        };
+        if !format_matches_family {
+            anyhow::bail!(
+                "artifact from producer {:?} declares incompatible {:?} format {:?}",
+                artifact.producer,
+                artifact.kind,
+                artifact.format
+            );
+        }
     }
     Ok(())
 }
@@ -2311,6 +2612,39 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("clean worktree"));
+    }
+
+    #[test]
+    fn clean_worktree_check_for_subproject_ignores_unrelated_monorepo_changes() {
+        let directory = tempdir().unwrap();
+        let repository = git2::Repository::init(directory.path()).unwrap();
+        let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+        let project = directory.path().join("gems/demo");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("tracked.rb"), "puts :ok\n").unwrap();
+        let mut index = repository.index().unwrap();
+        index
+            .add_path(std::path::Path::new("gems/demo/tracked.rb"))
+            .unwrap();
+        index.write().unwrap();
+        let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+        repository
+            .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+
+        fs::write(directory.path().join("unrelated.md"), "outside project\n").unwrap();
+        assert!(
+            ensure_clean_worktree(&project, std::path::Path::new(".lineage/artifacts"), None)
+                .is_ok()
+        );
+
+        fs::write(project.join("dirty.rb"), "puts :dirty\n").unwrap();
+        assert!(
+            ensure_clean_worktree(&project, std::path::Path::new(".lineage/artifacts"), None)
+                .unwrap_err()
+                .to_string()
+                .contains("gems/demo/dirty.rb")
+        );
     }
 
     #[test]

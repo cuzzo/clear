@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
@@ -766,6 +767,311 @@ fn next_ci_repairs_a_published_run_left_before_latest_pointer_update() {
         fs::read_to_string(artifacts.join("latest/.publication-state")).unwrap(),
         "published\n"
     );
+}
+
+#[test]
+fn ingest_run_rejects_a_path_traversal_producer_before_creating_temp_files() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
+    let revision = commit_all(&repository, &signature, "initial").to_string();
+    let run = directory.path().join("incoming");
+    fs::create_dir_all(run.join("artifacts")).unwrap();
+    let sarif = br#"{"version":"2.1.0","runs":[]}"#;
+    fs::write(run.join("artifacts/findings.sarif"), sarif).unwrap();
+    let escaped = std::env::temp_dir().join(format!(
+        "lineage-manifest-producer-escape-{}-{}.json",
+        std::process::id(),
+        revision
+    ));
+    let _ = fs::remove_file(&escaped);
+    write_external_sarif_manifest(
+        &run,
+        &revision,
+        "x/../../lineage-manifest-producer-escape",
+        "sarif",
+        sarif,
+        directory.path(),
+    );
+
+    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/fresh.db",
+            "--run",
+            "incoming/manifest.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!ingest.status.success());
+    assert!(
+        String::from_utf8_lossy(&ingest.stderr).contains("unsafe producer identifier"),
+        "{}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+    assert!(
+        !escaped.exists(),
+        "untrusted producer escaped the temp directory"
+    );
+}
+
+#[test]
+fn ingest_run_rejects_malformed_sarif_before_recording_complete_evidence() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
+    let revision = commit_all(&repository, &signature, "initial").to_string();
+    let run = directory.path().join("incoming");
+    fs::create_dir_all(run.join("artifacts")).unwrap();
+    let sarif = br#"{"version":"2.0.0","runs":[]}"#;
+    fs::write(run.join("artifacts/findings.sarif"), sarif).unwrap();
+    write_external_sarif_manifest(&run, &revision, "scanner", "sarif", sarif, directory.path());
+
+    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/fresh.db",
+            "--run",
+            "incoming/manifest.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!ingest.status.success());
+    assert!(
+        String::from_utf8_lossy(&ingest.stderr).contains("SARIF version must be"),
+        "{}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+    let connection =
+        rusqlite::Connection::open(directory.path().join(".lineage/fresh.db")).unwrap();
+    let scopes: i64 = connection
+        .query_row("SELECT COUNT(*) FROM evidence_artifact_scopes", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(scopes, 0, "invalid SARIF must not create complete evidence");
+}
+
+#[test]
+fn ingest_run_requires_successful_declared_producers_for_every_artifact() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
+    let revision = commit_all(&repository, &signature, "initial").to_string();
+    let run = directory.path().join("incoming");
+    fs::create_dir_all(run.join("artifacts")).unwrap();
+    let sarif = br#"{"version":"2.1.0","runs":[]}"#;
+    fs::write(run.join("artifacts/findings.sarif"), sarif).unwrap();
+    write_external_sarif_manifest(&run, &revision, "scanner", "sarif", sarif, directory.path());
+
+    let manifest_path = run.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["producers"][0]["outcome"] = serde_json::json!("failed");
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let failed = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/fresh.db",
+            "--run",
+            "incoming/manifest.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("non-successful producer"));
+
+    manifest["producers"][0]["outcome"] = serde_json::json!("succeeded");
+    manifest["artifacts"][0]["producer"] = serde_json::json!("undeclared");
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let undeclared = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/fresh.db",
+            "--run",
+            "incoming/manifest.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!undeclared.status.success());
+    assert!(String::from_utf8_lossy(&undeclared.stderr).contains("not declared"));
+}
+
+#[test]
+fn ingest_run_indexes_a_fresh_database_and_refreshes_the_manifest_revision() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn value() -> u8 { 1 }\n",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("lineage.yml"),
+        complete_profile_config(),
+    )
+    .unwrap();
+    let revision = commit_all(&repository, &signature, "initial").to_string();
+
+    let ci = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ci", "--repo"])
+        .arg(directory.path())
+        .args(["--db", ".lineage/producer.db", "--trust-current-config"])
+        .output()
+        .unwrap();
+    assert!(
+        ci.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ci.stderr)
+    );
+    fs::remove_file(directory.path().join(".lineage/producer.db")).unwrap();
+
+    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/fresh/lineage.db",
+            "--run",
+            ".lineage/artifacts/latest/manifest.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+    let storage =
+        lineage::Storage::open(directory.path().join(".lineage/fresh/lineage.db")).unwrap();
+    assert!(storage.commit_exists(&revision).unwrap());
+    assert_eq!(
+        storage.ci_run_state("latest").unwrap().as_deref(),
+        Some("ingested")
+    );
+}
+
+#[test]
+fn direct_ingest_coverage_matches_the_documented_kind_format_commit_workflow() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
+    fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn value() -> u8 { 1 }\n",
+    )
+    .unwrap();
+    let revision = commit_all(&repository, &signature, "initial").to_string();
+    fs::write(
+        directory.path().join("coverage.json"),
+        r#"{"files":[{"path":"lib.rs","coverage":100.0,"line_hits":[{"line":1,"hits":1}]}]}"#,
+    )
+    .unwrap();
+
+    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        .args(["ingest", "--repo"])
+        .arg(directory.path())
+        .args([
+            "--db",
+            ".lineage/lineage.db",
+            "--kind",
+            "coverage",
+            "--format",
+            "generic",
+            "--input",
+            "coverage.json",
+            "--commit",
+            &revision,
+            "--source",
+            "direct-coverage",
+            "--selection",
+            "full",
+            "--test-set",
+            "unit",
+            "--complete",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+    let storage = lineage::Storage::open(directory.path().join(".lineage/lineage.db")).unwrap();
+    let scope = lineage::EvidenceScopeFingerprint {
+        revision,
+        selection: "full".into(),
+        mutant_corpus: "not-applicable".into(),
+        test_set: "unit".into(),
+    };
+    assert!(storage
+        .scoped_coverage_artifact("direct-coverage", &scope, &["lib.rs".into()])
+        .unwrap()
+        .is_some());
+}
+
+fn write_external_sarif_manifest(
+    run: &std::path::Path,
+    revision: &str,
+    producer: &str,
+    format: &str,
+    sarif: &[u8],
+    repository: &std::path::Path,
+) {
+    let artifact_hash = hex::encode(Sha256::digest(sarif));
+    let manifest = serde_json::json!({
+        "version": "lineage-run/v1",
+        "revision": revision,
+        "profile": "external",
+        "repository_identity": lineage::repository_identity(repository),
+        "tree_fingerprint": revision,
+        "started_at_unix_ms": 1,
+        "duration_ms": 1,
+        "status": "succeeded",
+        "configuration_hash": "external",
+        "producers": [{
+            "name": producer,
+            "argv": ["external"],
+            "tool_version": "1",
+            "working_directory": ".",
+            "settings_hash": "settings",
+            "started_at_unix_ms": 1,
+            "duration_ms": 1,
+            "exit_status": 0,
+            "outcome": "succeeded",
+            "failure": null,
+            "stdout_log": "logs/stdout.log",
+            "stderr_log": "logs/stderr.log"
+        }],
+        "artifacts": [{
+            "producer": producer,
+            "kind": "sarif",
+            "format": format,
+            "path": "artifacts/findings.sarif",
+            "content_hash": artifact_hash,
+            "compression": "none",
+            "scope": null,
+            "complete": true,
+            "evidence_scope": {"selection":"full","test_set":"unit"}
+        }]
+    });
+    fs::write(
+        run.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
 }
 
 fn complete_profile_config() -> &'static str {

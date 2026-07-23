@@ -653,7 +653,10 @@ pub fn validate_run_artifacts(run_directory: &Path, manifest: &RunManifest) -> R
     Ok(())
 }
 
-fn validate_sarif_document(bytes: &[u8]) -> Result<()> {
+/// Validates the strict SARIF contract accepted for persisted Lineage
+/// evidence. Direct ingestion and manifest ingestion intentionally share this
+/// gate so an unsupported document cannot be reported as complete.
+pub fn validate_sarif_document(bytes: &[u8]) -> Result<()> {
     let document: serde_json::Value = serde_json::from_slice(bytes).context("parse JSON")?;
     if document.get("version").and_then(serde_json::Value::as_str) != Some("2.1.0") {
         bail!("SARIF version must be \"2.1.0\"");
@@ -1354,7 +1357,10 @@ fn create_checked_relative_directory(root: &Path, relative: &Path, label: &str) 
         current.push(name);
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                bail!("{label} ancestor {} must be a non-symlink directory", current.display());
+                bail!(
+                    "{label} ancestor {} must be a non-symlink directory",
+                    current.display()
+                );
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -2417,7 +2423,9 @@ fn validate_artifact_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn is_safe_identifier(value: &str) -> bool {
+/// Returns whether an identifier is safe to use as an on-disk namespace.
+/// External manifests must apply the same rule as trusted configuration.
+pub fn is_safe_identifier(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()
