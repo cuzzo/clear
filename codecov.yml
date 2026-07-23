@@ -42,9 +42,13 @@ comment:
 flags:
   ruby:
     paths:
-      - compiler/
+      - compiler/ruby/
     carryforward: false
-    joined: false
+    # Ruby unit and integration coverage are uploaded in separate CI jobs.
+    # They must be joined into the master report; `joined: false` leaves the
+    # individually-valid uploads available only as flags and omits them from
+    # compiler/ruby's aggregate coverage.
+    joined: true
   zig:
     paths:
       - zig/
