@@ -342,6 +342,7 @@ RSpec.describe NilKill do
       expect(static_result.fetch("properties")).not_to have_key("proof_boundary")
       expect(static_result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("unknown")
       expect(static_result.dig("properties", "fact_mine.proof_boundary", "claim_status")).to eq("review")
+      expect(static_result.dig("properties", "fact_mine.proof_boundary", "blockers")).to include({ "kind" => "missing_evidence" })
       expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")).to be_positive
       expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "invalid_boundaries")).to eq(0)
       expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "missing_boundaries")).to eq(0)
@@ -378,6 +379,27 @@ RSpec.describe NilKill do
       partial_boundary = described_class.new.send(:static_review_boundary, "static_nil_finding", blockers: [{ "kind" => "call_resolution" }])
       expect(partial_boundary.fetch("input_completeness")).to eq("partial")
       expect(partial_boundary.fetch("blockers")).to eq([{ "kind" => "call_resolution" }])
+    end
+
+    it "explains unknown static review input as missing coverage evidence" do
+      boundary = described_class.new.send(:static_review_boundary, "static_nil_finding")
+
+      expect(boundary).to include(
+        "input_completeness" => "unknown",
+        "blockers" => [{ "kind" => "missing_evidence" }]
+      )
+    end
+
+    it "explains an unclassified corpus-coverage record as missing evidence" do
+      coverage = described_class.new.send(
+        :corpus_boundary_attributes,
+        { "static" => { "input_coverage" => { "complete" => "unclassified" } } }
+      )
+
+      expect(coverage).to eq(
+        input_completeness: "unknown",
+        blockers: [{ "kind" => "missing_evidence" }]
+      )
     end
 
     it "does not treat complete inputs as a proven static claim" do
@@ -461,6 +483,27 @@ RSpec.describe NilKill do
 
       expect(result.fetch("properties")).not_to have_key("proof_boundary")
       expect(result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("unknown")
+      expect(result.dig("properties", "fact_mine.proof_boundary", "blockers")).to include({ "kind" => "missing_evidence" })
+    end
+
+    it "adds a coverage blocker to an incoming unexplained unknown boundary" do
+      reporter = described_class.new
+      incoming = NilKill::Sarif.proof_boundary(
+        input_completeness: "unknown",
+        claim_status: "proven",
+        coverage_discharge: "unsatisfiable",
+        authority: ["fact_mine_normalized_ast"],
+        claim_kind: "static_nullable_return",
+        scope: { kind: "local", closed: false }
+      )
+
+      boundary = reporter.send(:static_proof_boundary, { "proof_boundary" => incoming }, "static_nullable_return", {})
+
+      expect(boundary).to include(
+        "input_completeness" => "unknown",
+        "claim_status" => "proven",
+        "blockers" => [{ "kind" => "missing_evidence" }]
+      )
     end
 
     it "keeps static primitive-domain actions review-only in SARIF" do
@@ -479,7 +522,8 @@ RSpec.describe NilKill do
         "input_completeness" => "unknown",
         "claim_status" => "observed",
         "coverage_discharge" => "not_applicable",
-        "claim_kind" => "nil_kill_action"
+        "claim_kind" => "nil_kill_action",
+        "blockers" => [{ "kind" => "missing_evidence" }]
       )
     end
 
@@ -570,10 +614,12 @@ RSpec.describe NilKill do
       sarif = JSON.parse(described_class.new(["--format=sarif"], evidence: evidence).to_sarif(evidence))
       results = sarif.fetch("runs").first.fetch("results")
 
-      expect(results).to include(a_hash_including(
-        "ruleId" => "nil-kill.static.false-nullable-return",
-        "message" => a_hash_including("text" => include("false-nilable return")),
-      ))
+      result = results.find do |candidate|
+        candidate["ruleId"] == "nil-kill.static.false-nullable-return"
+      end
+      expect(result.fetch("ruleId")).to eq("nil-kill.static.false-nullable-return")
+      expect(result.dig("message", "text")).to include("false-nilable return")
+      expect(result.dig("properties", "fact_mine.proof_boundary", "blockers")).to include({ "kind" => "missing_evidence" })
     end
 
     it "renders pressure facts as actionable SARIF findings" do

@@ -615,25 +615,52 @@ module NilKill
         authority: ["fact_mine_normalized_ast", "nil_kill_static"],
         claim_kind: scope,
         scope: { kind: "local", closed: false },
-        blockers: []
+        blockers: NilKill::ProofBoundaryInput.unknown_without_coverage.blockers
       )
     end
 
     def static_review_boundary(scope, input_completeness: nil, blockers: [])
+      coverage = NilKill::ProofBoundaryInput.review(
+        input_completeness: input_completeness,
+        blocker_kinds: Array(blockers).filter_map do |blocker|
+          kind = blocker["kind"].to_s
+          kind unless kind.empty?
+        end
+      )
       NilKill::Sarif.proof_boundary(
-        input_completeness: input_completeness || (blockers.empty? ? "unknown" : "partial"),
+        input_completeness: coverage.input_completeness,
         claim_status: "review",
         coverage_discharge: "unsatisfiable",
         authority: ["fact_mine_normalized_ast", "nil_kill_static"],
         claim_kind: scope,
         scope: { kind: "local", closed: false },
-        blockers: blockers
+        blockers: coverage.blockers
       )
     end
 
     def apply_corpus_completeness(boundary, evidence)
       coverage = corpus_boundary_attributes(evidence)
-      return boundary if coverage.fetch(:input_completeness) == "unknown"
+      if coverage.fetch(:input_completeness) == "unknown"
+        # An incoming local boundary may retain its semantic claim, but an
+        # unexplained unknown input boundary must still name the absent
+        # corpus-coverage fact that prevents a complete-input conclusion.
+        return boundary unless boundary.fetch("input_completeness") == "unknown" && Array(boundary["blockers"]).empty?
+
+        explanation = NilKill::ProofBoundaryInput.explain_unknown(
+          input_completeness: boundary.fetch("input_completeness"),
+          blocker_kinds: []
+        )
+
+        return NilKill::Sarif.proof_boundary(
+          input_completeness: explanation.input_completeness,
+          claim_status: boundary.fetch("claim_status"),
+          coverage_discharge: boundary.fetch("coverage_discharge"),
+          authority: boundary.fetch("authority"),
+          claim_kind: boundary.fetch("claim_kind"),
+          scope: boundary.fetch("scope"),
+          blockers: explanation.blockers
+        )
+      end
       # Coverage completeness cannot promote a detector's independently
       # unknown boundary; it can only preserve a valid incoming boundary.
       return boundary if coverage.fetch(:input_completeness) == "complete"
@@ -653,7 +680,7 @@ module NilKill
 
     def corpus_boundary_attributes(evidence)
       corpus = evidence.is_a?(Hash) ? (evidence.dig("static", "input_coverage") || evidence["input_coverage"]) : nil
-      return { input_completeness: "unknown", blockers: [] } unless corpus.is_a?(Hash)
+      return coverage_attributes(NilKill::ProofBoundaryInput.unknown_without_coverage) unless corpus.is_a?(Hash)
       return { input_completeness: "complete", blockers: [] } if corpus["complete"] == true
 
       if corpus["complete"] == false
@@ -663,7 +690,11 @@ module NilKill
         }
       end
 
-      { input_completeness: "unknown", blockers: [] }
+      coverage_attributes(NilKill::ProofBoundaryInput.unknown_without_coverage)
+    end
+
+    def coverage_attributes(coverage)
+      { input_completeness: coverage.input_completeness, blockers: coverage.blockers }
     end
 
     def unknown_observation_boundary(scope)
@@ -673,7 +704,8 @@ module NilKill
         coverage_discharge: "not_applicable",
         authority: ["nil_kill"],
         claim_kind: scope,
-        scope: { kind: "local", closed: false }
+        scope: { kind: "local", closed: false },
+        blockers: NilKill::ProofBoundaryInput.unknown_without_coverage.blockers
       )
     end
 
