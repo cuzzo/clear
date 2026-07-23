@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "fileutils"
 require "optparse"
 require "rbconfig"
 require_relative "../lib/test_miser/mutant_collector"
@@ -81,7 +82,11 @@ begin
     raise TestMiser::CollectionError, "--jobs cannot be combined with --shard" if options[:shard_total] > 1
 
     shard_dir = "#{options[:output]}.shards"
-    Dir.mkdir(shard_dir) unless Dir.exist?(shard_dir)
+    # A non-resumed collection is a fresh corpus. Keeping checkpoint files
+    # from an interrupted prior run silently merges stale mutant outcomes into
+    # the new report. `--resume` is the explicit opt-in that preserves them.
+    FileUtils.rm_rf(shard_dir) unless options[:resume]
+    FileUtils.mkdir_p(shard_dir)
     shard_paths = options[:jobs].times.map do |index|
       File.join(shard_dir, format("shard-%03d-of-%03d.json", index + 1, options[:jobs]))
     end

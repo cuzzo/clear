@@ -84,6 +84,26 @@ class TestMiserTest < Minitest::Test
     assert_equal "test-miser.report.sarif.v1", sarif.dig("runs", 0, "properties", "format")
   end
 
+  def test_normalizes_mutation_testing_elements_into_lineage_mutant_facts
+    executable = File.expand_path("../exe/test-miser-facts", __dir__)
+    Dir.mktmpdir("test-miser-facts") do |dir|
+      output = File.join(dir, "mutant-facts.json")
+      _stdout, stderr, status = Open3.capture3(
+        "bundle", "exec", "ruby", executable, "normalize",
+        "--input", FIXTURE, "--output", output
+      )
+
+      assert status.success?, stderr
+      facts = JSON.parse(File.read(output))
+      assert_equal "mutant-facts/v1", facts.fetch("schema")
+      assert_equal "test-miser", facts.fetch("source")
+      assert_equal 8, facts.fetch("tests").length
+      assert_equal 5, facts.fetch("mutants").length
+      assert_equal false, facts.dig("test_miser", "complete")
+      assert_equal ["alias:no-kill"], facts.fetch("mutants").first.fetch("covered_by")
+    end
+  end
+
   def test_infer_finds_missing_test_line_from_source
     Dir.mktmpdir("test-miser-location") do |dir|
       path = File.join(dir, "test/example_test.rb")
@@ -222,6 +242,7 @@ class TestMiserTest < Minitest::Test
   end
 
   def test_cli_evidence_executes_factmine_disable_and_control_experiments
+    skip_recursive_mutation_meta_tests!
     executable = File.expand_path("../exe/test-miser", __dir__)
     Dir.mktmpdir("test-miser-oracle-cli") do |dir|
       provider = File.join(dir, "fact-mine")
@@ -256,9 +277,8 @@ class TestMiserTest < Minitest::Test
       stdout, stderr, status = Open3.capture3(
         "ruby", executable, "evidence", "--format", "json", "--oracle-execute", config_path, FIXTURE,
       )
-      payload = JSON.parse(stdout)
-
       assert status.success?, stderr
+      payload = JSON.parse(stdout)
       executions = payload.dig("oracle_sensitivity", "execution_results")
       assert_equal 1, executions.length
       assert_equal "DISABLE_ORACLE", executions.fetch(0).dig("disabled_rewrite", "mutation")
@@ -285,20 +305,26 @@ class TestMiserTest < Minitest::Test
   end
 
   def test_mutant_collector_records_individual_killers
+    skip_recursive_mutation_meta_tests!
     executable = File.expand_path("../exe/test-miser-mutant", __dir__)
     setup = File.expand_path("fixtures/collector/setup", __dir__)
 
     Dir.mktmpdir("test-miser-collector") do |dir|
       report_path = File.join(dir, "mutants.json")
+      stale_shard = File.join("#{report_path}.shards", "stale.json")
+      FileUtils.mkdir_p(File.dirname(stale_shard))
+      File.write(stale_shard, "not a mutation report")
       _stdout, stderr, status = Open3.capture3(
         "bundle", "exec", "ruby", executable,
         "-r", setup,
         "--run-to-complete",
+        "--jobs", "2",
         "-o", report_path,
         "TestMiserCollectorFixture#classify"
       )
 
       assert status.success?, stderr
+      refute File.exist?(stale_shard), "a fresh run must not retain stale shard checkpoints"
       report = TestMiser::MutationReport.load_files([report_path])
       analysis = TestMiser::Analyzer.new(report).analyze
 
@@ -335,6 +361,7 @@ class TestMiserTest < Minitest::Test
   end
 
   def test_mutant_collector_applies_since_and_marks_pr_scope_non_auditable
+    skip_recursive_mutation_meta_tests!
     executable = File.expand_path("../exe/test-miser-mutant", __dir__)
     setup = File.expand_path("fixtures/collector/setup", __dir__)
 
@@ -365,6 +392,15 @@ class TestMiserTest < Minitest::Test
       assert_empty analysis.zero_kill_tests
       assert_empty analysis.redundant_groups
     end
+  end
+
+  def test_mutant_collector_accepts_a_full_scope_with_no_non_neutral_mutations
+    collector = TestMiser::MutantCollector.allocate
+    collector.instance_variable_set(:@subjects, ["Example#value"])
+    collector.instance_variable_set(:@since, nil)
+    environment = Struct.new(:mutations).new([])
+
+    assert_empty collector.__send__(:evil_mutations, environment)
   end
 
   def test_mutation_corpus_bootstrap_is_complete_compressed_and_self_contained
@@ -590,6 +626,7 @@ class TestMiserTest < Minitest::Test
   end
 
   def test_mutant_collector_withholds_audit_without_run_to_complete
+    skip_recursive_mutation_meta_tests!
     executable = File.expand_path("../exe/test-miser-mutant", __dir__)
     setup = File.expand_path("fixtures/collector/setup", __dir__)
 
@@ -612,6 +649,7 @@ class TestMiserTest < Minitest::Test
   end
 
   def test_mutant_collector_refreshes_module_function_copy
+    skip_recursive_mutation_meta_tests!
     executable = File.expand_path("../exe/test-miser-mutant", __dir__)
     setup = File.expand_path("fixtures/collector/module_setup", __dir__)
 
@@ -635,6 +673,7 @@ class TestMiserTest < Minitest::Test
   end
 
   def test_rspec_collector_runs_every_selected_example
+    skip_recursive_mutation_meta_tests!
     executable = File.expand_path("../exe/test-miser-mutant", __dir__)
     fixture = File.expand_path("fixtures/rspec_collector", __dir__)
     spec_path = Pathname.new(File.join(fixture, "spec")).relative_path_from(Pathname.pwd).to_s
@@ -661,6 +700,12 @@ class TestMiserTest < Minitest::Test
     assert_equal true, payload.dig("testMiser", "complete")
   ensure
     File.delete(report_path) if report_path && File.exist?(report_path)
+  end
+
+  def skip_recursive_mutation_meta_tests!
+    return unless ENV["TEST_MISER_MUTATION_ANALYSIS"] == "1"
+
+    skip "self-hosted mutation integration is not a test of the selected production mutant"
   end
 
   def test_mutant_collector_removes_isolated_test_scratch_files

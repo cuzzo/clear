@@ -517,13 +517,18 @@ class EvidenceOracleTest < Minitest::Test
   end
 
   def test_execution_rejects_dirty_repository_before_running_commands
+    source_path = File.expand_path("fixtures/collector/setup.rb", __dir__)
+    original = File.binread(source_path)
     request = Evidence::OracleExecutionRequest.new(
       repository: File.expand_path("../../..", __dir__), source_path: "gems/test-miser/test/fixtures/collector/setup.rb",
       test_command: ["true"], test_id: "t1", fact: fact("o1", kind: Evidence::OracleKind::Equality),
       plan: Evidence::OracleMutationPlanner.plan(fact("o1", kind: Evidence::OracleKind::Equality)).first,
       language: "ruby",
     )
+    File.binwrite(source_path, "#{original}\n# deliberately dirty for this test\n")
     assert_raises(Evidence::InvalidOracleFacts) { Evidence::OracleExecutionRunner.new.run(request) }
+  ensure
+    File.binwrite(source_path, original) if defined?(original) && original
   end
 
   def test_revision_snapshot_resolves_identity_and_rejects_unsafe_source_paths
@@ -755,6 +760,7 @@ class EvidenceOracleTest < Minitest::Test
   end
 
   def test_oracle_execution_runs_real_pytest_junit_and_jest_fixtures
+    skip "external framework fixture is not a production mutation oracle" if ENV["TEST_MISER_MUTATION_ANALYSIS"] == "1"
     jest_bin = ENV["TEST_MISER_JEST_BIN"] || File.expand_path("../../../node_modules/.bin/jest", __dir__)
     fixtures = {
       "pytest" => {

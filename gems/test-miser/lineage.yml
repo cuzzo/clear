@@ -15,7 +15,8 @@ profiles:
     producers:
       - coverage
       - lint
-      - test-miser-collect
+      - test-miser-map
+      - test-miser-corpus
       - test-miser-facts
       - test-miser-report
       - nil-kill-collect
@@ -42,6 +43,10 @@ producers:
     environment: &ruby_bundle
       BUNDLE_GEMFILE: ../../Gemfile
       BUNDLE_PATH: vendor/bundle
+      # The full Test Miser suite executes a real Jest fixture. Prevent npm
+      # from rewriting the enclosing repository's package-lock.json while the
+      # fixture resolves its local test runtime.
+      NPM_CONFIG_PACKAGE_LOCK: "false"
     produces:
       - kind: coverage
         format: simplecov
@@ -73,16 +78,45 @@ producers:
         path: .lineage/artifacts/lint/zig-ast-check.sarif
         complete: false
 
-  test-miser-collect:
+  test-miser-corpus:
     executor: command
-    argv: [bundle, exec, ruby, exe/test-miser-mutant, -I, lib, -r, ./script/test_miser_mutant_setup, --integration, minitest, --run-to-complete, --timeout, '30', --jobs, '4', -o, .lineage/artifacts/test-miser/mutation-testing-elements.json, 'TestMiser*']
-    timeout_seconds: 7200
+    argv: [bundle, exec, ruby, exe/test-miser-corpus, -I, lib, -r, ./script/test_miser_mutant_setup, --namespace, TestMiser, --selection-map, .lineage/artifacts/test-miser/runtime-map.json, --timeout, '30', --jobs, '4', --collector-jobs, '1', --batch-size, '8', --resume, -o, .lineage/artifacts/test-miser/mutation-testing-elements.json]
+    # A complete local Test Miser corpus should finish quickly on this
+    # subproject. Keep a hard, actionable ceiling rather than allowing an
+    # accidentally recursive profile to consume a CI worker for hours.
+    timeout_seconds: 900
     max_output_bytes: 67108864
-    environment: *ruby_bundle
+    environment:
+      BUNDLE_GEMFILE: ../../Gemfile
+      BUNDLE_PATH: vendor/bundle
+      NPM_CONFIG_PACKAGE_LOCK: "false"
+      # The suite's collector integration tests launch their own full
+      # mutation runs. They remain part of normal test/coverage execution,
+      # but recursively running them inside a mutation worker has no bearing
+      # on the selected production mutant and never converges.
+      TEST_MISER_MUTATION_ANALYSIS: "1"
     produces:
       - kind: auxiliary
         format: mutation-testing-elements/v2
         path: .lineage/artifacts/test-miser/mutation-testing-elements.json
+
+  # Trace the complete Test Miser suite once. The full mutation collector
+  # shares this immutable map with all four workers instead of each worker
+  # repeating the same baseline pass.
+  test-miser-map:
+    executor: command
+    argv: [bundle, exec, ruby, exe/test-miser-map, -I, lib, -r, ./script/test_miser_mutant_setup, --integration, minitest, --timeout, '30', -o, .lineage/artifacts/test-miser/runtime-map.json]
+    timeout_seconds: 1800
+    max_output_bytes: 33554432
+    environment:
+      BUNDLE_GEMFILE: ../../Gemfile
+      BUNDLE_PATH: vendor/bundle
+      NPM_CONFIG_PACKAGE_LOCK: "false"
+      TEST_MISER_MUTATION_ANALYSIS: "1"
+    produces:
+      - kind: auxiliary
+        format: test-miser-runtime-map/v1
+        path: .lineage/artifacts/test-miser/runtime-map.json
 
   test-miser-facts:
     executor: command
@@ -120,6 +154,9 @@ producers:
       NIL_KILL_TARGETS: lib
       NIL_KILL_TMP_DIR: .lineage/artifacts/nil-kill
       NIL_KILL_JOBS: '4'
+      FACT_MINE_RUST_BINARY: ../../gems/fact-mine/target/debug/fact-mine-rust
+      NIL_KILL_INFER_RUST_BINARY: ../../gems/nil-kill/target/debug/nil-kill-infer-rust
+      NPM_CONFIG_PACKAGE_LOCK: "false"
     timeout_seconds: 900
     max_output_bytes: 33554432
 
@@ -132,6 +169,9 @@ producers:
       NIL_KILL_ROOT: .
       NIL_KILL_TARGETS: lib
       NIL_KILL_TMP_DIR: .lineage/artifacts/nil-kill
+      FACT_MINE_RUST_BINARY: ../../gems/fact-mine/target/debug/fact-mine-rust
+      NIL_KILL_INFER_RUST_BINARY: ../../gems/nil-kill/target/debug/nil-kill-infer-rust
+      NPM_CONFIG_PACKAGE_LOCK: "false"
     timeout_seconds: 900
     max_output_bytes: 33554432
     produces:
@@ -148,6 +188,8 @@ producers:
       NIL_KILL_ROOT: .
       NIL_KILL_TARGETS: lib
       NIL_KILL_TMP_DIR: .lineage/artifacts/nil-kill
+      FACT_MINE_RUST_BINARY: ../../gems/fact-mine/target/debug/fact-mine-rust
+      NPM_CONFIG_PACKAGE_LOCK: "false"
     timeout_seconds: 120
     max_output_bytes: 16777216
     produces:

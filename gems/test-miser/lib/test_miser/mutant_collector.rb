@@ -182,8 +182,11 @@ module TestMiser
         raise CollectionError, "runtime selection map is incomplete or stale"
       end
       test_index = tests.to_h { |test| [test.id, test] }
-      unless @selection_payload["expectedTests"] == tests.length
-        raise CollectionError, "runtime selection map has a different test inventory"
+      expected_tests = @selection_payload["expectedTests"]
+      unless expected_tests == tests.length
+        raise CollectionError,
+          "runtime selection map has a different test inventory " \
+          "(map=#{expected_tests.inspect}, collector=#{tests.length})"
       end
 
       @selection_payload.fetch("selections").to_h do |entry|
@@ -198,9 +201,9 @@ module TestMiser
     def evil_mutations(env)
       mutations = env.mutations.reject { |mutation| mutation.identification.start_with?("neutral:") }
         .sort_by { |mutation| stable_mutation_id(mutation) }
-      if mutations.empty? && !@since
-        raise CollectionError, "subject expressions generated no non-neutral mutants: #{@subjects.join(', ')}"
-      end
+      # A selected subject can legitimately have no non-neutral mutations.
+      # Report that as a complete empty component; rejecting it makes a corpus
+      # generated from SubjectInventory unable to collect itself.
       mutations
     end
 

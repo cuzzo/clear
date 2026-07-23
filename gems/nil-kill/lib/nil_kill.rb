@@ -17,7 +17,15 @@ $LOAD_PATH.unshift(File.expand_path("../../espalier/lib", __dir__)) unless $LOAD
 require "espalier/type_profile"
 
 module NilKill
-  ROOT = File.expand_path("../../..", __dir__)
+  # A Lineage profile may analyze a subproject within a monorepo.  Keep the
+  # historic checkout root by default, but let that profile designate the
+  # inspected project without making NilKill write runtime state beside the
+  # NilKill gem itself.
+  ROOT = if ENV.key?("NIL_KILL_ROOT")
+           File.expand_path(ENV.fetch("NIL_KILL_ROOT"))
+         else
+           File.expand_path("../../..", __dir__)
+         end
   TMP_DIR = File.expand_path(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), ROOT)
   RUNTIME_DIR = File.join(TMP_DIR, "runtime")
   INSTRUMENTED_DIR = File.join(TMP_DIR, "instrumented")

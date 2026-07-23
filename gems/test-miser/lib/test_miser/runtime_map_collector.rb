@@ -136,11 +136,22 @@ module TestMiser
         ),
         mutation: ::Mutant::Mutation::Config::DEFAULT.with(timeout: @timeout),
         reporter: ::Mutant::Reporter::Null.new,
-        requires: @requires,
+        # Mutant may bootstrap from a temporary directory. Match
+        # MutantCollector's require normalization so a runtime map is built
+        # against exactly the test inventory that later consumes it.
+        requires: @requires.map { |path| path.start_with?(".", "/") ? File.expand_path(path) : path },
         usage: ::Mutant::Usage::Opensource.new
       )
-      ::Mutant::Bootstrap.call_test(::Mutant::Env.empty(::Mutant::WORLD, config)).from_right do |error|
-        raise CollectionError, error
+      # MutantCollector bootstraps from an isolated directory. Do the same for
+      # the map pass: Minitest's discovered inventory can otherwise depend on
+      # the bootstrap working directory, making a freshly-created map
+      # immediately unusable by the collector.
+      Dir.mktmpdir("test-miser-map-bootstrap") do |directory|
+        Dir.chdir(directory) do
+          ::Mutant::Bootstrap.call_test(::Mutant::Env.empty(::Mutant::WORLD, config)).from_right do |error|
+            raise CollectionError, error
+          end
+        end
       end
     rescue LoadError => error
       raise CollectionError, error.message

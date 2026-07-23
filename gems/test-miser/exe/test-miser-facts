@@ -3,6 +3,7 @@
 
 require "json"
 require "optparse"
+require_relative "../lib/test_miser/mutation_report"
 
 options = { selected_components: [] }
 parser = OptionParser.new do |opts|
@@ -23,7 +24,34 @@ begin
   end
 
   payload = JSON.parse(File.read(options[:input]))
-  raise KeyError, "input is not mutant-facts" unless payload["schema"].to_s.start_with?("mutant-facts/")
+  payload = if payload["schema"].to_s.start_with?("mutant-facts/")
+              payload
+            elsif payload["files"].is_a?(Hash)
+              report = TestMiser::MutationReport.new(payload, source: options[:input])
+              metadata = payload.fetch("testMiser", {})
+              {
+                "schema" => "mutant-facts/v1",
+                "source" => "test-miser",
+                "language" => "ruby",
+                "subjects" => [],
+                "tests" => report.tests.map(&:to_h),
+                "mutants" => report.mutants.map do |mutant|
+                  {
+                    "id" => mutant.id,
+                    "file" => mutant.file,
+                    "covered_by" => mutant.covered_by.to_a.sort,
+                    "killed_by" => mutant.killed_by.to_a.sort
+                  }.compact
+                end,
+                "test_miser" => {
+                  "complete" => metadata["complete"] == true,
+                  "attribution_complete" => metadata["complete"] == true,
+                  "run_to_complete" => metadata["runToComplete"] == true
+                }
+              }
+            else
+              raise KeyError, "input is not mutant-facts or Mutation Testing Elements"
+            end
 
   if options[:path_prefix]
     ["subjects", "tests", "mutants"].each do |collection|
@@ -39,7 +67,7 @@ begin
   temporary = "#{options[:output]}.tmp-#{Process.pid}"
   File.write(temporary, "#{JSON.pretty_generate(payload)}\n")
   File.rename(temporary, options[:output])
-rescue JSON::ParserError, Errno::ENOENT, KeyError => error
+rescue JSON::ParserError, Errno::ENOENT, KeyError, TestMiser::InvalidReport => error
   warn "test-miser-facts: #{error.message}"
   exit 1
 ensure

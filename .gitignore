@@ -158,6 +158,17 @@ transpile-tests/fuzz/*.rb
 
 # Catch-all
 **/*.profile/
+
+# Per-subproject Lineage workspaces are local evidence stores. The monorepo's
+# root configuration remains reviewable; nested configurations and databases
+# are intentionally disposable.
+gems/**/lineage.yml
+gems/**/lineage.json
+gems/**/.lineage/
+gems/**/target/
+# The root allow-list above re-includes descendants, so match generated
+# contents explicitly as well as the target directory itself.
+gems/**/target/**
 **/.zig-cache/
 **/zig-out/
 **/*.clear-build.json

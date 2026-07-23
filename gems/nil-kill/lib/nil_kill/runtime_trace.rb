@@ -7,7 +7,11 @@ require "pathname"
 require "set"
 
 module NilKillRuntimeTrace
-  ROOT = File.expand_path("../../../..", __dir__)
+  ROOT = if ENV.key?("NIL_KILL_ROOT")
+           File.expand_path(ENV.fetch("NIL_KILL_ROOT"))
+         else
+           File.expand_path("../../../..", __dir__)
+         end
   OUT_DIR = File.expand_path(File.join(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), "runtime"), ROOT)
   TRACE_PLAN_PATH = File.expand_path(File.join(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), "trace-plan.json"), ROOT)
   TARGETS = ENV.fetch("NIL_KILL_TARGETS", "src").split(File::PATH_SEPARATOR).map do |path|
@@ -190,8 +194,16 @@ module NilKillRuntimeTrace
       sample_params = entry[:sample] && entry[:params].values.any?
       sample_return = entry[:sample] && entry[:return]
       frame_method = entry[:frame]
-      @targeted_tracepoints << TracePoint.new(:call) { |tp| record_call(tp, forced_entry: entry) }.enable(target: target) if sample_params || frame_method
-      @targeted_tracepoints << TracePoint.new(:return) { |tp| record_return(tp, forced_entry: entry) }.enable(target: target) if sample_return || frame_method
+      # Ruby accepts Method targets but rejects an UnboundMethod returned for
+      # ordinary instance methods on supported Rubies. The source-instrumented
+      # collector already records those methods at their real paths, so an
+      # optional optimization must never abort loading the application.
+      begin
+        @targeted_tracepoints << TracePoint.new(:call) { |tp| record_call(tp, forced_entry: entry) }.enable(target: target) if sample_params || frame_method
+        @targeted_tracepoints << TracePoint.new(:return) { |tp| record_return(tp, forced_entry: entry) }.enable(target: target) if sample_return || frame_method
+      rescue ArgumentError
+        @targeted_tracepoint_keys.delete(trace_key)
+      end
     end
   end
 
