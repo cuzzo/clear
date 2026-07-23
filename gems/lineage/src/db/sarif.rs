@@ -1,9 +1,9 @@
 use crate::model::{short_hash, SarifArtifact, SarifFinding};
 use crate::storage::{CurrentUnitSpan, Storage};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,6 +14,31 @@ pub struct SarifIngestStats {
     pub findings: usize,
     pub skipped_files: usize,
     pub skipped_results: usize,
+}
+
+/// A single physical SARIF finding after applying Lineage's shared path,
+/// fingerprint, category, and provenance normalization. Both persisted SARIF
+/// ingestion and ephemeral diff overlays consume this representation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NormalizedSarifFinding {
+    pub tool_name: String,
+    pub run_format: String,
+    pub rule_id: String,
+    pub level: String,
+    pub message: String,
+    pub path: String,
+    pub start_line: u32,
+    pub start_column: Option<u32>,
+    pub end_line: Option<u32>,
+    pub end_column: Option<u32>,
+    pub category: String,
+    pub is_dark_arm: bool,
+    pub fingerprint: String,
+    pub properties: Value,
+    pub raw_result: Value,
+    pub provenance: BTreeMap<String, String>,
+    pub proof_boundary: Vec<String>,
+    pub status: String,
 }
 
 pub fn ingest_sarif_paths(
@@ -124,6 +149,51 @@ fn is_sarif_document(value: &Value) -> bool {
         && value.get("runs").and_then(Value::as_array).is_some()
 }
 
+/// Normalizes every result location in a SARIF document without requiring a
+/// database snapshot. This is used for transient analysis overlays; database
+/// ingestion calls the same result normalizer before associating a finding
+/// with a logical unit.
+pub fn normalize_sarif_document(
+    repo: &Path,
+    document: &Value,
+) -> Result<Vec<NormalizedSarifFinding>> {
+    if !is_sarif_document(document) {
+        bail!("expected a SARIF 2.1.0 document with a runs array");
+    }
+    let mut normalized = Vec::new();
+    for run in document
+        .get("runs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let tool_name = run
+            .pointer("/tool/driver/name")
+            .and_then(Value::as_str)
+            .unwrap_or("SARIF");
+        let run_format = run
+            .pointer("/properties/format")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let run_properties = run.get("properties").unwrap_or(&Value::Null);
+        for result in run
+            .get("results")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            normalized.extend(normalize_sarif_result(
+                repo,
+                tool_name,
+                run_format,
+                run_properties,
+                result,
+            )?);
+        }
+    }
+    Ok(normalized)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn ingest_sarif_document(
     storage: &Storage,
@@ -183,6 +253,7 @@ fn ingest_sarif_document(
                 artifact_id,
                 &tool_name,
                 &run_format,
+                run.get("properties").unwrap_or(&Value::Null),
                 &result,
             )?;
             if normalized.is_empty() {
@@ -227,7 +298,12 @@ impl CurrentUnitIndex {
             spans
                 .iter()
                 .filter(|span| line >= span.start_line && line <= span.end_line)
-                .min_by_key(|span| (span.end_line.saturating_sub(span.start_line), span.id.as_str()))
+                .min_by_key(|span| {
+                    (
+                        span.end_line.saturating_sub(span.start_line),
+                        span.id.as_str(),
+                    )
+                })
                 .map(|span| span.id.clone())
         })
     }
@@ -243,8 +319,61 @@ fn normalize_result_locations(
     artifact_id: i64,
     tool_name: &str,
     run_format: &str,
+    run_properties: &Value,
     result: &Value,
 ) -> Result<Vec<SarifFinding>> {
+    let mut findings = Vec::new();
+    for normalized in normalize_sarif_result(repo, tool_name, run_format, run_properties, result)? {
+        let properties_json = serde_json::to_string(&normalized.properties)?;
+        let raw_json = serde_json::to_string(&normalized.raw_result)?;
+        let unit_id = unit_index.unit_id_for_path_line(&normalized.path, normalized.start_line);
+        let finding_key = finding_key(
+            source,
+            commit,
+            &normalized.tool_name,
+            &normalized.rule_id,
+            &normalized.path,
+            normalized.start_line,
+            normalized.start_column,
+            normalized.end_line,
+            normalized.end_column,
+            &normalized.fingerprint,
+            &normalized.message,
+        );
+        findings.push(SarifFinding {
+            artifact_id,
+            finding_key,
+            source: source.to_string(),
+            tool_name: normalized.tool_name,
+            run_format: normalized.run_format,
+            commit_hash: commit.to_string(),
+            timestamp,
+            rule_id: normalized.rule_id,
+            level: normalized.level,
+            message: normalized.message,
+            path: normalized.path,
+            start_line: normalized.start_line,
+            start_column: normalized.start_column,
+            end_line: normalized.end_line,
+            end_column: normalized.end_column,
+            category: normalized.category,
+            is_dark_arm: normalized.is_dark_arm,
+            unit_id,
+            fingerprint: normalized.fingerprint,
+            properties_json: properties_json.clone(),
+            raw_json: raw_json.clone(),
+        });
+    }
+    Ok(findings)
+}
+
+fn normalize_sarif_result(
+    repo: &Path,
+    tool_name: &str,
+    run_format: &str,
+    run_properties: &Value,
+    result: &Value,
+) -> Result<Vec<NormalizedSarifFinding>> {
     let rule_id = result
         .get("ruleId")
         .and_then(Value::as_str)
@@ -256,13 +385,41 @@ fn normalize_result_locations(
         .unwrap_or("warning")
         .to_string();
     let message = result_message(result).unwrap_or_else(|| rule_id.clone());
-    let properties = result.get("properties").cloned().unwrap_or(Value::Null);
-    let properties_json = serde_json::to_string(&properties)?;
-    let raw_json = serde_json::to_string(result)?;
-    let category = category_for_result(result, &properties, &rule_id);
-    let is_dark_arm = is_dark_arm_result(result, &properties, &rule_id, &message, &category);
+    // A SARIF run may carry a repository-wide manifest (Espalier does). That
+    // provenance belongs in `sarif_artifacts.payload_json`, which stores the
+    // source document once. Copying it into every physical finding turns a
+    // small report into an unbounded SQLite write amplification.
+    let classification_properties = merged_properties(run_properties, result.get("properties"));
+    let properties_json = serde_json::to_string(&classification_properties)?;
+    let properties = persisted_finding_properties(&classification_properties);
+    let category = category_for_result(result, &classification_properties, &rule_id);
+    let is_dark_arm = is_dark_arm_result(
+        result,
+        &classification_properties,
+        &rule_id,
+        &message,
+        &category,
+    );
     let fingerprint = partial_fingerprint(result)
         .unwrap_or_else(|| short_hash(&format!("{rule_id}\0{message}\0{properties_json}")));
+    let provenance = string_properties(&properties);
+    let proof_boundary: Vec<String> = properties
+        .get("lineage.proof_boundary")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let status = result
+        .get("baselineState")
+        .or_else(|| result.get("kind"))
+        .and_then(Value::as_str)
+        .unwrap_or("active")
+        .to_string();
     let locations = result
         .get("locations")
         .and_then(Value::as_array)
@@ -284,48 +441,88 @@ fn normalize_result_locations(
         let null_region = Value::Null;
         let region = physical.get("region").unwrap_or(&null_region);
         let start_line = u32_field(region, "startLine").unwrap_or(1);
-        let start_column = u32_field(region, "startColumn");
-        let end_line = u32_field(region, "endLine");
-        let end_column = u32_field(region, "endColumn");
-        let unit_id = unit_index.unit_id_for_path_line(&path, start_line);
-        let finding_key = finding_key(
-            source,
-            commit,
-            tool_name,
-            &rule_id,
-            &path,
-            start_line,
-            start_column,
-            end_line,
-            end_column,
-            &fingerprint,
-            &message,
-        );
-        findings.push(SarifFinding {
-            artifact_id,
-            finding_key,
-            source: source.to_string(),
+        findings.push(NormalizedSarifFinding {
             tool_name: tool_name.to_string(),
             run_format: run_format.to_string(),
-            commit_hash: commit.to_string(),
-            timestamp,
             rule_id: rule_id.clone(),
             level: level.clone(),
             message: message.clone(),
             path,
             start_line,
-            start_column,
-            end_line,
-            end_column,
+            start_column: u32_field(region, "startColumn"),
+            end_line: u32_field(region, "endLine"),
+            end_column: u32_field(region, "endColumn"),
             category: category.clone(),
             is_dark_arm,
-            unit_id,
             fingerprint: fingerprint.clone(),
-            properties_json: properties_json.clone(),
-            raw_json: raw_json.clone(),
+            properties: properties.clone(),
+            raw_result: result.clone(),
+            provenance: provenance.clone(),
+            proof_boundary: proof_boundary.clone(),
+            status: status.clone(),
         });
     }
     Ok(findings)
+}
+
+fn merged_properties(run_properties: &Value, result_properties: Option<&Value>) -> Value {
+    let mut merged = serde_json::Map::new();
+    for properties in [Some(run_properties), result_properties] {
+        if let Some(properties) = properties.and_then(Value::as_object) {
+            merged.extend(properties.clone());
+        }
+    }
+    Value::Object(merged)
+}
+
+const MAX_PERSISTED_FINDING_PROPERTIES_BYTES: usize = 16 * 1024;
+const MAX_PERSISTED_PROPERTY_VALUE_BYTES: usize = 4 * 1024;
+
+/// Keep finding records compact even when a SARIF run includes a large,
+/// report-wide manifest. The immutable SARIF artifact retains that complete
+/// provenance; finding rows need only small properties used for rendering,
+/// tiers, categories, and proof boundaries.
+fn persisted_finding_properties(properties: &Value) -> Value {
+    let Some(properties) = properties.as_object() else {
+        return Value::Object(serde_json::Map::new());
+    };
+    let mut persisted = serde_json::Map::new();
+    let mut used = 2usize; // `{}`
+    for (key, value) in properties {
+        let encoded = match serde_json::to_vec(value) {
+            Ok(encoded) => encoded,
+            Err(_) => continue,
+        };
+        // Scalars are always compact. Structured values are retained only
+        // when individually and collectively bounded.
+        if encoded.len() > MAX_PERSISTED_PROPERTY_VALUE_BYTES {
+            continue;
+        }
+        let entry_bytes = key.len() + encoded.len() + 4;
+        if used.saturating_add(entry_bytes) > MAX_PERSISTED_FINDING_PROPERTIES_BYTES {
+            continue;
+        }
+        used += entry_bytes;
+        persisted.insert(key.clone(), value.clone());
+    }
+    Value::Object(persisted)
+}
+
+fn string_properties(properties: &Value) -> BTreeMap<String, String> {
+    properties
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(key, value)| {
+            (
+                key.to_string(),
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| value.to_string()),
+            )
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -409,10 +606,17 @@ fn result_is_explicitly_dead(
     rule_id: &str,
     category: &str,
 ) -> bool {
-    let property_is_dead = ["category", "arm_category", "kind", "type", "status", "classification"]
-        .iter()
-        .filter_map(|key| properties.get(key).and_then(Value::as_str))
-        .any(|value| value.eq_ignore_ascii_case("dead"));
+    let property_is_dead = [
+        "category",
+        "arm_category",
+        "kind",
+        "type",
+        "status",
+        "classification",
+    ]
+    .iter()
+    .filter_map(|key| properties.get(key).and_then(Value::as_str))
+    .any(|value| value.eq_ignore_ascii_case("dead"));
     if property_is_dead || category.eq_ignore_ascii_case("dead") {
         return true;
     }
@@ -451,11 +655,16 @@ fn u32_field(value: &Value, key: &str) -> Option<u32> {
 }
 
 fn normalize_artifact_uri(repo: &Path, uri: &str) -> String {
-    let mut path = uri.trim().trim_start_matches("./").replace('\\', "/");
-    if let Some(stripped) = path.strip_prefix("file://") {
-        path = stripped.to_string();
+    let uri = uri.trim();
+    if let Ok(url) = url::Url::parse(uri) {
+        if url.scheme() == "file" {
+            if let Ok(path) = url.to_file_path() {
+                return path_to_repo_string(repo, &path);
+            }
+        }
     }
-    if path.starts_with('/') {
+    let mut path = uri.trim_start_matches("./").replace('\\', "/");
+    if Path::new(&path).is_absolute() {
         path = path_to_repo_string(repo, Path::new(&path));
     }
     path.trim_start_matches("./").to_string()
@@ -518,13 +727,42 @@ mod tests {
             "abc",
             Some(20),
             true,
-        ).unwrap();
-        let finding = storage.sarif_findings_for_path("test/example_test.rb").unwrap();
+        )
+        .unwrap();
+        let finding = storage
+            .sarif_findings_for_path("test/example_test.rb")
+            .unwrap();
 
         assert_eq!(stats.findings, 1);
         assert_eq!(finding[0].run_format, "test-miser.report.sarif.v1");
         assert_eq!(finding[0].unit_id, None);
-        assert!(finding[0].properties_json.contains("ExampleTest#test_empty"));
+        assert!(finding[0]
+            .properties_json
+            .contains("ExampleTest#test_empty"));
+    }
+
+    #[test]
+    fn bounds_report_wide_run_properties_per_finding() {
+        let large_manifest = "x".repeat(MAX_PERSISTED_PROPERTY_VALUE_BYTES + 1);
+        let properties = serde_json::json!({
+            "format": "espalier.report.sarif.v1",
+            "tier": 1,
+            "lineage.proof_boundary": ["bounded input"],
+            "espalier.manifest": large_manifest,
+        });
+
+        let persisted = persisted_finding_properties(&properties);
+
+        assert_eq!(persisted["format"], "espalier.report.sarif.v1");
+        assert_eq!(persisted["tier"], 1);
+        assert_eq!(
+            persisted["lineage.proof_boundary"],
+            serde_json::json!(["bounded input"])
+        );
+        assert!(persisted.get("espalier.manifest").is_none());
+        assert!(
+            serde_json::to_vec(&persisted).unwrap().len() <= MAX_PERSISTED_FINDING_PROPERTIES_BYTES
+        );
     }
 
     #[test]
@@ -546,6 +784,60 @@ mod tests {
             "dark arm",
             "dead",
         ));
+    }
+
+    #[test]
+    fn shared_normalizer_matches_ingestion_for_file_uri_provenance_and_fingerprint() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        let source = dir.path().join("src/demo.rs");
+        fs::write(&source, "fn demo() {}\n").unwrap();
+        let source_uri = url::Url::from_file_path(&source).unwrap().to_string();
+        let document = serde_json::json!({
+            "version": "2.1.0",
+            "runs": [{
+                "tool": {"driver": {"name": "FactMine"}},
+                "properties": {
+                    "format": "fact-mine.report.sarif.v1",
+                    "tier": 1,
+                    "lineage.proof_boundary": ["bounded hazard scan"]
+                },
+                "results": [{
+                    "ruleId": "fact-mine.hazard",
+                    "message": {"text": "hazard"},
+                    "partialFingerprints": {"z": "last", "a": "first"},
+                    "locations": [{"physicalLocation": {
+                        "artifactLocation": {"uri": source_uri},
+                        "region": {"startLine": 1, "endLine": 1}
+                    }}],
+                    "properties": {"category": "hazard"}
+                }]
+            }]
+        });
+        let normalized = normalize_sarif_document(dir.path(), &document).unwrap();
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].path, "src/demo.rs");
+        assert_eq!(normalized[0].fingerprint, "a=first\nz=last");
+        assert_eq!(normalized[0].provenance.get("tier"), Some(&"1".to_string()));
+        assert_eq!(normalized[0].proof_boundary, ["bounded hazard scan"]);
+
+        let sarif = dir.path().join("report.sarif");
+        fs::write(&sarif, serde_json::to_vec(&document).unwrap()).unwrap();
+        let storage = Storage::open_memory().unwrap();
+        ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[sarif],
+            "fact-mine",
+            "abc",
+            Some(1),
+            true,
+        )
+        .unwrap();
+        let persisted = storage.sarif_findings_for_path("src/demo.rs").unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].fingerprint, normalized[0].fingerprint);
+        assert_eq!(persisted[0].category, normalized[0].category);
     }
 
     #[test]
@@ -628,8 +920,16 @@ mod tests {
             Some(unit.id)
         );
 
-        let stats = ingest_sarif_paths(&storage, dir.path(), &[sarif], "slopcop", "abc", Some(20), true)
-            .unwrap();
+        let stats = ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[sarif],
+            "slopcop",
+            "abc",
+            Some(20),
+            true,
+        )
+        .unwrap();
         assert_eq!(stats.findings, 1);
         assert_eq!(storage.count_rows("sarif_findings").unwrap(), 1);
     }
@@ -762,9 +1062,20 @@ mod tests {
         });
         fs::write(&sarif, serde_json::to_vec(&document).unwrap()).unwrap();
 
-        let stats = ingest_sarif_paths(&storage, dir.path(), &[sarif], "sql-cov", "abc", Some(20), true).unwrap();
+        let stats = ingest_sarif_paths(
+            &storage,
+            dir.path(),
+            &[sarif],
+            "sql-cov",
+            "abc",
+            Some(20),
+            true,
+        )
+        .unwrap();
         assert_eq!(stats.findings, 1);
-        let findings = storage.sarif_findings_for_path("queries/orders.sql").unwrap();
+        let findings = storage
+            .sarif_findings_for_path("queries/orders.sql")
+            .unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].tool_name, "SQL-COV");
         assert_eq!(findings[0].run_format, "sql-cov.plan.sarif.v1");
@@ -821,7 +1132,8 @@ mod tests {
             "abc",
             None,
             false,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(stats.skipped_files, 2);
 
@@ -835,7 +1147,8 @@ mod tests {
             "abc",
             None,
             false,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(stats2.skipped_files, 1);
 
         let rule_json = dir.path().join("rule_test.sarif");
@@ -868,7 +1181,8 @@ mod tests {
                 }]
               }]
             }"#,
-        ).unwrap();
+        )
+        .unwrap();
 
         let stats3 = ingest_sarif_paths(
             &storage,
@@ -878,7 +1192,8 @@ mod tests {
             "abc",
             None,
             false,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(stats3.artifacts, 1);
         assert_eq!(stats3.findings, 2);
@@ -903,7 +1218,8 @@ mod tests {
                 }]
               }]
             }"#,
-        ).unwrap();
+        )
+        .unwrap();
 
         let stats4 = ingest_sarif_paths(
             &storage,
@@ -913,11 +1229,15 @@ mod tests {
             "abc",
             None,
             false,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(stats4.findings, 1);
         let findings = storage.sarif_findings_for_path("src/demo.rb").unwrap();
-        let dead_finding = findings.iter().find(|f| f.rule_id == "slopcop.dark-arm.dead").unwrap();
+        let dead_finding = findings
+            .iter()
+            .find(|f| f.rule_id == "slopcop.dark-arm.dead")
+            .unwrap();
         assert!(!dead_finding.is_dark_arm);
     }
 }
