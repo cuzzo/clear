@@ -468,6 +468,30 @@ fn typescript_null_and_undefined_receiver_operations_follow_direct_flow() -> Res
 }
 
 #[test]
+fn ruby_case_equality_disjunction_refines_the_else_path() -> Result<()> {
+    let document = syntax::parse_file(fixture("nullable_ruby.rb"), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::NilKill);
+
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableRuby#guarded_disjunction:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_states.iter().any(|state| {
+        state.state == "definitely_non_null"
+            && state.complete
+            && state
+                .place_id
+                .contains("NullableRuby#guarded_disjunction:local:value")
+    }));
+    Ok(())
+}
+
+#[test]
 fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_presence.go"), Language::Go)?;
     let output = profile::extract(&document, Profile::NilKill);

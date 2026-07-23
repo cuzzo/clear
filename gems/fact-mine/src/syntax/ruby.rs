@@ -1314,6 +1314,10 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         })
     }
 
+    fn nil_comparison_operator(&self, operator: &str) -> bool {
+        matches!(operator, "==" | "!=" | "===")
+    }
+
     fn terminating_call_message(&self, message: &str) -> bool {
         matches!(message, "raise" | "fail" | "abort" | "exit" | "exit!")
     }
