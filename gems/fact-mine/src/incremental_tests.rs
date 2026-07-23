@@ -40,7 +40,8 @@ fn warm_cache_skips_local_extraction_and_keeps_complete_output() -> Result<()> {
         false,
     )?;
     assert_eq!(first.metrics.shard_misses, 1);
-    assert_eq!(second.metrics.shard_hits, 1);
+    assert_eq!(second.metrics.project_snapshot_hits, 1);
+    assert_eq!(second.metrics.shard_hits, 0);
     assert_eq!(second.metrics.shard_misses, 0);
     assert_eq!(
         serde_json::to_value(&first.output)?.get("methods"),
@@ -119,9 +120,45 @@ fn corrupt_shards_are_safe_misses() -> Result<()> {
         .expect("shard")?
         .path();
     fs::write(&shard, b"corrupt")?;
+    fs::remove_dir_all(cache_config.directory.join("projects"))?;
     let run = build_profile(&[file], None, Profile::Espalier, &cache_config, false)?;
     assert_eq!(run.metrics.corrupt_entries, 1);
     assert_eq!(run.metrics.shard_misses, 1);
+    Ok(())
+}
+
+#[test]
+fn corrupt_project_snapshots_fall_back_to_valid_shards() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let cache_config = config(directory.path());
+    let file = ruby_file(
+        directory.path(),
+        "sample.rb",
+        "class A; def run; 1; end; end\n",
+    );
+    build_profile(
+        &[file.clone()],
+        None,
+        Profile::Espalier,
+        &cache_config,
+        false,
+    )?;
+    let candidate = candidate(
+        &file,
+        None,
+        Profile::Espalier,
+        directory.path(),
+        &stdlib_registry_digest()?,
+        &configuration_digest()?,
+    )?;
+    let project_key = project_cache_key(Profile::Espalier, &[candidate])?;
+    let cache = ShardCache::new(cache_config.directory.clone());
+    fs::write(cache.project_path(&project_key), b"corrupt")?;
+
+    let run = build_profile(&[file], None, Profile::Espalier, &cache_config, false)?;
+    assert_eq!(run.metrics.project_snapshot_hits, 0);
+    assert_eq!(run.metrics.project_snapshot_misses, 1);
+    assert_eq!(run.metrics.shard_hits, 1);
     Ok(())
 }
 
@@ -263,7 +300,7 @@ fn external_summary_changes_reuse_local_shards_and_recompute_project_output() ->
         false,
     )?;
     let second = build_profile(&[file], None, Profile::Espalier, &cache_config, false)?;
-    assert_eq!(second.metrics.shard_hits, 1);
+    assert_eq!(second.metrics.project_snapshot_hits, 1);
 
     let mut first_output = first.output;
     let mut second_output = second.output;
@@ -385,6 +422,7 @@ fn corrupt_json_identity_and_manifest_entries_are_misses() -> Result<()> {
     let mut bad_json = GzEncoder::new(Vec::new(), Compression::default());
     bad_json.write_all(b"{}")?;
     fs::write(&shard_path, bad_json.finish()?)?;
+    fs::remove_dir_all(cache_config.directory.join("projects"))?;
     let json_miss = build_profile(
         &[file.clone()],
         None,
@@ -425,6 +463,7 @@ fn corrupt_json_identity_and_manifest_entries_are_misses() -> Result<()> {
         cache_config.directory.join("revision-manifest-v1.json"),
         b"not json",
     )?;
+    fs::remove_dir_all(cache_config.directory.join("projects"))?;
     let manifest_miss = build_profile(&[file], None, Profile::Espalier, &cache_config, false)?;
     assert_eq!(manifest_miss.metrics.shard_misses, 1);
     Ok(())

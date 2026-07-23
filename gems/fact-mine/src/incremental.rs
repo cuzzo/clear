@@ -84,6 +84,13 @@ struct CachedShard {
     shard: LocalFactShard,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedProject {
+    schema_version: u32,
+    project_key: String,
+    output: ProfileOutput,
+}
+
 impl CachedShard {
     fn matches_candidate(&self, candidate: &Candidate) -> bool {
         self.schema_version == CACHE_SCHEMA_VERSION
@@ -104,6 +111,12 @@ struct RevisionManifest {
 
 enum CacheRead {
     Hit(Box<LocalFactShard>, u64),
+    Miss,
+    Corrupt(String),
+}
+
+enum ProjectCacheRead {
+    Hit(Box<ProfileOutput>, u64),
     Miss,
     Corrupt(String),
 }
@@ -161,6 +174,33 @@ pub fn build_profile(
     let hashing_millis = hashing_started.elapsed().as_millis();
 
     let cache = ShardCache::new(config.directory.clone());
+    let project_key = project_cache_key(profile, &candidates)?;
+    if !partial {
+        match cache.load_project(&project_key)? {
+            ProjectCacheRead::Hit(output, bytes) => {
+                let mut output = *output;
+                let metrics = IncrementalMetrics {
+                    files_considered: files.len(),
+                    hashing_millis,
+                    project_snapshot_hits: 1,
+                    project_snapshot_bytes_loaded: bytes,
+                    peak_resident_bytes: peak_resident_bytes(),
+                    ..IncrementalMetrics::default()
+                };
+                output.artifact_scope = Some(ArtifactScope {
+                    kind: "complete".to_string(),
+                    complete: true,
+                    selected_files: files.len(),
+                });
+                output.incremental_metrics = Some(metrics.clone());
+                return Ok(IncrementalRun { output, metrics });
+            }
+            ProjectCacheRead::Miss => {}
+            ProjectCacheRead::Corrupt(diagnostic) => {
+                std::eprintln!("FactMine incremental project cache miss: {diagnostic}");
+            }
+        }
+    }
     let shard_results = parallel::map_ordered(&candidates, |candidate| {
         let cache_load_started = Instant::now();
         let read = cache.load(candidate)?;
@@ -211,6 +251,7 @@ pub fn build_profile(
     let mut metrics = IncrementalMetrics {
         files_considered: files.len(),
         hashing_millis,
+        project_snapshot_misses: usize::from(!partial),
         ..IncrementalMetrics::default()
     };
     let mut recoveries = Vec::new();
@@ -271,6 +312,14 @@ pub fn build_profile(
         complete: !partial,
         selected_files: files.len(),
     });
+    if !partial {
+        let project_write_started = Instant::now();
+        let mut cacheable = output.clone();
+        cacheable.artifact_scope = None;
+        cacheable.incremental_metrics = None;
+        metrics.project_snapshot_bytes_written = cache.store_project(&project_key, &cacheable)?;
+        metrics.cache_write_millis += project_write_started.elapsed().as_millis();
+    }
     metrics.peak_resident_bytes = peak_resident_bytes();
     output.incremental_metrics = Some(metrics.clone());
 
@@ -340,6 +389,17 @@ fn profile_name(profile: Profile) -> &'static str {
         Profile::NilKill => "nil-kill",
         Profile::TracePlan => "trace-plan",
     }
+}
+
+fn project_cache_key(profile: Profile, candidates: &[Candidate]) -> Result<String> {
+    digest_json(&serde_json::json!({
+        "schema": "fact-mine-project-v1",
+        "profile": profile_name(profile),
+        "files": candidates.iter().map(|candidate| serde_json::json!({
+            "path": candidate.path_identity,
+            "shard": candidate.cache_key,
+        })).collect::<Vec<_>>(),
+    }))
 }
 
 fn configuration_digest() -> Result<String> {
@@ -418,6 +478,12 @@ impl ShardCache {
         self.directory.join("revision-manifest-v1.json")
     }
 
+    fn project_path(&self, project_key: &str) -> PathBuf {
+        self.directory
+            .join("projects")
+            .join(format!("{project_key}.json.gz"))
+    }
+
     fn load(&self, candidate: &Candidate) -> Result<CacheRead> {
         let path = self.shard_path(&candidate.cache_key);
         let Some(bytes) = read_optional(&path)? else {
@@ -464,6 +530,54 @@ impl ShardCache {
         encoder.write_all(&json)?;
         let compressed = encoder.finish()?;
         self.write_atomic(&self.shard_path(&candidate.cache_key), &compressed)?;
+        Ok(compressed.len() as u64)
+    }
+
+    fn load_project(&self, project_key: &str) -> Result<ProjectCacheRead> {
+        let path = self.project_path(project_key);
+        let Some(bytes) = read_optional(&path)? else {
+            return Ok(ProjectCacheRead::Miss);
+        };
+        let mut decoder = GzDecoder::new(bytes.as_slice());
+        let mut json = Vec::new();
+        if let Err(error) = decoder.read_to_end(&mut json) {
+            return Ok(ProjectCacheRead::Corrupt(format!(
+                "{} is not valid gzip: {error}",
+                path.display()
+            )));
+        }
+        let cached: CachedProject = match serde_json::from_slice(&json) {
+            Ok(cached) => cached,
+            Err(error) => {
+                return Ok(ProjectCacheRead::Corrupt(format!(
+                    "{} is not a valid project snapshot: {error}",
+                    path.display()
+                )))
+            }
+        };
+        if cached.schema_version != CACHE_SCHEMA_VERSION || cached.project_key != project_key {
+            return Ok(ProjectCacheRead::Corrupt(format!(
+                "{} has an incompatible project snapshot identity",
+                path.display()
+            )));
+        }
+        Ok(ProjectCacheRead::Hit(
+            Box::new(cached.output),
+            bytes.len() as u64,
+        ))
+    }
+
+    fn store_project(&self, project_key: &str, output: &ProfileOutput) -> Result<u64> {
+        let cached = CachedProject {
+            schema_version: CACHE_SCHEMA_VERSION,
+            project_key: project_key.to_string(),
+            output: output.clone(),
+        };
+        let json = serde_json::to_vec(&cached)?;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&json)?;
+        let compressed = encoder.finish()?;
+        self.write_atomic(&self.project_path(project_key), &compressed)?;
         Ok(compressed.len() as u64)
     }
 
