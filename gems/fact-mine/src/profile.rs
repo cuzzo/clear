@@ -39,6 +39,63 @@ pub enum Profile {
     TracePlan,
 }
 
+/// Immutable evidence extracted from one source file before any corpus-wide
+/// reasoning. This is the only FactMine result suitable for persistence in an
+/// incremental cache: cross-file call targets, candidate sets, callback costs,
+/// and project summaries are deliberately absent.
+#[derive(Clone, Debug)]
+pub struct LocalFactShard {
+    profile: Profile,
+    output: ProfileOutput,
+}
+
+impl LocalFactShard {
+    pub(crate) fn new(profile: Profile, output: ProfileOutput) -> Self {
+        Self { profile, output }
+    }
+
+    pub(crate) fn into_output(self) -> ProfileOutput {
+        self.output
+    }
+
+    /// The profile that governed local extraction.
+    pub fn profile(&self) -> Profile {
+        self.profile
+    }
+
+    /// Local evidence for diagnostics. Consumers must use
+    /// [`ProjectFactFinalizer`] to obtain a complete project result.
+    pub fn local_output(&self) -> &ProfileOutput {
+        &self.output
+    }
+}
+
+/// Owns every derivation that depends on the selected corpus. Keeping this
+/// separate from [`LocalFactShard`] makes cached shards safe to reuse after a
+/// different file changes.
+#[derive(Clone, Copy, Debug)]
+pub struct ProjectFactFinalizer {
+    profile: Profile,
+}
+
+impl ProjectFactFinalizer {
+    pub fn new(profile: Profile) -> Self {
+        Self { profile }
+    }
+
+    /// Produces a complete project snapshot from locally extracted shards.
+    pub fn finalize(self, shards: Vec<LocalFactShard>) -> ProfileOutput {
+        debug_assert!(shards.iter().all(|shard| shard.profile == self.profile));
+        merge(
+            shards
+                .into_iter()
+                .map(LocalFactShard::into_output)
+                .collect(),
+            self.profile,
+        )
+    }
+}
+
 /// The enriched output matching what Ruby's EspalierProfile::Builder.build returns.
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct ProfileOutput {
@@ -722,8 +779,9 @@ pub fn call_resolution_evidence(documents: &[Document]) -> CallResolutionEvidenc
     }
 }
 
-/// Extract enriched facts from a set of documents.
-pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
+/// Extract immutable, file-local facts. This function must not perform
+/// project-wide resolution; use [`ProjectFactFinalizer`] for that step.
+pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
     let language = document.language.as_str().to_string();
     let path = document.file.clone();
     let nil_kill = profile == Profile::NilKill;
@@ -791,18 +849,21 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
                 },
             ));
         }
-        return ProfileOutput {
-            methods,
-            fields,
-            struct_declarations,
-            state_types,
-            state_type_records,
-            signatures,
-            type_definitions,
-            declaration_type_pressures,
-            tlet_sites,
-            ..ProfileOutput::default()
-        };
+        return LocalFactShard::new(
+            profile,
+            ProfileOutput {
+                methods,
+                fields,
+                struct_declarations,
+                state_types,
+                state_type_records,
+                signatures,
+                type_definitions,
+                declaration_type_pressures,
+                tlet_sites,
+                ..ProfileOutput::default()
+            },
+        );
     }
 
     let mut hash_shapes = extract_hash_shapes(&lines, &language, &path);
@@ -831,10 +892,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         );
     }
     let state_type_edges = extract_state_type_edges(document, &language, &path);
-    let mut calls = extract_calls(document, &language, &path);
-    resolve_project_calls(&owners, &methods, &type_definitions, &mut calls);
-    apply_merged_declared_callback_costs(&fields, &methods, &mut calls);
-    let call_graph_edges = extract_call_graph_edges(&calls);
+    let calls = extract_calls(document, &language, &path);
     let state_accesses = extract_state_accesses(document, &language, &path);
     let complexity_facts = syntax::complexity_facts::facts(document);
 
@@ -1136,90 +1194,113 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         ..CallResolutionCoverage::default()
     };
 
-    ProfileOutput {
-        input_coverage: InputCoverage::default(),
-        owners,
-        methods,
-        fields,
-        struct_declarations,
-        state_types,
-        state_type_records,
-        state_protocols,
-        state_param_origins,
-        state_protocol_records,
-        state_param_origin_records,
-        signatures,
-        type_definitions,
-        declaration_type_pressures,
-        hash_shapes,
-        array_shapes,
-        state_type_edges,
-        call_graph_edges,
-        calls,
-        call_resolution_coverage,
-        state_accesses,
-        complexity_facts,
-        flow_local_types,
-        type_dependencies,
-        collection_index_lookups,
-        hash_record_blockers,
-        tlet_sites,
-        dead_nil_checks,
-        deterministic_guards,
-        return_origins,
-        noreturn_methods,
-        type_normalizers,
-        rescue_handlers,
-        return_usage_sites,
-        return_direct_usage_sites,
-        hash_record_escape_sites,
-        hidden_enum_observations,
-        nullable_refinements: if nil_kill {
-            document.nullable_refinements.clone()
-        } else {
-            Vec::new()
-        },
-        nullable_states: if nil_kill {
-            document.nullable_states.clone()
-        } else {
-            Vec::new()
-        },
-        nullable_summaries: if nil_kill {
-            document.nullable_summaries.clone()
-        } else {
-            Vec::new()
-        },
-        nullable_operations: if nil_kill {
-            document.nullable_operations.clone()
-        } else {
-            Vec::new()
-        },
-        presence_correlations: if nil_kill {
-            document.presence_correlations.clone()
-        } else {
-            Vec::new()
-        },
-        dispatcher_inferences,
-        hash_record_member_calls,
-        param_origins,
-        tuple_arrays,
-        struct_field_hash_shapes: struct_field_hash_shapes_out,
-        struct_field_array_shapes: struct_field_array_shapes_out,
-        hazard_sites: document.hazard_sites.clone(),
-        imports: document
-            .imports
-            .iter()
-            .map(|import| {
-                serde_json::json!({
-                    "path": document.file,
-                    "alias": import.alias,
-                    "target": import.target,
-                    "kind": import.kind,
-                    "line": import.line,
+    LocalFactShard::new(
+        profile,
+        ProfileOutput {
+            input_coverage: InputCoverage::default(),
+            owners,
+            methods,
+            fields,
+            struct_declarations,
+            state_types,
+            state_type_records,
+            state_protocols,
+            state_param_origins,
+            state_protocol_records,
+            state_param_origin_records,
+            signatures,
+            type_definitions,
+            declaration_type_pressures,
+            hash_shapes,
+            array_shapes,
+            state_type_edges,
+            call_graph_edges: Vec::new(),
+            calls,
+            call_resolution_coverage,
+            state_accesses,
+            complexity_facts,
+            flow_local_types,
+            type_dependencies,
+            collection_index_lookups,
+            hash_record_blockers,
+            tlet_sites,
+            dead_nil_checks,
+            deterministic_guards,
+            return_origins,
+            noreturn_methods,
+            type_normalizers,
+            rescue_handlers,
+            return_usage_sites,
+            return_direct_usage_sites,
+            hash_record_escape_sites,
+            hidden_enum_observations,
+            nullable_refinements: if nil_kill {
+                document.nullable_refinements.clone()
+            } else {
+                Vec::new()
+            },
+            nullable_states: if nil_kill {
+                document.nullable_states.clone()
+            } else {
+                Vec::new()
+            },
+            nullable_summaries: if nil_kill {
+                document.nullable_summaries.clone()
+            } else {
+                Vec::new()
+            },
+            nullable_operations: if nil_kill {
+                document.nullable_operations.clone()
+            } else {
+                Vec::new()
+            },
+            presence_correlations: if nil_kill {
+                document.presence_correlations.clone()
+            } else {
+                Vec::new()
+            },
+            dispatcher_inferences,
+            hash_record_member_calls,
+            param_origins,
+            tuple_arrays,
+            struct_field_hash_shapes: struct_field_hash_shapes_out,
+            struct_field_array_shapes: struct_field_array_shapes_out,
+            hazard_sites: document.hazard_sites.clone(),
+            imports: document
+                .imports
+                .iter()
+                .map(|import| {
+                    serde_json::json!({
+                        "path": document.file,
+                        "alias": import.alias,
+                        "target": import.target,
+                        "kind": import.kind,
+                        "line": import.line,
+                    })
                 })
-            })
-            .collect(),
-    }
+                .collect(),
+        },
+    )
+}
+
+/// Extract enriched facts for a single-file project. Existing callers retain
+/// their complete-output contract while incremental callers use
+/// [`extract_local`] plus [`ProjectFactFinalizer`] directly.
+pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
+    let mut output = extract_local(document, profile).into_output();
+    // Backward-compatible one-file projection. The incremental pipeline never
+    // calls this function: it finalizes the whole corpus through
+    // `ProjectFactFinalizer`, while direct callers retain the established
+    // single-document output shape and coverage contract.
+    resolve_project_calls(
+        &output.owners,
+        &output.methods,
+        &output.type_definitions,
+        &mut output.calls,
+    );
+    apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
+    output.call_graph_edges = extract_call_graph_edges(&output.calls);
+    output
 }
 
 /// Merge outputs from multiple files into one (like Ruby's per-file accumulation).
@@ -1243,7 +1324,6 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut hash_shapes = Vec::new();
     let mut array_shapes = Vec::new();
     let mut state_type_edges = Vec::new();
-    let mut call_graph_edges = Vec::new();
     let mut calls = Vec::new();
     let mut state_accesses = Vec::new();
     let mut complexity_facts = Vec::new();
@@ -1331,7 +1411,6 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         hash_shapes.extend(output.hash_shapes);
         array_shapes.extend(output.array_shapes);
         state_type_edges.extend(output.state_type_edges);
-        call_graph_edges.extend(output.call_graph_edges);
         calls.extend(output.calls);
         state_accesses.extend(output.state_accesses);
         complexity_facts.extend(output.complexity_facts);
@@ -1379,6 +1458,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         .collect();
 
     resolve_project_calls(&owners, &methods, &type_definitions, &mut calls);
+    apply_merged_declared_callback_costs(&fields, &methods, &mut calls);
+    let mut call_graph_edges = extract_call_graph_edges(&calls);
 
     owners.sort_by(|a, b| a.id.cmp(&b.id));
     owners.dedup_by(|a, b| a.id == b.id);

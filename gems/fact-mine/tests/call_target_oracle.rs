@@ -42,6 +42,52 @@ fn extract_java_project(files: &[(&str, &str)]) -> Result<ProfileOutput> {
 }
 
 #[test]
+fn local_shards_do_not_retain_cross_file_resolution() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let callee_path = directory.path().join("Callee.java");
+    let caller_path = directory.path().join("Caller.java");
+    fs::write(
+        &callee_path,
+        "package demo; class Callee { void work() {} }\n",
+    )?;
+    fs::write(
+        &caller_path,
+        "package demo; class Caller { void run(Callee callee) { callee.work(); } }\n",
+    )?;
+
+    let callee = syntax::parse_file(callee_path, Language::Java)?;
+    let caller = syntax::parse_file(caller_path, Language::Java)?;
+    let caller_shard = profile::extract_local(&caller, Profile::Espalier);
+    assert_eq!(caller_shard.profile(), Profile::Espalier);
+    let local_call = caller_shard
+        .local_output()
+        .calls
+        .iter()
+        .find(|call| call.message == "work")
+        .context("missing local call")?;
+    assert!(local_call.target.is_none());
+    assert!(local_call.candidate_targets.is_empty());
+    assert!(caller_shard.local_output().call_graph_edges.is_empty());
+
+    let output = profile::ProjectFactFinalizer::new(Profile::Espalier).finalize(vec![
+        profile::extract_local(&callee, Profile::Espalier),
+        caller_shard,
+    ]);
+    let target = output
+        .methods
+        .iter()
+        .find(|method| method.name == "work")
+        .context("missing project callee")?;
+    let finalized_call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "work")
+        .context("missing finalized call")?;
+    assert_eq!(finalized_call.target.as_deref(), Some(target.id.as_str()));
+    Ok(())
+}
+
+#[test]
 fn c_free_call_resolves_to_exact_declaration_id_and_span() -> Result<()> {
     let output = extract_source(
         "int helper(void) {\n  return 1;\n}\n\nint run(void) {\n  return helper();\n}\n",

@@ -242,7 +242,7 @@ fn build_profile(
         };
         let document = syntax::parse_file(file.clone(), language)?;
         Ok((
-            profile::extract(&document, selected_profile),
+            profile::extract_local(&document, selected_profile),
             document.parse_recovered.then(|| profile::ParseRecovery {
                 path: file.to_string_lossy().to_string(),
                 spans: document.parse_recovery_spans,
@@ -257,10 +257,8 @@ fn build_profile(
         .iter()
         .filter_map(|(_, recovered)| recovered.clone())
         .collect();
-    let mut output = profile::merge(
-        all_outputs.into_iter().map(|(output, _)| output).collect(),
-        selected_profile,
-    );
+    let mut output = profile::ProjectFactFinalizer::new(selected_profile)
+        .finalize(all_outputs.into_iter().map(|(output, _)| output).collect());
     output.input_coverage = profile::InputCoverage {
         selected_files: files.len(),
         parsed_files: files.len(),
