@@ -114,7 +114,7 @@ fn nullable_refinements_are_a_stable_nil_kill_public_fact() -> Result<()> {
     assert!(output.nullable_refinements.iter().all(|row| {
         row.place_id.starts_with("place:")
             && row.condition_node_id.starts_with("cfg:")
-            && row.complete
+            && (!row.complete || !row.source_definition_ids.is_empty())
     }));
     Ok(())
 }

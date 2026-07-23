@@ -9,6 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct NullableRefinement {
     pub place_id: String,
     pub condition_node_id: String,
+    /// Exact nullable reaching definitions at the condition node. Consumers
+    /// must join obligations through these IDs, never by place spelling.
+    pub source_definition_ids: Vec<String>,
     pub edge: String,
     pub state_on_edge: String,
     pub proof_kind: String,
@@ -63,6 +66,8 @@ pub struct NullableOperation {
     pub operation_kind: String,
     pub nil_behavior: String,
     pub state_at_operation: String,
+    /// Exact nullable reaching definitions at this operation node.
+    pub source_definition_ids: Vec<String>,
     pub complete: bool,
 }
 
@@ -93,6 +98,7 @@ pub(crate) struct PresenceCorrelationSeed {
 pub(crate) fn project_refinements(
     seeds: &[NullableRefinementSeed],
     facts: &ControlFlowFacts,
+    states: &[NullableState],
 ) -> Vec<NullableRefinement> {
     let place_names = facts
         .places
@@ -103,6 +109,10 @@ pub(crate) fn project_refinements(
         .effects
         .iter()
         .map(|effect| (effect.node_id.as_str(), effect))
+        .collect::<BTreeMap<_, _>>();
+    let states_by_node = states
+        .iter()
+        .map(|state| ((state.node_id.as_str(), state.place_id.as_str()), state))
         .collect::<BTreeMap<_, _>>();
 
     let mut rows = BTreeSet::new();
@@ -128,6 +138,9 @@ pub(crate) fn project_refinements(
                 .cloned()
                 .collect::<BTreeSet<_>>();
             for place_id in places {
+                let state = states_by_node
+                    .get(&(node.id.as_str(), place_id.as_str()))
+                    .copied();
                 rows.insert((
                     place_id,
                     node.id.clone(),
@@ -135,7 +148,10 @@ pub(crate) fn project_refinements(
                     seed.state_on_edge.clone(),
                     seed.proof_kind.clone(),
                     seed.condition_span,
-                    effect.complete,
+                    state
+                        .map(|state| state.source_definition_ids.clone())
+                        .unwrap_or_default(),
+                    effect.complete && state.is_some_and(|state| state.complete),
                 ));
             }
         }
@@ -150,11 +166,13 @@ pub(crate) fn project_refinements(
                 state_on_edge,
                 proof_kind,
                 source_span,
+                source_definition_ids,
                 complete,
             )| {
                 NullableRefinement {
                     place_id,
                     condition_node_id,
+                    source_definition_ids,
                     edge,
                     state_on_edge,
                     proof_kind,
@@ -395,6 +413,7 @@ pub(crate) fn project_operations(
                     seed.operation_kind.clone(),
                     "unknown".to_string(),
                     "unknown".to_string(),
+                    Vec::new(),
                     false,
                 ));
                 continue;
@@ -426,6 +445,9 @@ pub(crate) fn project_operations(
                 state
                     .map(|state| state.state.clone())
                     .unwrap_or_else(|| "unknown".to_string()),
+                state
+                    .map(|state| state.source_definition_ids.clone())
+                    .unwrap_or_default(),
                 state.is_some_and(|state| state.complete) && effect.complete,
             ));
         }
@@ -441,6 +463,7 @@ pub(crate) fn project_operations(
                 operation_kind,
                 nil_behavior,
                 state_at_operation,
+                source_definition_ids,
                 complete,
             )| {
                 NullableOperation {
@@ -451,6 +474,7 @@ pub(crate) fn project_operations(
                     operation_kind,
                     nil_behavior,
                     state_at_operation,
+                    source_definition_ids,
                     complete,
                 }
             },
@@ -766,11 +790,14 @@ mod tests {
                 proof_kind: "nil_comparison".to_string(),
             }],
             &facts,
+            &[],
         );
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].place_id, "place:value");
         assert_eq!(rows[0].state_on_edge, "definitely_non_null");
+        assert!(rows[0].source_definition_ids.is_empty());
+        assert!(!rows[0].complete);
     }
 
     #[test]
@@ -1098,6 +1125,101 @@ mod tests {
         assert_eq!(rows[0].return_state, "definitely_null");
         assert!(rows[0].complete);
         assert!(rows[0].unknown_reasons.is_empty());
+    }
+
+    #[test]
+    fn operations_keep_reassigned_reaching_roots_distinct() {
+        let facts = ControlFlowFacts {
+            nodes: vec![
+                ControlFlowNode {
+                    id: "op_a".to_string(),
+                    file: "reassign.c".to_string(),
+                    function: "use".to_string(),
+                    owner: "".to_string(),
+                    kind: "statement".to_string(),
+                    role: "statement".to_string(),
+                    line: 4,
+                    span: [4, 0, 4, 8],
+                    source: "*value".to_string(),
+                },
+                ControlFlowNode {
+                    id: "op_b".to_string(),
+                    file: "reassign.c".to_string(),
+                    function: "use".to_string(),
+                    owner: "".to_string(),
+                    kind: "statement".to_string(),
+                    role: "statement".to_string(),
+                    line: 8,
+                    span: [8, 0, 8, 8],
+                    source: "*value".to_string(),
+                },
+            ],
+            places: vec![Place {
+                id: "place:value".to_string(),
+                file: "reassign.c".to_string(),
+                function: "use".to_string(),
+                owner: "".to_string(),
+                kind: "local".to_string(),
+                name: "value".to_string(),
+                declaration_span: [1, 0, 1, 5],
+            }],
+            effects: vec![
+                NodeEffect {
+                    node_id: "op_a".to_string(),
+                    reads: vec!["place:value".to_string()],
+                    complete: true,
+                    ..NodeEffect::default()
+                },
+                NodeEffect {
+                    node_id: "op_b".to_string(),
+                    reads: vec!["place:value".to_string()],
+                    complete: true,
+                    ..NodeEffect::default()
+                },
+            ],
+            ..ControlFlowFacts::default()
+        };
+        let states = vec![
+            NullableState {
+                node_id: "op_a".to_string(),
+                place_id: "place:value".to_string(),
+                state: "maybe_null".to_string(),
+                source_definition_ids: vec!["definition:a".to_string()],
+                complete: true,
+                unknown_reasons: Vec::new(),
+            },
+            NullableState {
+                node_id: "op_b".to_string(),
+                place_id: "place:value".to_string(),
+                state: "maybe_null".to_string(),
+                source_definition_ids: vec!["definition:b".to_string()],
+                complete: true,
+                unknown_reasons: Vec::new(),
+            },
+        ];
+        let rows = project_operations(
+            &[
+                NullableOperationSeed {
+                    function: "use".to_string(),
+                    span: [4, 0, 4, 8],
+                    subject: "value".to_string(),
+                    operation_kind: "pointer_dereference".to_string(),
+                    nil_behavior: "undefined_behavior".to_string(),
+                },
+                NullableOperationSeed {
+                    function: "use".to_string(),
+                    span: [8, 0, 8, 8],
+                    subject: "value".to_string(),
+                    operation_kind: "pointer_dereference".to_string(),
+                    nil_behavior: "undefined_behavior".to_string(),
+                },
+            ],
+            &facts,
+            &states,
+        );
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].source_definition_ids, vec!["definition:a"]);
+        assert_eq!(rows[1].source_definition_ids, vec!["definition:b"]);
     }
 
     #[test]

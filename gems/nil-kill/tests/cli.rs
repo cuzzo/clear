@@ -69,7 +69,9 @@ fn binary_reports_causal_nullable_pressure_from_public_facts() {
                 }],
                 "nullable_refinements": [{
                     "place_id": "place:cache:value",
-                    "condition_node_id": "guard:1"
+                    "condition_node_id": "guard:1",
+                    "complete": true,
+                    "source_definition_ids": ["definition:cache_lookup"]
                 }],
                 "nullable_summaries": [{
                     "owner": "Cache",
@@ -85,7 +87,8 @@ fn binary_reports_causal_nullable_pressure_from_public_facts() {
                     "span": [22, 4, 22, 10],
                     "operation_kind": "pointer_dereference",
                     "nil_behavior": "undefined_behavior",
-                    "complete": true
+                    "complete": true,
+                    "source_definition_ids": ["definition:cache_lookup"]
                 }]
             }
         }))

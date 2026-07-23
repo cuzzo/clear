@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Produces a review-only causal report from FactMine's public nullable
 /// facts. NilKill deliberately receives no source text, normalized AST, or
-/// CFG here: it groups only already-proven origins and obligations.
+/// CFG here: FactMine has already joined each obligation to its exact nullable
+/// reaching-definition IDs.
 pub(super) fn report(input: &InputState) -> Vec<Action> {
     let mut roots = roots(&fact_helpers::objects(input, "nullable_states"));
     attach_guards(
@@ -30,15 +31,8 @@ fn roots(states: &[&serde_json::Map<String, serde_json::Value>]) -> BTreeMap<Str
         {
             continue;
         }
-        let Some(place_id) = fact_helpers::string(state, "place_id") else {
-            continue;
-        };
         for root in fact_helpers::strings(state, "source_definition_ids") {
-            roots
-                .entry(root.to_string())
-                .or_default()
-                .places
-                .insert(place_id.to_string());
+            roots.entry(root.to_string()).or_default();
         }
     }
     roots
@@ -48,13 +42,21 @@ fn attach_guards(
     roots: &mut BTreeMap<String, Evidence>,
     refinements: &[&serde_json::Map<String, serde_json::Value>],
 ) {
-    for evidence in roots.values_mut() {
-        for refinement in refinements {
-            let Some(place_id) = fact_helpers::string(refinement, "place_id") else {
-                continue;
-            };
-            if evidence.places.contains(place_id) {
-                let condition = fact_helpers::string(refinement, "condition_node_id").unwrap_or("");
+    for refinement in refinements {
+        if !fact_helpers::bool(refinement, "complete") {
+            continue;
+        }
+        let (Some(place_id), Some(condition)) = (
+            fact_helpers::string(refinement, "place_id"),
+            fact_helpers::string(refinement, "condition_node_id"),
+        ) else {
+            continue;
+        };
+        if condition.is_empty() {
+            continue;
+        }
+        for root in fact_helpers::strings(refinement, "source_definition_ids") {
+            if let Some(evidence) = roots.get_mut(root) {
                 evidence.guards.insert(format!("{place_id}:{condition}"));
             }
         }
@@ -83,30 +85,27 @@ fn attach_operations(
     roots: &mut BTreeMap<String, Evidence>,
     operations: &[&serde_json::Map<String, serde_json::Value>],
 ) {
-    for evidence in roots.values_mut() {
-        for operation in operations {
-            let Some(place_id) = fact_helpers::string(operation, "place_id") else {
-                continue;
-            };
-            let behavior = fact_helpers::string(operation, "nil_behavior").unwrap_or("unknown");
-            if !evidence.places.contains(place_id)
-                || matches!(behavior, "safe" | "unknown")
-                || !fact_helpers::bool(operation, "complete")
-            {
-                continue;
-            }
-            let location = OperationLocation {
-                path: fact_helpers::string(operation, "path")
-                    .unwrap_or("")
-                    .to_string(),
-                line: fact_helpers::span_line(operation),
-            };
-            if location.is_real_source_location() {
-                let node = fact_helpers::string(operation, "node_id").unwrap_or("");
-                let kind = fact_helpers::string(operation, "operation_kind").unwrap_or("");
+    for operation in operations {
+        let behavior = fact_helpers::string(operation, "nil_behavior").unwrap_or("unknown");
+        if matches!(behavior, "safe" | "unknown") || !fact_helpers::bool(operation, "complete") {
+            continue;
+        }
+        let location = OperationLocation {
+            path: fact_helpers::string(operation, "path")
+                .unwrap_or("")
+                .to_string(),
+            line: fact_helpers::span_line(operation),
+        };
+        if !location.is_real_source_location() {
+            continue;
+        }
+        let node = fact_helpers::string(operation, "node_id").unwrap_or("");
+        let kind = fact_helpers::string(operation, "operation_kind").unwrap_or("");
+        for root in fact_helpers::strings(operation, "source_definition_ids") {
+            if let Some(evidence) = roots.get_mut(root) {
                 evidence
                     .operations
-                    .insert(format!("{kind}:{node}"), location);
+                    .insert(format!("{kind}:{node}"), location.clone());
             }
         }
     }
@@ -160,7 +159,6 @@ fn actions(roots: BTreeMap<String, Evidence>) -> Vec<Action> {
 
 #[derive(Default)]
 struct Evidence {
-    places: BTreeSet<String>,
     guards: BTreeSet<String>,
     returns: BTreeSet<String>,
     operations: BTreeMap<String, OperationLocation>,
