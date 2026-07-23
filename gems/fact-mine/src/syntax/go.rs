@@ -15,10 +15,127 @@ use super::normalized_behavior::{
 };
 use super::{CallSite, ExternalCallComplexity, FunctionDef};
 use crate::ast::{Child, Node, Span};
+use crate::syntax::nullable::PresenceCorrelationSeed;
 use crate::type_inference::TypeExpr;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RawPresenceCorrelation {
+    function: String,
+    span: Span,
+    value_subject: String,
+    presence_subject: String,
+    semantics: &'static str,
+}
+
+/// Replaces normalized Go comma-ok spans with the exact raw parser node span.
+/// This remains at the Go adapter boundary because only Go owns the comma-ok
+/// grammar and the returned-function-literal normalization quirk it repairs.
+pub(crate) fn attach_raw_presence_correlation_spans(
+    root: tree_sitter::Node<'_>,
+    source: &str,
+    seeds: &mut Vec<PresenceCorrelationSeed>,
+) {
+    let correlations = raw_presence_correlations(root, source);
+    seeds.retain_mut(|seed| {
+        let matches = correlations
+            .iter()
+            .filter(|correlation| {
+                correlation.function == seed.function
+                    && correlation.value_subject == seed.value_subject
+                    && correlation.presence_subject == seed.presence_subject
+                    && correlation.semantics == seed.semantics
+            })
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [correlation] => {
+                seed.span = correlation.span;
+                true
+            }
+            // Multiple raw declarations with the same function-local names
+            // cannot be joined without an origin ID. Omit rather than guess.
+            _ => false,
+        }
+    });
+}
+
+fn raw_presence_correlations(
+    root: tree_sitter::Node<'_>,
+    source: &str,
+) -> Vec<RawPresenceCorrelation> {
+    fn text<'source>(node: tree_sitter::Node<'_>, source: &'source str) -> Option<&'source str> {
+        source.get(node.byte_range())
+    }
+
+    fn identifier_list(node: tree_sitter::Node<'_>, source: &str) -> Vec<String> {
+        let mut cursor = node.walk();
+        node.named_children(&mut cursor)
+            .filter(|child| child.kind() == "identifier")
+            .filter_map(|child| text(child, source).map(str::to_string))
+            .collect()
+    }
+
+    fn walk(
+        node: tree_sitter::Node<'_>,
+        source: &str,
+        function: &str,
+        rows: &mut Vec<RawPresenceCorrelation>,
+    ) {
+        let function = if node.kind() == "function_declaration" {
+            node.child_by_field_name("name")
+                .and_then(|name| text(name, source))
+                .unwrap_or(function)
+        } else {
+            function
+        };
+        if node.kind() == "short_var_declaration" {
+            let left = node.child_by_field_name("left");
+            let right = node.child_by_field_name("right");
+            let targets = left
+                .map(|left| identifier_list(left, source))
+                .unwrap_or_default();
+            let producer = right.and_then(|right| {
+                let mut cursor = right.walk();
+                let first = right.named_children(&mut cursor).next();
+                first
+            });
+            let semantics = producer.and_then(|producer| match producer.kind() {
+                "index_expression" => Some("map_lookup"),
+                "type_assertion_expression" => Some("type_assertion"),
+                "unary_expression"
+                    if text(producer, source)
+                        .is_some_and(|value| value.trim_start().starts_with("<-")) =>
+                {
+                    Some("channel_receive")
+                }
+                _ => None,
+            });
+            if let (Some(semantics), [value_subject, presence_subject]) =
+                (semantics, targets.as_slice())
+            {
+                let start = node.start_position();
+                let end = node.end_position();
+                rows.push(RawPresenceCorrelation {
+                    function: function.to_string(),
+                    span: [start.row + 1, start.column, end.row + 1, end.column],
+                    value_subject: value_subject.clone(),
+                    presence_subject: presence_subject.clone(),
+                    semantics,
+                });
+            }
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            walk(child, source, function, rows);
+        }
+    }
+
+    let mut rows = Vec::new();
+    walk(root, source, "(top-level)", &mut rows);
+    rows
+}
 
 fn scip_go_parts(symbol: &str) -> Option<(&str, &str)> {
     let rest = symbol.strip_prefix("scip-go gomod ")?;

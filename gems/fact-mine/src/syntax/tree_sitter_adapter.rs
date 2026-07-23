@@ -80,6 +80,17 @@ fn parse_normalized_file(
     let mut facts =
         passes::StatelessSyntaxPass::normalized(&parsed.file, &lines, &normalized_root, behavior)
             .run();
+    if language == Language::Go {
+        // Go function literals can normalize to a synthetic wrapper with the
+        // span of `return func`, rather than the comma-ok declaration. Keep
+        // source ownership in the Go adapter, which has the unmodified parser
+        // tree and can provide an exact node span without text recovery.
+        super::go::attach_raw_presence_correlation_spans(
+            parsed.tree.root_node(),
+            &parsed.source,
+            &mut facts.presence_correlation_seeds,
+        );
+    }
     let normalization_call_origins = parser_call_origins
         .into_iter()
         .map(

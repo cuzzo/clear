@@ -488,6 +488,17 @@ fn ruby_case_equality_disjunction_refines_the_else_path() -> Result<()> {
                 .place_id
                 .contains("NullableRuby#guarded_disjunction:local:value")
     }));
+    let post_join_state = output
+        .nullable_states
+        .iter()
+        .filter(|state| {
+            state
+                .place_id
+                .contains("NullableRuby#refinement_must_not_survive_join:local:value")
+        })
+        .max_by_key(|state| state.node_id.as_str())
+        .expect("fixture must retain the post-join state");
+    assert_eq!(post_join_state.state, "definitely_null");
     Ok(())
 }
 

@@ -1,5 +1,5 @@
 use crate::ast::Span;
-use crate::syntax::cfg::{ControlFlowFacts, ControlFlowNode, NodeEffect};
+use crate::syntax::cfg::{ControlFlowEdge, ControlFlowFacts, ControlFlowNode, NodeEffect};
 use crate::syntax::redundant_nil_guard::NullableRefinementSeed;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -247,8 +247,14 @@ pub(crate) fn project_states(facts: &ControlFlowFacts) -> Vec<NullableState> {
 }
 
 /// Applies complete branch proofs to successor states while their exact
-/// reaching definitions remain unchanged. A write to the refined place ends
-/// propagation, so a later reassignment cannot inherit an earlier guard.
+/// reaching definitions remain unchanged. A refinement is an *edge* fact: it
+/// is valid only until the selected edge meets a node also reachable from an
+/// unselected edge of the same decision. A write to the refined place also
+/// ends propagation, so a later reassignment cannot inherit an earlier guard.
+///
+/// This deliberately does not mutate the base reaching-definition result at a
+/// join. At a join the unselected path is another input to the nullable state,
+/// so retaining an edge-local `definitely_non_null` result would be unsound.
 pub(crate) fn apply_refinements(
     states: &[NullableState],
     refinements: &[NullableRefinement],
@@ -284,16 +290,31 @@ pub(crate) fn apply_refinements(
             .source_definition_ids
             .iter()
             .collect::<BTreeSet<_>>();
-        let mut pending = outgoing
+        let selected_successors = outgoing
             .get(refinement.condition_node_id.as_str())
             .into_iter()
             .flatten()
             .filter(|edge| refinement_edge_matches(&refinement.edge, &edge.kind))
             .map(|edge| edge.to.clone())
-            .collect::<Vec<_>>();
+            .collect::<BTreeSet<_>>();
+        let unselected_successors = outgoing
+            .get(refinement.condition_node_id.as_str())
+            .into_iter()
+            .flatten()
+            .filter(|edge| !refinement_edge_matches(&refinement.edge, &edge.kind))
+            .map(|edge| edge.to.clone())
+            .collect::<BTreeSet<_>>();
+        // A node reachable from any unselected successor is a control-flow
+        // join for this proof. Do not apply the selected-edge state at or
+        // beyond it; the base state already joins both incoming paths.
+        let joins = reachable_nodes(&unselected_successors, &outgoing);
+        let mut pending = selected_successors.into_iter().collect::<Vec<_>>();
         let mut visited = BTreeSet::new();
         while let Some(node_id) = pending.pop() {
             if !visited.insert(node_id.clone()) {
+                continue;
+            }
+            if joins.contains(&node_id) {
                 continue;
             }
             let state_key = (node_id.clone(), refinement.place_id.clone());
@@ -323,6 +344,27 @@ pub(crate) fn apply_refinements(
         }
     }
     output.into_values().collect()
+}
+
+fn reachable_nodes(
+    starts: &BTreeSet<String>,
+    outgoing: &BTreeMap<&str, Vec<&ControlFlowEdge>>,
+) -> BTreeSet<String> {
+    let mut reachable = BTreeSet::new();
+    let mut pending = starts.iter().cloned().collect::<Vec<_>>();
+    while let Some(node_id) = pending.pop() {
+        if !reachable.insert(node_id.clone()) {
+            continue;
+        }
+        pending.extend(
+            outgoing
+                .get(node_id.as_str())
+                .into_iter()
+                .flatten()
+                .map(|edge| edge.to.clone()),
+        );
+    }
+    reachable
 }
 
 fn refinement_edge_matches(edge: &str, cfg_kind: &str) -> bool {
@@ -836,6 +878,43 @@ mod tests {
     use super::*;
     use crate::syntax::cfg::{ControlFlowEdge, ControlFlowNode, NodeEffect, Place};
 
+    fn edge(from: &str, to: &str, kind: &str) -> ControlFlowEdge {
+        ControlFlowEdge {
+            file: "flow.rb".to_string(),
+            function: "use".to_string(),
+            owner: "".to_string(),
+            from: from.to_string(),
+            to: to.to_string(),
+            kind: kind.to_string(),
+            line: 1,
+            span: [1, 0, 1, 1],
+        }
+    }
+
+    fn nullable_state(node_id: &str) -> NullableState {
+        NullableState {
+            node_id: node_id.to_string(),
+            place_id: "place:value".to_string(),
+            state: "maybe_null".to_string(),
+            source_definition_ids: vec!["root:value".to_string()],
+            complete: true,
+            unknown_reasons: Vec::new(),
+        }
+    }
+
+    fn non_null_then_refinement() -> NullableRefinement {
+        NullableRefinement {
+            place_id: "place:value".to_string(),
+            condition_node_id: "branch".to_string(),
+            source_definition_ids: vec!["root:value".to_string()],
+            edge: "then".to_string(),
+            state_on_edge: "definitely_non_null".to_string(),
+            proof_kind: "nil_comparison".to_string(),
+            source_span: [1, 0, 1, 1],
+            complete: true,
+        }
+    }
+
     #[test]
     fn projects_only_a_subject_read_by_the_matching_condition() {
         let facts = ControlFlowFacts {
@@ -988,6 +1067,112 @@ mod tests {
         assert_eq!(state("operation"), "definitely_non_null");
         assert_eq!(state("write"), "definitely_non_null");
         assert_eq!(state("after_write"), "maybe_null");
+    }
+
+    #[test]
+    fn branch_refinements_are_edge_local_across_joins_and_loops() {
+        let cases = [
+            // `if value != nil; use(value); end; use(value)`: the implicit
+            // false edge joins after the guarded use.
+            (
+                "implicit_else_join",
+                vec![
+                    edge("branch", "guarded", "branch_true"),
+                    edge("branch", "join", "branch_false"),
+                    edge("guarded", "join", "fallthrough"),
+                ],
+                vec![("guarded", "definitely_non_null"), ("join", "maybe_null")],
+            ),
+            // Both explicit branches can reach the join; neither branch's
+            // proof may leak into the post-conditional operation.
+            (
+                "two_branch_join",
+                vec![
+                    edge("branch", "then", "branch_true"),
+                    edge("branch", "else", "branch_false"),
+                    edge("then", "join", "fallthrough"),
+                    edge("else", "join", "fallthrough"),
+                ],
+                vec![("then", "definitely_non_null"), ("join", "maybe_null")],
+            ),
+            // A guard clause has no false-path route to `after`, so the
+            // selected non-null edge remains valid after the early return.
+            (
+                "guard_clause",
+                vec![
+                    edge("branch", "after", "branch_true"),
+                    edge("branch", "return", "branch_false"),
+                ],
+                vec![("after", "definitely_non_null")],
+            ),
+            // A nested condition retains the outer refinement inside the
+            // selected region, but not at its outer join.
+            (
+                "nested_condition",
+                vec![
+                    edge("branch", "nested", "branch_true"),
+                    edge("branch", "join", "branch_false"),
+                    edge("nested", "guarded", "branch_true"),
+                    edge("nested", "join", "branch_false"),
+                    edge("guarded", "join", "fallthrough"),
+                ],
+                vec![
+                    ("nested", "definitely_non_null"),
+                    ("guarded", "definitely_non_null"),
+                    ("join", "maybe_null"),
+                ],
+            ),
+            // Backedges must neither make the traversal loop forever nor let
+            // the refinement survive the loop's exit join.
+            (
+                "loop_backedge",
+                vec![
+                    edge("branch", "body", "branch_true"),
+                    edge("branch", "join", "branch_false"),
+                    edge("body", "body", "fallthrough"),
+                    edge("body", "join", "fallthrough"),
+                ],
+                vec![("body", "definitely_non_null"), ("join", "maybe_null")],
+            ),
+            // A write on only the selected branch terminates the refinement;
+            // its sibling still prevents a post-conditional leak.
+            (
+                "reassignment_on_selected_branch",
+                vec![
+                    edge("branch", "write", "branch_true"),
+                    edge("branch", "join", "branch_false"),
+                    edge("write", "join", "fallthrough"),
+                ],
+                vec![("write", "definitely_non_null"), ("join", "maybe_null")],
+            ),
+        ];
+
+        for (name, edges, expected) in cases {
+            let mut facts = ControlFlowFacts {
+                edges,
+                ..ControlFlowFacts::default()
+            };
+            if name == "reassignment_on_selected_branch" {
+                facts.effects.push(NodeEffect {
+                    node_id: "write".to_string(),
+                    writes: vec!["place:value".to_string()],
+                    complete: true,
+                    ..NodeEffect::default()
+                });
+            }
+            let states = expected
+                .iter()
+                .map(|(node, _)| nullable_state(node))
+                .collect::<Vec<_>>();
+            let output = apply_refinements(&states, &[non_null_then_refinement()], &facts);
+            for (node, state) in expected {
+                let actual = output
+                    .iter()
+                    .find(|row| row.node_id == node)
+                    .map(|row| row.state.as_str());
+                assert_eq!(actual, Some(state), "{name}: {node}");
+            }
+        }
     }
 
     #[test]
