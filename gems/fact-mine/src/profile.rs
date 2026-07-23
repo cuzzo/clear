@@ -1349,6 +1349,12 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
 
 /// Merge outputs from multiple files into one (like Ruby's per-file accumulation).
 pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
+    let mut output = merge_local(outputs, profile);
+    finalize_project_output(&mut output);
+    output
+}
+
+fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let nil_kill = profile == Profile::NilKill;
     let espalier = profile == Profile::Espalier;
     let trace_plan = profile == Profile::TracePlan;
@@ -1501,47 +1507,6 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         .map(|(k, v)| (k, v.into_iter().collect()))
         .collect();
 
-    resolve_project_calls(&owners, &methods, &type_definitions, &mut calls);
-    apply_merged_declared_callback_costs(&fields, &methods, &mut calls);
-    let mut call_graph_edges = extract_call_graph_edges(&calls);
-
-    owners.sort_by(|a, b| a.id.cmp(&b.id));
-    owners.dedup_by(|a, b| a.id == b.id);
-    call_graph_edges.sort_by(|a, b| {
-        a.source
-            .cmp(&b.source)
-            .then_with(|| a.target.cmp(&b.target))
-            .then_with(|| a.kind.cmp(&b.kind))
-    });
-    calls.sort_by(|a, b| a.id.cmp(&b.id));
-    calls.dedup_by(|a, b| a.id == b.id);
-    annotate_call_resolution_proofs(&owners, &methods, &mut calls);
-    let mut call_resolution_coverage = summarize_call_resolution(&owners, &methods, &calls);
-    call_resolution_coverage.raw_parser_call_sites = raw_parser_call_sites;
-    call_resolution_coverage.raw_calls_not_normalized = raw_calls_not_normalized;
-    call_resolution_coverage.raw_calls_not_normalized_inside_function =
-        raw_calls_not_normalized_inside_function;
-    call_resolution_coverage.raw_calls_not_normalized_outside_function =
-        raw_calls_not_normalized_outside_function;
-    call_resolution_coverage.raw_calls_not_normalized_by_kind = raw_calls_not_normalized_by_kind;
-    raw_call_normalization_gap_samples.sort_by(|left, right| {
-        left.path
-            .cmp(&right.path)
-            .then_with(|| left.span.cmp(&right.span))
-            .then_with(|| left.kind.cmp(&right.kind))
-    });
-    raw_call_normalization_gap_samples.dedup();
-    raw_call_normalization_gap_samples.truncate(64);
-    call_resolution_coverage.raw_call_normalization_gap_samples =
-        raw_call_normalization_gap_samples;
-    call_resolution_coverage.normalized_calls_without_raw_span = normalized_calls_without_raw_span;
-    state_accesses.sort_by(|a, b| a.id.cmp(&b.id));
-    state_accesses.dedup_by(|a, b| a.id == b.id);
-    type_definitions.sort_by(|a, b| a.id.cmp(&b.id));
-    type_definitions.dedup_by(|a, b| a.id == b.id);
-    type_dependencies.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
-    type_dependencies.dedup_by(|left, right| left["id"] == right["id"]);
-
     ProfileOutput {
         artifact_scope: None,
         incremental_metrics: None,
@@ -1562,9 +1527,18 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         hash_shapes,
         array_shapes,
         state_type_edges,
-        call_graph_edges,
+        call_graph_edges: Vec::new(),
         calls,
-        call_resolution_coverage,
+        call_resolution_coverage: CallResolutionCoverage {
+            raw_parser_call_sites,
+            raw_calls_not_normalized,
+            raw_calls_not_normalized_inside_function,
+            raw_calls_not_normalized_outside_function,
+            raw_calls_not_normalized_by_kind,
+            raw_call_normalization_gap_samples,
+            normalized_calls_without_raw_span,
+            ..CallResolutionCoverage::default()
+        },
         state_accesses,
         complexity_facts,
         flow_local_types,
@@ -1596,6 +1570,59 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         hazard_sites,
         imports: import_facts,
     }
+}
+
+fn finalize_project_output(output: &mut ProfileOutput) {
+    resolve_project_calls(
+        &output.owners,
+        &output.methods,
+        &output.type_definitions,
+        &mut output.calls,
+    );
+    apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
+    output.call_graph_edges = extract_call_graph_edges(&output.calls);
+    output.owners.sort_by(|a, b| a.id.cmp(&b.id));
+    output.owners.dedup_by(|a, b| a.id == b.id);
+    output.call_graph_edges.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then_with(|| a.target.cmp(&b.target))
+            .then_with(|| a.kind.cmp(&b.kind))
+    });
+    output.calls.sort_by(|a, b| a.id.cmp(&b.id));
+    output.calls.dedup_by(|a, b| a.id == b.id);
+    annotate_call_resolution_proofs(&output.owners, &output.methods, &mut output.calls);
+    let raw_coverage = std::mem::take(&mut output.call_resolution_coverage);
+    let mut coverage = summarize_call_resolution(&output.owners, &output.methods, &output.calls);
+    coverage.raw_parser_call_sites = raw_coverage.raw_parser_call_sites;
+    coverage.raw_calls_not_normalized = raw_coverage.raw_calls_not_normalized;
+    coverage.raw_calls_not_normalized_inside_function =
+        raw_coverage.raw_calls_not_normalized_inside_function;
+    coverage.raw_calls_not_normalized_outside_function =
+        raw_coverage.raw_calls_not_normalized_outside_function;
+    coverage.raw_calls_not_normalized_by_kind = raw_coverage.raw_calls_not_normalized_by_kind;
+    let mut samples = raw_coverage.raw_call_normalization_gap_samples;
+    samples.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.span.cmp(&right.span))
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    samples.dedup();
+    samples.truncate(64);
+    coverage.raw_call_normalization_gap_samples = samples;
+    coverage.normalized_calls_without_raw_span = raw_coverage.normalized_calls_without_raw_span;
+    output.call_resolution_coverage = coverage;
+    output.state_accesses.sort_by(|a, b| a.id.cmp(&b.id));
+    output.state_accesses.dedup_by(|a, b| a.id == b.id);
+    output.type_definitions.sort_by(|a, b| a.id.cmp(&b.id));
+    output.type_definitions.dedup_by(|a, b| a.id == b.id);
+    output
+        .type_dependencies
+        .sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    output
+        .type_dependencies
+        .dedup_by(|left, right| left["id"] == right["id"]);
 }
 
 fn apply_merged_declared_callback_costs(
@@ -2643,6 +2670,9 @@ fn resolve_inherited_calls(
     let resolutions = calls
         .iter()
         .map(|call| {
+            if call.target.is_some() {
+                return None;
+            }
             let source = sources.get(call.source.as_str()).copied()?;
             // These adapters expose nominal inheritance or language-defined
             // method promotion. Other languages keep the normalized edge facts
