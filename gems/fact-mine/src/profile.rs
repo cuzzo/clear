@@ -24,6 +24,7 @@ use crate::type_inference::TypeExpr;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Which fact-set to produce.
@@ -1725,6 +1726,108 @@ pub(crate) fn reapply_declared_callback_costs(output: &mut ProfileOutput) {
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
 }
 
+/// Immutable lookup tables shared by proof annotation and coverage. The
+/// previous implementation rebuilt and rescanned corpus-wide method/call
+/// vectors for every unresolved call.
+struct CallResolutionIndex<'a> {
+    methods_by_id: HashMap<&'a str, &'a MethodRecord>,
+    methods_by_message: HashMap<(&'a str, &'a str), Vec<&'a MethodRecord>>,
+    methods_by_lexical: HashMap<(&'a str, &'a str), Vec<&'a MethodRecord>>,
+    methods_by_symbol_owner: HashMap<(&'a str, &'a str), Vec<&'a MethodRecord>>,
+    methods_by_owner: HashMap<(&'a str, &'a str), Vec<&'a MethodRecord>>,
+    methods_by_owner_dispatch: HashMap<(&'a str, &'a str, &'a str, &'a str), Vec<&'a MethodRecord>>,
+    calls_by_site: HashMap<(&'a str, &'a str, [usize; 4]), &'a CallRecord>,
+}
+
+impl<'a> CallResolutionIndex<'a> {
+    fn new(methods: &'a [MethodRecord], calls: &'a [CallRecord]) -> Self {
+        let mut index = Self {
+            methods_by_id: HashMap::new(),
+            methods_by_message: HashMap::new(),
+            methods_by_lexical: HashMap::new(),
+            methods_by_symbol_owner: HashMap::new(),
+            methods_by_owner: HashMap::new(),
+            methods_by_owner_dispatch: HashMap::new(),
+            calls_by_site: HashMap::new(),
+        };
+        for method in methods {
+            let language = method.language.as_str();
+            index.methods_by_id.insert(method.id.as_str(), method);
+            index
+                .methods_by_message
+                .entry((language, method.dispatch_name.as_str()))
+                .or_default()
+                .push(method);
+            if let Some(symbol) = method.lexical_symbol.as_deref() {
+                index
+                    .methods_by_lexical
+                    .entry((language, symbol))
+                    .or_default()
+                    .push(method);
+            }
+            if let Some(owner) = method.symbol_owner.as_deref() {
+                index
+                    .methods_by_symbol_owner
+                    .entry((language, owner))
+                    .or_default()
+                    .push(method);
+            }
+            let mut owners = vec![method.owner.as_str()];
+            if let Some(symbol_owner) = method.symbol_owner.as_deref() {
+                if symbol_owner != method.owner {
+                    owners.push(symbol_owner);
+                }
+            }
+            for owner in owners.into_iter().filter(|owner| !owner.is_empty()) {
+                index
+                    .methods_by_owner
+                    .entry((language, owner))
+                    .or_default()
+                    .push(method);
+                let short = owner
+                    .rsplit([':', '.'])
+                    .find(|part| !part.is_empty())
+                    .unwrap_or(owner);
+                if short != owner {
+                    index
+                        .methods_by_owner
+                        .entry((language, short))
+                        .or_default()
+                        .push(method);
+                }
+                index
+                    .methods_by_owner_dispatch
+                    .entry((
+                        language,
+                        owner,
+                        method.kind.as_str(),
+                        method.dispatch_name.as_str(),
+                    ))
+                    .or_default()
+                    .push(method);
+                if short != owner {
+                    index
+                        .methods_by_owner_dispatch
+                        .entry((
+                            language,
+                            short,
+                            method.kind.as_str(),
+                            method.dispatch_name.as_str(),
+                        ))
+                        .or_default()
+                        .push(method);
+                }
+            }
+        }
+        for call in calls {
+            index
+                .calls_by_site
+                .insert((call.source.as_str(), call.path.as_str(), call.span), call);
+        }
+        index
+    }
+}
+
 /// Summarize final call records without changing their resolution outcome.
 /// This must run after project merge so exact cross-file targets are already
 /// present and so consumers observe one authoritative denominator.
@@ -1733,11 +1836,7 @@ pub fn summarize_call_resolution(
     methods: &[MethodRecord],
     calls: &[CallRecord],
 ) -> CallResolutionCoverage {
-    let methods_by_id = methods
-        .iter()
-        .map(|method| (method.id.as_str(), method))
-        .collect::<BTreeMap<_, _>>();
-    let method_ids = methods_by_id.keys().copied().collect::<BTreeSet<_>>();
+    let index = CallResolutionIndex::new(methods, calls);
     let mut coverage = CallResolutionCoverage {
         total_call_sites: calls.len(),
         owners_with_supertypes: owners
@@ -1751,7 +1850,7 @@ pub fn summarize_call_resolution(
     let mut closed_candidate_identity_sites = 0usize;
 
     for call in calls {
-        let Some(source) = methods_by_id.get(call.source.as_str()).copied() else {
+        let Some(source) = index.methods_by_id.get(call.source.as_str()).copied() else {
             coverage.outside_executable_function += 1;
             continue;
         };
@@ -1773,7 +1872,7 @@ pub fn summarize_call_resolution(
         if call
             .target
             .as_deref()
-            .is_some_and(|target| method_ids.contains(target))
+            .is_some_and(|target| index.methods_by_id.contains_key(target))
         {
             coverage.exact_project_targets += 1;
             language.exact_project_targets += 1;
@@ -1821,7 +1920,7 @@ pub fn summarize_call_resolution(
             coverage.unresolved_with_ambiguous_inherited_targets += 1;
         }
         let missing_proof = call.resolution_missing_proof.clone().unwrap_or_else(|| {
-            first_missing_call_proof(methods, calls, call, source, inherited_targets.len())
+            first_missing_call_proof(&index, call, source, inherited_targets.len())
         });
         *coverage
             .unresolved_by_missing_proof
@@ -1865,14 +1964,11 @@ fn annotate_call_resolution_proofs(
     methods: &[MethodRecord],
     calls: &mut [CallRecord],
 ) {
-    let methods_by_id = methods
-        .iter()
-        .map(|method| (method.id.as_str(), method))
-        .collect::<BTreeMap<_, _>>();
+    let index = CallResolutionIndex::new(methods, calls);
     let proofs = calls
         .iter()
         .map(|call| {
-            let source = methods_by_id.get(call.source.as_str()).copied()?;
+            let source = index.methods_by_id.get(call.source.as_str()).copied()?;
             if call.target.is_some()
                 || call.known_time_complexity.is_some()
                 || call.known_space_complexity.is_some()
@@ -1880,7 +1976,7 @@ fn annotate_call_resolution_proofs(
                 return None;
             }
             let inherited = inherited_target_ids(owners, methods, call, source);
-            let proof = first_missing_call_proof(methods, calls, call, source, inherited.len());
+            let proof = first_missing_call_proof(&index, call, source, inherited.len());
             let cause = empty_domain_cause(owners, methods, call, source, &proof);
             Some((proof, cause))
         })
@@ -2050,8 +2146,7 @@ fn project_lexical_namespace_exists(
 }
 
 fn first_missing_call_proof(
-    methods: &[MethodRecord],
-    calls: &[CallRecord],
+    index: &CallResolutionIndex<'_>,
     call: &CallRecord,
     source: &MethodRecord,
     inherited_target_count: usize,
@@ -2075,22 +2170,19 @@ fn first_missing_call_proof(
         return "hierarchy_dispatch_ambiguous".to_string();
     }
 
-    let language_methods = methods
-        .iter()
-        .filter(|method| method.language == source.language)
-        .collect::<Vec<_>>();
-    let message_candidates = language_methods
-        .iter()
-        .copied()
-        .filter(|method| method.dispatch_name == call.message)
-        .collect::<Vec<_>>();
+    let language = source.language.as_str();
+    let message_candidates = index
+        .methods_by_message
+        .get(&(language, call.message.as_str()))
+        .map(Vec::as_slice)
+        .unwrap_or_default();
 
     if let Some(symbol) = call.lexical_symbol.as_deref() {
-        let candidates = language_methods
-            .iter()
-            .copied()
-            .filter(|method| method.lexical_symbol.as_deref() == Some(symbol))
-            .collect::<Vec<_>>();
+        let candidates = index
+            .methods_by_lexical
+            .get(&(language, symbol))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         return match candidates.len() {
             0 if message_candidates.is_empty() => "declaration_not_in_analyzed_project".to_string(),
             0 => "project_lexical_binding_missing".to_string(),
@@ -2100,11 +2192,11 @@ fn first_missing_call_proof(
     }
 
     if let Some(symbol) = call.receiver_symbol.as_deref() {
-        let owner_methods = language_methods
-            .iter()
-            .copied()
-            .filter(|method| method.symbol_owner.as_deref() == Some(symbol))
-            .collect::<Vec<_>>();
+        let owner_methods = index
+            .methods_by_symbol_owner
+            .get(&(language, symbol))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         if owner_methods.is_empty() {
             let type_name = call.receiver_type.as_deref().unwrap_or(symbol);
             let receiver_type = TypeExpr::parse(type_name, source.language.as_str());
@@ -2124,11 +2216,11 @@ fn first_missing_call_proof(
         } else {
             "instance"
         };
-        let candidates = owner_methods
-            .iter()
-            .copied()
-            .filter(|method| method.dispatch_name == call.message && method.kind == dispatch)
-            .collect::<Vec<_>>();
+        let candidates = index
+            .methods_by_owner_dispatch
+            .get(&(language, symbol, dispatch, call.message.as_str()))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         return match candidates.len() {
             0 => "project_receiver_known_member_absent".to_string(),
             1 => "normalization_defect_unique_dispatch_target_dropped".to_string(),
@@ -2145,11 +2237,10 @@ fn first_missing_call_proof(
         let producers = producer_spans
             .iter()
             .filter_map(|span| {
-                calls.iter().find(|candidate| {
-                    candidate.source == call.source
-                        && candidate.path == call.path
-                        && candidate.span == *span
-                })
+                index
+                    .calls_by_site
+                    .get(&(call.source.as_str(), call.path.as_str(), *span))
+                    .copied()
             })
             .collect::<Vec<_>>();
         if producers.len() != producer_spans.len()
@@ -2172,20 +2263,8 @@ fn first_missing_call_proof(
             declared_dispatch_owner_name_from_type(receiver_type_name, source.language.as_str());
         let owner_methods = nominal
             .as_deref()
-            .map(|nominal| {
-                language_methods
-                    .iter()
-                    .copied()
-                    .filter(|method| {
-                        method.owner == nominal
-                            || method.symbol_owner.as_deref() == Some(nominal)
-                            || method
-                                .symbol_owner
-                                .as_deref()
-                                .is_some_and(|owner| owner.ends_with(&format!(".{nominal}")))
-                    })
-                    .collect::<Vec<_>>()
-            })
+            .and_then(|nominal| index.methods_by_owner.get(&(language, nominal)))
+            .map(Vec::as_slice)
             .unwrap_or_default();
         if !owner_methods.is_empty() {
             return if owner_methods
@@ -2204,14 +2283,22 @@ fn first_missing_call_proof(
         return "declared_field_type_missing".to_string();
     }
     if call.implicit_receiver {
-        let local_candidates = message_candidates
-            .iter()
-            .copied()
-            .filter(|method| method.owner == call.owner && method.kind == source.kind)
-            .collect::<Vec<_>>();
-        let other_local_dispatch = message_candidates
-            .iter()
-            .any(|method| method.owner == call.owner && method.kind != source.kind);
+        let local_candidates = index
+            .methods_by_owner_dispatch
+            .get(&(
+                language,
+                call.owner.as_str(),
+                source.kind.as_str(),
+                call.message.as_str(),
+            ))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let other_local_dispatch = index
+            .methods_by_owner
+            .get(&(language, call.owner.as_str()))
+            .into_iter()
+            .flatten()
+            .any(|method| method.dispatch_name == call.message && method.kind != source.kind);
         return match local_candidates.len() {
             1 if local_candidates[0].path != call.path => {
                 "cross_file_linkage_or_module_binding_missing".to_string()
