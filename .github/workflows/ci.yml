@@ -24,23 +24,30 @@ jobs:
     name: CI change scope
     runs-on: ubuntu-latest
     outputs:
-      run_gems: ${{ steps.scope.outputs.run_gems || steps.full.outputs.run_gems }}
-      run_src: ${{ steps.scope.outputs.run_src || steps.full.outputs.run_src }}
-      run_zig: ${{ steps.scope.outputs.run_zig || steps.full.outputs.run_zig }}
+      run_gems: ${{ steps.pr_scope.outputs.run_gems || steps.push_scope.outputs.run_gems || steps.full.outputs.run_gems }}
+      run_src: ${{ steps.pr_scope.outputs.run_src || steps.push_scope.outputs.run_src || steps.full.outputs.run_src }}
+      run_zig: ${{ steps.pr_scope.outputs.run_zig || steps.push_scope.outputs.run_zig || steps.full.outputs.run_zig }}
     steps:
+      # Fetch the comparison commit for both PRs and ordinary pushes. Pushes
+      # used to bypass the path classifier and force every CI lane on, so a
+      # gem-only change still ran compiler coverage, benchmarks, and Zig jobs.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - id: full
-        if: github.event_name != 'pull_request'
+        # A first push has no parent SHA to diff. Keep the conservative full
+        # run for that unusual case only.
+        if: github.event_name == 'push' && github.event.before == '0000000000000000000000000000000000000000'
         run: |
           echo "run_gems=true" >> "$GITHUB_OUTPUT"
           echo "run_src=true" >> "$GITHUB_OUTPUT"
           echo "run_zig=true" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        if: github.event_name == 'pull_request'
-        with:
-          fetch-depth: 0
-      - id: scope
+      - id: pr_scope
         if: github.event_name == 'pull_request'
         run: ruby tools/ci_change_scopes.rb --base "${{ github.event.pull_request.base.sha }}"
+      - id: push_scope
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: ruby tools/ci_change_scopes.rb --base "${{ github.event.before }}"
 
   mutants-manual-pending:
     name: mutants/manual pending
@@ -600,6 +607,7 @@ jobs:
     needs: changes
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_zig == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     continue-on-error: true
     permissions:
       contents: read
@@ -620,7 +628,7 @@ jobs:
       - name: Generate lint SARIF
         run: |
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          bundle exec ruby tools/generate_lint_sarif.rb \
+          timeout 10m bundle exec ruby tools/generate_lint_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1453,6 +1461,7 @@ jobs:
   slopcop-report-sarif:
     name: SlopCop branch-gap SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs:
       - changes
       - ruby-unit
@@ -1483,7 +1492,7 @@ jobs:
           mkdir -p tmp
           coverage_path="$(find tmp/ruby-coverage-unit -name .resultset.json -type f | sort | head -n 1)"
           test -n "$coverage_path"
-          bundle exec ruby gems/slopcop/exe/slopcop report \
+          timeout 15m bundle exec ruby gems/slopcop/exe/slopcop report \
             --repo=. \
             --coverage="$coverage_path" \
             --output=tmp/slopcop-report.md \
@@ -1514,6 +1523,7 @@ jobs:
     # any sanitizer constraint blocking.
     name: SlopCop constraint coverage SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs:
       - changes
       - zig-special-coverage
@@ -1566,7 +1576,7 @@ jobs:
               args+=(--coverage="nil-kill:${path}")
             done < <(find tmp/ruby-coverage-unit \( -name 'cobertura.xml' -o -name 'coverage.xml' \) -type f | sort)
           fi
-          FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
+          timeout 20m env FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1596,6 +1606,7 @@ jobs:
     # SARIF, they do not block merges.
     name: Architecture SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs:
       - changes
       - sarif-rust-binaries
@@ -1622,11 +1633,11 @@ jobs:
           mkdir -p tmp
           export FACT_MINE_RUST_BINARY=$PWD/tmp/sarif-binaries/fact-mine-rust
           base="origin/${{ github.event.pull_request.base.ref }}"
-          ruby gems/espalier/tools/cycle_report.rb . \
+          timeout 8m ruby gems/espalier/tools/cycle_report.rb . \
             --base="$base" --sarif=tmp/arch-cycles.sarif
-          ruby gems/espalier/tools/reach_through_report.rb . \
+          timeout 8m ruby gems/espalier/tools/reach_through_report.rb . \
             --base="$base" --sarif=tmp/arch-reach-through.sarif
-          ruby gems/lineage/tools/change_coupling.rb . 8 \
+          timeout 8m ruby gems/lineage/tools/change_coupling.rb . 8 \
             --base="$base" --sarif=tmp/arch-change-coupling.sarif
       - name: Upload cycles SARIF
         uses: github/codeql-action/upload-sarif@v4
@@ -1656,6 +1667,7 @@ jobs:
   sarif-rust-binaries:
     name: Build shared SARIF analyzer binaries
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: changes
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') }}
     permissions:
@@ -1682,6 +1694,7 @@ jobs:
   decomplex-sarif:
     name: Decomplex SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [changes, sarif-rust-binaries]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
@@ -1703,7 +1716,7 @@ jobs:
         run: |
           chmod +x tmp/sarif-binaries/decomplex-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 15m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1724,6 +1737,7 @@ jobs:
   boobytrap-sarif:
     name: Boobytrap SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs:
       - changes
       - ruby-gems-coverage
@@ -1783,7 +1797,7 @@ jobs:
               ! -path '*zig-coverage-vopr-*' \
               | sort
           )
-          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 20m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1805,6 +1819,7 @@ jobs:
   slopcop-sarif:
     name: SlopCop SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs:
       - changes
       - ruby-gems-coverage
@@ -1864,7 +1879,7 @@ jobs:
               ! -path '*zig-coverage-vopr-*' \
               | sort
           )
-          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 20m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1886,6 +1901,7 @@ jobs:
   espalier-sarif:
     name: Espalier SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [changes, sarif-rust-binaries]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
@@ -1914,7 +1930,7 @@ jobs:
         run: |
           chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 15m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1934,6 +1950,7 @@ jobs:
   nil-kill-sarif:
     name: Nil-Kill SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [changes, sarif-rust-binaries]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
@@ -1966,7 +1983,7 @@ jobs:
         run: |
           chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 15m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1986,6 +2003,7 @@ jobs:
   sql-cov-sarif:
     name: SQL-COV SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [changes, sarif-rust-binaries, sql-cov-dialects]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' && needs.sql-cov-dialects.result == 'success' }}
     permissions:
@@ -2004,7 +2022,7 @@ jobs:
       - name: Generate SQL-COV report
         run: |
           chmod +x tmp/sarif-binaries/sql-cov
-          ./tools/generate_sql_cov_sarif.rb \
+          timeout 10m ./tools/generate_sql_cov_sarif.rb \
             --repo=. \
             --out-dir=tmp/sql-cov-sarif \
             --setup=gems/lineage/sql/storage/init_schema.sql \
@@ -2023,6 +2041,7 @@ jobs:
   sqlfluff-sarif:
     name: SQLFluff SARIF
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') }}
     permissions:
@@ -2038,7 +2057,7 @@ jobs:
         run: pip install sqlfluff==4.2.2
       - name: Generate SQLFluff report
         run: |
-          ./tools/generate_sqlfluff_sarif.rb \
+          timeout 10m ./tools/generate_sqlfluff_sarif.rb \
             --repo=. \
             --out-dir=tmp/sqlfluff-sarif \
             --config=.sqlfluff \
