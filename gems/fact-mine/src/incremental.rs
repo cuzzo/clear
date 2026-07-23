@@ -84,6 +84,17 @@ struct CachedShard {
     shard: LocalFactShard,
 }
 
+impl CachedShard {
+    fn matches_candidate(&self, candidate: &Candidate) -> bool {
+        self.schema_version == CACHE_SCHEMA_VERSION
+            && self.cache_key == candidate.cache_key
+            && self.source_digest == candidate.source_digest
+            && self.path == candidate.path_identity
+            && self.language == candidate.language.as_str()
+            && self.profile == candidate.profile
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct RevisionManifest {
     schema_version: u32,
@@ -409,14 +420,8 @@ impl ShardCache {
 
     fn load(&self, candidate: &Candidate) -> Result<CacheRead> {
         let path = self.shard_path(&candidate.cache_key);
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(CacheRead::Miss)
-            }
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to read {}", path.display()))
-            }
+        let Some(bytes) = read_optional(&path)? else {
+            return Ok(CacheRead::Miss);
         };
         let mut decoder = GzDecoder::new(bytes.as_slice());
         let mut json = Vec::new();
@@ -435,13 +440,7 @@ impl ShardCache {
                 )))
             }
         };
-        let valid = cached.schema_version == CACHE_SCHEMA_VERSION
-            && cached.cache_key == candidate.cache_key
-            && cached.source_digest == candidate.source_digest
-            && cached.path == candidate.path_identity
-            && cached.language == candidate.language.as_str()
-            && cached.profile == candidate.profile;
-        if !valid {
+        if !cached.matches_candidate(candidate) {
             return Ok(CacheRead::Corrupt(format!(
                 "{} has an incompatible shard identity",
                 path.display()
@@ -497,14 +496,8 @@ impl ShardCache {
 
     fn load_manifest(&self) -> Result<RevisionManifest> {
         let path = self.manifest_path();
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(RevisionManifest::default())
-            }
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to read {}", path.display()))
-            }
+        let Some(bytes) = read_optional(&path)? else {
+            return Ok(RevisionManifest::default());
         };
         match serde_json::from_slice(&bytes) {
             Ok(manifest) => Ok(manifest),
@@ -533,6 +526,14 @@ impl ShardCache {
             .with_context(|| format!("failed to write {}", temporary.display()))?;
         fs::rename(&temporary, path)
             .with_context(|| format!("failed to replace {}", path.display()))
+    }
+}
+
+fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
     }
 }
 
