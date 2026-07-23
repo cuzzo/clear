@@ -6,6 +6,7 @@
 pub mod application;
 #[path = "db/architecture.rs"]
 pub mod architecture;
+pub mod cli;
 pub mod diff;
 pub mod diff_render;
 pub mod diff_service;

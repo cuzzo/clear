@@ -342,6 +342,8 @@ enum Command {
 enum DiffFormat {
     Text,
     Json,
+    /// Launch the interactive terminal review UI.
+    Tui,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -428,6 +430,10 @@ fn main() -> Result<()> {
             require_complete,
         } => {
             let db = repository_path(&repo, &db);
+            if format == DiffFormat::Tui {
+                gigasail::cli::run_diff(&repo, &db, base, head, false, analyse, false)?;
+                return Ok(());
+            }
             let result = prepare_diff(DiffCommandRequest {
                 repo,
                 db,
@@ -453,6 +459,7 @@ fn main() -> Result<()> {
                     print!("{output}");
                 }
                 DiffFormat::Json => println!("{}", render_structured_diff_json(&result.plan)?),
+                DiffFormat::Tui => unreachable!("handled above"),
             }
         }
         Command::Init { db } => {
