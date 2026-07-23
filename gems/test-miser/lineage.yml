@@ -1,0 +1,219 @@
+version: 1
+artifacts:
+  # Keep the database, run store, and all transient producer output under one
+  # ignored root. This lets a Test Miser subproject run independently inside
+  # the monorepo without its own Lineage files appearing as source changes.
+  directory: .lineage
+  retain_runs: 3
+profiles:
+  analyse:
+    # Static analysis must be independently runnable. Espalier consumes the
+    # dynamic NilKill evidence produced by the CI profile, so it intentionally
+    # belongs only to that complete profile.
+    producers: [lint, fact-mine-hazards, decomplex-facts, decomplex-report]
+  ci:
+    producers:
+      - coverage
+      - lint
+      - test-miser-collect
+      - test-miser-facts
+      - test-miser-report
+      - nil-kill-collect
+      - nil-kill-infer
+      - nil-kill-report
+      - decomplex-facts
+      - decomplex-report
+      - slopcop
+      - espalier
+      - fact-mine-hazards
+    required_evidence: [coverage, mutants, sarif]
+producers:
+  coverage:
+    executor: command
+    argv:
+      - bundle
+      - exec
+      - ruby
+      - -rsimplecov
+      - -e
+      - 'SimpleCov.coverage_dir(".lineage/artifacts/coverage"); SimpleCov.start; Dir["test/**/*_test.rb"].sort.each { |path| require File.expand_path(path) }'
+    timeout_seconds: 600
+    max_output_bytes: 16777216
+    environment: &ruby_bundle
+      BUNDLE_GEMFILE: ../../Gemfile
+      BUNDLE_PATH: vendor/bundle
+    produces:
+      - kind: coverage
+        format: simplecov
+        path: .lineage/artifacts/coverage/.resultset.json
+        complete: true
+        evidence_scope: {selection: full, test_set: test-miser}
+
+  lint:
+    executor: command
+    argv: [bundle, exec, ruby, ../../tools/generate_lint_sarif.rb, '--repo=.', '--out-dir=.lineage/artifacts/lint']
+    timeout_seconds: 900
+    max_output_bytes: 33554432
+    environment: *ruby_bundle
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/lint/rubocop.sarif
+        complete: false
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/lint/clippy.sarif
+        complete: false
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/lint/go-vet.sarif
+        complete: false
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/lint/zig-ast-check.sarif
+        complete: false
+
+  test-miser-collect:
+    executor: command
+    argv: [bundle, exec, ruby, exe/test-miser-mutant, -I, lib, -r, ./script/test_miser_mutant_setup, --integration, minitest, --run-to-complete, --timeout, '30', --jobs, '4', -o, .lineage/artifacts/test-miser/mutation-testing-elements.json, 'TestMiser*']
+    timeout_seconds: 7200
+    max_output_bytes: 67108864
+    environment: *ruby_bundle
+    produces:
+      - kind: auxiliary
+        format: mutation-testing-elements/v2
+        path: .lineage/artifacts/test-miser/mutation-testing-elements.json
+
+  test-miser-facts:
+    executor: command
+    argv: [bundle, exec, ruby, exe/test-miser-facts, normalize, --input, .lineage/artifacts/test-miser/mutation-testing-elements.json, --output, .lineage/artifacts/test-miser/mutant-facts.json]
+    timeout_seconds: 120
+    max_output_bytes: 8388608
+    environment: *ruby_bundle
+    produces:
+      - kind: mutants
+        format: mutant-facts
+        path: .lineage/artifacts/test-miser/mutant-facts.json
+        complete: true
+        evidence_scope: {selection: full, mutant_corpus: test-miser-ruby-full-v1, test_set: test-miser}
+
+  test-miser-report:
+    executor: command
+    argv: [bundle, exec, ruby, exe/test-miser, infer, --root, ., --format, sarif, --output, .lineage/artifacts/test-miser/report.sarif, .lineage/artifacts/test-miser/mutant-facts.json]
+    timeout_seconds: 120
+    max_output_bytes: 8388608
+    environment: *ruby_bundle
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/test-miser/report.sarif
+        complete: true
+        evidence_scope: {selection: full, test_set: test-miser}
+
+  nil-kill-collect:
+    executor: command
+    argv: [bundle, exec, ruby, ../../gems/nil-kill/exe/nil-kill, collect, --, bundle, exec, ruby, -e, 'Dir["test/**/*_test.rb"].sort.each { |path| require File.expand_path(path) }']
+    environment:
+      BUNDLE_GEMFILE: ../../Gemfile
+      BUNDLE_PATH: vendor/bundle
+      NIL_KILL_ROOT: .
+      NIL_KILL_TARGETS: lib
+      NIL_KILL_TMP_DIR: .lineage/artifacts/nil-kill
+      NIL_KILL_JOBS: '4'
+    timeout_seconds: 900
+    max_output_bytes: 33554432
+
+  nil-kill-infer:
+    executor: command
+    argv: [bundle, exec, ruby, ../../gems/nil-kill/exe/nil-kill, infer]
+    environment:
+      BUNDLE_GEMFILE: ../../Gemfile
+      BUNDLE_PATH: vendor/bundle
+      NIL_KILL_ROOT: .
+      NIL_KILL_TARGETS: lib
+      NIL_KILL_TMP_DIR: .lineage/artifacts/nil-kill
+    timeout_seconds: 900
+    max_output_bytes: 33554432
+    produces:
+      - kind: auxiliary
+        format: nil-kill-evidence/v1
+        path: .lineage/artifacts/nil-kill/evidence.json
+
+  nil-kill-report:
+    executor: command
+    argv: [bundle, exec, ruby, ../../gems/nil-kill/exe/nil-kill, report, --evidence, .lineage/artifacts/nil-kill/evidence.json, --sarif, .lineage/artifacts/nil-kill/report.sarif]
+    environment:
+      BUNDLE_GEMFILE: ../../Gemfile
+      BUNDLE_PATH: vendor/bundle
+      NIL_KILL_ROOT: .
+      NIL_KILL_TARGETS: lib
+      NIL_KILL_TMP_DIR: .lineage/artifacts/nil-kill
+    timeout_seconds: 120
+    max_output_bytes: 16777216
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/nil-kill/report.sarif
+        complete: false
+
+  decomplex-facts:
+    executor: command
+    argv: [bundle, exec, ruby, ../../gems/decomplex/exe/decomplex, facts, --language, ruby, --output, .lineage/artifacts/decomplex/facts.json, lib]
+    timeout_seconds: 600
+    max_output_bytes: 16777216
+    environment: *ruby_bundle
+    produces:
+      - kind: auxiliary
+        format: decomplex-facts/v1
+        path: .lineage/artifacts/decomplex/facts.json
+
+  decomplex-report:
+    executor: command
+    argv: [bundle, exec, ruby, ../../gems/decomplex/exe/decomplex, render-report, --input, .lineage/artifacts/decomplex/facts.json, --format, sarif, --output, .lineage/artifacts/decomplex/report.sarif]
+    timeout_seconds: 120
+    max_output_bytes: 8388608
+    environment: *ruby_bundle
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/decomplex/report.sarif
+        complete: false
+
+  slopcop:
+    executor: command
+    argv: [bundle, exec, ruby, ../../gems/slopcop/exe/slopcop, report, '--repo=.', '--coverage=.lineage/artifacts/coverage/.resultset.json', '--mutation=.lineage/artifacts/test-miser/mutant-facts.json', '--decomplex-facts=.lineage/artifacts/decomplex/facts.json', '--sarif=.lineage/artifacts/slopcop/report.sarif']
+    timeout_seconds: 600
+    max_output_bytes: 16777216
+    environment: *ruby_bundle
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/slopcop/report.sarif
+        complete: false
+
+  espalier:
+    executor: command
+    argv: [bundle, exec, ruby, ../../gems/espalier/exe/espalier, --format, sarif, --output, .lineage/artifacts/espalier/report.sarif, --vcs, git, --decomplex, .lineage/artifacts/decomplex/facts.json, --nil-kill, .lineage/artifacts/nil-kill/evidence.json, lib]
+    timeout_seconds: 600
+    max_output_bytes: 16777216
+    environment:
+      BUNDLE_GEMFILE: ../../Gemfile
+      BUNDLE_PATH: vendor/bundle
+      FACT_MINE_RUST_BINARY: ../../gems/fact-mine/target/debug/fact-mine-rust
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/espalier/report.sarif
+        complete: false
+
+  fact-mine-hazards:
+    executor: lineage
+    argv: [fact-mine-native]
+    timeout_seconds: 60
+    max_output_bytes: 8388608
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .lineage/artifacts/fact-mine-hazards.sarif
+        scope: static
+        complete: false
