@@ -92,7 +92,7 @@ struct RevisionManifest {
 }
 
 enum CacheRead {
-    Hit(LocalFactShard, u64),
+    Hit(Box<LocalFactShard>, u64),
     Miss,
     Corrupt(String),
 }
@@ -157,7 +157,7 @@ pub fn build_profile(
         let corrupt_diagnostic = match read {
             CacheRead::Hit(shard, bytes) => {
                 return Ok(ShardResult {
-                    shard,
+                    shard: *shard,
                     source: ShardSource::Hit { bytes },
                     recovery: None,
                     cache_load_millis,
@@ -447,7 +447,7 @@ impl ShardCache {
                 path.display()
             )));
         }
-        Ok(CacheRead::Hit(cached.shard, bytes.len() as u64))
+        Ok(CacheRead::Hit(Box::new(cached.shard), bytes.len() as u64))
     }
 
     fn store(&self, candidate: &Candidate, shard: &LocalFactShard) -> Result<u64> {

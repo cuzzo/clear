@@ -1,4 +1,3 @@
-
 use super::*;
 use std::io::Write;
 use std::sync::Mutex;
@@ -412,7 +411,7 @@ fn corrupt_json_identity_and_manifest_entries_are_misses() -> Result<()> {
             path: candidate.path_identity.clone(),
             language: candidate.language.as_str().to_string(),
             profile: candidate.profile.to_string(),
-            shard,
+            shard: *shard,
         },
         _ => panic!("expected cached shard"),
     };
