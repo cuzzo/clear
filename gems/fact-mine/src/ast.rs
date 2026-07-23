@@ -299,6 +299,30 @@ pub fn flatten_and(node: &Node) -> Vec<&Node> {
         .collect()
 }
 
+/// Returns every operand of a normalized disjunction. A false disjunction
+/// proves every operand false, just as a true conjunction proves every
+/// operand true.
+pub fn flatten_or(node: &Node) -> Vec<&Node> {
+    if matches!(node.r#type.as_str(), "CONDITION_CLAUSE") {
+        let children = node
+            .children
+            .iter()
+            .filter_map(self::node)
+            .collect::<Vec<_>>();
+        if children.len() == 1 {
+            return flatten_or(children[0]);
+        }
+    }
+    if node.r#type != "OR" {
+        return vec![node];
+    }
+    node.children
+        .iter()
+        .filter_map(self::node)
+        .flat_map(flatten_or)
+        .collect()
+}
+
 const QUESTION_COLON_TERNARY_KINDS: &[&str] = &[
     "body_statement",
     "block_body",

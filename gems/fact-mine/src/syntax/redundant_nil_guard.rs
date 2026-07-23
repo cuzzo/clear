@@ -318,16 +318,18 @@ impl<'a> RedundantNilGuard<'a> {
             return;
         }
 
-        for fact in self.branch_nil_facts(condition, true) {
-            self.push_refinement(
-                &function,
-                condition_span,
-                node_type,
-                true,
-                &fact.local,
-                true,
-                &proof_kind,
-            );
+        for condition_truth in [true, false] {
+            for fact in self.branch_nil_facts(condition, condition_truth) {
+                self.push_refinement(
+                    &function,
+                    condition_span,
+                    node_type,
+                    condition_truth,
+                    &fact.local,
+                    true,
+                    &proof_kind,
+                );
+            }
         }
     }
 
@@ -367,6 +369,15 @@ impl<'a> RedundantNilGuard<'a> {
             return "safe_navigation".to_string();
         }
         if node.r#type == "OPCALL" {
+            return "nil_comparison".to_string();
+        }
+        if matches!(node.r#type.as_str(), "AND" | "OR")
+            && node
+                .children
+                .iter()
+                .filter_map(ast::node)
+                .any(|child| self.refinement_proof_kind(child) == "nil_comparison")
+        {
             return "nil_comparison".to_string();
         }
         if self.call_parts(node).is_some() {
@@ -469,7 +480,7 @@ impl<'a> RedundantNilGuard<'a> {
             if mid == "!" {
                 return self.negated_nil_fact(recv);
             }
-            if mid == "==" || mid == "!=" {
+            if self.behavior.nil_comparison_operator(mid) {
                 return self.comparison_nil_fact(recv, mid, args);
             }
         }
@@ -491,6 +502,16 @@ impl<'a> RedundantNilGuard<'a> {
             return ast::flatten_and(node)
                 .into_iter()
                 .flat_map(|child| self.branch_nil_facts(child, true))
+                .collect();
+        }
+
+        if node.r#type == "OR" {
+            if cond_truth {
+                return Vec::new();
+            }
+            return ast::flatten_or(node)
+                .into_iter()
+                .flat_map(|child| self.branch_nil_facts(child, false))
                 .collect();
         }
 
@@ -558,7 +579,7 @@ impl<'a> RedundantNilGuard<'a> {
         }
         Some(NilFact {
             local: subject,
-            non_nil_when_true: mid == "!=",
+            non_nil_when_true: matches!(mid, "!=" | "!=="),
         })
     }
 

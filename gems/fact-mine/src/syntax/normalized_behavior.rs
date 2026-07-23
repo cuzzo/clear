@@ -1529,6 +1529,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Whether this language treats the normalized operator as an equality
+    /// comparison against its null literal. Ruby deliberately does not accept
+    /// `===`: it is an overridable case-equality method there.
+    fn nil_comparison_operator(&self, operator: &str) -> bool {
+        matches!(operator, "==" | "!=")
+    }
+
     fn terminating_call_message(&self, _message: &str) -> bool {
         false
     }

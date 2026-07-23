@@ -326,6 +326,23 @@ fn java_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
                 .place_id
                 .contains("NullableJava#guarded:local:value")
     }));
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableJava#guardedDisjunction:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.state_at_operation == "definitely_non_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableJava#guardedDisjunction:local:value")
+    }));
     Ok(())
 }
 
@@ -364,6 +381,23 @@ fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
             && operation
                 .place_id
                 .contains("NullableCSharp#Guarded:local:value")
+    }));
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableCSharp#GuardedDisjunction:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.state_at_operation == "definitely_non_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableCSharp#GuardedDisjunction:local:value")
     }));
     Ok(())
 }
@@ -407,6 +441,23 @@ fn typescript_null_and_undefined_receiver_operations_follow_direct_flow() -> Res
             && operation
                 .place_id
                 .contains("NullableTypeScript#guarded:local:value")
+    }));
+    assert!(output.nullable_refinements.iter().any(|refinement| {
+        refinement
+            .place_id
+            .contains("NullableTypeScript#guardedDisjunction:local:value")
+            && refinement.edge == "else"
+            && refinement.state_on_edge == "definitely_non_null"
+            && refinement.proof_kind == "nil_comparison"
+            && refinement.complete
+    }));
+    assert!(output.nullable_operations.iter().any(|operation| {
+        operation.operation_kind == "receiver_member_access"
+            && operation.state_at_operation == "definitely_non_null"
+            && operation.complete
+            && operation
+                .place_id
+                .contains("NullableTypeScript#guardedDisjunction:local:value")
     }));
     assert!(output.nullable_operations.iter().all(|operation| {
         !operation

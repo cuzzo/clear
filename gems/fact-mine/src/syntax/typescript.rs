@@ -214,6 +214,10 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         )
     }
 
+    fn nil_comparison_operator(&self, operator: &str) -> bool {
+        matches!(operator, "==" | "!=" | "===" | "!==")
+    }
+
     fn semantic_effect_for_call(&self, call: &CallSite) -> Option<NormalizedSemanticEffect> {
         eliminable_guard_from_call(call, TYPESCRIPT_GUARD_MIDS)
             .or_else(|| effect_from_call_with_lexicon(call, &javascript::JAVASCRIPT_EFFECT_LEXICON))
@@ -675,6 +679,8 @@ mod tests {
             .is_some());
 
         assert!(b.nil_guard_fact("isNull", "x").is_some());
+        assert!(b.nil_comparison_operator("==="));
+        assert!(b.nil_comparison_operator("!=="));
 
         assert!(b
             .semantic_effect_for_call(&CallSite {

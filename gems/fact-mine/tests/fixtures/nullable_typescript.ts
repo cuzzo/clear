@@ -17,6 +17,15 @@ class NullableTypeScript {
     return value.length;
   }
 
+  guardedDisjunction(flag: number): number {
+    const value: string | undefined = undefined;
+    if (value === undefined || flag === 5) {
+      return 0;
+    } else {
+      return value.length;
+    }
+  }
+
   shadowedUndefined(): number {
     const undefined = "ready";
     return undefined.length;
