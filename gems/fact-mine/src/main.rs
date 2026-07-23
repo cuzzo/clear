@@ -98,6 +98,7 @@ fn run() -> Result<()> {
                 .map(Language::parse)
                 .transpose()?;
             let cacheable_artifact = incremental_cache.is_some()
+                && !changed_files_only
                 && !portable
                 && scip_indexes.is_empty()
                 && complexity_summaries.is_empty()
