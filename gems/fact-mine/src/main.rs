@@ -4,7 +4,10 @@ use fact_mine_rust::parallel;
 use fact_mine_rust::profile::{self, Profile};
 use fact_mine_rust::syntax::{self, Language};
 use fact_mine_rust::syntax_oracle;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use std::fs;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -112,18 +115,10 @@ fn run() -> Result<()> {
                 metrics.external_enrichment_millis =
                     external_enrichment_started.elapsed().as_millis();
             }
-            let mut value = serde_json::to_value(&merged)?;
-            if portable {
-                if let Ok(current_dir) = std::env::current_dir() {
-                    fact_mine_rust::profile::normalize_paths(&mut value, &current_dir);
-                }
-            }
-            let json = serde_json::to_string_pretty(&value)?;
-            if let Some(ref output_path) = output {
-                fs::write(output_path, &json)?;
-            } else {
-                println!("{}", json);
-            }
+            let serialization_started = Instant::now();
+            write_profile_artifact(&merged, output.as_ref(), portable)?;
+            let serialization_millis = serialization_started.elapsed().as_millis();
+            std::eprintln!("FactMine artifact serialization: {serialization_millis}ms");
         }
         Command::CallResolution {
             files,
@@ -239,6 +234,55 @@ fn run() -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+/// Stream the typed profile directly to its destination. Portable artifacts
+/// intentionally retain the value projection because path rewriting is a
+/// JSON-tree transformation; ordinary artifacts never allocate that second
+/// representation or a complete output string.
+fn write_profile_artifact(
+    output: &profile::ProfileOutput,
+    destination: Option<&PathBuf>,
+    portable: bool,
+) -> Result<()> {
+    if let Some(path) = destination {
+        let file = fs::File::create(path)
+            .with_context(|| format!("failed to create {}", path.display()))?;
+        let buffered = BufWriter::new(file);
+        if path.extension().and_then(|extension| extension.to_str()) == Some("gz") {
+            let mut encoder = GzEncoder::new(buffered, Compression::fast());
+            write_profile_json(output, portable, &mut encoder)?;
+            encoder.finish()?.flush()?;
+        } else {
+            let mut writer = buffered;
+            write_profile_json(output, portable, &mut writer)?;
+            writer.flush()?;
+        }
+        return Ok(());
+    }
+    let stdout = std::io::stdout();
+    let mut writer = BufWriter::new(stdout.lock());
+    write_profile_json(output, portable, &mut writer)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn write_profile_json(
+    output: &profile::ProfileOutput,
+    portable: bool,
+    writer: &mut impl Write,
+) -> Result<()> {
+    if !portable {
+        serde_json::to_writer(writer, output)?;
+        return Ok(());
+    }
+    let mut value = serde_json::to_value(output)?;
+    if let Ok(current_dir) = std::env::current_dir() {
+        fact_mine_rust::profile::normalize_paths(&mut value, &current_dir);
+    }
+    serde_json::to_writer(writer, &value)?;
     Ok(())
 }
 
@@ -760,5 +804,24 @@ mod tests {
             incremental_json,
             serde_json::to_value(clean).expect("serialize clean"),
         );
+    }
+
+    #[test]
+    fn profile_artifacts_stream_compact_json_and_gzip() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let output = profile::ProfileOutput::default();
+        let json = directory.path().join("profile.json");
+        let gzip = directory.path().join("profile.json.gz");
+
+        write_profile_artifact(&output, Some(&json), false).expect("write compact artifact");
+        let expected = serde_json::to_string(&output).expect("expected json");
+        assert_eq!(std::fs::read_to_string(&json).expect("json"), expected);
+
+        write_profile_artifact(&output, Some(&gzip), false).expect("write gzip artifact");
+        let compressed = std::fs::read(&gzip).expect("gzip");
+        let mut decoder = flate2::read::GzDecoder::new(compressed.as_slice());
+        let mut decoded = String::new();
+        std::io::Read::read_to_string(&mut decoder, &mut decoded).expect("decode gzip");
+        assert_eq!(decoded, expected);
     }
 }
