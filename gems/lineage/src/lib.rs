@@ -3,6 +3,7 @@
 //! The crate is intentionally split around replaceable boundaries:
 //! VCS traversal, source boundary extraction, analysis, and storage.
 
+pub mod application;
 #[path = "db/architecture.rs"]
 pub mod architecture;
 pub mod diff;

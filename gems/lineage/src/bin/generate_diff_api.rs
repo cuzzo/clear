@@ -2,8 +2,8 @@ use lineage::diff::{
     AddedLines, ChangeInventory, ConfigFile, DependencyChange, DependencyEntry, DependencyStatus,
     DiffFile, DiffGroup, DiffPlan, DiffScope, EvidenceAvailability, EvidenceScopeFingerprint,
     EvidenceState, FileChangeKind, LanguageSummary, LineAnnotation, LineVerification,
-    ResolvedSarifFinding, RiskSummary, SarifFindingSummary, SourceRole,
-    VerificationSlices, Visibility, VisibilityVerificationSlices,
+    ResolvedSarifFinding, RiskSummary, SarifFindingSummary, SourceRole, VerificationSlices,
+    Visibility, VisibilityVerificationSlices,
 };
 use std::path::Path;
 use ts_rs::TS;

@@ -2,8 +2,9 @@
 
 use crate::{
     ingest_coverage_json_with_options, ingest_mutant_facts_json_with_options, ingest_sarif_paths,
-    parse_coverage_input, CoverageIngestOptions, EvidenceArtifactScope, EvidenceScopeFingerprint,
-    GitProvider, HeuristicExtractor, MutantIngestOptions, RepoPathNormalizer, Storage,
+    parse_coverage_input, CoverageIngestOptions, CoverageIngestStats, EvidenceArtifactScope,
+    EvidenceScopeFingerprint, GitProvider, HeuristicExtractor, MutantIngestOptions,
+    MutantIngestStats, RepoPathNormalizer, SarifIngestStats, Storage,
 };
 use anyhow::{Context, Result};
 use std::{fs, path::Path};
@@ -29,6 +30,13 @@ pub struct DirectArtifactIngest<'a> {
     pub test_set: Option<String>,
     pub complete: bool,
     pub replace: bool,
+}
+
+#[derive(Debug)]
+pub enum DirectIngestResult {
+    Coverage(CoverageIngestStats),
+    Mutants(MutantIngestStats),
+    Sarif(SarifIngestStats),
 }
 
 /// Parses the input before the caller indexes a selected revision. This keeps
@@ -62,7 +70,7 @@ pub fn validate_direct_artifact(
 
 /// Imports one direct artifact in one SQLite transaction. A complete artifact
 /// that cannot be represented is rejected and leaves no partial evidence.
-pub fn ingest_direct_artifact(request: DirectArtifactIngest<'_>) -> Result<()> {
+pub fn ingest_direct_artifact(request: DirectArtifactIngest<'_>) -> Result<DirectIngestResult> {
     let scope = direct_evidence_scope(
         request.kind,
         request.commit,
@@ -73,8 +81,8 @@ pub fn ingest_direct_artifact(request: DirectArtifactIngest<'_>) -> Result<()> {
     )?;
     let storage = Storage::open(request.db)?;
     storage.begin_transaction()?;
-    let result = (|| -> Result<()> {
-        match request.kind {
+    let result = (|| -> Result<DirectIngestResult> {
+        let result = match request.kind {
             DirectArtifactKind::Coverage => {
                 let payload = fs::read_to_string(request.input)?;
                 let source = request.source.unwrap_or_else(|| "coverage".into());
@@ -97,10 +105,7 @@ pub fn ingest_direct_artifact(request: DirectArtifactIngest<'_>) -> Result<()> {
                         stats.skipped_files
                     );
                 }
-                println!(
-                    "ingested coverage: files={} units={} events={} line_events={} skipped_files={}",
-                    stats.files, stats.units, stats.events, stats.line_events, stats.skipped_files
-                );
+                DirectIngestResult::Coverage(stats)
             }
             DirectArtifactKind::Mutants => {
                 if request.format != "mutant-facts" {
@@ -135,15 +140,7 @@ pub fn ingest_direct_artifact(request: DirectArtifactIngest<'_>) -> Result<()> {
                         stats.skipped_facts
                     );
                 }
-                println!(
-                    "ingested mutant facts: facts={} units={} quality_events={} exposure_events={} skipped_files={} skipped_facts={}",
-                    stats.facts,
-                    stats.units,
-                    stats.quality_events,
-                    stats.exposure_events,
-                    stats.skipped_files,
-                    stats.skipped_facts
-                );
+                DirectIngestResult::Mutants(stats)
             }
             DirectArtifactKind::Sarif => {
                 if request.format != "sarif" {
@@ -177,16 +174,16 @@ pub fn ingest_direct_artifact(request: DirectArtifactIngest<'_>) -> Result<()> {
                         expected_lines: Default::default(),
                     })?;
                 }
-                println!(
-                    "ingested SARIF: artifacts={} findings={} skipped_files={} skipped_results={}",
-                    stats.artifacts, stats.findings, stats.skipped_files, stats.skipped_results
-                );
+                DirectIngestResult::Sarif(stats)
             }
-        }
-        Ok(())
+        };
+        Ok(result)
     })();
     match result {
-        Ok(()) => storage.commit_transaction(),
+        Ok(result) => {
+            storage.commit_transaction()?;
+            Ok(result)
+        }
         Err(error) => {
             let _ = storage.rollback_transaction();
             Err(error)
