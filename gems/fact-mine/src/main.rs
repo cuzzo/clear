@@ -97,11 +97,30 @@ fn run() -> Result<()> {
                 .as_deref()
                 .map(Language::parse)
                 .transpose()?;
+            let cacheable_artifact = incremental_cache.is_some()
+                && !portable
+                && scip_indexes.is_empty()
+                && complexity_summaries.is_empty()
+                && !output.as_ref().is_some_and(|path| {
+                    path.extension().and_then(|value| value.to_str()) == Some("gz")
+                });
+            if cacheable_artifact {
+                let root = std::env::current_dir().context("failed to determine cache root")?;
+                let config =
+                    incremental::CacheConfig::new(root, incremental_cache.clone().expect("cache"));
+                if let Some(artifact) =
+                    incremental::served_artifact_path(&files, language_override, profile, &config)?
+                {
+                    copy_profile_artifact(&artifact, output.as_ref())?;
+                    std::eprintln!("FactMine served cached artifact: {}", artifact.display());
+                    return Ok(());
+                }
+            }
             let mut merged = build_requested_profile(
                 &files,
                 language_override,
                 profile,
-                incremental_cache,
+                incremental_cache.clone(),
                 changed_files_only,
             )?;
             let external_enrichment_started = Instant::now();
@@ -116,7 +135,23 @@ fn run() -> Result<()> {
                     external_enrichment_started.elapsed().as_millis();
             }
             let serialization_started = Instant::now();
-            write_profile_artifact(&merged, output.as_ref(), portable)?;
+            if cacheable_artifact {
+                let root = std::env::current_dir().context("failed to determine cache root")?;
+                let config = incremental::CacheConfig::new(root, incremental_cache.expect("cache"));
+                let artifact = incremental::served_artifact_destination(
+                    &files,
+                    language_override,
+                    profile,
+                    &config,
+                )?;
+                if let Some(parent) = artifact.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                write_profile_artifact(&merged, Some(&artifact), false)?;
+                copy_profile_artifact(&artifact, output.as_ref())?;
+            } else {
+                write_profile_artifact(&merged, output.as_ref(), portable)?;
+            }
             let serialization_millis = serialization_started.elapsed().as_millis();
             std::eprintln!("FactMine artifact serialization: {serialization_millis}ms");
         }
@@ -234,6 +269,20 @@ fn run() -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+fn copy_profile_artifact(source: &std::path::Path, destination: Option<&PathBuf>) -> Result<()> {
+    if let Some(destination) = destination {
+        fs::copy(source, destination)?;
+        return Ok(());
+    }
+    let mut source = fs::File::open(source)?;
+    let stdout = std::io::stdout();
+    let mut writer = BufWriter::new(stdout.lock());
+    std::io::copy(&mut source, &mut writer)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
     Ok(())
 }
 

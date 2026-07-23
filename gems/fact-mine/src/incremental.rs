@@ -49,6 +49,60 @@ pub struct IncrementalRun {
     pub metrics: IncrementalMetrics,
 }
 
+/// Locates a ready-to-serve compact JSON artifact for an exact project input.
+/// This deliberately performs only source/configuration hashing; it never
+/// opens, decompresses, or deserializes the typed project snapshot.
+pub fn served_artifact_path(
+    files: &[PathBuf],
+    language_override: Option<Language>,
+    profile: Profile,
+    config: &CacheConfig,
+) -> Result<Option<PathBuf>> {
+    let registry_digest = stdlib_registry_digest()?;
+    let configuration_digest = configuration_digest()?;
+    let candidates = files
+        .iter()
+        .map(|path| {
+            candidate(
+                path,
+                language_override,
+                profile,
+                &config.root,
+                &registry_digest,
+                &configuration_digest,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let path = ShardCache::new(config.directory.clone())
+        .served_artifact_path(&project_cache_key(profile, &candidates)?);
+    Ok(path.exists().then_some(path))
+}
+
+pub fn served_artifact_destination(
+    files: &[PathBuf],
+    language_override: Option<Language>,
+    profile: Profile,
+    config: &CacheConfig,
+) -> Result<PathBuf> {
+    let registry_digest = stdlib_registry_digest()?;
+    let configuration_digest = configuration_digest()?;
+    let candidates = files
+        .iter()
+        .map(|path| {
+            candidate(
+                path,
+                language_override,
+                profile,
+                &config.root,
+                &registry_digest,
+                &configuration_digest,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(ShardCache::new(config.directory.clone())
+        .served_artifact_path(&project_cache_key(profile, &candidates)?))
+}
+
 #[derive(Clone, Debug, Serialize)]
 struct CacheIdentity<'a> {
     source_digest: &'a str,
@@ -482,6 +536,12 @@ impl ShardCache {
         self.directory
             .join("projects")
             .join(format!("{project_key}.json.gz"))
+    }
+
+    fn served_artifact_path(&self, project_key: &str) -> PathBuf {
+        self.directory
+            .join("artifacts")
+            .join(format!("{project_key}.json"))
     }
 
     fn load(&self, candidate: &Candidate) -> Result<CacheRead> {

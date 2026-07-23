@@ -59,6 +59,25 @@ fn warm_cache_skips_local_extraction_and_keeps_complete_output() -> Result<()> {
 }
 
 #[test]
+fn served_artifact_paths_use_the_exact_project_identity() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let cache_config = config(directory.path());
+    let file = ruby_file(directory.path(), "sample.rb", "class A; end\n");
+    assert!(
+        served_artifact_path(&[file.clone()], None, Profile::Espalier, &cache_config)?.is_none()
+    );
+    let destination =
+        served_artifact_destination(&[file.clone()], None, Profile::Espalier, &cache_config)?;
+    fs::create_dir_all(destination.parent().expect("artifact parent"))?;
+    fs::write(&destination, b"{}")?;
+    assert_eq!(
+        served_artifact_path(&[file], None, Profile::Espalier, &cache_config)?,
+        Some(destination)
+    );
+    Ok(())
+}
+
+#[test]
 fn changed_renamed_and_deleted_files_update_the_manifest() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let cache_config = config(directory.path());
