@@ -2009,6 +2009,14 @@ mod tests {
         assert!(run
             .pointer("/properties/fact_mine.proof_boundary_summary")
             .is_some());
+        assert_eq!(
+            run.pointer("/properties/fact_mine.proof_boundary_summary/invalid_boundaries"),
+            Some(&json!(0))
+        );
+        assert_eq!(
+            run.pointer("/properties/fact_mine.proof_boundary_summary/missing_boundaries"),
+            Some(&json!(0))
+        );
         let nil_guard = run
             .get("results")
             .and_then(Value::as_array)

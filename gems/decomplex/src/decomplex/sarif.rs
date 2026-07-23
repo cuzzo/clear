@@ -377,6 +377,8 @@ mod tests {
         let summary = proof_boundary_summary(&results);
         assert_eq!(summary.pointer("/result_count"), Some(&json!(4)));
         assert_eq!(summary.pointer("/results_with_boundary"), Some(&json!(2)));
+        assert_eq!(summary.pointer("/invalid_boundaries"), Some(&json!(1)));
+        assert_eq!(summary.pointer("/missing_boundaries"), Some(&json!(1)));
         assert_eq!(
             summary.pointer("/input_completeness/complete"),
             Some(&json!(1))
@@ -442,5 +444,23 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(boundary, fixture["representative"]["decomplex"]);
+    }
+
+    #[test]
+    fn typed_builder_can_emit_each_public_blocker_kind() {
+        let boundary = proof_boundary(
+            InputCompleteness::Unknown,
+            ClaimStatus::Review,
+            CoverageDischarge::Unknown,
+            &["fact_mine_normalized_ast"],
+            "unsupported_fixture",
+            ProofScopeKind::File,
+            false,
+            vec![ProofBlocker::unsupported_language()],
+        );
+        assert_eq!(
+            boundary.pointer("/blockers/0/kind"),
+            Some(&json!("unsupported_language"))
+        );
     }
 }

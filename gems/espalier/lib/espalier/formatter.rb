@@ -213,6 +213,12 @@ module Espalier
             "known_auxiliary_space_component" => known_space,
             "time_complete" => time_complete,
             "auxiliary_space_complete" => space_complete,
+            # This measures Espalier's complexity model, not whether
+            # FactMine supplied complete source input for the finding.
+            "model_completeness" => complexity_model_completeness(time_complete, space_complete),
+            "model_blockers" => complexity_model_blockers(
+              input_completeness_for(mod), unknowns, warnings, time_complete, space_complete
+            ),
             "dynamic" => dynamic,
             "basis" => "espalier-static",
             "confidence" => time_complete && space_complete ? "static-lower-bound" : "partial",
@@ -225,15 +231,13 @@ module Espalier
             # Big-O completeness describes Espalier's estimate, not the
             # completeness of the FactMine input. The extractor supplies the
             # latter explicitly through the projected module boundary.
-            input_completeness: complexity_input_completeness(mod, time_complete, space_complete),
+            input_completeness: input_completeness_for(mod),
             claim_status: "observed",
             coverage_discharge: "not_applicable",
             authority: ["fact_mine_normalized_ast", "espalier_static"],
             claim_kind: "function_complexity",
             scope: { kind: "function", closed: false },
-            blockers: input_blockers_for(mod) + complexity_proof_blockers(
-              input_completeness_for(mod), unknowns, warnings, time_complete, space_complete
-            )
+            blockers: input_blockers_for(mod)
           )
         }
       )
@@ -242,7 +246,7 @@ module Espalier
       result
     end
 
-    def complexity_proof_blockers(input_completeness, unknowns, warnings, time_complete, space_complete)
+    def complexity_model_blockers(input_completeness, unknowns, warnings, time_complete, space_complete)
       return [] if time_complete && space_complete
 
       blockers = []
@@ -252,11 +256,11 @@ module Espalier
       blockers.uniq
     end
 
-    def complexity_input_completeness(mod, time_complete, space_complete)
-      completeness = input_completeness_for(mod)
-      return completeness if time_complete && space_complete
+    def complexity_model_completeness(time_complete, space_complete)
+      return "complete" if time_complete && space_complete
+      return "partial" if time_complete == false || space_complete == false
 
-      completeness == "complete" ? "partial" : completeness
+      "unknown"
     end
 
     def input_completeness_for(mod)
@@ -270,7 +274,9 @@ module Espalier
       blockers = Array(boundary[:input_blockers] || boundary["input_blockers"])
       raise ArgumentError, "input blockers must use proof-boundary objects" unless blockers.all? { |blocker| blocker.is_a?(Hash) }
 
-      blockers.map { |blocker| blocker.transform_keys(&:to_s) }.uniq.sort_by { |blocker| JSON.generate(blocker) }
+      normalized = blockers.map { |blocker| blocker.transform_keys(&:to_s) }
+      normalized << { "kind" => "unknown" } if normalized.empty? && input_completeness_for(mod) == "unknown"
+      normalized.uniq.sort_by { |blocker| JSON.generate(blocker) }
     end
 
     def complexity_related_locations(variables)

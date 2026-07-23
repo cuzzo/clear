@@ -592,6 +592,8 @@ class SlopcopReportCovTest < Minitest::Test
     ]
     summary = SlopCop::Sarif.proof_boundary_summary(results)
     assert_equal 2, summary["results_with_boundary"]
+    assert_equal 0, summary["invalid_boundaries"]
+    assert_equal 0, summary["missing_boundaries"]
     assert_equal 1, summary.dig("input_completeness", "complete")
     assert_equal 1, summary.dig("claim_status", "review")
   end

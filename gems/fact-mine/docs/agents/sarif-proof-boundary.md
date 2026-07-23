@@ -44,6 +44,8 @@ The run-level `fact_mine.proof_boundary_summary` has the same `schema` and:
 {
   "result_count": 12,
   "results_with_boundary": 10,
+  "invalid_boundaries": 0,
+  "missing_boundaries": 2,
   "input_completeness": {"complete": 4, "partial": 2, "unknown": 4},
   "claim_status": {"proven": 1, "observed": 7, "review": 2},
   "coverage_discharge": {"satisfiable": 3, "unsatisfiable": 2, "not_applicable": 5, "unknown": 0}
@@ -51,8 +53,11 @@ The run-level `fact_mine.proof_boundary_summary` has the same `schema` and:
 ```
 
 `results_with_boundary` is the denominator for rates calculated from any one
-dimension; consumers must never combine `review` with `partial`, or infer
-`complete` from a missing field.
+dimension; `invalid_boundaries` and `missing_boundaries` make producer
+corruption and missing metadata visible rather than silently collapsing them
+into a quality rate. Consumers must never combine `review` with `partial`, or
+infer `complete` from a missing field. Producer conformance tests must assert
+that `invalid_boundaries` is zero.
 
 Current producers are Decomplex, Espalier, NilKill, and SlopCop. Consumers
 must preserve these properties when re-emitting SARIF rather than replacing

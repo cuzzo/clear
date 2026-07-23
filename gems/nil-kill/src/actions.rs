@@ -103,7 +103,11 @@ pub fn replace_deterministic_guard(input: &InputState) -> Vec<Action> {
     actions
 }
 use crate::schemas::{Action, InputState, MethodRecord, SourceRecord};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
+
+mod fact_helpers;
+mod primitive_domains;
+mod static_nil_pressure;
 
 pub fn propose_sig(input: &InputState) -> Vec<Action> {
     let mut actions = Vec::new();
@@ -2587,362 +2591,10 @@ pub fn build_actions(input: &InputState) -> Vec<Action> {
     actions.extend(propose_false_nilable_return_actions(input));
     actions.extend(propose_forwarded_return_chain_actions(input));
     actions.extend(propose_struct_field_sig_actions(input));
-    actions.extend(report_static_nil_pressure(input));
-    actions.extend(report_static_primitive_domains(input));
+    actions.extend(static_nil_pressure::report(input));
+    actions.extend(primitive_domains::report(input));
 
     actions
-}
-
-#[derive(Default)]
-struct PrimitiveDomain {
-    values: BTreeSet<String>,
-    decision_sites: BTreeSet<String>,
-    producer_sites: BTreeSet<String>,
-    path: String,
-    line: i64,
-    kind: String,
-    literal_kind: String,
-    slot: String,
-    blocked: bool,
-    strong_decision: bool,
-}
-
-fn primitive_domain_is_closed(domain: &PrimitiveDomain) -> bool {
-    !domain.blocked && (2..=10).contains(&domain.values.len())
-}
-
-fn primitive_domain_has_sufficient_evidence(domain: &PrimitiveDomain) -> bool {
-    domain.decision_sites.len() >= 2
-        || (domain.strong_decision && !domain.producer_sites.is_empty())
-}
-
-fn reportable_primitive_domain(domain: &PrimitiveDomain) -> bool {
-    primitive_domain_is_closed(domain) && primitive_domain_has_sufficient_evidence(domain)
-}
-
-/// Reports closed-looking primitive state domains from FactMine's normalized
-/// hidden-enum observations. Parameters are deliberately excluded: without a
-/// proven caller contract they are open-world inputs rather than candidates.
-fn report_static_primitive_domains(input: &InputState) -> Vec<Action> {
-    let mut domains = BTreeMap::<String, PrimitiveDomain>::new();
-    for observation in fact_objects(input, "hidden_enum_observations") {
-        // Parameters are open-world inputs without a caller contract.  Keep
-        // each remaining stable FactMine identity separate rather than
-        // grouping conditions by spelling or by their literal set.
-        if !matches!(fact_string(observation, "kind"), Some("state" | "local")) {
-            continue;
-        }
-        let Some(key) = fact_string(observation, "key") else {
-            continue;
-        };
-        let domain = domains.entry(key.to_string()).or_default();
-        domain.path = fact_string(observation, "path").unwrap_or("").to_string();
-        domain.line = fact_i64(observation, "line").unwrap_or(0);
-        domain.kind = fact_string(observation, "kind")
-            .unwrap_or("state")
-            .to_string();
-        domain.slot = fact_string(observation, "slot").unwrap_or("").to_string();
-        let site = observation
-            .get("site")
-            .and_then(serde_json::Value::as_object);
-        let site_id = site.map(|site| {
-            let line = fact_i64(site, "line").unwrap_or(0);
-            format!("{}:{line}", fact_string(site, "path").unwrap_or(""))
-        });
-        match fact_string(observation, "event") {
-            Some("decision") => {
-                if let Some(site_id) = site_id {
-                    domain.decision_sites.insert(site_id);
-                }
-                domain.strong_decision |= site
-                    .and_then(|site| fact_string(site, "kind"))
-                    .is_some_and(|kind| matches!(kind, "case" | "switch"));
-                add_primitive_domain_values(domain, observation);
-            }
-            Some("producer") => {
-                if let Some(site_id) = site_id {
-                    domain.producer_sites.insert(site_id);
-                }
-                add_primitive_domain_values(domain, observation);
-            }
-            Some("blocker") => domain.blocked = true,
-            _ => {}
-        }
-    }
-    domains
-        .into_values()
-        .filter(reportable_primitive_domain)
-        .map(|domain| Action {
-            kind: "report_static_primitive_domain".to_string(),
-            confidence: "review".to_string(),
-            path: domain.path,
-            line: domain.line,
-            message: format!(
-                "{} {} has a closed-looking {} domain across {} decision sites",
-                domain.kind,
-                domain.slot,
-                domain.literal_kind,
-                domain.decision_sites.len()
-            ),
-            data: HashMap::from([
-                ("slot".to_string(), serde_json::Value::String(domain.slot)),
-                ("values".to_string(), json_strings(domain.values)),
-                (
-                    "decision_sites".to_string(),
-                    json_strings(domain.decision_sites),
-                ),
-            ]),
-        })
-        .collect()
-}
-
-fn add_primitive_domain_values(
-    domain: &mut PrimitiveDomain,
-    observation: &serde_json::Map<String, serde_json::Value>,
-) {
-    let Some(values) = observation
-        .get("values")
-        .and_then(serde_json::Value::as_array)
-    else {
-        domain.blocked = true;
-        return;
-    };
-    if values.is_empty() {
-        domain.blocked = true;
-        return;
-    }
-    for value in values {
-        let Some(kind) = value.get("kind").and_then(serde_json::Value::as_str) else {
-            domain.blocked = true;
-            return;
-        };
-        if !matches!(kind, "String" | "Symbol" | "Integer") {
-            domain.blocked = true;
-            return;
-        }
-        if !domain.literal_kind.is_empty() && domain.literal_kind != kind {
-            domain.blocked = true;
-            return;
-        }
-        domain.literal_kind = kind.to_string();
-        let Some(value) = value.get("value").and_then(serde_json::Value::as_str) else {
-            domain.blocked = true;
-            return;
-        };
-        domain.values.insert(value.to_string());
-    }
-}
-
-/// Produces a review-only causal report from FactMine's public nullable
-/// facts. NilKill deliberately receives no source text, normalized AST, or
-/// CFG here: it groups only the already-proven origins and obligations.
-fn report_static_nil_pressure(input: &InputState) -> Vec<Action> {
-    let mut roots = nullable_roots(&fact_objects(input, "nullable_states"));
-    attach_guard_obligations(&mut roots, &fact_objects(input, "nullable_refinements"));
-    attach_return_obligations(&mut roots, &fact_objects(input, "nullable_summaries"));
-    attach_operation_obligations(&mut roots, &fact_objects(input, "nullable_operations"));
-    pressure_actions(roots)
-}
-
-fn nullable_roots(
-    states: &[&serde_json::Map<String, serde_json::Value>],
-) -> BTreeMap<String, PressureEvidence> {
-    let mut roots = BTreeMap::<String, PressureEvidence>::new();
-    for state in states {
-        if !is_pressure_nullable_state(fact_string(state, "state")) || !fact_bool(state, "complete")
-        {
-            continue;
-        }
-        let Some(place_id) = fact_string(state, "place_id") else {
-            continue;
-        };
-        for root in fact_strings(state, "source_definition_ids") {
-            let evidence = roots.entry(root.to_string()).or_default();
-            evidence.places.insert(place_id.to_string());
-        }
-    }
-    roots
-}
-
-fn attach_guard_obligations(
-    roots: &mut BTreeMap<String, PressureEvidence>,
-    refinements: &[&serde_json::Map<String, serde_json::Value>],
-) {
-    for (_, evidence) in roots {
-        for refinement in refinements {
-            let Some(place_id) = fact_string(refinement, "place_id") else {
-                continue;
-            };
-            if !evidence.places.contains(place_id) {
-                continue;
-            }
-            let condition = fact_string(refinement, "condition_node_id").unwrap_or("");
-            evidence.guards.insert(format!("{place_id}:{condition}"));
-        }
-    }
-}
-
-fn attach_return_obligations(
-    roots: &mut BTreeMap<String, PressureEvidence>,
-    summaries: &[&serde_json::Map<String, serde_json::Value>],
-) {
-    for (root, evidence) in roots {
-        for summary in summaries {
-            if is_pressure_nullable_state(fact_string(summary, "return_state"))
-                && fact_bool(summary, "complete")
-                && fact_strings(summary, "source_definition_ids").contains(&root.as_str())
-            {
-                let owner = fact_string(summary, "owner").unwrap_or("");
-                let function = fact_string(summary, "function").unwrap_or("");
-                evidence.returns.insert(format!("{owner}#{function}"));
-            }
-        }
-    }
-}
-
-fn is_pressure_nullable_state(state: Option<&str>) -> bool {
-    matches!(state, Some("definitely_null" | "maybe_null"))
-}
-
-fn attach_operation_obligations(
-    roots: &mut BTreeMap<String, PressureEvidence>,
-    operations: &[&serde_json::Map<String, serde_json::Value>],
-) {
-    for evidence in roots.values_mut() {
-        for operation in operations {
-            let Some(place_id) = fact_string(operation, "place_id") else {
-                continue;
-            };
-            let behavior = fact_string(operation, "nil_behavior").unwrap_or("unknown");
-            if evidence.places.contains(place_id)
-                && behavior != "safe"
-                && behavior != "unknown"
-                && fact_bool(operation, "complete")
-            {
-                let node = fact_string(operation, "node_id").unwrap_or("");
-                let kind = fact_string(operation, "operation_kind").unwrap_or("");
-                let location = OperationLocation {
-                    path: fact_string(operation, "path").unwrap_or("").to_string(),
-                    line: fact_span_line(operation),
-                };
-                if location.is_real_source_location() {
-                    evidence
-                        .operations
-                        .insert(format!("{kind}:{node}"), location);
-                }
-            }
-        }
-    }
-}
-
-fn pressure_actions(roots: BTreeMap<String, PressureEvidence>) -> Vec<Action> {
-    roots
-        .into_iter()
-        .filter_map(|(root, evidence)| {
-            let pressure = evidence.guards.len() + evidence.returns.len() + evidence.operations.len();
-            let location = evidence.operations.values().next().cloned()?;
-            (pressure > 0).then(|| {
-                let mut data = HashMap::new();
-                data.insert("root_definition_id".to_string(), serde_json::Value::String(root.clone()));
-                data.insert(
-                    "pressure".to_string(),
-                    serde_json::Value::Number(serde_json::Number::from(pressure)),
-                );
-                data.insert("guard_clusters".to_string(), json_strings(evidence.guards));
-                data.insert("nullable_returns".to_string(), json_strings(evidence.returns));
-                data.insert(
-                    "unsafe_operations".to_string(),
-                    json_strings(evidence.operations.into_keys().collect()),
-                );
-                Action {
-                    kind: "report_static_nil_pressure".to_string(),
-                    confidence: "review".to_string(),
-                    path: location.path,
-                    line: location.line,
-                    message: format!(
-                        "nullable root {root} creates {pressure} independently necessary obligations"
-                    ),
-                    data,
-                }
-            })
-        })
-        .collect()
-}
-
-#[derive(Default)]
-struct PressureEvidence {
-    places: BTreeSet<String>,
-    guards: BTreeSet<String>,
-    returns: BTreeSet<String>,
-    operations: BTreeMap<String, OperationLocation>,
-}
-
-#[derive(Clone, Default)]
-struct OperationLocation {
-    path: String,
-    line: i64,
-}
-
-impl OperationLocation {
-    fn is_real_source_location(&self) -> bool {
-        !self.path.is_empty() && self.line > 0
-    }
-}
-
-fn fact_objects<'a>(
-    input: &'a InputState,
-    key: &str,
-) -> Vec<&'a serde_json::Map<String, serde_json::Value>> {
-    input
-        .facts
-        .get(key)
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_object)
-        .collect()
-}
-
-fn fact_string<'a>(
-    fact: &'a serde_json::Map<String, serde_json::Value>,
-    key: &str,
-) -> Option<&'a str> {
-    fact.get(key).and_then(serde_json::Value::as_str)
-}
-
-fn fact_i64(fact: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<i64> {
-    fact.get(key).and_then(serde_json::Value::as_i64)
-}
-
-fn fact_strings<'a>(
-    fact: &'a serde_json::Map<String, serde_json::Value>,
-    key: &str,
-) -> Vec<&'a str> {
-    fact.get(key)
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .collect()
-}
-
-fn fact_bool(fact: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
-    fact.get(key)
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn fact_span_line(fact: &serde_json::Map<String, serde_json::Value>) -> i64 {
-    fact.get("span")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|span| span.first())
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|line| i64::try_from(line).ok())
-        .unwrap_or(0)
-}
-
-fn json_strings(values: BTreeSet<String>) -> serde_json::Value {
-    serde_json::Value::Array(values.into_iter().map(serde_json::Value::String).collect())
 }
 
 fn simple_high_confidence_collection_candidate(candidate: &str) -> bool {
@@ -3029,7 +2681,7 @@ mod tests {
                 ]
             }
         }));
-        let actions = report_static_primitive_domains(&input);
+        let actions = primitive_domains::report(&input);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].kind, "report_static_primitive_domain");
         assert_eq!(
@@ -3053,7 +2705,7 @@ mod tests {
                 {"event":"decision","kind":"param","key":"param:phase","path":"job.rb","line":12,"slot":"phase","site":{"path":"job.rb","line":13},"values":[{"kind":"Symbol","value":":queued"}]}
             ]}
         }));
-        let actions = report_static_primitive_domains(&input);
+        let actions = primitive_domains::report(&input);
         assert_eq!(actions.len(), 2);
         assert!(actions.iter().any(|action| action.data["slot"] == "@phase"));
         assert!(actions
@@ -3087,7 +2739,7 @@ mod tests {
                     {"event":"decision","kind":"state","key":"state:attempt","path":"job.rb","line":2,"slot":"@attempt","site":{"path":"job.rb","line":4},"values":[{"kind":"Integer","value":"2"}]}
                 ]}
             }));
-            assert!(report_static_primitive_domains(&input).is_empty());
+            assert!(primitive_domains::report(&input).is_empty());
         }
     }
 
@@ -3169,7 +2821,7 @@ mod tests {
             }
         }));
 
-        let actions = report_static_primitive_domains(&input);
+        let actions = primitive_domains::report(&input);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].data["slot"], "@flags");
         assert_eq!(actions[0].data["values"], serde_json::json!(["1", "2"]));
@@ -3200,7 +2852,7 @@ mod tests {
             }
         }));
 
-        let actions = report_static_primitive_domains(&input);
+        let actions = primitive_domains::report(&input);
         assert_eq!(actions.len(), 1);
         assert_eq!(
             actions[0].data["values"],
@@ -3240,7 +2892,7 @@ mod tests {
             }
         }));
 
-        let actions = report_static_primitive_domains(&input);
+        let actions = primitive_domains::report(&input);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].line, 2);
         assert!(actions[0]
@@ -3266,7 +2918,7 @@ mod tests {
             }
         }));
 
-        assert!(report_static_nil_pressure(&input).is_empty());
+        assert!(static_nil_pressure::report(&input).is_empty());
     }
 
     #[test]
@@ -3303,7 +2955,7 @@ mod tests {
                 }
             }));
 
-            assert!(report_static_nil_pressure(&input).is_empty(), "{state}");
+            assert!(static_nil_pressure::report(&input).is_empty(), "{state}");
         }
     }
 
@@ -3436,7 +3088,7 @@ mod tests {
             }
         }));
 
-        let actions = super::report_static_nil_pressure(&input);
+        let actions = super::static_nil_pressure::report(&input);
 
         assert_eq!(actions.len(), 1);
         let action = &actions[0];
@@ -3498,7 +3150,7 @@ mod tests {
             }
         }));
 
-        assert!(super::report_static_nil_pressure(&input).is_empty());
+        assert!(super::static_nil_pressure::report(&input).is_empty());
     }
 
     #[test]

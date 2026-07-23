@@ -343,6 +343,8 @@ RSpec.describe NilKill do
       expect(static_result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("unknown")
       expect(static_result.dig("properties", "fact_mine.proof_boundary", "claim_status")).to eq("review")
       expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "results_with_boundary")).to be_positive
+      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "invalid_boundaries")).to eq(0)
+      expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "missing_boundaries")).to eq(0)
     end
 
     it "distinguishes complete static proofs from partial static evidence in SARIF" do
@@ -524,6 +526,8 @@ RSpec.describe NilKill do
       ])
       expect(summary.fetch("result_count")).to eq(2)
       expect(summary.fetch("results_with_boundary")).to eq(1)
+      expect(summary.fetch("invalid_boundaries")).to eq(1)
+      expect(summary.fetch("missing_boundaries")).to eq(0)
     end
 
     it "joins relative method paths to absolute return-origin paths" do

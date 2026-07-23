@@ -212,6 +212,8 @@ class AggregatorTest < Minitest::Test
     fixture = JSON.parse(File.read(File.expand_path("../../hazard-contract/fixtures/proof-boundary.v3.json", __dir__)))
     assert_equal fixture.dig("representative", "espalier"), complexity.dig("properties", "fact_mine.proof_boundary")
     assert_equal 3, run.dig("properties", "fact_mine.proof_boundary_summary", "results_with_boundary")
+    assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "invalid_boundaries")
+    assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "missing_boundaries")
     assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "complete")
     assert_equal 3, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "unknown")
   end
@@ -220,6 +222,10 @@ class AggregatorTest < Minitest::Test
     manifest = [{
       module: "Parser",
       file: "lib/parser.rb",
+      proof_boundary: {
+        input_completeness: "complete",
+        input_blockers: []
+      },
       functions: [{
         name: "parse",
         line: 3,
@@ -236,10 +242,11 @@ class AggregatorTest < Minitest::Test
     run = JSON.parse(Espalier::Formatter.to_sarif(manifest)).fetch("runs").first
     result = run.fetch("results").first
     boundary = result.dig("properties", "fact_mine.proof_boundary")
-    assert_equal "unknown", boundary.fetch("input_completeness")
+    assert_equal "complete", boundary.fetch("input_completeness")
     assert_equal "observed", boundary.fetch("claim_status")
-    assert_includes boundary.fetch("blockers"), { "kind" => "call_resolution" }
-    assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "unknown")
+    assert_equal "partial", result.dig("properties", "complexity", "model_completeness")
+    assert_includes result.dig("properties", "complexity", "model_blockers"), { "kind" => "call_resolution" }
+    assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "complete")
   end
 
   def test_formatter_sarif_preserves_extractor_input_boundary

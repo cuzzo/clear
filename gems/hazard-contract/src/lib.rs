@@ -152,6 +152,14 @@ pub mod proof_boundary {
             }
         }
 
+        pub const fn unsupported_language() -> Self {
+            Self {
+                kind: ProofBlockerKind::UnsupportedLanguage,
+                path: None,
+                span: None,
+            }
+        }
+
         pub const fn open_corpus() -> Self {
             Self {
                 kind: ProofBlockerKind::OpenCorpus,
@@ -465,11 +473,15 @@ pub mod proof_boundary {
         let mut not_applicable = 0usize;
         let mut discharge_unknown = 0usize;
         let mut results_with_boundary = 0usize;
+        let mut invalid_boundaries = 0usize;
+        let mut missing_boundaries = 0usize;
         for result in results {
             let Some(boundary) = result.pointer(&format!("/properties/{PROPERTY}")) else {
+                missing_boundaries += 1;
                 continue;
             };
             let Ok(boundary) = parse_validate_normalize(boundary) else {
+                invalid_boundaries += 1;
                 continue;
             };
             results_with_boundary += 1;
@@ -494,6 +506,8 @@ pub mod proof_boundary {
             "schema": SCHEMA,
             "result_count": results.len(),
             "results_with_boundary": results_with_boundary,
+            "invalid_boundaries": invalid_boundaries,
+            "missing_boundaries": missing_boundaries,
             "input_completeness": {
                 "complete": complete,
                 "partial": partial,

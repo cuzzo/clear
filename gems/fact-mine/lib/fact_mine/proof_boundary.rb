@@ -81,10 +81,17 @@ module FactMine
       input = INPUT_COMPLETENESS.to_h { |value| [value, 0] }
       claims = CLAIM_STATUS.to_h { |value| [value, 0] }
       coverage = COVERAGE_DISCHARGE.to_h { |value| [value, 0] }
+      invalid_boundaries = 0
+      missing_boundaries = 0
       boundaries = Array(results).filter_map do |result|
         boundary = result.dig("properties", PROOF_BOUNDARY_PROPERTY)
-        parse_validate_normalize(boundary) if boundary.is_a?(Hash)
+        if boundary.nil?
+          missing_boundaries += 1
+          next
+        end
+        parse_validate_normalize(boundary)
       rescue ArgumentError
+        invalid_boundaries += 1
         nil
       end
       boundaries.each do |boundary|
@@ -96,6 +103,8 @@ module FactMine
         "schema" => SCHEMA,
         "result_count" => Array(results).size,
         "results_with_boundary" => boundaries.size,
+        "invalid_boundaries" => invalid_boundaries,
+        "missing_boundaries" => missing_boundaries,
         "input_completeness" => input,
         "claim_status" => claims,
         "coverage_discharge" => coverage
