@@ -2955,6 +2955,17 @@ mod tests {
     }
 
     #[test]
+    fn static_nil_pressure_ignores_guarded_non_null_operations() {
+        let input = input_from_json(serde_json::json!({
+            "facts": {
+                "nullable_states": [{"place_id": "place:value", "state": "maybe_null", "complete": true, "source_definition_ids": ["definition:value"]}],
+                "nullable_operations": [{"path": "guarded.cs", "span": [7, 0, 7, 12], "node_id": "operation", "operation_kind": "receiver_member_access", "nil_behavior": "null_reference_exception", "state_at_operation": "definitely_non_null", "complete": true, "source_definition_ids": ["definition:value"]}]
+            }
+        }));
+        assert!(static_nil_pressure::report(&input).is_empty());
+    }
+
+    #[test]
     fn strong_static_return_can_remove_false_nilability() {
         let input = input_from_json(serde_json::json!({
             "methods": [],
@@ -3068,6 +3079,7 @@ mod tests {
                         "span": [14, 2, 14, 8],
                         "operation_kind": "pointer_dereference",
                         "nil_behavior": "undefined_behavior",
+                        "state_at_operation": "definitely_null",
                         "complete": true,
                         "source_definition_ids": ["definition:cache_lookup"]
                     },
@@ -3123,8 +3135,8 @@ mod tests {
                     {"place_id": "place:value", "condition_node_id": "guard:b", "complete": true, "source_definition_ids": ["definition:b"]}
                 ],
                 "nullable_operations": [
-                    {"path": "reassign.c", "span": [10, 0, 10, 5], "node_id": "operation:a", "operation_kind": "pointer_dereference", "nil_behavior": "undefined_behavior", "complete": true, "source_definition_ids": ["definition:a"]},
-                    {"path": "reassign.c", "span": [20, 0, 20, 5], "node_id": "operation:b", "operation_kind": "pointer_dereference", "nil_behavior": "undefined_behavior", "complete": true, "source_definition_ids": ["definition:b"]}
+                    {"path": "reassign.c", "span": [10, 0, 10, 5], "node_id": "operation:a", "operation_kind": "pointer_dereference", "nil_behavior": "undefined_behavior", "state_at_operation": "maybe_null", "complete": true, "source_definition_ids": ["definition:a"]},
+                    {"path": "reassign.c", "span": [20, 0, 20, 5], "node_id": "operation:b", "operation_kind": "pointer_dereference", "nil_behavior": "undefined_behavior", "state_at_operation": "maybe_null", "complete": true, "source_definition_ids": ["definition:b"]}
                 ]
             }
         }));
@@ -3175,7 +3187,7 @@ mod tests {
                     {"place_id": "place:value", "complete": true, "source_definition_ids": ["definition:a"]},
                     {"place_id": "place:value", "condition_node_id": "missing-roots", "complete": true}
                 ],
-                "nullable_operations": [{"path": "guard.c", "span": [8, 0, 8, 4], "node_id": "operation", "operation_kind": "pointer_dereference", "nil_behavior": "undefined_behavior", "complete": true, "source_definition_ids": ["definition:a"]}]
+                "nullable_operations": [{"path": "guard.c", "span": [8, 0, 8, 4], "node_id": "operation", "operation_kind": "pointer_dereference", "nil_behavior": "undefined_behavior", "state_at_operation": "maybe_null", "complete": true, "source_definition_ids": ["definition:a"]}]
             }
         }));
 

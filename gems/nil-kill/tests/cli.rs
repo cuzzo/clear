@@ -87,6 +87,7 @@ fn binary_reports_causal_nullable_pressure_from_public_facts() {
                     "span": [22, 4, 22, 10],
                     "operation_kind": "pointer_dereference",
                     "nil_behavior": "undefined_behavior",
+                    "state_at_operation": "maybe_null",
                     "complete": true,
                     "source_definition_ids": ["definition:cache_lookup"]
                 }]

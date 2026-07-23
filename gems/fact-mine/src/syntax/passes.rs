@@ -152,12 +152,14 @@ impl<'a> StatefulSyntaxPass<'a> {
             self.normalized_root,
             self.behavior,
         );
-        let nullable_states = nullable::project_states(&control_flow);
+        let raw_nullable_states = nullable::project_states(&control_flow);
         let nullable_refinements = nullable::project_refinements(
             &nil_guard_facts.refinements,
             &control_flow,
-            &nullable_states,
+            &raw_nullable_states,
         );
+        let nullable_states =
+            nullable::apply_refinements(&raw_nullable_states, &nullable_refinements, &control_flow);
         let nullable_summaries = nullable::project_summaries(&control_flow, &nullable_states);
         let nullable_operations = nullable::project_operations(
             &facts.nullable_operation_seeds,

@@ -246,6 +246,92 @@ pub(crate) fn project_states(facts: &ControlFlowFacts) -> Vec<NullableState> {
     states.into_values().collect()
 }
 
+/// Applies complete branch proofs to successor states while their exact
+/// reaching definitions remain unchanged. A write to the refined place ends
+/// propagation, so a later reassignment cannot inherit an earlier guard.
+pub(crate) fn apply_refinements(
+    states: &[NullableState],
+    refinements: &[NullableRefinement],
+    facts: &ControlFlowFacts,
+) -> Vec<NullableState> {
+    let mut output = states
+        .iter()
+        .cloned()
+        .map(|state| ((state.node_id.clone(), state.place_id.clone()), state))
+        .collect::<BTreeMap<_, _>>();
+    let effects = facts
+        .effects
+        .iter()
+        .map(|effect| (effect.node_id.as_str(), effect))
+        .collect::<BTreeMap<_, _>>();
+    let outgoing = facts
+        .edges
+        .iter()
+        .fold(BTreeMap::<&str, Vec<_>>::new(), |mut rows, edge| {
+            rows.entry(edge.from.as_str()).or_default().push(edge);
+            rows
+        });
+
+    for refinement in refinements.iter().filter(|row| {
+        row.complete
+            && !row.source_definition_ids.is_empty()
+            && matches!(
+                row.state_on_edge.as_str(),
+                "definitely_non_null" | "definitely_null"
+            )
+    }) {
+        let roots = refinement
+            .source_definition_ids
+            .iter()
+            .collect::<BTreeSet<_>>();
+        let mut pending = outgoing
+            .get(refinement.condition_node_id.as_str())
+            .into_iter()
+            .flatten()
+            .filter(|edge| refinement_edge_matches(&refinement.edge, &edge.kind))
+            .map(|edge| edge.to.clone())
+            .collect::<Vec<_>>();
+        let mut visited = BTreeSet::new();
+        while let Some(node_id) = pending.pop() {
+            if !visited.insert(node_id.clone()) {
+                continue;
+            }
+            let state_key = (node_id.clone(), refinement.place_id.clone());
+            let unchanged = output.get(&state_key).is_some_and(|state| {
+                state.complete
+                    && state.source_definition_ids.iter().collect::<BTreeSet<_>>() == roots
+            });
+            if !unchanged {
+                continue;
+            }
+            if let Some(state) = output.get_mut(&state_key) {
+                state.state = refinement.state_on_edge.clone();
+            }
+            if effects
+                .get(node_id.as_str())
+                .is_some_and(|effect| effect.writes.contains(&refinement.place_id))
+            {
+                continue;
+            }
+            pending.extend(
+                outgoing
+                    .get(node_id.as_str())
+                    .into_iter()
+                    .flatten()
+                    .map(|edge| edge.to.clone()),
+            );
+        }
+    }
+    output.into_values().collect()
+}
+
+fn refinement_edge_matches(edge: &str, cfg_kind: &str) -> bool {
+    matches!(
+        (edge, cfg_kind),
+        ("then", "branch_true") | ("else", "branch_false")
+    )
+}
+
 /// Collapses the already-projected return-node states into one conservative
 /// summary per callable. This is a pure public-fact projection: no source,
 /// AST, or call-graph traversal is replayed here.
@@ -745,7 +831,7 @@ fn definitely_non_null_literal(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::cfg::{ControlFlowNode, NodeEffect, Place};
+    use crate::syntax::cfg::{ControlFlowEdge, ControlFlowNode, NodeEffect, Place};
 
     #[test]
     fn projects_only_a_subject_read_by_the_matching_condition() {
@@ -798,6 +884,107 @@ mod tests {
         assert_eq!(rows[0].state_on_edge, "definitely_non_null");
         assert!(rows[0].source_definition_ids.is_empty());
         assert!(!rows[0].complete);
+    }
+
+    #[test]
+    fn complete_branch_refinement_reaches_successors_and_stops_at_writes() {
+        let facts = ControlFlowFacts {
+            edges: vec![
+                ControlFlowEdge {
+                    file: "guard.c".to_string(),
+                    function: "use".to_string(),
+                    owner: "".to_string(),
+                    from: "guard".to_string(),
+                    to: "operation".to_string(),
+                    kind: "branch_false".to_string(),
+                    line: 2,
+                    span: [2, 0, 2, 8],
+                },
+                ControlFlowEdge {
+                    file: "guard.c".to_string(),
+                    function: "use".to_string(),
+                    owner: "".to_string(),
+                    from: "operation".to_string(),
+                    to: "write".to_string(),
+                    kind: "fallthrough".to_string(),
+                    line: 3,
+                    span: [3, 0, 3, 8],
+                },
+                ControlFlowEdge {
+                    file: "guard.c".to_string(),
+                    function: "use".to_string(),
+                    owner: "".to_string(),
+                    from: "write".to_string(),
+                    to: "after_write".to_string(),
+                    kind: "fallthrough".to_string(),
+                    line: 4,
+                    span: [4, 0, 4, 8],
+                },
+            ],
+            effects: vec![
+                NodeEffect {
+                    node_id: "operation".to_string(),
+                    reads: vec!["place:value".to_string()],
+                    complete: true,
+                    ..NodeEffect::default()
+                },
+                NodeEffect {
+                    node_id: "write".to_string(),
+                    writes: vec!["place:value".to_string()],
+                    complete: true,
+                    ..NodeEffect::default()
+                },
+            ],
+            ..ControlFlowFacts::default()
+        };
+        let states = vec![
+            NullableState {
+                node_id: "operation".to_string(),
+                place_id: "place:value".to_string(),
+                state: "maybe_null".to_string(),
+                source_definition_ids: vec!["root:a".to_string()],
+                complete: true,
+                unknown_reasons: Vec::new(),
+            },
+            NullableState {
+                node_id: "write".to_string(),
+                place_id: "place:value".to_string(),
+                state: "maybe_null".to_string(),
+                source_definition_ids: vec!["root:a".to_string()],
+                complete: true,
+                unknown_reasons: Vec::new(),
+            },
+            NullableState {
+                node_id: "after_write".to_string(),
+                place_id: "place:value".to_string(),
+                state: "maybe_null".to_string(),
+                source_definition_ids: vec!["root:b".to_string()],
+                complete: true,
+                unknown_reasons: Vec::new(),
+            },
+        ];
+        let refinements = vec![NullableRefinement {
+            place_id: "place:value".to_string(),
+            condition_node_id: "guard".to_string(),
+            source_definition_ids: vec!["root:a".to_string()],
+            edge: "else".to_string(),
+            state_on_edge: "definitely_non_null".to_string(),
+            proof_kind: "nil_comparison".to_string(),
+            source_span: [2, 0, 2, 8],
+            complete: true,
+        }];
+        let states = apply_refinements(&states, &refinements, &facts);
+        let state = |node: &str| {
+            states
+                .iter()
+                .find(|row| row.node_id == node)
+                .unwrap()
+                .state
+                .as_str()
+        };
+        assert_eq!(state("operation"), "definitely_non_null");
+        assert_eq!(state("write"), "definitely_non_null");
+        assert_eq!(state("after_write"), "maybe_null");
     }
 
     #[test]

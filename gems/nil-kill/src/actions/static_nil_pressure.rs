@@ -87,7 +87,11 @@ fn attach_operations(
 ) {
     for operation in operations {
         let behavior = fact_helpers::string(operation, "nil_behavior").unwrap_or("unknown");
-        if matches!(behavior, "safe" | "unknown") || !fact_helpers::bool(operation, "complete") {
+        let state = fact_helpers::string(operation, "state_at_operation").unwrap_or("unknown");
+        if matches!(behavior, "safe" | "unknown")
+            || !matches!(state, "maybe_null" | "definitely_null")
+            || !fact_helpers::bool(operation, "complete")
+        {
             continue;
         }
         let location = OperationLocation {
