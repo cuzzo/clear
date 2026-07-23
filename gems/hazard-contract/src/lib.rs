@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 /// Ruby producers use the matching `FactMine::ProofBoundary` implementation.
 pub mod proof_boundary {
     use serde_json::{json, Value};
+    use std::collections::BTreeSet;
 
     pub const PROPERTY: &str = "fact_mine.proof_boundary";
     pub const SUMMARY_PROPERTY: &str = "fact_mine.proof_boundary_summary";
@@ -97,12 +98,12 @@ pub mod proof_boundary {
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
     pub enum ProofBlockerKind {
-        ParserRecovery,
         CallResolution,
         MissingEvidence,
         OpenCorpus,
-        UnsupportedLanguage,
+        ParserRecovery,
         Unknown,
+        UnsupportedLanguage,
     }
 
     impl ProofBlockerKind {
@@ -119,7 +120,7 @@ pub mod proof_boundary {
     }
 
     /// A canonical reason why a detector cannot make a stronger claim.
-    #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct ProofBlocker {
         kind: ProofBlockerKind,
         path: Option<String>,
@@ -167,6 +168,24 @@ pub mod proof_boundary {
             }
         }
 
+        fn validate(&self) -> Result<(), String> {
+            if self.path.as_deref().is_some_and(str::is_empty) {
+                return Err("proof blocker path must not be empty".to_string());
+            }
+            if let Some([start_line, start_column, end_line, end_column]) = self.span {
+                if start_line < 1 || start_column < 0 || end_line < start_line || end_column < 0 {
+                    return Err(
+                        "proof blocker span must use nonnegative columns and positive lines"
+                            .to_string(),
+                    );
+                }
+                if end_line == start_line && end_column < start_column {
+                    return Err("proof blocker span end precedes its start".to_string());
+                }
+            }
+            Ok(())
+        }
+
         fn value(self) -> Value {
             let mut value = json!({ "kind": self.kind.as_str() });
             if let Some(path) = self.path {
@@ -176,6 +195,22 @@ pub mod proof_boundary {
                 value["span"] = json!(span);
             }
             value
+        }
+
+        fn canonical_sort_key(&self) -> String {
+            self.clone().value().to_string()
+        }
+    }
+
+    impl Ord for ProofBlocker {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            self.canonical_sort_key().cmp(&other.canonical_sort_key())
+        }
+    }
+
+    impl PartialOrd for ProofBlocker {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
         }
     }
 
@@ -190,12 +225,35 @@ pub mod proof_boundary {
         scope: ProofScopeKind,
         closed: bool,
         blockers: Vec<ProofBlocker>,
-    ) -> Value {
+    ) -> Result<Value, String> {
+        let authority = authority
+            .iter()
+            .map(|authority| (*authority).to_string())
+            .collect::<BTreeSet<_>>();
+        if authority.is_empty() || authority.iter().any(|authority| authority.is_empty()) {
+            return Err("proof boundary authority must contain nonempty entries".to_string());
+        }
+        if claim_kind.is_empty() {
+            return Err("proof boundary claim_kind must not be empty".to_string());
+        }
         let blockers = blockers
             .into_iter()
-            .map(ProofBlocker::value)
-            .collect::<Vec<_>>();
-        json!({
+            .map(|blocker| {
+                blocker.validate()?;
+                Ok(blocker)
+            })
+            .collect::<Result<BTreeSet<_>, String>>()?;
+        if input_completeness == InputCompleteness::Complete && !blockers.is_empty() {
+            return Err("complete input cannot carry proof blockers".to_string());
+        }
+        if blockers
+            .iter()
+            .any(|blocker| blocker.kind == ProofBlockerKind::OpenCorpus)
+            && input_completeness != InputCompleteness::Unknown
+        {
+            return Err("open corpus blocker requires unknown input completeness".to_string());
+        }
+        Ok(json!({
             "schema": SCHEMA,
             "input_completeness": input_completeness.as_str(),
             "claim_status": claim_status.as_str(),
@@ -203,8 +261,8 @@ pub mod proof_boundary {
             "authority": authority,
             "claim_kind": claim_kind,
             "scope": { "kind": scope.as_str(), "closed": closed },
-            "blockers": blockers,
-        })
+            "blockers": blockers.into_iter().map(ProofBlocker::value).collect::<Vec<_>>(),
+        }))
     }
 
     /// Summarizes each proof dimension independently.
@@ -540,9 +598,12 @@ pub fn validate_contract() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::proof_boundary::{
+        build, ClaimStatus, CoverageDischarge, InputCompleteness, ProofBlocker, ProofScopeKind,
+    };
     use super::{glob_matches, validate_contract};
     use jsonschema::JSONSchema;
-    use serde_json::Value;
+    use serde_json::{json, Value};
 
     #[test]
     fn canonical_contract_is_valid_and_synchronized() {
@@ -584,5 +645,106 @@ mod tests {
             !validator.is_valid(&fixture["invalid"]),
             "invalid vector must fail the v3 schema"
         );
+    }
+
+    #[test]
+    fn proof_boundary_builder_normalizes_and_rejects_invalid_boundaries() {
+        let boundary = build(
+            InputCompleteness::Partial,
+            ClaimStatus::Review,
+            CoverageDischarge::Unsatisfiable,
+            &[
+                "nil_kill_static",
+                "fact_mine_normalized_ast",
+                "nil_kill_static",
+            ],
+            "static_nil_pressure",
+            ProofScopeKind::Local,
+            false,
+            vec![
+                ProofBlocker::unknown(),
+                ProofBlocker::call_resolution("lib/example.rb", Some([3, 0, 3, 5])),
+                ProofBlocker::unknown(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            boundary["authority"],
+            json!(["fact_mine_normalized_ast", "nil_kill_static"])
+        );
+        assert_eq!(
+            boundary["blockers"],
+            json!([
+                {"kind":"call_resolution", "path":"lib/example.rb", "span":[3, 0, 3, 5]},
+                {"kind":"unknown"}
+            ])
+        );
+
+        assert!(build(
+            InputCompleteness::Unknown,
+            ClaimStatus::Review,
+            CoverageDischarge::Unsatisfiable,
+            &[],
+            "static_nil_pressure",
+            ProofScopeKind::Local,
+            false,
+            vec![],
+        )
+        .is_err());
+        assert!(build(
+            InputCompleteness::Unknown,
+            ClaimStatus::Review,
+            CoverageDischarge::Unsatisfiable,
+            &[""],
+            "static_nil_pressure",
+            ProofScopeKind::Local,
+            false,
+            vec![],
+        )
+        .is_err());
+        assert!(build(
+            InputCompleteness::Unknown,
+            ClaimStatus::Review,
+            CoverageDischarge::Unsatisfiable,
+            &["fact_mine_normalized_ast"],
+            "",
+            ProofScopeKind::Local,
+            false,
+            vec![],
+        )
+        .is_err());
+        assert!(build(
+            InputCompleteness::Partial,
+            ClaimStatus::Review,
+            CoverageDischarge::Unsatisfiable,
+            &["fact_mine_normalized_ast"],
+            "static_nil_pressure",
+            ProofScopeKind::Local,
+            false,
+            vec![ProofBlocker::call_resolution("x.rb", Some([3, 2, 3, 1]))],
+        )
+        .is_err());
+        assert!(build(
+            InputCompleteness::Complete,
+            ClaimStatus::Review,
+            CoverageDischarge::Unsatisfiable,
+            &["fact_mine_normalized_ast"],
+            "static_nil_pressure",
+            ProofScopeKind::Local,
+            false,
+            vec![ProofBlocker::unknown()],
+        )
+        .is_err());
+        assert!(build(
+            InputCompleteness::Partial,
+            ClaimStatus::Review,
+            CoverageDischarge::Unsatisfiable,
+            &["fact_mine_normalized_ast"],
+            "static_nil_pressure",
+            ProofScopeKind::Local,
+            false,
+            vec![ProofBlocker::open_corpus()],
+        )
+        .is_err());
     }
 }

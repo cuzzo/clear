@@ -2700,28 +2700,36 @@ fn add_primitive_domain_values(
     domain: &mut PrimitiveDomain,
     observation: &serde_json::Map<String, serde_json::Value>,
 ) {
-    for value in observation
+    let Some(values) = observation
         .get("values")
         .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-    {
+    else {
+        domain.blocked = true;
+        return;
+    };
+    if values.is_empty() {
+        domain.blocked = true;
+        return;
+    }
+    for value in values {
         let Some(kind) = value.get("kind").and_then(serde_json::Value::as_str) else {
             domain.blocked = true;
-            continue;
+            return;
         };
         if !matches!(kind, "String" | "Symbol" | "Integer") {
             domain.blocked = true;
-            continue;
+            return;
         }
         if !domain.literal_kind.is_empty() && domain.literal_kind != kind {
             domain.blocked = true;
-            continue;
+            return;
         }
         domain.literal_kind = kind.to_string();
-        if let Some(value) = value.get("value").and_then(serde_json::Value::as_str) {
-            domain.values.insert(value.to_string());
-        }
+        let Some(value) = value.get("value").and_then(serde_json::Value::as_str) else {
+            domain.blocked = true;
+            return;
+        };
+        domain.values.insert(value.to_string());
     }
 }
 
@@ -3051,6 +3059,36 @@ mod tests {
         assert!(actions
             .iter()
             .any(|action| action.data["slot"] == "attempt"));
+    }
+
+    #[test]
+    fn malformed_primitive_domain_observations_fail_closed() {
+        for values in [
+            serde_json::Value::Null,
+            serde_json::json!([]),
+            serde_json::json!([{"kind": "Integer"}]),
+        ] {
+            let first = if values.is_null() {
+                serde_json::json!({
+                    "event":"decision", "kind":"state", "key":"state:attempt",
+                    "path":"job.rb", "line":2, "slot":"@attempt",
+                    "site":{"path":"job.rb", "line":3}
+                })
+            } else {
+                serde_json::json!({
+                    "event":"decision", "kind":"state", "key":"state:attempt",
+                    "path":"job.rb", "line":2, "slot":"@attempt",
+                    "site":{"path":"job.rb", "line":3}, "values": values
+                })
+            };
+            let input = input_from_json(serde_json::json!({
+                "methods": [], "facts": { "hidden_enum_observations": [
+                    first,
+                    {"event":"decision","kind":"state","key":"state:attempt","path":"job.rb","line":2,"slot":"@attempt","site":{"path":"job.rb","line":4},"values":[{"kind":"Integer","value":"2"}]}
+                ]}
+            }));
+            assert!(report_static_primitive_domains(&input).is_empty());
+        }
     }
 
     #[test]

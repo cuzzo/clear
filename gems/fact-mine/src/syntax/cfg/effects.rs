@@ -28,6 +28,7 @@ struct RawEffect {
     write_sources: BTreeMap<String, String>,
     write_call_sources: BTreeMap<String, Span>,
     write_nullable_contracts: BTreeMap<String, String>,
+    return_state_hint: Option<String>,
     unknown_call: bool,
     complete: bool,
     unknown_reasons: Vec<String>,
@@ -104,6 +105,9 @@ pub(crate) fn extract(
             match find_syntax_node(&method.node, node.span, &node.role) {
                 Some(syntax_node) => {
                     let target = effect_target(syntax_node, &node.role, profile);
+                    if node.role == "return" {
+                        raw.return_state_hint = direct_return_state_hint(target);
+                    }
                     collect(
                         target,
                         &mut raw,
@@ -248,6 +252,7 @@ pub(crate) fn extract(
                 .into_iter()
                 .map(|(target, contract)| (id_for(&target), contract))
                 .collect(),
+            return_state_hint: raw.return_state_hint,
             unknown_call: raw.unknown_call,
             complete: raw.complete,
             unknown_reasons: raw.unknown_reasons,
@@ -484,6 +489,41 @@ fn literal_value_hint(node: &Node) -> Option<String> {
     }
 }
 
+/// Identifies only direct normalized literals at a return boundary. This is
+/// deliberately narrower than general expression evaluation: a literal may
+/// establish a nullable state, while calls and compound expressions must be
+/// accounted for through their reads/effects instead.
+fn direct_return_state_hint(node: &Node) -> Option<String> {
+    if ast::exact_integer_text(node.text.trim()) {
+        return Some("definitely_non_null".to_string());
+    }
+    match node.r#type.as_str() {
+        "RETURN" => {
+            let mut children = node.children.iter().filter_map(ast::node);
+            let value = children.next()?;
+            (children.next().is_none())
+                .then(|| direct_return_state_hint(value))
+                .flatten()
+        }
+        "PAREN" | "BEGIN" | "EXPRESSION_LIST" => {
+            let mut children = node.children.iter().filter_map(ast::node);
+            let value = children.next()?;
+            (children.next().is_none())
+                .then(|| direct_return_state_hint(value))
+                .flatten()
+        }
+        "NIL" => Some("definitely_null".to_string()),
+        "TRUE" | "FALSE" | "INTEGER" | "FLOAT" | "STR" | "STRING" | "ARRAY" | "LIST" | "HASH"
+        | "DICTIONARY" => Some("definitely_non_null".to_string()),
+        "LIT" => matches!(
+            node.children.first(),
+            Some(Child::Bool(_) | Child::Integer(_) | Child::Symbol(_))
+        )
+        .then(|| "definitely_non_null".to_string()),
+        _ => None,
+    }
+}
+
 /// Return a direct normalized call expression through transparent grouping
 /// only. Operations, containers, and member projections are not type-
 /// preserving assignment edges.
@@ -639,6 +679,7 @@ fn find_syntax_node<'a>(node: &'a Node, span: Span, role: &str) -> Option<&'a No
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn node(kind: &str, children: Vec<Child>) -> Node {
         Node {
@@ -704,6 +745,45 @@ mod tests {
         );
         assert_eq!(direct_call_result_node(&multi_expression), None);
         assert_eq!(direct_call_result_node(&node("OPCALL", Vec::new())), None);
+    }
+
+    #[test]
+    fn direct_return_literals_have_exact_states_but_calls_do_not() {
+        let nil = node("NIL", Vec::new());
+        let integer = node("INTEGER", Vec::new());
+        let unknown_call = node("FCALL", vec![Child::Symbol("load".to_string())]);
+        let return_node = |value: Node| node("RETURN", vec![Child::Node(Box::new(value))]);
+
+        assert_eq!(
+            direct_return_state_hint(&return_node(nil)),
+            Some("definitely_null".to_string())
+        );
+        assert_eq!(
+            direct_return_state_hint(&return_node(integer)),
+            Some("definitely_non_null".to_string())
+        );
+        assert_eq!(direct_return_state_hint(&return_node(unknown_call)), None);
+    }
+
+    #[test]
+    fn normalized_java_literal_return_has_a_direct_state() {
+        let fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/nullable_java.java");
+        let (root, _) = crate::ast::parse(&fixture).expect("parse nullable fixture");
+        let mut stack = vec![&root];
+        let literal_return = loop {
+            let node = stack.pop().expect("fixture has return 0");
+            if node.text == "return 0;" {
+                break node;
+            }
+            stack.extend(node.children.iter().filter_map(ast::node));
+        };
+        assert_eq!(literal_return.r#type, "RETURN");
+        assert_eq!(
+            direct_return_state_hint(literal_return),
+            Some("definitely_non_null".to_string()),
+            "normalized literal return: {literal_return:#?}"
+        );
     }
 
     #[test]

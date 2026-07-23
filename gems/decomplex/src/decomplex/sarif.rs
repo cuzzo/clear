@@ -10,9 +10,33 @@ pub const PROOF_BOUNDARY_PROPERTY: &str = hazard_contract::proof_boundary::PROPE
 pub const PROOF_BOUNDARY_SUMMARY_PROPERTY: &str = hazard_contract::proof_boundary::SUMMARY_PROPERTY;
 pub const PROOF_BOUNDARY_SCHEMA: &str = hazard_contract::proof_boundary::SCHEMA;
 
-pub use hazard_contract::proof_boundary::{
-    build as proof_boundary, summary as proof_boundary_summary,
-};
+pub use hazard_contract::proof_boundary::summary as proof_boundary_summary;
+
+/// Decomplex passes only internal typed facts. The fallible canonical builder
+/// remains in `hazard-contract`; this compatibility wrapper cannot recreate
+/// serialization or validation rules.
+pub fn proof_boundary(
+    input_completeness: InputCompleteness,
+    claim_status: ClaimStatus,
+    coverage_discharge: CoverageDischarge,
+    authority: &[&str],
+    claim_kind: &str,
+    scope: ProofScopeKind,
+    closed: bool,
+    blockers: Vec<ProofBlocker>,
+) -> Value {
+    hazard_contract::proof_boundary::build(
+        input_completeness,
+        claim_status,
+        coverage_discharge,
+        authority,
+        claim_kind,
+        scope,
+        closed,
+        blockers,
+    )
+    .expect("Decomplex must only emit valid canonical proof boundaries")
+}
 
 pub fn document(
     tool_name: &str,

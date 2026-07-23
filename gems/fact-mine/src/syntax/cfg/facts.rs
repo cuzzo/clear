@@ -84,6 +84,11 @@ pub struct NodeEffect {
     /// This is not inferred from identifiers downstream of the adapter.
     #[serde(default)]
     pub write_nullable_contracts: BTreeMap<String, String>,
+    /// Exact nullable state for a direct literal return. Expressions and
+    /// calls intentionally have no hint, so summary projection stays
+    /// conservative at semantic boundaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub return_state_hint: Option<String>,
     pub unknown_call: bool,
     pub complete: bool,
     pub unknown_reasons: Vec<String>,

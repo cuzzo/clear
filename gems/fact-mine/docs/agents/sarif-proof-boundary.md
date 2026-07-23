@@ -69,8 +69,11 @@ test compiles the versioned JSON Schema and validates those vectors, so the
 fixture is a conformance check rather than documentation alone.
 Ruby producers use `FactMine::ProofBoundary` rather than copying validation or
 summary logic. Rust producers use the typed serializer in
-`hazard-contract::proof_boundary` (Decomplex only re-exports that API), so
-invalid values cannot escape in release builds.
+`hazard-contract::proof_boundary` (Decomplex only re-exports that API). Its
+canonical builder validates and normalizes each release-build payload, and
+Rust producers must handle its `Result` rather than emitting invalid
+boundaries. Ruby producers raise `ArgumentError` for invalid enum and required
+field values.
 
 A detector creates the boundary with the finding it emits. SARIF only
 serializes it. Complete inputs do not imply a proven claim: only an explicit

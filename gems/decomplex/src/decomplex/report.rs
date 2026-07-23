@@ -726,6 +726,11 @@ fn finding_input_boundary(
     unknown.sort();
     unknown.dedup();
     if !unknown.is_empty() {
+        // Unknown is the final completeness level, not a reason to hide
+        // other independently observed limitations such as unresolved calls.
+        unknown.extend(partial);
+        unknown.sort();
+        unknown.dedup();
         return (sarif::InputCompleteness::Unknown, unknown);
     }
     partial.sort();
@@ -2063,6 +2068,36 @@ mod tests {
     }
 
     #[test]
+    fn unknown_boundaries_retain_independent_call_resolution_blockers() {
+        let facts = json!({
+            "semantic_evidence": {
+                "by_file": {
+                    "recovered.rb": {
+                        "normalized_ast_complete": false,
+                        "parse_recovery_spans": [[3, 0, 3, 0]],
+                        "unresolved_call_function_spans": [[1, 0, 10, 0]]
+                    }
+                }
+            }
+        });
+        let finding = json!({ "at": "recovered.rb:work:3" });
+        let (completeness, blockers) = finding_input_boundary(
+            EvidenceRequirement::REPORTED_SPANS.with_call_resolution(),
+            &finding,
+            &facts,
+        );
+
+        assert_eq!(completeness, sarif::InputCompleteness::Unknown);
+        assert_eq!(
+            blockers,
+            vec![
+                sarif::ProofBlocker::call_resolution("recovered.rb", Some([1, 0, 10, 0])),
+                sarif::ProofBlocker::parser_recovery("recovered.rb", Some([3, 0, 3, 0])),
+            ]
+        );
+    }
+
+    #[test]
     fn parser_recovery_only_downgrades_overlapping_finding_regions() {
         let file = json!({
             "parse_recovery_spans": [[10, 4, 10, 12]]
@@ -2188,7 +2223,7 @@ mod tests {
         assert_eq!(boundary.get("claim_status"), Some(&json!("review")));
         assert_eq!(
             boundary.get("authority"),
-            Some(&json!(["fact_mine_normalized_ast", "fact_mine_cfg"]))
+            Some(&json!(["fact_mine_cfg", "fact_mine_normalized_ast"]))
         );
     }
 

@@ -596,6 +596,21 @@ class SlopcopReportCovTest < Minitest::Test
     assert_equal 1, summary.dig("claim_status", "review")
   end
 
+  def test_sarif_proof_boundary_conforms_to_shared_slopcop_vector
+    fixture = JSON.parse(File.read(File.expand_path("../../hazard-contract/fixtures/proof-boundary.v3.json", __dir__)))
+    boundary = SlopCop::Sarif.proof_boundary(
+      input_completeness: "unknown",
+      claim_status: "observed",
+      coverage_discharge: "satisfiable",
+      authority: ["slopcop_coverage"],
+      claim_kind: "coverage_gap",
+      scope: { kind: "project", closed: false },
+      blockers: [{ kind: "unknown" }]
+    )
+
+    assert_equal fixture.dig("representative", "slopcop"), boundary
+  end
+
   # --- Lexicons Tests ---
   def test_lexicons
     # Ruby

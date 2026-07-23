@@ -718,7 +718,7 @@ fn exact_bare_identifier_text(text: &str) -> bool {
     true
 }
 
-fn exact_integer_text(text: &str) -> bool {
+pub(crate) fn exact_integer_text(text: &str) -> bool {
     let digits = text.strip_prefix('-').unwrap_or(text);
     !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit())
 }

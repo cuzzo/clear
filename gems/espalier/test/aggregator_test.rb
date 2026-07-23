@@ -209,6 +209,8 @@ class AggregatorTest < Minitest::Test
     assert_equal "espalier.manifest.sarif.v1", run.dig("properties", "format")
     assert_equal "unknown", complexity.dig("properties", "fact_mine.proof_boundary", "input_completeness")
     assert_equal "observed", complexity.dig("properties", "fact_mine.proof_boundary", "claim_status")
+    fixture = JSON.parse(File.read(File.expand_path("../../hazard-contract/fixtures/proof-boundary.v3.json", __dir__)))
+    assert_equal fixture.dig("representative", "espalier"), complexity.dig("properties", "fact_mine.proof_boundary")
     assert_equal 3, run.dig("properties", "fact_mine.proof_boundary_summary", "results_with_boundary")
     assert_equal 0, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "complete")
     assert_equal 3, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "unknown")

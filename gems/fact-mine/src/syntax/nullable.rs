@@ -271,19 +271,26 @@ pub(crate) fn project_summaries(
             let effects = return_effects
                 .remove(&(owner.clone(), function.clone()))
                 .unwrap_or_default();
-            let state = join_projected_states(states.iter().map(|state| state.state.as_str()));
+            let state = join_projected_states(
+                states.iter().map(|state| state.state.as_str()).chain(
+                    effects
+                        .iter()
+                        .filter_map(|effect| effect.return_state_hint.as_deref()),
+                ),
+            );
             let every_return_has_effect = nodes
                 .iter()
                 .all(|node| effects.iter().any(|effect| effect.node_id == node.id));
-            let every_return_has_tracked_read =
-                effects.iter().all(|effect| !effect.reads.is_empty());
+            let every_return_has_modeled_value = effects
+                .iter()
+                .all(|effect| !effect.reads.is_empty() || effect.return_state_hint.is_some());
             let every_read_modeled = effects.iter().all(|effect| {
                 effect.reads.iter().all(|place_id| {
                     states_by_node.contains_key(&(effect.node_id.as_str(), place_id.as_str()))
                 })
             });
             let complete = every_return_has_effect
-                && every_return_has_tracked_read
+                && every_return_has_modeled_value
                 && every_read_modeled
                 && effects
                     .iter()
@@ -309,7 +316,7 @@ pub(crate) fn project_summaries(
                 .chain((!every_read_modeled).then_some("unmodeled_return_read".to_string()))
                 .chain((!every_return_has_effect).then_some("return_without_effect".to_string()))
                 .chain(
-                    (!every_return_has_tracked_read)
+                    (!every_return_has_modeled_value)
                         .then_some("return_without_tracked_read".to_string()),
                 )
                 .chain(
@@ -1075,6 +1082,22 @@ mod tests {
         assert!(rows[0]
             .unknown_reasons
             .contains(&"return_without_tracked_read".to_string()));
+
+        let literal_return_facts = ControlFlowFacts {
+            nodes: vec![return_node("literal-return")],
+            effects: vec![NodeEffect {
+                node_id: "literal-return".to_string(),
+                return_state_hint: Some("definitely_null".to_string()),
+                complete: true,
+                ..NodeEffect::default()
+            }],
+            ..ControlFlowFacts::default()
+        };
+        let rows = project_summaries(&literal_return_facts, &[]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].return_state, "definitely_null");
+        assert!(rows[0].complete);
+        assert!(rows[0].unknown_reasons.is_empty());
     }
 
     #[test]
