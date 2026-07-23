@@ -4,6 +4,7 @@
 mod architecture_test;
 mod ast;
 pub mod external_summary;
+pub mod incremental;
 pub mod lsp_scip;
 pub mod lua_scip;
 pub mod parallel;

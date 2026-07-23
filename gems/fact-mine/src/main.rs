@@ -1,11 +1,12 @@
 use anyhow::{bail, Context, Result};
+use fact_mine_rust::incremental;
 use fact_mine_rust::parallel;
 use fact_mine_rust::profile::{self, Profile};
 use fact_mine_rust::syntax::{self, Language};
 use fact_mine_rust::syntax_oracle;
 use std::fs;
-
 use std::path::PathBuf;
+use std::time::Instant;
 
 fn main() -> Result<()> {
     let worker = std::thread::Builder::new()
@@ -78,6 +79,8 @@ fn run() -> Result<()> {
             scip_indexes,
             complexity_summaries,
             portable,
+            incremental_cache,
+            changed_files_only,
         } => {
             let profile = match profile.as_str() {
                 "espalier" => Profile::Espalier,
@@ -91,12 +94,23 @@ fn run() -> Result<()> {
                 .as_deref()
                 .map(Language::parse)
                 .transpose()?;
-            let mut merged = build_profile(&files, language_override, profile)?;
+            let mut merged = build_requested_profile(
+                &files,
+                language_override,
+                profile,
+                incremental_cache,
+                changed_files_only,
+            )?;
+            let external_enrichment_started = Instant::now();
             for index in scip_indexes {
                 fact_mine_rust::scip::apply_json_file(&mut merged, &index)?;
             }
             for summary in complexity_summaries {
                 fact_mine_rust::external_summary::apply_file(&mut merged, &summary)?;
+            }
+            if let Some(metrics) = merged.incremental_metrics.as_mut() {
+                metrics.external_enrichment_millis =
+                    external_enrichment_started.elapsed().as_millis();
             }
             let mut value = serde_json::to_value(&merged)?;
             if portable {
@@ -268,6 +282,27 @@ fn build_profile(
     Ok(output)
 }
 
+fn build_requested_profile(
+    files: &[PathBuf],
+    language_override: Option<Language>,
+    profile: Profile,
+    incremental_cache: Option<PathBuf>,
+    changed_files_only: bool,
+) -> Result<profile::ProfileOutput> {
+    if let Some(cache_directory) = incremental_cache {
+        let root = std::env::current_dir().context("failed to determine cache root")?;
+        return Ok(incremental::build_profile(
+            files,
+            language_override,
+            profile,
+            &incremental::CacheConfig::new(root, cache_directory),
+            changed_files_only,
+        )?
+        .output);
+    }
+    build_profile(files, language_override, profile)
+}
+
 fn render_call_resolution(coverage: &profile::CallResolutionCoverage) -> String {
     let mut lines = vec![
         "Call resolution coverage".to_string(),
@@ -374,6 +409,8 @@ enum Command {
         scip_indexes: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
         portable: bool,
+        incremental_cache: Option<PathBuf>,
+        changed_files_only: bool,
     },
     CallResolution {
         files: Vec<PathBuf>,
@@ -475,6 +512,8 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut scip_indexes = Vec::new();
             let mut complexity_summaries = Vec::new();
             let mut portable = false;
+            let mut incremental_cache = None;
+            let mut changed_files_only = false;
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
                     "--output" => {
@@ -517,12 +556,32 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                     "--portable" => {
                         portable = true;
                     }
+                    "--incremental" => {
+                        incremental_cache = Some(PathBuf::from(".lineage/cache/fact-mine"));
+                    }
+                    "--incremental-cache" => {
+                        incremental_cache = Some(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--incremental-cache requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--incremental-cache=") => {
+                        incremental_cache = Some(PathBuf::from(
+                            other.strip_prefix("--incremental-cache=").unwrap(),
+                        ));
+                    }
+                    "--changed-files-only" => {
+                        changed_files_only = true;
+                    }
                     other if other.starts_with("--") => bail!("unsupported option: {other}"),
                     path => files.push(PathBuf::from(path)),
                 }
             }
             if files.is_empty() {
                 bail!("profile requires at least one file");
+            }
+            if changed_files_only && incremental_cache.is_none() {
+                bail!("--changed-files-only requires --incremental or --incremental-cache");
             }
             Ok(Command::Profile {
                 profile,
@@ -532,6 +591,8 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 scip_indexes,
                 complexity_summaries,
                 portable,
+                incremental_cache,
+                changed_files_only,
             })
         }
         "call-resolution" => {
@@ -630,5 +691,74 @@ mod tests {
         assert_eq!(profile.input_coverage.parse_recovery_files.len(), 1);
         assert_eq!(profile.input_coverage.parse_recoveries.len(), 1);
         assert!(!profile.input_coverage.parse_recoveries[0].spans.is_empty());
+    }
+
+    #[test]
+    fn incremental_profile_options_select_a_complete_or_partial_cache_run() {
+        let parsed = parse_args(vec![
+            "profile".to_string(),
+            "espalier".to_string(),
+            "--incremental-cache=.cache".to_string(),
+            "--changed-files-only".to_string(),
+            "example.rb".to_string(),
+        ])
+        .expect("parse incremental profile");
+        match parsed {
+            Command::Profile {
+                incremental_cache,
+                changed_files_only,
+                files,
+                ..
+            } => {
+                assert_eq!(incremental_cache, Some(PathBuf::from(".cache")));
+                assert!(changed_files_only);
+                assert_eq!(files, vec![PathBuf::from("example.rb")]);
+            }
+            _ => panic!("expected profile command"),
+        }
+        assert!(parse_args(vec![
+            "profile".to_string(),
+            "espalier".to_string(),
+            "--changed-files-only".to_string(),
+            "example.rb".to_string(),
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn requested_incremental_profile_emits_cache_scope() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let source = directory.path().join("example.rb");
+        std::fs::write(&source, "class Example; def run; 1; end; end\n").expect("write source");
+        let clean =
+            build_profile(&[source.clone()], None, Profile::Espalier).expect("build clean profile");
+        let output = build_requested_profile(
+            &[source],
+            None,
+            Profile::Espalier,
+            Some(directory.path().join("cache")),
+            false,
+        )
+        .expect("build incremental profile");
+        assert_eq!(
+            output
+                .artifact_scope
+                .as_ref()
+                .map(|scope| scope.kind.as_str()),
+            Some("complete")
+        );
+        let mut incremental_json = serde_json::to_value(output).expect("serialize incremental");
+        incremental_json
+            .as_object_mut()
+            .expect("object")
+            .remove("artifact_scope");
+        incremental_json
+            .as_object_mut()
+            .expect("object")
+            .remove("incremental_metrics");
+        assert_eq!(
+            incremental_json,
+            serde_json::to_value(clean).expect("serialize clean"),
+        );
     }
 }

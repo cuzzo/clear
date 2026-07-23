@@ -22,12 +22,12 @@ macro_rules! eprintln {
 use crate::syntax::{self, Document};
 use crate::type_inference::TypeExpr;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Which fact-set to produce.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub enum Profile {
     /// Core facts for Espalier: methods, fields, type definitions, shapes, etc.
     Espalier,
@@ -43,7 +43,7 @@ pub enum Profile {
 /// reasoning. This is the only FactMine result suitable for persistence in an
 /// incremental cache: cross-file call targets, candidate sets, callback costs,
 /// and project summaries are deliberately absent.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LocalFactShard {
     profile: Profile,
     output: ProfileOutput,
@@ -96,9 +96,47 @@ impl ProjectFactFinalizer {
     }
 }
 
+/// Declares whether a serialized result represents the full selected corpus or
+/// an explicitly incomplete changed-file preview.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ArtifactScope {
+    pub kind: String,
+    pub complete: bool,
+    pub selected_files: usize,
+}
+
+/// Timings and cache counters for an incremental FactMine run. The fields are
+/// part of the artifact so automation can distinguish a cache miss from an
+/// unexpectedly expensive project finalization.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct IncrementalMetrics {
+    pub files_considered: usize,
+    pub shard_hits: usize,
+    pub shard_misses: usize,
+    pub corrupt_entries: usize,
+    pub invalidated_files: usize,
+    pub bytes_loaded: u64,
+    pub bytes_written: u64,
+    pub hashing_millis: u128,
+    pub cache_load_millis: u128,
+    pub local_extraction_millis: u128,
+    pub project_finalization_millis: u128,
+    pub cache_write_millis: u128,
+    pub external_enrichment_millis: u128,
+    pub serialization_millis: u128,
+    pub peak_resident_bytes: Option<u64>,
+}
+
 /// The enriched output matching what Ruby's EspalierProfile::Builder.build returns.
-#[derive(Clone, Debug, Serialize, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct ProfileOutput {
+    /// Present only for incremental results. Omitting it preserves the
+    /// historical standalone artifact shape for existing consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_scope: Option<ArtifactScope>,
+    /// Cache observability for incremental results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incremental_metrics: Option<IncrementalMetrics>,
     /// Extraction coverage owned by FactMine. This describes parser input
     /// availability only; semantic certainty remains in per-fact evidence.
     #[serde(default, skip_serializing_if = "InputCoverage::is_empty")]
@@ -205,7 +243,7 @@ pub struct ProfileOutput {
     pub imports: Vec<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct InputCoverage {
     pub selected_files: usize,
     pub parsed_files: usize,
@@ -224,13 +262,13 @@ impl InputCoverage {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ParseRecovery {
     pub path: String,
     pub spans: Vec<[usize; 4]>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OwnerRecord {
     pub id: String,
     pub name: String,
@@ -246,7 +284,7 @@ pub struct OwnerRecord {
     pub supertypes: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CallRecord {
     pub id: String,
     pub source: String,
@@ -369,7 +407,7 @@ pub struct CallRecord {
     pub empty_domain_cause: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct CallResolutionCounts {
     pub eligible_call_sites: usize,
     pub exact_project_targets: usize,
@@ -386,7 +424,7 @@ pub struct CallResolutionCounts {
 /// A bounded diagnostic sample of a parser call with no matched normalized
 /// call. Consumers must not treat it as a hazard; it exists to make extractor
 /// coverage regressions reviewable at an anchored source location.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct RawCallNormalizationGap {
     pub path: String,
     pub language: String,
@@ -403,7 +441,7 @@ pub struct RawCallNormalizationGap {
 /// top-level initialization remain visible in `total_call_sites` but are not
 /// counted as resolver failures until extraction gives them an executable
 /// source method.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct CallResolutionCoverage {
     /// Tree-sitter nodes the active language adapter classifies as calls.
     pub raw_parser_call_sites: usize,
@@ -472,7 +510,7 @@ pub struct CallResolutionCoverage {
 /// Compact, FactMine-owned evidence for consumers that need to know whether a
 /// call-sensitive finding depends on an unresolved call target.  This avoids
 /// running a full Espalier profile merely to reconstruct that single boundary.
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct CallResolutionEvidence {
     pub call_resolution_coverage: CallResolutionCoverage,
     pub unresolved_function_spans_by_file: BTreeMap<String, Vec<[usize; 4]>>,
@@ -484,7 +522,7 @@ impl CallResolutionCoverage {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StateAccessRecord {
     pub id: String,
     pub function_id: String,
@@ -501,7 +539,7 @@ pub struct StateAccessRecord {
     pub confidence: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CallGraphEdge {
     pub source: String,
     pub target: String,
@@ -513,7 +551,7 @@ pub struct CallGraphEdge {
     pub weight: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StateTypeEdge {
     pub source: String,
     pub target: String,
@@ -523,7 +561,7 @@ pub struct StateTypeEdge {
     pub weight: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MethodRecord {
     pub id: String,
     /// Compiler index symbol for this declaration when one is available.
@@ -562,12 +600,12 @@ pub struct MethodRecord {
     /// indexing consumers. This is intentionally lexical normalization, not a
     /// replacement for FactMine's normalized structural facts.
     pub normalized_source: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub untraceable_params: Vec<String>,
     pub source: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FieldRecord {
     pub id: String,
     pub language: String,
@@ -589,7 +627,7 @@ pub struct FieldRecord {
     pub source: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StateTypeRecord {
     pub language: String,
     pub path: String,
@@ -603,7 +641,7 @@ pub struct StateTypeRecord {
     pub key: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StateProtocolRecord {
     pub language: String,
     pub path: String,
@@ -616,7 +654,7 @@ pub struct StateProtocolRecord {
     pub key: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StateParamOriginRecord {
     pub language: String,
     pub path: String,
@@ -629,7 +667,7 @@ pub struct StateParamOriginRecord {
     pub key: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TypeDefinition {
     pub id: String,
     pub language: String,
@@ -660,7 +698,7 @@ pub struct TypeDefinition {
     pub source: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DeclarationTypePressure {
     pub id: String,
     pub language: String,
@@ -679,7 +717,7 @@ pub struct DeclarationTypePressure {
     pub nilable_collection: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct HashShape {
     pub path: String,
     pub line: usize,
@@ -692,7 +730,7 @@ pub struct HashShape {
     pub value_array_element_shapes: Option<BTreeMap<String, serde_json::Value>>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ArrayShape {
     pub path: String,
     pub line: usize,
@@ -701,7 +739,7 @@ pub struct ArrayShape {
     pub code: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StructDeclaration {
     pub path: String,
     pub class: String,
@@ -1197,6 +1235,8 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
     LocalFactShard::new(
         profile,
         ProfileOutput {
+            artifact_scope: None,
+            incremental_metrics: None,
             input_coverage: InputCoverage::default(),
             owners,
             methods,
@@ -1499,6 +1539,8 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     type_dependencies.dedup_by(|left, right| left["id"] == right["id"]);
 
     ProfileOutput {
+        artifact_scope: None,
+        incremental_metrics: None,
         input_coverage: InputCoverage::default(),
         owners,
         methods,
