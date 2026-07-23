@@ -5,9 +5,14 @@ use crate::model::{BlobFile, CommitMetadata};
 use crate::vcs::{CommitChanges, VcsProvider};
 use anyhow::{Context, Result};
 use git2::{ObjectType, Repository, Sort, Tree};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use std::collections::{BTreeMap, HashMap};
+
+/// Synthetic revision used for the index plus working tree. It is never a
+/// commit ID and consequently cannot be confused with persisted evidence.
+pub const WORKTREE_REVISION: &str = "WORKTREE";
 
 pub struct GitProvider {
     path: PathBuf,
@@ -35,16 +40,20 @@ impl GitProvider {
     }
 
     pub fn file_contents_at_commit(&self, commit_hash: &str, path: &str) -> Result<Option<String>> {
+        if commit_hash == WORKTREE_REVISION {
+            return self.file_contents_in_worktree(path);
+        }
         let repo = Repository::open(&self.path)?;
         let oid = git2::Oid::from_str(commit_hash)?;
         let commit = repo.find_commit(oid)?;
         let tree = commit.tree()?;
-        let path_obj = Path::new(path);
+        let repository_path = self.repository_path(path);
+        let path_obj = Path::new(&repository_path);
         if let Ok(entry) = tree.get_path(path_obj) {
             let entry_id = entry.id();
             let cached_contents = {
                 let cache = self.blob_cache.lock().unwrap();
-                cache.get(path).and_then(|(oid, contents)| {
+                cache.get(&repository_path).and_then(|(oid, contents)| {
                     if *oid == entry_id {
                         Some(contents.clone())
                     } else {
@@ -62,13 +71,43 @@ impl GitProvider {
                         self.blob_cache
                             .lock()
                             .unwrap()
-                            .insert(path.to_string(), (entry_id, contents_str.clone()));
+                            .insert(repository_path, (entry_id, contents_str.clone()));
                         return Ok(Some(contents_str));
                     }
                 }
             }
         }
         Ok(None)
+    }
+
+    fn file_contents_in_worktree(&self, path: &str) -> Result<Option<String>> {
+        let candidate = self.path.join(self.repository_path(path));
+        let metadata = match fs::symlink_metadata(&candidate) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(error).with_context(|| format!("stat working-tree file {path}"))
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            return Ok(fs::read_link(&candidate)
+                .ok()
+                .and_then(|target| target.into_os_string().into_string().ok()));
+        }
+        if !metadata.is_file() {
+            return Ok(None);
+        }
+        let root = self.path.canonicalize()?;
+        let canonical = candidate
+            .canonicalize()
+            .with_context(|| format!("resolve working-tree file {path}"))?;
+        if !canonical.starts_with(&root) {
+            return Ok(None);
+        }
+        let bytes = fs::read(canonical)?;
+        Ok((!bytes.contains(&0))
+            .then(|| String::from_utf8(bytes).ok())
+            .flatten())
     }
 
     /// Resolves a revision expression to the immutable commit object ID used by
@@ -82,15 +121,36 @@ impl GitProvider {
 
     pub fn diff_plan(&self, base_revision: &str, head_revision: &str) -> Result<DiffPlan> {
         let base_oid = self.resolve_commit(base_revision)?;
-        let head_oid = self.resolve_commit(head_revision)?;
-        let base = self.revision_snapshot(&base_oid)?;
-        let head = self.revision_snapshot(&head_oid)?;
-        let renames = self.diff_renames(&base_oid, &head_oid)?;
-        let overrides = classification_overrides(
-            head.iter()
-                .find(|file| file.path == ".lineage/diff.toml")
-                .and_then(|file| file.contents.as_deref()),
-        );
+        let repo = Repository::open(&self.path)?;
+        let base_tree = repo.find_commit(git2::Oid::from_str(&base_oid)?)?.tree()?;
+        let (head_oid, base, head, renames, override_contents) =
+            if head_revision == WORKTREE_REVISION {
+                let mut diff = repo.diff_tree_to_workdir_with_index(Some(&base_tree), None)?;
+                let (base, mut head, renames) =
+                    self.changed_snapshots(&repo, &base_tree, None, &mut diff)?;
+                self.add_untracked_worktree_files(&repo, &mut head)?;
+                (
+                    WORKTREE_REVISION.to_string(),
+                    base,
+                    head,
+                    renames,
+                    self.file_contents_in_worktree(".lineage/diff.toml")?,
+                )
+            } else {
+                let head_oid = self.resolve_commit(head_revision)?;
+                let head_tree = repo.find_commit(git2::Oid::from_str(&head_oid)?)?.tree()?;
+                let mut diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
+                let (base, head, renames) =
+                    self.changed_snapshots(&repo, &base_tree, Some(&head_tree), &mut diff)?;
+                (
+                    head_oid.clone(),
+                    base,
+                    head,
+                    renames,
+                    self.file_contents_at_commit(&head_oid, ".lineage/diff.toml")?,
+                )
+            };
+        let overrides = classification_overrides(override_contents.as_deref());
         Ok(build_diff_plan_with_renames_and_overrides(
             base_oid, head_oid, base, head, renames, overrides,
         ))
@@ -100,6 +160,28 @@ impl GitProvider {
         self.scope_prefix
             .as_ref()
             .is_none_or(|prefix| path == prefix || path.starts_with(&format!("{prefix}/")))
+    }
+
+    /// Converts a Git-worktree-relative path into this provider's public
+    /// path identity. A provider opened on a nested project exposes paths
+    /// relative to that project so Git, evidence artifacts, and the UI agree.
+    fn scoped_path(&self, path: &str) -> Option<String> {
+        match self.scope_prefix.as_deref() {
+            None => Some(path.to_string()),
+            Some(prefix) if path == prefix => Some(String::new()),
+            Some(prefix) => path
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.strip_prefix('/'))
+                .map(str::to_string),
+        }
+    }
+
+    /// Converts a project-relative path back to Git's enclosing-worktree path.
+    fn repository_path(&self, path: &str) -> String {
+        self.scope_prefix
+            .as_ref()
+            .map(|prefix| format!("{prefix}/{path}"))
+            .unwrap_or_else(|| path.to_string())
     }
 
     /// Resolves a review pair to immutable object IDs. With no explicit base,
@@ -113,6 +195,23 @@ impl GitProvider {
     ) -> Result<(String, String)> {
         let head_revision = head_revision.filter(|revision| !revision.trim().is_empty());
         let base_revision = base_revision.filter(|revision| !revision.trim().is_empty());
+        if head_revision.is_some_and(|revision| revision == WORKTREE_REVISION) {
+            let base = match base_revision {
+                Some(base) => self.resolve_commit(base)?,
+                None => self.resolve_commit("HEAD")?,
+            };
+            return Ok((base, WORKTREE_REVISION.into()));
+        }
+        // The interactive default is intentionally a working-tree review: it
+        // includes staged, unstaged, and non-ignored untracked files. Passing
+        // an explicit head continues to request an immutable commit review.
+        if head_revision.is_none() {
+            let base = match base_revision {
+                Some(base) => self.resolve_commit(base)?,
+                None => self.resolve_commit("HEAD")?,
+            };
+            return Ok((base, WORKTREE_REVISION.into()));
+        }
         let head_oid = self.resolve_commit(head_revision.unwrap_or("HEAD"))?;
         let base_oid = match base_revision {
             Some(base) => self.resolve_commit(base)?,
@@ -130,68 +229,158 @@ impl GitProvider {
         Ok(repo.merge_base(head.id(), parent.id())?.to_string())
     }
 
-    fn revision_snapshot(&self, commit_hash: &str) -> Result<Vec<RevisionFile>> {
-        let repo = Repository::open(&self.path)?;
-        let commit = repo.find_commit(git2::Oid::from_str(commit_hash)?)?;
-        let mut files = Vec::new();
-        collect_revision_tree(&repo, &commit.tree()?, PathBuf::new(), &mut files)?;
-        files.retain(|file| self.in_scope(&file.path));
-        Ok(files)
-    }
-
-    fn diff_renames(&self, base_oid: &str, head_oid: &str) -> Result<BTreeMap<String, String>> {
-        let repo = Repository::open(&self.path)?;
-        let base = repo.find_commit(git2::Oid::from_str(base_oid)?)?.tree()?;
-        let head = repo.find_commit(git2::Oid::from_str(head_oid)?)?.tree()?;
-        let mut diff = repo.diff_tree_to_tree(Some(&base), Some(&head), None)?;
+    fn changed_snapshots(
+        &self,
+        repo: &Repository,
+        base_tree: &Tree<'_>,
+        head_tree: Option<&Tree<'_>>,
+        diff: &mut git2::Diff<'_>,
+    ) -> Result<(
+        Vec<RevisionFile>,
+        Vec<RevisionFile>,
+        BTreeMap<String, String>,
+    )> {
         let mut options = git2::DiffFindOptions::new();
         options.renames(true);
         diff.find_similar(Some(&mut options))?;
-        Ok(diff
-            .deltas()
-            .filter_map(|delta| {
-                (delta.status() == git2::Delta::Renamed)
-                    .then(|| {
-                        let old_path = delta.old_file().path()?.to_str()?;
-                        let new_path = delta.new_file().path()?.to_str()?;
-                        if !self.in_scope(old_path) && !self.in_scope(new_path) {
-                            return None;
-                        }
-                        Some((old_path.to_string(), new_path.to_string()))
-                    })
-                    .flatten()
-            })
-            .collect())
+        let mut base = BTreeMap::new();
+        let mut head = BTreeMap::new();
+        let mut renames = BTreeMap::new();
+        for delta in diff.deltas() {
+            let old_path = delta
+                .old_file()
+                .path()
+                .and_then(|path| path.to_str())
+                .map(str::to_string);
+            let new_path = delta
+                .new_file()
+                .path()
+                .and_then(|path| path.to_str())
+                .map(str::to_string);
+            if let Some(path) = old_path.as_deref().filter(|path| self.in_scope(path)) {
+                if let Some(mut file) = revision_file_from_tree(repo, base_tree, path)? {
+                    let scoped_path = self.scoped_path(path).expect("path was in scope");
+                    file.path = scoped_path.clone();
+                    base.insert(scoped_path, file);
+                }
+            }
+            if let Some(path) = new_path.as_deref().filter(|path| self.in_scope(path)) {
+                let file = if let Some(tree) = head_tree {
+                    revision_file_from_tree(repo, tree, path)?
+                } else {
+                    self.working_tree_file(path)?
+                };
+                if let Some(mut file) = file {
+                    let scoped_path = self.scoped_path(path).expect("path was in scope");
+                    file.path = scoped_path.clone();
+                    head.insert(scoped_path, file);
+                }
+            }
+            if delta.status() == git2::Delta::Renamed {
+                if let (Some(old_path), Some(new_path)) = (old_path, new_path) {
+                    if self.in_scope(&old_path) && self.in_scope(&new_path) {
+                        renames.insert(
+                            self.scoped_path(&old_path).expect("path was in scope"),
+                            self.scoped_path(&new_path).expect("path was in scope"),
+                        );
+                    }
+                }
+            }
+        }
+        Ok((
+            base.into_values().collect(),
+            head.into_values().collect(),
+            renames,
+        ))
+    }
+
+    fn add_untracked_worktree_files(
+        &self,
+        repo: &Repository,
+        head: &mut Vec<RevisionFile>,
+    ) -> Result<()> {
+        let mut options = git2::StatusOptions::new();
+        options
+            .include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .include_ignored(false);
+        let mut paths = head
+            .iter()
+            .cloned()
+            .map(|file| (file.path.clone(), file))
+            .collect::<BTreeMap<_, _>>();
+        for entry in repo.statuses(Some(&mut options))?.iter() {
+            if !entry.status().contains(git2::Status::WT_NEW) {
+                continue;
+            }
+            let Some(path) = entry.path() else { continue };
+            if !self.in_scope(path) {
+                continue;
+            }
+            if let Some(file) = self.working_tree_file(path)? {
+                paths.insert(file.path.clone(), file);
+            }
+        }
+        *head = paths.into_values().collect();
+        Ok(())
+    }
+
+    fn working_tree_file(&self, path: &str) -> Result<Option<RevisionFile>> {
+        let candidate = self.path.join(path);
+        let metadata = match fs::symlink_metadata(&candidate) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(error).with_context(|| format!("stat working-tree file {path}"))
+            }
+        };
+        let contents = if metadata.file_type().is_symlink() {
+            fs::read_link(&candidate)
+                .ok()
+                .and_then(|target| target.into_os_string().into_string().ok())
+        } else if metadata.is_file() {
+            let root = self.path.canonicalize()?;
+            let canonical = candidate
+                .canonicalize()
+                .with_context(|| format!("resolve working-tree file {path}"))?;
+            if !canonical.starts_with(&root) {
+                return Ok(None);
+            }
+            let bytes = fs::read(canonical)?;
+            (!bytes.contains(&0))
+                .then(|| String::from_utf8(bytes).ok())
+                .flatten()
+        } else {
+            return Ok(None);
+        };
+        Ok(Some(RevisionFile {
+            path: self
+                .scoped_path(path)
+                .expect("working-tree path was in scope"),
+            contents,
+        }))
     }
 }
 
-fn collect_revision_tree(
+fn revision_file_from_tree(
     repo: &Repository,
     tree: &Tree<'_>,
-    prefix: PathBuf,
-    files: &mut Vec<RevisionFile>,
-) -> Result<()> {
-    for entry in tree.iter() {
-        let path = prefix.join(entry.name().unwrap_or_default());
-        match entry.kind() {
-            Some(ObjectType::Blob) => {
-                let blob = repo.find_blob(entry.id())?;
-                let contents = (!blob.is_binary())
-                    .then(|| std::str::from_utf8(blob.content()).ok().map(str::to_string))
-                    .flatten();
-                files.push(RevisionFile {
-                    path: path.to_string_lossy().replace('\\', "/"),
-                    contents,
-                });
-            }
-            Some(ObjectType::Tree) => {
-                let subtree = repo.find_tree(entry.id())?;
-                collect_revision_tree(repo, &subtree, path, files)?;
-            }
-            _ => {}
-        }
+    path: &str,
+) -> Result<Option<RevisionFile>> {
+    let Ok(entry) = tree.get_path(Path::new(path)) else {
+        return Ok(None);
+    };
+    if entry.kind() != Some(ObjectType::Blob) {
+        return Ok(None);
     }
-    Ok(())
+    let blob = repo.find_blob(entry.id())?;
+    let contents = (!blob.is_binary())
+        .then(|| std::str::from_utf8(blob.content()).ok().map(str::to_string))
+        .flatten();
+    Ok(Some(RevisionFile {
+        path: path.into(),
+        contents,
+    }))
 }
 
 impl VcsProvider for GitProvider {
@@ -225,15 +414,32 @@ impl VcsProvider for GitProvider {
         let commit = repo.find_commit(oid)?;
         let tree = commit.tree()?;
         let mut files = Vec::new();
-        collect_tree(
-            &repo,
-            &tree,
-            PathBuf::new(),
-            path_filter,
-            &self.blob_cache,
-            &mut files,
-        )?;
-        files.retain(|file| self.in_scope(&file.path));
+        if let Some(prefix) = self.scope_prefix.as_deref() {
+            let entry = tree
+                .get_path(Path::new(prefix))
+                .with_context(|| format!("find project scope {prefix} at {commit_hash}"))?;
+            if entry.kind() != Some(ObjectType::Tree) {
+                anyhow::bail!("project scope {prefix} is not a tree at {commit_hash}");
+            }
+            let scoped_tree = repo.find_tree(entry.id())?;
+            collect_tree(
+                &repo,
+                &scoped_tree,
+                PathBuf::new(),
+                path_filter,
+                &self.blob_cache,
+                &mut files,
+            )?;
+        } else {
+            collect_tree(
+                &repo,
+                &tree,
+                PathBuf::new(),
+                path_filter,
+                &self.blob_cache,
+                &mut files,
+            )?;
+        }
         Ok(files)
     }
 
@@ -275,7 +481,10 @@ impl VcsProvider for GitProvider {
                     | git2::Delta::Copied => {
                         if let Some(new_file) = delta.new_file().path() {
                             if let Some(path_str) = new_file.to_str() {
-                                if path_filter(path_str) && self.in_scope(path_str) {
+                                let Some(scoped_path) = self.scoped_path(path_str) else {
+                                    continue;
+                                };
+                                if path_filter(&scoped_path) {
                                     let entry_id = delta.new_file().id();
                                     if entry_id.is_zero() {
                                         continue;
@@ -292,7 +501,7 @@ impl VcsProvider for GitProvider {
                                     };
                                     if let Some(contents) = cached_contents {
                                         added_or_modified.push(BlobFile {
-                                            path: path_str.to_string(),
+                                            path: scoped_path.clone(),
                                             contents,
                                         });
                                     } else {
@@ -307,7 +516,7 @@ impl VcsProvider for GitProvider {
                                                         (entry_id, contents_str.clone()),
                                                     );
                                                     added_or_modified.push(BlobFile {
-                                                        path: path_str.to_string(),
+                                                        path: scoped_path,
                                                         contents: contents_str,
                                                     });
                                                 }
@@ -320,8 +529,10 @@ impl VcsProvider for GitProvider {
                         if delta.status() == git2::Delta::Renamed {
                             if let Some(old_file) = delta.old_file().path() {
                                 if let Some(path_str) = old_file.to_str() {
-                                    if path_filter(path_str) && self.in_scope(path_str) {
-                                        deleted.push(path_str.to_string());
+                                    if let Some(scoped_path) = self.scoped_path(path_str) {
+                                        if path_filter(&scoped_path) {
+                                            deleted.push(scoped_path);
+                                        }
                                     }
                                 }
                             }
@@ -330,8 +541,10 @@ impl VcsProvider for GitProvider {
                     git2::Delta::Deleted => {
                         if let Some(old_file) = delta.old_file().path() {
                             if let Some(path_str) = old_file.to_str() {
-                                if path_filter(path_str) && self.in_scope(path_str) {
-                                    deleted.push(path_str.to_string());
+                                if let Some(scoped_path) = self.scoped_path(path_str) {
+                                    if path_filter(&scoped_path) {
+                                        deleted.push(scoped_path);
+                                    }
                                 }
                             }
                         }
@@ -610,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn default_diff_pair_uses_resolved_head_and_first_parent_merge_base() -> Result<()> {
+    fn default_diff_pair_uses_head_against_the_working_tree() -> Result<()> {
         let dir = tempdir()?;
         let repo = Repository::init(dir.path())?;
         let base = create_commit(&repo, "base", &[("app.rb", "puts :base\n")])?;
@@ -619,7 +832,7 @@ mod tests {
 
         assert_eq!(
             provider.diff_revisions(None, None)?,
-            (base.clone(), head.clone())
+            (head.clone(), WORKTREE_REVISION.into())
         );
         assert_eq!(
             provider.diff_revisions(Some(&base), Some("HEAD"))?,
@@ -629,7 +842,134 @@ mod tests {
     }
 
     #[test]
-    fn subdirectory_provider_scopes_snapshots_diffs_and_engine_changes() -> Result<()> {
+    fn working_tree_diff_includes_staged_unstaged_untracked_and_deleted_files() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        let head = create_commit(
+            &repo,
+            "base",
+            &[
+                ("changed.rs", "fn value() { 1; }\n"),
+                ("deleted.rs", "fn deleted() {}\n"),
+                ("staged.rs", "fn staged() { 1; }\n"),
+            ],
+        )?;
+        fs::write(dir.path().join("changed.rs"), "fn value() { 2; }\n")?;
+        fs::remove_file(dir.path().join("deleted.rs"))?;
+        fs::write(dir.path().join("untracked.rs"), "fn new_file() {}\n")?;
+        fs::write(dir.path().join("staged.rs"), "fn staged() { 2; }\n")?;
+        let mut index = repo.index()?;
+        index.add_path(Path::new("staged.rs"))?;
+        index.write()?;
+
+        let provider = GitProvider::open(dir.path())?;
+        let (base, worktree) = provider.diff_revisions(None, None)?;
+        assert_eq!(base, head);
+        assert_eq!(worktree, WORKTREE_REVISION);
+        let plan = provider.diff_plan(&base, &worktree)?;
+        let paths = plan
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&"changed.rs"));
+        assert!(paths.contains(&"deleted.rs"));
+        assert!(paths.contains(&"staged.rs"));
+        assert!(paths.contains(&"untracked.rs"));
+        assert_eq!(
+            plan.files
+                .iter()
+                .find(|file| file.path == "deleted.rs")
+                .unwrap()
+                .change,
+            crate::diff::FileChangeKind::Deleted
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn worktree_revision_reads_current_source_without_treating_it_as_a_commit() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        create_commit(&repo, "base", &[("app.rs", "fn value() { 1; }\n")])?;
+        fs::write(dir.path().join("app.rs"), "fn value() { 2; }\n")?;
+        let provider = GitProvider::open(dir.path())?;
+        assert_eq!(
+            provider.file_contents_at_commit(WORKTREE_REVISION, "app.rs")?,
+            Some("fn value() { 2; }\n".into())
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clean_worktree_symlinks_are_not_reported_as_deleted() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        fs::write(dir.path().join("target.txt"), "target\n")?;
+        std::os::unix::fs::symlink("target.txt", dir.path().join("linked.txt"))?;
+        let mut index = repo.index()?;
+        index.add_path(Path::new("target.txt"))?;
+        index.add_path(Path::new("linked.txt"))?;
+        index.write()?;
+        let tree = repo.find_tree(index.write_tree()?)?;
+        let signature = git2::Signature::now("Test User", "test@example.com")?;
+        let commit = repo.commit(Some("HEAD"), &signature, &signature, "symlink", &tree, &[])?;
+
+        let plan =
+            GitProvider::open(dir.path())?.diff_plan(&commit.to_string(), WORKTREE_REVISION)?;
+        assert!(plan.files.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn diff_plan_loads_only_changed_paths_in_a_large_repository() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        let workdir = repo.workdir().context("test repository has no worktree")?;
+        let mut index = repo.index()?;
+        for number in 0..2_000 {
+            let path = format!("src/file-{number}.rs");
+            let file = workdir.join(&path);
+            fs::create_dir_all(file.parent().unwrap())?;
+            fs::write(
+                &file,
+                format!("fn value_{number}() -> u32 {{ {number} }}\n"),
+            )?;
+            index.add_path(Path::new(&path))?;
+        }
+        index.write()?;
+        let tree = repo.find_tree(index.write_tree()?)?;
+        let signature = git2::Signature::now("Test User", "test@example.com")?;
+        let base = repo.commit(Some("HEAD"), &signature, &signature, "base", &tree, &[])?;
+
+        fs::write(
+            workdir.join("src/file-777.rs"),
+            "fn value_777() -> u32 { 778 }\n",
+        )?;
+        let mut index = repo.index()?;
+        index.add_path(Path::new("src/file-777.rs"))?;
+        index.write()?;
+        let tree = repo.find_tree(index.write_tree()?)?;
+        let parent = repo.find_commit(base)?;
+        let head = repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "change",
+            &tree,
+            &[&parent],
+        )?;
+
+        let plan =
+            GitProvider::open(dir.path())?.diff_plan(&base.to_string(), &head.to_string())?;
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.files[0].path, "src/file-777.rs");
+        Ok(())
+    }
+
+    #[test]
+    fn repository_root_and_subdirectory_providers_have_consistent_path_identity() -> Result<()> {
         let dir = tempdir()?;
         let repo = Repository::init(dir.path())?;
         let base = create_commit(
@@ -649,15 +989,31 @@ mod tests {
             ],
         )?;
 
+        let root_provider = GitProvider::open(dir.path())?;
+        let root_plan = root_provider.diff_plan(&base, &head)?;
+        assert_eq!(root_plan.files.len(), 2);
+        assert!(root_plan
+            .files
+            .iter()
+            .any(|file| file.path == "gems/demo/lib/value.rb"));
+
         let provider = GitProvider::open(dir.path().join("gems/demo"))?;
         let plan = provider.diff_plan(&base, &head)?;
         assert_eq!(plan.files.len(), 1);
-        assert_eq!(plan.files[0].path, "gems/demo/lib/value.rb");
+        assert_eq!(plan.files[0].path, "lib/value.rb");
 
         let all = |_path: &str| true;
+        let files = provider.files_at_commit(&head, &all)?;
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "lib/value.rb");
+        assert_eq!(
+            provider.file_contents_at_commit(&head, "lib/value.rb")?,
+            Some("def value\n  2\nend\n".to_string())
+        );
+
         let changes = provider.changes_at_commit(Some(&base), &head, &all)?;
         assert_eq!(changes.added_or_modified.len(), 1);
-        assert_eq!(changes.added_or_modified[0].path, "gems/demo/lib/value.rb");
+        assert_eq!(changes.added_or_modified[0].path, "lib/value.rb");
         Ok(())
     }
 
@@ -729,6 +1085,39 @@ mod tests {
             ],
         )?;
         let plan = GitProvider::open(dir.path())?.diff_plan(&base, &head)?;
+        let file = plan
+            .files
+            .iter()
+            .find(|file| file.path == "spec/value_spec.rb")
+            .unwrap();
+        assert_eq!(file.role, crate::diff::SourceRole::Production);
+        Ok(())
+    }
+
+    #[test]
+    fn subdirectory_diff_uses_its_own_classification_overrides() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        let base = create_commit(
+            &repo,
+            "base",
+            &[("crate/spec/value_spec.rb", "describe :value do\nend\n")],
+        )?;
+        let head = create_commit(
+            &repo,
+            "scoped override",
+            &[
+                (
+                    "crate/spec/value_spec.rb",
+                    "describe :value do\n  value\nend\n",
+                ),
+                (
+                    "crate/.lineage/diff.toml",
+                    "[[overrides]]\nprefix = \"spec/\"\nrole = \"production\"\n",
+                ),
+            ],
+        )?;
+        let plan = GitProvider::open(dir.path().join("crate"))?.diff_plan(&base, &head)?;
         let file = plan
             .files
             .iter()

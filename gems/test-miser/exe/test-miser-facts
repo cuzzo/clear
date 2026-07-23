@@ -15,6 +15,32 @@ parser = OptionParser.new do |opts|
   opts.on("-h", "--help") { puts opts; exit 0 }
 end
 
+def method_from_mutant_id(id, file)
+  prefix = "#{file}:evil:"
+  return unless id.start_with?(prefix)
+
+  id.delete_prefix(prefix).split(":#{file}:", 2).first
+end
+
+def summarize_subjects(mutants)
+  mutants.group_by { |mutant| [mutant.fetch("file"), mutant["method"] || "*"] }
+    .sort_by { |(file, method), _rows| [file, method] }
+    .map do |(file, method), rows|
+      killed = rows.count { |row| !row.fetch("killed_by").empty? }
+      {
+        "file" => file,
+        "method" => method,
+        "source" => "test-miser",
+        "language" => "ruby",
+        "mutation_kind" => "stochastic",
+        "mutations" => rows.length,
+        "killed" => killed,
+        "alive" => rows.length - killed,
+        "kill_rate" => rows.empty? ? nil : (killed * 100.0 / rows.length).round(2)
+      }.compact
+    end
+end
+
 begin
   command = ARGV.shift
   parser.parse!
@@ -29,20 +55,22 @@ begin
             elsif payload["files"].is_a?(Hash)
               report = TestMiser::MutationReport.new(payload, source: options[:input])
               metadata = payload.fetch("testMiser", {})
+              mutants = report.mutants.map do |mutant|
+                {
+                  "id" => mutant.id,
+                  "file" => mutant.file,
+                  "method" => method_from_mutant_id(mutant.id, mutant.file),
+                  "covered_by" => mutant.covered_by.to_a.sort,
+                  "killed_by" => mutant.killed_by.to_a.sort
+                }.compact
+              end
               {
                 "schema" => "mutant-facts/v1",
                 "source" => "test-miser",
                 "language" => "ruby",
-                "subjects" => [],
+                "subjects" => summarize_subjects(mutants),
                 "tests" => report.tests.map(&:to_h),
-                "mutants" => report.mutants.map do |mutant|
-                  {
-                    "id" => mutant.id,
-                    "file" => mutant.file,
-                    "covered_by" => mutant.covered_by.to_a.sort,
-                    "killed_by" => mutant.killed_by.to_a.sort
-                  }.compact
-                end,
+                "mutants" => mutants,
                 "test_miser" => {
                   "complete" => metadata["complete"] == true,
                   "attribution_complete" => metadata["complete"] == true,

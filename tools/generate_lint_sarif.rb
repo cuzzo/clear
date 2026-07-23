@@ -198,7 +198,12 @@ def rubocop_results(repo, ruby_files)
   return [] if ruby_files.empty?
 
   commands = []
-  commands << ["bundle", "exec", "rubocop"] if File.file?(File.join(repo, "Gemfile")) && command_available?(repo, "bundle")
+  # A Lineage profile may lint a subproject whose Gemfile lives at a
+  # monorepo ancestor. Bundler's explicit BUNDLE_GEMFILE is authoritative for
+  # that profile, so do not silently drop RuboCop merely because the selected
+  # source root itself has no Gemfile.
+  bundled_project = File.file?(File.join(repo, "Gemfile")) || !ENV.fetch("BUNDLE_GEMFILE", "").empty?
+  commands << ["bundle", "exec", "rubocop"] if bundled_project && command_available?(repo, "bundle")
   commands << ["rubocop"] if command_available?(repo, "rubocop")
   commands.uniq!
   if commands.empty?

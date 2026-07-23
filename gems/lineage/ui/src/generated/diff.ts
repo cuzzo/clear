@@ -25,7 +25,17 @@ export type ResolvedSarifFinding = { path: string, finding: SarifFindingSummary,
 
 export type DiffGroup = { name: string, kind: string, start_line: number, end_line: number, base_start_line: number | null, base_end_line: number | null, visibility: Visibility, added_lines: AddedLines, verification: VerificationSlices, sarif_findings: Array<SarifFindingSummary>, risk: RiskSummary, };
 
-export type SarifFindingSummary = { source: string, tool: string, rule_id: string, level: string, category: string, message: string, fingerprint: string, tier: number | null, tier_one: boolean, status: string, start_line: number, end_line: number, };
+export type SarifFindingSummary = { source: string, tool: string, rule_id: string, level: string, category: string, message: string, fingerprint: string, tier: number | null, tier_one: boolean, status: string,
+/**
+ * Provider result properties preserved as stable strings so a transient
+ * analysis overlay keeps its proof boundary and classification context.
+ */
+provenance: { [key in string]?: string },
+/**
+ * Explicit limits or incompleteness declarations supplied by the
+ * analysis provider. An empty list means the provider supplied none.
+ */
+proof_boundary: Array<string>, start_line: number, end_line: number, };
 
 export type AddedLines = { code: number, comments: number, other: number, };
 

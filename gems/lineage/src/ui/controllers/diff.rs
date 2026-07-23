@@ -1,6 +1,6 @@
 use super::super::*;
-use axum::response::Redirect;
 use crate::{build_structured_diff, DiffRequest};
+use axum::response::Redirect;
 
 pub(super) fn routes() -> Router<UiServerState> {
     Router::new()
@@ -88,11 +88,7 @@ async fn api_diff_plan_handler(
     let result = build_ui_diff(&state, &request);
     match result {
         Ok(mut plan) => {
-            crate::diff::retain_plan_sources_for_page(
-                &mut plan,
-                query.page,
-                query.path.as_deref(),
-            );
+            crate::diff::retain_plan_sources_for_page(&mut plan, query.page, query.path.as_deref());
             Json(ApiEnvelope {
                 api_version: crate::diff::DIFF_API_VERSION,
                 data: plan,
@@ -123,7 +119,10 @@ fn diff_request(
     }
 }
 
-fn build_ui_diff(state: &UiServerState, request: &DiffRequest) -> anyhow::Result<crate::diff::DiffPlan> {
+fn build_ui_diff(
+    state: &UiServerState,
+    request: &DiffRequest,
+) -> anyhow::Result<crate::diff::DiffPlan> {
     let provider = GitProvider::open(state.repo.as_ref())?;
     let storage = state
         .db
@@ -151,16 +150,14 @@ async fn api_diff_file_handler(
     );
     let result = build_ui_diff(&state, &request);
     match result {
-        Ok(plan) => {
-            match plan.files.into_iter().find(|file| file.path == path) {
-                Some(file) => Json(ApiEnvelope {
-                    api_version: crate::diff::DIFF_API_VERSION,
-                    data: file,
-                })
-                .into_response(),
-                None => StatusCode::NOT_FOUND.into_response(),
-            }
-        }
+        Ok(plan) => match plan.files.into_iter().find(|file| file.path == path) {
+            Some(file) => Json(ApiEnvelope {
+                api_version: crate::diff::DIFF_API_VERSION,
+                data: file,
+            })
+            .into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        },
         Err(error) => error_json(StatusCode::BAD_REQUEST, error),
     }
 }
@@ -300,7 +297,14 @@ mod tests {
         let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
         let parent = repo.head().unwrap().peel_to_commit().unwrap();
         let head = repo
-            .commit(Some("HEAD"), &signature, &signature, "head", &tree, &[&parent])
+            .commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "head",
+                &tree,
+                &[&parent],
+            )
             .unwrap()
             .to_string();
         let state = UiServerState {
@@ -312,8 +316,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn diff_page_redirects_default_pair_to_immutable_oids() {
-        let (_dir, state, base, head) = test_state();
+    async fn diff_page_redirects_default_pair_to_head_and_worktree() {
+        let (_dir, state, _base, head) = test_state();
         let response = diff_page_handler(
             State(state),
             Query(DiffPageQuery {
@@ -341,7 +345,7 @@ mod tests {
                 .unwrap()
                 .to_str()
                 .unwrap(),
-            format!("/diff?base={base}&head={head}&presentation=semantic")
+            format!("/diff?base={head}&head=WORKTREE&presentation=semantic")
         );
     }
 
@@ -417,12 +421,17 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
-        let files = json.pointer("/data/files").and_then(serde_json::Value::as_array).unwrap();
+        let files = json
+            .pointer("/data/files")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
         assert_eq!(files.len(), crate::diff::DIFF_FILE_PAGE_SIZE + 1);
         assert_eq!(
             files
                 .iter()
-                .filter(|file| file.get("head_source").is_some_and(|source| !source.is_null()))
+                .filter(|file| file
+                    .get("head_source")
+                    .is_some_and(|source| !source.is_null()))
                 .count(),
             1
         );

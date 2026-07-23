@@ -82,7 +82,7 @@ fn apply_known_coverage(
     let paths = changed_paths(plan);
     let source = source.unwrap_or("coverage");
     if let Some(artifact) =
-        storage.scoped_coverage_artifact(source, &plan.scope.evidence_scope, &paths)?
+        storage.scoped_coverage_artifact_common(source, &plan.scope.evidence_scope, &paths)?
     {
         apply_scoped_coverage(plan, &artifact);
         return Ok(());
@@ -107,12 +107,12 @@ fn apply_known_sarif(storage: &Storage, plan: &mut DiffPlan, source: Option<&str
     let paths = changed_paths(plan);
     if let Some(source) = source {
         if let Some(rows) =
-            storage.scoped_sarif_observations(source, &plan.scope.evidence_scope, &paths)?
+            storage.scoped_sarif_observations_common(source, &plan.scope.evidence_scope, &paths)?
         {
             let base_scope = EvidenceScopeFingerprint {
                 revision: plan.scope.base_oid.clone(),
                 selection: plan.scope.evidence_scope.selection.clone(),
-                mutant_corpus: plan.scope.evidence_scope.mutant_corpus.clone(),
+                mutant_corpus: "not-applicable".into(),
                 test_set: plan.scope.evidence_scope.test_set.clone(),
             };
             let base_paths = plan
@@ -125,7 +125,7 @@ fn apply_known_sarif(storage: &Storage, plan: &mut DiffPlan, source: Option<&str
                 })
                 .collect::<Vec<_>>();
             if let Some(base_rows) =
-                storage.scoped_sarif_observations(source, &base_scope, &base_paths)?
+                storage.scoped_sarif_observations_common(source, &base_scope, &base_paths)?
             {
                 apply_exact_sarif_findings(plan, &rows, &base_rows);
             } else {

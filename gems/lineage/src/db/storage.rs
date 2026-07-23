@@ -8,7 +8,7 @@ use crate::model::{
 };
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 pub struct Storage {
@@ -51,6 +51,16 @@ pub struct SarifLifecycleSummary {
     pub persisted_findings: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CiRunRecord {
+    pub revision: String,
+    pub profile: String,
+    pub configuration_hash: String,
+    pub repository_identity: String,
+    pub manifest_hash: String,
+    pub state: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitSummary {
     pub id: String,
@@ -81,6 +91,10 @@ pub struct UnitSummary {
 
 impl Storage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
         let conn = Connection::open(path)?;
         configure_connection(&conn)?;
         let storage = Self { conn };
@@ -165,6 +179,16 @@ impl Storage {
             );\
             CREATE INDEX IF NOT EXISTS idx_evidence_artifact_scopes_lookup \
               ON evidence_artifact_scopes(family, revision, source);",
+        )?;
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS ci_runs (\
+              run_path TEXT PRIMARY KEY, revision TEXT NOT NULL, profile TEXT NOT NULL, \
+              configuration_hash TEXT NOT NULL, repository_identity TEXT NOT NULL, \
+              manifest_hash TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('ingesting', 'ingested', 'published')), \
+              updated_at_ms INTEGER NOT NULL\
+            );\
+            CREATE INDEX IF NOT EXISTS idx_ci_runs_revision_profile \
+              ON ci_runs(revision, profile, state);",
         )?;
         self.ensure_column(
             "ui_file_summaries",
@@ -271,6 +295,69 @@ impl Storage {
     pub fn rollback_transaction(&self) -> Result<()> {
         self.conn.execute_batch("ROLLBACK;")?;
         Ok(())
+    }
+
+    /// Durable database-side counterpart to the filesystem publication state.
+    /// The run path is repository-relative to the configured artifact store.
+    pub fn record_ci_run(
+        &self,
+        run_path: &str,
+        manifest: &crate::pipeline::RunManifest,
+        state: &str,
+        updated_at_ms: u128,
+    ) -> Result<()> {
+        let manifest_hash = crate::pipeline::run_manifest_hash(manifest)?;
+        self.conn.execute(
+            "INSERT INTO ci_runs \
+             (run_path, revision, profile, configuration_hash, repository_identity, manifest_hash, state, updated_at_ms) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+             ON CONFLICT(run_path) DO UPDATE SET revision = excluded.revision, profile = excluded.profile, \
+             configuration_hash = excluded.configuration_hash, repository_identity = excluded.repository_identity, \
+             manifest_hash = excluded.manifest_hash, state = excluded.state, updated_at_ms = excluded.updated_at_ms",
+            params![
+                run_path,
+                manifest.revision,
+                manifest.profile,
+                manifest.configuration_hash,
+                manifest.repository_identity,
+                manifest_hash,
+                state,
+                i64::try_from(updated_at_ms).unwrap_or(i64::MAX),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn ci_run_state(&self, run_path: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT state FROM ci_runs WHERE run_path = ?1",
+                params![run_path],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn ci_run_record(&self, run_path: &str) -> Result<Option<CiRunRecord>> {
+        self.conn
+            .query_row(
+                "SELECT revision, profile, configuration_hash, repository_identity, manifest_hash, state \
+                 FROM ci_runs WHERE run_path = ?1",
+                params![run_path],
+                |row| {
+                    Ok(CiRunRecord {
+                        revision: row.get(0)?,
+                        profile: row.get(1)?,
+                        configuration_hash: row.get(2)?,
+                        repository_identity: row.get(3)?,
+                        manifest_hash: row.get(4)?,
+                        state: row.get(5)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn insert_metadata(&self, metadata: &CommitMetadata) -> Result<()> {
@@ -1114,6 +1201,36 @@ impl Storage {
         }))
     }
 
+    /// Coverage has the common CI scope (revision, selection, test set), but
+    /// no inherent mutation corpus. Accept exactly one matching family scope
+    /// so a complete coverage run can compose with a separate mutation corpus.
+    pub fn scoped_coverage_artifact_common(
+        &self,
+        source: &str,
+        scope: &EvidenceScopeFingerprint,
+        paths: &[String],
+    ) -> Result<Option<ScopedCoverageArtifact>> {
+        let candidates = self.evidence_scope_candidates("coverage", source, scope)?;
+        let Some((artifact_scope, complete, expected_lines_json)) = candidates.into_iter().next()
+        else {
+            return Ok(None);
+        };
+        let expected_lines = serde_json::from_str::<Vec<(String, u32)>>(&expected_lines_json)?
+            .into_iter()
+            .collect();
+        let observations = self.coverage_observations_for_commit_paths_source(
+            &artifact_scope.revision,
+            paths,
+            source,
+        )?;
+        Ok(Some(ScopedCoverageArtifact {
+            scope: artifact_scope,
+            complete,
+            expected_lines,
+            observations,
+        }))
+    }
+
     fn coverage_observations_for_commit_paths_source(
         &self,
         commit_hash: &str,
@@ -1296,6 +1413,70 @@ impl Storage {
             .transpose()
     }
 
+    /// SARIF analysis is scoped by the shared revision/selection/test set.
+    /// It must not inherit mutation-corpus identity merely because mutation
+    /// evidence is also present in the same profile.
+    pub fn scoped_sarif_observations_common(
+        &self,
+        source: &str,
+        scope: &EvidenceScopeFingerprint,
+        paths: &[String],
+    ) -> Result<Option<Vec<SarifObservation>>> {
+        let candidates = self.evidence_scope_candidates("sarif", source, scope)?;
+        let Some((_artifact_scope, complete, _)) = candidates.into_iter().next() else {
+            return Ok(None);
+        };
+        complete
+            .then(|| {
+                self.sarif_observations_for_commit_paths_source(
+                    &scope.revision,
+                    paths,
+                    Some(source),
+                )
+            })
+            .transpose()
+    }
+
+    fn evidence_scope_candidates(
+        &self,
+        family: &str,
+        source: &str,
+        scope: &EvidenceScopeFingerprint,
+    ) -> Result<Vec<(EvidenceScopeFingerprint, bool, String)>> {
+        let mut statement = self.conn.prepare(
+            "SELECT mutant_corpus, complete, expected_lines_json FROM evidence_artifact_scopes \
+             WHERE family = ?1 AND source = ?2 AND revision = ?3 AND selection_scope = ?4 AND test_set = ?5",
+        )?;
+        let rows = statement.query_map(
+            params![
+                family,
+                source,
+                scope.revision,
+                scope.selection,
+                scope.test_set
+            ],
+            |row| {
+                Ok((
+                    EvidenceScopeFingerprint {
+                        revision: scope.revision.clone(),
+                        selection: scope.selection.clone(),
+                        mutant_corpus: row.get(0)?,
+                        test_set: scope.test_set.clone(),
+                    },
+                    row.get::<_, i64>(1)? != 0,
+                    row.get(2)?,
+                ))
+            },
+        )?;
+        let candidates = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        if candidates.len() > 1 {
+            anyhow::bail!(
+                "multiple {family} evidence scopes match source {source:?}; choose a distinct source or configure one family scope"
+            );
+        }
+        Ok(candidates)
+    }
+
     /// Returns whether this source has declared any scoped SARIF artifact.
     /// Callers use this to distinguish absent legacy evidence from evidence
     /// that exists but belongs to another immutable comparison scope.
@@ -1375,6 +1556,8 @@ impl Storage {
                         tier,
                         tier_one: tier == Some(1),
                         status: "partial".into(),
+                        provenance: BTreeMap::new(),
+                        proof_boundary: Vec::new(),
                         start_line: row.get::<_, i64>(9)?.max(1) as u32,
                         end_line: row.get::<_, i64>(10)?.max(1) as u32,
                     },

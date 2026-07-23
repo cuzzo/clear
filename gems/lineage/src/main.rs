@@ -1,20 +1,21 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use lineage::{
-    build_structured_diff, coverage_records_to_test_exposure_json, execute_profile,
-    ingest_architecture_json, ingest_coverage_json_with_options, ingest_hazards,
-    ingest_hotness_json, ingest_mutant_facts_json_with_options, ingest_sarif_paths,
-    ingest_stack_traces, ingest_test_exposure_json, latest_run_directory, load_config,
-    load_run_manifest, parse_coverage_input, read_manifest_artifact, render_structured_diff_json,
-    render_structured_diff_text, resolve_coverage_record_paths, serve_lsp, serve_mcp,
-    serve_ui_with_overlays, ArtifactKind, CoverageIngestOptions, DiffRequest,
-    EvidenceArtifactScope, EvidenceScopeFingerprint, GitProvider, HeuristicExtractor,
-    LineageEngine, MutantIngestOptions, publish_run, repository_identity, RepoPathNormalizer, RunStatus,
-    SentryProvider, Storage,
+    build_structured_diff, coverage_records_to_test_exposure_json, ingest_architecture_json,
+    ingest_coverage_json_with_options, ingest_hazards, ingest_hotness_json,
+    ingest_mutant_facts_json_with_options, ingest_sarif_paths, ingest_stack_traces,
+    ingest_test_exposure_json, latest_run_directory, load_config, load_config_contents,
+    load_run_manifest, parse_coverage_input, publish_run, read_manifest_artifact,
+    render_structured_diff_json, render_structured_diff_text, repository_identity,
+    resolve_coverage_record_paths, seal_published_run, serve_lsp, serve_mcp,
+    serve_ui_with_overlays, validate_run_artifacts, ArtifactKind, CoverageIngestOptions,
+    DiffRequest, EvidenceArtifactScope, EvidenceScopeFingerprint, GitProvider, HeuristicExtractor,
+    LanguageNormalizer, LineageEngine, MutantIngestOptions, ProfileExecutionSession,
+    ProfileRunKind, RepoPathNormalizer, RunStatus, SentryProvider, Storage,
 };
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
 #[derive(Debug, Parser)]
@@ -27,6 +28,24 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run the local static-analysis profile and stage a versioned analysis run.
+    #[command(alias = "analyze")]
+    Analyse {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, default_value = ".lineage/lineage.db")]
+        db: PathBuf,
+        #[arg(long, default_value = "analyse")]
+        profile: String,
+        /// Ingest a clean immutable-revision analysis run into lineage.db.
+        #[arg(long)]
+        ingest: bool,
+        /// Explicitly authorize commands from the checkout's lineage.yml.
+        /// Without this flag, analysis uses only Lineage's embedded,
+        /// allowlisted providers.
+        #[arg(long)]
+        trust_current_config: bool,
+    },
     /// Run a configured verification profile, stage its artifacts, and ingest them.
     Ci {
         #[arg(long, default_value = ".")]
@@ -35,6 +54,19 @@ enum Command {
         db: PathBuf,
         #[arg(long, default_value = "ci")]
         profile: String,
+        /// Read producer commands from this reviewed commit instead of the
+        /// current checkout. Defaults to HEAD^; use --trust-current-config to
+        /// explicitly authorize a newly introduced or changed configuration.
+        #[arg(long)]
+        config_revision: Option<String>,
+        /// Explicitly authorize executing lineage.yml from the current clean
+        /// checkout. Intended only for trusted local runs and protected CI.
+        #[arg(long)]
+        trust_current_config: bool,
+        /// Fail unless every artifact declared by the selected profile is
+        /// explicitly marked complete.
+        #[arg(long)]
+        require_complete: bool,
     },
     /// Print a revision-pinned, evidence-aware architectural diff.
     Diff {
@@ -61,6 +93,20 @@ enum Command {
         mutant_corpus: Option<String>,
         #[arg(long)]
         test_set: Option<String>,
+        /// Refresh Lineage's bundled source analysis before rendering.
+        #[arg(long)]
+        analyse: bool,
+        /// Explicitly authorize checkout lineage.yml commands for --analyse.
+        /// The default runs only embedded, allowlisted analysis.
+        #[arg(long)]
+        trust_current_config: bool,
+        /// Require the latest successful evidence run for this profile to
+        /// match the selected immutable revision and current configuration.
+        #[arg(long)]
+        require_profile: Option<String>,
+        /// Require every declared artifact in --require-profile to be complete.
+        #[arg(long)]
+        require_complete: bool,
     },
     /// Initialize an empty lineage SQLite database.
     Init {
@@ -274,24 +320,90 @@ struct DiffCommandRequest {
     selection: Option<String>,
     mutant_corpus: Option<String>,
     test_set: Option<String>,
+    analyse: bool,
+    trust_current_config: bool,
+    require_profile: Option<String>,
+    require_complete: bool,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Ci { repo, db, profile } => {
+        Command::Analyse {
+            repo,
+            db,
+            profile,
+            ingest,
+            trust_current_config,
+        } => {
             let db = repository_path(&repo, &db);
-            let config = load_config(&repo)?;
+            let config = analysis_config(&repo, &profile, trust_current_config)?;
             let git = GitProvider::open(&repo)?;
+            let revision = if ingest {
+                ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
+                git.resolve_commit("HEAD")?
+            } else {
+                lineage::git::WORKTREE_REVISION.into()
+            };
+            let execution = ProfileExecutionSession::begin(&repo, &config)?;
+            let completed =
+                execution.execute(&profile, &revision, ProfileRunKind::StandaloneAnalysis)?;
+            if ingest {
+                ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
+                ensure_revision_snapshot(&db, &repo, &revision)?;
+                ingest_run_manifest(&db, &repo, &completed.directory.join("manifest.json"))?;
+                Storage::open(&db)?.refresh_ui_summaries()?;
+                seal_published_run(&completed.directory)?;
+            }
+            println!(
+                "lineage analyse: profile={} revision={} artifacts={} ingested={} run={}",
+                profile,
+                revision,
+                completed.manifest.artifacts.len(),
+                ingest,
+                completed.directory.display(),
+            );
+        }
+        Command::Ci {
+            repo,
+            db,
+            profile,
+            config_revision,
+            trust_current_config,
+            require_complete,
+        } => {
+            let db = repository_path(&repo, &db);
+            let git = GitProvider::open(&repo)?;
+            let config = load_ci_config(
+                &repo,
+                &git,
+                config_revision.as_deref(),
+                trust_current_config,
+            )?;
+            if require_complete {
+                ensure_profile_declares_complete_artifacts(&config, &profile)?;
+            }
+            ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
+            let execution = ProfileExecutionSession::begin(&repo, &config)?;
+            reconcile_pending_publications(&repo, &config, &db)?;
             ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
             let revision = git.resolve_commit("HEAD")?;
             ensure_revision_snapshot(&db, &repo, &revision)?;
-            let completed = execute_profile(&repo, &config, &profile, &revision)?;
+            let completed =
+                execution.execute(&profile, &revision, ProfileRunKind::CiPublication)?;
             ensure_clean_worktree(&repo, &config.artifacts.directory, Some(&db))?;
             let run = completed.directory.join("manifest.json");
+            write_publication_state(&completed.directory, PublicationState::Ingesting)?;
+            record_run_state(&db, &run, "ingesting")?;
             ingest_run_manifest(&db, &repo, &run)?;
+            write_publication_state(&completed.directory, PublicationState::Ingested)?;
             Storage::open(&db)?.refresh_ui_summaries()?;
+            write_publication_state(&completed.directory, PublicationState::ReadyToPublish)?;
             publish_run(&repo, &config, &completed.directory)?;
+            let published = latest_run_directory(&repo, &config);
+            write_publication_state(&published, PublicationState::Published)?;
+            seal_published_run(&published)?;
+            record_run_state(&db, &published.join("manifest.json"), "published")?;
             println!(
                 "lineage ci: profile={} revision={} artifacts={}",
                 profile,
@@ -311,6 +423,10 @@ fn main() -> Result<()> {
             selection,
             mutant_corpus,
             test_set,
+            analyse,
+            trust_current_config,
+            require_profile,
+            require_complete,
         } => {
             let db = repository_path(&repo, &db);
             print!(
@@ -327,6 +443,10 @@ fn main() -> Result<()> {
                     selection,
                     mutant_corpus,
                     test_set,
+                    analyse,
+                    trust_current_config,
+                    require_profile,
+                    require_complete,
                 })?
             );
         }
@@ -723,39 +843,357 @@ fn repository_path(repo: &std::path::Path, path: &std::path::Path) -> PathBuf {
     }
 }
 
+fn load_ci_config(
+    repo: &Path,
+    git: &GitProvider,
+    requested_revision: Option<&str>,
+    trust_current_config: bool,
+) -> Result<lineage::LineageConfig> {
+    if trust_current_config {
+        if requested_revision.is_some() {
+            anyhow::bail!("--trust-current-config and --config-revision cannot be used together");
+        }
+        return load_config(repo);
+    }
+    let revision = match requested_revision {
+        Some(revision) => git.resolve_commit(revision)?,
+        None => git.resolve_commit("HEAD^").with_context(|| {
+            "lineage ci requires --config-revision or --trust-current-config when HEAD has no reviewed parent"
+        })?,
+    };
+    let yaml = git.file_contents_at_commit(&revision, lineage::pipeline::CONFIG_FILE_NAME)?;
+    let json = git.file_contents_at_commit(&revision, lineage::pipeline::CONFIG_JSON_FILE_NAME)?;
+    match (yaml, json) {
+        (Some(_), Some(_)) => anyhow::bail!(
+            "trusted configuration revision {revision} contains both lineage.yml and lineage.json"
+        ),
+        (Some(contents), None) => load_config_contents(&contents, Some("yml")).with_context(|| {
+            format!("parse trusted lineage.yml from configuration revision {revision}")
+        }),
+        (None, Some(contents)) => load_config_contents(&contents, Some("json")).with_context(|| {
+            format!("parse trusted lineage.json from configuration revision {revision}")
+        }),
+        (None, None) => anyhow::bail!(
+            "trusted configuration revision {revision} contains no lineage.yml; use --trust-current-config only after review"
+        ),
+    }
+}
+
+const PUBLICATION_STATE_FILE: &str = ".publication-state";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PublicationState {
+    Ingesting,
+    Ingested,
+    ReadyToPublish,
+    Published,
+}
+
+impl PublicationState {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ingesting => "ingesting",
+            Self::Ingested => "ingested",
+            Self::ReadyToPublish => "ready_to_publish",
+            Self::Published => "published",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self> {
+        match value.trim() {
+            "ingesting" => Ok(Self::Ingesting),
+            "ingested" => Ok(Self::Ingested),
+            "ready_to_publish" => Ok(Self::ReadyToPublish),
+            "published" => Ok(Self::Published),
+            other => anyhow::bail!("invalid Lineage publication state {other:?}"),
+        }
+    }
+}
+
+fn write_publication_state(run_directory: &Path, state: PublicationState) -> Result<()> {
+    use std::io::Write;
+
+    let state_path = run_directory.join(PUBLICATION_STATE_FILE);
+    let temporary = run_directory.join(format!(
+        ".{PUBLICATION_STATE_FILE}.{}-{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .context("system time precedes Unix epoch")?
+            .as_nanos()
+    ));
+    let result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(format!("{}\n", state.as_str()).as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temporary, &state_path)?;
+        #[cfg(unix)]
+        fs::File::open(run_directory)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result.with_context(|| {
+        format!(
+            "write Lineage publication state in {}",
+            run_directory.display()
+        )
+    })
+}
+
+fn run_key(manifest_path: &Path) -> Result<String> {
+    let directory = manifest_path
+        .parent()
+        .context("run manifest has no directory")?;
+    directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| {
+            name.trim_start_matches(".staging-")
+                .trim_start_matches("pending-")
+                .trim_start_matches("analysis-")
+                .trim_start_matches("published-")
+                .trim_start_matches("failed-")
+                .to_string()
+        })
+        .context("run directory has no valid name")
+}
+
+fn unix_time_ms() -> Result<u128> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system time precedes Unix epoch")?
+        .as_millis())
+}
+
+fn record_run_state(db: &Path, manifest_path: &Path, state: &str) -> Result<()> {
+    let manifest = load_run_manifest(manifest_path)?;
+    Storage::open(db)?.record_ci_run(&run_key(manifest_path)?, &manifest, state, unix_time_ms()?)
+}
+
+fn publication_state(run_directory: &Path) -> Result<PublicationState> {
+    let path = run_directory.join(PUBLICATION_STATE_FILE);
+    let contents = fs::read_to_string(&path)
+        .with_context(|| format!("read Lineage publication state {}", path.display()))?;
+    PublicationState::parse(&contents)
+}
+
+/// Recovers unfinished publication after a crash. A `ready_to_publish` state
+/// may be in either `pending-*` or `published-*`: the latter means the crash
+/// occurred after the durable directory rename but before `latest` changed.
+fn reconcile_pending_publications(
+    repo: &Path,
+    config: &lineage::LineageConfig,
+    db: &Path,
+) -> Result<()> {
+    let runs = repo.join(&config.artifacts.directory).join("runs");
+    if !runs.exists() {
+        return Ok(());
+    }
+    let mut recoverable = fs::read_dir(&runs)?
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("pending-") || name.starts_with("published-"))
+        })
+        .collect::<Vec<_>>();
+    recoverable.sort();
+    for run in recoverable {
+        let is_published = run
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("published-"));
+        let state = match publication_state(&run) {
+            Ok(state) => state,
+            Err(error)
+                if !is_published
+                    && error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+            {
+                // A producer can finish and finalize its immutable staged
+                // payload before the post-run clean-tree validation fails.
+                // No publication state means ingestion was never authorized;
+                // retain the forensic payload as a failed run instead of
+                // making every later CI invocation unrecoverable.
+                let name = run
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .context("pending Lineage run has no name")?;
+                let failed = runs.join(format!("failed-{}", name.trim_start_matches("pending-")));
+                fs::rename(&run, &failed).with_context(|| {
+                    format!("quarantine incomplete Lineage run {}", run.display())
+                })?;
+                continue;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "recoverable Lineage run {} has no publication state",
+                        run.display()
+                    )
+                })
+            }
+        };
+        match state {
+            PublicationState::Ingesting => {
+                if is_published {
+                    anyhow::bail!("published Lineage run {} is still ingesting", run.display());
+                }
+                ingest_run_manifest(db, repo, &run.join("manifest.json"))?;
+                write_publication_state(&run, PublicationState::Ingested)?;
+                Storage::open(db)?.refresh_ui_summaries()?;
+                write_publication_state(&run, PublicationState::ReadyToPublish)?;
+                publish_run(repo, config, &run)?;
+                write_publication_state(
+                    &latest_run_directory(repo, config),
+                    PublicationState::Published,
+                )?;
+                seal_published_run(&latest_run_directory(repo, config))?;
+                record_run_state(
+                    db,
+                    &latest_run_directory(repo, config).join("manifest.json"),
+                    "published",
+                )?;
+            }
+            PublicationState::Ingested => {
+                if is_published {
+                    anyhow::bail!("published Lineage run {} is only ingested", run.display());
+                }
+                Storage::open(db)?.refresh_ui_summaries()?;
+                write_publication_state(&run, PublicationState::ReadyToPublish)?;
+                publish_run(repo, config, &run)?;
+                write_publication_state(
+                    &latest_run_directory(repo, config),
+                    PublicationState::Published,
+                )?;
+                seal_published_run(&latest_run_directory(repo, config))?;
+                record_run_state(
+                    db,
+                    &latest_run_directory(repo, config).join("manifest.json"),
+                    "published",
+                )?;
+            }
+            PublicationState::ReadyToPublish => {
+                publish_run(repo, config, &run)?;
+                write_publication_state(
+                    &latest_run_directory(repo, config),
+                    PublicationState::Published,
+                )?;
+                seal_published_run(&latest_run_directory(repo, config))?;
+                record_run_state(
+                    db,
+                    &latest_run_directory(repo, config).join("manifest.json"),
+                    "published",
+                )?;
+            }
+            PublicationState::Published => {
+                if !is_published {
+                    anyhow::bail!(
+                        "pending Lineage run {} is incorrectly marked published",
+                        run.display()
+                    );
+                }
+                let manifest = load_run_manifest(&run.join("manifest.json"))?;
+                validate_run_artifacts(&run, &manifest)?;
+                publish_run(repo, config, &run)?;
+                record_run_state(db, &run.join("manifest.json"), "published")?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn ensure_clean_worktree(
     repo: &std::path::Path,
     artifact_directory: &std::path::Path,
     database: Option<&std::path::Path>,
 ) -> Result<()> {
+    let repository_root = ProcessCommand::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(repo)
+        .output()
+        .context("resolve Git repository root for lineage ci")?;
+    if !repository_root.status.success() {
+        anyhow::bail!("could not resolve Git repository root for lineage ci");
+    }
+    let repository_root = PathBuf::from(String::from_utf8(repository_root.stdout)?.trim());
+    let repository_prefix = repo
+        .canonicalize()
+        .context("canonicalize Lineage repository path")?
+        .strip_prefix(&repository_root)
+        .context("Lineage repository is outside its Git worktree")?
+        .to_path_buf();
     let output = ProcessCommand::new("git")
-        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
         .current_dir(repo)
         .output()
         .context("inspect Git worktree before lineage ci")?;
     if !output.status.success() {
         anyhow::bail!("could not inspect Git worktree before lineage ci");
     }
-    let artifact_prefix = artifact_directory.to_string_lossy().replace('\\', "/");
+    let artifact_prefix = repository_prefix
+        .join(artifact_directory)
+        .to_string_lossy()
+        .replace('\\', "/");
     let database_path = database
         .and_then(|path| path.strip_prefix(repo).ok())
+        .map(|path| repository_prefix.join(path))
         .map(|path| path.to_string_lossy().replace('\\', "/"));
-    let dirty = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| line.get(3..))
-        .map(|path| path.trim_start_matches("./").replace('\\', "/"))
+    let database_sidecars = database_path.as_ref().map(|database| {
+        ["-wal", "-shm", "-journal"]
+            .into_iter()
+            .map(|suffix| format!("{database}{suffix}"))
+            .collect::<Vec<_>>()
+    });
+    let dirty = porcelain_v1_dirty_paths(&output.stdout)?
+        .into_iter()
         .find(|path| {
             path != &artifact_prefix
                 && !path.starts_with(&format!("{artifact_prefix}/"))
                 && database_path.as_deref() != Some(path)
-                && !database_path
+                && !database_sidecars
                     .as_deref()
-                    .is_some_and(|database| path.starts_with(&format!("{database}-")))
+                    .is_some_and(|sidecars| sidecars.iter().any(|sidecar| sidecar == path))
         });
     if let Some(path) = dirty {
         anyhow::bail!("lineage ci requires a clean worktree (found {path})");
     }
     Ok(())
+}
+
+/// Parses `git status --porcelain=v1 -z` without relying on Git's quoted
+/// display format. Rename and copy records contain a second NUL-delimited
+/// source path, which must be inspected as well as the destination.
+fn porcelain_v1_dirty_paths(output: &[u8]) -> Result<Vec<String>> {
+    let mut records = output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty());
+    let mut paths = Vec::new();
+    while let Some(record) = records.next() {
+        if record.len() < 4 || record[2] != b' ' {
+            anyhow::bail!("invalid NUL-delimited git porcelain record");
+        }
+        let normalize = |path: &[u8]| {
+            String::from_utf8_lossy(path)
+                .trim_start_matches("./")
+                .replace('\\', "/")
+        };
+        paths.push(normalize(&record[3..]));
+        if matches!(record[0], b'R' | b'C') || matches!(record[1], b'R' | b'C') {
+            let source = records
+                .next()
+                .context("truncated NUL-delimited git rename/copy record")?;
+            paths.push(normalize(source));
+        }
+    }
+    Ok(paths)
 }
 
 fn ensure_revision_snapshot(
@@ -782,13 +1220,39 @@ fn ensure_revision_snapshot(
 
 fn execute_diff(mut request: DiffCommandRequest) -> Result<String> {
     let provider = GitProvider::open(&request.repo)?;
+    let analysis_overlay = if request.analyse {
+        build_analysis_overlay(
+            &request.repo,
+            &provider,
+            request.head.as_deref(),
+            request.trust_current_config,
+        )?
+    } else {
+        Vec::new()
+    };
+    if let Some(profile) = request.require_profile.as_deref() {
+        ensure_required_profile(
+            &request.repo,
+            &request.db,
+            &provider,
+            request.head.as_deref(),
+            profile,
+            request.require_complete,
+        )?;
+    } else if request.require_complete {
+        anyhow::bail!("--require-complete requires --require-profile");
+    }
     resolve_diff_run_scope(&provider, &mut request)?;
+    let full_report = request
+        .full
+        .then(|| configured_evidence_report(&request.repo, &provider, &request))
+        .transpose()?;
     let storage = request
         .db
         .exists()
         .then(|| Storage::open_existing(&request.db))
         .transpose()?;
-    let plan = build_structured_diff(
+    let mut plan = build_structured_diff(
         &provider,
         storage.as_ref(),
         &DiffRequest {
@@ -801,10 +1265,350 @@ fn execute_diff(mut request: DiffCommandRequest) -> Result<String> {
             test_set: request.test_set,
         },
     )?;
+    if !analysis_overlay.is_empty() {
+        lineage::diff::apply_head_only_sarif_findings(&mut plan, &analysis_overlay);
+    }
     match request.format {
-        DiffFormat::Text => Ok(render_structured_diff_text(&plan, request.full)),
+        DiffFormat::Text => {
+            let mut rendered = render_structured_diff_text(&plan, request.full);
+            if let Some(report) = full_report {
+                rendered.push_str(&report);
+            }
+            Ok(rendered)
+        }
         DiffFormat::Json => Ok(format!("{}\n", render_structured_diff_json(&plan)?)),
     }
+}
+
+fn build_analysis_overlay(
+    repo: &Path,
+    provider: &GitProvider,
+    requested_head: Option<&str>,
+    trust_current_config: bool,
+) -> Result<Vec<lineage::diff::SarifObservation>> {
+    let config = analysis_config(repo, "analyse", trust_current_config)?;
+    let revision = if let Some(head) =
+        requested_head.filter(|head| *head != lineage::git::WORKTREE_REVISION)
+    {
+        let resolved = provider.resolve_commit(head)?;
+        if resolved != provider.resolve_commit("HEAD")? {
+            anyhow::bail!(
+                "diff --analyse can only execute the current checkout; checkout {resolved} before analysing a historical revision"
+            );
+        }
+        ensure_clean_worktree(repo, &config.artifacts.directory, None)?;
+        resolved
+    } else {
+        lineage::git::WORKTREE_REVISION.into()
+    };
+    let execution = ProfileExecutionSession::begin(repo, &config)?;
+    let run = execution.execute("analyse", &revision, ProfileRunKind::StandaloneAnalysis)?;
+    let observations = sarif_observations_from_run(repo, &run.directory, &run.manifest);
+    let cleanup = fs::remove_dir_all(&run.directory)
+        .with_context(|| format!("remove ephemeral analysis run {}", run.directory.display()));
+    match (observations, cleanup) {
+        (Ok(observations), Ok(())) => Ok(observations),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(cleanup_error)) => Err(error.context(format!(
+            "also failed to clean analysis run: {cleanup_error:#}"
+        ))),
+    }
+}
+
+/// Returns only embedded, allowlisted analysis unless the caller explicitly
+/// authorizes execution of checkout configuration. This distinction matters:
+/// a repository's `lineage.yml` is arbitrary code when it contains command
+/// producers, while the built-in provider is linked into this binary.
+fn analysis_config(
+    repo: &Path,
+    profile: &str,
+    trust_current_config: bool,
+) -> Result<lineage::LineageConfig> {
+    let yaml = repo.join(lineage::pipeline::CONFIG_FILE_NAME);
+    let json = repo.join(lineage::pipeline::CONFIG_JSON_FILE_NAME);
+    if trust_current_config {
+        if !yaml.exists() && !json.exists() {
+            if profile == "analyse" {
+                return builtin_analysis_config();
+            }
+            anyhow::bail!(
+                "analysis profile {profile:?} is not built in and no lineage.yml was found"
+            );
+        }
+        let config = load_config(repo)?;
+        if !config.profiles.contains_key(profile) {
+            anyhow::bail!("unknown Lineage analysis profile {profile:?}");
+        }
+        return Ok(config);
+    }
+    if profile != "analyse" {
+        anyhow::bail!(
+            "analysis profile {profile:?} is repository configuration; pass --trust-current-config after review"
+        );
+    }
+    builtin_analysis_config()
+}
+
+fn builtin_analysis_config() -> Result<lineage::LineageConfig> {
+    use lineage::pipeline::{
+        validate_config, EvidenceProducer, ProducerExecutor, VerificationProfile,
+    };
+    let producer_names = vec!["fact-mine".to_string()];
+    let producers = BTreeMap::from([(
+        "fact-mine".to_string(),
+        EvidenceProducer {
+            executor: ProducerExecutor::Lineage,
+            argv: vec!["fact-mine-native".to_string()],
+            working_directory: None,
+            timeout_seconds: 60,
+            max_output_bytes: 8 * 1024 * 1024,
+            environment: BTreeMap::new(),
+            produces: vec![lineage::pipeline::ProducedArtifact {
+                kind: ArtifactKind::Sarif,
+                format: "sarif".to_string(),
+                path: PathBuf::from(".lineage/artifacts/fact-mine.sarif"),
+                scope: Some("static".to_string()),
+                complete: false,
+                evidence_scope: None,
+            }],
+        },
+    )]);
+    validate_config(lineage::LineageConfig {
+        version: 1,
+        artifacts: Default::default(),
+        profiles: BTreeMap::from([(
+            "analyse".to_string(),
+            VerificationProfile {
+                producers: producer_names,
+                required_evidence: Default::default(),
+            },
+        )]),
+        producers,
+    })
+}
+
+fn sarif_observations_from_run(
+    repo: &Path,
+    run_directory: &Path,
+    manifest: &lineage::RunManifest,
+) -> Result<Vec<lineage::diff::SarifObservation>> {
+    let mut observations = Vec::new();
+    for artifact in manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.kind == ArtifactKind::Sarif)
+    {
+        let document: serde_json::Value =
+            serde_json::from_slice(&read_manifest_artifact(run_directory, artifact)?)?;
+        for finding in lineage::normalize_sarif_document(repo, &document)? {
+            let tier = finding
+                .provenance
+                .get("tier")
+                .or_else(|| finding.provenance.get("risk_tier"))
+                .and_then(|value| value.parse::<u8>().ok());
+            observations.push(lineage::diff::SarifObservation {
+                path: finding.path,
+                finding: lineage::diff::SarifFindingSummary {
+                    source: artifact.producer.clone(),
+                    tool: finding.tool_name,
+                    rule_id: finding.rule_id,
+                    level: finding.level,
+                    category: finding.category,
+                    message: finding.message,
+                    fingerprint: finding.fingerprint,
+                    tier,
+                    tier_one: tier == Some(1),
+                    status: finding.status,
+                    provenance: finding.provenance,
+                    proof_boundary: finding.proof_boundary,
+                    start_line: finding.start_line,
+                    end_line: finding.end_line.unwrap_or(finding.start_line),
+                },
+            });
+        }
+    }
+    Ok(observations)
+}
+
+/// `DiffPlan` is intentionally limited to the evidence it can join to changed
+/// source lines. `--full` additionally reports every artifact family promised
+/// by the selected profile so absent, partial, and stale configured evidence
+/// is never silently omitted from the text view.
+fn configured_evidence_report(
+    repo: &Path,
+    provider: &GitProvider,
+    request: &DiffCommandRequest,
+) -> Result<String> {
+    let config_path = repo.join(lineage::pipeline::CONFIG_FILE_NAME);
+    let json_path = repo.join(lineage::pipeline::CONFIG_JSON_FILE_NAME);
+    if !config_path.exists() && !json_path.exists() {
+        return Ok("Configured evidence: unconfigured (no lineage.yml)\n".into());
+    }
+    let config = load_config(repo)?;
+    let profile_name = request
+        .require_profile
+        .as_deref()
+        .or_else(|| config.profiles.contains_key("ci").then_some("ci"));
+    let Some(profile_name) = profile_name else {
+        return Ok("Configured evidence: unconfigured (no selected profile)\n".into());
+    };
+    let profile = config
+        .profiles
+        .get(profile_name)
+        .context("selected Lineage profile is missing")?;
+    let manifest_path = latest_run_directory(repo, &config).join("manifest.json");
+    let manifest = manifest_path
+        .exists()
+        .then(|| load_run_manifest(&manifest_path))
+        .transpose()?;
+    let requested_head = request
+        .head
+        .as_deref()
+        .filter(|head| *head != lineage::git::WORKTREE_REVISION)
+        .map(|head| provider.resolve_commit(head))
+        .transpose()?;
+    let working_tree =
+        request.head.is_none() || request.head.as_deref() == Some(lineage::git::WORKTREE_REVISION);
+    let mut output = format!("Configured evidence ({profile_name}):\n");
+    for required in &profile.required_evidence {
+        let state = match manifest.as_ref() {
+            None => "missing",
+            Some(manifest) if manifest.status != RunStatus::Succeeded => "failed",
+            Some(_) if working_tree => "stale",
+            Some(manifest)
+                if requested_head
+                    .as_ref()
+                    .is_some_and(|head| manifest.revision != *head) =>
+            {
+                "stale"
+            }
+            Some(manifest) => match manifest
+                .artifacts
+                .iter()
+                .filter(|artifact| artifact.kind == *required)
+                .map(|artifact| artifact.complete)
+                .reduce(|left, right| left && right)
+            {
+                Some(true) => "exact",
+                Some(false) => "partial",
+                None => "missing",
+            },
+        };
+        use std::fmt::Write;
+        let _ = writeln!(output, "  {state:<9} {required:?}");
+    }
+    Ok(output)
+}
+
+fn ensure_profile_declares_complete_artifacts(
+    config: &lineage::pipeline::LineageConfig,
+    profile_name: &str,
+) -> Result<()> {
+    let profile = config
+        .profiles
+        .get(profile_name)
+        .with_context(|| format!("unknown Lineage profile {profile_name:?}"))?;
+    let declared = profile
+        .producers
+        .iter()
+        .flat_map(|name| {
+            config.producers[name]
+                .produces
+                .iter()
+                .map(move |artifact| (name, artifact))
+        })
+        .filter(|(_, artifact)| artifact.kind != ArtifactKind::Auxiliary)
+        .collect::<Vec<_>>();
+    if declared.is_empty() {
+        anyhow::bail!(
+            "profile {profile_name:?} cannot satisfy --require-complete because it declares no evidence artifacts"
+        );
+    }
+    let incomplete = declared.iter().find(|(_, artifact)| !artifact.complete);
+    if let Some((producer, artifact)) = incomplete {
+        anyhow::bail!(
+            "profile {profile_name:?} cannot satisfy --require-complete: producer {producer:?} artifact {} is declared partial",
+            artifact.path.display()
+        );
+    }
+    for required in &profile.required_evidence {
+        if !declared
+            .iter()
+            .any(|(_, artifact)| artifact.kind == *required)
+        {
+            anyhow::bail!(
+                "profile {profile_name:?} cannot satisfy --require-complete: missing required {required:?} evidence"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn ensure_required_profile(
+    repo: &std::path::Path,
+    db: &std::path::Path,
+    provider: &GitProvider,
+    requested_head: Option<&str>,
+    profile_name: &str,
+    require_complete: bool,
+) -> Result<()> {
+    if requested_head == Some(lineage::git::WORKTREE_REVISION) || requested_head.is_none() {
+        anyhow::bail!(
+            "--require-profile requires an explicit immutable head revision; working-tree evidence is not exact"
+        );
+    }
+    let config = load_config(repo)?;
+    if require_complete {
+        ensure_profile_declares_complete_artifacts(&config, profile_name)?;
+    }
+    let manifest_path = latest_run_directory(repo, &config).join("manifest.json");
+    let manifest = load_run_manifest(&manifest_path).with_context(|| {
+        format!("--require-profile {profile_name:?} needs a successful latest Lineage run")
+    })?;
+    validate_run_artifacts(
+        manifest_path
+            .parent()
+            .context("latest run has no directory")?,
+        &manifest,
+    )
+    .context("--require-profile found a modified or corrupt published artifact")?;
+    let record = Storage::open_existing(db)?
+        .ci_run_record(&run_key(&manifest_path)?)?
+        .context("--require-profile has no durable database run record")?;
+    if record.state != "published"
+        || record.manifest_hash != lineage::run_manifest_hash(&manifest)?
+        || record.revision != manifest.revision
+        || record.profile != manifest.profile
+        || record.repository_identity != manifest.repository_identity
+        || record.configuration_hash != manifest.configuration_hash
+    {
+        anyhow::bail!(
+            "--require-profile {profile_name:?} has a stale or modified durable database run record"
+        );
+    }
+    let head = provider.resolve_commit(requested_head.expect("checked above"))?;
+    if manifest.status != RunStatus::Succeeded
+        || manifest.profile != profile_name
+        || manifest.revision != head
+        || manifest.tree_fingerprint != head
+        || manifest.configuration_hash != lineage::pipeline::configuration_fingerprint(&config)?
+    {
+        anyhow::bail!(
+            "--require-profile {profile_name:?} was not satisfied by an exact successful run for {head}"
+        );
+    }
+    if require_complete
+        && manifest
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.kind != ArtifactKind::Auxiliary && !artifact.complete)
+    {
+        anyhow::bail!(
+            "--require-profile {profile_name:?} has a successful run, but it contains partial artifacts"
+        );
+    }
+    Ok(())
 }
 
 fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandRequest) -> Result<()> {
@@ -828,6 +1632,13 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
         return Ok(());
     }
     let manifest = load_run_manifest(&manifest_path)?;
+    validate_run_artifacts(
+        manifest_path
+            .parent()
+            .context("latest run has no directory")?,
+        &manifest,
+    )
+    .context("latest Lineage run contains a modified or corrupt artifact")?;
     let head = provider.resolve_commit(request.head.as_deref().unwrap_or("HEAD"))?;
     if manifest.status != RunStatus::Succeeded
         || manifest.revision != head
@@ -839,18 +1650,39 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
         .artifacts
         .iter()
         .filter(|artifact| artifact.complete)
-        .filter_map(|artifact| artifact.evidence_scope.as_ref())
+        .filter_map(|artifact| {
+            artifact
+                .evidence_scope
+                .as_ref()
+                .map(|scope| (artifact.kind, scope))
+        })
         .collect::<Vec<_>>();
-    let Some(scope) = scopes.first() else {
+    let Some((_, common_scope)) = scopes.first() else {
         return Ok(());
     };
-    if scopes.iter().any(|candidate| *candidate != *scope) {
-        anyhow::bail!("latest successful run contains incompatible complete evidence scopes");
+    if scopes.iter().any(|(_, candidate)| {
+        candidate.selection != common_scope.selection || candidate.test_set != common_scope.test_set
+    }) {
+        anyhow::bail!(
+            "latest successful run contains incompatible complete evidence selection or test-set scopes"
+        );
     }
+    let mutant_corpora = scopes
+        .iter()
+        .filter(|(kind, _)| *kind == ArtifactKind::Mutants)
+        .map(|(_, scope)| scope.mutant_corpus.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    if mutant_corpora.len() > 1 {
+        anyhow::bail!("latest successful run contains multiple complete mutation corpora; specify an explicit scope");
+    }
+    let inferred_mutant_corpus = mutant_corpora
+        .into_iter()
+        .next()
+        .unwrap_or("not-applicable");
     if !explicit_scope {
-        request.selection = Some(scope.selection.clone());
-        request.mutant_corpus = Some(scope.mutant_corpus.clone());
-        request.test_set = Some(scope.test_set.clone());
+        request.selection = Some(common_scope.selection.clone());
+        request.mutant_corpus = Some(inferred_mutant_corpus.into());
+        request.test_set = Some(common_scope.test_set.clone());
     }
     let coverage_sources = manifest
         .artifacts
@@ -859,7 +1691,9 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
         .map(|artifact| artifact.producer.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     if request.coverage_source.is_none() && coverage_sources.len() > 1 {
-        anyhow::bail!("latest successful run has multiple coverage producers; specify --coverage-source");
+        anyhow::bail!(
+            "latest successful run has multiple coverage producers; specify --coverage-source"
+        );
     }
     if request.coverage_source.is_none() {
         request.coverage_source = coverage_sources.into_iter().next().map(str::to_string);
@@ -870,10 +1704,11 @@ fn resolve_diff_run_scope(provider: &GitProvider, request: &mut DiffCommandReque
         .filter(|artifact| artifact.kind == ArtifactKind::Sarif)
         .map(|artifact| artifact.producer.as_str())
         .collect::<std::collections::BTreeSet<_>>();
-    if request.sarif_source.is_none() && sarif_sources.len() > 1 {
-        anyhow::bail!("latest successful run has multiple SARIF producers; specify --sarif-source");
-    }
-    if request.sarif_source.is_none() {
+    // A profile normally has many independent SARIF producers. Leaving the
+    // source unset deliberately asks DiffService to aggregate them, retaining
+    // their honest partial/exact state instead of silently choosing one or
+    // forcing users to repeat internal producer names.
+    if request.sarif_source.is_none() && sarif_sources.len() == 1 {
         request.sarif_source = sarif_sources.into_iter().next().map(str::to_string);
     }
     Ok(())
@@ -911,7 +1746,13 @@ fn ingest_run_manifest(
             let payload = read_manifest_artifact(run_directory, artifact)?;
             let evidence_scope = artifact_evidence_scope(artifact, &manifest.revision)?;
             match artifact.kind {
+                ArtifactKind::Auxiliary => {
+                    // Auxiliary artifacts are immutable run provenance and
+                    // producer hand-off inputs, not database evidence.
+                }
                 ArtifactKind::Coverage => {
+                    let payload =
+                        normalize_manifest_coverage_paths(&payload, &artifact.format, &normalizer)?;
                     ingest_coverage_json_with_options(
                         &storage,
                         std::str::from_utf8(&payload)?,
@@ -949,17 +1790,27 @@ fn ingest_run_manifest(
                             complete: artifact.complete,
                         },
                     )?;
-            }
-            ArtifactKind::Sarif => {
-                let document: serde_json::Value = serde_json::from_slice(&payload).with_context(|| {
-                    format!("parse SARIF artifact from producer {:?}", artifact.producer)
-                })?;
-                if document.get("version").and_then(serde_json::Value::as_str).is_none()
-                    || document.get("runs").and_then(serde_json::Value::as_array).is_none()
-                {
-                    anyhow::bail!("producer {:?} emitted an invalid SARIF document", artifact.producer);
                 }
-                let unpacked = sarif_directory
+                ArtifactKind::Sarif => {
+                    let document: serde_json::Value = serde_json::from_slice(&payload)
+                        .with_context(|| {
+                            format!("parse SARIF artifact from producer {:?}", artifact.producer)
+                        })?;
+                    if document
+                        .get("version")
+                        .and_then(serde_json::Value::as_str)
+                        .is_none()
+                        || document
+                            .get("runs")
+                            .and_then(serde_json::Value::as_array)
+                            .is_none()
+                    {
+                        anyhow::bail!(
+                            "producer {:?} emitted an invalid SARIF document",
+                            artifact.producer
+                        );
+                    }
+                    let unpacked = sarif_directory
                         .join(format!("{index}-{}", artifact.producer))
                         .with_extension("json");
                     fs::create_dir_all(
@@ -1004,6 +1855,12 @@ fn ingest_run_manifest(
                 })?;
             }
         }
+        storage.record_ci_run(
+            &run_key(manifest_path)?,
+            &manifest,
+            "ingested",
+            unix_time_ms()?,
+        )?;
         Ok(())
     })();
     let cleanup_result = fs::remove_dir_all(&sarif_directory);
@@ -1014,13 +1871,57 @@ fn ingest_run_manifest(
             return Err(error);
         }
     }
-    cleanup_result.with_context(|| format!("remove temporary SARIF directory {}", sarif_directory.display()))?;
+    cleanup_result.with_context(|| {
+        format!(
+            "remove temporary SARIF directory {}",
+            sarif_directory.display()
+        )
+    })?;
     println!(
         "ingested run {} with {} artifacts",
         manifest.revision,
         manifest.artifacts.len()
     );
     Ok(())
+}
+
+/// SimpleCov records absolute filenames. Convert those filenames at the
+/// manifest boundary, where the selected project root is known, before the
+/// generic coverage parser applies its intentionally repository-agnostic
+/// normalization. This keeps nested projects (`--repo gems/test-miser`) from
+/// being recorded under their enclosing monorepo prefix.
+fn normalize_manifest_coverage_paths(
+    payload: &[u8],
+    format: &str,
+    normalizer: &dyn LanguageNormalizer,
+) -> Result<Vec<u8>> {
+    if format != "simplecov" {
+        return Ok(payload.to_vec());
+    }
+    let mut document: serde_json::Value = serde_json::from_slice(payload)
+        .context("parse SimpleCov artifact while normalizing project-relative paths")?;
+    let Some(resultsets) = document.as_object_mut() else {
+        anyhow::bail!("SimpleCov artifact must be a JSON object");
+    };
+    for resultset in resultsets.values_mut() {
+        let Some(coverage) = resultset
+            .get_mut("coverage")
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            continue;
+        };
+        let mut normalized = serde_json::Map::new();
+        for (path, value) in std::mem::take(coverage) {
+            let path = normalizer.normalize_path(&path);
+            if normalized.insert(path.clone(), value).is_some() {
+                anyhow::bail!(
+                    "SimpleCov artifact contains multiple paths that normalize to {path:?}"
+                );
+            }
+        }
+        *coverage = normalized;
+    }
+    serde_json::to_vec(&document).context("serialize normalized SimpleCov artifact")
 }
 
 fn validate_manifest_provenance(
@@ -1031,7 +1932,9 @@ fn validate_manifest_provenance(
     if manifest.status != RunStatus::Succeeded {
         anyhow::bail!("only successful run manifests can be ingested");
     }
-    if manifest.repository_identity.is_empty() || manifest.repository_identity != repository_identity(repo) {
+    if manifest.repository_identity.is_empty()
+        || manifest.repository_identity != repository_identity(repo)
+    {
         anyhow::bail!("run manifest was produced for a different repository");
     }
     let resolved = git.resolve_commit(&manifest.revision)?;
@@ -1175,7 +2078,34 @@ fn json_escape(value: &str) -> String {
 mod tests {
     use super::*;
     use lineage::pipeline::{DeclaredEvidenceScope, ManifestArtifact, RunManifest};
+    use sha2::{Digest, Sha256};
     use tempfile::tempdir;
+
+    #[test]
+    fn normalizes_simplecov_paths_to_the_selected_subproject() {
+        let payload = br#"{
+          "Minitest": {
+            "coverage": {
+              "/tmp/checkout/gems/test-miser/lib/test_miser/report.rb": {"lines": [null, 1]},
+              "/tmp/checkout/gems/test-miser/test/report_test.rb": {"lines": [null, 2]}
+            }
+          }
+        }"#;
+        let normalized = normalize_manifest_coverage_paths(
+            payload,
+            "simplecov",
+            &RepoPathNormalizer::new("/tmp/checkout/gems/test-miser"),
+        )
+        .unwrap();
+        let document: serde_json::Value = serde_json::from_slice(&normalized).unwrap();
+        let coverage = document
+            .pointer("/Minitest/coverage")
+            .and_then(serde_json::Value::as_object)
+            .unwrap();
+        assert!(coverage.contains_key("lib/test_miser/report.rb"));
+        assert!(coverage.contains_key("test/report_test.rb"));
+        assert!(!coverage.keys().any(|path| path.contains("gems/test-miser")));
+    }
 
     #[test]
     fn latest_successful_run_supplies_complete_diff_scope() {
@@ -1194,6 +2124,11 @@ mod tests {
         let config = load_config(directory.path()).unwrap();
         let latest = latest_run_directory(directory.path(), &config);
         fs::create_dir_all(&latest).unwrap();
+        let coverage = b"{}";
+        let sarif = b"{\"version\":\"2.1.0\",\"runs\":[]}";
+        fs::write(latest.join("coverage.json"), coverage).unwrap();
+        fs::write(latest.join("first.sarif"), sarif).unwrap();
+        fs::write(latest.join("second.sarif"), sarif).unwrap();
         fs::write(
             latest.join("manifest.json"),
             serde_json::to_vec(&RunManifest {
@@ -1207,21 +2142,49 @@ mod tests {
                 status: RunStatus::Succeeded,
                 configuration_hash: "config".into(),
                 producers: Vec::new(),
-                artifacts: vec![ManifestArtifact {
-                    producer: "coverage-ci".into(),
-                    kind: ArtifactKind::Coverage,
-                    format: "generic".into(),
-                    path: "coverage.json".into(),
-                    content_hash: "unused".into(),
-                    compression: lineage::ArtifactCompression::None,
-                    scope: None,
-                    complete: true,
-                    evidence_scope: Some(DeclaredEvidenceScope {
-                        selection: "full".into(),
-                        mutant_corpus: "corpus-v1".into(),
-                        test_set: "unit".into(),
-                    }),
-                }],
+                artifacts: vec![
+                    ManifestArtifact {
+                        producer: "coverage-ci".into(),
+                        kind: ArtifactKind::Coverage,
+                        format: "generic".into(),
+                        path: "coverage.json".into(),
+                        content_hash: hex::encode(Sha256::digest(coverage)),
+                        compression: lineage::ArtifactCompression::None,
+                        scope: None,
+                        complete: true,
+                        evidence_scope: Some(DeclaredEvidenceScope {
+                            selection: "full".into(),
+                            mutant_corpus: "corpus-v1".into(),
+                            test_set: "unit".into(),
+                        }),
+                    },
+                    ManifestArtifact {
+                        producer: "first".into(),
+                        kind: ArtifactKind::Sarif,
+                        format: "sarif".into(),
+                        path: "first.sarif".into(),
+                        content_hash: hex::encode(Sha256::digest(sarif)),
+                        compression: lineage::ArtifactCompression::None,
+                        scope: None,
+                        complete: true,
+                        evidence_scope: Some(DeclaredEvidenceScope {
+                            selection: "full".into(),
+                            mutant_corpus: "not-applicable".into(),
+                            test_set: "unit".into(),
+                        }),
+                    },
+                    ManifestArtifact {
+                        producer: "second".into(),
+                        kind: ArtifactKind::Sarif,
+                        format: "sarif".into(),
+                        path: "second.sarif".into(),
+                        content_hash: hex::encode(Sha256::digest(sarif)),
+                        compression: lineage::ArtifactCompression::None,
+                        scope: None,
+                        complete: false,
+                        evidence_scope: None,
+                    },
+                ],
             })
             .unwrap(),
         )
@@ -1239,14 +2202,19 @@ mod tests {
             selection: None,
             mutant_corpus: None,
             test_set: None,
+            analyse: false,
+            trust_current_config: false,
+            require_profile: None,
+            require_complete: false,
         };
 
         resolve_diff_run_scope(&provider, &mut request).unwrap();
 
         assert_eq!(request.coverage_source.as_deref(), Some("coverage-ci"));
         assert_eq!(request.selection.as_deref(), Some("full"));
-        assert_eq!(request.mutant_corpus.as_deref(), Some("corpus-v1"));
+        assert_eq!(request.mutant_corpus.as_deref(), Some("not-applicable"));
         assert_eq!(request.test_set.as_deref(), Some("unit"));
+        assert!(request.sarif_source.is_none());
     }
 
     #[test]
@@ -1266,6 +2234,10 @@ mod tests {
             selection: Some("full".into()),
             mutant_corpus: None,
             test_set: None,
+            analyse: false,
+            trust_current_config: false,
+            require_profile: None,
+            require_complete: false,
         };
         assert!(resolve_diff_run_scope(&provider, &mut request)
             .unwrap_err()
@@ -1290,6 +2262,10 @@ mod tests {
             selection: None,
             mutant_corpus: None,
             test_set: None,
+            analyse: false,
+            trust_current_config: false,
+            require_profile: None,
+            require_complete: false,
         };
 
         resolve_diff_run_scope(&provider, &mut request).unwrap();
@@ -1311,7 +2287,9 @@ mod tests {
             .unwrap();
         fs::create_dir_all(directory.path().join(".lineage/artifacts/runs")).unwrap();
         fs::write(
-            directory.path().join(".lineage/artifacts/runs/manifest.json"),
+            directory
+                .path()
+                .join(".lineage/artifacts/runs/manifest.json"),
             "{}",
         )
         .unwrap();
@@ -1325,9 +2303,57 @@ mod tests {
         )
         .unwrap();
         fs::write(directory.path().join("unexpected.txt"), "dirty\n").unwrap();
-        assert!(ensure_clean_worktree(directory.path(), std::path::Path::new(".lineage/artifacts"), None)
-            .unwrap_err()
-            .to_string()
-            .contains("clean worktree"));
+        assert!(ensure_clean_worktree(
+            directory.path(),
+            std::path::Path::new(".lineage/artifacts"),
+            None
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("clean worktree"));
+    }
+
+    #[test]
+    fn parses_nul_porcelain_renames_and_unusual_names_without_display_quoting() {
+        let output = b" M spaced name.rb\0R  renamed name.rb\0old name.rb\0?? quote\"and\tunicode-\xE2\x98\x83.rb\0";
+        assert_eq!(
+            porcelain_v1_dirty_paths(output).unwrap(),
+            vec![
+                "spaced name.rb",
+                "renamed name.rb",
+                "old name.rb",
+                "quote\"and\tunicode-☃.rb",
+            ]
+        );
+        assert!(porcelain_v1_dirty_paths(b"R  only-new\0").is_err());
+    }
+
+    #[test]
+    fn publication_state_round_trips() {
+        let directory = tempdir().unwrap();
+        let run = directory.path().join("pending-run");
+        fs::create_dir_all(&run).unwrap();
+        write_publication_state(&run, PublicationState::Ingesting).unwrap();
+        assert_eq!(
+            publication_state(&run).unwrap(),
+            PublicationState::Ingesting
+        );
+        write_publication_state(&run, PublicationState::ReadyToPublish).unwrap();
+        assert_eq!(
+            publication_state(&run).unwrap(),
+            PublicationState::ReadyToPublish
+        );
+    }
+
+    #[test]
+    fn run_key_normalizes_each_durable_run_prefix() {
+        let directory = tempfile::tempdir().unwrap();
+        for prefix in ["pending-", "analysis-", "published-", "failed-"] {
+            let manifest = directory
+                .path()
+                .join(format!("{prefix}stable-run/manifest.json"));
+            std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+            assert_eq!(run_key(&manifest).unwrap(), "stable-run");
+        }
     }
 }

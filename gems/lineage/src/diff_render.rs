@@ -39,6 +39,27 @@ pub fn render_structured_diff_text(plan: &DiffPlan, full: bool) -> String {
         evidence_label(plan.evidence.hazards),
         evidence_label(plan.evidence.sarif)
     );
+    if full {
+        let evidence = [
+            ("coverage", plan.evidence.coverage),
+            ("mutation", plan.evidence.mutation),
+            ("hazards", plan.evidence.hazards),
+            ("sarif", plan.evidence.sarif),
+        ];
+        let exact = evidence
+            .iter()
+            .filter(|(_, state)| *state == EvidenceState::Exact)
+            .count();
+        let _ = writeln!(
+            output,
+            "Evidence completeness: {}/{} exact categories",
+            exact,
+            evidence.len()
+        );
+        for (category, state) in evidence {
+            let _ = writeln!(output, "  {:<9} {}", evidence_label(state), category);
+        }
+    }
     let _ = writeln!(
         output,
         "Inventory: {} directories, {} files ({} added, {} modified, {} deleted, {} renamed)",
@@ -182,6 +203,7 @@ mod tests {
     use super::*;
     use crate::diff::{DependencyChange, DependencyEntry, DependencyStatus, SarifFindingSummary};
     use crate::{build_diff_plan, RevisionFile};
+    use std::collections::BTreeMap;
 
     #[test]
     fn renders_versioned_json_without_losing_the_plan() {
@@ -209,6 +231,8 @@ mod tests {
             tier: Some(1),
             tier_one: true,
             status: "new".into(),
+            provenance: BTreeMap::new(),
+            proof_boundary: Vec::new(),
             start_line: 1,
             end_line: 1,
         });

@@ -99,6 +99,10 @@ class TestMiserTest < Minitest::Test
       assert_equal "test-miser", facts.fetch("source")
       assert_equal 8, facts.fetch("tests").length
       assert_equal 5, facts.fetch("mutants").length
+      refute_empty facts.fetch("subjects")
+      subject = facts.fetch("subjects").first
+      assert_equal subject.fetch("mutations"), subject.fetch("killed") + subject.fetch("alive")
+      refute_empty subject.fetch("method")
       assert_equal false, facts.dig("test_miser", "complete")
       assert_equal ["alias:no-kill"], facts.fetch("mutants").first.fetch("covered_by")
     end

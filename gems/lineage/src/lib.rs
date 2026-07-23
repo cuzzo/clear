@@ -73,22 +73,24 @@ pub use mutant::{
     MutantFact, MutantIngestOptions, MutantIngestStats,
 };
 pub use pipeline::{
-    execute_profile, latest_run_directory, load_config, load_run_manifest, publish_run,
-    repository_identity,
-    read_manifest_artifact, ArtifactCompression, ArtifactKind, CompletedRun, LineageConfig,
-    RunManifest, RunStatus,
+    latest_run_directory, load_config, load_config_contents, load_run_manifest, publish_run,
+    read_manifest_artifact, recover_workspace_transactions, repository_identity, run_manifest_hash,
+    seal_published_run, validate_run_artifacts, ArtifactCompression, ArtifactKind, CompletedRun,
+    LineageConfig, ProfileExecutionSession, ProfileRunKind, RunManifest, RunStatus,
 };
 pub use quality::{
     coverage_records_to_test_exposure_json, ingest_coverage_json,
     ingest_coverage_json_with_options, parse_coverage_input, resolve_coverage_record_paths,
     CoverageIngestOptions, CoverageIngestStats, CoverageRecord,
 };
-pub use sarif::{ingest_sarif_paths, SarifIngestStats};
+pub use sarif::{
+    ingest_sarif_paths, normalize_sarif_document, NormalizedSarifFinding, SarifIngestStats,
+};
 pub use stack_trace::{
     ingest_stack_traces, LanguageNormalizer, RepoPathNormalizer, SentryProvider, StackIngestStats,
     StackPayload, StackTraceProvider,
 };
-pub use storage::{EvidenceArtifactScope, Storage, UnitSummary};
+pub use storage::{CiRunRecord, EvidenceArtifactScope, Storage, UnitSummary};
 pub use test_exposure::{
     ingest_test_exposure_json, parse_test_exposure_records, TestExposureIngestStats,
     TestExposureRecord,

@@ -198,6 +198,12 @@ pub struct SarifFindingSummary {
     pub tier: Option<u8>,
     pub tier_one: bool,
     pub status: String,
+    /// Provider result properties preserved as stable strings so a transient
+    /// analysis overlay keeps its proof boundary and classification context.
+    pub provenance: BTreeMap<String, String>,
+    /// Explicit limits or incompleteness declarations supplied by the
+    /// analysis provider. An empty list means the provider supplied none.
+    pub proof_boundary: Vec<String>,
     pub start_line: u32,
     pub end_line: u32,
 }
@@ -588,7 +594,7 @@ pub fn apply_partial_coverage(plan: &mut DiffPlan, observations: &[CoverageObser
 /// legacy ledger rows, this contract carries explicit expected membership, so
 /// a zero-hit observation can become a truthful not-covered finding.
 pub fn apply_scoped_coverage(plan: &mut DiffPlan, artifact: &ScopedCoverageArtifact) {
-    if artifact.scope != plan.scope.evidence_scope {
+    if !same_common_evidence_scope(&artifact.scope, &plan.scope.evidence_scope) {
         plan.evidence.coverage = EvidenceState::Stale;
         return;
     }
@@ -601,7 +607,11 @@ pub fn apply_scoped_coverage(plan: &mut DiffPlan, artifact: &ScopedCoverageArtif
                 .map(|line| (file.path.clone(), *line))
         })
         .collect::<BTreeSet<_>>();
-    if !artifact.complete || artifact.expected_lines != expected {
+    // A complete run naturally records every line in its selected corpus,
+    // while a review examines only the changed subset. Exact review coverage
+    // therefore requires that the artifact's declared membership contains
+    // every reviewed line, not that both sets are identical.
+    if !artifact.complete || !expected.is_subset(&artifact.expected_lines) {
         apply_partial_coverage(plan, &artifact.observations);
         return;
     }
@@ -623,6 +633,15 @@ pub fn apply_scoped_coverage(plan: &mut DiffPlan, artifact: &ScopedCoverageArtif
     }
     plan.evidence.coverage = EvidenceState::Exact;
     plan.language_summaries = language_summaries(&plan.files);
+}
+
+fn same_common_evidence_scope(
+    left: &EvidenceScopeFingerprint,
+    right: &EvidenceScopeFingerprint,
+) -> bool {
+    left.revision == right.revision
+        && left.selection == right.selection
+        && left.test_set == right.test_set
 }
 
 /// Upgrades only already-observed covered lines. The mutation event ledger has
@@ -718,6 +737,11 @@ pub fn apply_partial_sarif_findings(plan: &mut DiffPlan, observations: &[SarifOb
 /// simply was not observed in the baseline. Keep it visible and explicitly
 /// incomparable rather than assigning it risk.
 pub fn apply_head_only_sarif_findings(plan: &mut DiffPlan, observations: &[SarifObservation]) {
+    // An empty complete head report is still meaningful: it establishes that
+    // this analyzer ran, even though there is no comparable baseline for an
+    // exact new/resolved classification.
+    plan.evidence.sarif = EvidenceState::Partial;
+    plan.evidence.hazards = EvidenceState::Partial;
     let mut observations = observations.to_vec();
     for observation in &mut observations {
         observation.finding.status = "uncompared".into();
@@ -769,11 +793,15 @@ pub fn apply_exact_sarif_findings(
                 let mut finding = observation.finding.clone();
                 finding.status = match base_by_identity.get(&sarif_identity(&finding)) {
                     None => "new",
-                    Some(base) if base.iter().any(|candidate| {
-                        candidate.path == observation.path
-                            && candidate.finding.start_line == finding.start_line
-                            && candidate.finding.end_line == finding.end_line
-                    }) => "persisted",
+                    Some(base)
+                        if base.iter().any(|candidate| {
+                            candidate.path == observation.path
+                                && candidate.finding.start_line == finding.start_line
+                                && candidate.finding.end_line == finding.end_line
+                        }) =>
+                    {
+                        "persisted"
+                    }
                     Some(_) => "moved",
                 }
                 .into();
@@ -1265,6 +1293,9 @@ fn parser_language(path: &str) -> Option<Language> {
 }
 
 fn classify_node_lines(node: Node<'_>, lines: &mut [LineKind]) {
+    if lines.is_empty() {
+        return;
+    }
     if node.is_named() && node.child_count() == 0 {
         let kind = node
             .kind()
@@ -1886,7 +1917,9 @@ fn normalized_override_path(value: &str, is_prefix: bool) -> Option<String> {
     let normalized = value.trim().trim_matches('/');
     if normalized.is_empty()
         || value.starts_with('/')
-        || normalized.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+        || normalized
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
     {
         return None;
     }
@@ -2575,13 +2608,10 @@ mod tests {
             file.path == "lib/0.rb" && file.head_source.as_deref() == Some("puts :value\n")
         }));
         assert!(plan.files.iter().any(|file| {
-            file.path == paged_path
-                && file.head_source.as_deref() == Some("puts :value\n")
+            file.path == paged_path && file.head_source.as_deref() == Some("puts :value\n")
         }));
         assert!(plan.files.iter().all(|file| {
-            file.path == "lib/0.rb"
-                || file.path == paged_path
-                || file.head_source.is_none()
+            file.path == "lib/0.rb" || file.path == paged_path || file.head_source.is_none()
         }));
     }
 
@@ -2841,6 +2871,46 @@ mod tests {
     }
 
     #[test]
+    fn complete_coverage_for_a_larger_corpus_is_exact_for_the_reviewed_subset() {
+        let scope = EvidenceScopeFingerprint {
+            revision: "head".into(),
+            selection: "full".into(),
+            mutant_corpus: "not-applicable".into(),
+            test_set: "unit".into(),
+        };
+        let mut plan = with_evidence_scope(
+            build_diff_plan(
+                "base",
+                "head",
+                Vec::new(),
+                vec![file("lib/app.rb", "def run\n  value\nend\n")],
+            ),
+            scope.clone(),
+        );
+        let mut expected = plan.files[0]
+            .line_verification
+            .keys()
+            .map(|line| ("lib/app.rb".to_string(), *line))
+            .collect::<BTreeSet<_>>();
+        expected.insert(("lib/unchanged.rb".to_string(), 1));
+        apply_scoped_coverage(
+            &mut plan,
+            &ScopedCoverageArtifact {
+                scope,
+                complete: true,
+                expected_lines: expected,
+                observations: vec![CoverageObservation {
+                    path: "lib/app.rb".into(),
+                    line: 1,
+                    hits: 1,
+                    is_partial: false,
+                }],
+            },
+        );
+        assert_eq!(plan.evidence.coverage, EvidenceState::Exact);
+    }
+
+    #[test]
     fn upgrades_only_known_covered_lines_with_partial_mutation_kills() {
         let mut plan = build_diff_plan(
             "base",
@@ -3015,6 +3085,18 @@ mod tests {
     }
 
     #[test]
+    fn classifies_empty_supported_source_without_indexing_an_absent_line() {
+        assert_eq!(
+            classify_source_lines(Some(""), "empty.go"),
+            Some(Vec::new())
+        );
+        let plan = build_diff_plan("base", "head", Vec::new(), vec![file("empty.go", "")]);
+        assert_eq!(plan.files.len(), 1);
+        assert!(plan.files[0].semantic_classification_available);
+        assert_eq!(plan.files[0].added_lines, AddedLines::default());
+    }
+
+    #[test]
     fn classifies_supported_tree_sitter_languages_from_syntax() {
         let fixtures = [
             ("value.c", "int value(void) { return 1; }\n"),
@@ -3184,6 +3266,8 @@ mod tests {
             tier: None,
             tier_one: false,
             status: "partial".into(),
+            provenance: BTreeMap::new(),
+            proof_boundary: Vec::new(),
             start_line,
             end_line,
         }
@@ -3192,13 +3276,34 @@ mod tests {
     #[test]
     fn recognizes_catalog_entries_and_raw_file_fallbacks() {
         let overrides = ClassificationOverrides::default();
-        assert_eq!(source_role_with_overrides("src/main.zig", &overrides), SourceRole::Production);
-        assert_eq!(source_role_with_overrides("spec/model_spec.rb", &overrides), SourceRole::Test);
-        assert_eq!(source_role_with_overrides("generated/api.ts", &overrides), SourceRole::Generated);
-        assert_eq!(source_role_with_overrides("README.md", &overrides), SourceRole::Documentation);
-        assert_eq!(source_role_with_overrides(".gitignore", &overrides), SourceRole::Configuration);
-        assert_eq!(source_role_with_overrides("go.sum", &overrides), SourceRole::Lockfile);
-        assert_eq!(source_role_with_overrides("image.avif", &overrides), SourceRole::Other);
+        assert_eq!(
+            source_role_with_overrides("src/main.zig", &overrides),
+            SourceRole::Production
+        );
+        assert_eq!(
+            source_role_with_overrides("spec/model_spec.rb", &overrides),
+            SourceRole::Test
+        );
+        assert_eq!(
+            source_role_with_overrides("generated/api.ts", &overrides),
+            SourceRole::Generated
+        );
+        assert_eq!(
+            source_role_with_overrides("README.md", &overrides),
+            SourceRole::Documentation
+        );
+        assert_eq!(
+            source_role_with_overrides(".gitignore", &overrides),
+            SourceRole::Configuration
+        );
+        assert_eq!(
+            source_role_with_overrides("go.sum", &overrides),
+            SourceRole::Lockfile
+        );
+        assert_eq!(
+            source_role_with_overrides("image.avif", &overrides),
+            SourceRole::Other
+        );
         assert_eq!(config_kind("Library.gemspec"), Some("ruby_manifest"));
         assert_eq!(
             config_kind(".github/actions/setup/action.yml"),
@@ -3240,10 +3345,22 @@ mod tests {
                 role = "generated"
             "#,
         ));
-        assert_eq!(source_role_with_overrides("spec/model_spec.rb", &overrides), SourceRole::Production);
-        assert_eq!(source_role_with_overrides("lib/generated.rb", &overrides), SourceRole::Test);
-        assert_eq!(source_role_with_overrides("lib/ordinary.rb", &overrides), SourceRole::Production);
-        assert_eq!(source_role_with_overrides("outside/file.rb", &overrides), SourceRole::Production);
+        assert_eq!(
+            source_role_with_overrides("spec/model_spec.rb", &overrides),
+            SourceRole::Production
+        );
+        assert_eq!(
+            source_role_with_overrides("lib/generated.rb", &overrides),
+            SourceRole::Test
+        );
+        assert_eq!(
+            source_role_with_overrides("lib/ordinary.rb", &overrides),
+            SourceRole::Production
+        );
+        assert_eq!(
+            source_role_with_overrides("outside/file.rb", &overrides),
+            SourceRole::Production
+        );
         assert_eq!(
             source_role_with_overrides(".lineage/diff.toml", &overrides),
             SourceRole::Configuration
