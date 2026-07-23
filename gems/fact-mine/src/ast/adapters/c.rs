@@ -115,7 +115,7 @@ pub(super) fn strip_native_nullability_annotations(source: &str) -> String {
     for matched in pattern.find_iter(&masked) {
         let annotation_start = matched
             .as_str()
-            .find(|character: char| character == '_')
+            .find('_')
             .expect("native annotation match contains an underscore");
         let start = matched.start() + annotation_start;
         for byte in &mut result[start..matched.end()] {

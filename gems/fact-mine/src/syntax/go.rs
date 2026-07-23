@@ -794,9 +794,11 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.starts_with('*') {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.starts_with('*')
+        {
             type_text.to_string()
         } else {
             format!("*{}", type_text)
@@ -1056,8 +1058,8 @@ fn span(node: &Node) -> Span {
 // exactly one tag.
 fn strip_struct_tag(text: &str) -> &str {
     let trimmed = text.trim_end();
-    if trimmed.ends_with('`') {
-        if let Some(start) = trimmed[..trimmed.len() - 1].rfind('`') {
+    if let Some(without_closing) = trimmed.strip_suffix('`') {
+        if let Some(start) = without_closing.rfind('`') {
             return trimmed[..start].trim_end();
         }
     }

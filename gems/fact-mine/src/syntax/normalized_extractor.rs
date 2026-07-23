@@ -2248,7 +2248,7 @@ fn tail_return(node: &Node) -> Option<&Node> {
     if !predicate_container_node(node) {
         return None;
     }
-    for child in child_nodes(node).into_iter().rev() {
+    if let Some(child) = child_nodes(node).into_iter().next_back() {
         if child.r#type == "RETURN" {
             return Some(child);
         }
@@ -2550,13 +2550,14 @@ fn is_unevaluated_context(node: &Node) -> bool {
     ) || (node.r#type == "FCALL" && node.text.trim_start().starts_with("noexcept("))
 }
 
+type DispatchEqualityGroup<'a> = Vec<(&'a ComparisonUse, String)>;
+
 fn collect_equality_dispatch_sites(
     comparisons: &[ComparisonUse],
     call_sites: &[CallSite],
     out: &mut Vec<DispatchSite>,
 ) {
-    let mut groups: BTreeMap<(String, String, String), Vec<(&ComparisonUse, String)>> =
-        BTreeMap::new();
+    let mut groups: BTreeMap<(String, String, String), DispatchEqualityGroup<'_>> = BTreeMap::new();
     for comparison in comparisons {
         let Some((predicate, variant)) = dispatch_equality(&comparison.canon_source) else {
             continue;
@@ -2765,7 +2766,7 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
             }
         }
         let before_name = text[..idx].trim_end();
-        if let Some(last_part) = before_name.split(|c| c == '=' || c == ':').last() {
+        if let Some(last_part) = before_name.split(['=', ':']).next_back() {
             let last_part = last_part.trim();
             let mut parts = last_part.split_whitespace().collect::<Vec<_>>();
             while !parts.is_empty()
@@ -2829,6 +2830,7 @@ fn effect_key(site: &SemanticEffectSite) -> (String, String, String, usize, Span
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)] // Mock AST fixtures intentionally override one behavior at a time.
 mod tests {
     use super::*;
     use crate::ast::{Child, Node};
@@ -3046,7 +3048,7 @@ mod tests {
             enclosing_span: [1, 0, 1, 10],
         };
         let mut out = Vec::new();
-        collect_equality_dispatch_sites(&[c1.clone()], &[], &mut out);
+        collect_equality_dispatch_sites(std::slice::from_ref(&c1), &[], &mut out);
         assert!(out.is_empty());
 
         let c2 = ComparisonUse {

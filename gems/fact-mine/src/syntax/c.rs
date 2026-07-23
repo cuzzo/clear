@@ -189,9 +189,11 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 
     fn state_identity(&self, owner: &str, field: &str) -> String {
-        (!owner.is_empty())
-            .then(|| format!("{owner}::{field}"))
-            .unwrap_or_default()
+        if !owner.is_empty() {
+            format!("{owner}::{field}")
+        } else {
+            Default::default()
+        }
     }
 
     fn suppress_state_read_for_call(
@@ -314,8 +316,7 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         }
         let text = text.split('=').next().unwrap_or(text).trim();
         text.split(|ch: char| !(ch == '_' || ch == '?' || ch.is_ascii_alphanumeric()))
-            .filter(|part| !part.is_empty())
-            .next_back()
+            .rfind(|part| !part.is_empty())
             .map(|part| part.trim_end_matches('?').to_string())
     }
 
@@ -379,8 +380,7 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         node.text
             .trim_end_matches(';')
             .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-            .filter(|part| simple_identifier(part))
-            .next_back()
+            .rfind(|part| simple_identifier(part))
             .map(str::to_string)
     }
     fn format_array_type(&self, elem: &str) -> String {
@@ -396,9 +396,11 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.ends_with('*') {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.ends_with('*')
+        {
             type_text.to_string()
         } else {
             format!("{}*", type_text)
@@ -553,10 +555,7 @@ mod tests {
             ..node("VCALL", "callback()")
         };
         assert_eq!(local_call_subject(&malformed), None);
-        assert_eq!(
-            CNormalizedBehavior.function_value_calls_are_local_reads(),
-            true
-        );
+        assert!(CNormalizedBehavior.function_value_calls_are_local_reads());
 
         let address = Node {
             children: vec![Child::Node(Box::new(node("LVAR", "value")))],

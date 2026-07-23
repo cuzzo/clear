@@ -183,6 +183,7 @@ fn reachable_nodes(
     reachable
 }
 
+#[allow(clippy::too_many_arguments)] // These are the independent dataflow inputs, not an unstable options bag.
 fn append_dominators(
     facts: &mut ControlFlowFacts,
     file: &str,
@@ -354,6 +355,7 @@ fn append_reaching_and_def_use(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // These are the independent dataflow inputs, not an unstable options bag.
 fn append_liveness(
     facts: &mut ControlFlowFacts,
     file: &str,

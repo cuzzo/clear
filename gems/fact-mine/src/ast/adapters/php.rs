@@ -196,7 +196,7 @@ fn php_member_receiver<'tree>(node: TreeSitterNode<'tree>) -> Option<TreeSitterN
 fn php_member_name<'tree>(node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
     node.child_by_field_name("name")
         .or_else(|| node.child_by_field_name("field"))
-        .or_else(|| php_named_children(node).into_iter().rev().next())
+        .or_else(|| php_named_children(node).into_iter().next_back())
 }
 
 fn php_identifier_text(text: &str) -> String {

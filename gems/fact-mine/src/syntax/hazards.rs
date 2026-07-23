@@ -595,52 +595,46 @@ fn reflection_result_kind(
         (Language::CSharp, Some(ReflectionValueKind::CSharpType), "GetType") => {
             Some(ReflectionValueKind::CSharpType)
         }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
-            if matches!(method, "GetMethod" | "GetMethods") =>
-        {
+        (Language::CSharp, Some(ReflectionValueKind::CSharpType), "GetMethod" | "GetMethods") => {
             Some(ReflectionValueKind::CSharpMethodInfo)
         }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
-            if matches!(method, "GetField" | "GetFields") =>
-        {
+        (Language::CSharp, Some(ReflectionValueKind::CSharpType), "GetField" | "GetFields") => {
             Some(ReflectionValueKind::CSharpFieldInfo)
         }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
-            if matches!(method, "GetProperty" | "GetProperties") =>
-        {
-            Some(ReflectionValueKind::CSharpPropertyInfo)
-        }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpType), method)
-            if matches!(method, "GetConstructor" | "GetConstructors") =>
-        {
-            Some(ReflectionValueKind::CSharpConstructorInfo)
-        }
-        (Language::CSharp, Some(ReflectionValueKind::CSharpAssembly), method)
-            if matches!(method, "Load" | "LoadFrom" | "LoadFile") =>
-        {
-            Some(ReflectionValueKind::CSharpAssembly)
-        }
+        (
+            Language::CSharp,
+            Some(ReflectionValueKind::CSharpType),
+            "GetProperty" | "GetProperties",
+        ) => Some(ReflectionValueKind::CSharpPropertyInfo),
+        (
+            Language::CSharp,
+            Some(ReflectionValueKind::CSharpType),
+            "GetConstructor" | "GetConstructors",
+        ) => Some(ReflectionValueKind::CSharpConstructorInfo),
+        (
+            Language::CSharp,
+            Some(ReflectionValueKind::CSharpAssembly),
+            "Load" | "LoadFrom" | "LoadFile",
+        ) => Some(ReflectionValueKind::CSharpAssembly),
         (Language::Java, Some(ReflectionValueKind::JavaClass), "forName") => {
             Some(ReflectionValueKind::JavaClass)
         }
         (Language::Java, Some(ReflectionValueKind::JavaClassLoader), "loadClass") => {
             Some(ReflectionValueKind::JavaClass)
         }
-        (Language::Java, Some(ReflectionValueKind::JavaClass), method)
-            if matches!(method, "getMethod" | "getDeclaredMethod") =>
-        {
-            Some(ReflectionValueKind::JavaMethod)
-        }
-        (Language::Java, Some(ReflectionValueKind::JavaClass), method)
-            if matches!(method, "getField" | "getDeclaredField") =>
-        {
+        (
+            Language::Java,
+            Some(ReflectionValueKind::JavaClass),
+            "getMethod" | "getDeclaredMethod",
+        ) => Some(ReflectionValueKind::JavaMethod),
+        (Language::Java, Some(ReflectionValueKind::JavaClass), "getField" | "getDeclaredField") => {
             Some(ReflectionValueKind::JavaField)
         }
-        (Language::Java, Some(ReflectionValueKind::JavaClass), method)
-            if matches!(method, "getConstructor" | "getDeclaredConstructor") =>
-        {
-            Some(ReflectionValueKind::JavaConstructor)
-        }
+        (
+            Language::Java,
+            Some(ReflectionValueKind::JavaClass),
+            "getConstructor" | "getDeclaredConstructor",
+        ) => Some(ReflectionValueKind::JavaConstructor),
         _ => None,
     }
 }
@@ -677,9 +671,7 @@ fn infer_reflection_value_kind(
             .ok()
             .and_then(|name| bindings.get(name).copied());
     }
-    let Some((receiver, method)) = reflection_call_parts(value, language, source) else {
-        return None;
-    };
+    let (receiver, method) = reflection_call_parts(value, language, source)?;
     let receiver_kind = if language == Language::Java && method == "getClass" {
         None
     } else {
@@ -704,12 +696,10 @@ fn reflection_declarator_value<'tree>(declarator: Node<'tree>) -> Option<Node<'t
     }
     let name_id = declarator.child_by_field_name("name").map(|name| name.id());
     let mut cursor = declarator.walk();
-    for child in declarator.children(&mut cursor) {
-        if child.is_named() && Some(child.id()) != name_id {
-            return Some(child);
-        }
-    }
-    None
+    let value = declarator
+        .children(&mut cursor)
+        .find(|&child| child.is_named() && Some(child.id()) != name_id);
+    value
 }
 
 type ReflectionBindings = std::collections::HashMap<String, ReflectionValueKind>;
@@ -848,6 +838,7 @@ fn merge_reflection_bindings(branches: &[ReflectionBindings]) -> ReflectionBindi
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)] // Reflection propagation needs explicit language and shadowing context.
 fn process_reflection_flow_node(
     node: Node,
     scope: Node,
@@ -1605,6 +1596,7 @@ fn compute_callback_origins(
     origins
 }
 
+#[allow(clippy::nonminimal_bool)] // Callback gating is deliberately spelled as independent conservative exclusions.
 pub fn detect_and_append_callback_hazards(document: &mut Document) {
     let file_stem = std::path::Path::new(&document.file)
         .file_stem()
@@ -1699,13 +1691,13 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
             }
         } else {
             let mut is_cb_receiver = false;
-            if call.receiver != "self" && call.receiver != "this" {
-                if enclosing_fn.params.contains(&call.receiver)
+            if call.receiver != "self"
+                && call.receiver != "this"
+                && (enclosing_fn.params.contains(&call.receiver)
                     || enclosing_fn.callback_params.contains(&call.receiver)
-                    || origin.param_derived.contains(&call.receiver)
-                {
-                    is_cb_receiver = true;
-                }
+                    || origin.param_derived.contains(&call.receiver))
+            {
+                is_cb_receiver = true;
             }
 
             if is_cb_receiver {
@@ -1732,7 +1724,7 @@ pub fn detect_and_append_callback_hazards(document: &mut Document) {
                             .message
                             .chars()
                             .nth(2)
-                            .map_or(false, |c| c.is_ascii_uppercase()));
+                            .is_some_and(|c| c.is_ascii_uppercase()));
 
                 let is_invoker = matches!(
                     call.message.as_str(),

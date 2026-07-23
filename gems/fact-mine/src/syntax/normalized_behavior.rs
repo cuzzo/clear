@@ -899,9 +899,11 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// default: two unrelated classes both having `config` or `kind` state
     /// must never be analyzed as one mutable field.
     fn state_identity(&self, owner: &str, field: &str) -> String {
-        (!owner.is_empty())
-            .then(|| format!("{owner}::{field}"))
-            .unwrap_or_default()
+        if !owner.is_empty() {
+            format!("{owner}::{field}")
+        } else {
+            Default::default()
+        }
     }
 
     fn empty_check_call(&self, _message: &str) -> bool {
@@ -1393,8 +1395,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         }
         let text = text.split('=').next().unwrap_or(text).trim();
         text.split(|ch: char| !(ch == '_' || ch == '?' || ch.is_ascii_alphanumeric()))
-            .filter(|part| !part.is_empty())
-            .next_back()
+            .rfind(|part| !part.is_empty())
             .map(|part| part.trim_end_matches('?').to_string())
     }
 

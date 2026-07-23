@@ -187,8 +187,10 @@ mod tests {
     #[test]
     fn joins_only_exact_compiler_symbols() {
         let symbol = "scip-java maven maven/acme/demo 1 acme/Demo#read().";
-        let mut output = ProfileOutput::default();
-        output.calls = vec![call(Some(symbol)), call(Some("other")), call(None)];
+        let mut output = ProfileOutput {
+            calls: vec![call(Some(symbol)), call(Some("other")), call(None)],
+            ..ProfileOutput::default()
+        };
         let json = serde_json::json!({
             "schema": SCHEMA,
             "symbols": {

@@ -25,7 +25,7 @@ fn test_cli_error_paths_and_variations() {
 
     // 3. profile requires at least one file
     let out = Command::new(bin_path)
-        .args(&["profile", "espalier"])
+        .args(["profile", "espalier"])
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -34,7 +34,7 @@ fn test_cli_error_paths_and_variations() {
 
     // 4. unsupported profile
     let out = Command::new(bin_path)
-        .args(&["profile", "invalid-profile", "Cargo.toml"])
+        .args(["profile", "invalid-profile", "Cargo.toml"])
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -43,7 +43,7 @@ fn test_cli_error_paths_and_variations() {
 
     // 5. unsupported option in syntax-facts
     let out = Command::new(bin_path)
-        .args(&["syntax-facts", "--invalid-flag", "Cargo.toml"])
+        .args(["syntax-facts", "--invalid-flag", "Cargo.toml"])
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -52,7 +52,7 @@ fn test_cli_error_paths_and_variations() {
 
     // 6. unsupported option in profile
     let out = Command::new(bin_path)
-        .args(&["profile", "espalier", "--invalid-flag", "Cargo.toml"])
+        .args(["profile", "espalier", "--invalid-flag", "Cargo.toml"])
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -61,7 +61,7 @@ fn test_cli_error_paths_and_variations() {
 
     // 7. run profile to stdout (no --output flag)
     let out = Command::new(bin_path)
-        .args(&["profile", "espalier", "src/lib.rs"])
+        .args(["profile", "espalier", "src/lib.rs"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -72,7 +72,7 @@ fn test_cli_error_paths_and_variations() {
     let temp_dir = std::env::temp_dir();
     let temp_file = temp_dir.join("test_out.json");
     let out = Command::new(bin_path)
-        .args(&[
+        .args([
             "profile",
             "espalier",
             &format!("--output={}", temp_file.display()),
@@ -86,21 +86,21 @@ fn test_cli_error_paths_and_variations() {
 
     // 9. run profile with --language=rust
     let out = Command::new(bin_path)
-        .args(&["profile", "espalier", "--language=rust", "src/lib.rs"])
+        .args(["profile", "espalier", "--language=rust", "src/lib.rs"])
         .output()
         .unwrap();
     assert!(out.status.success());
 
     // 10. run profile --language without value (error)
     let out = Command::new(bin_path)
-        .args(&["profile", "espalier", "--language", "src/lib.rs"])
+        .args(["profile", "espalier", "--language", "src/lib.rs"])
         .output()
         .unwrap();
     assert!(!out.status.success());
 
     // 11. call-resolution exposes both machine-readable and human reports
     let out = Command::new(bin_path)
-        .args(&["call-resolution", "--format=json", "src/lib.rs"])
+        .args(["call-resolution", "--format=json", "src/lib.rs"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -109,7 +109,7 @@ fn test_cli_error_paths_and_variations() {
     assert!(coverage.get("unresolved_by_reason").is_some());
 
     let out = Command::new(bin_path)
-        .args(&["call-resolution", "src/lib.rs"])
+        .args(["call-resolution", "src/lib.rs"])
         .output()
         .unwrap();
     assert!(out.status.success());

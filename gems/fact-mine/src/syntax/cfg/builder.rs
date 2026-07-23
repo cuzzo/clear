@@ -352,6 +352,7 @@ fn append_ensure(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)] // CFG edge construction needs its explicit traversal context.
 fn append_cleanup_for_exit(
     item: &SequenceItem<'_>,
     cleanup: &[&Node],

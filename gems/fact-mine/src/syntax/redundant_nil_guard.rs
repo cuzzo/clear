@@ -331,6 +331,7 @@ impl<'a> RedundantNilGuard<'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // Refinement facts retain each proof component explicitly.
     fn push_refinement(
         &mut self,
         function: &str,

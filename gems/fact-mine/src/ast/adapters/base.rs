@@ -787,12 +787,11 @@ pub(crate) trait AstNormalizationAdapter: Sync {
             }
 
             let stripped = node_text(node, source).trim();
-            if stripped == node_text(child, source)
-                || stripped == format!("{};", node_text(child, source))
+            if (stripped == node_text(child, source)
+                || stripped == format!("{};", node_text(child, source)))
+                && ARRAY_LITERAL_NODE_KINDS.contains(&child.kind())
             {
-                if ARRAY_LITERAL_NODE_KINDS.contains(&child.kind()) {
-                    return Some(child);
-                }
+                return Some(child);
             }
         }
 
@@ -926,7 +925,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     }
 
     fn heredoc_body_statement(&self, node: TreeSitterNode<'_>) -> bool {
-        self.heredoc_body_nodes(node).first().is_some()
+        !self.heredoc_body_nodes(node).is_empty()
     }
 
     fn heredoc_start_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
@@ -997,14 +996,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     fn concatenated_string_target<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
-        source: &str,
+        _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
         if self.concatenated_string_node(node) {
             return Some(node);
         }
         let children = named_children(node);
         if children.len() == 1 {
-            return self.concatenated_string_target(children[0], source);
+            return self.concatenated_string_target(children[0], _source);
         }
         None
     }

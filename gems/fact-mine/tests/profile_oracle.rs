@@ -1307,10 +1307,6 @@ fn ruby_calculator_extracts_methods() -> Result<()> {
             .collect::<Vec<_>>()
             .join(" ")
     );
-    assert!(
-        !add_method.signature.is_empty() || true,
-        "signature optional without Sorbet sigs"
-    );
 
     let result_method = output
         .methods
@@ -1641,7 +1637,7 @@ end
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
     let declared = document
         .method_param_types
-        .get("TypedInputs\0run\04")
+        .get(&format!("TypedInputs\0run\0{}", 4))
         .context("missing declared parameter shapes")?;
     assert_eq!(
         declared.get("weak").map(String::as_str),

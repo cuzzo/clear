@@ -759,7 +759,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
                 &path,
                 &mut Vec::new(),
                 &mut struct_declarations,
-                &*behavior,
+                behavior,
             );
             crate::type_inference::collect_tlet_sites(&root, &path, &mut tlet_sites);
             // The field inventory keeps one representative write per state
@@ -818,7 +818,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
 
     let mut struct_declarations = extract_struct_declarations(document, &language, &path);
     let behavior = crate::syntax::normalized_behavior::behavior(
-        crate::syntax::Language::parse(&document.language.as_str())
+        crate::syntax::Language::parse(document.language.as_str())
             .unwrap_or(crate::syntax::Language::Ruby),
     );
     if let Some(ref root) = root_node {
@@ -827,7 +827,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
             &path,
             &mut Vec::new(),
             &mut struct_declarations,
-            &*behavior,
+            behavior,
         );
     }
     let state_type_edges = extract_state_type_edges(document, &language, &path);
@@ -3265,18 +3265,19 @@ fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {
     let mut header = String::new();
     let mut open_parens = 0;
     let mut has_parens = false;
-    for i in start_idx..std::cmp::min(lines.len(), start_idx + 10) {
-        let line = &lines[i];
+    for line in lines
+        .iter()
+        .take(std::cmp::min(lines.len(), start_idx + 10))
+        .skip(start_idx)
+    {
         header.push_str(line);
         header.push('\n');
         for c in line.chars() {
             if c == '(' {
                 open_parens += 1;
                 has_parens = true;
-            } else if c == ')' {
-                if open_parens > 0 {
-                    open_parens -= 1;
-                }
+            } else if c == ')' && open_parens > 0 {
+                open_parens -= 1;
             }
         }
         if has_parens && open_parens == 0 {
@@ -4841,7 +4842,7 @@ fn type_reference_candidates(type_text: &str) -> Vec<String> {
         if word
             .chars()
             .next()
-            .map_or(false, |c| c.is_uppercase() || c == '_')
+            .is_some_and(|c| c.is_uppercase() || c == '_')
         {
             out.push(word.to_string());
         }
@@ -5072,6 +5073,7 @@ fn collect_array_shapes_from_ast(
     }
 }
 
+#[allow(clippy::if_same_then_else)] // Quote forms intentionally share extraction after syntax validation.
 fn collect_hash_shapes_from_ast(
     node: &crate::ast::Node,
     language: &str,
@@ -5149,8 +5151,8 @@ fn collect_hash_shapes_from_ast(
     }
 }
 
-fn collect_struct_declarations<'a>(
-    node: &'a crate::ast::Node,
+fn collect_struct_declarations(
+    node: &crate::ast::Node,
     path: &str,
     namespace: &mut Vec<String>,
     struct_declarations: &mut Vec<StructDeclaration>,
@@ -5274,7 +5276,7 @@ fn infer_literal_type(value: &str, language: &str) -> String {
     if value.starts_with("%s") {
         return "Symbol".to_string();
     }
-    if value.chars().next().map_or(false, |c| c.is_uppercase()) {
+    if value.chars().next().is_some_and(|c| c.is_uppercase()) {
         return value.to_string();
     }
     if lang == "javascript" || lang == "typescript" {
@@ -6720,10 +6722,14 @@ end
     }
 
     pub(crate) fn test_nil_kill_profile_merge_impl() {
-        let mut p1 = ProfileOutput::default();
-        p1.collection_index_lookups = vec![serde_json::json!({"test": 1})];
-        let mut p2 = ProfileOutput::default();
-        p2.collection_index_lookups = vec![serde_json::json!({"test": 2})];
+        let p1 = ProfileOutput {
+            collection_index_lookups: vec![serde_json::json!({"test": 1})],
+            ..ProfileOutput::default()
+        };
+        let p2 = ProfileOutput {
+            collection_index_lookups: vec![serde_json::json!({"test": 2})],
+            ..ProfileOutput::default()
+        };
 
         let merged = merge(vec![p1, p2], Profile::NilKill);
         assert_eq!(merged.collection_index_lookups.len(), 2);
@@ -7766,7 +7772,7 @@ pub(crate) fn child_nodes(node: &crate::ast::Node) -> Vec<&crate::ast::Node> {
         .collect()
 }
 
-pub(crate) fn call_arguments<'a>(args_node: &'a crate::ast::Node) -> Vec<&'a crate::ast::Node> {
+pub(crate) fn call_arguments(args_node: &crate::ast::Node) -> Vec<&crate::ast::Node> {
     let t = args_node.r#type.as_str();
     if t == "argument_list"
         || t == "arguments"
@@ -7803,8 +7809,8 @@ fn get_receiver_alias(text: &str) -> Option<String> {
     let t = text.trim_start();
     if let Some(rest) = t.strip_prefix("func") {
         let rest = rest.trim_start();
-        if rest.starts_with('(') {
-            if let Some((receiver_part, _)) = rest[1..].split_once(')') {
+        if let Some(receiver_body) = rest.strip_prefix('(') {
+            if let Some((receiver_part, _)) = receiver_body.split_once(')') {
                 let parts: Vec<&str> = receiver_part.split_whitespace().collect();
                 if !parts.is_empty() {
                     let r = parts[0].trim_start_matches('*').to_string();
@@ -7908,7 +7914,7 @@ impl<'a> StateParamVisitor<'a> {
                     let mut owner = self.current_owners.last().cloned().unwrap_or_default();
                     let mut final_func_name = func_name.clone();
                     if owner.is_empty() {
-                        if let Some(pos) = func_name.rfind(|c| c == ':' || c == '.') {
+                        if let Some(pos) = func_name.rfind([':', '.']) {
                             owner = func_name[..pos].to_string();
                             final_func_name = func_name[pos + 1..].to_string();
                         }
@@ -8033,7 +8039,7 @@ impl<'a> StateParamVisitor<'a> {
                 Some(field_symbol),
                 Some(crate::ast::Child::Node(args_node)),
             ) = (
-                node.children.get(0),
+                node.children.first(),
                 child_symbol(node, 1),
                 node.children.get(2),
             ) {
@@ -8053,10 +8059,7 @@ impl<'a> StateParamVisitor<'a> {
 
                 if let Some(field) = field_name {
                     let arg_children = call_arguments(args_node);
-                    let val_node = arg_children
-                        .last()
-                        .map(|n| *n)
-                        .unwrap_or(args_node.as_ref());
+                    let val_node = arg_children.last().copied().unwrap_or(args_node.as_ref());
                     if let Some(param_name) = find_param_ref(val_node, &fn_def.params) {
                         self.origins.push(crate::syntax::StateParamOrigin {
                             field,

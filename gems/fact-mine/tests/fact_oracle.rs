@@ -27,7 +27,7 @@ fn syntax_fact_examples_match_oracles() -> Result<()> {
             serde_json::from_str(&fs::read_to_string(&oracle_path)?)
                 .with_context(|| format!("read {}", oracle_path.display()))?
         };
-        let actual = syntax_oracle::project_files(&[fixture.clone()], language)
+        let actual = syntax_oracle::project_files(std::slice::from_ref(&fixture), language)
             .with_context(|| format!("project {}", fixture.display()))?;
         let actual = project_expected_shape(&actual, &expected)?;
 
@@ -732,7 +732,7 @@ fn source_fact_examples_match_oracles() -> Result<()> {
             actual.insert(
                 "local_flow".to_string(),
                 project_local_flow(&value(syntax::local_flow::scan_files(
-                    &[fixture.clone()],
+                    std::slice::from_ref(&fixture),
                     language,
                 )?)?),
             );
@@ -741,7 +741,7 @@ fn source_fact_examples_match_oracles() -> Result<()> {
             actual.insert(
                 "path_condition".to_string(),
                 project_path_condition(&value(syntax::path_condition::scan_files(
-                    &[fixture.clone()],
+                    std::slice::from_ref(&fixture),
                     language,
                 )?)?),
             );
@@ -775,7 +775,7 @@ fn regression_fixtures_preserve_utf8_state_scope_and_product_domains() -> Result
     // Scanning the fixture exercises the formerly panicking path-condition
     // excerpt and establishes that identical `$this->options` spellings stay
     // owner-relative rather than becoming one global flow root.
-    let path_conditions = syntax::path_condition::scan_documents(&[php.clone()]);
+    let path_conditions = syntax::path_condition::scan_documents(std::slice::from_ref(&php));
     // The fixture reaches the normalized path-condition pass; successful
     // completion is the regression for the former UTF-8 boundary panic.
     assert_eq!(path_conditions.neglected.len(), 0);
@@ -1258,9 +1258,9 @@ fn javascript_bound_method_setup_is_not_mutable_instance_state() -> Result<()> {
     use std::io::Write;
 
     let mut fixture = tempfile::Builder::new().suffix(".ts").tempfile()?;
-    write!(
+    writeln!(
         fixture,
-        "class Handler {{ run() {{}} constructor() {{ this.run = this.run.bind(this); }} }}\n"
+        "class Handler {{ run() {{}} constructor() {{ this.run = this.run.bind(this); }} }}"
     )?;
     let document = syntax::parse_file(fixture.path().to_path_buf(), Language::TypeScript)?;
     assert!(!document

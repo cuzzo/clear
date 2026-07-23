@@ -306,7 +306,7 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
         } else {
             field
         };
-        if let Some(pos) = field_truncated.rfind(|c| c == '.' || c == ':') {
+        if let Some(pos) = field_truncated.rfind(['.', ':']) {
             let receiver = &field_truncated[..pos];
             let actual_field = &field_truncated[pos + 1..];
             if simple_dotted_part(receiver) && simple_identifier(actual_field) {
@@ -382,9 +382,12 @@ impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.ends_with("|nil") || type_text.starts_with("nil|") {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.ends_with("|nil")
+            || type_text.starts_with("nil|")
+        {
             type_text.to_string()
         } else {
             format!("{}|nil", type_text)
@@ -541,7 +544,7 @@ fn lua_function_owner(text: &str) -> Option<String> {
         Some(pos) => rest[..pos].trim(),
         None => rest.trim(),
     };
-    let separator = name_part.rfind(|c| c == ':' || c == '.')?;
+    let separator = name_part.rfind([':', '.'])?;
     let owner = &name_part[..separator];
     simple_dotted_part(owner).then(|| owner.to_string())
 }

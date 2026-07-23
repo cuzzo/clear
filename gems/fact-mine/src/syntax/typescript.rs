@@ -523,7 +523,7 @@ fn is_simple_name(name: &str) -> bool {
         && name
             .chars()
             .next()
-            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
         && name
             .chars()
             .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())

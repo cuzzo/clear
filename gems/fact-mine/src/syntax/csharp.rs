@@ -272,6 +272,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         format!("this.{message}")
     }
 
+    #[allow(clippy::never_loop)] // The nested AST walk may emit multiple writes despite sparse mock-node shapes.
     fn initializer_writes(
         &self,
         node: &Node,
@@ -400,8 +401,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         decl_part
             .trim_end_matches(';')
             .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
-            .filter(|part| !part.is_empty())
-            .next_back()
+            .rfind(|part| !part.is_empty())
             .map(str::to_string)
     }
 
@@ -538,9 +538,11 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     }
 
     fn format_nilable_type(&self, type_text: &str) -> String {
-        if type_text.is_empty() || type_text == "nil" || type_text == "null" {
-            type_text.to_string()
-        } else if type_text.ends_with('?') {
+        if type_text.is_empty()
+            || type_text == "nil"
+            || type_text == "null"
+            || type_text.ends_with('?')
+        {
             type_text.to_string()
         } else {
             format!("{}?", type_text)

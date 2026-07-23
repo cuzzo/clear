@@ -345,15 +345,13 @@ fn get_empty_node() -> &'static crate::ast::Node {
     })
 }
 
-fn match_call<'a>(
-    node: &'a crate::ast::Node,
-) -> Option<(&'a crate::ast::Node, String, &'a crate::ast::Node)> {
+fn match_call(node: &crate::ast::Node) -> Option<(&crate::ast::Node, String, &crate::ast::Node)> {
     if node.r#type == "CALL"
         || node.r#type == "QCALL"
         || node.r#type == "OPCALL"
         || node.r#type == "ATTRASGN"
     {
-        let receiver = match node.children.get(0)? {
+        let receiver = match node.children.first()? {
             crate::ast::Child::Node(n) => n.as_ref(),
             _ => return None,
         };
@@ -442,11 +440,11 @@ fn return_control_shape(
     }
     if explicit
         .iter()
-        .any(|expr| branching_return_expression(*expr))
+        .any(|expr| branching_return_expression(expr))
     {
         return "branching";
     }
-    if implicit_present && implicit.is_some_and(|expr| branching_return_expression(expr)) {
+    if implicit_present && implicit.is_some_and(branching_return_expression) {
         return "branching";
     }
     "branchless"
@@ -461,7 +459,7 @@ fn branching_return_expression(node: &crate::ast::Node) -> bool {
     }
     child_nodes(node)
         .into_iter()
-        .any(|child| branching_return_expression(child))
+        .any(branching_return_expression)
 }
 
 fn return_syntax(explicit_empty: bool, implicit_present: bool) -> &'static str {
@@ -1253,7 +1251,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                     if let Some(receiver_type) = self.expression_type(rec) {
                         if let Some(info) = collection_type_info(&receiver_type) {
                             if info.kind == "hash" {
-                                if let Some(p0) = param_names.get(0) {
+                                if let Some(p0) = param_names.first() {
                                     if let Some(ref key_ty) = info.element {
                                         if useful_type(key_ty) {
                                             self.local_types.insert(p0.clone(), key_ty.clone());
@@ -1268,7 +1266,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                     }
                                 }
                             } else {
-                                if let Some(p0) = param_names.get(0) {
+                                if let Some(p0) = param_names.first() {
                                     if let Some(ref elem_ty) = info.element {
                                         if useful_type(elem_ty) {
                                             self.local_types.insert(p0.clone(), elem_ty.clone());
@@ -1279,7 +1277,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                         }
                     }
 
-                    if let Some(p0) = param_names.get(0) {
+                    if let Some(p0) = param_names.first() {
                         if let Some(shape) = self.array_element_shape_for_receiver(Some(rec)) {
                             self.local_hash_shapes.insert(p0.clone(), shape);
                         }
@@ -1476,7 +1474,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             let arg_nodes = call_arguments(args_node);
                             if let Some(type_node) = arg_nodes.get(1) {
                                 resolved_type = Some(TypeExpr::parse(
-                                    &type_node.text.trim(),
+                                    type_node.text.trim(),
                                     self.document.language.as_str(),
                                 ));
                             }
@@ -1568,16 +1566,14 @@ impl<'a> TypeInferenceVisitor<'a> {
                             "reason": format!("{} is provably non-nil", receiver.text),
                         }));
                     }
-                } else if self.behavior.is_nil_check(&method) {
-                    if self.provably_non_nil(receiver) {
-                        self.facts.dead_nil_checks.push(json!({
+                } else if self.behavior.is_nil_check(&method) && self.provably_non_nil(receiver) {
+                    self.facts.dead_nil_checks.push(json!({
                             "path": self.path,
                             "line": node.first_lineno,
                             "kind": "nil_check",
                             "code": node.text.clone(),
                             "reason": format!("{} is provably non-nil; .nil? is always false", receiver.text),
                         }));
-                    }
                 }
             }
         }
@@ -2233,15 +2229,15 @@ impl<'a> TypeInferenceVisitor<'a> {
                             let mut p0_name = None;
                             if let Some(block) = child_node(value, 1) {
                                 let mut args_node = None;
-                                for child in child_nodes(&block) {
+                                for child in child_nodes(block) {
                                     if child.r#type == "ARGS" {
                                         args_node = Some(child);
                                         break;
                                     }
                                 }
                                 if let Some(args) = args_node {
-                                    let param_names = collect_block_param_names(&args);
-                                    if let Some(p0) = param_names.get(0) {
+                                    let param_names = collect_block_param_names(args);
+                                    if let Some(p0) = param_names.first() {
                                         p0_name = Some(p0.clone());
                                     }
                                 }
@@ -2455,17 +2451,14 @@ impl<'a> TypeInferenceVisitor<'a> {
                         non_nil.push(r.clone());
                     }
                 }
-                let mut normalized = non_nil
-                    .iter()
-                    .map(|ty| strip_nilable_type(ty))
-                    .collect::<Vec<_>>();
+                let mut normalized = non_nil.iter().map(strip_nilable_type).collect::<Vec<_>>();
                 normalized.sort();
                 normalized.dedup();
                 if normalized.len() == 1 && useful_type(&normalized[0]) {
                     return Some(normalized[0].clone());
                 }
 
-                if left == right && left.as_ref().is_some_and(|l| useful_type(l)) {
+                if left == right && left.as_ref().is_some_and(useful_type) {
                     return left;
                 }
                 None
@@ -2647,7 +2640,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 if let Some(ref receiver_type) = receiver_type {
                     if let Some(info) = collection_type_info(receiver_type) {
                         if info.kind == "hash" {
-                            if let Some(p0) = param_names.get(0) {
+                            if let Some(p0) = param_names.first() {
                                 if let Some(key_ty) = info.element.as_ref() {
                                     if useful_type(key_ty) {
                                         next_locals.insert(p0.clone(), key_ty.clone());
@@ -2662,7 +2655,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                                 }
                             }
                         } else {
-                            if let Some(p0) = param_names.get(0) {
+                            if let Some(p0) = param_names.first() {
                                 if let Some(elem_ty) = info.element.as_ref() {
                                     if useful_type(elem_ty) {
                                         next_locals.insert(p0.clone(), elem_ty.clone());
@@ -2678,7 +2671,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                         let body_expr = implicit_return_expression(body_node).unwrap_or(body_node);
 
                         let mut next_hash_shapes = extra_hash_shapes.clone();
-                        if let Some(p0) = param_names.get(0) {
+                        if let Some(p0) = param_names.first() {
                             if let Some(rec) = receiver {
                                 if let Some(shape) = self.array_element_shape_for_receiver_readonly(
                                     Some(rec),
@@ -2862,7 +2855,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             || key_node.r#type == "LIT"
                                 && !text.starts_with('"')
                                 && !text.starts_with('\'')
-                                && !text.parse::<f64>().is_ok()
+                                && text.parse::<f64>().is_err()
                         {
                             key_ty = TypeExpr::Primitive("Symbol".to_string());
                         }
@@ -2897,7 +2890,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                             || key_node.r#type == "LIT"
                                 && !text.starts_with('"')
                                 && !text.starts_with('\'')
-                                && !text.parse::<f64>().is_ok()
+                                && text.parse::<f64>().is_err()
                         {
                             key_ty = TypeExpr::Primitive("Symbol".to_string());
                         }
@@ -3265,7 +3258,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if node.r#type == "ATTRASGN" {
             if let Some(args_node) = child_node(node, 2) {
                 let arg_children = call_arguments(args_node);
-                let val_node = arg_children.last().map(|n| *n).unwrap_or(args_node);
+                let val_node = arg_children.last().copied().unwrap_or(args_node);
                 return self.return_sources_for(val_node, body, blockers);
             }
         }
@@ -3400,7 +3393,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if (node.r#type == "CALL" || node.r#type == "QCALL" || node.r#type == "OPCALL")
             && node_symbol(node)
                 .as_deref()
-                .map_or(false, |m| self.behavior.is_type_guard(m))
+                .is_some_and(|m| self.behavior.is_type_guard(m))
         {
             if let Some((receiver, _, args_node)) = match_call(node) {
                 let arg_nodes = call_arguments(args_node);
@@ -3440,7 +3433,7 @@ impl<'a> TypeInferenceVisitor<'a> {
                 }
                 if depth == 0 {
                     if let Some(rhs) = assigns.get(&name) {
-                        return self.classify_origin(*rhs, param_names, assigns, depth + 1);
+                        return self.classify_origin(rhs, param_names, assigns, depth + 1);
                     }
                 }
                 ("local".to_string(), Value::Null)
@@ -4239,33 +4232,33 @@ impl<'a> TypeInferenceVisitor<'a> {
                     }
                 }
             }
-            if node.r#type == "ARRAY" || node.r#type == "LIST" {
-                if child_nodes(node).into_iter().any(|child| {
+            if (node.r#type == "ARRAY" || node.r#type == "LIST")
+                && child_nodes(node).into_iter().any(|child| {
                     (child.r#type == "LVAR" || child.r#type == "DVAR")
                         && node_symbol(child).as_deref() == Some(name)
-                }) {
-                    let mut is_non_escaping_arg_list = false;
-                    if let Some(parent) = self.find_parent(root, node) {
-                        if parent.r#type == "FCALL" || parent.r#type == "VCALL" {
-                            if let Some(callee) = node_symbol(parent) {
-                                if self.current_method.as_ref() == Some(&callee) {
-                                    is_non_escaping_arg_list = true;
-                                }
-                            }
-                        } else if parent.r#type == "CALL" || parent.r#type == "QCALL" {
-                            if let Some((_, callee, _)) = match_call(parent) {
-                                if self.current_method.as_ref() == Some(&callee) {
-                                    is_non_escaping_arg_list = true;
-                                }
+                })
+            {
+                let mut is_non_escaping_arg_list = false;
+                if let Some(parent) = self.find_parent(root, node) {
+                    if parent.r#type == "FCALL" || parent.r#type == "VCALL" {
+                        if let Some(callee) = node_symbol(parent) {
+                            if self.current_method.as_ref() == Some(&callee) {
+                                is_non_escaping_arg_list = true;
                             }
                         }
-                        if self.noreturn_call(parent) {
-                            is_non_escaping_arg_list = true;
+                    } else if parent.r#type == "CALL" || parent.r#type == "QCALL" {
+                        if let Some((_, callee, _)) = match_call(parent) {
+                            if self.current_method.as_ref() == Some(&callee) {
+                                is_non_escaping_arg_list = true;
+                            }
                         }
                     }
-                    if !is_non_escaping_arg_list {
-                        escapes = true;
+                    if self.noreturn_call(parent) {
+                        is_non_escaping_arg_list = true;
                     }
+                }
+                if !is_non_escaping_arg_list {
+                    escapes = true;
                 }
             }
         });
@@ -4293,7 +4286,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             )) {
                 return Some(shape.clone());
             }
-            if class_name != "" {
+            if !class_name.is_empty() {
                 if let Some(shape) = self.method_param_hash_shapes.get(&(
                     "".to_string(),
                     m.clone(),
@@ -4344,7 +4337,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             )) {
                 return Some(shape.clone());
             }
-            if class_name != "" {
+            if !class_name.is_empty() {
                 if let Some(shape) = self.method_param_array_shapes.get(&(
                     "".to_string(),
                     m.clone(),
@@ -4385,7 +4378,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         {
             return Some(shape.clone());
         }
-        if class_name != "" {
+        if !class_name.is_empty() {
             if let Some(shape) = self
                 .method_return_hash_shapes
                 .get(&("".to_string(), method_name.to_string()))
@@ -4422,7 +4415,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         {
             return Some(shape.clone());
         }
-        if class_name != "" {
+        if !class_name.is_empty() {
             if let Some(shape) = self
                 .method_return_array_shapes
                 .get(&("".to_string(), method_name.to_string()))
@@ -4508,7 +4501,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             return;
         };
 
-        if callee == "defined?" || callee == "" {
+        if callee == "defined?" || callee.is_empty() {
             return;
         }
 
@@ -4573,7 +4566,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             } else {
                 let record = self.param_origin_record(
                     node,
-                    *arg,
+                    arg,
                     &callee,
                     "positional",
                     &positional_idx.to_string(),
@@ -4586,14 +4579,14 @@ impl<'a> TypeInferenceVisitor<'a> {
                     &callee,
                     "positional",
                     &positional_idx.to_string(),
-                    *arg,
+                    arg,
                 );
                 self.record_callsite_array_element_shape(
                     &class_name,
                     &callee,
                     "positional",
                     &positional_idx.to_string(),
-                    *arg,
+                    arg,
                 );
                 positional_idx += 1;
             }
@@ -4806,9 +4799,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         node: &crate::ast::Node,
         receiver_type: Option<&TypeExpr>,
     ) -> Option<TypeExpr> {
-        let Some((receiver, _, args_node)) = match_call(node) else {
-            return None;
-        };
+        let (receiver, _, args_node) = match_call(node)?;
         let args = call_arguments(args_node);
         if args.len() != 1 {
             return None;
@@ -5236,7 +5227,7 @@ impl<'a> TypeInferenceVisitor<'a> {
         if receiver_name == "fetch" && args.len() > 1 {
             return;
         }
-        let Some(key) = args.first().and_then(|arg| hash_key_name(*arg)) else {
+        let Some(key) = args.first().and_then(|arg| hash_key_name(arg)) else {
             return;
         };
 
@@ -5409,7 +5400,7 @@ impl<'a> TypeInferenceVisitor<'a> {
             if method.ends_with('=') {
                 let field = method.trim_end_matches('=').to_string();
                 let arg_children = call_arguments(args_node);
-                let val_node = arg_children.last().map(|n| *n).unwrap_or(args_node);
+                let val_node = arg_children.last().copied().unwrap_or(args_node);
                 let class_name = if let Some(receiver_type) = self.expression_type(rec) {
                     receiver_type.strip_nilable().to_sorbet_string()
                 } else {
@@ -5598,13 +5589,11 @@ impl<'a> TypeInferenceVisitor<'a> {
                     if matches!(
                         method.as_str(),
                         "[]=" | "merge!" | "update" | "delete" | "clear" | "shift"
-                    ) {
-                        if self.local_hash_shapes.contains_key(&name)
-                            || self.local_array_shapes.contains_key(&name)
-                        {
-                            self.local_hash_shapes.remove(&name);
-                            self.local_array_shapes.remove(&name);
-                        }
+                    ) && (self.local_hash_shapes.contains_key(&name)
+                        || self.local_array_shapes.contains_key(&name))
+                    {
+                        self.local_hash_shapes.remove(&name);
+                        self.local_array_shapes.remove(&name);
                     }
                 }
             }
@@ -5896,15 +5885,15 @@ impl<'a> TypeInferenceVisitor<'a> {
                             let mut p0_name = None;
                             if let Some(block) = child_node(value, 1) {
                                 let mut args_node = None;
-                                for child in child_nodes(&block) {
+                                for child in child_nodes(block) {
                                     if child.r#type == "ARGS" {
                                         args_node = Some(child);
                                         break;
                                     }
                                 }
                                 if let Some(args) = args_node {
-                                    let param_names = collect_block_param_names(&args);
-                                    if let Some(p0) = param_names.get(0) {
+                                    let param_names = collect_block_param_names(args);
+                                    if let Some(p0) = param_names.first() {
                                         p0_name = Some(p0.clone());
                                     }
                                 }
@@ -6084,7 +6073,7 @@ fn case_literal_values(case_node: &crate::ast::Node) -> Vec<Value> {
                 children
                     .into_iter()
                     .take(count)
-                    .flat_map(|condition| hidden_enum_literal_values(condition))
+                    .flat_map(hidden_enum_literal_values)
                     .collect::<Vec<_>>()
             }
         })
@@ -6113,11 +6102,11 @@ fn hidden_enum_literal_values(node: &crate::ast::Node) -> Vec<Value> {
             .unwrap_or_default(),
         "ARRAY" | "LIST" => child_nodes(node)
             .into_iter()
-            .flat_map(|child| hidden_enum_literal_values(child))
+            .flat_map(hidden_enum_literal_values)
             .collect(),
         "PAREN" => child_nodes(node)
             .into_iter()
-            .flat_map(|child| hidden_enum_literal_values(child))
+            .flat_map(hidden_enum_literal_values)
             .collect(),
         _ => Vec::new(),
     }
@@ -6143,7 +6132,11 @@ fn hidden_enum_scalar_literal_values(node: &crate::ast::Node) -> Vec<Value> {
                 .into_iter()
                 .flat_map(hidden_enum_scalar_literal_values)
                 .collect::<Vec<_>>();
-            (values.len() == 1).then_some(values).unwrap_or_default()
+            if values.len() == 1 {
+                values
+            } else {
+                Default::default()
+            }
         }
         _ => Vec::new(),
     }
@@ -6490,10 +6483,8 @@ fn tuple_confidence(types: &[TypeExpr]) -> &'static str {
         .collect::<Vec<_>>();
     let namespaces = constants
         .iter()
-        .filter_map(|ty| {
-            ty.contains("::")
-                .then(|| ty.split("::").next().unwrap_or(""))
-        })
+        .filter(|&ty| ty.contains("::"))
+        .map(|ty| ty.split("::").next().unwrap_or(""))
         .collect::<BTreeSet<_>>();
     if namespaces.len() == 1 && constants.len() == types.len() {
         return "review";

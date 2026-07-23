@@ -485,7 +485,7 @@ impl<'a> LocalFlow<'a> {
 
     fn method_name(&self, node: &Node) -> String {
         let name = if node.r#type == "DEFS" {
-            let receiver = node.children.get(0).and_then(ast::node);
+            let receiver = node.children.first().and_then(ast::node);
             let prefix = receiver
                 .map(|receiver| {
                     if receiver.r#type == "SELF" {
@@ -866,13 +866,13 @@ fn identifiers_with_positions(source: &str) -> Vec<IdentifierSpan> {
     let mut out = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
-        let has_prefix = if index + 5 <= bytes.len() && &bytes[index..index + 5] == b"self." {
+        let has_prefix = if index + 5 <= bytes.len()
+            && matches!(&bytes[index..index + 5], b"self." | b"this.")
+        {
             Some(5)
-        } else if index + 5 <= bytes.len() && &bytes[index..index + 5] == b"this." {
-            Some(5)
-        } else if index + 6 <= bytes.len() && &bytes[index..index + 6] == b"self->" {
-            Some(6)
-        } else if index + 6 <= bytes.len() && &bytes[index..index + 6] == b"this->" {
+        } else if index + 6 <= bytes.len()
+            && matches!(&bytes[index..index + 6], b"self->" | b"this->")
+        {
             Some(6)
         } else if index + 7 <= bytes.len() && &bytes[index..index + 7] == b"$this->" {
             Some(7)
@@ -1075,7 +1075,7 @@ mod tests {
     fn parameter_types_reconcile_only_a_unique_name_and_line_identity() {
         let entry = BTreeMap::from([("value".to_string(), "gsl::not_null<Widget *>".to_string())]);
         let mut types = BTreeMap::new();
-        types.insert("fixture\0load\012".to_string(), entry.clone());
+        types.insert(format!("fixture\0load\0{}", 12), entry.clone());
         let flow = LocalFlow::new(
             "fixture.cpp".to_string(),
             Vec::new(),
@@ -1086,7 +1086,7 @@ mod tests {
         assert_eq!(flow.param_types_for("(top-level)", "load", 12), entry);
 
         let mut ambiguous = flow.method_param_types.clone();
-        ambiguous.insert("other\0load\012".to_string(), BTreeMap::new());
+        ambiguous.insert(format!("other\0load\0{}", 12), BTreeMap::new());
         let ambiguous_flow = LocalFlow::new(
             "fixture.cpp".to_string(),
             Vec::new(),

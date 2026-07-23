@@ -1,4 +1,8 @@
 #[cfg(test)]
+#[allow(
+    clippy::approx_constant,
+    clippy::too_many_arguments
+)] // Literal-value fixtures use source spelling; the helper mirrors explicit output collections.
 mod tests {
     use super::*;
     use crate::syntax::{Document, Language};
@@ -1010,7 +1014,7 @@ mod tests {
         let shape = visitor.hash_shape_for_value_readonly(&hash_node, &extra_hash_shapes);
         assert!(shape.is_some());
         let val = shape.unwrap();
-        assert_eq!(val.get("keys").unwrap().get("a").unwrap().as_array().unwrap().get(0).unwrap().as_str().unwrap(), "Integer");
+        assert_eq!(val.get("keys").unwrap().get("a").unwrap().as_array().unwrap().first().unwrap().as_str().unwrap(), "Integer");
 
         let array_node: crate::ast::Node = serde_json::from_str(r#"{
             "type": "ARRAY",
@@ -1926,8 +1930,8 @@ mod tests {
         let shape_hash = visitor.hash_shape_for_value_readonly(&hash_node, &extra_hash_shapes);
         assert!(shape_hash.is_some());
         let sh_val = shape_hash.unwrap();
-        assert!(!sh_val.get("value_hash_shapes").unwrap().get("a").is_none());
-        assert!(!sh_val.get("value_array_element_shapes").unwrap().get("b").is_none());
+        assert!(sh_val.get("value_hash_shapes").unwrap().get("a").is_some());
+        assert!(sh_val.get("value_array_element_shapes").unwrap().get("b").is_some());
 
         // Poisoned HASH
         let poisoned_hash: crate::ast::Node = serde_json::from_str(r#"{

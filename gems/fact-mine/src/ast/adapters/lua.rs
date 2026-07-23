@@ -84,8 +84,7 @@ impl AstNormalizationAdapter for LuaAstAdapter {
                         matches!(parent.kind(), "assignment_statement" | "return_statement")
                     })
                     .unwrap_or(false)
-                    .then_some(node_text(node, source) == node_text(children[0], source))
-                    .unwrap_or(false)
+                && node_text(node, source) == node_text(children[0], source)
             {
                 return NamedChildrenAction::Drop;
             }

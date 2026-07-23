@@ -112,7 +112,7 @@ pub(crate) mod tests {
             ) -> Option<TreeSitterNode<'t>> {
                 if node.kind() == "argument_list" {
                     let guard = self.wrapped_call_target.lock().unwrap();
-                    guard.clone().map(|n| unsafe { std::mem::transmute(n) })
+                    (*guard).map(|n| unsafe { std::mem::transmute(n) })
                 } else {
                     None
                 }
@@ -216,7 +216,9 @@ pub(crate) mod tests {
                 let guard = self.wrapped_call_target.lock().unwrap();
                 if let Some(child) = *guard {
                     if self.mock_replace.swap(false, Ordering::Relaxed) {
-                        NamedChildrenAction::Replace(vec![unsafe { std::mem::transmute(child) }])
+                        NamedChildrenAction::Replace(vec![unsafe {
+                            std::mem::transmute::<tree_sitter::Node<'_>, tree_sitter::Node<'_>>(child)
+                        }])
                     } else {
                         NamedChildrenAction::Default
                     }
@@ -315,7 +317,7 @@ pub(crate) mod tests {
             }
             fn else_if_block<'tree>(&self, _node: TreeSitterNode<'tree>, _source: &str) -> Option<TreeSitterNode<'tree>> {
                 let guard = self.mock_else_if_block.lock().unwrap();
-                guard.clone().map(|n| unsafe { std::mem::transmute(n) })
+                (*guard).map(|n| unsafe { std::mem::transmute(n) })
             }
             fn else_body_nodes<'tree>(&self, _node: TreeSitterNode<'tree>, _source: &str) -> Option<Vec<TreeSitterNode<'tree>>> {
                 let guard = self.mock_else_body_nodes.lock().unwrap();

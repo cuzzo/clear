@@ -349,32 +349,31 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self
             .normalization_adapter
             .check_node_role(node, "expression_list")
+            && self.single_short_var_lhs(node)
         {
-            if self.single_short_var_lhs(node) {
-                // `x := expr` declares a local: expose the write and its value
-                // source so dataflow facts see the binding.
-                let target = self.named_children(node).into_iter().next()?;
-                let right = node
-                    .next_named_sibling()
-                    .map(|rhs| {
-                        let named = self.named_children(rhs);
-                        if named.len() == 1 {
-                            named[0]
-                        } else {
-                            rhs
-                        }
-                    })
-                    .and_then(|child| self.normalize_node(child));
-                let source = node.parent().unwrap_or(node);
-                return Some(self.wrap(
-                    "LASGN",
-                    vec![
-                        Child::String(self.target_name(target)),
-                        optional_node(right),
-                    ],
-                    source,
-                ));
-            }
+            // `x := expr` declares a local: expose the write and its value
+            // source so dataflow facts see the binding.
+            let target = self.named_children(node).into_iter().next()?;
+            let right = node
+                .next_named_sibling()
+                .map(|rhs| {
+                    let named = self.named_children(rhs);
+                    if named.len() == 1 {
+                        named[0]
+                    } else {
+                        rhs
+                    }
+                })
+                .and_then(|child| self.normalize_node(child));
+            let source = node.parent().unwrap_or(node);
+            return Some(self.wrap(
+                "LASGN",
+                vec![
+                    Child::String(self.target_name(target)),
+                    optional_node(right),
+                ],
+                source,
+            ));
         }
         if self.call_node(node) {
             return self.normalize_call(node);
@@ -1462,9 +1461,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_field(node, "function")
             .or_else(|| self.named_field(node, "call"))
             .or_else(|| self.named_children(node).into_iter().next())?;
-        let Some(function_name) = self.identifier_text(function) else {
-            return None;
-        };
+        let function_name = self.identifier_text(function)?;
 
         let args_node = self
             .named_field(node, "arguments")
@@ -1991,9 +1988,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         {
             return None;
         }
-        if self.identifier_text(left).is_none() {
-            return None;
-        }
+        self.identifier_text(left)?;
         let name = self.target_name(left);
         let node_type = if operator == "||" {
             "OP_ASGN_OR"
@@ -3856,7 +3851,7 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     fn record_call_origin(&self, raw_call_span: Span, normalized: &Node) {
-        let normalized_call_span = primary_normalized_call_span(normalized).unwrap_or_else(|| {
+        let normalized_call_span = primary_normalized_call_span(normalized).unwrap_or({
             [
                 normalized.first_lineno,
                 normalized.first_column,

@@ -1116,16 +1116,16 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         if message == "concat" || message == "push" || message == "unshift" || message == "append" {
             return receiver_type.map(|t| t.to_string());
         }
-        if message == "first"
+        if (message == "first"
             || message == "last"
             || message == "pop"
             || message == "shift"
-            || message == "sample"
+            || message == "sample")
+            && r.starts_with("T::Array[")
+            && r.ends_with(']')
         {
-            if r.starts_with("T::Array[") && r.ends_with(']') {
-                let inner = &r[9..r.len() - 1];
-                return Some(wrap_nilable(inner));
-            }
+            let inner = &r[9..r.len() - 1];
+            return Some(wrap_nilable(inner));
         }
         if message == "map"
             || message == "select"
@@ -1136,47 +1136,35 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         {
             return Some("T::Array[T.untyped]".to_string());
         }
-        if message == "compact" {
-            if r.starts_with("T::Array[") && r.ends_with(']') {
-                let inner = &r[9..r.len() - 1];
-                let no_nil = inner.trim_start_matches("T.nilable(").trim_end_matches(')');
-                return Some(format!("T::Array[{}]", no_nil));
+        if message == "compact" && r.starts_with("T::Array[") && r.ends_with(']') {
+            let inner = &r[9..r.len() - 1];
+            let no_nil = inner.trim_start_matches("T.nilable(").trim_end_matches(')');
+            return Some(format!("T::Array[{}]", no_nil));
+        }
+        if message == "flatten" && r.starts_with("T::Array[T::Array[") {
+            let inner = &r[18..r.len() - 2];
+            return Some(format!("T::Array[{}]", inner));
+        }
+        if message == "keys" && r.starts_with("T::Hash[") {
+            if let Some((k, _)) = r[8..r.len() - 1].split_once(", ") {
+                return Some(format!("T::Array[{}]", k));
             }
         }
-        if message == "flatten" {
-            if r.starts_with("T::Array[T::Array[") {
-                let inner = &r[18..r.len() - 2];
-                return Some(format!("T::Array[{}]", inner));
+        if message == "values" && r.starts_with("T::Hash[") {
+            if let Some((_, v)) = r[8..r.len() - 1].split_once(", ") {
+                return Some(format!("T::Array[{}]", v));
             }
         }
-        if message == "keys" {
-            if r.starts_with("T::Hash[") {
-                if let Some((k, _)) = r[8..r.len() - 1].split_once(", ") {
-                    return Some(format!("T::Array[{}]", k));
-                }
-            }
+        if message == "join" && (r.starts_with("T::Array[") || r == "Array") {
+            return Some("String".to_string());
         }
-        if message == "values" {
-            if r.starts_with("T::Hash[") {
-                if let Some((_, v)) = r[8..r.len() - 1].split_once(", ") {
-                    return Some(format!("T::Array[{}]", v));
-                }
-            }
+        if message == "to_a"
+            && (r.starts_with("T::Array[") || r.starts_with("T::Hash[") || r.starts_with("T::Set["))
+        {
+            return Some(r.to_string());
         }
-        if message == "join" {
-            if r.starts_with("T::Array[") || r == "Array" {
-                return Some("String".to_string());
-            }
-        }
-        if message == "to_a" {
-            if r.starts_with("T::Array[") || r.starts_with("T::Hash[") || r.starts_with("T::Set[") {
-                return Some(r.to_string());
-            }
-        }
-        if message == "to_h" {
-            if r.starts_with("T::Hash[") || r.starts_with("T::Array[") {
-                return Some(r.to_string());
-            }
+        if message == "to_h" && (r.starts_with("T::Hash[") || r.starts_with("T::Array[")) {
+            return Some(r.to_string());
         }
         None
     }
@@ -1574,10 +1562,10 @@ fn immutable_struct_reader_types(
         }
         if let Some(owner) = class_stack.last() {
             let mut line_rest = None;
-            if stripped.starts_with("const :") {
-                line_rest = Some(&stripped["const :".len()..]);
-            } else if stripped.starts_with("prop :") {
-                line_rest = Some(&stripped["prop :".len()..]);
+            if let Some(rest) = stripped.strip_prefix("const :") {
+                line_rest = Some(rest);
+            } else if let Some(rest) = stripped.strip_prefix("prop :") {
+                line_rest = Some(rest);
             }
             if let Some(rest) = line_rest {
                 let parts = split_top_level_params_local(rest);

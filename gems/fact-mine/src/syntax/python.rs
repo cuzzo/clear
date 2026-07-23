@@ -143,11 +143,10 @@ impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
     }
 
     fn clean_receiver(&self, receiver: &str) -> String {
-        if receiver.starts_with("self.") {
-            receiver["self.".len()..].to_string()
-        } else {
-            receiver.to_string()
-        }
+        receiver
+            .strip_prefix("self.")
+            .unwrap_or(receiver)
+            .to_string()
     }
 
     fn yield_semantic_effect(&self, _node: &Node) -> bool {
@@ -551,7 +550,7 @@ fn is_simple_name(name: &str) -> bool {
         && name
             .chars()
             .next()
-            .map_or(false, |c| c == '_' || c.is_ascii_alphabetic())
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
         && name
             .chars()
             .all(|ch| ch == '_' || ch == '?' || ch == '!' || ch.is_ascii_alphanumeric())

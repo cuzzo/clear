@@ -977,7 +977,7 @@ fn source_offset(lines: &[&str], line: usize, column: usize) -> Option<usize> {
 }
 
 fn first_argument_start(source: &str, call_span: [usize; 4]) -> Option<(usize, usize)> {
-    for line_index in call_span[0]..=call_span[2] {
+    if let Some(line_index) = (call_span[0]..=call_span[2]).next() {
         let line = source.lines().nth(line_index)?;
         let start = if line_index == call_span[0] {
             call_span[1]
@@ -1063,6 +1063,7 @@ fn method_span_size(method: &&MethodRecord) -> (usize, usize) {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)] // Fixtures build semantic records incrementally for readability.
 mod tests {
     use super::*;
     use crate::profile::{CallRecord, MethodRecord, OwnerRecord};

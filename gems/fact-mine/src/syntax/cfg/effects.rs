@@ -676,6 +676,23 @@ fn find_syntax_node<'a>(node: &'a Node, span: Span, role: &str) -> Option<&'a No
         .or_else(|| find_by_span(node, span, role == "linear_statement"))
 }
 
+fn find_by_span_and_kind<'a>(node: &'a Node, span: Span, kind: &str) -> Option<&'a Node> {
+    if node.r#type == kind
+        && [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ] == span
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .filter_map(ast::node)
+        .find_map(|child| find_by_span_and_kind(child, span, kind))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,21 +814,4 @@ mod tests {
         assert_eq!(indexed_base_name("values"), None);
         assert_eq!(indexed_base_name("[key]"), None);
     }
-}
-
-fn find_by_span_and_kind<'a>(node: &'a Node, span: Span, kind: &str) -> Option<&'a Node> {
-    if node.r#type == kind
-        && [
-            node.first_lineno,
-            node.first_column,
-            node.last_lineno,
-            node.last_column,
-        ] == span
-    {
-        return Some(node);
-    }
-    node.children
-        .iter()
-        .filter_map(ast::node)
-        .find_map(|child| find_by_span_and_kind(child, span, kind))
 }

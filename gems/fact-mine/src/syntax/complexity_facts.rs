@@ -528,6 +528,7 @@ fn collect_block_invocations(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // The fact mirrors the independently extracted method evidence.
 fn fact_for_method(
     document: &Document,
     path: &str,
@@ -1002,6 +1003,7 @@ fn collect_deferred_regions(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Allocation analysis consumes independent flow maps.
 fn collect_allocations(
     node: &Node,
     params: &BTreeSet<String>,
@@ -1105,6 +1107,7 @@ fn collect_allocations(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Loop analysis requires the full immutable analysis context.
 fn visit_loops(
     node: &Node,
     params: &BTreeSet<String>,
@@ -1329,9 +1332,7 @@ fn visit_loops(
                 })
             });
         let mut power = parent.power;
-        if parent.collapse_direct_child && !refs.is_empty() {
-            power = parent.power;
-        } else if parent.absorb_next {
+        if (parent.collapse_direct_child && !refs.is_empty()) || parent.absorb_next {
             power = parent.power;
         } else if !fixed {
             let inferred_block_power = if node.r#type == "ITER" {
@@ -1349,11 +1350,7 @@ fn visit_loops(
                 parent.power + growth_power
             } else if !locals.is_disjoint(&parent.independent_collection_bindings) {
                 parent.power + inferred_block_power
-            } else if refs.is_empty() && independent_nested_domain {
-                parent.power + inferred_block_power
-            } else if refs.is_empty() {
-                power.max(1)
-            } else if amortized {
+            } else if refs.is_empty() || amortized {
                 power.max(1)
             } else {
                 power + inferred_block_power
@@ -2212,6 +2209,7 @@ fn call_argument_progress(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Recursion evidence is accumulated from independent control-flow inputs.
 fn collect_recursion(
     node: &Node,
     function: &str,

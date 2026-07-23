@@ -453,7 +453,7 @@ fn language_specific_ast_files_live_only_in_ast_adapters() {
             }
             let file_name = path.file_name()?.to_str()?;
             (forbidden_names.contains(&file_name) || file_name.ends_with("_normalization.rs"))
-                .then(|| relative)
+                .then_some(relative)
         })
         .collect::<Vec<_>>();
 

@@ -133,7 +133,7 @@ impl PathCondition {
 
         match node.r#type.as_str() {
             "IF" | "UNLESS" => {
-                let cond = node.children.get(0).and_then(ast::node);
+                let cond = node.children.first().and_then(ast::node);
                 let a = node.children.get(1).and_then(ast::node);
                 let b = node.children.get(2).and_then(ast::node);
 
@@ -162,10 +162,10 @@ impl PathCondition {
 
                 return;
             }
-            "CALL" | "FCALL" | "VCALL" | "ATTRASGN" | "LASGN" | "IASGN" | "OPCALL" => {
-                if guards.len() >= 2 {
-                    self.record(node, &next_defstack, guards);
-                }
+            "CALL" | "FCALL" | "VCALL" | "ATTRASGN" | "LASGN" | "IASGN" | "OPCALL"
+                if guards.len() >= 2 =>
+            {
+                self.record(node, &next_defstack, guards);
             }
             _ => {}
         }
@@ -251,20 +251,6 @@ impl PathCondition {
 
 fn truncate_action(slice: &str, max_chars: usize) -> String {
     slice.chars().take(max_chars).collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn truncating_diagnostic_source_never_splits_a_utf8_codepoint() {
-        let source = format!("{}€ŠšŽ", "a".repeat(79));
-        let action = truncate_action(&source, 80);
-        assert_eq!(action.chars().count(), 80);
-        assert!(action.ends_with('€'));
-        assert!(std::str::from_utf8(action.as_bytes()).is_ok());
-    }
 }
 
 struct Report {
@@ -375,7 +361,7 @@ impl Report {
                     }
 
                     // dedupe manually
-                    let key = (gs.clone(), sup.clone(), missing.clone(), at.clone());
+                    let key = (gs.clone(), *sup, missing.clone(), at.clone());
                     if seen.insert(key) {
                         let mut spans = BTreeMap::new();
                         spans.insert(at.clone(), s.span);
@@ -395,5 +381,19 @@ impl Report {
 
         out.sort_by(|a, b| b.support.cmp(&a.support).then_with(|| a.at.cmp(&b.at)));
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncating_diagnostic_source_never_splits_a_utf8_codepoint() {
+        let source = format!("{}€ŠšŽ", "a".repeat(79));
+        let action = truncate_action(&source, 80);
+        assert_eq!(action.chars().count(), 80);
+        assert!(action.ends_with('€'));
+        assert!(std::str::from_utf8(action.as_bytes()).is_ok());
     }
 }
