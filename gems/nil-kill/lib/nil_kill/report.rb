@@ -587,7 +587,14 @@ module NilKill
 
     def static_proof_boundary(finding, scope, evidence = nil)
       boundary = finding["proof_boundary"]
-      return apply_corpus_completeness(boundary, evidence) if boundary.is_a?(Hash)
+      if boundary.is_a?(Hash)
+        begin
+          normalized = FactMine::ProofBoundary.parse_validate_normalize(boundary)
+          return apply_corpus_completeness(normalized, evidence)
+        rescue ArgumentError
+          return static_review_boundary(scope, input_completeness: "unknown", blockers: [{ "kind" => "unknown" }])
+        end
+      end
 
       # Legacy evidence had no typed boundary. Do not reinterpret arbitrary
       # payload fields such as `complete` or `proof_tier` while rendering.
@@ -595,7 +602,10 @@ module NilKill
     end
 
     def static_proven_boundary(evidence, scope)
-      blockers = Array(evidence["blockers"])
+      # Return-origin prose blockers are not proof-boundary blockers. A
+      # claimed proof cannot preserve them as invented typed evidence.
+      return static_review_boundary(scope, input_completeness: "unknown", blockers: [{ "kind" => "unknown" }]) unless Array(evidence["blockers"]).empty?
+
       NilKill::Sarif.proof_boundary(
         # A fact's local proof completeness is not corpus/input completeness.
         # Only `input_coverage` may set this boundary dimension.
@@ -605,7 +615,7 @@ module NilKill
         authority: ["fact_mine_normalized_ast", "nil_kill_static"],
         claim_kind: scope,
         scope: { kind: "local", closed: false },
-        blockers: blockers
+        blockers: []
       )
     end
 
@@ -624,10 +634,14 @@ module NilKill
     def apply_corpus_completeness(boundary, evidence)
       coverage = corpus_boundary_attributes(evidence)
       return boundary if coverage.fetch(:input_completeness) == "unknown"
-      return boundary if coverage.fetch(:input_completeness) == "complete" && boundary["input_completeness"] != "unknown"
+      # Coverage completeness cannot promote a detector's independently
+      # unknown boundary; it can only preserve a valid incoming boundary.
+      return boundary if coverage.fetch(:input_completeness) == "complete"
+
+      input_completeness = boundary.fetch("input_completeness") == "unknown" ? "unknown" : "partial"
 
       NilKill::Sarif.proof_boundary(
-        input_completeness: coverage.fetch(:input_completeness),
+        input_completeness: input_completeness,
         claim_status: boundary.fetch("claim_status"),
         coverage_discharge: boundary.fetch("coverage_discharge"),
         authority: boundary.fetch("authority"),
@@ -645,7 +659,7 @@ module NilKill
       if corpus["complete"] == false
         return {
           input_completeness: "partial",
-          blockers: [corpus["reason"].to_s.empty? ? "incomplete_input_coverage" : corpus["reason"].to_s]
+          blockers: [{ "kind" => "missing_evidence" }]
         }
       end
 

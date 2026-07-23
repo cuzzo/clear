@@ -307,7 +307,9 @@ module Espalier
       if complete == true
         { input_completeness: "complete", input_blockers: [] }
       elsif complete == false
-        { input_completeness: "partial", input_blockers: [reason.empty? ? "incomplete_corpus" : reason] }
+        # Input-coverage prose is retained elsewhere for humans; the shared
+        # proof contract transports only its canonical machine-readable kind.
+        { input_completeness: "partial", input_blockers: [{ "kind" => "missing_evidence" }] }
       else
         { input_completeness: "unknown", input_blockers: [] }
       end

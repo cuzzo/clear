@@ -75,11 +75,13 @@ struct DetectorPolicy {
 }
 
 impl DetectorPolicy {
-    const STRUCTURAL: Self = Self {
-        id: "decomplex_detector",
-        claim_status: sarif::ClaimStatus::Observed,
-        authority: &["fact_mine_normalized_ast"],
-    };
+    const fn observed(id: &'static str) -> Self {
+        Self {
+            id,
+            claim_status: sarif::ClaimStatus::Observed,
+            authority: &["fact_mine_normalized_ast"],
+        }
+    }
 
     const REDUNDANT_NIL_GUARD: Self = Self {
         id: "redundant_nil_guard",
@@ -90,8 +92,24 @@ impl DetectorPolicy {
 
 impl ReportSection {
     pub fn new(title: &str, tier: i64, desc: &str, findings: Vec<Value>) -> Self {
+        Self::with_detector_policy(
+            DetectorPolicy::observed("decomplex_external"),
+            title,
+            tier,
+            desc,
+            findings,
+        )
+    }
+
+    fn with_detector_policy(
+        detector_policy: DetectorPolicy,
+        title: &str,
+        tier: i64,
+        desc: &str,
+        findings: Vec<Value>,
+    ) -> Self {
         Self {
-            detector_policy: DetectorPolicy::STRUCTURAL,
+            detector_policy,
             title: title.to_string(),
             tier,
             desc: desc.to_string(),
@@ -467,22 +485,21 @@ impl SarifEmitter {
 
 fn finding_proof_boundary(section: &ReportSection, finding: &Value) -> Value {
     rv::get(finding, "proof_boundary")
-        .cloned()
-        .unwrap_or_else(|| {
-            // Only old, externally supplied detector payloads reach this path.
-            // Their generic fields are intentionally not reinterpreted at render
-            // time: absence of an explicit boundary is an unknown observation.
-            sarif::proof_boundary(
-                sarif::InputCompleteness::Unknown,
-                section.detector_policy.claim_status,
-                sarif::CoverageDischarge::NotApplicable,
-                section.detector_policy.authority,
-                section.detector_policy.id,
-                section.evidence_requirement.scope.proof_scope(),
-                section.evidence_requirement.scope.closed(),
-                Vec::new(),
-            )
-        })
+        .and_then(|boundary| sarif::parse_validate_normalize(boundary).ok())
+        .unwrap_or_else(|| unknown_boundary(section))
+}
+
+fn unknown_boundary(section: &ReportSection) -> Value {
+    sarif::proof_boundary(
+        sarif::InputCompleteness::Unknown,
+        section.detector_policy.claim_status,
+        sarif::CoverageDischarge::NotApplicable,
+        section.detector_policy.authority,
+        section.detector_policy.id,
+        section.evidence_requirement.scope.proof_scope(),
+        section.evidence_requirement.scope.closed(),
+        vec![sarif::ProofBlocker::unknown()],
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -569,34 +586,34 @@ fn build_sections(detectors: &Value, facts: &Value) -> Vec<ReportSection> {
         .partition(|finding| rv::field(finding, "confidence") == "high");
 
     let mut sections = vec![
-        section("Decision Pressure", 1, "ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/rescue-nil) -> tighten the contract once / nil-kill: DELETE. essential dispatch + pure c-uses are split out, NEVER summed (Rapps-Weyuker p-use; McCabe)", direct_array(detectors, "decision_pressure")),
-        section("Redundant Nil Guards", 1, "nil checks / safe-nav dominated by an earlier non-nil proof -- delete repeated control flow or tighten the type", direct_array(detectors, "redundant_nil_guard")).with_policy(DetectorPolicy::REDUNDANT_NIL_GUARD),
-        section("State Heatmap", 1, "state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner", direct_array(detectors, "state_heatmap")).with_evidence_scope(EvidenceScope::Owner).excluded_from_convergence(),
-        section("Superfluous State", 1, "state fields that could be eliminated entirely (dead state / intra-method pass-through / adjacent-call pass-through / derived cache)", direct_array(detectors, "superfluous_state")).with_evidence_scope(EvidenceScope::ClosedCorpus),
-        section("Declared Type Pressure", 2, "normalized declared-type shapes where multiple pressures converge (wide/nested unions, unknown leaves, collection depth, and nilability)", direct_array(detectors, "declared_type_pressure")),
-        section("State-Based Branch Density", 1, "branch decisions over mutable/object state -- state + control-flow pressure", direct_array(detectors, "state_branch_density")).with_evidence_scope(EvidenceScope::File),
-        section("Temporal Ordering Pressure", 1, "public mutable lifecycle surfaces that create implicit state-machine ordering", direct_array(detectors, "temporal_ordering_pressure")),
-        section("Scoped State Restoration", 1, "temporary mutable-state scopes with a proven restoration bypass, or a lower-confidence unprotected call before restoration", direct_array(detectors, "scoped_state_restoration")),
-        section("Missing Abstractions", 1, "guard tuple recomputed across >=2 decision units", nested_array(miner, "missing_abstractions")),
-        section("Reification Misses", 1, "an existing predicate reinvented inline -- invariant #16", nested_array(semantic_alias, "reification_misses")),
-        section("Semantic Predicate Aliases", 1, "one decision, multiple names (receiver/polarity folded)", nested_array(semantic_alias, "alias_clusters")),
-        section("Exact Predicate Aliases", 1, "identical one-line predicate body under >=2 names", nested_array(rv::get(detectors, "predicate_alias").unwrap_or(&Value::Null), "alias_clusters")),
-        section("Inconsistent Rename Clones", 2, "pasted block with inconsistent identifier mapping -- *POSSIBLE* missed rename bug", direct_array(detectors, "inconsistent_rename_clone")),
-        section("Structural Similarity (Type-2/3)", 2, "Tree-sitter structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict", direct_array(detectors, "flay_similarity")),
-        section("Neglected Updates", 2, "co-written state, one write missing -- *POSSIBLE* redundant-state desync", nested_array(co_update, "neglected_updates")),
-        section("Derived-State Staleness", 2, "b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug", direct_array(detectors, "derived_state")),
-        section("Neglected Conditions", 2, "dispatch/conjunction minus one element -- *POSSIBLE* bug", nested_array(miner, "neglected_conditions")),
-        section("Neglected Path Conditions", 3, "nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)", nested_array(path_condition, "neglected")),
-        section("Oversized Predicates", 3, "predicate with >3 condition atoms -- use an existing helper or extract a named predicate", direct_array(detectors, "oversized_predicate")),
-        section("Broken Protocols", 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)", nested_array(sequence_mine, "broken_protocol")).with_evidence_scope(EvidenceScope::ClosedCorpus),
-        section("Implicit Control Flow", 2, "state-dependent internal call order exists -- hidden lifecycle/control-flow pressure", nested_array(rv::get(detectors, "implicit_control_flow").unwrap_or(&Value::Null), "ordered_protocols")).with_evidence_scope(EvidenceScope::ClosedCorpus).with_call_resolution(),
-        section("Weighted Inlined Cognitive Complexity", 2, "same-owner helper chain hides cognitive load behind a low-looking orchestration method", direct_array(detectors, "weighted_inlined_complexity")).with_evidence_scope(EvidenceScope::EnclosingFunction).with_call_resolution(),
-        section("Locality Drag", 2, "local initialized far before first use while unrelated work runs -- move setup closer or extract a private phase", direct_array(detectors, "locality_drag")),
-        section("Operational Discontinuity (High Confidence)", 2, "strong blank/comment phase boundary where local variable lifetimes reset -- likely implicit sub-function boundary", operational_high),
-        section("Function LCOM", 3, "independent local data-flow components inside one method -- *POSSIBLE* mixed concerns", direct_array(detectors, "function_lcom")).with_evidence_scope(EvidenceScope::EnclosingFunction),
-        section("Operational Discontinuity", 3, "blank/comment phase boundary where local variable lifetimes reset -- *POSSIBLE* implicit sub-function boundary", operational_rest),
-        section("False Simplicity", 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/reflection/reopen -- *POSSIBLE* (noisy)", direct_array(detectors, "false_simplicity")).with_evidence_scope(EvidenceScope::EnclosingFunction).with_call_resolution(),
-        section("Fat Unions", 3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*", nested_array(fat_union, "fat_unions")),
+        section("decision_pressure", "Decision Pressure", 1, "ELIMINABLE guard-pressure per loose contract (nil/is_a?/respond_to?/safe-nav/rescue-nil) -> tighten the contract once / nil-kill: DELETE. essential dispatch + pure c-uses are split out, NEVER summed (Rapps-Weyuker p-use; McCabe)", direct_array(detectors, "decision_pressure")),
+        section("redundant_nil_guard", "Redundant Nil Guards", 1, "nil checks / safe-nav dominated by an earlier non-nil proof -- delete repeated control flow or tighten the type", direct_array(detectors, "redundant_nil_guard")).with_policy(DetectorPolicy::REDUNDANT_NIL_GUARD),
+        section("state_heatmap", "State Heatmap", 1, "state fields ranked by write/read/re-derivation scatter -- tangled mutable state should get one owner", direct_array(detectors, "state_heatmap")).with_evidence_scope(EvidenceScope::Owner).excluded_from_convergence(),
+        section("superfluous_state", "Superfluous State", 1, "state fields that could be eliminated entirely (dead state / intra-method pass-through / adjacent-call pass-through / derived cache)", direct_array(detectors, "superfluous_state")).with_evidence_scope(EvidenceScope::ClosedCorpus),
+        section("declared_type_pressure", "Declared Type Pressure", 2, "normalized declared-type shapes where multiple pressures converge (wide/nested unions, unknown leaves, collection depth, and nilability)", direct_array(detectors, "declared_type_pressure")),
+        section("state_branch_density", "State-Based Branch Density", 1, "branch decisions over mutable/object state -- state + control-flow pressure", direct_array(detectors, "state_branch_density")).with_evidence_scope(EvidenceScope::File),
+        section("temporal_ordering_pressure", "Temporal Ordering Pressure", 1, "public mutable lifecycle surfaces that create implicit state-machine ordering", direct_array(detectors, "temporal_ordering_pressure")),
+        section("scoped_state_restoration", "Scoped State Restoration", 1, "temporary mutable-state scopes with a proven restoration bypass, or a lower-confidence unprotected call before restoration", direct_array(detectors, "scoped_state_restoration")),
+        section("missing_abstractions", "Missing Abstractions", 1, "guard tuple recomputed across >=2 decision units", nested_array(miner, "missing_abstractions")),
+        section("reification_miss", "Reification Misses", 1, "an existing predicate reinvented inline -- invariant #16", nested_array(semantic_alias, "reification_misses")),
+        section("semantic_predicate_alias", "Semantic Predicate Aliases", 1, "one decision, multiple names (receiver/polarity folded)", nested_array(semantic_alias, "alias_clusters")),
+        section("exact_predicate_alias", "Exact Predicate Aliases", 1, "identical one-line predicate body under >=2 names", nested_array(rv::get(detectors, "predicate_alias").unwrap_or(&Value::Null), "alias_clusters")),
+        section("inconsistent_rename_clone", "Inconsistent Rename Clones", 2, "pasted block with inconsistent identifier mapping -- *POSSIBLE* missed rename bug", direct_array(detectors, "inconsistent_rename_clone")),
+        section("structural_similarity", "Structural Similarity (Type-2/3)", 2, "Tree-sitter structural clone pressure: Type-2 renamed clones and Type-3 fuzzy clones -- refactor pressure, not a verdict", direct_array(detectors, "flay_similarity")),
+        section("neglected_update", "Neglected Updates", 2, "co-written state, one write missing -- *POSSIBLE* redundant-state desync", nested_array(co_update, "neglected_updates")),
+        section("derived_state_staleness", "Derived-State Staleness", 2, "b = f(a); a later reassigned, b not recomputed -- *POSSIBLE* bug", direct_array(detectors, "derived_state")),
+        section("neglected_condition", "Neglected Conditions", 2, "dispatch/conjunction minus one element -- *POSSIBLE* bug", nested_array(miner, "neglected_conditions")),
+        section("neglected_path_condition", "Neglected Path Conditions", 3, "nested-if/&& guard set minus one atom -- *POSSIBLE* bug (noisy)", nested_array(path_condition, "neglected")),
+        section("oversized_predicate", "Oversized Predicates", 3, "predicate with >3 condition atoms -- use an existing helper or extract a named predicate", direct_array(detectors, "oversized_predicate")),
+        section("broken_protocol", "Broken Protocols", 3, "co-called pair, one site does A without B -- *POSSIBLE* bug (noisy)", nested_array(sequence_mine, "broken_protocol")).with_evidence_scope(EvidenceScope::ClosedCorpus),
+        section("implicit_control_flow", "Implicit Control Flow", 2, "state-dependent internal call order exists -- hidden lifecycle/control-flow pressure", nested_array(rv::get(detectors, "implicit_control_flow").unwrap_or(&Value::Null), "ordered_protocols")).with_evidence_scope(EvidenceScope::ClosedCorpus).with_call_resolution(),
+        section("weighted_inlined_cognitive_complexity", "Weighted Inlined Cognitive Complexity", 2, "same-owner helper chain hides cognitive load behind a low-looking orchestration method", direct_array(detectors, "weighted_inlined_complexity")).with_evidence_scope(EvidenceScope::EnclosingFunction).with_call_resolution(),
+        section("locality_drag", "Locality Drag", 2, "local initialized far before first use while unrelated work runs -- move setup closer or extract a private phase", direct_array(detectors, "locality_drag")),
+        section("operational_discontinuity_high", "Operational Discontinuity (High Confidence)", 2, "strong blank/comment phase boundary where local variable lifetimes reset -- likely implicit sub-function boundary", operational_high),
+        section("function_lcom", "Function LCOM", 3, "independent local data-flow components inside one method -- *POSSIBLE* mixed concerns", direct_array(detectors, "function_lcom")).with_evidence_scope(EvidenceScope::EnclosingFunction),
+        section("operational_discontinuity", "Operational Discontinuity", 3, "blank/comment phase boundary where local variable lifetimes reset -- *POSSIBLE* implicit sub-function boundary", operational_rest),
+        section("false_simplicity", "False Simplicity", 3, "looks simple, behaves non-locally: hidden dispatch/mutation/IO/context/reflection/reopen -- *POSSIBLE* (noisy)", direct_array(detectors, "false_simplicity")).with_evidence_scope(EvidenceScope::EnclosingFunction).with_call_resolution(),
+        section("fat_union", "Fat Unions", 3, "case dispatch over class consts whose arms read mostly variant-invariant members -- product-vs-sum decomposition candidate (extraction -> nil-kill) -- *POSSIBLE*", nested_array(fat_union, "fat_unions")),
     ];
     attach_detector_boundaries(&mut sections, facts);
     sections
@@ -604,31 +621,33 @@ fn build_sections(detectors: &Value, facts: &Value) -> Vec<ReportSection> {
 
 fn attach_detector_boundaries(sections: &mut [ReportSection], facts: &Value) {
     for section in sections {
+        let detector_policy = section.detector_policy;
+        let evidence_requirement = section.evidence_requirement;
+        let unknown = unknown_boundary(section);
         for finding in &mut section.findings {
             if !finding.is_object() {
                 continue;
             }
-            if finding.get("proof_boundary").is_some() {
-                continue;
-            }
-            let (input_completeness, blockers) =
-                finding_input_boundary(section.evidence_requirement, finding, facts);
+            let boundary = if let Some(boundary) = finding.get("proof_boundary") {
+                sarif::parse_validate_normalize(boundary).unwrap_or_else(|_| unknown.clone())
+            } else {
+                let (input_completeness, blockers) =
+                    finding_input_boundary(evidence_requirement, finding, facts);
+                sarif::proof_boundary(
+                    input_completeness,
+                    detector_policy.claim_status,
+                    sarif::CoverageDischarge::NotApplicable,
+                    detector_policy.authority,
+                    detector_policy.id,
+                    evidence_requirement.scope.proof_scope(),
+                    evidence_requirement.scope.closed(),
+                    blockers,
+                )
+            };
             finding
                 .as_object_mut()
                 .expect("object checked above")
-                .insert(
-                    "proof_boundary".to_string(),
-                    sarif::proof_boundary(
-                        input_completeness,
-                        section.detector_policy.claim_status,
-                        sarif::CoverageDischarge::NotApplicable,
-                        section.detector_policy.authority,
-                        section.detector_policy.id,
-                        section.evidence_requirement.scope.proof_scope(),
-                        section.evidence_requirement.scope.closed(),
-                        blockers,
-                    ),
-                );
+                .insert("proof_boundary".to_string(), boundary);
         }
     }
 }
@@ -807,8 +826,20 @@ fn span_contains_location_values(span: [i64; 4], location: &SarifLocation) -> bo
     (span[0], span[1]) <= point && point <= (span[2], span[3])
 }
 
-fn section(title: &str, tier: i64, desc: &str, findings: Vec<Value>) -> ReportSection {
-    ReportSection::new(title, tier, desc, findings)
+fn section(
+    detector_id: &'static str,
+    title: &str,
+    tier: i64,
+    desc: &str,
+    findings: Vec<Value>,
+) -> ReportSection {
+    ReportSection::with_detector_policy(
+        DetectorPolicy::observed(detector_id),
+        title,
+        tier,
+        desc,
+        findings,
+    )
 }
 
 fn direct_array(value: &Value, key: &str) -> Vec<Value> {
@@ -2225,6 +2256,50 @@ mod tests {
             boundary.get("authority"),
             Some(&json!(["fact_mine_cfg", "fact_mine_normalized_ast"]))
         );
+    }
+
+    #[test]
+    fn catalog_assigns_stable_unique_detector_claim_kinds() {
+        let sections = build_sections(&json!({}), &json!({}));
+        let ids = sections
+            .iter()
+            .map(|section| section.detector_policy.id)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(ids.len(), sections.len());
+        assert!(!ids.contains("decomplex_detector"));
+        assert!(ids.contains("false_simplicity"));
+        assert!(ids.contains("locality_drag"));
+        assert!(ids.contains("superfluous_state"));
+        assert!(ids.contains("weighted_inlined_cognitive_complexity"));
+    }
+
+    #[test]
+    fn invalid_incoming_boundary_is_downgraded_before_rendering() {
+        let mut sections = vec![section(
+            "false_simplicity",
+            "False Simplicity",
+            3,
+            "test",
+            vec![json!({
+                "at": "example.rb:work:3",
+                "proof_boundary": {
+                    "schema": "fact-mine.proof-boundary.v3",
+                    "input_completeness": "complete",
+                    "claim_status": "observed",
+                    "coverage_discharge": "not_applicable",
+                    "authority": ["fact_mine_normalized_ast"],
+                    "claim_kind": "false_simplicity",
+                    "scope": {"kind": "function", "closed": false},
+                    "blockers": [{"kind": "unknown"}]
+                }
+            })],
+        )];
+        attach_detector_boundaries(&mut sections, &json!({}));
+        let boundary = &sections[0].findings[0]["proof_boundary"];
+        assert_eq!(boundary["input_completeness"], json!("unknown"));
+        assert_eq!(boundary["claim_kind"], json!("false_simplicity"));
+        assert_eq!(boundary["blockers"], json!([{"kind": "unknown"}]));
     }
 
     #[test]

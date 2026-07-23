@@ -265,6 +265,193 @@ pub mod proof_boundary {
         }))
     }
 
+    /// Parses an externally supplied v3 boundary, validates its structure and
+    /// semantic constraints, then emits the same canonical ordering as
+    /// [`build`]. Consumers use this before preserving evidence supplied by a
+    /// different tool.
+    pub fn parse_validate_normalize(boundary: &Value) -> Result<Value, String> {
+        let object = boundary
+            .as_object()
+            .ok_or_else(|| "proof boundary must be an object".to_string())?;
+        let required = [
+            "schema",
+            "input_completeness",
+            "claim_status",
+            "coverage_discharge",
+            "authority",
+            "claim_kind",
+            "scope",
+            "blockers",
+        ];
+        if object.keys().any(|key| !required.contains(&key.as_str())) {
+            return Err("proof boundary has unknown fields".to_string());
+        }
+        if required.iter().any(|key| !object.contains_key(*key)) {
+            return Err("proof boundary is missing required fields".to_string());
+        }
+        if object.get("schema").and_then(Value::as_str) != Some(SCHEMA) {
+            return Err("invalid proof boundary schema".to_string());
+        }
+
+        let input_completeness = parse_input(field_str(object, "input_completeness")?)?;
+        let claim_status = parse_claim(field_str(object, "claim_status")?)?;
+        let coverage_discharge = parse_coverage(field_str(object, "coverage_discharge")?)?;
+        let authority = object
+            .get("authority")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "proof boundary authority must be an array".to_string())?
+            .iter()
+            .map(|value| {
+                let authority = value.as_str().ok_or_else(|| {
+                    "proof boundary authority entries must be strings".to_string()
+                })?;
+                if authority.is_empty() {
+                    return Err(
+                        "proof boundary authority must contain nonempty entries".to_string()
+                    );
+                }
+                Ok(authority)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let claim_kind = field_str(object, "claim_kind")?;
+        let scope = object
+            .get("scope")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "proof boundary scope must be an object".to_string())?;
+        if scope.len() != 2 || !scope.contains_key("kind") || !scope.contains_key("closed") {
+            return Err("proof boundary scope must contain only kind and closed".to_string());
+        }
+        let scope_kind = parse_scope(field_str(scope, "kind")?)?;
+        let closed = scope
+            .get("closed")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| "proof boundary scope closed must be boolean".to_string())?;
+        let blockers = object
+            .get("blockers")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "proof boundary blockers must be an array".to_string())?
+            .iter()
+            .map(parse_blocker)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        build(
+            input_completeness,
+            claim_status,
+            coverage_discharge,
+            &authority,
+            claim_kind,
+            scope_kind,
+            closed,
+            blockers,
+        )
+    }
+
+    fn field_str<'a>(
+        object: &'a serde_json::Map<String, Value>,
+        field: &str,
+    ) -> Result<&'a str, String> {
+        object
+            .get(field)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("proof boundary {field} must be a string"))
+    }
+
+    fn parse_input(value: &str) -> Result<InputCompleteness, String> {
+        match value {
+            "complete" => Ok(InputCompleteness::Complete),
+            "partial" => Ok(InputCompleteness::Partial),
+            "unknown" => Ok(InputCompleteness::Unknown),
+            _ => Err(format!("invalid input completeness: {value}")),
+        }
+    }
+
+    fn parse_claim(value: &str) -> Result<ClaimStatus, String> {
+        match value {
+            "proven" => Ok(ClaimStatus::Proven),
+            "observed" => Ok(ClaimStatus::Observed),
+            "review" => Ok(ClaimStatus::Review),
+            _ => Err(format!("invalid claim status: {value}")),
+        }
+    }
+
+    fn parse_coverage(value: &str) -> Result<CoverageDischarge, String> {
+        match value {
+            "satisfiable" => Ok(CoverageDischarge::Satisfiable),
+            "unsatisfiable" => Ok(CoverageDischarge::Unsatisfiable),
+            "not_applicable" => Ok(CoverageDischarge::NotApplicable),
+            "unknown" => Ok(CoverageDischarge::Unknown),
+            _ => Err(format!("invalid coverage discharge: {value}")),
+        }
+    }
+
+    fn parse_scope(value: &str) -> Result<ProofScopeKind, String> {
+        match value {
+            "reported_span" => Ok(ProofScopeKind::ReportedSpan),
+            "function" => Ok(ProofScopeKind::Function),
+            "owner" => Ok(ProofScopeKind::Owner),
+            "file" => Ok(ProofScopeKind::File),
+            "project" => Ok(ProofScopeKind::Project),
+            "closed_build_target" => Ok(ProofScopeKind::ClosedBuildTarget),
+            "local" => Ok(ProofScopeKind::Local),
+            _ => Err(format!("invalid proof scope kind: {value}")),
+        }
+    }
+
+    fn parse_blocker(value: &Value) -> Result<ProofBlocker, String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| "proof blocker must be an object".to_string())?;
+        if object
+            .keys()
+            .any(|key| !["kind", "path", "span"].contains(&key.as_str()))
+            || !object.contains_key("kind")
+        {
+            return Err("proof blocker has invalid fields".to_string());
+        }
+        let kind = match field_str(object, "kind")? {
+            "parser_recovery" => ProofBlockerKind::ParserRecovery,
+            "call_resolution" => ProofBlockerKind::CallResolution,
+            "missing_evidence" => ProofBlockerKind::MissingEvidence,
+            "open_corpus" => ProofBlockerKind::OpenCorpus,
+            "unsupported_language" => ProofBlockerKind::UnsupportedLanguage,
+            "unknown" => ProofBlockerKind::Unknown,
+            value => return Err(format!("invalid proof blocker kind: {value}")),
+        };
+        let path = object
+            .get("path")
+            .map(|value| {
+                let path = value
+                    .as_str()
+                    .ok_or_else(|| "proof blocker path must be a string".to_string())?;
+                if path.is_empty() {
+                    return Err("proof blocker path must not be empty".to_string());
+                }
+                Ok(path.to_string())
+            })
+            .transpose()?;
+        let span = object
+            .get("span")
+            .map(|value| {
+                let values = value
+                    .as_array()
+                    .ok_or_else(|| "proof blocker span must be an array".to_string())?;
+                if values.len() != 4 {
+                    return Err("proof blocker span must contain four integers".to_string());
+                }
+                let mut span = [0; 4];
+                for (index, value) in values.iter().enumerate() {
+                    span[index] = value.as_i64().ok_or_else(|| {
+                        "proof blocker span must contain four integers".to_string()
+                    })?;
+                }
+                Ok(span)
+            })
+            .transpose()?;
+        let blocker = ProofBlocker { kind, path, span };
+        blocker.validate()?;
+        Ok(blocker)
+    }
+
     /// Summarizes each proof dimension independently.
     pub fn summary(results: &[Value]) -> Value {
         let mut complete = 0usize;
@@ -279,10 +466,10 @@ pub mod proof_boundary {
         let mut discharge_unknown = 0usize;
         let mut results_with_boundary = 0usize;
         for result in results {
-            let Some(boundary) = result
-                .pointer(&format!("/properties/{PROPERTY}"))
-                .and_then(Value::as_object)
-            else {
+            let Some(boundary) = result.pointer(&format!("/properties/{PROPERTY}")) else {
+                continue;
+            };
+            let Ok(boundary) = parse_validate_normalize(boundary) else {
                 continue;
             };
             results_with_boundary += 1;
@@ -599,7 +786,8 @@ pub fn validate_contract() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::proof_boundary::{
-        build, ClaimStatus, CoverageDischarge, InputCompleteness, ProofBlocker, ProofScopeKind,
+        build, parse_validate_normalize, ClaimStatus, CoverageDischarge, InputCompleteness,
+        ProofBlocker, ProofScopeKind,
     };
     use super::{glob_matches, validate_contract};
     use jsonschema::JSONSchema;
@@ -640,11 +828,18 @@ mod tests {
                 validator.is_valid(boundary),
                 "representative boundary must satisfy v3 schema: {boundary}"
             );
+            assert_eq!(
+                parse_validate_normalize(boundary).unwrap(),
+                boundary.clone(),
+                "representative boundary must be canonical: {boundary}"
+            );
         }
-        assert!(
-            !validator.is_valid(&fixture["invalid"]),
-            "invalid vector must fail the v3 schema"
-        );
+        for (name, boundary) in fixture["invalid"].as_object().unwrap() {
+            assert!(
+                parse_validate_normalize(boundary).is_err(),
+                "invalid vector {name} must fail semantic validation"
+            );
+        }
     }
 
     #[test]

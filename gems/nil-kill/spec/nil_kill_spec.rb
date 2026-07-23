@@ -373,7 +373,7 @@ RSpec.describe NilKill do
       claims = sarif.dig("runs", 0, "results").map { |result| result.dig("properties", "fact_mine.proof_boundary", "claim_status") }.compact
       expect(claims).to include("proven", "review")
       expect(sarif.dig("runs", 0, "properties", "fact_mine.proof_boundary_summary", "claim_status", "review")).to be_positive
-      partial_boundary = described_class.new.send(:static_review_boundary, "static_nil_finding", blockers: ["dynamic dispatch"])
+      partial_boundary = described_class.new.send(:static_review_boundary, "static_nil_finding", blockers: [{ "kind" => "call_resolution" }])
       expect(partial_boundary.fetch("input_completeness")).to eq("partial")
       expect(partial_boundary.fetch("blockers")).to eq([{ "kind" => "call_resolution" }])
     end
@@ -412,10 +412,36 @@ RSpec.describe NilKill do
 
       expect(boundary.fetch("input_completeness")).to eq("partial")
       expect(boundary.fetch("claim_status")).to eq("proven")
-      expect(boundary.fetch("blockers")).to include({ "kind" => "parser_recovery" })
+      expect(boundary.fetch("blockers")).to include({ "kind" => "missing_evidence" })
     end
 
-    it "serializes only the canonical proof boundary for pressure findings" do
+    it "downgrades an invalid incoming proof boundary instead of preserving it" do
+      boundary = described_class.new.send(
+        :static_proof_boundary,
+        {
+          "proof_boundary" => {
+            "schema" => "fact-mine.proof-boundary.v3",
+            "input_completeness" => "complete",
+            "claim_status" => "proven",
+            "coverage_discharge" => "unsatisfiable",
+            "authority" => ["nil_kill_static"],
+            "claim_kind" => "static_nullable_return",
+            "scope" => { "kind" => "local", "closed" => false },
+            "blockers" => [{ "kind" => "unknown" }]
+          }
+        },
+        "static_nullable_return"
+      )
+
+      expect(boundary).to include(
+        "input_completeness" => "unknown",
+        "claim_status" => "review",
+        "claim_kind" => "static_nullable_return",
+        "blockers" => [{ "kind" => "unknown" }]
+      )
+    end
+
+    it "does not promote a canonical unknown boundary from corpus completeness" do
       reporter = described_class.new
       finding = {
         "kind" => "primitive_record",
@@ -432,7 +458,7 @@ RSpec.describe NilKill do
       )
 
       expect(result.fetch("properties")).not_to have_key("proof_boundary")
-      expect(result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("complete")
+      expect(result.dig("properties", "fact_mine.proof_boundary", "input_completeness")).to eq("unknown")
     end
 
     it "keeps static primitive-domain actions review-only in SARIF" do
@@ -472,24 +498,32 @@ RSpec.describe NilKill do
 
       expect(boundary).to eq(valid)
       expect(boundary).to eq(fixture.dig("representative", "nil_kill"))
+      ([valid] + fixture.fetch("representative").values).each do |candidate|
+        expect(FactMine::ProofBoundary.parse_validate_normalize(candidate)).to eq(candidate)
+      end
+      fixture.fetch("invalid").each_value do |candidate|
+        expect { FactMine::ProofBoundary.parse_validate_normalize(candidate) }.to raise_error(ArgumentError)
+      end
       expect {
-        NilKill::Sarif.proof_boundary(
-          input_completeness: fixture.dig("invalid", "input_completeness"),
-          claim_status: "review",
-          coverage_discharge: "unsatisfiable",
-          authority: [],
-          scope: "test"
-        )
-      }.to raise_error(ArgumentError, /input completeness/)
+        FactMine::ProofBoundary.parse_validate_normalize("kind" => "unknown")
+      }.to raise_error(ArgumentError)
       expect {
-        NilKill::Sarif.proof_boundary(
+        FactMine::ProofBoundary.build(
           input_completeness: "partial",
           claim_status: "review",
           coverage_discharge: "unsatisfiable",
-          authority: [],
-          scope: ""
+          authority: ["fact_mine"],
+          claim_kind: "test",
+          scope: "local"
         )
-      }.to raise_error(ArgumentError, /authority must not be empty/)
+      }.to raise_error(ArgumentError, /scope must be a hash/)
+
+      summary = FactMine::ProofBoundary.summary([
+        { "properties" => { FactMine::ProofBoundary::PROOF_BOUNDARY_PROPERTY => valid } },
+        { "properties" => { FactMine::ProofBoundary::PROOF_BOUNDARY_PROPERTY => fixture.fetch("invalid").fetch("complete_with_blocker") } }
+      ])
+      expect(summary.fetch("result_count")).to eq(2)
+      expect(summary.fetch("results_with_boundary")).to eq(1)
     end
 
     it "joins relative method paths to absolute return-origin paths" do

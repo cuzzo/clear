@@ -68,7 +68,11 @@ SlopCop producer values, live in
 test compiles the versioned JSON Schema and validates those vectors, so the
 fixture is a conformance check rather than documentation alone.
 Ruby producers use `FactMine::ProofBoundary` rather than copying validation or
-summary logic. Rust producers use the typed serializer in
+summary logic. Both implementations execute the shared valid and invalid
+vectors. Incoming boundaries must first pass `parse_validate_normalize`; an
+invalid payload is never preserved as trusted evidence. The only legacy
+conversion is the explicit `legacy_scope` adapter for a known v2 scope value;
+arbitrary blocker prose is not interpreted as a typed blocker. Rust producers use the typed serializer in
 `hazard-contract::proof_boundary` (Decomplex only re-exports that API). Its
 canonical builder validates and normalizes each release-build payload, and
 Rust producers must handle its `Result` rather than emitting invalid

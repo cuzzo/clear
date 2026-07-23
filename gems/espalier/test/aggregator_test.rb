@@ -248,7 +248,7 @@ class AggregatorTest < Minitest::Test
       file: "lib/parser.rb",
       proof_boundary: {
         input_completeness: "partial",
-        input_blockers: ["selected target is not a closed corpus"]
+        input_blockers: [{ "kind" => "missing_evidence" }]
       },
       functions: [{
         name: "parse",
@@ -260,7 +260,7 @@ class AggregatorTest < Minitest::Test
     run = JSON.parse(Espalier::Formatter.to_sarif(manifest)).fetch("runs").first
     boundary = run.fetch("results").first.dig("properties", "fact_mine.proof_boundary")
     assert_equal "partial", boundary.fetch("input_completeness")
-    assert_equal [{ "kind" => "open_corpus" }], boundary.fetch("blockers")
+    assert_equal [{ "kind" => "missing_evidence" }], boundary.fetch("blockers")
     assert_equal 1, run.dig("properties", "fact_mine.proof_boundary_summary", "input_completeness", "partial")
   end
 

@@ -225,13 +225,15 @@ module Espalier
             # Big-O completeness describes Espalier's estimate, not the
             # completeness of the FactMine input. The extractor supplies the
             # latter explicitly through the projected module boundary.
-            input_completeness: input_completeness_for(mod),
+            input_completeness: complexity_input_completeness(mod, time_complete, space_complete),
             claim_status: "observed",
             coverage_discharge: "not_applicable",
             authority: ["fact_mine_normalized_ast", "espalier_static"],
             claim_kind: "function_complexity",
             scope: { kind: "function", closed: false },
-            blockers: input_blockers_for(mod) + complexity_proof_blockers(unknowns, warnings, time_complete, space_complete)
+            blockers: input_blockers_for(mod) + complexity_proof_blockers(
+              input_completeness_for(mod), unknowns, warnings, time_complete, space_complete
+            )
           )
         }
       )
@@ -240,10 +242,21 @@ module Espalier
       result
     end
 
-    def complexity_proof_blockers(unknowns, warnings, time_complete, space_complete)
+    def complexity_proof_blockers(input_completeness, unknowns, warnings, time_complete, space_complete)
       return [] if time_complete && space_complete
 
-      (unknowns + warnings + ["incomplete_complexity_proof"]).map(&:to_s).uniq.sort
+      blockers = []
+      blockers << { "kind" => "call_resolution" } unless unknowns.empty?
+      blockers << { "kind" => "missing_evidence" } unless warnings.empty?
+      blockers << { "kind" => (input_completeness == "unknown" ? "unknown" : "missing_evidence") } if blockers.empty?
+      blockers.uniq
+    end
+
+    def complexity_input_completeness(mod, time_complete, space_complete)
+      completeness = input_completeness_for(mod)
+      return completeness if time_complete && space_complete
+
+      completeness == "complete" ? "partial" : completeness
     end
 
     def input_completeness_for(mod)
@@ -254,7 +267,10 @@ module Espalier
 
     def input_blockers_for(mod)
       boundary = mod[:proof_boundary] || mod["proof_boundary"] || {}
-      Array(boundary[:input_blockers] || boundary["input_blockers"]).map(&:to_s).reject(&:empty?).uniq.sort
+      blockers = Array(boundary[:input_blockers] || boundary["input_blockers"])
+      raise ArgumentError, "input blockers must use proof-boundary objects" unless blockers.all? { |blocker| blocker.is_a?(Hash) }
+
+      blockers.map { |blocker| blocker.transform_keys(&:to_s) }.uniq.sort_by { |blocker| JSON.generate(blocker) }
     end
 
     def complexity_related_locations(variables)

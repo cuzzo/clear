@@ -52,13 +52,55 @@
     }
   },
   "invalid": {
-    "schema": "fact-mine.proof-boundary.v3",
-    "input_completeness": "certain",
-    "claim_status": "review",
-    "coverage_discharge": "unsatisfiable",
-    "authority": ["fact_mine_normalized_ast"],
-    "claim_kind": "static_nil_pressure",
-    "scope": {"kind": "local", "closed": false},
-    "blockers": []
+    "invalid_enum": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "certain",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": []
+    },
+    "complete_with_blocker": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "complete",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": [{"kind": "unknown"}]
+    },
+    "open_corpus_partial": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "partial",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": [{"kind": "open_corpus"}]
+    },
+    "empty_path": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "partial",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": [{"kind": "call_resolution", "path": ""}]
+    },
+    "reversed_span": {
+      "schema": "fact-mine.proof-boundary.v3",
+      "input_completeness": "partial",
+      "claim_status": "review",
+      "coverage_discharge": "unsatisfiable",
+      "authority": ["fact_mine_normalized_ast"],
+      "claim_kind": "static_nil_pressure",
+      "scope": {"kind": "local", "closed": false},
+      "blockers": [{"kind": "call_resolution", "path": "lib/example.rb", "span": [3, 2, 3, 1]}]
+    }
   }
 }

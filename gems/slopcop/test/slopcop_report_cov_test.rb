@@ -587,8 +587,8 @@ class SlopcopReportCovTest < Minitest::Test
 
   def test_sarif_proof_boundary_summary
     results = [
-      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(input_completeness: "complete", claim_status: "proven", coverage_discharge: "not_applicable", authority: ["fact_mine"], scope: "local") } },
-      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(input_completeness: "partial", claim_status: "review", coverage_discharge: "unsatisfiable", authority: ["fact_mine"], scope: "local", blockers: ["dynamic"]) } }
+      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(input_completeness: "complete", claim_status: "proven", coverage_discharge: "not_applicable", authority: ["fact_mine"], claim_kind: "test_complete", scope: "local") } },
+      { "properties" => { "fact_mine.proof_boundary" => SlopCop::Sarif.proof_boundary(input_completeness: "partial", claim_status: "review", coverage_discharge: "unsatisfiable", authority: ["fact_mine"], claim_kind: "test_partial", scope: "local", blockers: [{ "kind" => "unknown" }]) } }
     ]
     summary = SlopCop::Sarif.proof_boundary_summary(results)
     assert_equal 2, summary["results_with_boundary"]

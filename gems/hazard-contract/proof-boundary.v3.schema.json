@@ -13,6 +13,10 @@
     "authority": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "minItems": 1},
     "claim_kind": {"type": "string", "minLength": 1},
     "scope": {"type": "object", "additionalProperties": false, "required": ["kind", "closed"], "properties": {"kind": {"enum": ["reported_span", "function", "owner", "file", "project", "closed_build_target", "local"]}, "closed": {"type": "boolean"}}},
-    "blockers": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"enum": ["parser_recovery", "call_resolution", "missing_evidence", "open_corpus", "unsupported_language", "unknown"]}, "path": {"type": "string"}, "span": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}}}, "uniqueItems": true}
-  }
+    "blockers": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"enum": ["parser_recovery", "call_resolution", "missing_evidence", "open_corpus", "unsupported_language", "unknown"]}, "path": {"type": "string", "minLength": 1}, "span": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}}}, "uniqueItems": true}
+  },
+  "allOf": [
+    {"if": {"properties": {"input_completeness": {"const": "complete"}}}, "then": {"properties": {"blockers": {"maxItems": 0}}}},
+    {"if": {"properties": {"blockers": {"contains": {"properties": {"kind": {"const": "open_corpus"}}, "required": ["kind"]}}}}, "then": {"properties": {"input_completeness": {"const": "unknown"}}}}
+  ]
 }

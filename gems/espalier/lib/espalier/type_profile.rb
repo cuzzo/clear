@@ -823,7 +823,7 @@ module Decomplex
         claim_status: claim_status,
         coverage_discharge: coverage_discharge,
         authority: authority,
-        scope: scope,
+        scope: scope.is_a?(Hash) ? scope : FactMine::ProofBoundary.legacy_scope(scope),
         blockers: blockers,
         claim_kind: claim_kind
       )

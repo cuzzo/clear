@@ -1,6 +1,6 @@
 pub use hazard_contract::proof_boundary::{
-    ClaimStatus, CoverageDischarge, InputCompleteness, ProofBlocker, ProofBlockerKind,
-    ProofScopeKind,
+    parse_validate_normalize, ClaimStatus, CoverageDischarge, InputCompleteness, ProofBlocker,
+    ProofBlockerKind, ProofScopeKind,
 };
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
@@ -355,11 +355,27 @@ mod tests {
                     )
                 }
             }),
+            // An object-shaped but invalid incoming boundary must not affect
+            // aggregate proof metrics.
+            json!({
+                "properties": {
+                    PROOF_BOUNDARY_PROPERTY: {
+                        "schema": "fact-mine.proof-boundary.v3",
+                        "input_completeness": "complete",
+                        "claim_status": "observed",
+                        "coverage_discharge": "not_applicable",
+                        "authority": ["fact_mine_normalized_ast"],
+                        "claim_kind": "invalid",
+                        "scope": {"kind": "local", "closed": false},
+                        "blockers": [{"kind": "unknown"}]
+                    }
+                }
+            }),
             json!({"ruleId": "unannotated"}),
         ];
 
         let summary = proof_boundary_summary(&results);
-        assert_eq!(summary.pointer("/result_count"), Some(&json!(3)));
+        assert_eq!(summary.pointer("/result_count"), Some(&json!(4)));
         assert_eq!(summary.pointer("/results_with_boundary"), Some(&json!(2)));
         assert_eq!(
             summary.pointer("/input_completeness/complete"),
