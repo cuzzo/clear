@@ -1603,6 +1603,31 @@ fn apply_merged_declared_callback_costs(
         .iter()
         .map(|method| (method.id.as_str(), method))
         .collect::<BTreeMap<_, _>>();
+    // Callback contracts use the deliberately conservative `owner_name_matches`
+    // relation: only the terminal nominal owner name participates.  Building
+    // that projection once avoids an O(calls * receiver-segments * fields)
+    // scan during project finalization while preserving its ambiguity rules.
+    let declared_types_by_field = fields
+        .iter()
+        .filter_map(|field| {
+            field.declared_type.as_deref().map(|declared_type| {
+                (
+                    (
+                        field.language.as_str(),
+                        owner_type_name(&field.owner).to_string(),
+                        field.name.trim_start_matches('@').to_string(),
+                    ),
+                    declared_type,
+                )
+            })
+        })
+        .fold(
+            BTreeMap::<(&str, String, String), BTreeSet<&str>>::new(),
+            |mut index, (key, declared_type)| {
+                index.entry(key).or_default().insert(declared_type);
+                index
+            },
+        );
     for call in calls {
         if call.target.is_some() || call.known_time_complexity.is_some() {
             continue;
@@ -1614,7 +1639,7 @@ fn apply_merged_declared_callback_costs(
             continue;
         };
         let behavior = crate::syntax::normalized_behavior::behavior(language);
-        let mut owner = call.owner.clone();
+        let mut owner = owner_type_name(&call.owner).to_string();
         let mut failed = false;
         for field_name in call
             .receiver
@@ -1623,28 +1648,27 @@ fn apply_merged_declared_callback_costs(
             .filter(|part| !part.is_empty())
             .skip_while(|part| matches!(*part, "self" | "this"))
         {
-            let candidates = fields
-                .iter()
-                .filter(|field| field.language == method.language)
-                .filter(|field| owner_name_matches(&field.owner, &owner))
-                .filter(|field| field.name.trim_start_matches('@') == field_name)
-                .filter_map(|field| field.declared_type.as_deref())
-                .collect::<BTreeSet<_>>();
+            let candidates = declared_types_by_field
+                .get(&(
+                    method.language.as_str(),
+                    owner.clone(),
+                    field_name.to_string(),
+                ))
+                .cloned()
+                .unwrap_or_default();
             if candidates.len() != 1 {
                 failed = true;
                 break;
             }
-            owner = candidates.into_iter().next().unwrap().to_string();
+            owner = owner_type_name(candidates.into_iter().next().unwrap()).to_string();
         }
         if failed {
             continue;
         }
-        let costs = fields
-            .iter()
-            .filter(|field| field.language == method.language)
-            .filter(|field| owner_name_matches(&field.owner, &owner))
-            .filter(|field| field.name.trim_start_matches('@') == call.message)
-            .filter_map(|field| field.declared_type.as_deref())
+        let costs = declared_types_by_field
+            .get(&(method.language.as_str(), owner, call.message.clone()))
+            .into_iter()
+            .flatten()
             .filter_map(|declared_type| behavior.declared_callable_cost(declared_type))
             .collect::<BTreeSet<_>>();
         if costs.len() != 1 {
@@ -2368,6 +2392,16 @@ fn resolve_project_calls(
             by_lexical.entry(symbol).or_default().push(method);
         }
     }
+    let mut by_dispatch: BTreeMap<(&str, &str, &str), Vec<&MethodRecord>> = BTreeMap::new();
+    for method in methods {
+        let Some(owner) = method.symbol_owner.as_deref() else {
+            continue;
+        };
+        by_dispatch
+            .entry((owner, method.dispatch_name.as_str(), method.kind.as_str()))
+            .or_default()
+            .push(method);
+    }
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
         let Some(symbol) = call.lexical_symbol.as_deref() else {
             continue;
@@ -2394,18 +2428,7 @@ fn resolve_project_calls(
     }
 
     resolve_same_namespace_static_calls(methods, calls);
-    resolve_same_namespace_declared_receiver_calls(methods, calls);
-
-    let mut by_dispatch: BTreeMap<(&str, &str, &str), Vec<&MethodRecord>> = BTreeMap::new();
-    for method in methods {
-        let Some(owner) = method.symbol_owner.as_deref() else {
-            continue;
-        };
-        by_dispatch
-            .entry((owner, method.dispatch_name.as_str(), method.kind.as_str()))
-            .or_default()
-            .push(method);
-    }
+    resolve_same_namespace_declared_receiver_calls(methods, calls, &by_dispatch);
 
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
         let Some(owner) = call.receiver_symbol.as_deref() else {
@@ -2458,6 +2481,7 @@ fn resolve_project_calls(
 fn resolve_same_namespace_declared_receiver_calls(
     methods: &[MethodRecord],
     calls: &mut [CallRecord],
+    by_dispatch: &BTreeMap<(&str, &str, &str), Vec<&MethodRecord>>,
 ) {
     let sources = methods
         .iter()
@@ -2485,16 +2509,16 @@ fn resolve_same_namespace_declared_receiver_calls(
         }
         let expected_dot = format!("{namespace}.{nominal}");
         let expected_scope = format!("{namespace}::{nominal}");
-        let candidates = methods
-            .iter()
-            .filter(|method| method.language == source.language)
-            .filter(|method| {
-                matches!(
-                    method.symbol_owner.as_deref(),
-                    Some(owner) if owner == expected_dot || owner == expected_scope
-                )
+        let candidates = [expected_dot.as_str(), expected_scope.as_str()]
+            .into_iter()
+            .flat_map(|owner| {
+                by_dispatch
+                    .get(&(owner, call.message.as_str(), "instance"))
+                    .into_iter()
+                    .flatten()
+                    .copied()
             })
-            .filter(|method| method.kind == "instance" && method.dispatch_name == call.message)
+            .filter(|method| method.language == source.language)
             .collect::<Vec<_>>();
         let Some(candidate) =
             unique_call_candidate(&candidates, call, Some(source.language.as_str()))
