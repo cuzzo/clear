@@ -20,11 +20,11 @@ fn diff_prints_revision_pinned_text_and_versioned_json_without_writing_analysis_
         String::from_utf8_lossy(&text.stderr)
     );
     let text = String::from_utf8(text.stdout).unwrap();
-    assert!(text.contains(&format!("Lineage diff {base}..{head}")));
+    assert!(text.contains(&format!("Gigasail diff {base}..{head}")));
     assert!(text.contains("Evidence: coverage=missing mutation=missing"));
     assert!(!missing_db.exists());
 
-    lineage::Storage::open(&missing_db).unwrap();
+    gigasail::Storage::open(&missing_db).unwrap();
     let output = run_diff(
         directory.path(),
         &missing_db,
@@ -52,7 +52,7 @@ fn diff_prints_revision_pinned_text_and_versioned_json_without_writing_analysis_
         String::from_utf8_lossy(&output.stderr)
     );
     let document: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(document["format_version"], "lineage-diff/v1");
+    assert_eq!(document["format_version"], "gigasail-diff/v1");
     assert_eq!(document["plan"]["scope"]["base_oid"], base.to_string());
     assert_eq!(document["plan"]["scope"]["head_oid"], head.to_string());
     assert_eq!(
@@ -68,7 +68,7 @@ fn run_diff<const N: usize>(
     head: git2::Oid,
     options: [&str; N],
 ) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lineage"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_giga"));
     command.arg("diff").args(options).arg("--repo").arg(repo);
     command
         .arg("--db")

@@ -15,7 +15,7 @@ fn analyze_alias_uses_a_safe_builtin_profile_without_lineage_configuration() {
     .unwrap();
     commit_all(&repository, &signature, "initial");
 
-    let analyse = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let analyse = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["analyze", "--repo"])
         .arg(directory.path())
         .output()
@@ -26,7 +26,7 @@ fn analyze_alias_uses_a_safe_builtin_profile_without_lineage_configuration() {
         "{}",
         String::from_utf8_lossy(&analyse.stderr)
     );
-    let run = fs::read_dir(directory.path().join(".lineage/artifacts/runs"))
+    let run = fs::read_dir(directory.path().join(".gigasail/artifacts/runs"))
         .unwrap()
         .filter_map(std::result::Result::ok)
         .map(|entry| entry.path())
@@ -45,13 +45,13 @@ fn analyze_alias_uses_a_safe_builtin_profile_without_lineage_configuration() {
     assert_eq!(manifest["producers"][0]["name"], "fact-mine");
     assert_eq!(manifest["producers"][0]["outcome"], "succeeded");
     assert_eq!(manifest["artifacts"].as_array().unwrap().len(), 1);
-    let typed_manifest: lineage::RunManifest = serde_json::from_value(manifest.clone()).unwrap();
+    let typed_manifest: gigasail::RunManifest = serde_json::from_value(manifest.clone()).unwrap();
     let sarif = String::from_utf8(
-        lineage::read_manifest_artifact(&run, &typed_manifest.artifacts[0]).unwrap(),
+        gigasail::read_manifest_artifact(&run, &typed_manifest.artifacts[0]).unwrap(),
     )
     .unwrap();
     assert!(sarif.contains("fact-mine.rust_unsafe_block"), "{sarif}");
-    assert!(!directory.path().join(".lineage/lineage.db").exists());
+    assert!(!directory.path().join(".gigasail/gigasail.db").exists());
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn standalone_analysis_manifest_fingerprints_the_dirty_worktree_content() {
         "pub unsafe fn value() -> u8 { unsafe { core::ptr::read(0 as *const u8) } }\n",
     ] {
         fs::write(directory.path().join("lib.rs"), source).unwrap();
-        let analyse = Command::new(env!("CARGO_BIN_EXE_lineage"))
+        let analyse = Command::new(env!("CARGO_BIN_EXE_giga"))
             .args(["analyse", "--repo"])
             .arg(directory.path())
             .output()
@@ -83,7 +83,7 @@ fn standalone_analysis_manifest_fingerprints_the_dirty_worktree_content() {
         );
     }
 
-    let fingerprints = fs::read_dir(directory.path().join(".lineage/artifacts/runs"))
+    let fingerprints = fs::read_dir(directory.path().join(".gigasail/artifacts/runs"))
         .unwrap()
         .filter_map(std::result::Result::ok)
         .map(|entry| entry.path().join("manifest.json"))
@@ -104,13 +104,13 @@ fn analyse_ignores_untrusted_checkout_configuration_and_bounds_run_retention() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
-        "version: 1\nprofiles:\n  analyse:\n    producers: [static]\nproducers:\n  static:\n    executor: command\n    argv: [sh, -c, \"mkdir -p .lineage/artifacts && printf '{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[]}' > .lineage/artifacts/static.sarif\"]\n    produces:\n      - kind: sarif\n        format: sarif\n        path: .lineage/artifacts/static.sarif\n        complete: false\n",
+        directory.path().join("gigasail.yml"),
+        "version: 1\nprofiles:\n  analyse:\n    producers: [static]\nproducers:\n  static:\n    executor: command\n    argv: [sh, -c, \"mkdir -p .gigasail/artifacts && printf '{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[]}' > .gigasail/artifacts/static.sarif\"]\n    produces:\n      - kind: sarif\n        format: sarif\n        path: .gigasail/artifacts/static.sarif\n        complete: false\n",
     )
     .unwrap();
     commit_all(&repository, &signature, "analysis profile");
 
-    let analyse = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let analyse = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["analyse", "--repo"])
         .arg(directory.path())
         .output()
@@ -121,10 +121,10 @@ fn analyse_ignores_untrusted_checkout_configuration_and_bounds_run_retention() {
         String::from_utf8_lossy(&analyse.stderr)
     );
     assert!(String::from_utf8_lossy(&analyse.stdout).contains("revision=WORKTREE"));
-    assert!(!directory.path().join(".lineage/lineage.db").exists());
+    assert!(!directory.path().join(".gigasail/gigasail.db").exists());
     assert!(directory
         .path()
-        .join(".lineage/artifacts/runs")
+        .join(".gigasail/artifacts/runs")
         .read_dir()
         .unwrap()
         .any(|entry| entry
@@ -134,7 +134,7 @@ fn analyse_ignores_untrusted_checkout_configuration_and_bounds_run_retention() {
             .starts_with("analysis-")));
     assert!(!directory
         .path()
-        .join(".lineage/artifacts/static.sarif")
+        .join(".gigasail/artifacts/static.sarif")
         .exists());
 }
 
@@ -149,19 +149,19 @@ fn interrupted_standalone_analysis_run_cannot_block_the_next_ci_publication() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
+        directory.path().join("gigasail.yml"),
         complete_profile_config(),
     )
     .unwrap();
     commit_all(&repository, &signature, "initial");
 
-    let analyse = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let analyse = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["analyse", "--repo"])
         .arg(directory.path())
         .output()
         .unwrap();
     assert!(analyse.status.success());
-    let run = fs::read_dir(directory.path().join(".lineage/artifacts/runs"))
+    let run = fs::read_dir(directory.path().join(".gigasail/artifacts/runs"))
         .unwrap()
         .filter_map(std::result::Result::ok)
         .map(|entry| entry.path())
@@ -172,10 +172,10 @@ fn interrupted_standalone_analysis_run_cannot_block_the_next_ci_publication() {
         .unwrap();
     assert!(!run.join(".publication-state").exists());
 
-    let ci = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ci = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
-        .args(["--db", ".lineage/lineage.db", "--trust-current-config"])
+        .args(["--db", ".gigasail/gigasail.db", "--trust-current-config"])
         .output()
         .unwrap();
     assert!(
@@ -183,7 +183,7 @@ fn interrupted_standalone_analysis_run_cannot_block_the_next_ci_publication() {
         "{}",
         String::from_utf8_lossy(&ci.stderr)
     );
-    assert!(directory.path().join(".lineage/artifacts/latest").exists());
+    assert!(directory.path().join(".gigasail/artifacts/latest").exists());
 }
 
 #[test]
@@ -193,13 +193,13 @@ fn analyse_selects_a_trusted_custom_profile_and_stages_its_sarif() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
-        "version: 1\nprofiles:\n  security:\n    producers: [adapter]\nproducers:\n  adapter:\n    executor: command\n    argv: [sh, -c, \"mkdir -p .lineage/artifacts && printf '{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[]}' > .lineage/artifacts/adapter.sarif\"]\n    produces:\n      - kind: sarif\n        format: sarif\n        path: .lineage/artifacts/adapter.sarif\n",
+        directory.path().join("gigasail.yml"),
+        "version: 1\nprofiles:\n  security:\n    producers: [adapter]\nproducers:\n  adapter:\n    executor: command\n    argv: [sh, -c, \"mkdir -p .gigasail/artifacts && printf '{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[]}' > .gigasail/artifacts/adapter.sarif\"]\n    produces:\n      - kind: sarif\n        format: sarif\n        path: .gigasail/artifacts/adapter.sarif\n",
     )
     .unwrap();
     commit_all(&repository, &signature, "analysis adapter");
 
-    let analyse = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let analyse = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["analyse", "--repo"])
         .arg(directory.path())
         .args(["--profile", "security", "--trust-current-config"])
@@ -210,7 +210,7 @@ fn analyse_selects_a_trusted_custom_profile_and_stages_its_sarif() {
         "{}",
         String::from_utf8_lossy(&analyse.stderr)
     );
-    let run = fs::read_dir(directory.path().join(".lineage/artifacts/runs"))
+    let run = fs::read_dir(directory.path().join(".gigasail/artifacts/runs"))
         .unwrap()
         .filter_map(std::result::Result::ok)
         .map(|entry| entry.path())
@@ -222,7 +222,7 @@ fn analyse_selects_a_trusted_custom_profile_and_stages_its_sarif() {
     assert_eq!(manifest["artifacts"][0]["producer"], "adapter");
     assert!(!directory
         .path()
-        .join(".lineage/artifacts/adapter.sarif")
+        .join(".gigasail/artifacts/adapter.sarif")
         .exists());
 }
 
@@ -240,10 +240,10 @@ fn analyse_ingest_indexes_a_clean_revision_and_its_fact_mine_sarif() {
     .unwrap();
     let head = commit_all(&repository, &signature, "hazard");
 
-    let analyse = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let analyse = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["analyse", "--repo"])
         .arg(directory.path())
-        .args(["--ingest", "--db", ".lineage/lineage.db"])
+        .args(["--ingest", "--db", ".gigasail/gigasail.db"])
         .output()
         .unwrap();
     assert!(
@@ -251,14 +251,14 @@ fn analyse_ingest_indexes_a_clean_revision_and_its_fact_mine_sarif() {
         "{}",
         String::from_utf8_lossy(&analyse.stderr)
     );
-    assert!(directory.path().join(".lineage/lineage.db").exists());
+    assert!(directory.path().join(".gigasail/gigasail.db").exists());
 
-    let diff = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let diff = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["diff", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/lineage.db",
+            ".gigasail/gigasail.db",
             "--sarif-source",
             "fact-mine",
             "--format",
@@ -287,13 +287,13 @@ fn analyse_refuses_an_untrusted_profile_that_would_modify_tracked_source() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
+        directory.path().join("gigasail.yml"),
         "version: 1\nprofiles:\n  unsafe:\n    producers: [bad]\nproducers:\n  bad:\n    executor: command\n    argv: [sh, -c, \"printf changed > lib.rs\"]\n",
     )
     .unwrap();
     commit_all(&repository, &signature, "initial");
 
-    let analyse = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let analyse = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["analyse", "--repo"])
         .arg(directory.path())
         .args([
@@ -301,13 +301,13 @@ fn analyse_refuses_an_untrusted_profile_that_would_modify_tracked_source() {
             "unsafe",
             "--ingest",
             "--db",
-            ".lineage/lineage.db",
+            ".gigasail/gigasail.db",
         ])
         .output()
         .unwrap();
     assert!(!analyse.status.success());
     assert!(String::from_utf8_lossy(&analyse.stderr).contains("trust-current-config"));
-    assert!(!directory.path().join(".lineage/lineage.db").exists());
+    assert!(!directory.path().join(".gigasail/gigasail.db").exists());
     assert_eq!(
         fs::read_to_string(directory.path().join("lib.rs")).unwrap(),
         "pub fn value() {}\n"
@@ -327,7 +327,7 @@ fn diff_analyse_runs_builtin_fact_mine_against_the_worktree_without_a_database()
     )
     .unwrap();
 
-    let diff = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let diff = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["diff", "--repo"])
         .arg(directory.path())
         .args(["--analyse", "--format", "json"])
@@ -343,8 +343,8 @@ fn diff_analyse_runs_builtin_fact_mine_against_the_worktree_without_a_database()
         "{}",
         String::from_utf8_lossy(&diff.stdout)
     );
-    assert!(!directory.path().join(".lineage/lineage.db").exists());
-    let runs = directory.path().join(".lineage/artifacts/runs");
+    assert!(!directory.path().join(".gigasail/gigasail.db").exists());
+    let runs = directory.path().join(".gigasail/artifacts/runs");
     assert!(
         !runs.exists() || runs.read_dir().unwrap().next().is_none(),
         "diff --analyse must remove its ephemeral run"
@@ -374,7 +374,7 @@ fn diff_analyse_rejects_dirty_source_for_an_explicit_commit_head() {
     )
     .unwrap();
 
-    let diff = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let diff = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["diff", "--repo"])
         .arg(directory.path())
         .args(["--analyse", "--format", "json"])
@@ -402,22 +402,22 @@ fn analyse_rejects_a_forged_workspace_journal_without_touching_source_or_outside
     let tracked_source = directory.path().join("lib.rs");
     fs::write(&tracked_source, "pub fn value() -> u8 { 1 }\n").unwrap();
     commit_all(&repository, &signature, "initial");
-    let source = directory.path().join(".lineage/artifacts/fact-mine.sarif");
+    let source = directory.path().join(".gigasail/artifacts/fact-mine.sarif");
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(&source, "declared output must survive\n").unwrap();
     let outside = tempfile::NamedTempFile::new().unwrap();
     fs::write(outside.path(), "outside must survive\n").unwrap();
     let run = directory
         .path()
-        .join(".lineage/artifacts/runs/.staging-forged");
+        .join(".gigasail/artifacts/runs/.staging-forged");
     fs::create_dir_all(&run).unwrap();
     fs::write(
         run.join("workspace-transaction.json"),
-        r#"[{"source":".lineage/artifacts/fact-mine.sarif","backup":"preexisting/../../../../../../tmp/forged","original_present":true}]"#,
+        r#"[{"source":".gigasail/artifacts/fact-mine.sarif","backup":"preexisting/../../../../../../tmp/forged","original_present":true}]"#,
     )
     .unwrap();
 
-    let analyse = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let analyse = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["analyse", "--repo"])
         .arg(directory.path())
         .output()
@@ -453,8 +453,8 @@ fn diff_analyse_applies_configured_sarif_as_a_worktree_overlay() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
-        "version: 1\nprofiles:\n  analyse:\n    producers: [static]\nproducers:\n  static:\n    executor: command\n    argv: [sh, -c, \"mkdir -p .lineage/artifacts && printf '{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[{\\\"tool\\\":{\\\"driver\\\":{\\\"name\\\":\\\"Test Analyzer\\\"}},\\\"properties\\\":{\\\"lineage.proof_boundary\\\":[\\\"partial analyzer\\\"]},\\\"results\\\":[{\\\"ruleId\\\":\\\"T001\\\",\\\"level\\\":\\\"warning\\\",\\\"message\\\":{\\\"text\\\":\\\"overlay finding\\\"},\\\"properties\\\":{\\\"tier\\\":1,\\\"category\\\":\\\"static-hazard\\\"},\\\"locations\\\":[{\\\"physicalLocation\\\":{\\\"artifactLocation\\\":{\\\"uri\\\":\\\"lib.rs\\\"},\\\"region\\\":{\\\"startLine\\\":1}}},{\\\"physicalLocation\\\":{\\\"artifactLocation\\\":{\\\"uri\\\":\\\"lib.rs\\\"},\\\"region\\\":{\\\"startLine\\\":2}}}]}]}]}' > .lineage/artifacts/static.sarif\"]\n    produces:\n      - kind: sarif\n        format: sarif\n        path: .lineage/artifacts/static.sarif\n        complete: false\n",
+        directory.path().join("gigasail.yml"),
+        "version: 1\nprofiles:\n  analyse:\n    producers: [static]\nproducers:\n  static:\n    executor: command\n    argv: [sh, -c, \"mkdir -p .gigasail/artifacts && printf '{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[{\\\"tool\\\":{\\\"driver\\\":{\\\"name\\\":\\\"Test Analyzer\\\"}},\\\"properties\\\":{\\\"gigasail.proof_boundary\\\":[\\\"partial analyzer\\\"]},\\\"results\\\":[{\\\"ruleId\\\":\\\"T001\\\",\\\"level\\\":\\\"warning\\\",\\\"message\\\":{\\\"text\\\":\\\"overlay finding\\\"},\\\"properties\\\":{\\\"tier\\\":1,\\\"category\\\":\\\"static-hazard\\\"},\\\"locations\\\":[{\\\"physicalLocation\\\":{\\\"artifactLocation\\\":{\\\"uri\\\":\\\"lib.rs\\\"},\\\"region\\\":{\\\"startLine\\\":1}}},{\\\"physicalLocation\\\":{\\\"artifactLocation\\\":{\\\"uri\\\":\\\"lib.rs\\\"},\\\"region\\\":{\\\"startLine\\\":2}}}]}]}]}' > .gigasail/artifacts/static.sarif\"]\n    produces:\n      - kind: sarif\n        format: sarif\n        path: .gigasail/artifacts/static.sarif\n        complete: false\n",
     )
     .unwrap();
     commit_all(&repository, &signature, "analysis profile");
@@ -464,7 +464,7 @@ fn diff_analyse_applies_configured_sarif_as_a_worktree_overlay() {
     )
     .unwrap();
 
-    let diff = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let diff = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["diff", "--repo"])
         .arg(directory.path())
         .args(["--analyse", "--trust-current-config", "--format", "json"])
@@ -478,7 +478,7 @@ fn diff_analyse_applies_configured_sarif_as_a_worktree_overlay() {
     assert!(String::from_utf8_lossy(&diff.stdout).contains("overlay finding"));
     assert!(String::from_utf8_lossy(&diff.stdout).contains("partial analyzer"));
     assert!(String::from_utf8_lossy(&diff.stdout).contains("static-hazard"));
-    assert!(!directory.path().join(".lineage/artifacts/latest").exists());
+    assert!(!directory.path().join(".gigasail/artifacts/latest").exists());
 }
 
 #[test]
@@ -492,7 +492,7 @@ fn ci_ingests_a_complete_profile_publishes_it_and_diff_requires_that_profile() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
+        directory.path().join("gigasail.yml"),
         complete_profile_config(),
     )
     .unwrap();
@@ -504,12 +504,12 @@ fn ci_ingests_a_complete_profile_publishes_it_and_diff_requires_that_profile() {
     .unwrap();
     let head = commit_all(&repository, &signature, "change");
 
-    let ci = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ci = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/lineage.db",
+            ".gigasail/gigasail.db",
             "--profile",
             "ci",
             "--trust-current-config",
@@ -522,20 +522,20 @@ fn ci_ingests_a_complete_profile_publishes_it_and_diff_requires_that_profile() {
         "{}",
         String::from_utf8_lossy(&ci.stderr)
     );
-    assert!(directory.path().join(".lineage/lineage.db").exists());
+    assert!(directory.path().join(".gigasail/gigasail.db").exists());
     assert!(directory
         .path()
-        .join(".lineage/artifacts/latest/manifest.json")
+        .join(".gigasail/artifacts/latest/manifest.json")
         .exists());
     assert!(!directory
         .path()
-        .join(".lineage/artifacts/coverage.json")
+        .join(".gigasail/artifacts/coverage.json")
         .exists());
 
-    let diff = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let diff = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["diff", "--repo"])
         .arg(directory.path())
-        .args(["--db", ".lineage/lineage.db", "--full"])
+        .args(["--db", ".gigasail/gigasail.db", "--full"])
         .args(["--require-profile", "ci", "--require-complete"])
         .arg(base.to_string())
         .arg(head.to_string())
@@ -563,30 +563,30 @@ fn ci_failure_records_the_failing_producer_and_preserves_workspace_outputs() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
-        "version: 1\nprofiles:\n  ci:\n    producers: [broken]\nproducers:\n  broken:\n    executor: command\n    argv: [sh, -c, 'exit 7']\n    timeout_seconds: 1\n    max_output_bytes: 1024\n    produces:\n      - kind: coverage\n        format: generic\n        path: .lineage/artifacts/coverage.json\n",
+        directory.path().join("gigasail.yml"),
+        "version: 1\nprofiles:\n  ci:\n    producers: [broken]\nproducers:\n  broken:\n    executor: command\n    argv: [sh, -c, 'exit 7']\n    timeout_seconds: 1\n    max_output_bytes: 1024\n    produces:\n      - kind: coverage\n        format: generic\n        path: .gigasail/artifacts/coverage.json\n",
     )
     .unwrap();
     commit_all(&repository, &signature, "initial");
-    fs::create_dir_all(directory.path().join(".lineage/artifacts")).unwrap();
+    fs::create_dir_all(directory.path().join(".gigasail/artifacts")).unwrap();
     fs::write(
-        directory.path().join(".lineage/artifacts/coverage.json"),
+        directory.path().join(".gigasail/artifacts/coverage.json"),
         "previous output",
     )
     .unwrap();
 
-    let ci = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ci = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
-        .args(["--db", ".lineage/lineage.db", "--trust-current-config"])
+        .args(["--db", ".gigasail/gigasail.db", "--trust-current-config"])
         .output()
         .unwrap();
     assert!(!ci.status.success());
     assert_eq!(
-        fs::read_to_string(directory.path().join(".lineage/artifacts/coverage.json")).unwrap(),
+        fs::read_to_string(directory.path().join(".gigasail/artifacts/coverage.json")).unwrap(),
         "previous output"
     );
-    let failed = fs::read_dir(directory.path().join(".lineage/artifacts/runs"))
+    let failed = fs::read_dir(directory.path().join(".gigasail/artifacts/runs"))
         .unwrap()
         .filter_map(std::result::Result::ok)
         .map(|entry| entry.path())
@@ -615,16 +615,16 @@ fn next_ci_recovers_an_ingested_pending_run_before_its_own_clean_check() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
+        directory.path().join("gigasail.yml"),
         complete_profile_config(),
     )
     .unwrap();
     commit_all(&repository, &signature, "initial");
 
-    let first = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let first = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
-        .args(["--db", ".lineage/lineage.db", "--trust-current-config"])
+        .args(["--db", ".gigasail/gigasail.db", "--trust-current-config"])
         .output()
         .unwrap();
     assert!(
@@ -633,17 +633,17 @@ fn next_ci_recovers_an_ingested_pending_run_before_its_own_clean_check() {
         String::from_utf8_lossy(&first.stderr)
     );
 
-    let artifacts = directory.path().join(".lineage/artifacts");
+    let artifacts = directory.path().join(".gigasail/artifacts");
     let published = artifacts.join("latest").canonicalize().unwrap();
     let pending = artifacts.join("runs/pending-recovery");
     fs::rename(&published, &pending).unwrap();
     fs::write(pending.join(".publication-state"), "ingested\n").unwrap();
     fs::write(directory.path().join("dirty.txt"), "stop after recovery\n").unwrap();
 
-    let second = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let second = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
-        .args(["--db", ".lineage/lineage.db", "--trust-current-config"])
+        .args(["--db", ".gigasail/gigasail.db", "--trust-current-config"])
         .output()
         .unwrap();
     assert!(!second.status.success());
@@ -667,25 +667,25 @@ fn ci_uses_the_reviewed_parent_config_when_lineage_yml_changes() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
+        directory.path().join("gigasail.yml"),
         complete_profile_config(),
     )
     .unwrap();
     commit_all(&repository, &signature, "reviewed configuration");
     fs::write(
-        directory.path().join("lineage.yml"),
+        directory.path().join("gigasail.yml"),
         complete_profile_config().replace(
-            "mkdir -p .lineage/artifacts",
-            "touch untrusted-config-executed && mkdir -p .lineage/artifacts",
+            "mkdir -p .gigasail/artifacts",
+            "touch untrusted-config-executed && mkdir -p .gigasail/artifacts",
         ),
     )
     .unwrap();
     commit_all(&repository, &signature, "untrusted config change");
 
-    let ci = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ci = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
-        .args(["--db", ".lineage/lineage.db"])
+        .args(["--db", ".gigasail/gigasail.db"])
         .output()
         .unwrap();
     assert!(
@@ -703,18 +703,18 @@ fn require_complete_rejects_a_profile_without_evidence_artifacts() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
+        directory.path().join("gigasail.yml"),
         "version: 1\nprofiles:\n  ci:\n    producers: [check]\nproducers:\n  check:\n    executor: command\n    argv: [true]\n",
     )
     .unwrap();
     commit_all(&repository, &signature, "empty profile");
 
-    let ci = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ci = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/lineage.db",
+            ".gigasail/gigasail.db",
             "--trust-current-config",
             "--require-complete",
         ])
@@ -735,29 +735,29 @@ fn next_ci_repairs_a_published_run_left_before_latest_pointer_update() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
+        directory.path().join("gigasail.yml"),
         complete_profile_config(),
     )
     .unwrap();
     commit_all(&repository, &signature, "initial");
-    let first = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let first = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
-        .args(["--db", ".lineage/lineage.db", "--trust-current-config"])
+        .args(["--db", ".gigasail/gigasail.db", "--trust-current-config"])
         .output()
         .unwrap();
     assert!(first.status.success());
 
-    let artifacts = directory.path().join(".lineage/artifacts");
+    let artifacts = directory.path().join(".gigasail/artifacts");
     let published = artifacts.join("latest").canonicalize().unwrap();
     fs::write(published.join(".publication-state"), "ready_to_publish\n").unwrap();
     fs::remove_file(artifacts.join("latest")).unwrap();
     fs::write(directory.path().join("dirty.txt"), "stop after recovery\n").unwrap();
 
-    let second = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let second = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
-        .args(["--db", ".lineage/lineage.db", "--trust-current-config"])
+        .args(["--db", ".gigasail/gigasail.db", "--trust-current-config"])
         .output()
         .unwrap();
     assert!(!second.status.success());
@@ -781,7 +781,7 @@ fn ingest_run_rejects_a_path_traversal_producer_before_creating_temp_files() {
     let sarif = br#"{"version":"2.1.0","runs":[]}"#;
     fs::write(run.join("artifacts/findings.sarif"), sarif).unwrap();
     let escaped = std::env::temp_dir().join(format!(
-        "lineage-manifest-producer-escape-{}-{}.json",
+        "gigasail-manifest-producer-escape-{}-{}.json",
         std::process::id(),
         revision
     ));
@@ -789,18 +789,18 @@ fn ingest_run_rejects_a_path_traversal_producer_before_creating_temp_files() {
     write_external_sarif_manifest(
         &run,
         &revision,
-        "x/../../lineage-manifest-producer-escape",
+        "x/../../gigasail-manifest-producer-escape",
         "sarif",
         sarif,
         directory.path(),
     );
 
-    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ingest = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/fresh.db",
+            ".gigasail/fresh.db",
             "--run",
             "incoming/manifest.json",
         ])
@@ -831,12 +831,12 @@ fn ingest_run_rejects_malformed_sarif_before_recording_complete_evidence() {
     fs::write(run.join("artifacts/findings.sarif"), sarif).unwrap();
     write_external_sarif_manifest(&run, &revision, "scanner", "sarif", sarif, directory.path());
 
-    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ingest = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/fresh.db",
+            ".gigasail/fresh.db",
             "--run",
             "incoming/manifest.json",
         ])
@@ -849,7 +849,7 @@ fn ingest_run_rejects_malformed_sarif_before_recording_complete_evidence() {
         String::from_utf8_lossy(&ingest.stderr)
     );
     assert!(
-        !directory.path().join(".lineage/fresh.db").exists(),
+        !directory.path().join(".gigasail/fresh.db").exists(),
         "invalid SARIF must be rejected before snapshot creation mutates a fresh database"
     );
 }
@@ -872,12 +872,12 @@ fn ingest_run_rejects_invalid_complete_scope_before_indexing_a_fresh_database() 
     manifest["artifacts"][0]["evidence_scope"]["selection"] = serde_json::json!("");
     fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
 
-    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ingest = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/fresh.db",
+            ".gigasail/fresh.db",
             "--run",
             "incoming/manifest.json",
         ])
@@ -890,7 +890,7 @@ fn ingest_run_rejects_invalid_complete_scope_before_indexing_a_fresh_database() 
         String::from_utf8_lossy(&ingest.stderr)
     );
     assert!(
-        !directory.path().join(".lineage/fresh.db").exists(),
+        !directory.path().join(".gigasail/fresh.db").exists(),
         "manifest validation must happen before a fresh database is indexed"
     );
 }
@@ -908,12 +908,12 @@ fn ingest_run_rolls_back_complete_sarif_when_results_cannot_be_represented() {
     fs::write(run.join("artifacts/findings.sarif"), sarif).unwrap();
     write_external_sarif_manifest(&run, &revision, "scanner", "sarif", sarif, directory.path());
 
-    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ingest = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/fresh.db",
+            ".gigasail/fresh.db",
             "--run",
             "incoming/manifest.json",
         ])
@@ -922,7 +922,7 @@ fn ingest_run_rolls_back_complete_sarif_when_results_cannot_be_represented() {
     assert!(!ingest.status.success());
     assert!(String::from_utf8_lossy(&ingest.stderr).contains("complete SARIF"));
     let connection =
-        rusqlite::Connection::open(directory.path().join(".lineage/fresh.db")).unwrap();
+        rusqlite::Connection::open(directory.path().join(".gigasail/fresh.db")).unwrap();
     let scopes: i64 = connection
         .query_row("SELECT COUNT(*) FROM evidence_artifact_scopes", [], |row| {
             row.get(0)
@@ -949,12 +949,12 @@ fn ingest_run_requires_successful_declared_producers_for_every_artifact() {
         serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
     manifest["producers"][0]["outcome"] = serde_json::json!("failed");
     fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
-    let failed = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let failed = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/fresh.db",
+            ".gigasail/fresh.db",
             "--run",
             "incoming/manifest.json",
         ])
@@ -966,12 +966,12 @@ fn ingest_run_requires_successful_declared_producers_for_every_artifact() {
     manifest["producers"][0]["outcome"] = serde_json::json!("succeeded");
     manifest["artifacts"][0]["producer"] = serde_json::json!("undeclared");
     fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
-    let undeclared = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let undeclared = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/fresh.db",
+            ".gigasail/fresh.db",
             "--run",
             "incoming/manifest.json",
         ])
@@ -992,16 +992,16 @@ fn ingest_run_indexes_a_fresh_database_and_refreshes_the_manifest_revision() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("lineage.yml"),
+        directory.path().join("gigasail.yml"),
         complete_profile_config(),
     )
     .unwrap();
     let revision = commit_all(&repository, &signature, "initial").to_string();
 
-    let ci = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ci = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ci", "--repo"])
         .arg(directory.path())
-        .args(["--db", ".lineage/producer.db", "--trust-current-config"])
+        .args(["--db", ".gigasail/producer.db", "--trust-current-config"])
         .output()
         .unwrap();
     assert!(
@@ -1009,16 +1009,16 @@ fn ingest_run_indexes_a_fresh_database_and_refreshes_the_manifest_revision() {
         "{}",
         String::from_utf8_lossy(&ci.stderr)
     );
-    fs::remove_file(directory.path().join(".lineage/producer.db")).unwrap();
+    fs::remove_file(directory.path().join(".gigasail/producer.db")).unwrap();
 
-    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ingest = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/fresh/lineage.db",
+            ".gigasail/fresh/gigasail.db",
             "--run",
-            ".lineage/artifacts/latest/manifest.json",
+            ".gigasail/artifacts/latest/manifest.json",
         ])
         .output()
         .unwrap();
@@ -1028,7 +1028,7 @@ fn ingest_run_indexes_a_fresh_database_and_refreshes_the_manifest_revision() {
         String::from_utf8_lossy(&ingest.stderr)
     );
     let storage =
-        lineage::Storage::open(directory.path().join(".lineage/fresh/lineage.db")).unwrap();
+        gigasail::Storage::open(directory.path().join(".gigasail/fresh/gigasail.db")).unwrap();
     assert!(storage.commit_exists(&revision).unwrap());
     assert_eq!(
         storage.ci_run_state("latest").unwrap().as_deref(),
@@ -1053,12 +1053,12 @@ fn direct_ingest_coverage_matches_the_documented_kind_format_commit_workflow() {
     )
     .unwrap();
 
-    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ingest = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/lineage.db",
+            ".gigasail/gigasail.db",
             "--kind",
             "coverage",
             "--format",
@@ -1082,8 +1082,8 @@ fn direct_ingest_coverage_matches_the_documented_kind_format_commit_workflow() {
         "{}",
         String::from_utf8_lossy(&ingest.stderr)
     );
-    let storage = lineage::Storage::open(directory.path().join(".lineage/lineage.db")).unwrap();
-    let scope = lineage::EvidenceScopeFingerprint {
+    let storage = gigasail::Storage::open(directory.path().join(".gigasail/gigasail.db")).unwrap();
+    let scope = gigasail::EvidenceScopeFingerprint {
         revision,
         selection: "full".into(),
         mutant_corpus: "not-applicable".into(),
@@ -1118,12 +1118,12 @@ fn direct_ingest_indexes_the_requested_historical_revision_in_a_fresh_database()
     )
     .unwrap();
 
-    let ingest = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let ingest = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/lineage.db",
+            ".gigasail/gigasail.db",
             "--kind",
             "coverage",
             "--format",
@@ -1140,7 +1140,7 @@ fn direct_ingest_indexes_the_requested_historical_revision_in_a_fresh_database()
         "{}",
         String::from_utf8_lossy(&ingest.stderr)
     );
-    let storage = lineage::Storage::open(directory.path().join(".lineage/lineage.db")).unwrap();
+    let storage = gigasail::Storage::open(directory.path().join(".gigasail/gigasail.db")).unwrap();
     assert!(storage.commit_exists(&historical).unwrap());
     assert!(
         !storage.commit_exists(&head).unwrap(),
@@ -1170,12 +1170,12 @@ fn direct_mutant_and_sarif_ingestion_record_complete_family_scopes() {
     )
     .unwrap();
 
-    let mutant = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let mutant = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/lineage.db",
+            ".gigasail/gigasail.db",
             "--kind",
             "mutants",
             "--format",
@@ -1202,12 +1202,12 @@ fn direct_mutant_and_sarif_ingestion_record_complete_family_scopes() {
         String::from_utf8_lossy(&mutant.stderr)
     );
 
-    let sarif = Command::new(env!("CARGO_BIN_EXE_lineage"))
+    let sarif = Command::new(env!("CARGO_BIN_EXE_giga"))
         .args(["ingest", "--repo"])
         .arg(directory.path())
         .args([
             "--db",
-            ".lineage/lineage.db",
+            ".gigasail/gigasail.db",
             "--kind",
             "sarif",
             "--format",
@@ -1233,7 +1233,7 @@ fn direct_mutant_and_sarif_ingestion_record_complete_family_scopes() {
     );
 
     let connection =
-        rusqlite::Connection::open(directory.path().join(".lineage/lineage.db")).unwrap();
+        rusqlite::Connection::open(directory.path().join(".gigasail/gigasail.db")).unwrap();
     let scopes: Vec<(String, String, i64)> = connection
         .prepare("SELECT family, source, complete FROM evidence_artifact_scopes ORDER BY family")
         .unwrap()
@@ -1282,12 +1282,12 @@ fn complete_direct_imports_rollback_when_coverage_mutants_or_sarif_skip_evidence
         ),
         ("sarif", "sarif", "findings.sarif", Vec::new()),
     ] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lineage"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_giga"));
         command.args(["ingest", "--repo"]);
         command.arg(directory.path());
         command.args([
             "--db",
-            ".lineage/lineage.db",
+            ".gigasail/gigasail.db",
             "--kind",
             kind,
             "--format",
@@ -1311,7 +1311,7 @@ fn complete_direct_imports_rollback_when_coverage_mutants_or_sarif_skip_evidence
         assert!(String::from_utf8_lossy(&output.stderr).contains("complete"));
     }
     let connection =
-        rusqlite::Connection::open(directory.path().join(".lineage/lineage.db")).unwrap();
+        rusqlite::Connection::open(directory.path().join(".gigasail/gigasail.db")).unwrap();
     let scopes: i64 = connection
         .query_row("SELECT COUNT(*) FROM evidence_artifact_scopes", [], |row| {
             row.get(0)
@@ -1333,10 +1333,10 @@ fn write_external_sarif_manifest(
 ) {
     let artifact_hash = hex::encode(Sha256::digest(sarif));
     let manifest = serde_json::json!({
-        "version": "lineage-run/v1",
+        "version": "gigasail-run/v1",
         "revision": revision,
         "profile": "external",
-        "repository_identity": lineage::repository_identity(repository),
+        "repository_identity": gigasail::repository_identity(repository),
         "tree_fingerprint": revision,
         "started_at_unix_ms": 1,
         "duration_ms": 1,
@@ -1384,23 +1384,23 @@ profiles:
 producers:
   evidence:
     executor: command
-    argv: [sh, -c, "mkdir -p .lineage/artifacts && printf '{\"files\":[{\"path\":\"lib.rs\",\"coverage\":100.0,\"line_hits\":[{\"line\":1,\"hits\":1}]}]}' > .lineage/artifacts/coverage.json && printf '{\"schema\":\"mutant-facts/v1\",\"source\":\"test\",\"language\":\"rust\",\"subjects\":[{\"file\":\"lib.rs\",\"method\":\"value\",\"mutations\":1,\"killed\":1,\"alive\":0}]}' > .lineage/artifacts/mutants.json && printf '{\"version\":\"2.1.0\",\"runs\":[]}' > .lineage/artifacts/findings.sarif"]
+    argv: [sh, -c, "mkdir -p .gigasail/artifacts && printf '{\"files\":[{\"path\":\"lib.rs\",\"coverage\":100.0,\"line_hits\":[{\"line\":1,\"hits\":1}]}]}' > .gigasail/artifacts/coverage.json && printf '{\"schema\":\"mutant-facts/v1\",\"source\":\"test\",\"language\":\"rust\",\"subjects\":[{\"file\":\"lib.rs\",\"method\":\"value\",\"mutations\":1,\"killed\":1,\"alive\":0}]}' > .gigasail/artifacts/mutants.json && printf '{\"version\":\"2.1.0\",\"runs\":[]}' > .gigasail/artifacts/findings.sarif"]
     timeout_seconds: 10
     max_output_bytes: 1024
     produces:
       - kind: coverage
         format: generic
-        path: .lineage/artifacts/coverage.json
+        path: .gigasail/artifacts/coverage.json
         complete: true
         evidence_scope: {selection: full, test_set: unit}
       - kind: mutants
         format: mutant-facts
-        path: .lineage/artifacts/mutants.json
+        path: .gigasail/artifacts/mutants.json
         complete: true
         evidence_scope: {selection: full, mutant_corpus: corpus, test_set: unit}
       - kind: sarif
         format: sarif
-        path: .lineage/artifacts/findings.sarif
+        path: .gigasail/artifacts/findings.sarif
         complete: true
         evidence_scope: {selection: full, test_set: unit}
 "#
