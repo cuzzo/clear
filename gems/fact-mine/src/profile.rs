@@ -7671,6 +7671,23 @@ def py_fn(a: int) -> str:
             "func F[T interface{ ~int }](x T) error "
         );
     }
+
+    #[test]
+    fn normalize_paths_normalizes_compound_identity_keys() {
+        let root = std::path::Path::new("/workspace/clear");
+        let mut value = serde_json::json!({
+            "hidden_enum_observations": [{
+                "key": "local\u{0}/workspace/clear/gems/fact-mine/example.rb\u{0}Owner"
+            }]
+        });
+
+        super::normalize_paths(&mut value, root);
+
+        assert_eq!(
+            value["hidden_enum_observations"][0]["key"],
+            "local\u{0}gems/fact-mine/example.rb\u{0}Owner"
+        );
+    }
 }
 
 pub fn run_profile_tests() {
@@ -8124,7 +8141,11 @@ pub fn normalize_paths(v: &mut serde_json::Value, root: &std::path::Path) {
     match v {
         serde_json::Value::Object(map) => {
             for (key, val) in map.iter_mut() {
-                if key == "path" || key == "file" || key == "id" {
+                // Stable identities can embed paths in a compound key (for
+                // example hidden-enum local keys use NUL-separated fields).
+                // Normalize those exactly as IDs so profile oracles remain
+                // portable across checkouts.
+                if key == "path" || key == "file" || key == "id" || key == "key" {
                     if let serde_json::Value::String(s) = val {
                         *val = serde_json::Value::String(normalize_string(s, root));
                     }
