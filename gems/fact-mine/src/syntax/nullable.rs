@@ -609,7 +609,10 @@ pub(crate) fn project_presence_correlations(
             rows.insert((
                 format!("presence:{}:{value_place_id}:{presence_place_id}", node.id),
                 node.file.clone(),
-                node.span,
+                // The CFG node can be a synthetic returned-closure wrapper;
+                // retain the extractor's exact comma-ok declaration span for
+                // downstream SARIF locations.
+                seed.span,
                 value_place_id,
                 presence_place_id,
                 seed.semantics.clone(),

@@ -518,7 +518,29 @@ fn go_type_assertions_and_channel_receives_export_presence_without_payload_proof
         .iter()
         .map(|correlation| correlation.semantics.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(semantics, vec!["channel_receive", "type_assertion"]);
+    assert_eq!(
+        semantics,
+        vec![
+            "channel_receive",
+            "type_assertion",
+            "type_assertion",
+            "type_assertion",
+        ]
+    );
+    let closure_correlations = output
+        .presence_correlations
+        .iter()
+        .filter(|correlation| {
+            correlation.value_place_id.contains(":first")
+                || correlation.value_place_id.contains(":second")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(closure_correlations.len(), 2);
+    assert_eq!(closure_correlations[0].span[0], 15);
+    assert_eq!(closure_correlations[1].span[0], 17);
+    assert!(closure_correlations
+        .iter()
+        .all(|correlation| correlation.span[0] == correlation.span[2]));
     assert!(output
         .nullable_states
         .iter()

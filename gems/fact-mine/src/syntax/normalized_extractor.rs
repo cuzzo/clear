@@ -222,15 +222,78 @@ impl<'a> Extractor<'a> {
         let Some(correlation) = self.behavior.presence_correlation(node) else {
             return;
         };
+        let Some(correlation_span) = self.precise_presence_correlation_span(node, &correlation)
+        else {
+            return;
+        };
         self.facts
             .presence_correlation_seeds
             .push(PresenceCorrelationSeed {
                 function: self.current_function(),
-                span: span(node),
+                span: correlation_span,
                 value_subject: correlation.value_subject,
                 presence_subject: correlation.presence_subject,
                 semantics: correlation.semantics.to_string(),
             });
+    }
+
+    /// A normalized CFG node normally retains the declaration's source span.
+    /// Returned Go closures are an exception: their synthetic declaration node
+    /// can point to the `return func` line. Recover one exact `value, ok :=`
+    /// line, first in the node span and then (only when necessary) uniquely in
+    /// the file. Ambiguity fails closed rather than emitting a misleading
+    /// SARIF location.
+    fn precise_presence_correlation_span(
+        &self,
+        node: &Node,
+        correlation: &super::normalized_behavior::NormalizedPresenceCorrelation,
+    ) -> Option<Span> {
+        let node_span = span(node);
+        let candidates = self.presence_declaration_spans(
+            node_span[0]..=node_span[2],
+            &correlation.value_subject,
+            &correlation.presence_subject,
+        );
+        match candidates.as_slice() {
+            [candidate] => return Some(*candidate),
+            [_, ..] => return None,
+            [] => {}
+        }
+
+        let candidates = self.presence_declaration_spans(
+            1..=self.lines.len(),
+            &correlation.value_subject,
+            &correlation.presence_subject,
+        );
+        (candidates.len() == 1).then(|| candidates[0])
+    }
+
+    fn presence_declaration_spans(
+        &self,
+        line_numbers: std::ops::RangeInclusive<usize>,
+        value_subject: &str,
+        presence_subject: &str,
+    ) -> Vec<Span> {
+        let declaration = format!("{value_subject},{presence_subject}:=");
+        line_numbers
+            .filter_map(|line_number| {
+                let line = self.lines.get(line_number.saturating_sub(1))?;
+                let code = line
+                    .split_once("//")
+                    .map_or(line.as_str(), |(code, _)| code);
+                let compact = code
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .collect::<String>();
+                let column = code.find(value_subject)?;
+                compact.contains(&declaration).then_some([
+                    line_number,
+                    column,
+                    line_number,
+                    code.len(),
+                ])
+            })
+            .collect()
     }
 
     fn scan_children(&mut self, node: &Node) {
