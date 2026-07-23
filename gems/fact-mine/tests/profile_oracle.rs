@@ -2403,6 +2403,7 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
         profile::normalize_paths(&mut actual_json, &manifest_dir);
 
         let mut expected: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+        assert_oracle_paths_are_relative(&expected, &oracle_path)?;
         profile::normalize_paths(&mut expected, &manifest_dir);
 
         let normalized = normalize_for_oracle(&actual_json, &expected);
@@ -2420,6 +2421,38 @@ fn profile_oracle_matches_ruby_output() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn assert_oracle_paths_are_relative(value: &Value, oracle_path: &std::path::Path) -> Result<()> {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                if matches!(key.as_str(), "path" | "file" | "id" | "key") {
+                    if let Value::String(identity) = child {
+                        for component in identity
+                            .split('\0')
+                            .flat_map(|component| component.split(':'))
+                        {
+                            if std::path::Path::new(component).is_absolute() {
+                                bail!(
+                                    "{} contains an absolute path in {key}: {component}",
+                                    oracle_path.display()
+                                );
+                            }
+                        }
+                    }
+                }
+                assert_oracle_paths_are_relative(child, oracle_path)?;
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                assert_oracle_paths_are_relative(child, oracle_path)?;
+            }
+        }
+        _ => {}
+    }
     Ok(())
 }
 
