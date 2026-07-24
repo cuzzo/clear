@@ -55,6 +55,8 @@ pub struct App {
     pub detail_open: HashSet<usize>,
     /// Fold regions (by their first hidden line index) expanded in the code pane.
     pub expanded_folds: HashSet<usize>,
+    /// True while a background `giga sync` is refreshing this diff's evidence.
+    pub syncing: bool,
 }
 
 /// A visible row in the folded code pane: a real diff line, or a collapsed run
@@ -245,6 +247,7 @@ impl App {
             code_cursor: 0,
             detail_open: HashSet::new(),
             expanded_folds: HashSet::new(),
+            syncing: false,
         };
         app.refresh_rows();
         app.select_riskiest_file();
@@ -283,6 +286,29 @@ impl App {
     /// Whether the selected row is the synthetic summary row.
     fn summary_selected(&self) -> bool {
         self.selected_row().map(|r| r.kind) == Some(NodeKind::Summary)
+    }
+
+    /// Replace the diff data after a background sync re-prepared the plan,
+    /// keeping the current selection index where possible.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_view(
+        &mut self,
+        root: Node,
+        changes: Vec<FileChange>,
+        files: HashMap<String, FileDiff>,
+        sources: HashMap<String, String>,
+        line_ev: HashMap<String, Vec<LineEvidence>>,
+        summary: DiffSummary,
+    ) {
+        self.root = root;
+        self.changes = changes;
+        self.files = files;
+        self.sources = sources;
+        self.line_ev = line_ev;
+        self.summary = summary;
+        let prev = self.selected;
+        self.refresh_rows();
+        self.selected = prev.min(self.rows.len().saturating_sub(1));
     }
 
     pub fn selected_row(&self) -> Option<&FlatRow> {

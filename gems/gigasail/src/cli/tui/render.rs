@@ -67,13 +67,18 @@ use crate::cli::gutter::GutterKind;
 use crate::cli::tui::app::Focus;
 
 /// Render the whole frame.
-pub fn render(frame: &mut Frame, app: &App, _now: f64) {
+pub fn render(frame: &mut Frame, app: &App, now: f64) {
     let area = frame.area();
 
-    // Left/right panes above a one-row legend.
+    // Left/right panes, an optional background-sync bar, then a one-row legend.
+    let constraints = if app.syncing {
+        vec![Constraint::Min(3), Constraint::Length(1), Constraint::Length(1)]
+    } else {
+        vec![Constraint::Min(3), Constraint::Length(1)]
+    };
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .constraints(constraints)
         .split(area);
 
     let panes = Layout::default()
@@ -83,7 +88,35 @@ pub fn render(frame: &mut Frame, app: &App, _now: f64) {
 
     render_left(frame, app, panes[0]);
     render_right(frame, app, panes[1]);
+    if app.syncing {
+        render_sync_bar(frame, rows[1], now);
+    }
     render_legend(frame, app, rows[rows.len() - 1]);
+}
+
+/// The bottom "analysing…" progress bar shown while a background sync runs.
+fn render_sync_bar(frame: &mut Frame, area: Rect, now: f64) {
+    let width = (area.width as usize).saturating_sub(24).clamp(8, 40);
+    // A moving fill so the bar reads as active without a known total.
+    let pos = ((now * 8.0) as usize) % (width + 1);
+    let mut bar = String::new();
+    for i in 0..width {
+        bar.push(if i <= pos { '\u{2593}' } else { '\u{2591}' });
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                " \u{25C9} analysing HEAD ".to_string(),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(bar, Style::default().fg(Color::Cyan)),
+            Span::styled(
+                "  giga sync in background".to_string(),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ])),
+        area,
+    );
 }
 
 /// Border style that highlights the focused pane.
@@ -1205,6 +1238,19 @@ mod tests {
         // rows carry no line number).
         let twos = text.matches("    2 +").count() + text.matches("    2  ").count();
         assert!(twos <= 1, "line number must not repeat on wrapped rows");
+    }
+
+    #[test]
+    fn sync_bar_shows_while_syncing() {
+        let mut app = app_no_evidence();
+        app.syncing = true;
+        let text = buffer_text(&draw(&app, 0.5));
+        assert!(text.contains("analysing HEAD"), "sync bar should appear");
+        assert!(text.contains("giga sync"));
+        // Gone when not syncing.
+        app.syncing = false;
+        let text = buffer_text(&draw(&app, 0.5));
+        assert!(!text.contains("analysing HEAD"));
     }
 
     #[test]

@@ -52,7 +52,7 @@ pub fn run_diff(
     // base/head, so there is no separate working-tree selection to make here.
     let _ = all;
     let label = target_label(&base, &head);
-    let result = crate::application::diff::prepare(DiffCommandRequest {
+    let request = |base: Option<String>, head: Option<String>| DiffCommandRequest {
         repo: repo.to_path_buf(),
         db: db.to_path_buf(),
         base,
@@ -67,7 +67,8 @@ pub fn run_diff(
         trust_current_config: false,
         require_profile: None,
         require_complete: false,
-    })?;
+    };
+    let result = crate::application::diff::prepare(request(base.clone(), head.clone()))?;
 
     if result.plan.files.is_empty() {
         println!("No changes.");
@@ -97,7 +98,21 @@ pub fn run_diff(
     app.summary = summary;
     app.refresh_rows();
     app.selected = 0;
-    let _ = tui::run(app)?;
+
+    // Auto-sync: if the diffed head has no analysis run yet, kick off
+    // `giga sync` in the background and refresh the UI when it finishes.
+    let background = if evidence_stale(repo, db, head.as_deref()) {
+        spawn_background_sync(repo, db)
+    } else {
+        None
+    };
+    let reload = |app: &mut tui::app::App| {
+        if let Ok(result) = crate::application::diff::prepare(request(base.clone(), head.clone())) {
+            let (root, changes, files, sources, line_ev, summary) = plan_to_view(&result.plan);
+            app.apply_view(root, changes, files, sources, line_ev, summary);
+        }
+    };
+    let _ = tui::run_with_sync(app, background, reload)?;
     Ok(())
 }
 
@@ -129,6 +144,45 @@ pub fn wait_for_in_flight_analysis(repo: &Path, db: &Path, head: Option<&str>) {
             }
         },
     );
+}
+
+/// Whether the diffed head commit has no analysis run yet in the `.giga` store
+/// (so the diff's evidence is stale and a background sync is worthwhile).
+fn evidence_stale(repo: &Path, db: &Path, head: Option<&str>) -> bool {
+    let Ok(provider) = crate::git::GitProvider::open(repo) else {
+        return false;
+    };
+    let Ok(commit) = provider.resolve_commit(head.unwrap_or("HEAD")) else {
+        return false;
+    };
+    let short = &commit[..commit.len().min(16)];
+    let runs = crate::watch::giga_dir(db).join("artifacts/runs");
+    let analyzed = std::fs::read_dir(&runs)
+        .map(|entries| {
+            entries
+                .filter_map(std::result::Result::ok)
+                .any(|entry| entry.file_name().to_string_lossy().contains(short))
+        })
+        .unwrap_or(false);
+    !analyzed
+}
+
+/// Spawn `giga sync --ingest` in the background to refresh evidence. It takes
+/// the `.giga` lock, so a concurrent watcher/MCP stays coordinated.
+fn spawn_background_sync(repo: &Path, db: &Path) -> Option<std::process::Child> {
+    let exe = std::env::current_exe().ok()?;
+    std::process::Command::new(exe)
+        .arg("sync")
+        .arg("--repo")
+        .arg(repo)
+        .arg("--db")
+        .arg(db)
+        .arg("--ingest")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()
 }
 
 /// Adapt a `DiffPlan` into the TUI view-model: the collapse tree, per-file

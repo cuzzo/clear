@@ -63,14 +63,24 @@ fn truecolor_from_env(colorterm: Option<&str>, term: Option<&str>) -> bool {
 
 /// Run the interactive review UI until the user quits, returning the final app
 /// state (so background-stage durations can be persisted).
-pub fn run(mut app: App) -> Result<App> {
+pub fn run(app: App) -> Result<App> {
+    run_with_sync(app, None, |_| {})
+}
+
+/// Run the UI, optionally polling a background `giga sync` child. When it
+/// finishes, `reload` is called to swap in the freshly re-prepared diff.
+pub fn run_with_sync(
+    mut app: App,
+    background: Option<std::process::Child>,
+    reload: impl FnMut(&mut App),
+) -> Result<App> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = event_loop(&mut terminal, &mut app);
+    let result = event_loop(&mut terminal, &mut app, background, reload);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -81,11 +91,30 @@ pub fn run(mut app: App) -> Result<App> {
 fn event_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
+    mut background: Option<std::process::Child>,
+    mut reload: impl FnMut(&mut App),
 ) -> Result<()> {
+    app.syncing = background.is_some();
     let start = Instant::now();
     loop {
         let now = start.elapsed().as_secs_f64();
         terminal.draw(|frame| render::render(frame, app, now))?;
+
+        // Poll the background sync; when it exits, re-prepare and refresh.
+        if let Some(child) = background.as_mut() {
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    reload(app);
+                    app.syncing = false;
+                    background = None;
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    app.syncing = false;
+                    background = None;
+                }
+            }
+        }
 
         if event::poll(Duration::from_millis(120))? {
             if let Event::Key(key) = event::read()? {
@@ -95,6 +124,10 @@ fn event_loop<B: ratatui::backend::Backend>(
             }
         }
         if app.should_quit {
+            if let Some(mut child) = background.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
             break;
         }
     }
