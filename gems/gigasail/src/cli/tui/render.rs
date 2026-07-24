@@ -564,8 +564,8 @@ fn render_right(frame: &mut Frame, app: &App, area: Rect) {
 
 /// The colored coverage bar. When no coverage was measured (every line
 /// `unknown`) it reads `[  NO COVERAGE DATA  ]`. Otherwise: `*` covered+killed
-/// (dark green), `+` covered (light green), `-` partial (yellow), a full red
-/// block for uncovered, and a gray remainder for any unknown lines.
+/// (dark green), `+` covered (light green), `-` partial (yellow), and red `.`
+/// dots for every miss (uncovered plus any unmeasured/rounding remainder).
 fn coverage_bar_spans(bar: &crate::cli::diff::summary::CoverageBar, width: usize) -> Vec<Span<'static>> {
     let bracket = Style::default().fg(Color::DarkGray);
     if !bar.has_coverage() {
@@ -597,20 +597,12 @@ fn coverage_bar_spans(bar: &crate::cli::diff::summary::CoverageBar, width: usize
             used += w;
         }
     }
-    // Uncovered: a full red block.
-    let uncovered = seg(bar.uncovered);
-    if uncovered > 0 {
-        spans.push(Span::styled(
-            " ".repeat(uncovered),
-            Style::default().bg(Color::Red),
-        ));
-        used += uncovered;
-    }
-    // Any remaining width (rounding + unknown lines) is neutral gray.
+    // Everything past the covered/partial segments is a miss (uncovered lines
+    // plus unmeasured/rounding remainder): red dots.
     if width > used {
         spans.push(Span::styled(
-            " ".repeat(width - used),
-            Style::default().bg(Color::DarkGray),
+            ".".repeat(width - used),
+            Style::default().fg(Color::Red),
         ));
     }
     spans.push(Span::styled("]".to_string(), bracket));
@@ -1441,8 +1433,9 @@ mod tests {
         assert!(text.contains("OTHER") && text.contains("Markdown"));
         assert!(text.contains("dependencies"));
         assert!(text.contains("T1"), "hazard tier row");
-        // The coverage bar drew colored segment glyphs.
+        // The coverage bar drew colored segment glyphs, with red dots for misses.
         assert!(text.contains('*') && text.contains('+') && text.contains('-'));
+        assert!(text.contains(".."), "misses render as dots, not blanks");
     }
 
     #[test]
