@@ -119,6 +119,15 @@ impl ReviewConfig {
         checks
     }
 
+    /// The names of the packages affected by a change (see `affected_packages`),
+    /// as owned strings for reporting / JSON output.
+    pub fn affected_package_names(&self, changed_paths: &[String]) -> Vec<String> {
+        self.affected_packages(changed_paths)
+            .into_iter()
+            .map(String::from)
+            .collect()
+    }
+
     /// The set of packages affected by a change: every package whose files
     /// changed, plus every package that transitively depends on one of those
     /// (reverse-transitive closure). Empty when no `packages` graph is

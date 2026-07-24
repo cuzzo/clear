@@ -3,6 +3,7 @@
 //! These modules own policy and state transitions. Command-line code should
 //! only translate flags to requests and render the returned results.
 
+pub mod affected;
 pub mod analyse;
 pub mod checks;
 pub mod ci;

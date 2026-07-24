@@ -381,6 +381,32 @@ enum Command {
         #[arg(long)]
         trust_current_config: bool,
     },
+    /// Resolve the project-graph affected set for a change and print it (text or
+    /// JSON), running nothing. The general "changed files + declared graph ->
+    /// affected work" primitive; feed the JSON to CI to gate its job matrix.
+    Affected {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        /// Treat these repo-relative paths as the changed set (repeatable),
+        /// instead of diffing git.
+        #[arg(long = "changed")]
+        changed: Vec<String>,
+        /// Resolve for the premerge stage (adds premerge-only producers).
+        #[arg(long)]
+        premerge: bool,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = AffectedFormat::Text)]
+        format: AffectedFormat,
+        /// Authorize reading the current checkout's giga.yml.
+        #[arg(long)]
+        trust_current_config: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum AffectedFormat {
+    Text,
+    Json,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -1050,6 +1076,45 @@ fn main() -> Result<()> {
                     result.revision.as_deref().unwrap_or(""),
                     result.artifact_count
                 );
+            }
+        }
+        Command::Affected {
+            repo,
+            changed,
+            premerge,
+            format,
+            trust_current_config,
+        } => {
+            let stage = if premerge {
+                gigasail::review::ReviewMode::Premerge
+            } else {
+                gigasail::review::ReviewMode::Precommit
+            };
+            let affected = gigasail::application::affected::execute(
+                &repo,
+                stage,
+                (!changed.is_empty()).then_some(changed),
+                trust_current_config,
+            )?;
+            match format {
+                AffectedFormat::Json => {
+                    let doc = serde_json::json!({
+                        "mode": affected.mode,
+                        "changed": affected.changed,
+                        "packages": affected.packages,
+                        "producers": affected.producers,
+                        "checks": affected.checks,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                }
+                AffectedFormat::Text => {
+                    println!("mode: {}", affected.mode);
+                    println!("packages: {}", affected.packages.join(", "));
+                    println!("producers: {}", affected.producers.join(", "));
+                    if !affected.checks.is_empty() {
+                        println!("checks: {}", affected.checks.join(", "));
+                    }
+                }
             }
         }
     }

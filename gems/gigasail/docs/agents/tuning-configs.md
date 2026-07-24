@@ -867,6 +867,28 @@ guesses - a wrong edge either over-runs (a false dependent) or, worse, under-run
 (a missing dependent silently skips tests that should have run). `paths` globs
 support a trailing `/**` for a subtree; other entries match exactly.
 
+### `giga affected`: the change-detection primitive (for CI)
+
+`giga affected --changed <paths> [--premerge] --format json` (IMPLEMENTED) runs
+the same resolution as `giga test --dry-run` but prints only the affected set -
+`{mode, changed, packages, producers, checks}` - and runs nothing. It is the
+general "changed files + declared graph -> affected work" primitive: CI diffs the
+base, pipes the paths in, and gates its job matrix on the JSON. No DB, no repo
+knowledge baked in - the only project-specific input is `giga.yml`, exactly like
+Nx `affected` or a Bazel query. It replaces a hand-written path classifier (e.g.
+a `ci_change_scopes.rb`) with the same package graph the rest of `giga` uses.
+
+**Under-run safety (important, especially for Ruby).** An *unclassified* path -
+one matching no package's `paths` - contributes **nothing** to the affected set.
+That is the dangerous direction: in a dynamic language a change to an unmatched
+file can still break seemingly unrelated code (monkey-patch, global state,
+metaprogramming). A safe CI consumer must therefore treat "non-empty `changed`
+but empty `producers`" as *"fall back to the full run,"* not *"run nothing"* -
+one line of glue, no `giga` change. The alternative is a catch-all package (broad
+`paths`, all suites as `producers`) so an unexpected change fans out conservatively.
+Package-level selection is a **coverage-reducing heuristic backed by a
+conservative fallback**, never a soundness proof - keep the fallback.
+
 ## 14. Pre-test check gates (lint/format)
 
 `review.checks_enabled` + per-package `checks` (IMPLEMENTED) add optional

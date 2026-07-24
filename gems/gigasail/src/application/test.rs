@@ -129,20 +129,14 @@ pub fn execute(req: TestRequest) -> Result<TestResult> {
     let git = GitProvider::open(&req.repo)?;
     let config = crate::application::ci::load_ci_config(&req.repo, &git, None, req.trust_current_config)?;
     // Change detection: with a project graph, diff the stage's base against the
-    // working tree to find which packages (hence producers) are affected.
-    let changed = if let Some(explicit) = &req.changed_override {
-        Some(explicit.clone())
-    } else if config.review.packages.is_empty() {
-        None
-    } else {
-        let base = match req.stage {
-            ReviewMode::Precommit => "HEAD~1".to_string(),
-            ReviewMode::Premerge => git
-                .merge_base("HEAD", "master")
-                .unwrap_or_else(|_| "HEAD~1".to_string()),
-        };
-        git.changed_paths(&base).ok()
-    };
+    // working tree to find which packages (hence producers) are affected. Shared
+    // with `giga affected` so the base selection has one definition.
+    let changed = crate::application::affected::changed_paths(
+        &git,
+        &config,
+        req.stage,
+        req.changed_override.as_deref(),
+    );
     let (producers, mutation_forced) = resolve_producers(&config, &req, changed.as_deref());
     if producers.is_empty() {
         bail!(
