@@ -2520,6 +2520,34 @@ fn resolve_project_calls(
             .or_default()
             .push(method);
     }
+    // Go package-leaf reconciliation. A Go definition's `lexical_symbol` is
+    // `{directory}::{package}::{name}` (the namespace is filesystem-directory
+    // mangled), while a cross-package call's is `{import_path}::{name}`. Go
+    // guarantees an import path's last segment equals the package clause name,
+    // so both collapse to `(package_leaf, name)`. Index top-level Go functions
+    // by that pair; the resolution pass below only binds a *unique* candidate,
+    // so a package-name collision falls through to `unresolved` rather than a
+    // wrong target.
+    let mut by_go_package: BTreeMap<(&str, &str), Vec<&MethodRecord>> = BTreeMap::new();
+    for method in methods {
+        if method.language != "go" {
+            continue;
+        }
+        let Some(symbol) = method.lexical_symbol.as_deref() else {
+            continue;
+        };
+        let mut parts = symbol.rsplit("::");
+        let (Some(name), Some(package)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        let package_leaf = package.rsplit('/').next().unwrap_or(package);
+        if !name.is_empty() && !package_leaf.is_empty() {
+            by_go_package
+                .entry((package_leaf, name))
+                .or_default()
+                .push(method);
+        }
+    }
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
         let Some(symbol) = call.lexical_symbol.as_deref() else {
             continue;
@@ -2543,6 +2571,40 @@ fn resolve_project_calls(
         };
         call.confidence = "high".to_string();
         call.unresolved_reason = None;
+    }
+
+    // Go cross-package free calls whose `{import_path}::{name}` symbol did not
+    // hit `by_lexical` (directory vs import-path namespace mismatch): reconcile
+    // through the package leaf. Bind only a unique candidate.
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        if source_languages.get(call.source.as_str()).copied() != Some("go") {
+            continue;
+        }
+        let Some(symbol) = call.lexical_symbol.as_deref() else {
+            continue;
+        };
+        let mut parts = symbol.rsplit("::");
+        let (Some(name), Some(import_path)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        let package_leaf = import_path.rsplit('/').next().unwrap_or(import_path);
+        if name.is_empty() || package_leaf.is_empty() {
+            continue;
+        }
+        let candidates = by_go_package
+            .get(&(package_leaf, name))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if let Some(candidate) = unique_call_candidate(candidates, call, Some("go")) {
+            call.target = Some(candidate.id.clone());
+            call.kind = if call.owner == candidate.owner {
+                "internal_call".to_string()
+            } else {
+                "resolved_call".to_string()
+            };
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+        }
     }
 
     resolve_same_namespace_static_calls(methods, calls);

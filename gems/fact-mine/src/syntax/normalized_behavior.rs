@@ -727,12 +727,33 @@ pub(crate) fn configured_collection_operation(
         _ => return None,
     };
     let operations = stdlib_operations(language)?;
-    names.into_iter().find_map(|name| {
-        operations
-            .get(&name)
-            .and_then(|methods| methods.get(message))
-            .and_then(|operation| operation_from_config(operation))
-    })
+    names
+        .iter()
+        .find_map(|name| {
+            operations
+                .get(name)
+                .and_then(|methods| methods.get(message))
+                .and_then(|operation| operation_from_config(operation))
+        })
+        .or_else(|| {
+            // Flat package-qualified receiver methods (e.g. ExternalLatency's
+            // `sync.Mutex.Lock`, or an Intrinsic `bytes.Buffer.WriteByte`) are
+            // stored under a section keyed by the composite `Type.method`, not
+            // as a nested type. Once the receiver type is resolved they are the
+            // same fact; probe them so source-only analysis reaches them without
+            // SCIP.
+            names.iter().find_map(|name| {
+                let composite = format!("{name}.{message}");
+                ["ExternalLatency", "Intrinsic", "SemanticSymbol"]
+                    .iter()
+                    .find_map(|section| {
+                        operations
+                            .get(*section)
+                            .and_then(|entries| entries.get(&composite))
+                            .and_then(|operation| operation_from_config(operation))
+                    })
+            })
+        })
 }
 
 /// Maps only explicit native nullability annotations to a CFG contract.

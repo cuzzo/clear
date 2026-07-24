@@ -1047,6 +1047,15 @@ fn go_method_local_types(
         Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*make\s*\(\s*chan\s+([^\s,)]+)")
             .expect("valid Go channel construction regex")
     });
+    // `b := strings.Builder{}` / `b := &bytes.Buffer{}` - a composite literal
+    // names the variable's type directly. The `&?` is skipped so a pointer
+    // literal still yields the base type, which is how the stdlib registry
+    // keys its methods (`bytes.Buffer.WriteByte`, `sync.Mutex.Lock`).
+    static COMPOSITE: OnceLock<Regex> = OnceLock::new();
+    let composite = COMPOSITE.get_or_init(|| {
+        Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*&?\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\{")
+            .expect("valid Go composite literal regex")
+    });
     let receive = RECEIVE.get_or_init(|| {
         Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*<-\s*([A-Za-z_][A-Za-z0-9_]*)")
             .expect("valid Go channel receive regex")
@@ -1103,6 +1112,13 @@ fn go_method_local_types(
             let mut known = parameters.clone();
 
             for capture in var.captures_iter(&body) {
+                candidates
+                    .entry(capture[1].to_string())
+                    .or_default()
+                    .insert(capture[2].to_string());
+                known.insert(capture[1].to_string(), capture[2].to_string());
+            }
+            for capture in composite.captures_iter(&body) {
                 candidates
                     .entry(capture[1].to_string())
                     .or_default()
