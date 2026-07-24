@@ -865,7 +865,10 @@ impl Storage {
                 artifact.artifact_sha256,
                 artifact.commit_hash,
                 artifact.timestamp,
-                artifact.payload_json
+                // Never read back (findings are normalized into sarif_findings;
+                // the gzipped run-store artifact is the durable raw copy), so we
+                // do not persist the full document text here.
+                ""
             ],
         )?;
         let id = self.conn.query_row(

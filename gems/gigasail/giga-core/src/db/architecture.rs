@@ -91,7 +91,10 @@ pub fn ingest_architecture_json(
             root,
             complete as i64,
             generated_at,
-            payload
+            // The full graph is decomposed into the nodes/edges/spans tables and
+            // this column is never read back (the gzipped run-store artifact is
+            // the durable copy), so storing it would only bloat the DB.
+            ""
         ],
     )?;
     let artifact_id = tx.last_insert_rowid();
