@@ -513,10 +513,7 @@ fn render_summary(
         Style::default().add_modifier(Modifier::BOLD),
     )));
     body.push(Line::from(Span::styled(
-        format!(
-            "{} over the risk threshold, riskiest first:",
-            summary.rows.len()
-        ),
+        format!("{} changed, riskiest first:", summary.rows.len()),
         Style::default().fg(Color::DarkGray),
     )));
     body.push(Line::from(""));
@@ -567,7 +564,7 @@ fn render_summary(
 
     if summary.rows.is_empty() {
         body.push(Line::from(Span::styled(
-            "no children above the risk threshold.".to_string(),
+            "no changed children.".to_string(),
             Style::default().fg(Color::DarkGray),
         )));
     } else {
@@ -701,6 +698,83 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| render(f, app, now)).unwrap();
         terminal
+    }
+
+    fn app_no_evidence() -> App {
+        // A 6-line function where only line 3 was added; no coverage/hazard
+        // evidence (as for a freshly built repo).
+        let unit = ChangedUnit {
+            name: "handler".into(),
+            kind: UnitKind::Function,
+            path: "src/app.rs".into(),
+            start_line: 1,
+            end_line: 6,
+            signature: "pub fn handler()".into(),
+            visibility: Visibility::Public,
+            is_test: false,
+            added: 1,
+            removed: 0,
+            added_lines: vec![3],
+            evidence: Evidence::default(),
+        };
+        let change = FileChange {
+            path: "src/app.rs".into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            is_test: false,
+            units: vec![unit],
+            file_added: 1,
+            file_removed: 0,
+            unattributed_added: 0,
+            unattributed_removed: 0,
+        };
+        let file = FileDiff {
+            path: "src/app.rs".into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_lines: 5,
+                new_start: 1,
+                new_lines: 6,
+                lines: vec![
+                    DiffLine { origin: LineOrigin::Context, old_lineno: Some(1), new_lineno: Some(1), content: "pub fn handler() {".into() },
+                    DiffLine { origin: LineOrigin::Context, old_lineno: Some(2), new_lineno: Some(2), content: "    let a = 1;".into() },
+                    DiffLine { origin: LineOrigin::Add, old_lineno: None, new_lineno: Some(3), content: "    let b = 2;".into() },
+                    DiffLine { origin: LineOrigin::Context, old_lineno: Some(3), new_lineno: Some(4), content: "    let c = 3;".into() },
+                    DiffLine { origin: LineOrigin::Context, old_lineno: Some(4), new_lineno: Some(5), content: "    a + b".into() },
+                    DiffLine { origin: LineOrigin::Context, old_lineno: Some(5), new_lineno: Some(6), content: "}".into() },
+                ],
+            }],
+        };
+        let mut sources = HashMap::new();
+        sources.insert("src/app.rs".to_string(),
+            "pub fn handler() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n    a + b\n}\n".to_string());
+        let root = build_tree(std::slice::from_ref(&change), project_root_of);
+        App::new(PathBuf::from("."), PathBuf::from("/nonexistent/gigasail.db"),
+            root, vec![change], vec![file], sources, HashMap::new(), "HEAD".into())
+    }
+
+    #[test]
+    fn container_lists_changed_children_without_evidence() {
+        // A repo built without coverage/hazard evidence yields zero-risk units.
+        // Container (project/dir/file) views must still list their changed
+        // children rather than collapsing to an empty "no children" message.
+        let mut app = app_no_evidence();
+        select(&mut app, "app.rs");
+        let text = buffer_text(&draw(&app, 0.0));
+        assert!(
+            text.contains("handler()"),
+            "file container must list its changed function; got:\n{text}"
+        );
+        assert!(
+            !text.contains("no changed children"),
+            "container must not be empty when children changed"
+        );
+        // The riskiest-child summary for the whole project also lists the file.
+        select(&mut app, "src");
+        let dir_text = buffer_text(&draw(&app, 0.0));
+        assert!(dir_text.contains("app.rs"), "dir container lists changed file");
     }
 
     #[test]
@@ -863,8 +937,8 @@ mod tests {
         let terminal = draw(&app, 0.0);
         let text = buffer_text(&terminal);
         assert!(text.contains("notes.txt"));
-        // No units -> a summary with no children above threshold.
-        assert!(text.contains("no children above the risk threshold"));
+        // No logical units -> a summary with no changed children to list.
+        assert!(text.contains("no changed children"));
     }
 
     fn pane_line(origin: LineOrigin, n: u32) -> PaneLine {

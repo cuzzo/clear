@@ -98,6 +98,7 @@ pub struct SummaryRow {
     pub label: String,
     pub kind: NodeKind,
     pub risk: f64,
+    pub changed_loc: u32,
     pub uncovered_hazards: u32,
     pub t1_unkilled: u32,
     pub t2_unkilled: u32,
@@ -368,6 +369,7 @@ impl App {
             label: child.label.clone(),
             kind: child.kind,
             risk: child.risk.0,
+            changed_loc: child.changed_loc(),
             uncovered_hazards: 0,
             t1_unkilled: 0,
             t2_unkilled: 0,
@@ -566,7 +568,7 @@ impl App {
             }
         }
 
-        // Container -> summary of its riskiest direct children.
+        // Container -> summary of its changed direct children, riskiest first.
         let mut units = Vec::new();
         Self::collect_units(node, &mut units);
         let stats = Self::summary_stats(&units);
@@ -574,13 +576,21 @@ impl App {
             .children
             .iter()
             .map(Self::summary_row)
-            .filter(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD)
+            .filter(|r| r.changed_loc > 0)
             .collect();
         rows.sort_by(|a, b| {
             b.risk
                 .partial_cmp(&a.risk)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then(b.changed_loc.cmp(&a.changed_loc))
+                .then(a.label.cmp(&b.label))
         });
+        // Keep only the risk-bearing children when any clear the threshold, so a
+        // signal-rich diff stays focused; otherwise show every changed child so
+        // the view is never empty (e.g. a freshly built repo with no evidence).
+        if rows.iter().any(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD) {
+            rows.retain(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD);
+        }
 
         RightPane {
             title: node.path.clone().unwrap_or_else(|| node.label.clone()),
