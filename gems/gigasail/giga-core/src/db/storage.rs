@@ -102,6 +102,13 @@ impl Storage {
             .filter(|parent| !parent.as_os_str().is_empty())
         {
             std::fs::create_dir_all(parent)?;
+            // Make the state directory self-ignoring so the database, its WAL/SHM
+            // sidecars, run artifacts, and the coordination lock never surface as
+            // Git changes (in `giga diff`, the clean-worktree gate, or `git status`).
+            let ignore = parent.join(".gitignore");
+            if !ignore.exists() {
+                let _ = std::fs::write(&ignore, "*\n");
+            }
         }
         let conn = Connection::open(path)?;
         configure_connection(&conn)?;

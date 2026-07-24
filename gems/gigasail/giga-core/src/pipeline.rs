@@ -1644,7 +1644,18 @@ pub fn publish_run(repo: &Path, config: &LineageConfig, completed: &Path) -> Res
         .file_name()
         .and_then(|name| name.to_str())
         .context("completed run directory has no valid file name")?;
-    if completed.parent() != Some(runs.as_path()) {
+    // The completed run must live directly in the configured run store. Compare
+    // canonically as well, so a relative `--repo` (which makes `runs` relative)
+    // still matches a run directory whose path was resolved to an absolute form
+    // upstream.
+    let in_store = completed.parent().is_some_and(|parent| {
+        parent == runs
+            || matches!(
+                (parent.canonicalize(), runs.canonicalize()),
+                (Ok(parent), Ok(runs)) if parent == runs
+            )
+    });
+    if !in_store {
         bail!(
             "completed run {} is not in the configured run store",
             completed.display()

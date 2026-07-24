@@ -42,7 +42,8 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Run the local static-analysis profile and stage a versioned analysis run.
-    #[command(alias = "analyze")]
+    /// `sync` is an alias; pass --ingest to persist the run into the database.
+    #[command(alias = "analyze", alias = "sync")]
     Analyse {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -60,6 +61,7 @@ enum Command {
         trust_current_config: bool,
     },
     /// Run a configured verification profile, stage its artifacts, and ingest them.
+    #[command(alias = "check")]
     Ci {
         #[arg(long, default_value = ".")]
         repo: PathBuf,

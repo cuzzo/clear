@@ -1407,6 +1407,46 @@ producers:
 }
 
 #[test]
+fn ci_publishes_a_run_with_a_relative_repo_path() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Gigasail", "giga@example.test").unwrap();
+    fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn value() -> i32 { 1 }\n",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("gigasail.yml"),
+        complete_profile_config(),
+    )
+    .unwrap();
+    commit_all(&repository, &signature, "initial");
+
+    // Invoke from inside the repo with a relative `--repo .`. The run-store
+    // containment check must still recognize the published run even though the
+    // store path is relative and the run directory resolves to an absolute path.
+    let ci = Command::new(env!("CARGO_BIN_EXE_giga"))
+        .current_dir(directory.path())
+        .args([
+            "ci",
+            "--repo",
+            ".",
+            "--db",
+            ".giga/gigasail.db",
+            "--trust-current-config",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        ci.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ci.stderr)
+    );
+    assert!(String::from_utf8_lossy(&ci.stdout).contains("gigasail ci: profile=ci"));
+}
+
+#[test]
 fn watch_once_analyses_and_syncs_head_then_releases_the_lock() {
     let directory = tempdir().unwrap();
     let repository = git2::Repository::init(directory.path()).unwrap();
