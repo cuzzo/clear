@@ -21,7 +21,9 @@ pub const CONFIG_JSON_FILE_NAME: &str = "giga.json";
 pub const RUN_MANIFEST_VERSION: &str = "gigasail-run/v1";
 const MAX_DECOMPRESSED_ARTIFACT_BYTES: u64 = 128 * 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// No `Eq`: `review` carries f64 ranking weights/thresholds (§tuning-configs),
+// which are `PartialEq` only. Nothing keys a set/map on `LineageConfig`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LineageConfig {
     pub version: u32,
@@ -31,6 +33,10 @@ pub struct LineageConfig {
     pub profiles: BTreeMap<String, VerificationProfile>,
     #[serde(default)]
     pub producers: BTreeMap<String, EvidenceProducer>,
+    /// Review gates, metric weighting, and purity policy. See
+    /// `crate::review::ReviewConfig` and docs/agents/tuning-configs.md.
+    #[serde(default)]
+    pub review: crate::review::ReviewConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2653,6 +2659,7 @@ mod tests {
                 },
             )]),
             producers: BTreeMap::from([("coverage".into(), producer("coverage.json"))]),
+            review: Default::default(),
         };
         assert!(validate_config(duplicate_profile)
             .unwrap_err()
@@ -2667,6 +2674,7 @@ mod tests {
                 ("coverage".into(), producer("result.json")),
                 ("other".into(), producer("result.json")),
             ]),
+            review: Default::default(),
         };
         assert!(validate_config(duplicate_output)
             .unwrap_err()
@@ -2755,6 +2763,7 @@ mod tests {
                     },
                 ),
             ]),
+            review: Default::default(),
         })
         .unwrap();
 
@@ -2830,6 +2839,7 @@ mod tests {
                     }],
                 },
             )]),
+            review: Default::default(),
         })
         .unwrap();
 
@@ -2888,6 +2898,7 @@ mod tests {
                         .collect(),
                 },
             )]),
+            review: Default::default(),
         };
 
         assert!(quarantine_profile_outputs(
@@ -2943,6 +2954,7 @@ mod tests {
                     }],
                 },
             )]),
+            review: Default::default(),
         })
         .unwrap();
         let run = directory
@@ -2994,6 +3006,7 @@ mod tests {
                     }],
                 },
             )]),
+            review: Default::default(),
         })
         .unwrap();
         let run = directory
@@ -3063,6 +3076,7 @@ mod tests {
                     },
                 ),
             ]),
+            review: Default::default(),
         })
         .unwrap();
 
@@ -3133,6 +3147,7 @@ mod tests {
                     produces: Vec::new(),
                 },
             )]),
+            review: Default::default(),
         };
         let error = validate_config(config).unwrap_err().to_string();
         assert!(error.contains("allowlisted embedded provider"), "{error}");
@@ -3178,6 +3193,7 @@ mod tests {
                     }],
                 },
             )]),
+            review: Default::default(),
         })
         .unwrap();
         for revision in ["one", "two", "three"] {
@@ -3241,6 +3257,7 @@ mod tests {
                     }],
                 },
             )]),
+            review: Default::default(),
         })
         .unwrap();
         let error = ProfileExecutionSession::begin(directory.path(), &config)
@@ -3277,6 +3294,7 @@ mod tests {
             artifacts: ArtifactStoreConfig::default(),
             profiles: BTreeMap::new(),
             producers: BTreeMap::new(),
+            review: Default::default(),
         };
         let session = ProfileExecutionSession::begin(directory.path(), &config).unwrap();
         let error = match ProfileExecutionSession::begin(directory.path(), &config) {

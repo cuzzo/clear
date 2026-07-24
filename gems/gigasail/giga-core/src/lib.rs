@@ -27,6 +27,7 @@ pub mod mutant;
 pub mod pipeline;
 #[path = "db/quality.rs"]
 pub mod quality;
+pub mod review;
 #[path = "db/sarif.rs"]
 pub mod sarif;
 #[path = "db/stack_trace.rs"]

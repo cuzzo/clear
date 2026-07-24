@@ -192,6 +192,7 @@ fn builtin_analysis_config() -> Result<crate::LineageConfig> {
             },
         )]),
         producers,
+        review: Default::default(),
     })
 }
 
