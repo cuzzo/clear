@@ -57,7 +57,7 @@ async fn measures_real_lineage_owner_inventory_where_clause() {
     execute_sqlite_setup(&pool, SETUP).await.unwrap();
     let schema = sql_cov::schema::SchemaCatalog::load_sqlite(&pool).await.unwrap();
     let analysis = analyze_sql(
-        "gems/lineage/sql/architecture/owner_inventory.sql",
+        "gems/gigasail/giga-core/sql/architecture/owner_inventory.sql",
         OWNER_INVENTORY,
         DialectName::Sqlite,
         Some(&schema),

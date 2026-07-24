@@ -11,7 +11,7 @@ class CrossGemContractIntegrationTest < Minitest::Test
   def setup
     @fact_mine_bin = File.expand_path("../../fact-mine/target/release/fact-mine-rust", __dir__)
     @espalier_bin = File.expand_path("../../espalier/exe/espalier", __dir__)
-    @lineage_bin = File.expand_path("../../lineage/target/release/lineage", __dir__)
+    @lineage_bin = File.expand_path("../../gigasail/target/release/giga", __dir__)
     @slopcop_bin = File.expand_path("../exe/slopcop", __dir__)
 
     # Ensure all binaries exist

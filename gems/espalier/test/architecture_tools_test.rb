@@ -12,7 +12,7 @@ require "fileutils"
 class ArchitectureToolsTest < Minitest::Test
   TOOLS = File.expand_path("../tools", __dir__)
   LINEAGE_TOOLS = File.expand_path("../../lineage/tools", __dir__)
-  LINEAGE_BIN = File.expand_path("../../lineage/target/release/lineage", __dir__)
+  LINEAGE_BIN = File.expand_path("../../gigasail/target/release/giga", __dir__)
   FACT_MINE_BIN = File.expand_path("../../fact-mine/target/release/fact-mine-rust", __dir__)
 
   def setup
@@ -289,7 +289,7 @@ class ArchitectureToolsTest < Minitest::Test
   # so one unit's tracked rename still canonicalizes every other unit's
   # stale path for the same file.
   def test_change_coupling_db_mode_unifies_coupling_across_a_rename
-    skip "lineage binary missing; build gems/lineage first" unless File.executable?(LINEAGE_BIN)
+    skip "lineage binary missing; build gems/gigasail first" unless File.executable?(LINEAGE_BIN)
 
     with_repo do |dir|
       FileUtils.mkdir_p(%w[core util])
@@ -328,7 +328,7 @@ class ArchitectureToolsTest < Minitest::Test
   end
 
   def test_sarif_outputs_ingest_into_lineage
-    skip "lineage binary missing; build gems/lineage first" unless File.executable?(LINEAGE_BIN)
+    skip "lineage binary missing; build gems/gigasail first" unless File.executable?(LINEAGE_BIN)
 
     with_repo do |dir|
       FileUtils.mkdir_p(%w[lib/core lib/util])
