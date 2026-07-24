@@ -752,9 +752,23 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     fn suppress_state_read_for_call(
         &self,
         call: &NormalizedCallProjection,
-        _span_source: &str,
+        span_source: &str,
     ) -> bool {
-        call.receiver == "self" && matches!(call.message.as_str(), "callback" | "println")
+        if call.receiver != "self" {
+            return false;
+        }
+        // A bare builtin call (`make(...)`, `len(x)`, `string(x)`, `float64(x)`)
+        // has no receiver, so the normalizer attributes it to `self`. It is not
+        // a struct-field read; treating it as one fabricates state like
+        // `read:make`.
+        if is_go_builtin(call.message.as_str()) {
+            return true;
+        }
+        // `self.method(...)` (the message immediately followed by `(`) is a
+        // method invocation, not a field read; only bare `self.field` is state.
+        // It is already recorded as a call edge, so recording it as state too
+        // would double-count and fabricate `read:method`.
+        span_source.contains(&format!("{}(", call.message))
     }
 
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
@@ -1334,10 +1348,59 @@ fn simple_identifier(name: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
+/// Go's predeclared builtin functions and builtin type-conversion names. A bare
+/// call to one of these is not a struct-field access.
+fn is_go_builtin(message: &str) -> bool {
+    matches!(
+        message,
+        // builtin functions
+        "append" | "cap" | "clear" | "close" | "complex" | "copy" | "delete"
+            | "imag" | "len" | "make" | "max" | "min" | "new" | "panic"
+            | "print" | "println" | "real" | "recover"
+            // builtin type conversions (predeclared types)
+            | "bool" | "byte" | "complex64" | "complex128" | "error" | "float32"
+            | "float64" | "int" | "int8" | "int16" | "int32" | "int64" | "rune"
+            | "string" | "uint" | "uint8" | "uint16" | "uint32" | "uint64"
+            | "uintptr" | "any"
+            // legacy suppression retained
+            | "callback"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::syntax::Child;
+
+    #[test]
+    fn self_builtin_calls_are_not_state_reads() {
+        let profile = GoNormalizedBehavior;
+        let call = |message: &str, args: Vec<String>| NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: message.to_string(),
+            arguments: args,
+            access_span: [0, 0, 0, 0],
+            span: [0, 0, 0, 0],
+        };
+        // Bare builtins attributed to `self` must be suppressed so they do not
+        // fabricate state like `read:make` / `read:string` / `read:float64`.
+        for builtin in ["make", "len", "string", "float64", "append", "new", "cap"] {
+            assert!(
+                profile.suppress_state_read_for_call(&call(builtin, vec!["x".into()]), "make(x)"),
+                "expected {builtin} to be suppressed"
+            );
+        }
+        // A `self.method()` invocation is a call, not a field read (span shows
+        // the invoking paren); it is suppressed as state.
+        assert!(profile.suppress_state_read_for_call(
+            &call("populateFileSizes", vec![]),
+            "g.populateFileSizes()"
+        ));
+        // A real struct-field read on self (no invoking paren) is kept.
+        assert!(!profile.suppress_state_read_for_call(&call("count", vec![]), "c.count"));
+        assert!(is_go_builtin("make") && is_go_builtin("string"));
+        assert!(!is_go_builtin("count") && !is_go_builtin("populateFileSizes"));
+    }
 
     fn node(kind: &str, text: &str) -> Node {
         Node {
