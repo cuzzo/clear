@@ -2098,7 +2098,7 @@ fn write_fact_mine_sarif(repo: &Path, producer: &EvidenceProducer, document: &[u
 }
 
 fn embedded_fact_mine_version() -> String {
-    const FACT_MINE_MANIFEST: &str = include_str!("../../fact-mine/Cargo.toml");
+    const FACT_MINE_MANIFEST: &str = include_str!("../../../fact-mine/Cargo.toml");
     let version = FACT_MINE_MANIFEST
         .lines()
         .skip_while(|line| line.trim() != "[package]")

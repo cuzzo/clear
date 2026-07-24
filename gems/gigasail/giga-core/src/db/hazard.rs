@@ -16,12 +16,12 @@ pub struct HazardIngestStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct HazardSite {
-    pub(crate) path: String,
-    pub(crate) line: u32,
-    pub(crate) source: String,
-    pub(crate) hazard_type: String,
-    pub(crate) required_evidence: String,
+pub struct HazardSite {
+    pub path: String,
+    pub line: u32,
+    pub source: String,
+    pub hazard_type: String,
+    pub required_evidence: String,
 }
 
 pub fn ingest_hazards(
@@ -628,7 +628,7 @@ fn query_hazards(
     unique_sites
 }
 
-pub(crate) fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub fn scan_zig_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     let sites = query_hazards(
         path,
         contents,
@@ -727,11 +727,11 @@ fn executable_zig_retry_line(line: &str) -> bool {
         && code != "} else {"
 }
 
-pub(crate) fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub fn scan_go_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(path, contents, tree_sitter_go::LANGUAGE.into(), GO_HAZARDS)
 }
 
-pub(crate) fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(
         path,
         contents,
@@ -740,11 +740,11 @@ pub(crate) fn scan_rust_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     )
 }
 
-pub(crate) fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub fn scan_c_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(path, contents, tree_sitter_c::LANGUAGE.into(), C_HAZARDS)
 }
 
-pub(crate) fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     query_hazards(
         path,
         contents,
@@ -756,7 +756,7 @@ pub(crate) fn scan_cpp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
 // C# reflection flow is owned by FactMine. Gigasail keeps the same narrow site
 // shape for storage/UI consumers, but does not replay a second type/alias
 // analysis here.
-pub(crate) fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
+pub fn scan_csharp_sites(path: &str, contents: &str) -> Vec<HazardSite> {
     fact_mine_rust::syntax::hazards::extract_file_hazards(
         path,
         contents,
@@ -1399,7 +1399,7 @@ mod tests {
     #[test]
     fn vendored_hazard_queries_match_fact_mines_originals() {
         let originals_dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fact-mine/src/syntax");
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fact-mine/src/syntax");
         if !originals_dir.is_dir() {
             eprintln!("skipping: fact-mine sibling tree not present (not a monorepo checkout)");
             return;

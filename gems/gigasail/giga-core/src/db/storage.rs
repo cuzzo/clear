@@ -11,6 +11,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
+/// The hotness overlay query, shared by core summary materialization and the
+/// giga-ui runtime overlay. Exposed as a const so consumers across the crate
+/// boundary reuse the single source instead of a cross-crate `include_str!`.
+pub const APPLY_HOTNESS_SQL: &str = include_str!("../../sql/core/apply_hotness.sql");
+
 pub struct Storage {
     conn: Connection,
 }
@@ -227,7 +232,7 @@ impl Storage {
         Ok(())
     }
 
-    pub(crate) fn connection(&self) -> &Connection {
+    pub fn connection(&self) -> &Connection {
         &self.conn
     }
 
@@ -1889,7 +1894,7 @@ impl Storage {
         self.ensure_unit_hotness_table()?;
         let mut stmt = self
             .conn
-            .prepare(include_str!("../../sql/ui/runtime/top_hotness.sql"))?;
+            .prepare(include_str!("../../sql/core/top_hotness.sql"))?;
         let rows = stmt
             .query_map([], |row| {
                 Ok(crate::model::HotnessRow {
@@ -1910,7 +1915,7 @@ impl Storage {
         self.ensure_unit_hotness_table()?;
         let mut stmt = self
             .conn
-            .prepare(include_str!("../../sql/ui/runtime/apply_hotness.sql"))?;
+            .prepare(APPLY_HOTNESS_SQL)?;
         let path_owned = path.to_string();
         let rows = stmt
             .query_map(params![path], move |row| {
@@ -2396,14 +2401,16 @@ mod tests {
     }
 
     #[test]
-    fn extracted_storage_and_ui_queries_prepare_against_the_real_schema() {
+    fn extracted_storage_queries_prepare_against_the_real_schema() {
         let storage = Storage::open_memory().unwrap();
         let sql_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("sql");
-        let files = [sql_root.join("storage"), sql_root.join("ui/runtime")]
+        // UI runtime queries live in the giga-ui crate and are validated there
+        // against this same schema (see giga-ui's schema test).
+        let files = [sql_root.join("storage"), sql_root.join("core")]
             .into_iter()
             .flat_map(|root| collected_sql_files(&root))
             .collect::<Vec<_>>();
-        assert!(files.len() >= 70);
+        assert!(files.len() >= 45);
         for path in files {
             let sql = fs::read_to_string(&path)
                 .unwrap()

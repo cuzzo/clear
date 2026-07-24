@@ -747,14 +747,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "gigasail"
+name = "giga-core"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "askama",
- "axum",
- "clap",
- "crossterm",
  "fact-mine-rust",
  "flate2",
  "git2",
@@ -763,22 +759,16 @@ dependencies = [
  "idna_adapter",
  "libc",
  "openssl-sys",
- "ratatui",
  "rayon",
- "rmcp",
  "roxmltree",
  "rusqlite",
- "rust-embed",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
  "streaming-iterator",
  "tempfile",
- "tokio",
  "toml",
- "tower-http",
- "tower-lsp",
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-c-sharp",
@@ -798,6 +788,47 @@ dependencies = [
  "tree-sitter-zig",
  "ts-rs",
  "url",
+]
+
+[[package]]
+name = "giga-ui"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "askama",
+ "axum",
+ "clap",
+ "giga-core",
+ "git2",
+ "rayon",
+ "rmcp",
+ "rusqlite",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower-http",
+ "tower-lsp",
+ "url",
+]
+
+[[package]]
+name = "gigasail"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "giga-core",
+ "git2",
+ "hex",
+ "ratatui",
+ "rusqlite",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "ts-rs",
 ]
 
 [[package]]

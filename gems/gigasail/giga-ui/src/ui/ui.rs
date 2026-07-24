@@ -9346,6 +9346,38 @@ mod tests {
             .unwrap();
     }
 
+    fn collected_ui_sql_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                files.extend(collected_ui_sql_files(&path));
+            } else if path.extension().and_then(|value| value.to_str()) == Some("sql") {
+                files.push(path);
+            }
+        }
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn ui_runtime_queries_prepare_against_the_real_schema() {
+        let storage = Storage::open_memory().unwrap();
+        let runtime =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sql/ui/runtime");
+        let files = collected_ui_sql_files(&runtime);
+        assert!(files.len() >= 25, "expected the ui runtime query corpus");
+        for path in files {
+            let sql = std::fs::read_to_string(&path)
+                .unwrap()
+                .replace("{column}", "current_line_cov");
+            storage
+                .connection()
+                .prepare(&sql)
+                .unwrap_or_else(|error| panic!("{} did not prepare: {error}", path.display()));
+        }
+    }
+
     #[test]
     fn source_payload_includes_coverage_mutation_hazards_and_versions() {
         let dir = tempdir().unwrap();

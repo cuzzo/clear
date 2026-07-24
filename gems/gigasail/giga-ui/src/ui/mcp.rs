@@ -667,7 +667,7 @@ fn unit_context(
 
     let hotness_rows = query_rows(
         storage,
-        include_str!("../../sql/ui/runtime/apply_hotness.sql"),
+        giga_core::storage::APPLY_HOTNESS_SQL,
         &[path],
         &[
             "function",

@@ -22,9 +22,8 @@ use gigasail::{
     ingest_mutant_facts_json_with_options, ingest_sarif_paths, ingest_stack_traces,
     ingest_test_exposure_json, latest_run_directory, load_config, parse_coverage_input,
     render_structured_diff_json, render_structured_diff_text, resolve_coverage_record_paths,
-    serve_lsp, serve_mcp, serve_ui_with_overlays, CoverageIngestOptions, EvidenceScopeFingerprint,
-    GitProvider, HeuristicExtractor, LineageEngine, MutantIngestOptions, RepoPathNormalizer,
-    SentryProvider, Storage,
+    CoverageIngestOptions, EvidenceScopeFingerprint, GitProvider, HeuristicExtractor,
+    LineageEngine, MutantIngestOptions, RepoPathNormalizer, SentryProvider, Storage,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -158,36 +157,6 @@ enum Command {
     RefreshUi {
         #[arg(long, default_value = ".gigasail/gigasail.db")]
         db: PathBuf,
-    },
-    /// Serve the local Gigasail source and verification UI.
-    Ui {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
-        db: PathBuf,
-        #[arg(long, default_value = ".")]
-        repo: PathBuf,
-        #[arg(long, default_value = "127.0.0.1")]
-        host: String,
-        #[arg(long, default_value_t = 8080)]
-        port: u16,
-        #[arg(long = "overlay")]
-        overlays: Vec<PathBuf>,
-    },
-    /// Run the Gigasail language server over stdio.
-    Lsp {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
-        db: PathBuf,
-        #[arg(long, default_value = ".")]
-        repo: PathBuf,
-        #[arg(long = "overlay")]
-        overlays: Vec<PathBuf>,
-    },
-    /// Serve gigasail.db to LLM coding agents over the Model Context Protocol.
-    /// Omit --db to run DB-less (live disk facts only; see docs/agents/mcp.md).
-    Mcp {
-        #[arg(long)]
-        db: Option<PathBuf>,
-        #[arg(long, default_value = ".")]
-        repo: PathBuf,
     },
     /// Ingest aggregate coverage or mutation quality data for one commit.
     IngestCoverage {
@@ -538,27 +507,6 @@ fn main() -> Result<()> {
                 "refreshed UI summaries for {} files and {} warning units",
                 files, units
             );
-        }
-        Command::Ui {
-            db,
-            repo,
-            host,
-            port,
-            overlays,
-        } => {
-            serve_ui_with_overlays(db, repo, &host, port, &overlays)?;
-        }
-        Command::Lsp { db, repo, overlays } => {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
-            runtime.block_on(serve_lsp(db, repo, &overlays))?;
-        }
-        Command::Mcp { db, repo } => {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
-            runtime.block_on(serve_mcp(db, repo))?;
         }
         Command::IngestCoverage {
             db,
