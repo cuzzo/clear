@@ -256,6 +256,33 @@ impl GitProvider {
         Ok(statuses.is_empty())
     }
 
+    /// Repo-relative paths changed between `base` and the working tree (staged +
+    /// unstaged). Drives `giga test`'s change detection: which packages, hence
+    /// which test producers, a change affects.
+    pub fn changed_paths(&self, base: &str) -> Result<Vec<String>> {
+        let repo = Repository::open(&self.path)?;
+        let base_oid = git2::Oid::from_str(&self.resolve_commit(base)?)?;
+        let base_tree = repo.find_commit(base_oid)?.tree()?;
+        let mut opts = git2::DiffOptions::new();
+        opts.include_untracked(true).recurse_untracked_dirs(true);
+        let diff = repo.diff_tree_to_workdir_with_index(Some(&base_tree), Some(&mut opts))?;
+        let mut paths = std::collections::BTreeSet::new();
+        diff.foreach(
+            &mut |delta, _| {
+                for file in [delta.new_file(), delta.old_file()] {
+                    if let Some(path) = file.path().and_then(|p| p.to_str()) {
+                        paths.insert(path.to_string());
+                    }
+                }
+                true
+            },
+            None,
+            None,
+            None,
+        )?;
+        Ok(paths.into_iter().collect())
+    }
+
     /// The merge base of two revisions (their common ancestor). Backs the
     /// `giga_premerge` review range: `merge_base(branch, target)..branch`.
     pub fn merge_base(&self, a: &str, b: &str) -> Result<String> {

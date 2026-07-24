@@ -37,6 +37,13 @@ pub struct ReviewConfig {
     /// whether mutation testing runs there. See `stage_tests`.
     #[serde(default)]
     pub tests: TestDepthConfig,
+    /// A project graph: which files belong to each package, which packages it
+    /// depends on, and the test producers to run for it. A change runs the
+    /// affected packages (changed + everything that transitively depends on
+    /// them). This is the "run these tests when these files change" model — not
+    /// a build system (see tuning-configs.md §12–§13).
+    #[serde(default)]
+    pub packages: BTreeMap<String, Package>,
     // Reserved (parsed, not yet evaluated) — see tuning-configs.md §3f–§3i.
     #[serde(default)]
     pub retain: Option<serde_json::Value>,
@@ -44,6 +51,79 @@ pub struct ReviewConfig {
     pub perf: Option<serde_json::Value>,
     #[serde(default)]
     pub tags: BTreeMap<String, serde_json::Value>,
+}
+
+/// One node in the project graph.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Package {
+    /// Globs identifying this package's files (`gems/fact-mine/**`). A trailing
+    /// `/**` matches the directory subtree; other entries match exactly.
+    #[serde(default)]
+    pub paths: Vec<String>,
+    /// Packages this one depends on. A change to a dependency runs this package
+    /// too (reverse-transitive closure).
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    /// Test producers to run when this package is affected (precommit + premerge).
+    #[serde(default)]
+    pub producers: Vec<String>,
+    /// Additional producers to run only at premerge (e.g. fuzz suites).
+    #[serde(default)]
+    pub premerge: Vec<String>,
+}
+
+impl ReviewConfig {
+    /// The producers to run for a set of changed paths at a stage: the union
+    /// over every affected package (a package whose files changed, plus every
+    /// package that transitively depends on it). Empty when no `packages` graph
+    /// is configured — callers then fall back to the stage's profiles.
+    pub fn affected_producers(&self, changed_paths: &[String], mode: ReviewMode) -> Vec<String> {
+        if self.packages.is_empty() {
+            return Vec::new();
+        }
+        // Directly-changed packages.
+        let mut affected: BTreeSet<&str> = BTreeSet::new();
+        for (name, pkg) in &self.packages {
+            if changed_paths
+                .iter()
+                .any(|p| pkg.paths.iter().any(|glob| path_matches(glob, p)))
+            {
+                affected.insert(name.as_str());
+            }
+        }
+        // Reverse edges: dependency -> dependent. Close over them so a change to
+        // a dependency pulls in its dependents.
+        let mut queue: Vec<&str> = affected.iter().copied().collect();
+        while let Some(dep) = queue.pop() {
+            for (name, pkg) in &self.packages {
+                if pkg.depends_on.iter().any(|d| d == dep) && affected.insert(name.as_str()) {
+                    queue.push(name.as_str());
+                }
+            }
+        }
+        // Union the affected packages' producers (+ premerge producers at premerge).
+        let mut producers: BTreeSet<String> = BTreeSet::new();
+        for name in &affected {
+            if let Some(pkg) = self.packages.get(*name) {
+                producers.extend(pkg.producers.iter().cloned());
+                if mode == ReviewMode::Premerge {
+                    producers.extend(pkg.premerge.iter().cloned());
+                }
+            }
+        }
+        producers.into_iter().collect()
+    }
+}
+
+/// A minimal glob: a trailing `/**` matches the directory subtree; otherwise an
+/// exact path match. Sufficient for package-root globs like `gems/fact-mine/**`.
+fn path_matches(glob: &str, path: &str) -> bool {
+    if let Some(prefix) = glob.strip_suffix("/**") {
+        path == prefix || path.starts_with(&format!("{prefix}/"))
+    } else {
+        path == glob
+    }
 }
 
 /// Per-stage test selection. `giga_precommit` runs the fast set (no mutation by
@@ -858,6 +938,37 @@ tests:
         assert_eq!(c.tests.precommit.profiles, ["unit"]);
         assert_eq!(c.tests.premerge.profiles, ["unit", "integration", "fuzz"]);
         assert!(c.tests.premerge.mutation);
+    }
+
+    #[test]
+    fn affected_producers_follows_the_reverse_dependency_closure() {
+        let c = cfg(r#"
+packages:
+  fact-mine:  { paths: ["gems/fact-mine/**"], producers: [fact-mine-test] }
+  giga-core:  { paths: ["gems/gigasail/giga-core/**"], producers: [giga-core-test] }
+  boobytrap:  { paths: ["gems/boobytrap/**"], producers: [boobytrap-test], depends_on: [giga-core, fact-mine] }
+  slopcop:    { paths: ["gems/slopcop/**"], producers: [slopcop-test], depends_on: [boobytrap] }
+  compiler:   { paths: ["compiler/ruby/**"], producers: [compiler-spec, transpile], premerge: [fuzz-compiler] }
+  zig:        { paths: ["zig/**"], producers: [zig-test, transpile], premerge: [fuzz-zig] }
+"#);
+        // A fact-mine change reaches boobytrap (deps on it) and slopcop (deps on boobytrap).
+        let p = c.affected_producers(&["gems/fact-mine/src/x.rs".into()], ReviewMode::Precommit);
+        assert_eq!(p, ["boobytrap-test", "fact-mine-test", "slopcop-test"]);
+        // giga-core -> boobytrap -> slopcop too.
+        let p = c.affected_producers(&["gems/gigasail/giga-core/src/diff.rs".into()], ReviewMode::Precommit);
+        assert_eq!(p, ["boobytrap-test", "giga-core-test", "slopcop-test"]);
+        // A compiler change: precommit runs spec+transpile; premerge adds fuzz.
+        let pre = c.affected_producers(&["compiler/ruby/ast/parser.rb".into()], ReviewMode::Precommit);
+        assert_eq!(pre, ["compiler-spec", "transpile"]);
+        let merge = c.affected_producers(&["compiler/ruby/ast/parser.rb".into()], ReviewMode::Premerge);
+        assert_eq!(merge, ["compiler-spec", "fuzz-compiler", "transpile"]);
+        // A zig change doesn't drag in the compiler graph.
+        let p = c.affected_producers(&["zig/runtime/switch.zig".into()], ReviewMode::Precommit);
+        assert_eq!(p, ["transpile", "zig-test"]);
+        // No packages -> empty (callers fall back to stage profiles).
+        assert!(ReviewConfig::default()
+            .affected_producers(&["x".into()], ReviewMode::Precommit)
+            .is_empty());
     }
 
     #[test]

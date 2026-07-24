@@ -39,15 +39,33 @@ pub struct TestResult {
 
 /// Resolve the producer set for the request from the giga.yml `review.tests`
 /// stage config plus the flag overrides.
-fn resolve_producers(config: &crate::LineageConfig, req: &TestRequest) -> (Vec<String>, bool) {
+fn resolve_producers(
+    config: &crate::LineageConfig,
+    req: &TestRequest,
+    changed_paths: Option<&[String]>,
+) -> (Vec<String>, bool) {
     let stage = config.review.stage_tests(req.stage);
     let want_mutants = stage.mutation || req.mutants;
-    let mut names: Vec<String> = stage
-        .profiles
-        .iter()
-        .filter_map(|p| config.profiles.get(p))
-        .flat_map(|prof| prof.producers.iter().cloned())
-        .collect();
+    // With a project graph + a known change set, run only the affected packages'
+    // producers ("run these tests when these files change"). Otherwise fall back
+    // to the stage's profiles (run everything the stage declares).
+    let affected = changed_paths
+        .map(|paths| config.review.affected_producers(paths, req.stage))
+        .unwrap_or_default();
+    let mut names: Vec<String> = if !affected.is_empty() {
+        affected
+    } else if !config.review.packages.is_empty() && changed_paths.is_some() {
+        // A graph is configured and we know the changes, but nothing matched:
+        // nothing to run.
+        Vec::new()
+    } else {
+        stage
+            .profiles
+            .iter()
+            .filter_map(|p| config.profiles.get(p))
+            .flat_map(|prof| prof.producers.iter().cloned())
+            .collect()
+    };
     // Mutation producers aren't tied to a stage's profile list, so when mutation
     // is wanted (stage default or `--mutants`) pull in every producer that emits
     // a mutants artifact, wherever it is declared.
@@ -103,7 +121,20 @@ fn resolve_producers(config: &crate::LineageConfig, req: &TestRequest) -> (Vec<S
 pub fn execute(req: TestRequest) -> Result<TestResult> {
     let git = GitProvider::open(&req.repo)?;
     let config = crate::application::ci::load_ci_config(&req.repo, &git, None, req.trust_current_config)?;
-    let (producers, mutation_forced) = resolve_producers(&config, &req);
+    // Change detection: with a project graph, diff the stage's base against the
+    // working tree to find which packages (hence producers) are affected.
+    let changed = if config.review.packages.is_empty() {
+        None
+    } else {
+        let base = match req.stage {
+            ReviewMode::Precommit => "HEAD~1".to_string(),
+            ReviewMode::Premerge => git
+                .merge_base("HEAD", "master")
+                .unwrap_or_else(|_| "HEAD~1".to_string()),
+        };
+        git.changed_paths(&base).ok()
+    };
+    let (producers, mutation_forced) = resolve_producers(&config, &req, changed.as_deref());
     if producers.is_empty() {
         bail!(
             "no test producers matched (stage={:?}, tags={:?}, mutants={}, no_cov={}). \
@@ -199,19 +230,19 @@ mod tests {
     fn stage_and_flags_select_the_right_producers() {
         let c = config();
         // precommit: fast unit coverage, no mutants.
-        let (p, forced) = resolve_producers(&c, &req(ReviewMode::Precommit, false, false, &[]));
+        let (p, forced) = resolve_producers(&c, &req(ReviewMode::Precommit, false, false, &[]), None);
         assert_eq!(p, ["rspec-unit"]);
         assert!(!forced);
         // --mutants pulls the mutation producer in even at precommit.
-        let (p, forced) = resolve_producers(&c, &req(ReviewMode::Precommit, true, false, &[]));
+        let (p, forced) = resolve_producers(&c, &req(ReviewMode::Precommit, true, false, &[]), None);
         assert_eq!(p, ["rspec-unit", "ruby-mutants"]);
         assert!(forced);
         // premerge runs both by default (mutation not "forced" - it's the default).
-        let (p, forced) = resolve_producers(&c, &req(ReviewMode::Premerge, false, false, &[]));
+        let (p, forced) = resolve_producers(&c, &req(ReviewMode::Premerge, false, false, &[]), None);
         assert_eq!(p, ["rspec-unit", "ruby-mutants"]);
         assert!(!forced);
         // --no-cov drops the coverage-only producer.
-        let (p, _) = resolve_producers(&c, &req(ReviewMode::Premerge, false, true, &[]));
+        let (p, _) = resolve_producers(&c, &req(ReviewMode::Premerge, false, true, &[]), None);
         assert_eq!(p, ["ruby-mutants"]);
     }
 }
