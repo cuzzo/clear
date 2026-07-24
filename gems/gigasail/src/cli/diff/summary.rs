@@ -33,6 +33,17 @@ impl CoverageBar {
     pub fn total(&self) -> u32 {
         self.covered_killed + self.covered + self.partial + self.uncovered + self.unknown
     }
+
+    /// Lines whose coverage status is actually known. Zero means the change has
+    /// no coverage data (everything is `unknown`), so the bar reads
+    /// "NO COVERAGE DATA" rather than showing an all-red bar.
+    pub fn measured(&self) -> u32 {
+        self.covered_killed + self.covered + self.partial + self.uncovered
+    }
+
+    pub fn has_coverage(&self) -> bool {
+        self.measured() > 0
+    }
 }
 
 fn slice_total(s: &VerificationSlices) -> u32 {
@@ -54,7 +65,8 @@ impl HazardTotals {
     }
 }
 
-/// One language's production-code breakdown by visibility, with its coverage.
+/// One language's production-code breakdown by visibility, with its coverage
+/// and hazard/tier findings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LangRow {
     pub language: String,
@@ -62,6 +74,7 @@ pub struct LangRow {
     pub private: u32,
     pub other: u32,
     pub bar: CoverageBar,
+    pub hazards: HazardTotals,
 }
 
 /// The funnel, widest row first.
@@ -97,6 +110,33 @@ pub fn build_summary(plan: &DiffPlan, changes: &[FileChange]) -> DiffSummary {
         summary.total_removed += (r.code + r.comments + r.other) as u32;
     }
 
+    // Map each changed path to its language, then aggregate hazard/tier findings
+    // per language (and overall) from the units, so they match the tree.
+    let path_lang: std::collections::HashMap<&str, &str> = plan
+        .files
+        .iter()
+        .filter_map(|f| f.language.as_deref().map(|l| (f.path.as_str(), l)))
+        .collect();
+    let mut lang_hazards: std::collections::HashMap<String, HazardTotals> =
+        std::collections::HashMap::new();
+    for change in changes {
+        let lang = path_lang.get(change.path.as_str());
+        for unit in &change.units {
+            let ev = &unit.evidence;
+            summary.hazards.hazards += ev.hazards_total;
+            summary.hazards.t1 += ev.t1_findings;
+            summary.hazards.t2 += ev.t2_findings;
+            summary.hazards.t3 += ev.t3_findings;
+            if let Some(lang) = lang {
+                let h = lang_hazards.entry((*lang).to_string()).or_default();
+                h.hazards += ev.hazards_total;
+                h.t1 += ev.t1_findings;
+                h.t2 += ev.t2_findings;
+                h.t3 += ev.t3_findings;
+            }
+        }
+    }
+
     for lang in &plan.language_summaries {
         let prod = lang.production.code as u32;
         let test = lang.test.code as u32;
@@ -113,32 +153,20 @@ pub fn build_summary(plan: &DiffPlan, changes: &[FileChange]) -> DiffSummary {
         summary.other_vis += other;
         summary.bar.add_slices(&lang.production_verification);
 
+        let mut bar = CoverageBar::default();
+        bar.add_slices(&lang.production_verification);
         summary.langs.push(LangRow {
             language: lang.language.clone(),
             public,
             private,
             other,
-            bar: {
-                let mut bar = CoverageBar::default();
-                bar.add_slices(&lang.production_verification);
-                bar
-            },
+            bar,
+            hazards: lang_hazards.get(&lang.language).copied().unwrap_or_default(),
         });
     }
 
     // Non-code additions are whatever is left after the recognized source code.
     summary.other_added = summary.total_added.saturating_sub(summary.code_added);
-
-    // Hazards and tier findings from the changed units, matching the tree.
-    for change in changes {
-        for unit in &change.units {
-            let ev = &unit.evidence;
-            summary.hazards.hazards += ev.hazards_total;
-            summary.hazards.t1 += ev.t1_findings;
-            summary.hazards.t2 += ev.t2_findings;
-            summary.hazards.t3 += ev.t3_findings;
-        }
-    }
 
     // Riskiest / largest languages first.
     summary

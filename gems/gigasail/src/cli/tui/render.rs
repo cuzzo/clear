@@ -167,7 +167,8 @@ fn render_left(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 String::new()
             };
-            let text = format!("{arrow} {indent}{}{counts}", row.label);
+            // The collapser indents with depth and sits right beside its label.
+            let text = format!("{indent}{arrow} {}{counts}", row.label);
             let mut style = Style::default();
             if row.kind == NodeKind::Summary {
                 style = style.fg(Color::Cyan).add_modifier(Modifier::BOLD);
@@ -510,43 +511,86 @@ fn render_right(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// The colored coverage bar `[***+++--  ]`: `*` covered+killed (dark green),
-/// `+` covered (light green), `-` partial (yellow), red block untested, gray
-/// unknown. Widths are proportional to the line counts.
+/// The colored coverage bar. When no coverage was measured (every line
+/// `unknown`) it reads `[  NO COVERAGE DATA  ]`. Otherwise: `*` covered+killed
+/// (dark green), `+` covered (light green), `-` partial (yellow), a full red
+/// block for uncovered, and a gray remainder for any unknown lines.
 fn coverage_bar_spans(bar: &crate::cli::diff::summary::CoverageBar, width: usize) -> Vec<Span<'static>> {
-    let total = bar.total();
-    let mut spans = vec![Span::styled("[".to_string(), Style::default().fg(Color::DarkGray))];
-    if total == 0 {
-        spans.push(Span::styled(
-            " ".repeat(width),
-            Style::default().fg(Color::DarkGray),
-        ));
-        spans.push(Span::styled("]".to_string(), Style::default().fg(Color::DarkGray)));
-        return spans;
+    let bracket = Style::default().fg(Color::DarkGray);
+    if !bar.has_coverage() {
+        let msg = "NO COVERAGE DATA";
+        let inner = width.max(msg.len() + 4);
+        let pad = inner - msg.len();
+        let left = pad / 2;
+        return vec![
+            Span::styled("[".to_string(), bracket),
+            Span::styled(
+                format!("{}{}{}", " ".repeat(left), msg, " ".repeat(pad - left)),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled("]".to_string(), bracket),
+        ];
     }
+    let total = bar.total().max(1);
     let seg = |count: u32| (count as usize * width) / total as usize;
-    let mut widths = [
-        (seg(bar.covered_killed), '*', Style::default().fg(Color::Green)),
-        (seg(bar.covered), '+', Style::default().fg(Color::LightGreen)),
-        (seg(bar.partial), '-', Style::default().fg(Color::Yellow)),
-        (seg(bar.unknown), '\u{00b7}', Style::default().fg(Color::DarkGray)),
-    ];
-    let used: usize = widths.iter().map(|(w, ..)| *w).sum();
-    // The untested remainder fills the bar so it is always exactly `width` wide.
-    let untested = width.saturating_sub(used);
-    for (w, ch, style) in widths.iter_mut() {
-        if *w > 0 {
-            spans.push(Span::styled(ch.to_string().repeat(*w), *style));
+    let mut spans = vec![Span::styled("[".to_string(), bracket)];
+    let mut used = 0usize;
+    for (count, ch, style) in [
+        (bar.covered_killed, '*', Style::default().fg(Color::Green)),
+        (bar.covered, '+', Style::default().fg(Color::LightGreen)),
+        (bar.partial, '-', Style::default().fg(Color::Yellow)),
+    ] {
+        let w = seg(count);
+        if w > 0 {
+            spans.push(Span::styled(ch.to_string().repeat(w), style));
+            used += w;
         }
     }
-    if untested > 0 {
+    // Uncovered: a full red block.
+    let uncovered = seg(bar.uncovered);
+    if uncovered > 0 {
         spans.push(Span::styled(
-            " ".repeat(untested),
+            " ".repeat(uncovered),
             Style::default().bg(Color::Red),
         ));
+        used += uncovered;
     }
-    spans.push(Span::styled("]".to_string(), Style::default().fg(Color::DarkGray)));
+    // Any remaining width (rounding + unknown lines) is neutral gray.
+    if width > used {
+        spans.push(Span::styled(
+            " ".repeat(width - used),
+            Style::default().bg(Color::DarkGray),
+        ));
+    }
+    spans.push(Span::styled("]".to_string(), bracket));
     spans
+}
+
+/// Compact non-zero findings: `¤×2 T1×2 T2×5 T3×4`, colored, zeros omitted.
+/// Returns the spans and their total character width (for column padding).
+fn findings_spans(h: &crate::cli::diff::summary::HazardTotals, ascii: bool) -> (Vec<Span<'static>>, usize) {
+    let mut spans = Vec::new();
+    let mut width = 0usize;
+    let mut push = |text: String, color: Color| {
+        width += text.chars().count();
+        spans.push(Span::styled(text, Style::default().fg(color)));
+    };
+    if h.hazards > 0 {
+        push(
+            format!("{}\u{00d7}{} ", GutterKind::Hazard.icon(ascii), h.hazards),
+            Color::Red,
+        );
+    }
+    if h.t1 > 0 {
+        push(format!("T1\u{00d7}{} ", h.t1), Color::LightRed);
+    }
+    if h.t2 > 0 {
+        push(format!("T2\u{00d7}{} ", h.t2), Color::Yellow);
+    }
+    if h.t3 > 0 {
+        push(format!("T3\u{00d7}{} ", h.t3), Color::Gray);
+    }
+    (spans, width)
 }
 
 fn hazard_spans(h: &crate::cli::diff::summary::HazardTotals, ascii: bool) -> Vec<Span<'static>> {
@@ -559,7 +603,7 @@ fn hazard_spans(h: &crate::cli::diff::summary::HazardTotals, ascii: bool) -> Vec
     let mut spans = Vec::new();
     if h.hazards > 0 {
         spans.push(Span::styled(
-            format!("{} \u{00d7}{}   ", GutterKind::Hazard.icon(ascii), h.hazards),
+            format!("{}\u{00d7}{}   ", GutterKind::Hazard.icon(ascii), h.hazards),
             Style::default().fg(Color::Red),
         ));
     }
@@ -656,20 +700,39 @@ fn render_funnel(
     body.push(Line::from(haz));
     body.push(Line::from(""));
 
-    // Per-language breakdown.
+    // Per-language table: language | public | private | findings | coverage.
+    const FIND_W: usize = 22;
     body.push(Line::from(Span::styled(
-        "by language".to_string(),
-        Style::default().add_modifier(Modifier::BOLD),
+        format!(
+            " {:<10} {:>8} {:>9}  {:<width$}coverage",
+            "language",
+            "public",
+            "private",
+            "findings",
+            width = FIND_W
+        ),
+        Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD),
     )));
+    let lang_bar_w = (bar_w / 2).max(12);
     for lang in &summary.langs {
-        let mut spans = vec![Span::styled(
-            format!("  {:<10} ", truncate(&lang.language, 10)),
-            Style::default().fg(Color::Cyan),
-        )];
-        spans.push(count_span("", lang.public, Color::White));
-        spans.push(count_span("", lang.private, Color::Gray));
-        spans.push(Span::raw(" "));
-        spans.extend(coverage_bar_spans(&lang.bar, (bar_w / 2).max(8)));
+        let mut spans = vec![
+            Span::styled(
+                format!(" {:<10} ", truncate(&lang.language, 10)),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::styled(
+                format!("{:>8} ", format!("+{}", lang.public)),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(
+                format!("{:>9}  ", format!("+{}", lang.private)),
+                Style::default().fg(Color::Gray),
+            ),
+        ];
+        let (find_spans, find_w) = findings_spans(&lang.hazards, app.ascii);
+        spans.extend(find_spans);
+        spans.push(Span::raw(" ".repeat(FIND_W.saturating_sub(find_w))));
+        spans.extend(coverage_bar_spans(&lang.bar, lang_bar_w));
         body.push(Line::from(spans));
     }
 
@@ -768,69 +831,65 @@ fn render_summary(
     summary: &crate::cli::tui::app::SummaryView,
     border: Style,
 ) {
+    use crate::cli::diff::summary::HazardTotals;
     use crate::cli::tui::app::SummaryRow;
-    let s = &summary.stats;
+    const NAME_W: usize = 30;
+    const DELTA_W: usize = 12;
+    const FIND_W: usize = 20;
     let mut body: Vec<Line> = Vec::new();
+
+    // Header row: function | delta | findings | coverage.
     body.push(Line::from(Span::styled(
         format!(
-            "covered+killed {}   covered {}   partial {}   uncovered {}   unknown {}",
-            s.covered_killed, s.covered, s.partial, s.uncovered, s.unknown
+            " {:<nw$} {:<dw$} {:<fw$}coverage",
+            "function",
+            "delta",
+            "findings",
+            nw = NAME_W,
+            dw = DELTA_W,
+            fw = FIND_W
         ),
-        Style::default().add_modifier(Modifier::BOLD),
+        Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD),
     )));
-    body.push(Line::from(Span::styled(
-        format!("{} changed, riskiest first:", summary.rows.len()),
-        Style::default().fg(Color::DarkGray),
-    )));
-    body.push(Line::from(""));
 
+    let bar_w = (area.width as usize).saturating_sub(NAME_W + DELTA_W + FIND_W + 6).clamp(10, 30);
     let row_line = |row: &SummaryRow| -> Line<'static> {
-        let mut spans = vec![Span::styled(
-            format!("{:<34}", truncate(&row.label, 34)),
-            Style::default().add_modifier(Modifier::BOLD),
-        )];
-        let mut findings: Vec<Span> = Vec::new();
-        if row.uncovered_hazards > 0 {
-            findings.push(Span::styled(
-                format!(
-                    "{} {} uncovered hazards  ",
-                    GutterKind::Hazard.icon(app.ascii),
-                    row.uncovered_hazards
-                ),
-                Style::default().fg(Color::Red),
-            ));
-        }
-        if row.t1_unkilled > 0 {
-            findings.push(Span::styled(
-                format!("{} T1 unkilled  ", row.t1_unkilled),
-                Style::default().fg(Color::LightRed),
-            ));
-        }
-        if row.t2_unkilled > 0 {
-            findings.push(Span::styled(
-                format!("{} T2  ", row.t2_unkilled),
-                Style::default().fg(Color::Yellow),
-            ));
-        }
-        if row.t3_unkilled > 0 {
-            findings.push(Span::styled(
-                format!("{} T3  ", row.t3_unkilled),
+        let mut spans = vec![
+            Span::styled(
+                format!(" {:<nw$} ", truncate(&row.label, NAME_W), nw = NAME_W),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:<dw$} ", format!("+{} -{}", row.added, row.removed), dw = DELTA_W),
                 Style::default().fg(Color::Gray),
-            ));
-        }
-        if findings.is_empty() {
-            findings.push(Span::styled(
-                "clean".to_string(),
+            ),
+        ];
+        // Findings, matching the funnel's compact form (zeros omitted).
+        let (find_spans, find_w) = findings_spans(
+            &HazardTotals {
+                hazards: row.uncovered_hazards,
+                t1: row.t1_unkilled,
+                t2: row.t2_unkilled,
+                t3: row.t3_unkilled,
+            },
+            app.ascii,
+        );
+        if find_spans.is_empty() {
+            spans.push(Span::styled(
+                format!("{:<fw$}", "clean", fw = FIND_W),
                 Style::default().fg(Color::Green),
             ));
+        } else {
+            spans.extend(find_spans);
+            spans.push(Span::raw(" ".repeat(FIND_W.saturating_sub(find_w))));
         }
-        spans.extend(findings);
+        spans.extend(coverage_bar_spans(&row.bar, bar_w));
         Line::from(spans)
     };
 
     if summary.rows.is_empty() {
         body.push(Line::from(Span::styled(
-            "no changed children.".to_string(),
+            " no changed children.".to_string(),
             Style::default().fg(Color::DarkGray),
         )));
     } else {
@@ -1145,7 +1204,19 @@ mod tests {
                 public: 400,
                 private: 700,
                 other: 200,
-                bar: CoverageBar::default(),
+                bar: CoverageBar {
+                    covered_killed: 5,
+                    covered: 3,
+                    partial: 1,
+                    uncovered: 1,
+                    unknown: 0,
+                },
+                hazards: HazardTotals {
+                    hazards: 2,
+                    t1: 2,
+                    t2: 5,
+                    t3: 4,
+                },
             }],
         };
         app.refresh_rows();
@@ -1155,7 +1226,7 @@ mod tests {
         assert!(text.contains("+9000"), "funnel shows total added");
         assert!(text.contains("code +8000"), "code vs other split");
         assert!(text.contains("public +800"), "visibility split");
-        assert!(text.contains("by language") && text.contains("ruby"));
+        assert!(text.contains("language") && text.contains("ruby"));
         assert!(text.contains("T1"), "hazard tier row");
         // The coverage bar drew colored segment glyphs.
         assert!(text.contains('*') && text.contains('+') && text.contains('-'));
@@ -1236,9 +1307,10 @@ mod tests {
     fn file_summary_lists_condensed_findings() {
         let app = app_with_change();
         let text = buffer_text(&draw(&app, 0.0));
-        // verify() has one uncovered hazard and one T1 finding.
-        assert!(text.contains("uncovered hazards"));
-        assert!(text.contains("T1 unkilled"));
+        // The container view is a table; verify() has one hazard and one T1.
+        assert!(text.contains("function") && text.contains("findings"));
+        assert!(text.contains("verify"));
+        assert!(text.contains("T1"));
     }
 
     #[test]

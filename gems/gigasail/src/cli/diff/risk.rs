@@ -75,6 +75,12 @@ pub struct Evidence {
     pub dark_arm_findings: u32,
     pub uncovered_changed_loc: u32,
     pub coverage: CoverageState,
+    /// Coverage of this unit's added lines, split into the bar's segments.
+    pub cov_killed: u32,
+    pub cov_covered: u32,
+    pub cov_partial: u32,
+    pub cov_uncovered: u32,
+    pub cov_unknown: u32,
 }
 
 impl Default for Evidence {
@@ -88,6 +94,11 @@ impl Default for Evidence {
             dark_arm_findings: 0,
             uncovered_changed_loc: 0,
             coverage: CoverageState::Unknown,
+            cov_killed: 0,
+            cov_covered: 0,
+            cov_partial: 0,
+            cov_uncovered: 0,
+            cov_unknown: 0,
         }
     }
 }

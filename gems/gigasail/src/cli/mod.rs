@@ -216,6 +216,11 @@ fn group_to_unit(
         t3_findings: count_tier(&group.sarif_findings, 3),
         dark_arm_findings: 0,
         coverage: coverage_from(&group.verification),
+        cov_killed: group.verification.covered_and_killed as u32,
+        cov_covered: group.verification.covered as u32,
+        cov_partial: group.verification.partially_covered as u32,
+        cov_uncovered: group.verification.not_covered as u32,
+        cov_unknown: group.verification.unknown as u32,
     };
     ChangedUnit {
         name: group.name.clone(),

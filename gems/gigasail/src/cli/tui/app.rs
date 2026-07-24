@@ -104,10 +104,14 @@ pub struct SummaryRow {
     pub kind: NodeKind,
     pub risk: f64,
     pub changed_loc: u32,
+    pub added: u32,
+    pub removed: u32,
     pub uncovered_hazards: u32,
     pub t1_unkilled: u32,
     pub t2_unkilled: u32,
     pub t3_unkilled: u32,
+    /// Coverage of this child's added lines.
+    pub bar: crate::cli::diff::summary::CoverageBar,
 }
 
 impl SummaryRow {
@@ -401,10 +405,13 @@ impl App {
             kind: child.kind,
             risk: child.risk.0,
             changed_loc: child.changed_loc(),
+            added: child.added,
+            removed: child.removed,
             uncovered_hazards: 0,
             t1_unkilled: 0,
             t2_unkilled: 0,
             t3_unkilled: 0,
+            bar: crate::cli::diff::summary::CoverageBar::default(),
         };
         for unit in &units {
             let ev = &unit.evidence;
@@ -414,6 +421,11 @@ impl App {
                 row.t2_unkilled += ev.t2_findings;
                 row.t3_unkilled += ev.t3_findings;
             }
+            row.bar.covered_killed += ev.cov_killed;
+            row.bar.covered += ev.cov_covered;
+            row.bar.partial += ev.cov_partial;
+            row.bar.uncovered += ev.cov_uncovered;
+            row.bar.unknown += ev.cov_unknown;
         }
         row
     }
