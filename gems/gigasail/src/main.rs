@@ -338,6 +338,39 @@ enum Command {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
     },
+    /// Run the test producers a project declares in giga.yml, selected by stage
+    /// and flags, then ingest coverage/mutation evidence. Thin orchestrator over
+    /// the profile machinery - not a build system (see tuning-configs.md §12).
+    Test {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, default_value = ".giga/gigasail.db")]
+        db: PathBuf,
+        /// Only unit-tagged producers (evidence_scope.test_set == unit).
+        #[arg(long)]
+        unit: bool,
+        /// Only integration-tagged producers.
+        #[arg(long)]
+        integration: bool,
+        /// Only fuzz-tagged producers.
+        #[arg(long)]
+        fuzz: bool,
+        /// Include mutation producers even if the stage default is off.
+        #[arg(long)]
+        mutants: bool,
+        /// Skip coverage-only producers (mutation still runs if selected).
+        #[arg(long = "no-cov")]
+        no_cov: bool,
+        /// Draw from the premerge stage (default: precommit).
+        #[arg(long)]
+        premerge: bool,
+        /// Print the resolved producer plan without running anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// Authorize running commands from the current checkout's giga.yml.
+        #[arg(long)]
+        trust_current_config: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -940,6 +973,59 @@ fn main() -> Result<()> {
                 .enable_all()
                 .build()?;
             runtime.block_on(gigasail::serve_mcp(db, repo))?;
+        }
+        Command::Test {
+            repo,
+            db,
+            unit,
+            integration,
+            fuzz,
+            mutants,
+            no_cov,
+            premerge,
+            dry_run,
+            trust_current_config,
+        } => {
+            let mut tags = Vec::new();
+            if unit {
+                tags.push("unit".to_string());
+            }
+            if integration {
+                tags.push("integration".to_string());
+            }
+            if fuzz {
+                tags.push("fuzz".to_string());
+            }
+            let stage = if premerge {
+                gigasail::review::ReviewMode::Premerge
+            } else {
+                gigasail::review::ReviewMode::Precommit
+            };
+            let result = gigasail::application::test::execute(gigasail::application::test::TestRequest {
+                repo,
+                db,
+                tags,
+                mutants,
+                no_cov,
+                stage,
+                trust_current_config,
+                dry_run,
+            })?;
+            let forced = if result.mutation_forced {
+                " (mutation added by --mutants)"
+            } else {
+                ""
+            };
+            if result.dry_run {
+                println!("giga test plan{forced}: {}", result.producers.join(", "));
+            } else {
+                println!(
+                    "giga test: ran [{}]{forced} for {}; {} artifact(s) ingested",
+                    result.producers.join(", "),
+                    result.revision.as_deref().unwrap_or(""),
+                    result.artifact_count
+                );
+            }
         }
     }
     Ok(())

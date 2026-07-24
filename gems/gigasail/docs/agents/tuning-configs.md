@@ -782,3 +782,58 @@ head evidence" instead of "no analysis run at all".
 13. **Coverage retention** — keep the most recent N commits' coverage per branch
     (the aggressive half of §3f); a diff further back reads indexed events, never
     re-runs.
+
+---
+
+## 12. `giga test` and the "don't reinvent Bazel" boundary
+
+`giga test` (IMPLEMENTED, first cut) runs the test producers a project already
+declares in `giga.yml`, selected by stage and flags, then ingests the evidence:
+
+```
+giga test                 # precommit set: fast unit coverage, no mutation
+giga test --premerge      # premerge set: + integration/fuzz + mutation
+giga test --mutants       # add mutation producers even at precommit
+giga test --no-cov        # skip coverage-only producers
+giga test --unit          # only producers tagged evidence_scope.test_set: unit
+giga test --dry-run       # print the resolved producer plan, run nothing
+```
+
+It resolves the set from `review.tests.<stage>` + the flags (see
+`application::test::resolve_producers`), builds a synthetic profile, and runs it
+through the existing profile/producer + ingest machinery. Tests run against the
+current checkout (a dirty tree is fine - you test your working changes). Mutation
+producers are pulled in from anywhere in the config when mutation is wanted,
+since they aren't tied to a stage's profile list.
+
+### The design boundary: an orchestrator, not a build system
+
+**`giga` must not reinvent Bazel.** A producer is a plain shell command - "run
+these tests" - so for the vast majority of projects the whole requirement is
+*"run this command when these files change,"* which the stage/tag config already
+expresses. That is deliberately all `giga test` does at its core: pick the right
+commands and run them, then attribute coverage/mutants to the changed lines.
+
+- **Mutants with kill attribution** fan out to the language runners
+  (`ruby_mutant.rb`, zig-mutants, ...) and to **test-miser** for the audit;
+  `giga` ingests the resulting `mutant-facts/v1`. `giga test` orchestrates; it
+  does not own the mutation engine.
+- **Bazel (or any real build graph): delegate, never rebuild.** If a project
+  uses Bazel, they put `bazel test //...` (or a targeted query) in a producer's
+  `argv` and `giga` runs it like any command. The only thing `giga` would gain
+  from *knowing* about Bazel is a better "which targets are affected by this
+  diff" answer than path-glob change detection - and that is exactly the kind of
+  feature to **gate behind an optional Bazel (or better) dependency**, not to
+  reimplement. Plan, not built now: a `change_detection: paths | bazel` knob per
+  producer, where `bazel` shells out to `bazel query 'rdeps(...)'`; absent it,
+  the default stays simple path/tag matching.
+
+### Incremental "only what's out of date" (planned)
+
+The stage resolver already narrows *which* producers run. The remaining piece
+(build-order §11 item 12) is to skip a producer whose `test_type`/stage evidence
+for the head commit is already indexed - so a re-run of `giga test` after an
+unrelated edit does nothing, and a diff N commits back reads indexed evidence
+rather than re-running. This is change detection at the producer level: simple
+path/tag rules by default, delegating to Bazel's affected-targets query only
+when a project opts in.

@@ -8,3 +8,4 @@ pub mod ci;
 pub mod diff;
 pub mod ingest;
 pub mod revision;
+pub mod test;
