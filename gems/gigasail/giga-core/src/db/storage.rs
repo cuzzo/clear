@@ -178,12 +178,7 @@ impl Storage {
         self.ensure_logical_unit_column("current_mutant_verified_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("current_mutant_killed_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("last_test_exposure_at", "INTEGER DEFAULT 0")?;
-        // Big-O time/space complexity per function, from the architecture graph.
-        // Status is complete | partial | unknown (unknown = no analysis).
-        self.ensure_logical_unit_column("big_o_time", "TEXT DEFAULT ''")?;
-        self.ensure_logical_unit_column("big_o_time_status", "TEXT DEFAULT 'unknown'")?;
-        self.ensure_logical_unit_column("big_o_space", "TEXT DEFAULT ''")?;
-        self.ensure_logical_unit_column("big_o_space_status", "TEXT DEFAULT 'unknown'")?;
+        self.ensure_big_o_columns()?;
         self.ensure_column(
             "test_exposure_events",
             "mutation_kind",
@@ -1919,6 +1914,18 @@ impl Storage {
             .optional()?)
     }
 
+    /// Self-heal the Big-O columns on `logical_units`. `Storage::open` only
+    /// initializes brand-new files, so existing databases need this on every
+    /// Big-O read/write path (idempotent). Status is complete | partial |
+    /// unknown (unknown = no analysis).
+    pub fn ensure_big_o_columns(&self) -> Result<()> {
+        self.ensure_logical_unit_column("big_o_time", "TEXT DEFAULT ''")?;
+        self.ensure_logical_unit_column("big_o_time_status", "TEXT DEFAULT 'unknown'")?;
+        self.ensure_logical_unit_column("big_o_space", "TEXT DEFAULT ''")?;
+        self.ensure_logical_unit_column("big_o_space_status", "TEXT DEFAULT 'unknown'")?;
+        Ok(())
+    }
+
     /// Record a function's Big-O time/space complexity (from the architecture
     /// graph) on its logical unit. `status` is complete | partial | unknown.
     pub fn update_logical_unit_big_o(
@@ -1929,6 +1936,7 @@ impl Storage {
         space: &str,
         space_status: &str,
     ) -> Result<()> {
+        self.ensure_big_o_columns()?;
         self.conn.execute(
             "UPDATE logical_units SET big_o_time = ?2, big_o_time_status = ?3, \
              big_o_space = ?4, big_o_space_status = ?5 WHERE id = ?1",

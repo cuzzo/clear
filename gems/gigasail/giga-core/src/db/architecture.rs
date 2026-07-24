@@ -74,6 +74,8 @@ pub fn ingest_architecture_json(
     if document.get("kind").and_then(Value::as_str) != Some("espalier.architecture.v1") {
         bail!("unsupported architecture artifact kind");
     }
+    // Self-heal the Big-O columns for pre-existing databases before nodes update them.
+    storage.ensure_big_o_columns()?;
     let schema_version = document
         .get("schema_version")
         .and_then(Value::as_i64)
