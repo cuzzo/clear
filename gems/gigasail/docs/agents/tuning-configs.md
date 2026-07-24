@@ -253,13 +253,16 @@ review:
     review_window: 20             # keep evidence for the last N commits on a line
     keep_branch_bases: true       # never prune a merge-base a pre-merge would use
 
-  # ── 3g. Test depth per tool ────────────────────────────────────────────────
-  # Named test sets mapped to giga.yml profiles. `giga_precommit` runs `fast`;
-  # `giga_premerge` runs `exhaustive`. A set names profiles whose producers
-  # already exist (§ pipeline: ci/analyse), so this only *selects* depth.
+  # ── 3g. Test depth per stage (IMPLEMENTED) ─────────────────────────────────
+  # Each stage names giga.yml profiles whose producers run, and whether mutation
+  # runs. Defaults: precommit = [ci], mutation off (fast); premerge = [ci,
+  # analyse], mutation on. Turning mutation off at a stage forfeits the "covered
+  # but not killed" signal (a test that executes a line without asserting on it).
+  # A profile groups producers by `test_type` tag (unit/integration/fuzz), so a
+  # stage mixes suites without naming each producer. See §11.
   tests:
-    fast: [ci]                    # unit tests + coverage; seconds
-    exhaustive: [ci, mutation, bench]   # full suite + mutation + benchmarks
+    precommit: { profiles: [unit], mutation: false }
+    premerge:  { profiles: [unit, integration, fuzz], mutation: true }
 
   # ── 3h. Performance testing & regression (pre-merge only, for now) ─────────
   # A perf producer emits per-benchmark numbers; the evaluator compares head vs
@@ -678,3 +681,104 @@ Sources for §9–§10:
 [Codex truncates critical error lines](https://github.com/openai/codex/issues/9502),
 [large tool output overflows the window](https://github.com/openai/codex/issues/4398),
 [context-window overflow / Memory-Pointer pattern](https://dev.to/aws/ai-context-window-overflow-memory-pointer-fix-3akc).
+
+---
+
+## 11. First-party tool integration: stages, tags, and coverage of the delta
+
+How giga.yml wires the 1p analyzers (gotest/coverage, gremlins+test-miser for
+mutation, slopcop, espalier, nil-kill, decomplex) to the right stage, and how
+the review reads "coverage **of the delta**" rather than "delta of coverage".
+
+### Stages → producers (IMPLEMENTED: config + resolution)
+
+`review.tests.{precommit,premerge}` names giga.yml profiles to run and whether
+mutation runs. `ReviewConfig::stage_tests(mode)` resolves the run:
+
+- **precommit** — fast, inner-loop: unit coverage + quick static analyzers.
+  **No mutation by default** (it is slow, and precommit must stay seconds-fast).
+- **premerge** — the gate before merge: adds integration/fuzz suites and
+  **mutation on by default**. Set `premerge.mutation: false` to skip it, at the
+  cost of the covered-but-not-killed signal (a suite can execute every changed
+  line yet assert nothing — only mutation catches that).
+
+**Mutation-requirement coupling (IMPLEMENTED).** If any gate's
+`require.mutation_kill_rate` or a purity bucket's `mutation_kill_rate` is set,
+`requires_mutation()` is true and `stage_tests` forces mutation **on at that
+stage** — even precommit — with `mutation_forced: true` in the report. Without
+this, a precommit that gates on kill rate would be permanently `critical` ("no
+mutants killed") and an agent could never satisfy it. So: *don't gate on kills
+at a stage where you won't run mutants* — and if you do, the runner will run
+them for you rather than fail you.
+
+### Test-type tags (unit / integration / fuzz) — already plumbed
+
+The unit/integration/fuzz tag is `test_type`, which **already flows end to
+end**: coverage (`coverage_line_events.test_type`), mutation, and test-exposure
+ingestion all carry it, it rolls up to `logical_units.current_test_types`, and
+the LSP/web-UI already render it (hover "Test types: …"). A producer tags its
+artifact via `evidence_scope.test_set`; several tagged coverage/mutant files may
+be produced per commit (one per suite). **To surface a new tag you only pick it
+in a producer's `evidence_scope` — no new giga-core or UI code.** The cli-ui
+should show the same `test_type` set the web-UI does (a small render add, listed
+in §7).
+
+Recommended producer layout (test-miser especially):
+
+```yaml
+profiles:
+  unit:        { producers: [gotest-unit] }
+  integration: { producers: [gotest-integration] }
+  fuzz:        { producers: [gotest-fuzz] }
+  analyse:     { producers: [espalier-arch, espalier-sarif, decomplex, nil-kill, slopcop] }
+producers:
+  gotest-unit:        # produces coverage, evidence_scope.test_set: unit
+  gotest-integration: # produces coverage, evidence_scope.test_set: integration
+  gremlins:           # produces mutants (kind: mutants) -> test-miser audit
+  slopcop:            # produces sarif; NEEDS coverage input to gap-check (below)
+```
+
+test-miser consumes gremlins' `mutant-facts/v1`; giga ingests the result as
+mutation exposure (kind: mutants). slopcop is coverage-gap-driven — it wants
+**full** coverage to report against, so it must run *after* the coverage
+producers in the same stage (profile order is honored).
+
+### Coverage OF the delta, not delta OF coverage
+
+The review measures whether the **changed lines** are covered/killed — not how
+overall coverage moved. Consequences (design intent, some still to build):
+
+- **No historical coverage diffing is needed.** We never compare head coverage
+  to base coverage; we intersect head coverage with the diff's *added lines*
+  (this is exactly what the evaluator's `coverage_posture` already does).
+- **Retention can be aggressive.** Coverage artifacts are large, so keep only
+  the most recent commits' coverage **per branch** (the lineage index still
+  holds the per-line events it needs; the bulky raw artifacts can go). This is
+  the branch-aware pruning in §3f / `TODO.md` — coverage is the first thing it
+  should reclaim.
+- **A diff N commits back does not re-run anything.** If that commit's coverage
+  is already indexed, the review reads it from the DB. The only reason to run a
+  suite is that a *needed* `test_type`/stage has **no** evidence for the head
+  commit — then run just that suite (precommit vs premerge set), not everything.
+
+### Background run + re-trigger (extends the existing auto-sync)
+
+`giga diff` already spawns `giga sync` in the background when evidence is stale
+and renders a bottom progress bar (`spawn_background_sync` / `render_sync_bar`).
+Extend it for coverage/gap tools: when the head commit lacks full coverage for
+the stage's `test_type` set, run the missing suites in the background, show
+progress at the bottom of the cli-ui, then **re-trigger the coverage-dependent
+1p metrics** (slopcop's gap check, test-miser's audit) now that their input
+exists, and refresh the view. Same mechanism, driven by "which test_type has no
+head evidence" instead of "no analysis run at all".
+
+### Build order for this section (adds to §7)
+
+11. **cli-ui `test_type` render** — show the tag set the web-UI/LSP already
+    compute (small).
+12. **Stage-driven background runner** — from `stage_tests(mode)` + "missing
+    head evidence per test_type", run only the missing suites, then re-trigger
+    coverage-dependent producers (slopcop/test-miser) and refresh.
+13. **Coverage retention** — keep the most recent N commits' coverage per branch
+    (the aggressive half of §3f); a diff further back reads indexed events, never
+    re-runs.
