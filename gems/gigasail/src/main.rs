@@ -610,8 +610,28 @@ fn main() -> Result<()> {
                 print_json_summary(&units);
             } else {
                 for (index, unit) in units.iter().enumerate() {
+                    let big_o = if unit.big_o_time_status == "unknown"
+                        && unit.big_o_space_status == "unknown"
+                    {
+                        String::new()
+                    } else {
+                        let t = if unit.big_o_time.is_empty() {
+                            "?"
+                        } else {
+                            unit.big_o_time.as_str()
+                        };
+                        let s = if unit.big_o_space.is_empty() {
+                            "?"
+                        } else {
+                            unit.big_o_space.as_str()
+                        };
+                        format!(
+                            " big_o=time:{}({}) space:{}({})",
+                            t, unit.big_o_time_status, s, unit.big_o_space_status,
+                        )
+                    };
                     println!(
-                        "{:>2}. {:<10} {:<32} {:<48} risk={:.1} fixes={} changes={} moves={} events={} tests={} mutant_killed={}/{} stale_mutant_days={:.1} stale_changes={} reopened={}",
+                        "{:>2}. {:<10} {:<32} {:<48} risk={:.1} fixes={} changes={} moves={} events={} tests={} mutant_killed={}/{} stale_mutant_days={:.1} stale_changes={} reopened={}{}",
                         index + 1,
                         unit.kind,
                         unit.name,
@@ -626,7 +646,8 @@ fn main() -> Result<()> {
                         unit.current_mutant_verified_tests,
                         unit.verification_staleness_score,
                         unit.semantic_changes_after_mutant_run,
-                        unit.reopened_count
+                        unit.reopened_count,
+                        big_o,
                     );
                 }
             }
@@ -1143,7 +1164,7 @@ fn print_json_summary(units: &[gigasail::UnitSummary]) {
             print!(",");
         }
         print!(
-            "{{\"id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"original_path\":\"{}\",\"current_path\":\"{}\",\"total_events\":{},\"changes\":{},\"moves\":{},\"fixes\":{},\"risk_score\":{:.6},\"current_distinct_tests\":{},\"current_test_types\":\"{}\",\"current_mutant_verified_tests\":{},\"current_mutant_killed_tests\":{},\"last_test_exposure_at\":{},\"last_mutant_run_at\":{},\"latest_fix_at\":{},\"latest_change_at\":{},\"fixes_after_test_exposure\":{},\"changes_after_test_exposure\":{},\"semantic_changes_after_mutant_run\":{},\"verification_stale_seconds\":{},\"verification_staleness_score\":{:.6},\"reopened_count\":{}}}",
+            "{{\"id\":\"{}\",\"name\":\"{}\",\"kind\":\"{}\",\"original_path\":\"{}\",\"current_path\":\"{}\",\"total_events\":{},\"changes\":{},\"moves\":{},\"fixes\":{},\"risk_score\":{:.6},\"current_distinct_tests\":{},\"current_test_types\":\"{}\",\"current_mutant_verified_tests\":{},\"current_mutant_killed_tests\":{},\"last_test_exposure_at\":{},\"last_mutant_run_at\":{},\"latest_fix_at\":{},\"latest_change_at\":{},\"fixes_after_test_exposure\":{},\"changes_after_test_exposure\":{},\"semantic_changes_after_mutant_run\":{},\"verification_stale_seconds\":{},\"verification_staleness_score\":{:.6},\"reopened_count\":{},\"big_o_time\":\"{}\",\"big_o_time_status\":\"{}\",\"big_o_space\":\"{}\",\"big_o_space_status\":\"{}\"}}",
             json_escape(&unit.id),
             json_escape(&unit.name),
             json_escape(&unit.kind),
@@ -1167,7 +1188,11 @@ fn print_json_summary(units: &[gigasail::UnitSummary]) {
             unit.semantic_changes_after_mutant_run,
             unit.verification_stale_seconds,
             unit.verification_staleness_score,
-            unit.reopened_count
+            unit.reopened_count,
+            json_escape(&unit.big_o_time),
+            json_escape(&unit.big_o_time_status),
+            json_escape(&unit.big_o_space),
+            json_escape(&unit.big_o_space_status),
         );
     }
     println!("]");

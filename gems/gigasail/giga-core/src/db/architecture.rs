@@ -160,8 +160,9 @@ pub fn ingest_architecture_json(
         } else {
             reconcile_logical_unit(&tx, path.as_deref(), &name, &kind, start_line)?
         };
-        if logical_unit_id.is_some() {
+        if let Some(unit_id) = &logical_unit_id {
             stats.reconciled_units += 1;
+            apply_node_big_o(&tx, node, unit_id)?;
         }
         let metadata = node.get("metadata").cloned().unwrap_or_else(|| json!({}));
         let confidence = metadata
@@ -419,6 +420,40 @@ pub fn ingest_architecture_json(
             Err(error)
         }
     }
+}
+
+/// Store a function node's Big-O time/space complexity on its logical unit.
+/// espalier emits `big_o_time`/`big_o_space` (the O(...) strings) plus
+/// `time_complete`/`space_complete` bools. Status maps to: complete when the
+/// bound is proven complete, partial when a bound is known but not complete,
+/// unknown when absent. Nodes without any Big-O are left untouched.
+fn apply_node_big_o(tx: &rusqlite::Connection, node: &Value, unit_id: &str) -> Result<()> {
+    let time = optional_text(node, "big_o_time");
+    let space = optional_text(node, "big_o_space");
+    if time.is_none() && space.is_none() {
+        return Ok(());
+    }
+    let status = |val: &Option<String>, complete_key: &str| -> &'static str {
+        if val.is_none() {
+            "unknown"
+        } else if node.get(complete_key).and_then(Value::as_bool).unwrap_or(false) {
+            "complete"
+        } else {
+            "partial"
+        }
+    };
+    tx.execute(
+        "UPDATE logical_units SET big_o_time = ?2, big_o_time_status = ?3, \
+         big_o_space = ?4, big_o_space_status = ?5 WHERE id = ?1",
+        params![
+            unit_id,
+            time.clone().unwrap_or_default(),
+            status(&time, "time_complete"),
+            space.clone().unwrap_or_default(),
+            status(&space, "space_complete"),
+        ],
+    )?;
+    Ok(())
 }
 
 fn reconcile_logical_unit(
@@ -801,6 +836,61 @@ mod tests {
                 .prepare(sql)
                 .unwrap_or_else(|error| panic!("standalone SQL failed to prepare: {error}\n{sql}"));
         }
+    }
+
+    #[test]
+    fn arch_ingest_stores_node_big_o_on_the_reconciled_unit() {
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            crate::model::UnitKind::Function,
+            "demo.rb",
+            0,
+            2,
+            5,
+            "def run",
+            "def run\n@v=1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        let payload = json!({
+            "schema_version": 1, "kind": "espalier.architecture.v1",
+            "analyzer": {"name": "espalier", "version": "t"},
+            "generated_at": "2026-07-11T00:00:00Z",
+            "corpus": {"commit": "abc", "root": ".", "complete": true, "languages": ["ruby"]},
+            "nodes": [{
+                "id": "fn:1", "kind": "function", "name": "run", "path": "demo.rb",
+                "start_line": 2, "end_line": 5,
+                "big_o_time": "O(n log n)", "time_complete": true,
+                "big_o_space": "O(n)", "space_complete": false,
+                "metadata": {"confidence": "high"}
+            }],
+            "edges": [], "pressure": [], "hazards": []
+        })
+        .to_string();
+        ingest_architecture_json(&storage, &payload).unwrap();
+        // time is proven complete, space is a known-but-partial bound.
+        assert_eq!(
+            storage.logical_unit_big_o(&unit.id).unwrap(),
+            (
+                "O(n log n)".to_string(),
+                "complete".to_string(),
+                "O(n)".to_string(),
+                "partial".to_string()
+            )
+        );
+        // A unit whose node carries no Big-O stays unknown.
+        let plain = LogicalUnit::new(
+            "plain",
+            crate::model::UnitKind::Function,
+            "demo.rb",
+            1,
+            10,
+            12,
+            "def plain",
+            "def plain\n1\nend",
+        );
+        storage.upsert_logical_unit(&plain, 10).unwrap();
+        assert_eq!(storage.logical_unit_big_o(&plain.id).unwrap().1, "unknown");
     }
 
     #[test]

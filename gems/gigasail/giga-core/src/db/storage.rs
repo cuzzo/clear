@@ -95,6 +95,12 @@ pub struct UnitSummary {
     pub verification_stale_seconds: i64,
     pub verification_staleness_score: f64,
     pub reopened_count: i64,
+    /// Big-O time/space complexity from the architecture graph, with status
+    /// complete | partial | unknown (unknown = no analysis available).
+    pub big_o_time: String,
+    pub big_o_time_status: String,
+    pub big_o_space: String,
+    pub big_o_space_status: String,
 }
 
 impl Storage {
@@ -172,6 +178,12 @@ impl Storage {
         self.ensure_logical_unit_column("current_mutant_verified_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("current_mutant_killed_tests", "INTEGER DEFAULT 0")?;
         self.ensure_logical_unit_column("last_test_exposure_at", "INTEGER DEFAULT 0")?;
+        // Big-O time/space complexity per function, from the architecture graph.
+        // Status is complete | partial | unknown (unknown = no analysis).
+        self.ensure_logical_unit_column("big_o_time", "TEXT DEFAULT ''")?;
+        self.ensure_logical_unit_column("big_o_time_status", "TEXT DEFAULT 'unknown'")?;
+        self.ensure_logical_unit_column("big_o_space", "TEXT DEFAULT ''")?;
+        self.ensure_logical_unit_column("big_o_space_status", "TEXT DEFAULT 'unknown'")?;
         self.ensure_column(
             "test_exposure_events",
             "mutation_kind",
@@ -1823,6 +1835,46 @@ impl Storage {
         Ok(changed > 0)
     }
 
+    /// Record a function's Big-O time/space complexity (from the architecture
+    /// graph) on its logical unit. `status` is complete | partial | unknown.
+    pub fn update_logical_unit_big_o(
+        &self,
+        unit_id: &str,
+        time: &str,
+        time_status: &str,
+        space: &str,
+        space_status: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE logical_units SET big_o_time = ?2, big_o_time_status = ?3, \
+             big_o_space = ?4, big_o_space_status = ?5 WHERE id = ?1",
+            params![unit_id, time, time_status, space, space_status],
+        )?;
+        Ok(())
+    }
+
+    /// The Big-O complexity recorded for a logical unit: (time, time_status,
+    /// space, space_status). `unknown` status means no analysis is available.
+    pub fn logical_unit_big_o(&self, unit_id: &str) -> Result<(String, String, String, String)> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT big_o_time, big_o_time_status, big_o_space, big_o_space_status \
+                 FROM logical_units WHERE id = ?1",
+                params![unit_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?
+            .unwrap_or_else(|| {
+                (
+                    String::new(),
+                    "unknown".into(),
+                    String::new(),
+                    "unknown".into(),
+                )
+            }))
+    }
+
     /// Aggregate `test_exposure_events` for one commit into a per-test inventory
     /// for the diff "Tests" section. Test-level attributes (the test's own file
     /// and definition span, pending status, and the set of mutants it killed)
@@ -2275,6 +2327,10 @@ impl Storage {
                     verification_staleness_score: verification_stale_seconds as f64 / 86_400.0,
                     reopened_count: row.get(21)?,
                     risk_score: 0.0,
+                    big_o_time: String::new(),
+                    big_o_time_status: "unknown".into(),
+                    big_o_space: String::new(),
+                    big_o_space_status: "unknown".into(),
                 })
             })?;
             rows.collect::<Result<Vec<_>, _>>()?
@@ -2383,6 +2439,10 @@ impl Storage {
                     verification_staleness_score: verification_stale_seconds as f64 / 86_400.0,
                     reopened_count: row.get(21)?,
                     risk_score: 0.0,
+                    big_o_time: String::new(),
+                    big_o_time_status: "unknown".into(),
+                    big_o_space: String::new(),
+                    big_o_space_status: "unknown".into(),
                 })
             })?;
             rows.collect::<Result<Vec<_>, _>>()?
@@ -2413,6 +2473,15 @@ impl Storage {
                 .then_with(|| left.name.cmp(&right.name))
         });
         out.truncate(limit);
+        // Enrich the surfaced units with their Big-O complexity (cheap: only the
+        // truncated top-N). Left as unknown/empty when no analysis is recorded.
+        for summary in &mut out {
+            let (time, time_status, space, space_status) = self.logical_unit_big_o(&summary.id)?;
+            summary.big_o_time = time;
+            summary.big_o_time_status = time_status;
+            summary.big_o_space = space;
+            summary.big_o_space_status = space_status;
+        }
         Ok(out)
     }
 }
