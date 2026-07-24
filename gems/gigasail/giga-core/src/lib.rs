@@ -19,6 +19,7 @@ pub mod hazard;
 #[path = "db/hotness.rs"]
 pub mod hotness;
 pub mod ingest_service;
+pub mod lock;
 #[path = "db/model.rs"]
 pub mod model;
 #[path = "db/mutant.rs"]
