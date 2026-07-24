@@ -24,6 +24,8 @@ pub struct TestRequest {
     pub no_cov: bool,
     /// Which stage's profile set to draw from (precommit = fast, premerge = full).
     pub stage: ReviewMode,
+    /// Explicit changed-path set (from `--changed`), bypassing the git diff.
+    pub changed_override: Option<Vec<String>>,
     pub trust_current_config: bool,
     /// Print the resolved producer plan without running anything.
     pub dry_run: bool,
@@ -123,7 +125,9 @@ pub fn execute(req: TestRequest) -> Result<TestResult> {
     let config = crate::application::ci::load_ci_config(&req.repo, &git, None, req.trust_current_config)?;
     // Change detection: with a project graph, diff the stage's base against the
     // working tree to find which packages (hence producers) are affected.
-    let changed = if config.review.packages.is_empty() {
+    let changed = if let Some(explicit) = &req.changed_override {
+        Some(explicit.clone())
+    } else if config.review.packages.is_empty() {
         None
     } else {
         let base = match req.stage {
@@ -221,6 +225,7 @@ mod tests {
             mutants,
             no_cov,
             stage,
+            changed_override: None,
             trust_current_config: true,
             dry_run: true,
         }

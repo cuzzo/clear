@@ -364,6 +364,10 @@ enum Command {
         /// Draw from the premerge stage (default: precommit).
         #[arg(long)]
         premerge: bool,
+        /// Treat these repo-relative paths as the changed set (repeatable),
+        /// instead of diffing git. Preview/testing which producers a change runs.
+        #[arg(long = "changed")]
+        changed: Vec<String>,
         /// Print the resolved producer plan without running anything.
         #[arg(long)]
         dry_run: bool,
@@ -983,6 +987,7 @@ fn main() -> Result<()> {
             mutants,
             no_cov,
             premerge,
+            changed,
             dry_run,
             trust_current_config,
         } => {
@@ -1008,6 +1013,7 @@ fn main() -> Result<()> {
                 mutants,
                 no_cov,
                 stage,
+                changed_override: (!changed.is_empty()).then_some(changed),
                 trust_current_config,
                 dry_run,
             })?;
