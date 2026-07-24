@@ -33,15 +33,110 @@ pub struct ReviewConfig {
     pub gates: Vec<Gate>,
     #[serde(default)]
     pub report: ReportConfig,
+    /// Which test producers run at each review stage (precommit / premerge) and
+    /// whether mutation testing runs there. See `stage_tests`.
+    #[serde(default)]
+    pub tests: TestDepthConfig,
     // Reserved (parsed, not yet evaluated) — see tuning-configs.md §3f–§3i.
     #[serde(default)]
     pub retain: Option<serde_json::Value>,
     #[serde(default)]
-    pub tests: Option<serde_json::Value>,
-    #[serde(default)]
     pub perf: Option<serde_json::Value>,
     #[serde(default)]
     pub tags: BTreeMap<String, serde_json::Value>,
+}
+
+/// Per-stage test selection. `giga_precommit` runs the fast set (no mutation by
+/// default); `giga_premerge` runs the exhaustive set (mutation on by default).
+/// Turning mutation off at a stage forfeits the "covered but not killed"
+/// signal — a test that executes a line without asserting anything about it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TestDepthConfig {
+    #[serde(default = "precommit_default")]
+    pub precommit: StageTests,
+    #[serde(default = "premerge_default")]
+    pub premerge: StageTests,
+}
+
+impl Default for TestDepthConfig {
+    fn default() -> Self {
+        Self {
+            precommit: precommit_default(),
+            premerge: premerge_default(),
+        }
+    }
+}
+
+/// The producers (by giga.yml profile) and whether mutation runs, for one stage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct StageTests {
+    /// giga.yml profiles whose producers run at this stage. A profile groups
+    /// producers by `test_type` tag (unit / integration / fuzz), so a stage can
+    /// mix "run unit + integration coverage" without naming each producer.
+    #[serde(default)]
+    pub profiles: Vec<String>,
+    /// Whether mutation testing (test-miser / the mutant runner) runs here.
+    #[serde(default)]
+    pub mutation: bool,
+}
+
+fn precommit_default() -> StageTests {
+    StageTests {
+        profiles: vec!["ci".into()],
+        mutation: false,
+    }
+}
+fn premerge_default() -> StageTests {
+    StageTests {
+        profiles: vec!["ci".into(), "analyse".into()],
+        mutation: true,
+    }
+}
+
+/// The resolved test run for a stage, after applying the mutation-requirement
+/// coupling. `mutation_forced` is true when a gate/purity kill-rate requirement
+/// turned mutation on despite the stage default being off — surfaced so the
+/// runner (and the agent) can see *why* mutants are running at precommit.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ResolvedStage {
+    pub profiles: Vec<String>,
+    pub mutation: bool,
+    pub mutation_forced: bool,
+}
+
+impl ReviewConfig {
+    /// Whether any active gate or purity bucket demands a mutant kill rate.
+    /// If so, mutation MUST run wherever those gates apply — otherwise the
+    /// verdict is permanently `critical` ("no mutants killed") no matter how
+    /// good the tests are, and an agent can never satisfy it.
+    pub fn requires_mutation(&self) -> bool {
+        let gate_kill = self.gates.iter().any(|g| {
+            g.require
+                .as_ref()
+                .and_then(|r| r.mutation_kill_rate)
+                .is_some()
+        });
+        gate_kill
+            || self.purity.pure.mutation_kill_rate.is_some()
+            || self.purity.stateful.mutation_kill_rate.is_some()
+    }
+
+    /// The test run for a stage. Mutation is on when the stage default asks for
+    /// it OR a kill-rate requirement forces it (`mutation_forced`).
+    pub fn stage_tests(&self, mode: ReviewMode) -> ResolvedStage {
+        let base = match mode {
+            ReviewMode::Precommit => &self.tests.precommit,
+            ReviewMode::Premerge => &self.tests.premerge,
+        };
+        let forced = !base.mutation && self.requires_mutation();
+        ResolvedStage {
+            profiles: base.profiles.clone(),
+            mutation: base.mutation || forced,
+            mutation_forced: forced,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -278,6 +373,9 @@ pub struct ReviewReport {
     pub verdict: Verdict,
     pub gates_triggered: Vec<GateHit>,
     pub summary: ReviewSummary,
+    /// The test depth resolved for this stage (which profiles, whether mutation
+    /// ran, and whether a kill-rate requirement forced it on).
+    pub tests: ResolvedStage,
     pub findings: Vec<ReviewFinding>,
     pub deprioritized: usize,
     pub ignored: usize,
@@ -412,6 +510,7 @@ pub fn evaluate(plan: &DiffPlan, config: &ReviewConfig, mode: ReviewMode) -> Rev
             findings: counts,
             coverage: coverage_posture(plan),
         },
+        tests: config.stage_tests(mode),
         findings,
         deprioritized,
         ignored,
@@ -710,6 +809,55 @@ metrics:
             &c,
         );
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn stage_defaults_precommit_skips_mutation_premerge_runs_it() {
+        let c = ReviewConfig::default();
+        let pre = c.stage_tests(ReviewMode::Precommit);
+        assert!(!pre.mutation && !pre.mutation_forced);
+        assert_eq!(pre.profiles, ["ci"]);
+        let merge = c.stage_tests(ReviewMode::Premerge);
+        assert!(merge.mutation && !merge.mutation_forced);
+    }
+
+    #[test]
+    fn a_kill_rate_requirement_forces_mutation_at_precommit() {
+        // A gate that requires a mutant kill rate must pull mutation into the
+        // precommit run, or the verdict is stuck critical ("no mutants killed").
+        let c = cfg(r#"
+gates:
+  - id: pure-kill
+    when: { purity: pure }
+    require: { mutation_kill_rate: 0.8 }
+    severity: critical
+"#);
+        assert!(c.requires_mutation());
+        let pre = c.stage_tests(ReviewMode::Precommit);
+        assert!(pre.mutation, "mutation forced on at precommit");
+        assert!(pre.mutation_forced, "and flagged as forced, not defaulted");
+    }
+
+    #[test]
+    fn purity_kill_rate_also_forces_mutation() {
+        let c = cfg(r#"
+purity:
+  pure: { line_coverage: 0.95, mutation_kill_rate: 0.8 }
+"#);
+        assert!(c.requires_mutation());
+        assert!(c.stage_tests(ReviewMode::Precommit).mutation_forced);
+    }
+
+    #[test]
+    fn custom_stage_config_parses_and_overrides_defaults() {
+        let c = cfg(r#"
+tests:
+  precommit: { profiles: [unit], mutation: false }
+  premerge:  { profiles: [unit, integration, fuzz], mutation: true }
+"#);
+        assert_eq!(c.tests.precommit.profiles, ["unit"]);
+        assert_eq!(c.tests.premerge.profiles, ["unit", "integration", "fuzz"]);
+        assert!(c.tests.premerge.mutation);
     }
 
     #[test]
