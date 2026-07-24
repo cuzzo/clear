@@ -224,6 +224,118 @@ Intrinsic:
   "atomic.LoadUint64": constant
   "atomic.StoreUint32": constant
   "atomic.StoreUint64": constant
+  # internal/bytealg assembly primitives. The exported bytes/strings search and
+  # compare API bottoms out in these; they are pure linear scans (or an O(n)
+  # allocation), so mapping them lets the stdlib's own functions close.
+  "bytealg.Compare": linear_scan
+  "bytealg.Count": linear_scan
+  "bytealg.CountString": linear_scan
+  "bytealg.Equal": linear_scan
+  "bytealg.Index": linear_scan
+  "bytealg.IndexByte": linear_scan
+  "bytealg.IndexByteString": linear_scan
+  "bytealg.IndexString": linear_scan
+  "bytealg.IndexRabinKarp": linear_scan
+  "bytealg.IndexRabinKarpBytes": linear_scan
+  "bytealg.LastIndexByte": linear_scan
+  "bytealg.LastIndexByteString": linear_scan
+  "bytealg.HashStr": linear_scan
+  "bytealg.HashStrBytes": linear_scan
+  "bytealg.Cutover": constant
+  "bytealg.MakeNoZero": linear_materialize
+  # unsafe intrinsics: compile-time size/offset constants and zero-copy pointer
+  # or header construction. All O(1); no runtime work is a function of input.
+  "unsafe.Pointer": constant
+  "unsafe.Sizeof": constant
+  "unsafe.Offsetof": constant
+  "unsafe.Alignof": constant
+  "unsafe.Add": constant
+  "unsafe.Slice": constant
+  "unsafe.SliceData": constant
+  "unsafe.String": constant
+  "unsafe.StringData": constant
+  # runtime hints and bounded introspection: no-ops or stack-depth bounded,
+  # constant with respect to the caller's input.
+  "runtime.KeepAlive": constant
+  "runtime.SetFinalizer": constant
+  "runtime.GC": constant
+  "runtime.Caller": constant
+  "runtime.Callers": constant
+  "runtime.CallersFrames": constant
+  "runtime.NumCPU": constant
+  "runtime.NumGoroutine": constant
+  "runtime.Gosched": constant
+  # Race detector instrumentation: a no-op without -race; O(1).
+  "race.Enable": constant
+  "race.Disable": constant
+  "race.Acquire": constant
+  "race.Release": constant
+  "race.ReleaseMerge": constant
+  "race.Read": constant
+  "race.Write": constant
+  "race.ReadRange": constant
+  "race.WriteRange": constant
+  # math/bits: single-word bit operations, each O(1).
+  "bits.Add": constant
+  "bits.Add32": constant
+  "bits.Add64": constant
+  "bits.Sub": constant
+  "bits.Sub32": constant
+  "bits.Sub64": constant
+  "bits.Mul": constant
+  "bits.Mul32": constant
+  "bits.Mul64": constant
+  "bits.Div": constant
+  "bits.Div32": constant
+  "bits.Div64": constant
+  "bits.Len": constant
+  "bits.Len8": constant
+  "bits.Len16": constant
+  "bits.Len32": constant
+  "bits.Len64": constant
+  "bits.LeadingZeros": constant
+  "bits.LeadingZeros8": constant
+  "bits.LeadingZeros16": constant
+  "bits.LeadingZeros32": constant
+  "bits.LeadingZeros64": constant
+  "bits.TrailingZeros": constant
+  "bits.TrailingZeros32": constant
+  "bits.TrailingZeros64": constant
+  "bits.OnesCount": constant
+  "bits.OnesCount32": constant
+  "bits.OnesCount64": constant
+  "bits.RotateLeft": constant
+  "bits.RotateLeft8": constant
+  "bits.RotateLeft16": constant
+  "bits.RotateLeft32": constant
+  "bits.RotateLeft64": constant
+  "bits.ReverseBytes": constant
+  "bits.ReverseBytes32": constant
+  "bits.ReverseBytes64": constant
+  # Elementary math: constant-time numeric primitives.
+  "math.Float32bits": constant
+  "math.Float64bits": constant
+  "math.Float32frombits": constant
+  "math.Float64frombits": constant
+  "math.Log": constant
+  "math.Log2": constant
+  "math.Exp": constant
+  "math.Sqrt": constant
+  "math.Abs": constant
+  "math.Floor": constant
+  "math.Ceil": constant
+  "math.Trunc": constant
+  "math.Mod": constant
+  "math.Pow": constant
+  "math.Ldexp": constant
+  "math.Frexp": constant
+  # cmp: ordered comparison. Linear to bound the string operand case.
+  "cmp.Less": linear_scan
+  "cmp.Compare": linear_scan
+  "cmp.Or": constant
+  # internal/abi: compile-time layout constants.
+  "abi.FuncPCABI0": constant
+  "abi.FuncPCABIInternal": constant
   # Language builtins. These are syntax-proven by the Go adapter and do not
   # require a SCIP declaration. Materializing operations use worst-case upper
   # bounds, including allocation/copy during append growth.
