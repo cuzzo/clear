@@ -20,6 +20,9 @@ pub struct AuditTest {
     pub killed: BTreeSet<String>,
     /// Whether this test covered any mutant (ran against mutated code).
     pub covered: bool,
+    /// The test is skipped/pending (from a `pending`/`skipped` flag or a
+    /// `status` of "skipped"/"pending" on the inventory entry).
+    pub pending: bool,
 }
 
 /// Extract per-test attribution from an audit-capable mutant-facts value,
@@ -32,13 +35,15 @@ pub fn collect_audit_tests(value: &Value) -> Vec<AuditTest> {
     // test_id -> (file, line, killed set, covered)
     let mut tests: BTreeMap<String, AuditTest> = BTreeMap::new();
     let entry = |tests: &mut BTreeMap<String, AuditTest>, id: &str, file: &str, line: Option<u32>| {
-        let t = tests.entry(id.to_string()).or_insert_with(|| AuditTest {
+        tests.entry(id.to_string()).or_insert_with(|| AuditTest {
             id: id.to_string(),
             file: String::new(),
             line: None,
             killed: BTreeSet::new(),
             covered: false,
+            pending: false,
         });
+        let t = tests.get_mut(id).unwrap();
         if t.file.is_empty() && !file.is_empty() {
             t.file = file.to_string();
         }
@@ -46,6 +51,20 @@ pub fn collect_audit_tests(value: &Value) -> Vec<AuditTest> {
             t.line = line;
         }
     };
+    // Read a pending/skipped marker off an inventory entry (bool flag or a
+    // status string). Used by the tests[]/testFiles inventory readers below.
+    fn entry_pending(test: &Value) -> bool {
+        if ["pending", "skipped"]
+            .iter()
+            .any(|k| test.get(*k).and_then(Value::as_bool).unwrap_or(false))
+        {
+            return true;
+        }
+        matches!(
+            test.get("status").and_then(Value::as_str),
+            Some("skipped") | Some("pending") | Some("skip")
+        )
+    }
 
     // Native mutant-facts/v1: authoritative test inventory with file/line.
     if let Some(arr) = value.get("tests").and_then(Value::as_array) {
@@ -56,6 +75,9 @@ pub fn collect_audit_tests(value: &Value) -> Vec<AuditTest> {
             let file = test.get("file").and_then(Value::as_str).unwrap_or("");
             let line = test.get("line").and_then(Value::as_u64).map(|n| n as u32);
             entry(&mut tests, id, file, line);
+            if entry_pending(test) {
+                tests.get_mut(id).unwrap().pending = true;
+            }
         }
     }
     let apply_mutant = |tests: &mut BTreeMap<String, AuditTest>,
@@ -120,6 +142,9 @@ pub fn collect_audit_tests(value: &Value) -> Vec<AuditTest> {
                             .and_then(Value::as_u64)
                             .map(|n| n as u32);
                         entry(&mut tests, id, path, line);
+                        if entry_pending(test) {
+                            tests.get_mut(id).unwrap().pending = true;
+                        }
                     }
                 }
             }
@@ -183,6 +208,7 @@ pub fn ingest_audit_test_attribution(
                 "test_path": test.file,
                 "test_start_line": test.line,
                 "test_end_line": test.line,
+                "pending": test.pending,
                 "killed_mutant_ids": test.killed.iter().collect::<Vec<_>>(),
             })
             .to_string();
@@ -906,17 +932,19 @@ mod tests {
                 {"id": "1", "coveredBy": ["t:a", "t:b"], "killedBy": ["t:a"]}
             ]}},
             "testFiles": {"test/x_test.rb": {"tests": [
-                {"id": "t:a", "name": "A"}, {"id": "t:b", "name": "B"}
+                {"id": "t:a", "name": "A"}, {"id": "t:b", "name": "B", "status": "skipped"}
             ]}}
         });
         let mut tests = collect_audit_tests(&mte);
         tests.sort_by(|a, b| a.id.cmp(&b.id));
         assert_eq!(tests[0].file, "test/x_test.rb");
         assert_eq!(tests[0].killed, ["lib/x.rb:1".to_string()].into_iter().collect());
+        assert!(!tests[0].pending);
         assert!(
             tests[1].covered && tests[1].killed.is_empty(),
             "t:b covered but killed nothing"
         );
+        assert!(tests[1].pending, "t:b marked skipped");
 
         // Subject-only facts carry no per-test attribution.
         assert!(collect_audit_tests(&serde_json::json!({"subjects": []})).is_empty());
