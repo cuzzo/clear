@@ -491,6 +491,43 @@ raw test log:
   cheaper - and harder to misread - than piping a truncated log through the
   window. Rationale and the cost analysis: tuning-configs.md §9.
 
+### Dogfooding on CLEAR: is the overhead worth it?
+
+The workflow: let the agent run `giga_precommit` on every commit (fast, keeps
+each commit green), then `giga_premerge` once at the end (exhaustive - catches
+the tech debt accrued along the way) before merging.
+
+Measured on the CLEAR compiler (`~/clear`, ~2,800 commits of history, 255
+source files, Ruby unit suite via `prspec`). The question is whether tracking
+coverage/analysis on top of the tests you already run is a rounding error or a
+tax:
+
+| Step | Time | Notes |
+|---|---|---|
+| Unit suite, no coverage (know it *passes*) | **1m45s** | parallel `prspec` |
+| Unit suite **with** branch coverage | **2m12s** | +26% - SimpleCov instrumentation |
+| Ingest that coverage into giga | **+19s** | 255 files, 84k line events |
+| **Precommit total** (tests + coverage of the delta) | **~2m31s** | +44% over bare tests |
+| One-time history index (`giga build`) | 52s once | incremental after: **~0.07s/commit** |
+| Static analysis (espalier graph + SARIF), premerge only | +23s analyze | see note |
+| Ingest the architecture graph | +59s | **slow - batched-insert optimization is a TODO** |
+
+**Takeaway.** Coverage *of the delta* costs ~26% on the test run plus a flat
+~19s ingest - a clear win: you already ran the tests, and now you know which
+*changed* lines are actually covered. The incremental cost per later commit is
+near-zero (the history index is one-time; coverage re-ingests one file).
+
+**Mutation (honest gap).** A project-wide mutant database for a whole compiler
+is a multi-hour one-time build, and it is **not yet run here** (CLEAR's mutant
+tooling is currently Go-only; the Ruby `mutant` runner for `compiler/ruby` is a
+TODO). The design intent is what makes it viable: incremental mutation re-runs
+only the *changed subjects*, so per-commit mutant time scales with the diff, not
+the project - which is exactly why `giga_precommit` skips mutation by default and
+`giga_premerge` runs it. The rule of thumb we are validating: if per-commit
+mutant feedback (after the initial DB) stays within a small multiple of the test
+run, it earns its place at premerge; if it is 10x, it will not get used. That
+number will be filled in here once the Ruby mutant runner lands.
+
 ## Supported Languages Roadmap
 
 Gigasail uses Tree-sitter-backed logical-unit extraction for the core
