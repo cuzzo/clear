@@ -682,7 +682,7 @@ fn render_funnel(
         "",
         vec![
             count_span("prod ", summary.prod_code, Color::LightGreen),
-            count_span("tests ", summary.test_code, Color::Magenta),
+            count_span("tests ", summary.test_code, Color::White),
         ],
     ));
     body.push(funnel_row(
