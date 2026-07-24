@@ -44,9 +44,30 @@ pub fn build_structured_diff(
         apply_known_mutation_kills(storage, &mut plan)?;
         apply_known_sarif(storage, &mut plan, request.sarif_source.as_deref())?;
         apply_known_architecture(storage, &mut plan)?;
+        apply_function_big_o(storage, &mut plan)?;
         apply_test_summaries(storage, &mut plan)?;
     }
     Ok(plan)
+}
+
+/// Attach each changed function's Big-O time/space complexity (from the
+/// architecture graph, stored on its logical unit) to its group, for the diff
+/// function box. Groups with no analysis keep the unknown default.
+fn apply_function_big_o(storage: &Storage, plan: &mut DiffPlan) -> Result<()> {
+    for file in &mut plan.files {
+        for group in &mut file.groups {
+            if group.kind != "function" {
+                continue;
+            }
+            let (time, time_status, space, space_status) =
+                storage.function_big_o(&file.path, &group.name)?;
+            group.big_o_time = time;
+            group.big_o_time_status = time_status;
+            group.big_o_space = space;
+            group.big_o_space_status = space_status;
+        }
+    }
+    Ok(())
 }
 
 /// Compute the "Tests" section: for each changed test file, aggregate the base-

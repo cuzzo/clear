@@ -143,6 +143,10 @@ mod tests {
             added_lines: (start..start + added).collect(),
             added_dependencies: Vec::new(),
             added_state: Vec::new(),
+            big_o_time: String::new(),
+            big_o_time_status: "unknown".into(),
+            big_o_space: String::new(),
+            big_o_space_status: "unknown".into(),
             evidence: Evidence::default(),
         }
     }

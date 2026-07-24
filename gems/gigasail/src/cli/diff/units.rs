@@ -31,6 +31,12 @@ pub struct ChangedUnit {
     /// State accesses (`read:field` / `write:field`) newly made on this unit's
     /// added lines, from the architecture graph.
     pub added_state: Vec<String>,
+    /// Big-O time/space complexity + status (complete | partial | unknown) of
+    /// this function, from the architecture graph. Empty/unknown if unavailable.
+    pub big_o_time: String,
+    pub big_o_time_status: String,
+    pub big_o_space: String,
+    pub big_o_space_status: String,
     pub evidence: Evidence,
 }
 
@@ -173,6 +179,10 @@ pub fn assign_units(file: &FileDiff, new_source: Option<&str>) -> FileChange {
             added_lines: std::mem::take(&mut added_lines[idx]),
             added_dependencies: Vec::new(),
             added_state: Vec::new(),
+            big_o_time: String::new(),
+            big_o_time_status: "unknown".to_string(),
+            big_o_space: String::new(),
+            big_o_space_status: "unknown".to_string(),
             evidence: Evidence::default(),
         });
     }
@@ -385,6 +395,10 @@ mod tests {
             added_lines: vec![],
             added_dependencies: Vec::new(),
             added_state: Vec::new(),
+            big_o_time: String::new(),
+            big_o_time_status: "unknown".into(),
+            big_o_space: String::new(),
+            big_o_space_status: "unknown".into(),
             evidence: Evidence::default(),
         };
         assert_eq!(unit.owner(), Some("Store"));

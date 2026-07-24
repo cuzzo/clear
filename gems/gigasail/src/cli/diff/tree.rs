@@ -249,6 +249,10 @@ mod tests {
             added_lines: vec![],
             added_dependencies: Vec::new(),
             added_state: Vec::new(),
+            big_o_time: String::new(),
+            big_o_time_status: "unknown".into(),
+            big_o_space: String::new(),
+            big_o_space_status: "unknown".into(),
             evidence: Evidence {
                 t1_findings: added, // more churn -> more findings, for deterministic risk
                 ..Default::default()

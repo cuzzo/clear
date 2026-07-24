@@ -319,6 +319,10 @@ fn group_to_unit(
         added_lines,
         added_dependencies: group.added_dependencies.clone(),
         added_state: group.added_state.clone(),
+        big_o_time: group.big_o_time.clone(),
+        big_o_time_status: group.big_o_time_status.clone(),
+        big_o_space: group.big_o_space.clone(),
+        big_o_space_status: group.big_o_space_status.clone(),
         evidence,
     }
 }

@@ -314,6 +314,16 @@ pub struct DiffGroup {
     /// State accesses (`read:field` / `write:field`) whose site first appears on
     /// this group's added lines. Sourced from the ingested architecture graph.
     pub added_state: Vec<String>,
+    /// Big-O time/space complexity of this function + status (complete | partial
+    /// | unknown), from the architecture graph. Empty/unknown when unavailable.
+    #[serde(default)]
+    pub big_o_time: String,
+    #[serde(default)]
+    pub big_o_time_status: String,
+    #[serde(default)]
+    pub big_o_space: String,
+    #[serde(default)]
+    pub big_o_space_status: String,
     pub risk: RiskSummary,
 }
 
@@ -1172,6 +1182,10 @@ fn semantic_groups(
                     sarif_findings: Vec::new(),
                     added_dependencies: Vec::new(),
                     added_state: Vec::new(),
+                    big_o_time: String::new(),
+                    big_o_time_status: "unknown".to_string(),
+                    big_o_space: String::new(),
+                    big_o_space_status: "unknown".to_string(),
                     added_lines,
                 }
             })

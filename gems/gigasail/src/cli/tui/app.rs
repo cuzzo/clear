@@ -146,6 +146,10 @@ pub struct InfoBox {
     /// Newly-added state accesses (`read:field` / `write:field`), for the
     /// `New State:` line. Only meaningful for class/function views.
     pub new_state: Vec<String>,
+    /// Big-O complexity for a function view: `(time, time_status, space,
+    /// space_status)`. `time_status`/`space_status` are complete | partial |
+    /// unknown; both unknown means no line is shown.
+    pub big_o: Option<(String, String, String, String)>,
 }
 
 /// Coverage breakdown of the units under a container node.
@@ -743,6 +747,7 @@ impl App {
             bar: crate::cli::diff::summary::CoverageBar::default(),
             new_dependencies: Vec::new(),
             new_state: Vec::new(),
+            big_o: None,
         };
         let mut deps = std::collections::BTreeSet::new();
         let mut state = std::collections::BTreeSet::new();
@@ -765,6 +770,19 @@ impl App {
         info.new_state = state.into_iter().collect();
         if units.len() == 1 {
             info.coverage = units[0].evidence.coverage;
+            // Big-O is per-function; show it only for a single function view
+            // that actually has an analyzed bound.
+            let u = units[0];
+            if u.kind == crate::model::UnitKind::Function
+                && (u.big_o_time_status != "unknown" || u.big_o_space_status != "unknown")
+            {
+                info.big_o = Some((
+                    u.big_o_time.clone(),
+                    u.big_o_time_status.clone(),
+                    u.big_o_space.clone(),
+                    u.big_o_space_status.clone(),
+                ));
+            }
         }
         info
     }
@@ -932,6 +950,10 @@ mod tests {
             added_lines: vec![],
             added_dependencies: Vec::new(),
             added_state: Vec::new(),
+            big_o_time: String::new(),
+            big_o_time_status: "unknown".into(),
+            big_o_space: String::new(),
+            big_o_space_status: "unknown".into(),
             evidence: Evidence {
                 t1_findings: added,
                 hazards_total: if vis == Visibility::Public { 1 } else { 0 },
@@ -1449,6 +1471,10 @@ mod tests {
             added_lines: vec![2, 3],
             added_dependencies: Vec::new(),
             added_state: Vec::new(),
+            big_o_time: String::new(),
+            big_o_time_status: "unknown".into(),
+            big_o_space: String::new(),
+            big_o_space_status: "unknown".into(),
             evidence: Evidence::default(),
         };
         let change = FileChange {

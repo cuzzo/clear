@@ -1972,6 +1972,46 @@ impl Storage {
             }))
     }
 
+    /// Big-O for a function identified by its current file path and name, for
+    /// the diff function box. Returns unknown when no unit matches or none has
+    /// analysis. Matches on the unit's latest-event path (or original path).
+    pub fn function_big_o(
+        &self,
+        path: &str,
+        name: &str,
+    ) -> Result<(String, String, String, String)> {
+        self.ensure_big_o_columns()?;
+        // The diff's group name and the stored unit name may differ in
+        // qualification (`constant` vs `Calc.constant`/`Calc#constant`), so match
+        // the leaf with a suffix LIKE as the reconciler does.
+        let leaf = name.rsplit(['.', ':', '#']).next().unwrap_or(name);
+        let suffix = format!("%{leaf}");
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT u.big_o_time, u.big_o_time_status, u.big_o_space, u.big_o_space_status \
+                 FROM logical_units u \
+                 LEFT JOIN (SELECT unit_id, path, \
+                              ROW_NUMBER() OVER (PARTITION BY unit_id ORDER BY timestamp DESC, id DESC) rk \
+                            FROM events) e ON e.unit_id = u.id AND e.rk = 1 \
+                 WHERE (u.name = ?2 OR u.name = ?4 OR u.name LIKE ?3) \
+                   AND COALESCE(e.path, u.original_path) = ?1 \
+                   AND (u.big_o_time_status <> 'unknown' OR u.big_o_space_status <> 'unknown') \
+                 LIMIT 1",
+                params![path, name, suffix, leaf],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?
+            .unwrap_or_else(|| {
+                (
+                    String::new(),
+                    "unknown".into(),
+                    String::new(),
+                    "unknown".into(),
+                )
+            }))
+    }
+
     /// Aggregate `test_exposure_events` for one commit into a per-test inventory
     /// for the diff "Tests" section. Test-level attributes (the test's own file
     /// and definition span, pending status, and the set of mutants it killed)

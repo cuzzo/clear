@@ -250,7 +250,41 @@ fn info_lines(info: &InfoBox, ascii: bool, inner_w: usize) -> Vec<Line<'static>>
     if !info.new_state.is_empty() {
         lines.push(fact_line("New State: ", &info.new_state, Color::Magenta));
     }
+    if let Some((time, ts, space, ss)) = &info.big_o {
+        lines.push(big_o_line(time, ts, space, ss));
+    }
     lines
+}
+
+/// `Big-O: time O(n) (complete)  space O(1) (partial)` - status colours the
+/// bound (green complete, yellow partial); unknown axes are omitted.
+fn big_o_line(time: &str, time_status: &str, space: &str, space_status: &str) -> Line<'static> {
+    let part = |label: &str, val: &str, status: &str| -> Vec<Span<'static>> {
+        let color = match status {
+            "complete" => Color::Green,
+            "partial" => Color::Yellow,
+            _ => Color::DarkGray,
+        };
+        let shown = if val.is_empty() { "?" } else { val };
+        vec![
+            Span::styled(format!("{label} "), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("{shown} ({status})"),
+                Style::default().fg(color),
+            ),
+        ]
+    };
+    let mut spans = vec![Span::styled("Big-O: ", Style::default().fg(Color::Gray))];
+    if time_status != "unknown" {
+        spans.extend(part("time", time, time_status));
+    }
+    if space_status != "unknown" {
+        if time_status != "unknown" {
+            spans.push(Span::raw("  "));
+        }
+        spans.extend(part("space", space, space_status));
+    }
+    Line::from(spans)
 }
 
 /// `Label: [ a, b, c ]` - the architecture-derived dependency/state lines.
@@ -268,7 +302,8 @@ fn fact_line(label: &'static str, items: &[String], value: Color) -> Line<'stati
 fn info_box_height(info: &InfoBox) -> u16 {
     let content = 1
         + u16::from(!info.new_dependencies.is_empty())
-        + u16::from(!info.new_state.is_empty());
+        + u16::from(!info.new_state.is_empty())
+        + u16::from(info.big_o.is_some());
     content + 2
 }
 
@@ -1166,6 +1201,10 @@ mod tests {
             added_lines: vec![],
             added_dependencies: vec!["Token#decode".into()],
             added_state: vec!["write:self.count".into()],
+            big_o_time: String::new(),
+            big_o_time_status: "unknown".into(),
+            big_o_space: String::new(),
+            big_o_space_status: "unknown".into(),
             evidence: Evidence {
                 hazards_total: 1,
                 hazards_uncovered: 1,
@@ -1253,6 +1292,10 @@ mod tests {
             added_lines: vec![3],
             added_dependencies: Vec::new(),
             added_state: Vec::new(),
+            big_o_time: String::new(),
+            big_o_time_status: "unknown".into(),
+            big_o_space: String::new(),
+            big_o_space_status: "unknown".into(),
             evidence: Evidence::default(),
         };
         let change = FileChange {
@@ -1410,6 +1453,10 @@ mod tests {
             added_lines: vec![3],
             added_dependencies: Vec::new(),
             added_state: Vec::new(),
+            big_o_time: String::new(),
+            big_o_time_status: "unknown".into(),
+            big_o_space: String::new(),
+            big_o_space_status: "unknown".into(),
             evidence: Evidence::default(),
         };
         let change = FileChange {
