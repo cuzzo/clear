@@ -78,19 +78,21 @@ fn resolve(repo: &Path, check: &str) -> Result<Command> {
 /// Locate the bundled `contrib/` script directory. Search order:
 /// 1. `$GIGA_CONTRIB_DIR`
 /// 2. `<repo>/gems/gigasail/contrib` (dogfooding inside the CLEAR repo)
-/// 3. `<exe_dir>/contrib` and `<exe_dir>/../contrib` (installed layout)
+/// 3. Walking up from the executable (which may be a symlink into the source
+///    tree): each ancestor's `contrib/` or `gems/gigasail/contrib/`. This finds
+///    the bundled scripts when `giga` is run against an unrelated repo.
 fn contrib_dir(repo: &Path) -> Result<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(dir) = std::env::var("GIGA_CONTRIB_DIR") {
         candidates.push(dir.into());
     }
     candidates.push(repo.join("gems/gigasail/contrib"));
+    // current_exe() resolves the symlink on Linux, so ancestors reach into the
+    // source tree (…/gems/gigasail/target/release/giga -> …/gems/gigasail).
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("contrib"));
-            if let Some(up) = dir.parent() {
-                candidates.push(up.join("contrib"));
-            }
+        for ancestor in exe.ancestors().skip(1).take(6) {
+            candidates.push(ancestor.join("contrib"));
+            candidates.push(ancestor.join("gems/gigasail/contrib"));
         }
     }
     candidates
