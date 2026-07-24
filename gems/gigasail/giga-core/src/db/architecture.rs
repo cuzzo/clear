@@ -710,6 +710,17 @@ pub fn architecture_fact_sites_for_commit(
             // variable) rather than a `Owner#name` collaboration.
             "calls" | "internal_call" | "resolved_call" | "delegation" => {
                 if let Some((name, owner)) = nodes.get(&target) {
+                    // A same-class call is not a *new dependency*: only a call to
+                    // a different owner (class) is a collaboration dependency.
+                    // Compare the caller's owner (source node) with the callee's.
+                    let caller_owner = nodes.get(&source).and_then(|(_, o)| o.as_deref());
+                    let same_class = matches!(
+                        (caller_owner, owner.as_deref()),
+                        (Some(a), Some(b)) if !a.is_empty() && a == b
+                    );
+                    if same_class {
+                        continue;
+                    }
                     let label = match owner {
                         Some(owner) if !owner.is_empty() => format!("{owner}#{name}"),
                         _ => name.clone(),
@@ -943,11 +954,14 @@ mod tests {
                 {"id":"fn:run","kind":"function","name":"run","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":2,"start_column":0,"end_line":6,"end_column":3,"metadata":{}},
                 {"id":"fn:help","kind":"function","name":"help","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":7,"start_column":0,"end_line":8,"end_column":3,"metadata":{}},
                 {"id":"state:v","kind":"state","name":"@value","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":3,"start_column":2,"end_line":3,"end_column":8,"metadata":{}},
+                {"id":"owner:2","kind":"owner","name":"Widget","owner":"Widget","path":"widget.rb","start_line":1,"start_column":0,"end_line":3,"end_column":3,"metadata":{}},
+                {"id":"fn:paint","kind":"function","name":"paint","owner":"Widget","owner_id":"owner:2","path":"widget.rb","start_line":2,"start_column":0,"end_line":3,"end_column":3,"metadata":{}},
                 {"id":"external:import:s","kind":"external","name":"strings","owner":null,"language":"ruby","path":null,"start_line":0,"start_column":0,"end_line":0,"end_column":0,"metadata":{"import":true}}
             ],
             "edges": [
                 {"id":"e:import","source":"file:demo.rb","target":"external:import:s","kind":"imports","conditional":false,"weight":1,"confidence":"high","metadata":{"module":"strings"},"spans":[{"path":"demo.rb","start_line":1,"start_column":0,"end_line":1,"end_column":0}]},
-                {"id":"e:call","source":"fn:run","target":"fn:help","kind":"calls","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":4,"start_column":4,"end_line":4,"end_column":10}]},
+                {"id":"e:call","source":"fn:run","target":"fn:paint","kind":"calls","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":4,"start_column":4,"end_line":4,"end_column":10}]},
+                {"id":"e:call_same","source":"fn:run","target":"fn:help","kind":"calls","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":6,"start_column":4,"end_line":6,"end_column":10}]},
                 {"id":"e:write","source":"fn:run","target":"state:v","kind":"writes","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":3,"start_column":2,"end_line":3,"end_column":8}]},
                 {"id":"e:read","source":"state:v","target":"fn:help","kind":"reads","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":7,"start_column":2,"end_line":7,"end_column":8}]},
                 {"id":"e:ext","source":"fn:run","target":"external:puts","kind":"external_call","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":5,"start_column":4,"end_line":5,"end_column":8}]}
@@ -958,13 +972,18 @@ mod tests {
         ingest_architecture_json(&storage, &payload).unwrap();
 
         let sites = architecture_fact_sites_for_commit(&storage, "deadbeef").unwrap();
-        // The call resolves to `Owner#name`; the external call is dropped.
+        // A cross-class call resolves to `Owner#name`; the external call is
+        // dropped, and a same-class call (Demo -> Demo#help) is NOT a dependency.
         let call = sites
             .iter()
             .find(|s| s.kind == FactKind::Call && s.line == 4)
             .unwrap();
-        assert_eq!(call.label, "Demo#help");
+        assert_eq!(call.label, "Widget#paint");
         assert!(sites.iter().all(|s| s.label != "puts"), "external calls dropped");
+        assert!(
+            !sites.iter().any(|s| s.kind == FactKind::Call && s.line == 6),
+            "same-class call is not a new dependency"
+        );
         // Write names the state target; read names the state source (reversed).
         let write = sites
             .iter()

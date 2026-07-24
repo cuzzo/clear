@@ -236,8 +236,11 @@ fn info_lines(info: &InfoBox, ascii: bool, inner_w: usize) -> Vec<Line<'static>>
         ));
         find_w = label.len();
     }
-    let bar_w = inner_w.saturating_sub(find_w + 2).clamp(10, 30);
-    let pad = inner_w.saturating_sub(find_w + bar_w).max(1);
+    // The bar renders as `[<bar_w>]` (bar_w + 2 for the brackets). Reserve room
+    // for the brackets, keep a gap after the findings, and leave a 1-col right
+    // margin so the whole bar stays visible instead of being pushed off-edge.
+    let bar_w = inner_w.saturating_sub(find_w + 4).clamp(10, 30);
+    let pad = inner_w.saturating_sub(find_w + bar_w + 3).max(1);
     spans.push(Span::raw(" ".repeat(pad)));
     spans.extend(coverage_bar_spans(&info.bar, bar_w));
     let mut lines = vec![Line::from(spans)];
@@ -841,6 +844,57 @@ fn render_funnel(
                     Span::styled(scope, Style::default().fg(Color::DarkGray)),
                 ]));
             }
+        }
+    }
+
+    // TESTS: how the change affected the test suite, per language:test_set.
+    if !summary.tests.is_empty() {
+        body.push(Line::from(""));
+        body.push(Line::from(Span::styled(
+            "TESTS".to_string(),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        body.push(Line::from(Span::styled(
+            format!(" {:<16} {:<18} {}", "group", "churn", "quality / timing"),
+            Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD),
+        )));
+        for t in &summary.tests {
+            let group = format!("{}:{}", t.language, t.test_set);
+            let churn = if t.inventory_available {
+                format!("+{} -{} ~{} p{}", t.added, t.deleted, t.changed, t.pending)
+            } else {
+                format!("p{} (n/a)", t.pending)
+            };
+            let mut quality: Vec<String> = Vec::new();
+            if t.mutation_available {
+                quality.push(format!("{} no-kill", t.kill_no_mutants));
+                quality.push(format!("{} no-distinct", t.kill_no_distinct));
+            }
+            let timing = match &t.timing {
+                Some(ti) if ti.pending => " time [PENDING]".to_string(),
+                Some(ti) if ti.baseline_n == 0 => format!(" time n={} (building)", ti.samples),
+                Some(ti) => format!(
+                    " time {}{:.1}% \u{00b1}{:.1}%",
+                    if ti.pct >= 0.0 { "+" } else { "" },
+                    ti.pct,
+                    ti.ci_pct
+                ),
+                None => String::new(),
+            };
+            body.push(Line::from(vec![
+                Span::styled(
+                    format!(" {:<16} ", truncate(&group, 16)),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(
+                    format!("{:<18} ", churn),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::styled(
+                    format!("{}{}", quality.join(" "), timing),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
         }
     }
 
@@ -1502,6 +1556,7 @@ mod tests {
                     after: Some("1.1".into()),
                 },
             ],
+            tests: Vec::new(),
         };
         app.refresh_rows();
         app.selected = 0; // the [SUMMARY] row

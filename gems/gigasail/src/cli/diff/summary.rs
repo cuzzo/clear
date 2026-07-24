@@ -162,6 +162,9 @@ pub struct DiffSummary {
     pub other: Vec<OtherRow>,
     /// Dependencies changed between the two revisions, across all manifests.
     pub deps: Vec<DepChange>,
+    /// Per language:test_set test-suite churn + quality + timing (the change's
+    /// effect on the tests), for the TESTS section.
+    pub tests: Vec<crate::test_summary::TestSummary>,
 }
 
 /// Build the funnel from the plan (line splits, coverage, visibility) and the
@@ -293,6 +296,10 @@ pub fn build_summary(plan: &DiffPlan, changes: &[FileChange]) -> DiffSummary {
     summary
         .langs
         .sort_by(|a, b| (b.public + b.private + b.other).cmp(&(a.public + a.private + a.other)));
+
+    // TESTS: the change's effect on the test suite (already scoped to changed
+    // test files and only the groups it touched).
+    summary.tests = plan.test_summaries.clone();
     summary
 }
 

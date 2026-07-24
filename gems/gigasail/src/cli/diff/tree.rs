@@ -17,7 +17,7 @@ pub enum NodeKind {
     Function,
     /// The single per-file `(PRIVATE FUNCTIONS)` blob.
     PrivateGroup,
-    /// The per-project `(TESTS)` subtree that isolates test-code risk.
+    /// The per-project `[ TESTS ]` subtree that isolates test-code risk.
     TestGroup,
 }
 
@@ -153,7 +153,9 @@ pub fn build_tree(changes: &[FileChange], project_for: impl Fn(&str) -> String) 
 
     for fc in changes {
         let project = project_for(&fc.path);
-        let project_node = child_mut(&mut root.children, NodeKind::Project, &project);
+        // The repo-root "project" has no name; label it `./` so it isn't blank.
+        let project_label = if project.is_empty() { "./" } else { project.as_str() };
+        let project_node = child_mut(&mut root.children, NodeKind::Project, project_label);
 
         // Path relative to the project root, split into directory segments.
         let rel = fc
@@ -166,7 +168,7 @@ pub fn build_tree(changes: &[FileChange], project_for: impl Fn(&str) -> String) 
 
         let file = file_node(fc);
         if fc.is_test {
-            let tests = child_mut(&mut project_node.children, NodeKind::TestGroup, "(TESTS)");
+            let tests = child_mut(&mut project_node.children, NodeKind::TestGroup, "[ TESTS ]");
             insert_file(tests, &segments, file);
         } else {
             insert_file(project_node, &segments, file);
@@ -373,7 +375,7 @@ mod tests {
             ),
         ];
         let root = build_tree(&changes, flat("proj"));
-        let tests = find(&root, NodeKind::TestGroup, "(TESTS)").unwrap();
+        let tests = find(&root, NodeKind::TestGroup, "[ TESTS ]").unwrap();
         assert!(find(tests, NodeKind::File, "a_spec.rb").is_some());
         // Production file is NOT under the tests group.
         assert!(find(tests, NodeKind::File, "a.rs").is_none());
