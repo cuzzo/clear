@@ -2,6 +2,7 @@
 //! pane with gutters and an info box, and the bottom background-progress box.
 
 use crate::cli::diff::gitdiff::LineOrigin;
+use crate::cli::diff::risk::CoverageState;
 use crate::cli::diff::tree::NodeKind;
 use crate::cli::highlight::{highlight_line, lang_for_path, HlKind, Lang};
 use crate::cli::tui::app::{App, InfoBox, PaneBody, PaneLine};
@@ -442,6 +443,34 @@ fn origin_bg(origin: LineOrigin, truecolor: bool) -> Option<Color> {
     }
 }
 
+/// Gutter highlight for a line's coverage/mutation state: dark green = covered +
+/// mutant-killed, green = covered, yellow = partial, red = uncovered. `Unknown`
+/// (no evidence measured) gets no highlight. Truecolor uses tuned RGB; a 16-color
+/// terminal falls back to named colors.
+fn coverage_gutter_bg(state: CoverageState, truecolor: bool) -> Option<Color> {
+    Some(match (state, truecolor) {
+        (CoverageState::CoveredKilled, true) => Color::Rgb(0, 74, 16),
+        (CoverageState::Covered, true) => Color::Rgb(30, 122, 45),
+        (CoverageState::Partial, true) => Color::Rgb(140, 108, 0),
+        (CoverageState::Uncovered, true) => Color::Rgb(150, 32, 32),
+        (CoverageState::CoveredKilled, false) => Color::Green,
+        (CoverageState::Covered, false) => Color::LightGreen,
+        (CoverageState::Partial, false) => Color::Yellow,
+        (CoverageState::Uncovered, false) => Color::Red,
+        (CoverageState::Unknown, _) => return None,
+    })
+}
+
+/// Partial-coverage lines tint their addition span yellow instead of the usual
+/// green, so an added-but-under-tested line is visible in the body, not only the
+/// gutter. Only applies to truecolor added lines.
+fn partial_add_bg(line: &PaneLine, truecolor: bool) -> Option<Color> {
+    (truecolor
+        && line.origin == LineOrigin::Add
+        && line.coverage == CoverageState::Partial)
+        .then_some(Color::Rgb(60, 52, 12))
+}
+
 /// Render one diff line into one-or-more visual rows: the content wraps to the
 /// pane width with a hanging indent (no repeated line number) instead of being
 /// truncated. Every row is padded to full width so it overwrites stale cells.
@@ -455,18 +484,15 @@ fn pane_line_rows(
     width: usize,
     cursor: bool,
 ) -> Vec<Line<'static>> {
-    // Cursor tint overrides the diff tint; otherwise diff add/remove tint.
+    // Cursor tint overrides everything. Otherwise the content carries the diff
+    // add/remove tint (yellow for a partial-coverage addition), while the gutter
+    // carries the per-line coverage highlight.
     // On non-truecolor terminals a reversed-video cursor replaces the RGB tint.
-    let bg = if cursor && truecolor {
-        Some(Color::Rgb(48, 48, 84))
-    } else {
-        origin_bg(line.origin, truecolor)
-    };
-    let paint = move |style: Style| {
-        let style = match bg {
-            Some(color) => style.bg(color),
-            None => style,
-        };
+    let cursor_bg = (cursor && truecolor).then_some(Color::Rgb(48, 48, 84));
+    let content_bg =
+        cursor_bg.or_else(|| partial_add_bg(line, truecolor).or_else(|| origin_bg(line.origin, truecolor)));
+    let gutter_bg = cursor_bg.or_else(|| coverage_gutter_bg(line.coverage, truecolor));
+    let with_cursor = move |style: Style| {
         if cursor {
             let style = style.add_modifier(Modifier::BOLD);
             if truecolor {
@@ -477,6 +503,18 @@ fn pane_line_rows(
         } else {
             style
         }
+    };
+    let paint = move |style: Style| {
+        with_cursor(match content_bg {
+            Some(color) => style.bg(color),
+            None => style,
+        })
+    };
+    let paint_gutter = move |style: Style| {
+        with_cursor(match gutter_bg {
+            Some(color) => style.bg(color),
+            None => style,
+        })
     };
 
     let cover = match line.covered {
@@ -517,7 +555,7 @@ fn pane_line_rows(
         // line number.
         let (lead, lead_w) = if first {
             (
-                Span::styled(prefix.clone(), paint(origin_style(line.origin))),
+                Span::styled(prefix.clone(), paint_gutter(origin_style(line.origin))),
                 prefix_w,
             )
         } else {
@@ -1880,10 +1918,37 @@ mod tests {
             content: format!("line{n}"),
             gutters: vec![],
             covered: None,
+            coverage: CoverageState::Unknown,
             findings: vec![],
             hazards: vec![],
             dark_arms: vec![],
         }
+    }
+
+    #[test]
+    fn gutter_color_tracks_coverage_state() {
+        // dark green (killed) is distinct from and darker than plain covered green.
+        let killed = coverage_gutter_bg(CoverageState::CoveredKilled, true).unwrap();
+        let covered = coverage_gutter_bg(CoverageState::Covered, true).unwrap();
+        assert!(matches!(killed, Color::Rgb(_, k, _) if matches!(covered, Color::Rgb(_, c, _) if k < c)));
+        assert_eq!(coverage_gutter_bg(CoverageState::Partial, false), Some(Color::Yellow));
+        assert_eq!(coverage_gutter_bg(CoverageState::Uncovered, false), Some(Color::Red));
+        // No evidence -> no gutter highlight.
+        assert_eq!(coverage_gutter_bg(CoverageState::Unknown, true), None);
+    }
+
+    #[test]
+    fn partial_addition_span_is_tinted_only_for_added_partial_lines() {
+        let mut add = pane_line(LineOrigin::Add, 1);
+        add.coverage = CoverageState::Partial;
+        assert!(partial_add_bg(&add, true).is_some());
+        // A covered addition keeps the normal green diff tint.
+        add.coverage = CoverageState::Covered;
+        assert!(partial_add_bg(&add, true).is_none());
+        // Context lines are never partial-tinted even if marked partial.
+        let mut ctx = pane_line(LineOrigin::Context, 1);
+        ctx.coverage = CoverageState::Partial;
+        assert!(partial_add_bg(&ctx, true).is_none());
     }
 
     #[test]

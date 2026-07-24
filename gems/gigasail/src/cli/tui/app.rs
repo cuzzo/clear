@@ -119,6 +119,9 @@ pub struct PaneLine {
     pub content: String,
     pub gutters: Vec<GutterKind>,
     pub covered: Option<bool>,
+    /// Per-line coverage/mutation state, used to tint the line's gutter (and the
+    /// addition span for partial lines). `Unknown` where no evidence was measured.
+    pub coverage: CoverageState,
     /// SARIF findings / hazards / dark arms on this line, for the Space detail.
     pub findings: Vec<FindingDetail>,
     pub hazards: Vec<HazardDetail>,
@@ -632,6 +635,7 @@ impl App {
             content: content.to_string(),
             gutters: Vec::new(),
             covered: None,
+            coverage: CoverageState::Unknown,
             findings: Vec::new(),
             hazards: Vec::new(),
             dark_arms: Vec::new(),
@@ -644,6 +648,19 @@ impl App {
             .line_ev
             .get(path)
             .and_then(|lines| lines.iter().find(|l| l.line == lineno));
+        let coverage = ev
+            .map(|e| {
+                let has_evidence =
+                    e.covered_known || e.distinct_tests > 0 || e.mutant_killed_tests > 0;
+                CoverageState::derive(
+                    e.covered,
+                    e.is_partial,
+                    e.distinct_tests,
+                    e.mutant_killed_tests,
+                    has_evidence,
+                )
+            })
+            .unwrap_or(CoverageState::Unknown);
         PaneLine {
             origin,
             new_lineno: Some(lineno),
@@ -651,6 +668,7 @@ impl App {
             gutters: ev.map(|e| e.gutters.clone()).unwrap_or_default(),
             // Only surface a coverage mark where coverage was actually measured.
             covered: ev.and_then(|e| e.covered_known.then_some(e.covered)),
+            coverage,
             findings: ev.map(|e| e.findings.clone()).unwrap_or_default(),
             hazards: ev.map(|e| e.hazards.clone()).unwrap_or_default(),
             dark_arms: ev.map(|e| e.dark_arms.clone()).unwrap_or_default(),
@@ -1385,6 +1403,7 @@ mod tests {
             content: "x".into(),
             gutters: vec![],
             covered: None,
+            coverage: CoverageState::Unknown,
             findings: vec![],
             hazards: vec![],
             dark_arms: vec![],
