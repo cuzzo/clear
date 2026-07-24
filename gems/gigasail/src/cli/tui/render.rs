@@ -78,7 +78,7 @@ pub fn render(frame: &mut Frame, app: &App, _now: f64) {
 
     let panes = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(38), Constraint::Min(20)])
+        .constraints([Constraint::Length(44), Constraint::Min(20)])
         .split(rows[0]);
 
     render_left(frame, app, panes[0]);
@@ -150,24 +150,33 @@ fn render_left(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, row)| {
-            let indent = "  ".repeat(row.depth);
+            // `arrow` + one space + one space per depth level keeps the tree
+            // compact so function rows still show their `+N -N` counts.
             let arrow = if row.has_children {
                 if row.open {
-                    "\u{25BE} "
+                    "\u{25BE}"
                 } else {
-                    "\u{25B8} "
+                    "\u{25B8}"
                 }
             } else {
-                "  "
+                " "
             };
-            let dot = risk_dot(row.risk, app.ascii);
-            let text = format!(
-                "{indent}{arrow}{} {}  +{} -{}",
-                dot, row.label, row.added, row.removed
-            );
+            let indent = " ".repeat(row.depth);
+            let counts = if row.added > 0 || row.removed > 0 {
+                format!("  +{} -{}", row.added, row.removed)
+            } else {
+                String::new()
+            };
+            let text = format!("{arrow} {indent}{}{counts}", row.label);
             let mut style = Style::default();
-            if row.kind == NodeKind::PrivateGroup || row.kind == NodeKind::TestGroup {
+            if row.kind == NodeKind::Summary {
+                style = style.fg(Color::Cyan).add_modifier(Modifier::BOLD);
+            } else if row.kind == NodeKind::PrivateGroup || row.kind == NodeKind::TestGroup {
                 style = style.fg(Color::DarkGray);
+            } else if row.risk >= 20.0 {
+                style = style.fg(Color::Red);
+            } else if row.risk >= 5.0 {
+                style = style.fg(Color::Yellow);
             }
             if i == app.selected {
                 style = style.add_modifier(Modifier::REVERSED);
@@ -191,11 +200,9 @@ fn info_lines(info: &InfoBox) -> Vec<Line<'static>> {
         info.hazards_total, info.hazards_uncovered, info.t1, info.t2, info.t3
     );
     let state = format!("coverage: {}", info.coverage.label());
+    // The filename/function is already the info box's border title, so it is not
+    // repeated here.
     vec![
-        Line::from(Span::styled(
-            info.title.clone(),
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
         Line::from(Span::styled(
             header,
             Style::default().fg(if info.hazards_uncovered > 0 {
@@ -318,14 +325,19 @@ fn origin_bg(origin: LineOrigin, truecolor: bool) -> Option<Color> {
     }
 }
 
-fn pane_line_spans(
+/// Render one diff line into one-or-more visual rows: the content wraps to the
+/// pane width with a hanging indent (no repeated line number) instead of being
+/// truncated. Every row is padded to full width so it overwrites stale cells.
+const WRAP_INDENT: usize = 2;
+
+fn pane_line_rows(
     line: &PaneLine,
     ascii: bool,
     truecolor: bool,
     lang: &Lang,
     width: usize,
     cursor: bool,
-) -> Line<'static> {
+) -> Vec<Line<'static>> {
     // Cursor tint overrides the diff tint; otherwise diff add/remove tint.
     // On non-truecolor terminals a reversed-video cursor replaces the RGB tint.
     let bg = if cursor && truecolor {
@@ -364,31 +376,64 @@ fn pane_line_spans(
         LineOrigin::Context => " ",
     };
     let prefix = format!("{cover}{}{num} {sign} ", gutter_str(line, ascii));
+    let prefix_w = prefix.chars().count();
 
-    // Expand tabs to spaces: a raw `\t` written to the terminal moves the
-    // cursor to the next hardware tab stop, desyncing ratatui's cell model from
-    // the screen and cascading into garbled, artifact-laden rows.
+    // Expand tabs to spaces: a raw `\t` written to the terminal moves the cursor
+    // to the next hardware tab stop, desyncing ratatui's cell model.
     let content = expand_tabs(&line.content);
 
-    let mut spans = vec![Span::styled(
-        prefix.clone(),
-        paint(origin_style(line.origin)),
-    )];
-    // Syntax-highlight the content for every origin; the tint conveys add/remove.
+    // Flatten the highlighted content to styled characters for easy wrapping.
+    let mut chars: Vec<(char, Style)> = Vec::new();
     for (text, kind) in highlight_line(&content, lang) {
-        spans.push(Span::styled(text, paint(hl_style(kind))));
+        let style = paint(hl_style(kind));
+        for ch in text.chars() {
+            chars.push((ch, style));
+        }
     }
-    // Always pad to full width: it fills the GitHub-like row tint on truecolor
-    // and, on every terminal, overwrites any stale cells left by a longer line
-    // from a previously selected node.
-    let used = prefix.chars().count() + content.chars().count();
-    if width > used {
-        spans.push(Span::styled(
-            " ".repeat(width - used),
-            paint(Style::default()),
-        ));
+
+    let mut rows: Vec<Line> = Vec::new();
+    let mut idx = 0;
+    let mut first = true;
+    loop {
+        // First row leads with the gutter/line-number prefix; continuations use
+        // a blank prefix of the same width plus a hanging indent, and carry no
+        // line number.
+        let (lead, lead_w) = if first {
+            (
+                Span::styled(prefix.clone(), paint(origin_style(line.origin))),
+                prefix_w,
+            )
+        } else {
+            let w = prefix_w + WRAP_INDENT;
+            (Span::styled(" ".repeat(w), paint(Style::default())), w)
+        };
+        let cap = width.saturating_sub(lead_w).max(1);
+        let end = (idx + cap).min(chars.len());
+
+        let mut spans = vec![lead];
+        let mut j = idx;
+        while j < end {
+            let style = chars[j].1;
+            let mut text = String::new();
+            while j < end && chars[j].1 == style {
+                text.push(chars[j].0);
+                j += 1;
+            }
+            spans.push(Span::styled(text, style));
+        }
+        let used = lead_w + (end - idx);
+        if width > used {
+            spans.push(Span::styled(" ".repeat(width - used), paint(Style::default())));
+        }
+        rows.push(Line::from(spans));
+
+        idx = end;
+        first = false;
+        if idx >= chars.len() {
+            break;
+        }
     }
-    Line::from(spans)
+    rows
 }
 
 /// The indented SARIF/hazard/dark-arm detail rows shown under a line on Space.
@@ -461,7 +506,182 @@ fn render_right(frame: &mut Frame, app: &App, area: Rect) {
             render_summary(frame, app, area, &pane.title, summary, border)
         }
         PaneBody::Code { info, lines } => render_code(frame, app, area, &pane, info, lines, border),
+        PaneBody::Funnel(summary) => render_funnel(frame, app, area, &pane.title, summary, border),
     }
+}
+
+/// The colored coverage bar `[***+++--  ]`: `*` covered+killed (dark green),
+/// `+` covered (light green), `-` partial (yellow), red block untested, gray
+/// unknown. Widths are proportional to the line counts.
+fn coverage_bar_spans(bar: &crate::cli::diff::summary::CoverageBar, width: usize) -> Vec<Span<'static>> {
+    let total = bar.total();
+    let mut spans = vec![Span::styled("[".to_string(), Style::default().fg(Color::DarkGray))];
+    if total == 0 {
+        spans.push(Span::styled(
+            " ".repeat(width),
+            Style::default().fg(Color::DarkGray),
+        ));
+        spans.push(Span::styled("]".to_string(), Style::default().fg(Color::DarkGray)));
+        return spans;
+    }
+    let seg = |count: u32| (count as usize * width) / total as usize;
+    let mut widths = [
+        (seg(bar.covered_killed), '*', Style::default().fg(Color::Green)),
+        (seg(bar.covered), '+', Style::default().fg(Color::LightGreen)),
+        (seg(bar.partial), '-', Style::default().fg(Color::Yellow)),
+        (seg(bar.unknown), '\u{00b7}', Style::default().fg(Color::DarkGray)),
+    ];
+    let used: usize = widths.iter().map(|(w, ..)| *w).sum();
+    // The untested remainder fills the bar so it is always exactly `width` wide.
+    let untested = width.saturating_sub(used);
+    for (w, ch, style) in widths.iter_mut() {
+        if *w > 0 {
+            spans.push(Span::styled(ch.to_string().repeat(*w), *style));
+        }
+    }
+    if untested > 0 {
+        spans.push(Span::styled(
+            " ".repeat(untested),
+            Style::default().bg(Color::Red),
+        ));
+    }
+    spans.push(Span::styled("]".to_string(), Style::default().fg(Color::DarkGray)));
+    spans
+}
+
+fn hazard_spans(h: &crate::cli::diff::summary::HazardTotals, ascii: bool) -> Vec<Span<'static>> {
+    if h.is_empty() {
+        return vec![Span::styled(
+            "no hazards or tier findings".to_string(),
+            Style::default().fg(Color::Green),
+        )];
+    }
+    let mut spans = Vec::new();
+    if h.hazards > 0 {
+        spans.push(Span::styled(
+            format!("{} \u{00d7}{}   ", GutterKind::Hazard.icon(ascii), h.hazards),
+            Style::default().fg(Color::Red),
+        ));
+    }
+    for (label, n, color) in [
+        ("T1", h.t1, Color::LightRed),
+        ("T2", h.t2, Color::Yellow),
+        ("T3", h.t3, Color::Gray),
+    ] {
+        if n > 0 {
+            spans.push(Span::styled(
+                format!("{label}\u{00d7}{n}   "),
+                Style::default().fg(color),
+            ));
+        }
+    }
+    spans
+}
+
+fn funnel_row(indent: &str, label: &str, spans: Vec<Span<'static>>) -> Line<'static> {
+    let mut out = vec![Span::styled(
+        format!("{indent}{label}"),
+        Style::default().fg(Color::DarkGray),
+    )];
+    out.extend(spans);
+    Line::from(out)
+}
+
+fn count_span(prefix: &str, n: u32, color: Color) -> Span<'static> {
+    Span::styled(format!("{prefix}+{n}   "), Style::default().fg(color))
+}
+
+fn render_funnel(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    title: &str,
+    summary: &crate::cli::diff::summary::DiffSummary,
+    border: Style,
+) {
+    let bar_w = (area.width as usize).saturating_sub(28).clamp(10, 40);
+    let mut body: Vec<Line> = Vec::new();
+
+    // Funnel: total -> code/other -> prod/test -> visibility.
+    body.push(Line::from(vec![
+        Span::styled(
+            format!("+{} ", summary.total_added),
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("-{} ", summary.total_removed),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("lines changed".to_string(), Style::default().fg(Color::Gray)),
+    ]));
+    body.push(funnel_row(
+        "├ ",
+        "",
+        vec![
+            count_span("code ", summary.code_added, Color::LightGreen),
+            count_span("md/other ", summary.other_added, Color::Gray),
+        ],
+    ));
+    body.push(funnel_row(
+        "├ ",
+        "",
+        vec![
+            count_span("prod ", summary.prod_code, Color::LightGreen),
+            count_span("tests ", summary.test_code, Color::Cyan),
+        ],
+    ));
+    body.push(funnel_row(
+        "│   ",
+        "",
+        vec![
+            count_span("public ", summary.public, Color::White),
+            count_span("private ", summary.private, Color::Gray),
+            count_span("other ", summary.other_vis, Color::DarkGray),
+        ],
+    ));
+    body.push(Line::from(""));
+
+    // Coverage bar + hazards.
+    let mut cov = vec![Span::styled(
+        "coverage ".to_string(),
+        Style::default().fg(Color::Gray),
+    )];
+    cov.extend(coverage_bar_spans(&summary.bar, bar_w));
+    body.push(Line::from(cov));
+    let mut haz = vec![Span::styled(
+        "hazards  ".to_string(),
+        Style::default().fg(Color::Gray),
+    )];
+    haz.extend(hazard_spans(&summary.hazards, app.ascii));
+    body.push(Line::from(haz));
+    body.push(Line::from(""));
+
+    // Per-language breakdown.
+    body.push(Line::from(Span::styled(
+        "by language".to_string(),
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+    for lang in &summary.langs {
+        let mut spans = vec![Span::styled(
+            format!("  {:<10} ", truncate(&lang.language, 10)),
+            Style::default().fg(Color::Cyan),
+        )];
+        spans.push(count_span("", lang.public, Color::White));
+        spans.push(count_span("", lang.private, Color::Gray));
+        spans.push(Span::raw(" "));
+        spans.extend(coverage_bar_spans(&lang.bar, (bar_w / 2).max(8)));
+        body.push(Line::from(spans));
+    }
+
+    let widget = Paragraph::new(body)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border)
+                .title(title.to_string()),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(widget, area);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -476,7 +696,7 @@ fn render_code(
 ) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(5), Constraint::Min(1)])
+        .constraints([Constraint::Length(4), Constraint::Min(1)])
         .split(area);
     let info_widget = Paragraph::new(info_lines(info))
         .block(
@@ -501,7 +721,7 @@ fn render_code(
             if i == app.code_cursor {
                 cursor_row = out.len() as u16;
             }
-            out.push(pane_line_spans(
+            out.extend(pane_line_rows(
                 line,
                 app.ascii,
                 app.truecolor,
@@ -519,15 +739,15 @@ fn render_code(
     } else {
         // Overview mode: fold unchanged runs.
         let max_rows = code_area.height.saturating_sub(2) as usize;
-        let out = fold_lines(lines, max_rows)
-            .iter()
-            .map(|row| match row {
+        let mut out: Vec<Line> = Vec::new();
+        for row in fold_lines(lines, max_rows) {
+            match row {
                 DisplayRow::Code(l) => {
-                    pane_line_spans(l, app.ascii, app.truecolor, &lang, width, false)
+                    out.extend(pane_line_rows(l, app.ascii, app.truecolor, &lang, width, false))
                 }
-                DisplayRow::Elision => elision_line(),
-            })
-            .collect();
+                DisplayRow::Elision => out.push(elision_line()),
+            }
+        }
         (out, 0)
     };
 
@@ -869,6 +1089,76 @@ mod tests {
             0,
             "non-truecolor terminals must not emit RGB background tints"
         );
+    }
+
+    #[test]
+    fn long_lines_wrap_with_a_hanging_indent() {
+        let mut app = app_no_evidence();
+        let long = format!("    let x = \"{}\";", "abcdefgh ".repeat(20));
+        app.sources.insert(
+            "src/app.rs".to_string(),
+            format!("pub fn handler() {{\n{long}\n    let b = 2;\n}}\n"),
+        );
+        // Widen the unit so the long line is inside it.
+        app.changes[0].units[0].end_line = 4;
+        select(&mut app, "handler()");
+        app.focus = crate::cli::tui::app::Focus::Code;
+        let term = draw(&app, 0.0);
+        let text = buffer_text(&term);
+        // The tail of the long line is present (it wrapped rather than being cut).
+        assert!(text.contains("abcdefgh"), "wrapped content should be visible");
+        // No raw tab, and the line number 2 appears exactly once (continuation
+        // rows carry no line number).
+        let twos = text.matches("    2 +").count() + text.matches("    2  ").count();
+        assert!(twos <= 1, "line number must not repeat on wrapped rows");
+    }
+
+    #[test]
+    fn summary_row_renders_the_funnel() {
+        use crate::cli::diff::summary::{CoverageBar, DiffSummary, HazardTotals, LangRow};
+        let mut app = app_no_evidence();
+        app.summary = DiffSummary {
+            total_added: 9000,
+            total_removed: 50,
+            code_added: 8000,
+            other_added: 1000,
+            prod_code: 3000,
+            test_code: 5000,
+            public: 800,
+            private: 1800,
+            other_vis: 400,
+            bar: CoverageBar {
+                covered_killed: 40,
+                covered: 30,
+                partial: 10,
+                uncovered: 20,
+                unknown: 0,
+            },
+            hazards: HazardTotals {
+                hazards: 4,
+                t1: 10,
+                t2: 3,
+                t3: 1,
+            },
+            langs: vec![LangRow {
+                language: "ruby".into(),
+                public: 400,
+                private: 700,
+                other: 200,
+                bar: CoverageBar::default(),
+            }],
+        };
+        app.refresh_rows();
+        app.selected = 0; // the [SUMMARY] row
+        let text = buffer_text(&draw(&app, 0.0));
+        assert!(text.contains("[SUMMARY]"), "left pane lists the summary row");
+        assert!(text.contains("+9000"), "funnel shows total added");
+        assert!(text.contains("code +8000"), "code vs other split");
+        assert!(text.contains("public +800"), "visibility split");
+        assert!(text.contains("by language") && text.contains("ruby"));
+        assert!(text.contains("T1"), "hazard tier row");
+        // The coverage bar drew colored segment glyphs.
+        assert!(text.contains('*') && text.contains('+') && text.contains('-'));
     }
 
     #[test]

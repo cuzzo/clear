@@ -7,6 +7,8 @@ use crate::model::UnitKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
+    /// The synthetic top row: the whole-change funnel summary.
+    Summary,
     Root,
     Project,
     Directory,

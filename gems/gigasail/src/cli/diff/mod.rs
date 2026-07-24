@@ -2,6 +2,7 @@
 
 pub mod gitdiff;
 pub mod risk;
+pub mod summary;
 pub mod tree;
 pub mod units;
 pub mod visibility;

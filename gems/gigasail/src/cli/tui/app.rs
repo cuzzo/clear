@@ -6,6 +6,7 @@
 
 use crate::cli::diff::gitdiff::{FileDiff, LineOrigin};
 use crate::cli::diff::risk::CoverageState;
+use crate::cli::diff::summary::DiffSummary;
 use crate::cli::diff::tree::{Node, NodeKind};
 use crate::cli::diff::units::{ChangedUnit, FileChange};
 use crate::cli::gutter::GutterKind;
@@ -41,6 +42,8 @@ pub struct App {
     /// Whether the terminal supports 24-bit color (gates the diff row tints).
     pub truecolor: bool,
     pub target_label: String,
+    /// The whole-change funnel, shown when the `[SUMMARY]` row is selected.
+    pub summary: DiffSummary,
     /// Files with a diff, in display order (for header counts).
     pub file_count: usize,
     pub hazard_count: u32,
@@ -129,6 +132,8 @@ pub enum PaneBody {
     },
     /// A container: coverage stats + riskiest children with condensed findings.
     Summary(SummaryView),
+    /// The top-level language funnel (the `[SUMMARY]` row).
+    Funnel(DiffSummary),
     Empty(String),
 }
 
@@ -179,6 +184,7 @@ impl App {
             ascii: false,
             truecolor: true,
             target_label,
+            summary: DiffSummary::default(),
             focus: Focus::Tree,
             code_cursor: 0,
             detail_open: HashSet::new(),
@@ -197,10 +203,29 @@ impl App {
     }
 
     pub fn refresh_rows(&mut self) {
-        self.rows = flatten(&self.root, &self.search);
+        // The synthetic `[SUMMARY]` row always leads the list; it carries the
+        // whole-change totals and, when selected, shows the funnel.
+        let mut rows = vec![FlatRow {
+            path: Vec::new(),
+            depth: 0,
+            label: "[SUMMARY]".into(),
+            kind: NodeKind::Summary,
+            added: self.summary.total_added,
+            removed: self.summary.total_removed,
+            risk: 0.0,
+            has_children: false,
+            open: false,
+        }];
+        rows.extend(flatten(&self.root, &self.search));
+        self.rows = rows;
         if self.selected >= self.rows.len() {
             self.selected = self.rows.len().saturating_sub(1);
         }
+    }
+
+    /// Whether the selected row is the synthetic summary row.
+    fn summary_selected(&self) -> bool {
+        self.selected_row().map(|r| r.kind) == Some(NodeKind::Summary)
     }
 
     pub fn selected_row(&self) -> Option<&FlatRow> {
@@ -208,6 +233,9 @@ impl App {
     }
 
     pub fn selected_node(&self) -> Option<&Node> {
+        if self.summary_selected() {
+            return None;
+        }
         let path = &self.selected_row()?.path;
         node_at(&self.root, path)
     }
@@ -546,6 +574,13 @@ impl App {
     /// Build the right pane for the current selection: a function shows its
     /// code; a container shows a level-appropriate risk summary.
     pub fn right_pane(&self) -> RightPane {
+        if self.summary_selected() {
+            return RightPane {
+                title: "Change summary".into(),
+                body: PaneBody::Funnel(self.summary.clone()),
+                path: None,
+            };
+        }
         let node = match self.selected_node() {
             Some(node) => node,
             None => {
@@ -740,8 +775,9 @@ mod tests {
     #[test]
     fn collapse_and_expand_change_visible_rows() {
         let mut app = sample_app();
-        app.selected = 0; // the project row (a container with children)
-                          // h collapses, l expands (arrows now switch panes).
+        // Row 0 is the [SUMMARY] row; select the first collapsible container.
+        app.selected = app.rows.iter().position(|r| r.has_children).unwrap();
+        // h collapses, l expands (arrows now switch panes).
         let before = app.rows.len();
         app.handle_key(key(KeyCode::Char('h')));
         let after = app.rows.len();
@@ -763,7 +799,7 @@ mod tests {
     #[test]
     fn space_toggles_directory_in_tree_pane() {
         let mut app = sample_app();
-        app.selected = 0; // a container row
+        app.selected = app.rows.iter().position(|r| r.has_children).unwrap();
         let open_rows = app.rows.len();
         app.handle_key(key(KeyCode::Char(' '))); // collapse
         assert!(app.rows.len() < open_rows);

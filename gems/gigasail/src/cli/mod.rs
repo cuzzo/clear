@@ -35,6 +35,7 @@ type View = (
     HashMap<String, FileDiff>,
     HashMap<String, String>,
     HashMap<String, Vec<LineEvidence>>,
+    crate::cli::diff::summary::DiffSummary,
 );
 
 /// Entry point for the `diff` subcommand's interactive renderer.
@@ -73,7 +74,7 @@ pub fn run_diff(
         return Ok(());
     }
 
-    let (root, changes, files, sources, line_ev) = plan_to_view(&result.plan);
+    let (root, changes, files, sources, line_ev, summary) = plan_to_view(&result.plan);
 
     if no_tui || !std::io::stdout().is_terminal() {
         print_tree(&label, &root);
@@ -92,6 +93,10 @@ pub fn run_diff(
     );
     app.ascii = tui::detect_ascii();
     app.truecolor = tui::detect_truecolor();
+    // Populate the funnel and start on the `[SUMMARY]` row.
+    app.summary = summary;
+    app.refresh_rows();
+    app.selected = 0;
     let _ = tui::run(app)?;
     Ok(())
 }
@@ -188,7 +193,8 @@ pub fn plan_to_view(plan: &DiffPlan) -> View {
     }
 
     let root = build_tree(&changes, project_root_of);
-    (root, changes, files, sources, line_ev)
+    let summary = crate::cli::diff::summary::build_summary(plan, &changes);
+    (root, changes, files, sources, line_ev, summary)
 }
 
 /// Convert a plan `DiffGroup` into a view-model `ChangedUnit`.
@@ -419,7 +425,7 @@ mod tests {
                 "pub fn a() {}\npub fn b() {}\n",
             )],
         );
-        let (root, changes, files, sources, _line_ev) = plan_to_view(&plan);
+        let (root, changes, files, sources, _line_ev, _summary) = plan_to_view(&plan);
         // The added function surfaces as a changed unit.
         assert!(changes
             .iter()
@@ -442,7 +448,7 @@ mod tests {
                 "fn it_works() {\n    assert!(true);\n}\n",
             )],
         );
-        let (_, changes, _, _, _) = plan_to_view(&plan);
+        let (_, changes, _, _, _, _) = plan_to_view(&plan);
         assert!(changes.iter().all(|change| change.is_test));
     }
 
