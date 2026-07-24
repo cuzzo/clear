@@ -15,6 +15,9 @@ use std::path::Path;
 /// giga-ui runtime overlay. Exposed as a const so consumers across the crate
 /// boundary reuse the single source instead of a cross-crate `include_str!`.
 pub const APPLY_HOTNESS_SQL: &str = include_str!("../../sql/core/apply_hotness.sql");
+/// Per-line active-hazard overlay. Shared by the web UI, the LSP, and the MCP
+/// `giga_unit_context` tool — it is a Storage runtime query, so it lives here.
+pub const APPLY_HAZARDS_SQL: &str = include_str!("../../sql/core/apply_hazards.sql");
 
 pub struct Storage {
     conn: Connection,

@@ -330,6 +330,14 @@ enum Command {
         #[arg(long)]
         complete: bool,
     },
+    /// Serve gigasail.db to LLM coding agents over the Model Context Protocol.
+    /// Omit --db to run DB-less (live disk facts only; see docs/agents/mcp.md).
+    Mcp {
+        #[arg(long)]
+        db: Option<PathBuf>,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -925,6 +933,13 @@ fn main() -> Result<()> {
                 "ingested stack traces: payloads={} frames={} events={} unverified={} skipped_frames={}",
                 stats.payloads, stats.frames, stats.events, stats.unverified, stats.skipped_frames
             );
+        }
+        Command::Mcp { db, repo } => {
+            // Stdio protocol adapter over giga-core; needs an async runtime.
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(gigasail::serve_mcp(db, repo))?;
         }
     }
     Ok(())

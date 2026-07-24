@@ -13,4 +13,7 @@ pub use giga_core::{
 
 pub mod application;
 pub mod cli;
+pub mod mcp;
 pub mod watch;
+
+pub use mcp::serve_mcp;

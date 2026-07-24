@@ -3917,7 +3917,7 @@ fn apply_hazards(
 ) -> Result<()> {
     let mut stmt = storage
         .connection()
-        .prepare(include_str!("../../sql/ui/runtime/apply_hazards.sql"))?;
+        .prepare(giga_core::storage::APPLY_HAZARDS_SQL)?;
     let rows = stmt.query_map(params![path], |row| {
         Ok((
             row.get::<_, u32>(0)?,

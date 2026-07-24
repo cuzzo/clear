@@ -13,10 +13,12 @@ require "tmpdir"
 # lsp_integration_test.rb's pattern of driving the compiled binary directly
 # rather than mocking the protocol.
 class McpServerTest < Minitest::Test
-  LINEAGE_BIN = File.expand_path("../target/release/lineage", __dir__)
+  # `giga mcp` now lives in the CLI binary alongside init/build/ingest-*
+  # (the MCP server folded out of giga-ui — see docs/agents/tuning-configs.md §0).
+  LINEAGE_BIN = File.expand_path("../target/release/giga", __dir__)
 
   def setup
-    skip "lineage binary missing; build gems/lineage first" unless File.executable?(LINEAGE_BIN)
+    skip "giga binary missing; build gems/gigasail first" unless File.executable?(LINEAGE_BIN)
   end
 
   def test_all_five_tools_over_stdio
@@ -82,7 +84,7 @@ class McpServerTest < Minitest::Test
       ).first.first
       writable = SQLite3::Database.new(db)
       writable.execute(
-        File.read(File.expand_path("../sql/storage/insert_hazard_event.sql", __dir__)),
+        File.read(File.expand_path("../giga-core/sql/storage/insert_hazard_event.sql", __dir__)),
         [unit_id, "ruby", "ruby_metaprogramming", "nil-kill", "src/worker.rb", 3, "run",
          "test-fixture", "commit-1", 1, "{}"]
       )
@@ -93,12 +95,12 @@ class McpServerTest < Minitest::Test
         client.initialize!
         tool_names = client.list_tools
         assert_equal(
-          %w[lineage_file_risk lineage_unit_context lineage_verification_gaps
-             lineage_change_history lineage_find_definition].sort,
+          %w[giga_file_risk giga_unit_context giga_verification_gaps
+             giga_change_history giga_find_definition].sort,
           tool_names.sort
         )
 
-        context = client.call_tool("lineage_unit_context", { "path" => "src/worker.rb", "line" => 3 })
+        context = client.call_tool("giga_unit_context", { "path" => "src/worker.rb", "line" => 3 })
         assert_equal "Worker.run", context.dig("unit", "name")
         # A real `events` row exists after the second commit, so the span is
         # the method's true multi-line extent (def/body/end), not the
@@ -112,20 +114,20 @@ class McpServerTest < Minitest::Test
         assert_equal "test-fixture", hazard["snippet"]
         assert(context["hotness"].any? { |h| h["tier"] == "critical" })
 
-        risk = client.call_tool("lineage_file_risk", { "path" => "src/" })
+        risk = client.call_tool("giga_file_risk", { "path" => "src/" })
         assert_equal "src/*", risk["scope"]
         assert(risk["files"].any? { |f| f["current_path"] == "src/worker.rb" && f["open_hazards"] == 1 })
 
-        gaps = client.call_tool("lineage_verification_gaps", { "path" => "src/worker.rb" })
+        gaps = client.call_tool("giga_verification_gaps", { "path" => "src/worker.rb" })
         gap_hazard = gaps["open_hazards"].find { |h| h["hazard_type"] == "ruby_metaprogramming" }
         refute_nil gap_hazard
         assert_equal "test-fixture", gap_hazard["snippet"]
         assert_equal "run", gap_hazard["symbol"]
 
-        history = client.call_tool("lineage_change_history", { "path" => "src/worker.rb" })
+        history = client.call_tool("giga_change_history", { "path" => "src/worker.rb" })
         assert_operator history["events"].size, :>=, 1
 
-        definitions = client.call_tool("lineage_find_definition", { "name" => "run" })
+        definitions = client.call_tool("giga_find_definition", { "name" => "run" })
         assert(definitions["definitions"].any? { |d| d["path"] == "src/worker.rb" })
 
         # Unknown tool -> JSON-RPC error, not a crash.
@@ -192,7 +194,7 @@ class McpServerTest < Minitest::Test
       client = McpStdioClient.spawn(LINEAGE_BIN, "mcp", "--db", db, "--repo", repo)
       begin
         client.initialize!
-        context = client.call_tool("lineage_unit_context", { "path" => "src/lib.rs", "line" => 3 })
+        context = client.call_tool("giga_unit_context", { "path" => "src/lib.rs", "line" => 3 })
         assert_equal "uncommitted-changes", context["dirty"]
         refute_nil context["live_hazards"]
         unsafe_hazard = context["live_hazards"].find { |h| h["hazard_type"] == "rust_unsafe_block" }
@@ -221,18 +223,18 @@ class McpServerTest < Minitest::Test
       begin
         client.initialize!
 
-        context = client.call_tool("lineage_unit_context", { "path" => "src/lib.rs", "line" => 2 })
+        context = client.call_tool("giga_unit_context", { "path" => "src/lib.rs", "line" => 2 })
         assert_equal "risky", context.dig("unit", "name")
-        assert_match(/no lineage\.db/, context["note"])
+        assert_match(/no gigasail\.db/, context["note"])
         hazard = context["live_hazards"].find { |h| h["hazard_type"] == "rust_unsafe_block" }
         refute_nil hazard
 
-        gaps = client.call_tool("lineage_verification_gaps", { "path" => "src/lib.rs" })
+        gaps = client.call_tool("giga_verification_gaps", { "path" => "src/lib.rs" })
         refute_empty gaps["open_hazards"]
 
-        response = client.request("tools/call", { "name" => "lineage_file_risk", "arguments" => { "path" => "src/" } })
+        response = client.request("tools/call", { "name" => "giga_file_risk", "arguments" => { "path" => "src/" } })
         result = response["result"]
-        assert result["isError"], "expected lineage_file_risk to fail cleanly without a database"
+        assert result["isError"], "expected giga_file_risk to fail cleanly without a database"
       ensure
         client.shutdown!
       end
@@ -322,7 +324,7 @@ class McpServerTest < Minitest::Test
       client = McpStdioClient.spawn(LINEAGE_BIN, "mcp", "--db", db, "--repo", repo)
       begin
         client.initialize!
-        risk = client.call_tool("lineage_file_risk", { "path" => "src/lib.rs" })
+        risk = client.call_tool("giga_file_risk", { "path" => "src/lib.rs" })
         file = risk["files"].find { |f| f["current_path"] == "src/lib.rs" }
         refute_nil file
         assert_equal 2, file["units"]

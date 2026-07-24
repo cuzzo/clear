@@ -26,6 +26,11 @@ git2 = "0.18"
 ratatui = "0.29"
 serde_json = "1.0"
 ts-rs = "10.1"
+# The MCP server (`giga mcp`) is a stdio protocol adapter over giga-core;
+# it lives with the CLI, not the axum web UI. See docs/agents/tuning-configs.md §0.
+rmcp = { version = "2.2.0", features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["io-std", "macros", "rt", "rt-multi-thread"] }
+rusqlite = { version = "0.30", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "=3.10.1"

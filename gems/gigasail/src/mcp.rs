@@ -659,7 +659,7 @@ fn unit_context(
 
     let hazard_rows = query_rows(
         storage,
-        include_str!("../../sql/ui/runtime/apply_hazards.sql"),
+        giga_core::storage::APPLY_HAZARDS_SQL,
         &[path],
         &[
             "line",
