@@ -895,6 +895,32 @@ fn render_code(
     frame.render_widget(code, code_area);
 }
 
+/// The kind header a container-summary row is grouped under. Structs and
+/// classes both surface as `NodeKind::Class` in the giga-core DB, so they share
+/// one label; anything that is not a code unit falls through to `Other:`.
+fn section_label(kind: crate::cli::diff::tree::NodeKind) -> &'static str {
+    use crate::cli::diff::tree::NodeKind;
+    match kind {
+        NodeKind::Function => "Functions:",
+        NodeKind::Class => "Structs / Classes:",
+        NodeKind::File => "Files:",
+        NodeKind::Directory => "Directories:",
+        _ => "Other:",
+    }
+}
+
+/// Section labels in display order. Rows whose kind maps to a label appear
+/// under it; empty sections are skipped by the caller.
+fn summary_sections() -> [(usize, &'static str); 5] {
+    [
+        (0, "Functions:"),
+        (1, "Structs / Classes:"),
+        (2, "Files:"),
+        (3, "Directories:"),
+        (4, "Other:"),
+    ]
+}
+
 fn render_summary(
     frame: &mut Frame,
     app: &App,
@@ -974,8 +1000,25 @@ fn render_summary(
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        for row in &summary.rows {
-            body.push(row_line(row));
+        // Group rows under kind headers ("Functions:", "Structs / Classes:",
+        // ...), driven by the giga-core unit kind already on each row. Rows keep
+        // their risk order within a section. Only non-empty sections print.
+        for (_, label) in summary_sections() {
+            let section: Vec<&SummaryRow> = summary
+                .rows
+                .iter()
+                .filter(|row| section_label(row.kind) == label)
+                .collect();
+            if section.is_empty() {
+                continue;
+            }
+            body.push(Line::from(Span::styled(
+                label.to_string(),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            )));
+            for row in section {
+                body.push(row_line(row));
+            }
         }
     }
 
@@ -1490,6 +1533,8 @@ mod tests {
         assert!(text.contains("verify"));
         // The summary shows coverage buckets and condensed findings.
         assert!(text.contains("uncovered"));
+        // Function children are grouped under a kind header.
+        assert!(text.contains("Functions:"), "kind section header");
     }
 
     #[test]
