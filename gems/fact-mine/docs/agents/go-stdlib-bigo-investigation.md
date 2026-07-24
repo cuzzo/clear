@@ -2,122 +2,128 @@
 
 ## Question
 
-Would running our full Big-O analysis over the Go standard library (and vendor
-packages), then consuming those per-function bounds as known callee
-complexities, **substantially** increase `complete` Big-O coverage for Go
-packages? If yes, decide whether to build it.
+Would resolving external (stdlib/vendor) callee bounds substantially increase
+`complete` Big-O for Go **production** code? Is >80% reachable? If so, what is
+the smarter method, and should we build it?
 
-This extends two existing docs:
-- `fact-mine/docs/agents/stdlib-complexity-registry-audit.md` - the hand-authored
-  stdlib *name-mapping* registry. It gave Go **+0** complete functions, because
-  it only maps intrinsics (`len`/`cap`/typed slice/map/string ops), not the
-  high-frequency packages (`fmt`, `filepath`, `os`).
-- `fact-mine/docs/agents/minimal-call-graph-feasibility.md` - concluded "don't
-  build," but measured on **`compiler/ruby`**, where blockers are dynamic
-  dispatch / receiver ambiguity. Go is statically typed with explicit,
-  package-qualified stdlib calls, so that conclusion does not transfer unexamined.
+Tests are excluded throughout: we care about the library/production runtime
+complexity, not table-driven test harnesses.
 
 ## Method
 
-Sampled two real, low-dependency Go repos: `~/unslop` (157 fns) and
-`gems/boobytrap/src` (131 fns). For each:
-1. `espalier -f architecture` -> per-function `time_complete` + `big_o_time`
-   (the known structural component).
-2. `espalier -f unknown_operations` -> ranked operations blocking completeness,
-   with the incomplete functions each one blocks.
-3. Classified every blocking operation against GOROOT's authoritative package
-   set (`/usr/lib/go-1.22/src`, 224 leaf packages) and the repo's own packages:
-   stdlib call / project call / typed receiver-method / unresolved-or-callback.
-4. Per incomplete function, required **both** a concrete known structural
-   component **and** all call-blockers resolvable, to count it "completable".
-5. Ran the analysis over the hot stdlib packages themselves to measure how many
-   stdlib functions actually yield a usable bound.
+Sampled `~/unslop` and `gems/boobytrap/src` (boobytrap is itself Go). For each,
+`espalier -f architecture` (per-function `time_complete` + `big_o_time` known
+component) and `-f unknown_operations` (ranked blockers + the functions each
+blocks). Classified every blocker against GOROOT's 224-package set
+(`/usr/lib/go-1.22/src`) and the repo's own packages. A function is "completable
+by X" only if it has a concrete known structural component **and** all its
+call-blockers are resolvable by X.
 
 ## Findings
 
-### 1. Go's incompleteness IS call-dominated (unlike Ruby)
+### 1. For production Go, structural loops/recursion are a non-issue
 
-Current `time_complete`: unslop 18% (29/157), boobytrap 30% (39/131).
+The "structural ceiling" is a test-code artifact. Structurally-unbounded
+(`big_o_time = None`) production functions:
 
-Of the incomplete functions, the blocker composition (unslop / boobytrap):
+| Repo | all fns | `_test.go` incl. structural-unknown | **production** structural-unknown |
+|---|---:|---:|---:|
+| unslop | 157 | 39 | **3** |
+| boobytrap | 131 | 46 | **0** |
 
-| Blocker category | unslop | boobytrap | stdlib analysis helps? |
-|---|---:|---:|---|
-| concrete structure + only stdlib/project calls | 49 (38%) | 36 (39%) | **yes** |
-| + also typed stdlib-type receiver methods | 12 (9%) | 1 (1%) | yes, with type modeling |
-| unresolved receiver / callback call | 28 (22%) | 9 (10%) | no |
-| structurally unbounded loop / recursion | 39 (30%) | 46 (50%) | no |
+Test functions are table-driven (constant cases) or call unresolved `testing`
+methods; they dominated the earlier "unbounded loop" bucket. Production Go loops
+are almost all range-over-collection with a known cardinality domain, which the
+existing analyzer already bounds.
 
-Naive ceiling if analyzed stdlib bounds were complete and consumed:
-unslop **18% -> 50%**, boobytrap **30% -> 57%** - roughly a doubling. `fmt`,
-`filepath`, `os`, `exec` are the dominant blockers. This is the opposite of the
-Ruby registry result and confirms the call-blocker lever is real for Go.
+### 2. Production completeness is gated by callee resolution, and it climbs fast
 
-### 2. But the naive ceiling is not realizable by pure analysis
+| Step (production only) | unslop (121 fns) | boobytrap (85 fns) |
+|---|---:|---:|
+| complete now | 24% | 46% |
+| + stdlib/project package-call bounds | **64%** | **88%** |
+| + typed stdlib-type receiver methods | **74%** | 89% |
+| truly structural-unbounded (irreducible) | 3 fns | 0 fns |
 
-The Go stdlib **itself is only 33% complete** when we analyze it (170/515 fns
-over `fmt`, `path/filepath`, `strconv`, `strings`, `sort`). Worse, the
-highest-frequency blockers are themselves incomplete:
+The residual after package-call bounds is "unresolved receiver" calls. Inspected
+directly, these are **overwhelmingly stdlib type methods on locals whose type
+was not propagated**: `mu.Lock` (sync.Mutex), `wg.Done` (sync.WaitGroup),
+`info.ModTime`/`info.Size` (os.FileInfo), `d.IsDir` (fs.DirEntry),
+`f.Close`/`f.Fd` (*os.File), `flags.Bool` (*flag.FlagSet),
+`inputBuf.WriteByte` (bytes.Buffer), `effTime.After` (time.Time). Only a few are
+project methods. None are unbounded - each is O(1)/amortized-O(1) once the
+receiver type is known. Resolving them pushes unslop from 74% toward **~90%**.
 
-- Complete: `filepath.Join` O(1), `filepath.ToSlash` O(N).
-- Incomplete: `fmt.Sprintf/Errorf/Fprintf` (reflection over `interface{}`),
-  `filepath.Base/Dir/Ext`, `strconv.Itoa/Atoi`.
+This matches `espalier/docs/agents/complexity-coverage.md`: "the dominant
+remaining gap is **receiver/callee resolution, not loop or recursion
+recognition**."
 
-`fmt.*` alone is ~40% of stdlib-call blocker occurrences and is reflection-based;
-callback-takers (`sort.Slice`, `filepath.WalkDir`) are input-dependent. Feeding
-an *incomplete* stdlib bound does not complete the caller (completeness is
-transitive), so pure automated stdlib analysis realizes only a fraction of the
-50%/57% ceiling.
+### 3. But raw analysis of the stdlib does not, by itself, deliver the bounds
 
-### 3. Vendor adds ~nothing for these repos
+The Go stdlib is only **33% complete** when analyzed (170/515 over
+`fmt`,`filepath`,`strconv`,`strings`,`sort`), and the highest-frequency blockers
+are themselves incomplete: `fmt.Sprintf/Errorf/Fprintf` (reflection - ~40% of
+stdlib-call blockers), `filepath.Base/Dir/Ext`, `strconv.Itoa/Atoi`. Only
+`filepath.Join`/`ToSlash` came back complete. Completeness is transitive, so
+consuming an incomplete stdlib bound does not complete the caller. The bounds
+must be **asserted** (a sound semantic bound, e.g. `fmt.Sprintf` = O(total input
+size)), with analysis supplying the draft.
 
-Both repos are near-zero-dependency; the "project/vendor" blocker share was
-negligible. Vendor's value is entirely repo-specific and only shows up on
-dependency-heavy code (e.g. fzf). It should not be built or judged until
-measured on such a repo.
+### 4. Vendor is repo-specific and secondary
 
-### 4. Hard ceiling ~55-60%
-
-Structurally unbounded loops/recursion (30-50%) and unresolved
-receivers/callbacks (10-22%) are untouched by any external-bound work. Even a
-perfect stdlib+vendor+type model caps Go `complete` near 55-60%, not 80%.
+Both repos are near-zero-dependency; the vendor/project blocker share was
+negligible. Vendor's value only appears on dependency-heavy code and must be
+measured on such a repo (e.g. fzf) before it is judged - it is not the lever
+for typical Go code.
 
 ## Determination
 
-**Yes, external stdlib bounds are the single largest fixable lever for Go
-completeness - but "run the analysis over GOROOT and consume it" is the wrong
-build.** The stdlib's own hot functions are incomplete or reflection/callback
-dependent, so automated consumption yields little.
+**>80% complete Big-O for production Go is reachable, and my earlier ~55-60%
+ceiling was wrong** - it counted test-code loop noise. Excluding tests,
+structural incompleteness is ~0; completeness is bounded almost entirely by
+**callee/receiver resolution into the standard library**, which is tractable
+because Go calls are statically typed and package-qualified.
 
-The substantial, tractable win is a **curated authoritative-bound table for the
-top ~20-30 highest-frequency Go stdlib functions** (`fmt.Sprintf/Errorf/Fprintf`,
-`filepath.*`, `os.*`, `strconv.*`, `strings.*`), where:
-- Espalier's analysis over the stdlib supplies the **draft** known component
-  (e.g. `filepath.Base` = O(N+M)) - it does the tedious first pass.
-- A human closes the reflection/callback cases with a sound semantic bound
-  (e.g. `fmt.Sprintf` = O(total input size)) and promotes correct-but-marked-
-  incomplete bounds to authoritative.
-- The result lands in the existing `config/stdlib_complexity/go.yml`, extending
-  the registry the audit found too sparse - not a new subsystem.
+The smarter method is two coupled pieces, not "analyze GOROOT and consume it":
 
-This is analysis-*assisted registry curation*, ranked by the
-`unknown_operations` occurrence counts, not a full stdlib-analysis pipeline.
+1. **An asserted Go stdlib bound table covering both forms** in
+   `config/stdlib_complexity/go.yml`:
+   - package functions (`fmt.*`, `filepath.*`, `os.*`, `exec.*`, `strconv.*`,
+     `strings.*`), and
+   - **type methods** (`sync.Mutex`, `sync.WaitGroup`, `*os.File`,
+     `os.FileInfo`, `fs.DirEntry`, `bytes.Buffer`, `strings.Builder`,
+     `time.Time`, `*flag.FlagSet`).
+
+   Espalier's stdlib analysis supplies the draft known component; a human closes
+   the reflection/callback cases with a sound bound. Ranked by
+   `unknown_operations` occurrence, ~30-40 entries cover the bulk.
+
+2. **Local/flow receiver type resolution** so `mu`, `info`, `f`, `flags` resolve
+   to their stdlib types and pick up (1). This is the dominant gap named in
+   `complexity-coverage.md`; for Go it is available from declared/assigned local
+   types (or `go/types`/SSA for the hard cases).
+
+With both, the sampled repos project to ~90% (unslop) / ~89% (boobytrap)
+complete on production code. Vendor is a later, repo-specific add-on.
+
+This revises the "don't build" of `minimal-call-graph-feasibility.md`, whose
+data was Ruby (dynamic dispatch). Go's static typing makes the same lever pay
+off very differently.
 
 ## Recommended validation before building
 
-Cheap prototype to convert the ceiling into a measured number: assert
-authoritative bounds for the top ~25 Go stdlib functions in `go.yml`, re-run
-architecture analysis on unslop + boobytrap + one dependency-heavy repo (fzf),
-and measure the real `time_complete` delta. Build the curation effort only if
-that delta clears an agreed bar (suggest: +15 absolute percentage points).
+Assert the top ~30 Go stdlib bounds (package fns + type methods) in `go.yml`,
+add the local receiver-type resolution, re-run architecture on unslop +
+boobytrap + a dependency-heavy repo (fzf), production functions only, and
+confirm `time_complete` clears 80%. Build in that order; stop if step 1 alone
+does not reach ~65%.
 
 ## Reproduction
 
 ```sh
-# per-function completeness + blockers
-espalier -f architecture       -o arch.json    <go files...>
-espalier -f unknown_operations -o unknown.json <go files...>
-# stdlib self-completeness
+espalier -f architecture       -o arch.json    <non-test go files...>
+espalier -f unknown_operations -o unknown.json <non-test go files...>
 espalier -f architecture -o stdlib.json \
   /usr/lib/go-1.22/src/{fmt,path/filepath,strconv,strings,sort}/*.go  # exclude _test
+# then: filter arch nodes to paths not ending _test.go; measure time_complete
 ```
