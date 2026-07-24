@@ -10,7 +10,7 @@ pub const DEFAULT_CODE_EXTENSIONS: &[&str] = &[
 ];
 const DEFAULT_IGNORED_COMPONENTS: &[&str] = &[
     ".git",
-    ".gigasail",
+    ".giga",
     ".zig-cache",
     ".clear-cache",
     ".clear-transpile-cache",

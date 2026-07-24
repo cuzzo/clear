@@ -15,7 +15,7 @@ struct Cli {
 enum Command {
     /// Serve the local Gigasail source and verification UI.
     Serve {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -28,7 +28,7 @@ enum Command {
     },
     /// Run the Gigasail language server over stdio.
     Lsp {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,

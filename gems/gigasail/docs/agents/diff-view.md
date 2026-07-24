@@ -332,7 +332,7 @@ Repository configuration can add custom manifests, change a category, or
 disable an overly broad rule.
 
 The shipped override file is revision-scoped: Gigasail reads
-`.gigasail/diff.toml` from the selected immutable head revision. It supports
+`.giga/diff.toml` from the selected immutable head revision. It supports
 auditable exact-path and directory-prefix source-role overrides; overrides win
 over catalog and convention classification:
 

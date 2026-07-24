@@ -18,7 +18,7 @@ pub struct RevisionFile {
 }
 
 /// Repository-local source-role overrides, parsed from the immutable head
-/// revision's `.gigasail/diff.toml`. They are intentionally limited to exact
+/// revision's `.giga/diff.toml`. They are intentionally limited to exact
 /// paths and directory prefixes so classification remains auditable and does
 /// not need a second glob language.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1874,7 +1874,7 @@ impl ClassificationOverrides {
     }
 }
 
-/// Parses `.gigasail/diff.toml` from the selected head revision. Invalid,
+/// Parses `.giga/diff.toml` from the selected head revision. Invalid,
 /// absolute, and traversal paths are ignored rather than applying a broad
 /// classification to an unintended file.
 pub fn classification_overrides(contents: Option<&str>) -> ClassificationOverrides {
@@ -1980,7 +1980,7 @@ fn is_lockfile(path: &str) -> bool {
 
 fn config_kind(path: &str) -> Option<&'static str> {
     let file = path.rsplit('/').next().unwrap_or(path);
-    if path == ".gigasail/diff.toml" {
+    if path == ".giga/diff.toml" {
         return Some("gigasail");
     }
     if path.starts_with(".github/workflows/") && (file.ends_with(".yml") || file.ends_with(".yaml"))
@@ -3362,7 +3362,7 @@ mod tests {
             SourceRole::Production
         );
         assert_eq!(
-            source_role_with_overrides(".gigasail/diff.toml", &overrides),
+            source_role_with_overrides(".giga/diff.toml", &overrides),
             SourceRole::Configuration
         );
     }

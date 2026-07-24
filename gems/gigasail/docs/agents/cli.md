@@ -189,7 +189,7 @@ transactional ingestion.
 The preferred complete form consumes a run manifest:
 
 ```sh
-giga ingest --run .gigasail/runs/RUN_ID/manifest.json
+giga ingest --run .giga/runs/RUN_ID/manifest.json
 ```
 
 This permits ingestion from GitHub Actions, Buildkite, Jenkins, Bazel, Codecov,
@@ -268,7 +268,7 @@ error; there must be no precedence ambiguity.
 Gigasail should publish a JSON Schema for validation, editor completion, and
 stable versioning.
 
-The existing `.gigasail/diff.toml` classification overrides should migrate into
+The existing `.giga/diff.toml` classification overrides should migrate into
 this schema. A compatibility reader may remain for a bounded migration period,
 but Gigasail must not maintain two independent long-term configuration models.
 
@@ -313,7 +313,7 @@ producers:
     targets: ["//..."]
     produces:
       - kind: bazel-bep
-        path: .gigasail/artifacts/bep.json
+        path: .giga/artifacts/bep.json
 ```
 
 The config describes evidence producers and their declared artifacts. It must
@@ -430,7 +430,7 @@ Exact numeric exit codes should be stable and documented for CI consumers.
 8. Add the Bazel executor and BEP adapter.
 9. Convert `tools/import_repo.rb` into a compatibility wrapper around the new
    commands, then remove its duplicated orchestration.
-10. Migrate `.gigasail/diff.toml` classification into `gigasail.yml`.
+10. Migrate `.giga/diff.toml` classification into `gigasail.yml`.
 
 ## Acceptance Criteria
 

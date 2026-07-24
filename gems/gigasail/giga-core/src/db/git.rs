@@ -134,7 +134,7 @@ impl GitProvider {
                     base,
                     head,
                     renames,
-                    self.file_contents_in_worktree(".gigasail/diff.toml")?,
+                    self.file_contents_in_worktree(".giga/diff.toml")?,
                 )
             } else {
                 let head_oid = self.resolve_commit(head_revision)?;
@@ -147,7 +147,7 @@ impl GitProvider {
                     base,
                     head,
                     renames,
-                    self.file_contents_at_commit(&head_oid, ".gigasail/diff.toml")?,
+                    self.file_contents_at_commit(&head_oid, ".giga/diff.toml")?,
                 )
             };
         let overrides = classification_overrides(override_contents.as_deref());
@@ -1079,7 +1079,7 @@ mod tests {
             &[
                 ("spec/value_spec.rb", "describe :value do\n  value\nend\n"),
                 (
-                    ".gigasail/diff.toml",
+                    ".giga/diff.toml",
                     "[[overrides]]\nprefix = \"spec/\"\nrole = \"production\"\n",
                 ),
             ],
@@ -1112,7 +1112,7 @@ mod tests {
                     "describe :value do\n  value\nend\n",
                 ),
                 (
-                    "crate/.gigasail/diff.toml",
+                    "crate/.giga/diff.toml",
                     "[[overrides]]\nprefix = \"spec/\"\nrole = \"production\"\n",
                 ),
             ],

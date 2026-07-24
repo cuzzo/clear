@@ -2413,10 +2413,10 @@ pub fn validate_relative_path(path: &Path, label: &str) -> Result<()> {
 fn validate_artifact_directory(path: &Path) -> Result<()> {
     validate_relative_path(path, "artifacts.directory")?;
     // A project may keep the database, run store, and declared producer
-    // outputs under one `.gigasail/` root. Keep the historical
-    // `.gigasail/artifacts/` default, but do not force a split that makes the
+    // outputs under one `.giga/` root. Keep the historical
+    // `.giga/artifacts/` default, but do not force a split that makes the
     // database look like a source-tree mutation during subproject CI.
-    let reserved = Path::new(".gigasail");
+    let reserved = Path::new(".giga");
     if !path.starts_with(reserved) {
         bail!("artifacts.directory must be beneath {}", reserved.display());
     }
@@ -2449,7 +2449,7 @@ fn is_environment_key_continue(byte: u8) -> bool {
 }
 
 fn default_artifact_directory() -> PathBuf {
-    PathBuf::from(".gigasail/artifacts")
+    PathBuf::from(".giga/artifacts")
 }
 
 fn default_compression() -> ArtifactCompression {
@@ -2533,7 +2533,7 @@ mod tests {
         assert_eq!(config.artifacts.compression, ArtifactCompression::Gzip);
         assert_eq!(
             latest_run_directory(directory.path(), &config),
-            directory.path().join(".gigasail/artifacts/latest")
+            directory.path().join(".giga/artifacts/latest")
         );
         assert_eq!(config.profiles["ci"].producers, ["coverage"]);
     }
@@ -2552,7 +2552,7 @@ mod tests {
             .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
             .unwrap();
 
-        let artifact_directory = Path::new(".gigasail/artifacts");
+        let artifact_directory = Path::new(".giga/artifacts");
         let clean =
             working_tree_fingerprint(directory.path(), artifact_directory, &BTreeSet::new())
                 .unwrap();
@@ -2574,9 +2574,9 @@ mod tests {
         let untracked =
             working_tree_fingerprint(directory.path(), artifact_directory, &BTreeSet::new())
                 .unwrap();
-        fs::create_dir_all(directory.path().join(".gigasail/artifacts")).unwrap();
+        fs::create_dir_all(directory.path().join(".giga/artifacts")).unwrap();
         fs::write(
-            directory.path().join(".gigasail/artifacts/transient.json"),
+            directory.path().join(".giga/artifacts/transient.json"),
             "{}\n",
         )
         .unwrap();
@@ -2758,7 +2758,7 @@ mod tests {
         );
         let failed = directory
             .path()
-            .join(".gigasail/artifacts/runs")
+            .join(".giga/artifacts/runs")
             .read_dir()
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -2933,7 +2933,7 @@ mod tests {
         .unwrap();
         let run = directory
             .path()
-            .join(".gigasail/artifacts/runs/.staging-interrupted");
+            .join(".giga/artifacts/runs/.staging-interrupted");
         fs::create_dir_all(&run).unwrap();
         let transaction =
             quarantine_profile_outputs(directory.path(), &run, &config.profiles["ci"], &config)
@@ -2984,7 +2984,7 @@ mod tests {
         .unwrap();
         let run = directory
             .path()
-            .join(".gigasail/artifacts/runs/.staging-interrupted");
+            .join(".giga/artifacts/runs/.staging-interrupted");
         fs::create_dir_all(&run).unwrap();
         let transaction =
             quarantine_profile_outputs(directory.path(), &run, &config.profiles["ci"], &config)
@@ -3181,7 +3181,7 @@ mod tests {
                 seal_published_run(&run.directory).unwrap();
             }
         }
-        let runs = fs::read_dir(directory.path().join(".gigasail/artifacts/runs"))
+        let runs = fs::read_dir(directory.path().join(".giga/artifacts/runs"))
             .unwrap()
             .filter_map(std::result::Result::ok)
             .filter(|entry| entry.file_name().to_string_lossy().starts_with("analysis-"))
@@ -3236,7 +3236,7 @@ mod tests {
             .to_string();
         assert!(error.contains("validate SARIF artifact"), "{error}");
         assert!(
-            fs::read_dir(directory.path().join(".gigasail/artifacts/runs"))
+            fs::read_dir(directory.path().join(".giga/artifacts/runs"))
                 .unwrap()
                 .filter_map(std::result::Result::ok)
                 .all(|entry| !entry.file_name().to_string_lossy().starts_with("analysis-"))

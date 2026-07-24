@@ -46,7 +46,7 @@ enum Command {
     Analyse {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = "analyse")]
         profile: String,
@@ -63,7 +63,7 @@ enum Command {
     Ci {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = "ci")]
         profile: String,
@@ -85,7 +85,7 @@ enum Command {
     Diff {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(value_name = "BASE")]
         base: Option<String>,
@@ -123,12 +123,12 @@ enum Command {
     },
     /// Initialize an empty gigasail SQLite database.
     Init {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
     },
     /// Ingest a versioned Espalier architecture graph artifact.
     IngestArchitecture {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long)]
         input: PathBuf,
@@ -137,14 +137,14 @@ enum Command {
     Build {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long)]
         max_commits: Option<usize>,
     },
     /// Print the highest-risk logical units from a gigasail database.
     Summary {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value_t = 20)]
         top: usize,
@@ -155,12 +155,12 @@ enum Command {
     },
     /// Refresh materialized UI summaries for fast dashboard and file index reads.
     RefreshUi {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
     },
     /// Ingest aggregate coverage or mutation quality data for one commit.
     IngestCoverage {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -185,7 +185,7 @@ enum Command {
     },
     /// Ingest named test exposure facts for one commit.
     IngestTestExposure {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -198,7 +198,7 @@ enum Command {
     },
     /// Ingest Ruby mutant-facts/v1 and convert them to mutation exposure.
     IngestMutants {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -223,7 +223,7 @@ enum Command {
     },
     /// Ingest profile-hotness/v1 runtime profiling shares.
     IngestHotness {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -236,7 +236,7 @@ enum Command {
     },
     /// Ingest current hazard sites for one provider and commit.
     IngestHazards {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -249,7 +249,7 @@ enum Command {
     },
     /// Ingest SARIF artifacts into the persistent finding index.
     IngestSarif {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -266,13 +266,13 @@ enum Command {
     },
     /// Ingest provider stack traces and anchor frames to logical units.
     Ingest {
-        #[arg(long, default_value = ".gigasail/gigasail.db")]
+        #[arg(long, default_value = ".giga/gigasail.db")]
         db: PathBuf,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
         #[arg(long)]
         input: Option<PathBuf>,
-        /// Ingest a gigasail-run/v1 manifest. Defaults to .gigasail/artifacts/latest/manifest.json.
+        /// Ingest a gigasail-run/v1 manifest. Defaults to .giga/artifacts/latest/manifest.json.
         #[arg(long)]
         run: Option<PathBuf>,
         #[arg(long)]
@@ -1162,27 +1162,27 @@ mod tests {
         repository
             .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
             .unwrap();
-        fs::create_dir_all(directory.path().join(".gigasail/artifacts/runs")).unwrap();
+        fs::create_dir_all(directory.path().join(".giga/artifacts/runs")).unwrap();
         fs::write(
             directory
                 .path()
-                .join(".gigasail/artifacts/runs/manifest.json"),
+                .join(".giga/artifacts/runs/manifest.json"),
             "{}",
         )
         .unwrap();
-        let database = directory.path().join(".gigasail/gigasail.db");
+        let database = directory.path().join(".giga/gigasail.db");
         fs::write(&database, "sqlite").unwrap();
 
         ensure_clean_worktree(
             directory.path(),
-            std::path::Path::new(".gigasail/artifacts"),
+            std::path::Path::new(".giga/artifacts"),
             Some(&database),
         )
         .unwrap();
         fs::write(directory.path().join("unexpected.txt"), "dirty\n").unwrap();
         assert!(ensure_clean_worktree(
             directory.path(),
-            std::path::Path::new(".gigasail/artifacts"),
+            std::path::Path::new(".giga/artifacts"),
             None
         )
         .unwrap_err()
@@ -1210,13 +1210,13 @@ mod tests {
 
         fs::write(directory.path().join("unrelated.md"), "outside project\n").unwrap();
         assert!(
-            ensure_clean_worktree(&project, std::path::Path::new(".gigasail/artifacts"), None)
+            ensure_clean_worktree(&project, std::path::Path::new(".giga/artifacts"), None)
                 .is_ok()
         );
 
         fs::write(project.join("dirty.rb"), "puts :dirty\n").unwrap();
         assert!(
-            ensure_clean_worktree(&project, std::path::Path::new(".gigasail/artifacts"), None)
+            ensure_clean_worktree(&project, std::path::Path::new(".giga/artifacts"), None)
                 .unwrap_err()
                 .to_string()
                 .contains("gems/demo/dirty.rb")

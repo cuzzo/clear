@@ -174,7 +174,7 @@ fn builtin_analysis_config() -> Result<crate::LineageConfig> {
             produces: vec![crate::pipeline::ProducedArtifact {
                 kind: ArtifactKind::Sarif,
                 format: "sarif".to_string(),
-                path: PathBuf::from(".gigasail/artifacts/fact-mine.sarif"),
+                path: PathBuf::from(".giga/artifacts/fact-mine.sarif"),
                 scope: Some("static".to_string()),
                 complete: false,
                 evidence_scope: None,
