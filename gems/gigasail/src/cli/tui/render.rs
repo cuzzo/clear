@@ -693,25 +693,25 @@ fn render_funnel(
         "├ ",
         "",
         vec![
-            count_span("code ", summary.code_added, Color::LightGreen),
-            count_span("md/other ", summary.other_added, Color::Gray),
+            count_span("code: ", summary.code_added, Color::LightGreen),
+            count_span("md/other: ", summary.other_added, Color::Gray),
         ],
     ));
     body.push(funnel_row(
         "├ ",
         "",
         vec![
-            count_span("prod ", summary.prod_code, Color::LightGreen),
-            count_span("tests ", summary.test_code, Color::White),
+            count_span("prod: ", summary.prod_code, Color::LightGreen),
+            count_span("tests: ", summary.test_code, Color::White),
         ],
     ));
     body.push(funnel_row(
         "├ ",
         "",
         vec![
-            count_span("public ", summary.public, Color::Green),
-            count_span("private ", summary.private, Color::Gray),
-            count_span("other ", summary.other_vis, Color::DarkGray),
+            count_span("public: ", summary.public, Color::Green),
+            count_span("private: ", summary.private, Color::Gray),
+            count_span("other: ", summary.other_vis, Color::DarkGray),
         ],
     ));
     body.push(Line::from(""));
@@ -1435,8 +1435,8 @@ mod tests {
         assert!(text.contains("[SUMMARY]"), "left pane lists the summary row");
         assert!(text.contains("+9000"), "funnel shows total added");
         assert!(text.contains("3 commits"), "header shows the commit span");
-        assert!(text.contains("code +8000"), "code vs other split");
-        assert!(text.contains("public +800"), "visibility split");
+        assert!(text.contains("code: +8000"), "code vs other split");
+        assert!(text.contains("public: +800"), "visibility split");
         assert!(text.contains("CODE") && text.contains("language") && text.contains("ruby"));
         assert!(text.contains("OTHER") && text.contains("Markdown"));
         assert!(text.contains("dependencies"));
