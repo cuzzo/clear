@@ -657,10 +657,13 @@ fn render_funnel(
     ));
     body.push(Line::from(""));
 
-    // Per-language table: language | public | private | findings | coverage.
-    // (Aggregate coverage/hazards are intentionally omitted here — they are
-    // shown per language in the table below.)
+    // CODE: per-language table (language | public | private | findings | coverage).
+    // (Aggregate coverage/hazards are omitted — shown per language here.)
     const FIND_W: usize = 22;
+    body.push(Line::from(Span::styled(
+        "CODE".to_string(),
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+    )));
     body.push(Line::from(Span::styled(
         format!(
             " {:<10} {:>8} {:>9}  {:<width$}coverage",
@@ -693,6 +696,50 @@ fn render_funnel(
         spans.push(Span::raw(" ".repeat(FIND_W.saturating_sub(find_w))));
         spans.extend(coverage_bar_spans(&lang.bar, lang_bar_w));
         body.push(Line::from(spans));
+    }
+
+    // OTHER: non-code file types (Markdown, YAML, Dockerfile, ...) + dependencies.
+    if !summary.other.is_empty() || !summary.deps.is_empty() {
+        body.push(Line::from(""));
+        body.push(Line::from(Span::styled(
+            "OTHER".to_string(),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        body.push(Line::from(Span::styled(
+            format!(" {:<14} {:<12}", "type", "delta"),
+            Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD),
+        )));
+        for row in &summary.other {
+            body.push(Line::from(vec![
+                Span::styled(
+                    format!(" {:<14} ", truncate(&row.type_label, 14)),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::styled(
+                    format!("+{} -{}", row.added, row.removed),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+        }
+        if !summary.deps.is_empty() {
+            let mut parts = Vec::new();
+            if summary.deps.added > 0 {
+                parts.push(format!("+{} added", summary.deps.added));
+            }
+            if summary.deps.removed > 0 {
+                parts.push(format!("-{} removed", summary.deps.removed));
+            }
+            if summary.deps.changed > 0 {
+                parts.push(format!("~{} changed", summary.deps.changed));
+            }
+            body.push(Line::from(vec![
+                Span::styled(
+                    " dependencies  ".to_string(),
+                    Style::default().fg(Color::Gray),
+                ),
+                Span::styled(parts.join(", "), Style::default().fg(Color::White)),
+            ]));
+        }
     }
 
     let widget = Paragraph::new(body)
@@ -1177,6 +1224,16 @@ mod tests {
                     t3: 4,
                 },
             }],
+            other: vec![crate::cli::diff::summary::OtherRow {
+                type_label: "Markdown".into(),
+                added: 1000,
+                removed: 0,
+            }],
+            deps: crate::cli::diff::summary::DepSummary {
+                added: 3,
+                removed: 1,
+                changed: 2,
+            },
         };
         app.refresh_rows();
         app.selected = 0; // the [SUMMARY] row
@@ -1185,7 +1242,9 @@ mod tests {
         assert!(text.contains("+9000"), "funnel shows total added");
         assert!(text.contains("code +8000"), "code vs other split");
         assert!(text.contains("public +800"), "visibility split");
-        assert!(text.contains("language") && text.contains("ruby"));
+        assert!(text.contains("CODE") && text.contains("language") && text.contains("ruby"));
+        assert!(text.contains("OTHER") && text.contains("Markdown"));
+        assert!(text.contains("dependencies"));
         assert!(text.contains("T1"), "hazard tier row");
         // The coverage bar drew colored segment glyphs.
         assert!(text.contains('*') && text.contains('+') && text.contains('-'));

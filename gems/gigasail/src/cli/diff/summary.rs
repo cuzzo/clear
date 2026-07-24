@@ -9,7 +9,7 @@
 //! aggregated from the changed units so they match the tree.
 
 use crate::cli::diff::units::FileChange;
-use crate::diff::{DiffPlan, VerificationSlices};
+use crate::diff::{DiffPlan, SourceRole, VerificationSlices};
 
 /// Proportional coverage of changed production code, in line counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -77,6 +77,68 @@ pub struct LangRow {
     pub hazards: HazardTotals,
 }
 
+/// One non-code file type in the OTHER section (Markdown, YAML, Dockerfile...).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OtherRow {
+    pub type_label: String,
+    pub added: u32,
+    pub removed: u32,
+}
+
+/// Added / removed / version-changed dependency counts across all manifests.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DepSummary {
+    pub added: u32,
+    pub removed: u32,
+    pub changed: u32,
+}
+
+impl DepSummary {
+    pub fn is_empty(&self) -> bool {
+        self.added + self.removed + self.changed == 0
+    }
+}
+
+/// A display type for a non-code file, from its name/extension. giga-core owns
+/// the code-vs-non-code decision (the file's `role`); this only groups the
+/// non-code files for the OTHER table.
+pub fn other_type(path: &str) -> &'static str {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let lower = file.to_ascii_lowercase();
+    let ext = lower.rsplit('.').next().unwrap_or("");
+    if lower.starts_with("dockerfile") {
+        return "Dockerfile";
+    }
+    if lower == "makefile" || lower == "gnumakefile" || ext == "mk" {
+        return "Makefile";
+    }
+    if lower.starts_with("gemfile") {
+        return "Gemfile";
+    }
+    if lower == "rakefile" {
+        return "Rakefile";
+    }
+    if file == "BUILD" || file == "WORKSPACE" || ext == "bzl" || ext == "bazel" {
+        return "Bazel";
+    }
+    match ext {
+        "md" | "markdown" => "Markdown",
+        "yml" | "yaml" => "YAML",
+        "json" => "JSON",
+        "toml" => "TOML",
+        "xml" => "XML",
+        "ini" | "cfg" | "conf" | "properties" => "Config",
+        "txt" | "rst" | "adoc" => "Text",
+        "sh" | "bash" | "zsh" | "fish" => "Shell",
+        "lock" => "Lockfile",
+        "" => "Other",
+        other => match other {
+            "gradle" => "Gradle",
+            _ => "Other",
+        },
+    }
+}
+
 /// The funnel, widest row first.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DiffSummary {
@@ -96,6 +158,10 @@ pub struct DiffSummary {
     pub bar: CoverageBar,
     pub hazards: HazardTotals,
     pub langs: Vec<LangRow>,
+    /// Non-code file types (Markdown, YAML, Dockerfile, ...), by line delta.
+    pub other: Vec<OtherRow>,
+    /// Added/removed/changed dependencies across all manifests.
+    pub deps: DepSummary,
 }
 
 /// Build the funnel from the plan (line splits, coverage, visibility) and the
@@ -167,6 +233,38 @@ pub fn build_summary(plan: &DiffPlan, changes: &[FileChange]) -> DiffSummary {
 
     // Non-code additions are whatever is left after the recognized source code.
     summary.other_added = summary.total_added.saturating_sub(summary.code_added);
+
+    // OTHER section: aggregate non-code files (docs, config, generated, lockfiles)
+    // by display type, using giga-core's per-file role to decide code vs not.
+    let mut other: std::collections::BTreeMap<&'static str, OtherRow> =
+        std::collections::BTreeMap::new();
+    for file in &plan.files {
+        if matches!(file.role, SourceRole::Production | SourceRole::Test) {
+            continue;
+        }
+        let a = &file.added_lines;
+        let r = &file.removed_lines;
+        let row = other.entry(other_type(&file.path)).or_default();
+        row.type_label = other_type(&file.path).to_string();
+        row.added += (a.code + a.comments + a.other) as u32;
+        row.removed += (r.code + r.comments + r.other) as u32;
+    }
+    summary.other = other.into_values().collect();
+    summary
+        .other
+        .sort_by(|a, b| (b.added + b.removed).cmp(&(a.added + a.removed)));
+
+    // Dependency changes across all manifests, from the plan.
+    for change in &plan.dependency_changes {
+        for entry in &change.entries {
+            match (entry.before.is_some(), entry.after.is_some()) {
+                (false, true) => summary.deps.added += 1,
+                (true, false) => summary.deps.removed += 1,
+                (true, true) if entry.before != entry.after => summary.deps.changed += 1,
+                _ => {}
+            }
+        }
+    }
 
     // Riskiest / largest languages first.
     summary
