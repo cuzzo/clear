@@ -24,23 +24,23 @@ require "tmpdir"
 TOOL_ROOT = File.expand_path("../../..", __dir__)
 
 options = {
-  db: "lineage.db",
+  db: "gigasail.db",
   repo: ".",
   corpus: nil,
   materialized: nil,
   commit: nil,
-  lineage_bin: File.expand_path("../target/release/lineage", __dir__),
+  giga_bin: File.expand_path("../target/release/giga", __dir__),
   artifact_exe: File.join(TOOL_ROOT, "gems/test-miser/exe/test-miser-artifact")
 }
 
 OptionParser.new do |opts|
   opts.banner = "Usage: ingest_mutation_corpus.rb [options]"
-  opts.on("--db=PATH", "lineage database (default lineage.db)") { |v| options[:db] = v }
+  opts.on("--db=PATH", "gigasail database (default gigasail.db)") { |v| options[:db] = v }
   opts.on("--repo=PATH", "repository root (default .)") { |v| options[:repo] = v }
   opts.on("--corpus=FILE", "mutation-corpus.json.zst envelope") { |v| options[:corpus] = v }
   opts.on("--materialized=DIR", "already-materialized corpus directory") { |v| options[:materialized] = v }
   opts.on("--commit=SHA", "commit override (default: the corpus commit)") { |v| options[:commit] = v }
-  opts.on("--lineage-bin=PATH", "lineage binary") { |v| options[:lineage_bin] = v }
+  opts.on("--giga-bin=PATH", "giga binary") { |v| options[:giga_bin] = v }
   opts.on("--test-miser-artifact=PATH", "test-miser-artifact executable") { |v| options[:artifact_exe] = v }
 end.parse!
 
@@ -53,7 +53,7 @@ def run!(command, chdir: nil)
 end
 
 abort "exactly one of --corpus or --materialized is required" unless [options[:corpus], options[:materialized]].compact.size == 1
-abort "lineage binary not executable: #{options[:lineage_bin]}" unless File.executable?(options[:lineage_bin])
+abort "giga binary not executable: #{options[:giga_bin]}" unless File.executable?(options[:giga_bin])
 
 repo = File.expand_path(options[:repo])
 db = File.expand_path(options[:db])
@@ -85,7 +85,7 @@ ingest = lambda do |directory|
     facts = JSON.parse(File.read(facts_path))
     suite = facts.dig("test_miser", "suite") || File.basename(facts_path)
     out = run!([
-                 options[:lineage_bin], "ingest-mutants",
+                 options[:giga_bin], "ingest-mutants",
                  "--db", db, "--repo", repo,
                  "--input", facts_path, "--commit", commit_used
                ])
@@ -101,7 +101,7 @@ ingest = lambda do |directory|
   sarif_path = File.join(directory, "weak-tests.sarif")
   abort "weak-tests.sarif missing in #{directory}; the corpus is incomplete" unless File.file?(sarif_path)
   out = run!([
-               options[:lineage_bin], "ingest-sarif",
+               options[:giga_bin], "ingest-sarif",
                "--db", db, "--repo", repo,
                "--input", sarif_path, "--source", "test-miser",
                "--commit", commit_used, "--replace"
@@ -110,7 +110,7 @@ ingest = lambda do |directory|
   evidence_path = File.join(directory, "evidence.sarif")
   abort "evidence.sarif missing in #{directory}; the corpus is incomplete" unless File.file?(evidence_path)
   out = run!([
-               options[:lineage_bin], "ingest-sarif",
+               options[:giga_bin], "ingest-sarif",
                "--db", db, "--repo", repo,
                "--input", evidence_path, "--source", "test-miser-evidence",
                "--commit", commit_used, "--replace"

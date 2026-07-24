@@ -12,7 +12,7 @@ require "set"
 require "etc"
 
 TOOL_ROOT = File.expand_path("../../..", __dir__)
-LINEAGE_MANIFEST = File.join(TOOL_ROOT, "gems/lineage/Cargo.toml")
+GIGASAIL_MANIFEST = File.join(TOOL_ROOT, "gems/gigasail/Cargo.toml")
 DECOMPLEX_MANIFEST = File.join(TOOL_ROOT, "gems/decomplex/Cargo.toml")
 FACT_MINE_MANIFEST = File.join(TOOL_ROOT, "gems/fact-mine/Cargo.toml")
 SQL_COV_MANIFEST = File.join(TOOL_ROOT, "gems/sql-cov/Cargo.toml")
@@ -86,8 +86,8 @@ options = {
 OptionParser.new do |parser|
   parser.banner = "Usage: import_repo.rb [options]"
   parser.on("--repo=PATH", "Repository to import. Default: .") { |value| options[:repo] = value }
-  parser.on("--db=PATH", "Lineage DB path. Default: REPO/lineage.db") { |value| options[:db] = value }
-  parser.on("--out-dir=PATH", "Artifact/log directory. Default: REPO/tmp/lineage-import") { |value| options[:out_dir] = value }
+  parser.on("--db=PATH", "Gigasail DB path. Default: REPO/gigasail.db") { |value| options[:db] = value }
+  parser.on("--out-dir=PATH", "Artifact/log directory. Default: REPO/tmp/gigasail-import") { |value| options[:out_dir] = value }
   parser.on("--max-commits=N", Integer, "Cap lineage history while iterating") { |value| options[:max_commits] = value }
   parser.on("--fresh", "Remove the existing DB before import") { options[:fresh] = true }
   parser.on("--no-build-tools", "Do not build Lineage/Decomplex/fact-mine release binaries") { options[:build_tools] = false }
@@ -391,12 +391,13 @@ def convert_go_coverprofile(path, out_dir, repo, suffix_index)
 end
 
 repo = File.realpath(options[:repo])
-db = File.expand_path(options[:db] || File.join(repo, "lineage.db"), repo)
-out_dir = File.expand_path(options[:out_dir] || File.join(repo, "tmp/lineage-import"), repo)
+db = File.expand_path(options[:db] || File.join(repo, "gigasail.db"), repo)
+out_dir = File.expand_path(options[:out_dir] || File.join(repo, "tmp/gigasail-import"), repo)
 log_dir = File.join(out_dir, "logs")
 sarif_dir = File.join(out_dir, "sarif")
 coverage_dir = File.join(out_dir, "coverage-normalized")
-lineage_bin = File.join(TOOL_ROOT, "gems/lineage/target/release/lineage")
+giga_bin = File.join(TOOL_ROOT, "gems/gigasail/target/release/giga")
+giga_ui_bin = File.join(TOOL_ROOT, "gems/gigasail/target/release/giga-ui")
 decomplex_bin = File.join(TOOL_ROOT, "gems/decomplex/target/release/decomplex-rust")
 fact_mine_bin = File.join(TOOL_ROOT, "gems/fact-mine/target/release/fact-mine-rust")
 sql_cov_bin = File.join(TOOL_ROOT, "gems/sql-cov/target/release/sql-cov")
@@ -407,7 +408,7 @@ FileUtils.rm_f(db) if options[:fresh]
 if options[:build_tools]
   threads = []
   threads << Thread.new do
-    run_command("build-lineage", ["cargo", "build", "--release", "--manifest-path", LINEAGE_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir)
+    run_command("build-giga", ["cargo", "build", "--release", "--workspace", "--manifest-path", GIGASAIL_MANIFEST], chdir: TOOL_ROOT, log_dir: log_dir)
   end
   if options[:analyzers]
     threads << Thread.new do
@@ -426,9 +427,9 @@ if options[:build_tools]
 end
 
 commit = git_output(repo, "rev-parse", "HEAD").strip
-build_cmd = [lineage_bin, "build", "--repo", repo, "--db", db]
+build_cmd = [giga_bin, "build", "--repo", repo, "--db", db]
 build_cmd += ["--max-commits", options[:max_commits].to_s] if options[:max_commits]
-run_command("lineage-build", build_cmd, chdir: repo, log_dir: log_dir)
+run_command("giga-build", build_cmd, chdir: repo, log_dir: log_dir)
 
 analyzer_coverage_paths = []
 if options[:coverage]
@@ -448,7 +449,7 @@ if options[:coverage]
   threads = inputs_and_metadata.map do |path, format, input, rel, type, test_id|
     Thread.new do
       cmd = [
-        lineage_bin, "ingest-coverage",
+        giga_bin, "ingest-coverage",
         "--db", db,
         "--repo", repo,
         "--input", input,
@@ -489,7 +490,7 @@ if options[:analyzers]
     ENV["CORES"] ||= Etc.nprocessors.to_s
     ENV["JOBS"] ||= Etc.nprocessors.to_s
     run_command("first-party-sarif", cmd, chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
-    ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", first_party_dir, "--source", "first-party", "--commit", commit]
+    ingest = [giga_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", first_party_dir, "--source", "first-party", "--commit", commit]
     ingest << "--replace" if options[:replace]
     run_command("ingest-first-party-sarif", ingest, chdir: repo, log_dir: log_dir, optional: true)
   end
@@ -500,7 +501,7 @@ if options[:lints]
     lint_dir = File.join(sarif_dir, "lint")
     cmd = ["ruby", File.join(TOOL_ROOT, "tools/generate_lint_sarif.rb"), "--repo", repo, "--out-dir", lint_dir]
     run_command("lint-sarif", cmd, chdir: TOOL_ROOT, log_dir: log_dir, optional: true)
-    ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", lint_dir, "--source", "lint", "--commit", commit]
+    ingest = [giga_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", lint_dir, "--source", "lint", "--commit", commit]
     ingest << "--replace" if options[:replace]
     run_command("ingest-lint-sarif", ingest, chdir: repo, log_dir: log_dir, optional: true)
   end
@@ -508,7 +509,7 @@ end
 
 options[:hotness_inputs].each do |hotness_input|
   sarif_threads << Thread.new do
-    ingest = [lineage_bin, "ingest-hotness", "--db", db, "--repo", repo, "--input", File.expand_path(hotness_input, repo)]
+    ingest = [giga_bin, "ingest-hotness", "--db", db, "--repo", repo, "--input", File.expand_path(hotness_input, repo)]
     run_command("ingest-hotness", ingest, chdir: repo, log_dir: log_dir, optional: true)
   end
 end
@@ -518,9 +519,9 @@ if options[:mutation_corpus]
     corpus_path = File.expand_path(options[:mutation_corpus], repo)
     mode = File.directory?(corpus_path) ? "--materialized" : "--corpus"
     cmd = [
-      "ruby", File.join(TOOL_ROOT, "gems/lineage/tools/ingest_mutation_corpus.rb"),
+      "ruby", File.join(TOOL_ROOT, "gems/gigasail/tools/ingest_mutation_corpus.rb"),
       "--db=#{db}", "--repo=#{repo}", "#{mode}=#{corpus_path}",
-      "--lineage-bin=#{lineage_bin}",
+      "--giga-bin=#{giga_bin}",
     ]
     run_command("ingest-mutation-corpus", cmd, chdir: repo, log_dir: log_dir)
   end
@@ -539,7 +540,7 @@ if options[:sql_queries]
     cmd += ["--setup", File.expand_path(options[:sql_setup], repo)] if options[:sql_setup]
     cmd += options[:sql_parameters].flat_map { |parameter| ["--param", parameter] }
     run_command("sql-cov-plan", cmd, chdir: repo, log_dir: log_dir)
-    ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", sql_plan, "--source", "sql-cov", "--commit", commit]
+    ingest = [giga_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", sql_plan, "--source", "sql-cov", "--commit", commit]
     ingest << "--replace" if options[:replace]
     run_command("ingest-sql-cov-plan", ingest, chdir: repo, log_dir: log_dir)
   end
@@ -550,7 +551,7 @@ options[:sarif_inputs].each do |input|
   next unless File.exist?(input)
 
   sarif_threads << Thread.new do
-    ingest = [lineage_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", input, "--source", "external", "--commit", commit]
+    ingest = [giga_bin, "ingest-sarif", "--db", db, "--repo", repo, "--input", input, "--source", "external", "--commit", commit]
     ingest << "--replace" if options[:replace]
     run_command("ingest-extra-sarif-#{File.basename(input)}", ingest, chdir: repo, log_dir: log_dir, optional: true)
   end
@@ -558,20 +559,20 @@ end
 
 sarif_threads.each(&:value)
 
-run_command("refresh-ui", [lineage_bin, "refresh-ui", "--db", db], chdir: repo, log_dir: log_dir)
+run_command("refresh-ui", [giga_bin, "refresh-ui", "--db", db], chdir: repo, log_dir: log_dir)
 
-puts "Lineage import complete"
+puts "Gigasail import complete"
 puts "  repo: #{repo}"
 puts "  db: #{db}"
 puts "  artifacts: #{out_dir}"
 puts "  commit: #{commit}"
 
 if options[:serve]
-  cmd = [lineage_bin, "ui", "--db", db, "--repo", repo, "--host", options[:host], "--port", options[:port].to_s]
+  cmd = [giga_ui_bin, "serve", "--db", db, "--repo", repo, "--host", options[:host], "--port", options[:port].to_s]
   if options[:daemon]
-    ui_log = File.join(log_dir, "lineage-ui.log")
+    ui_log = File.join(log_dir, "giga-ui.log")
     pid = Process.spawn(*cmd, out: ui_log, err: ui_log, chdir: repo, pgroup: true)
-    File.write(File.join(out_dir, "lineage-ui.pid"), "#{pid}\n")
+    File.write(File.join(out_dir, "giga-ui.pid"), "#{pid}\n")
     puts "  ui: http://#{options[:host]}:#{options[:port]} (pid #{pid})"
   else
     warn "Serving Lineage UI on #{options[:host]}:#{options[:port]}"
