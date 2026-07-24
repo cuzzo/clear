@@ -332,8 +332,18 @@ fn review(
     };
     let plan =
         build_structured_diff(&provider, Some(storage), &request).map_err(|e| e.to_string())?;
-    // Missing giga.yml → default review policy (gate only on uncovered T1).
-    let config = load_config(repo).map(|c| c.review).unwrap_or_default();
+    // No giga.yml → default policy (gate only on uncovered T1). But a giga.yml
+    // that IS present and has a malformed `review:` block must surface, not be
+    // silently replaced by defaults — otherwise a typo weakens the gate unseen.
+    let has_config = repo.join(crate::pipeline::CONFIG_FILE_NAME).exists()
+        || repo.join(crate::pipeline::CONFIG_JSON_FILE_NAME).exists();
+    let config = if has_config {
+        load_config(repo)
+            .map_err(|e| format!("giga.yml review config: {e}"))?
+            .review
+    } else {
+        crate::review::ReviewConfig::default()
+    };
     let report = crate::review::evaluate(&plan, &config, mode);
     serde_json::to_value(report).map_err(|e| e.to_string())
 }

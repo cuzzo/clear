@@ -2559,6 +2559,49 @@ mod tests {
     }
 
     #[test]
+    fn loads_a_review_block_through_the_real_config_path() {
+        use crate::review::{PuritySource, Visibility};
+        let directory = tempdir().unwrap();
+        fs::write(
+            directory.path().join(CONFIG_FILE_NAME),
+            "version: 1\n\
+             review:\n\
+             \x20 metrics:\n\
+             \x20   \"T3\": { policy: deprioritize, weight: 0.0 }\n\
+             \x20 weights:\n\
+             \x20   tier_two_finding: 5.0\n\
+             \x20 purity:\n\
+             \x20   source: effects\n\
+             \x20 gates:\n\
+             \x20   - id: uncovered-tier1\n\
+             \x20     when: { tier: 1, on: added, coverage: uncovered }\n\
+             \x20     severity: critical\n",
+        )
+        .unwrap();
+
+        let config = load_config(directory.path()).unwrap();
+        // The `review:` key round-trips through load_config (not just serde),
+        // so a project's config actually reaches the evaluator.
+        assert_eq!(config.review.weights.tier_two_finding, 5.0);
+        assert_eq!(config.review.metrics["T3"].policy, Visibility::Deprioritize);
+        assert_eq!(config.review.purity.source, PuritySource::Effects);
+        assert_eq!(config.review.gates[0].id, "uncovered-tier1");
+    }
+
+    #[test]
+    fn a_malformed_review_block_is_a_load_error_not_a_silent_default() {
+        let directory = tempdir().unwrap();
+        // `wieght` is a typo; deny_unknown_fields must reject it so the mistake
+        // surfaces instead of silently falling back to default gating.
+        fs::write(
+            directory.path().join(CONFIG_FILE_NAME),
+            "version: 1\nreview:\n  weights:\n    wieght: 3.0\n",
+        )
+        .unwrap();
+        assert!(load_config(directory.path()).is_err());
+    }
+
+    #[test]
     fn worktree_fingerprint_changes_with_dirty_source_and_untracked_files() {
         let directory = tempdir().unwrap();
         let repository = git2::Repository::init(directory.path()).unwrap();
