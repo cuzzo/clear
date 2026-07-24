@@ -122,6 +122,35 @@ impl GigaLock {
     }
 }
 
+/// Block while a live process holds the `.giga/` lock for `commit` (an analysis
+/// of exactly that commit is in flight), so a reader sees complete evidence
+/// instead of a half-ingested database. Returns as soon as the lock is free or
+/// held for a *different* commit (that reader's target is not being worked on,
+/// so it should render what it already has). Gives up after `timeout` and lets
+/// the caller proceed regardless. `on_wait` is invoked once per poll with the
+/// current holder, e.g. to print a "waiting" line.
+pub fn wait_while_locked_for(
+    giga_dir: &Path,
+    commit: &str,
+    timeout: std::time::Duration,
+    poll: std::time::Duration,
+    mut on_wait: impl FnMut(&LockInfo),
+) -> Result<()> {
+    let start = std::time::Instant::now();
+    loop {
+        match GigaLock::current(giga_dir)? {
+            Some(info) if info.commit == commit => {
+                if start.elapsed() >= timeout {
+                    return Ok(());
+                }
+                on_wait(&info);
+                std::thread::sleep(poll);
+            }
+            _ => return Ok(()),
+        }
+    }
+}
+
 impl Drop for GigaLock {
     fn drop(&mut self) {
         // Only remove the lock if we are still the recorded owner, so a
@@ -244,6 +273,63 @@ mod tests {
         assert!(GigaLock::try_acquire(dir.path(), "busy", "ingest")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn wait_returns_immediately_when_the_lock_is_free() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut waits = 0;
+        wait_while_locked_for(
+            dir.path(),
+            "x",
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(10),
+            |_| waits += 1,
+        )
+        .unwrap();
+        assert_eq!(waits, 0);
+    }
+
+    #[test]
+    fn wait_ignores_a_lock_held_for_a_different_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        // A peer is analysing "other"; a reader targeting "mine" should not wait.
+        let _held = GigaLock::try_acquire(dir.path(), "other", "analyse")
+            .unwrap()
+            .unwrap();
+        let mut waits = 0;
+        wait_while_locked_for(
+            dir.path(),
+            "mine",
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(10),
+            |_| waits += 1,
+        )
+        .unwrap();
+        assert_eq!(waits, 0);
+    }
+
+    #[test]
+    fn wait_blocks_until_timeout_while_the_same_commit_is_locked() {
+        let dir = tempfile::tempdir().unwrap();
+        let _held = GigaLock::try_acquire(dir.path(), "busy", "analyse")
+            .unwrap()
+            .unwrap();
+        let mut waits = 0;
+        let start = std::time::Instant::now();
+        wait_while_locked_for(
+            dir.path(),
+            "busy",
+            std::time::Duration::from_millis(60),
+            std::time::Duration::from_millis(10),
+            |info| {
+                assert_eq!(info.commit, "busy");
+                waits += 1;
+            },
+        )
+        .unwrap();
+        assert!(waits >= 1, "should have polled at least once while locked");
+        assert!(start.elapsed() >= std::time::Duration::from_millis(60));
     }
 
     #[test]

@@ -95,6 +95,36 @@ pub fn run_diff(
     Ok(())
 }
 
+/// Block while a `giga watch` holds the `.giga/` lock for the exact commit being
+/// diffed, so the render sees a fully ingested database. Best-effort: outside a
+/// Git repo, or if the target rev cannot be resolved, it returns without waiting.
+pub fn wait_for_in_flight_analysis(repo: &Path, db: &Path, head: Option<&str>) {
+    let Ok(provider) = crate::git::GitProvider::open(repo) else {
+        return;
+    };
+    let Ok(commit) = provider.resolve_commit(head.unwrap_or("HEAD")) else {
+        return;
+    };
+    let giga_dir = crate::watch::giga_dir(db);
+    let mut announced = false;
+    let _ = giga_core::lock::wait_while_locked_for(
+        &giga_dir,
+        &commit,
+        std::time::Duration::from_secs(600),
+        std::time::Duration::from_millis(250),
+        |info| {
+            if !announced {
+                eprintln!(
+                    "giga diff: waiting for analysis of {} ({})...",
+                    &commit[..commit.len().min(12)],
+                    info.operation
+                );
+                announced = true;
+            }
+        },
+    );
+}
+
 /// Adapt a `DiffPlan` into the TUI view-model: the collapse tree, per-file
 /// changes with logical units, the line-level diffs, new-side sources, and
 /// per-line evidence.

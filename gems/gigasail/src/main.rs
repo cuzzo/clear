@@ -437,6 +437,10 @@ fn main() -> Result<()> {
             require_complete,
         } => {
             let db = repository_path(&repo, &db);
+            // If a `giga watch` is analysing exactly this commit, wait so the
+            // diff renders complete evidence; a previously analysed commit shows
+            // immediately. Applies to every output format.
+            gigasail::cli::wait_for_in_flight_analysis(&repo, &db, head.as_deref());
             if format == DiffFormat::Tui {
                 gigasail::cli::run_diff(&repo, &db, base, head, false, analyse, false)?;
                 return Ok(());

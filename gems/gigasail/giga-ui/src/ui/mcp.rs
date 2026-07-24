@@ -37,6 +37,8 @@ use std::sync::Mutex;
 /// DB-less mode (see `docs/agents/mcp.md`), where only the tools/fields
 /// derivable from live disk content are available.
 pub async fn serve_mcp(db: Option<PathBuf>, repo: PathBuf) -> Result<()> {
+    // The `.giga/` directory holding the coordination lock, alongside the DB.
+    let giga_dir = db.as_ref().and_then(|path| path.parent()).map(Path::to_path_buf);
     let storage = match db {
         Some(path) => {
             if !path.is_file() {
@@ -52,6 +54,7 @@ pub async fn serve_mcp(db: Option<PathBuf>, repo: PathBuf) -> Result<()> {
     let handler = LineageMcp {
         storage: Mutex::new(storage),
         repo,
+        giga_dir,
     };
     let transport = rmcp::transport::stdio();
     let service = handler.serve(transport).await?;
@@ -62,6 +65,34 @@ pub async fn serve_mcp(db: Option<PathBuf>, repo: PathBuf) -> Result<()> {
 struct LineageMcp {
     storage: Mutex<Option<Storage>>,
     repo: PathBuf,
+    giga_dir: Option<PathBuf>,
+}
+
+impl LineageMcp {
+    /// Block while a `giga watch` is analysing the repo's current HEAD, so a
+    /// tool call reads a fully ingested database rather than a half-written one.
+    /// Runs the blocking poll off the async executor. Best-effort: no-op when
+    /// there is no DB directory or HEAD cannot be resolved.
+    async fn wait_for_head_analysis(&self) {
+        let Some(dir) = self.giga_dir.clone() else {
+            return;
+        };
+        let repo = self.repo.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Ok(provider) = crate::git::GitProvider::open(&repo) {
+                if let Ok(commit) = provider.resolve_commit("HEAD") {
+                    let _ = giga_core::lock::wait_while_locked_for(
+                        &dir,
+                        &commit,
+                        std::time::Duration::from_secs(600),
+                        std::time::Duration::from_millis(250),
+                        |_| {},
+                    );
+                }
+            }
+        })
+        .await;
+    }
 }
 
 fn tool_defs() -> Vec<Tool> {
@@ -167,6 +198,9 @@ impl ServerHandler for LineageMcp {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        // Wait out any in-flight analysis of HEAD before reading, so tool
+        // results reflect a complete database.
+        self.wait_for_head_analysis().await;
         let args = request.arguments.unwrap_or_default();
         let storage = self.storage.lock().unwrap();
         let tool_name = request.name.as_ref();
