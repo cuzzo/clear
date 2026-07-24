@@ -16,8 +16,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub const CONFIG_FILE_NAME: &str = "gigasail.yml";
-pub const CONFIG_JSON_FILE_NAME: &str = "gigasail.json";
+pub const CONFIG_FILE_NAME: &str = "giga.yml";
+pub const CONFIG_JSON_FILE_NAME: &str = "giga.json";
 pub const RUN_MANIFEST_VERSION: &str = "gigasail-run/v1";
 const MAX_DECOMPRESSED_ARTIFACT_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -444,7 +444,7 @@ pub fn load_config(repo: &Path) -> Result<LineageConfig> {
 
 /// Parses a configuration from an already-trusted source snapshot. CI uses
 /// this for a reviewed base revision so a pull request cannot grant itself
-/// arbitrary command execution merely by editing `gigasail.yml`.
+/// arbitrary command execution merely by editing `giga.yml`.
 pub fn load_config_contents(contents: &str, extension: Option<&str>) -> Result<LineageConfig> {
     let config: LineageConfig = if extension == Some("json") {
         serde_json::from_str(contents).map_err(anyhow::Error::from)
@@ -457,7 +457,7 @@ pub fn load_config_contents(contents: &str, extension: Option<&str>) -> Result<L
 pub fn validate_config(config: LineageConfig) -> Result<LineageConfig> {
     if config.version != 1 {
         bail!(
-            "unsupported gigasail.yml version {}; expected 1",
+            "unsupported giga.yml version {}; expected 1",
             config.version
         );
     }
@@ -2618,7 +2618,7 @@ mod tests {
         assert!(load_config(directory.path())
             .unwrap_err()
             .to_string()
-            .contains("both gigasail.yml"));
+            .contains("both giga.yml"));
     }
 
     #[test]

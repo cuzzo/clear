@@ -55,7 +55,7 @@ enum Command {
         /// Ingest a clean immutable-revision analysis run into gigasail.db.
         #[arg(long)]
         ingest: bool,
-        /// Explicitly authorize commands from the checkout's gigasail.yml.
+        /// Explicitly authorize commands from the checkout's giga.yml.
         /// Without this flag, analysis uses only Gigasail's embedded,
         /// allowlisted providers.
         #[arg(long)]
@@ -75,7 +75,7 @@ enum Command {
         /// explicitly authorize a newly introduced or changed configuration.
         #[arg(long)]
         config_revision: Option<String>,
-        /// Explicitly authorize executing gigasail.yml from the current clean
+        /// Explicitly authorize executing giga.yml from the current clean
         /// checkout. Intended only for trusted local runs and protected CI.
         #[arg(long)]
         trust_current_config: bool,
@@ -97,7 +97,7 @@ enum Command {
         /// Seconds between HEAD polls.
         #[arg(long, default_value_t = 2)]
         interval: u64,
-        /// Explicitly authorize commands from the checkout's gigasail.yml.
+        /// Explicitly authorize commands from the checkout's giga.yml.
         #[arg(long)]
         trust_current_config: bool,
         /// Process the current HEAD once and exit instead of looping.
@@ -134,7 +134,7 @@ enum Command {
         /// Refresh Gigasail's bundled source analysis before rendering.
         #[arg(long)]
         analyse: bool,
-        /// Explicitly authorize checkout gigasail.yml commands for --analyse.
+        /// Explicitly authorize checkout giga.yml commands for --analyse.
         /// The default runs only embedded, allowlisted analysis.
         #[arg(long)]
         trust_current_config: bool,
@@ -307,7 +307,7 @@ enum Command {
         #[arg(long)]
         replace: bool,
         /// Directly ingest a coverage, mutation, or SARIF artifact. This is
-        /// independent of gigasail.yml and complements --run manifests.
+        /// independent of giga.yml and complements --run manifests.
         #[arg(long, value_enum)]
         kind: Option<DirectIngestKind>,
         /// Input encoding for --kind (for example cobertura, simplecov,
@@ -1056,7 +1056,7 @@ mod tests {
             .commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
             .unwrap()
             .to_string();
-        fs::write(directory.path().join("gigasail.yml"), "version: 1\n").unwrap();
+        fs::write(directory.path().join("giga.yml"), "version: 1\n").unwrap();
         let config = load_config(directory.path()).unwrap();
         let latest = latest_run_directory(directory.path(), &config);
         fs::create_dir_all(&latest).unwrap();

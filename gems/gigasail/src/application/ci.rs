@@ -102,16 +102,16 @@ pub fn load_ci_config(
     let json = git.file_contents_at_commit(&revision, crate::pipeline::CONFIG_JSON_FILE_NAME)?;
     match (yaml, json) {
         (Some(_), Some(_)) => anyhow::bail!(
-            "trusted configuration revision {revision} contains both gigasail.yml and gigasail.json"
+            "trusted configuration revision {revision} contains both giga.yml and giga.json"
         ),
         (Some(contents), None) => load_config_contents(&contents, Some("yml")).with_context(|| {
-            format!("parse trusted gigasail.yml from configuration revision {revision}")
+            format!("parse trusted giga.yml from configuration revision {revision}")
         }),
         (None, Some(contents)) => load_config_contents(&contents, Some("json")).with_context(|| {
-            format!("parse trusted gigasail.json from configuration revision {revision}")
+            format!("parse trusted giga.json from configuration revision {revision}")
         }),
         (None, None) => anyhow::bail!(
-            "trusted configuration revision {revision} contains no gigasail.yml; use --trust-current-config only after review"
+            "trusted configuration revision {revision} contains no giga.yml; use --trust-current-config only after review"
         ),
     }
 }

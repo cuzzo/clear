@@ -125,7 +125,7 @@ pub fn build_analysis_overlay(
 
 /// Returns only embedded, allowlisted analysis unless the caller explicitly
 /// authorizes execution of checkout configuration. This distinction matters:
-/// a repository's `gigasail.yml` is arbitrary code when it contains command
+/// a repository's `giga.yml` is arbitrary code when it contains command
 /// producers, while the built-in provider is linked into this binary.
 pub fn analysis_config(
     repo: &Path,
@@ -140,7 +140,7 @@ pub fn analysis_config(
                 return builtin_analysis_config();
             }
             anyhow::bail!(
-                "analysis profile {profile:?} is not built in and no gigasail.yml was found"
+                "analysis profile {profile:?} is not built in and no giga.yml was found"
             );
         }
         let config = load_config(repo)?;

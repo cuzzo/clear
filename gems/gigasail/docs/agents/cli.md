@@ -167,7 +167,7 @@ the entire repository or test corpus.
 
 ### `giga ingest`
 
-Ingestion must remain independently useful. It must not require `gigasail.yml`,
+Ingestion must remain independently useful. It must not require `giga.yml`,
 `gigasail verify`, Bazel, or a Gigasail-created CI run.
 
 Direct artifact ingestion remains supported:
@@ -260,8 +260,8 @@ honestly.
 
 ## Configuration
 
-The canonical authoring format is `gigasail.yml` at the repository root. A
-`gigasail.json` representation may be accepted through the same typed schema,
+The canonical authoring format is `giga.yml` at the repository root. A
+`giga.json` representation may be accepted through the same typed schema,
 primarily for generated configuration. A repository containing both is an
 error; there must be no precedence ambiguity.
 
@@ -394,7 +394,7 @@ Required protections include:
 
 - Execute commands from a trusted base revision or separately approved
   repository configuration.
-- Treat a change to `gigasail.yml`, build scripts, or producer scripts as a
+- Treat a change to `giga.yml`, build scripts, or producer scripts as a
   security-sensitive configuration change.
 - Permit revision-scoped classification metadata to affect presentation, but
   do not confuse that with authority to execute commands.
@@ -430,7 +430,7 @@ Exact numeric exit codes should be stable and documented for CI consumers.
 8. Add the Bazel executor and BEP adapter.
 9. Convert `tools/import_repo.rb` into a compatibility wrapper around the new
    commands, then remove its duplicated orchestration.
-10. Migrate `.giga/diff.toml` classification into `gigasail.yml`.
+10. Migrate `.giga/diff.toml` classification into `giga.yml`.
 
 ## Acceptance Criteria
 
@@ -453,7 +453,7 @@ Exact numeric exit codes should be stable and documented for CI consumers.
 
 ## Final Decision
 
-Gigasail will provide a declarative evidence pipeline through `gigasail.yml`, but
+Gigasail will provide a declarative evidence pipeline through `giga.yml`, but
 will not become a build system. Bazel is supported as an optional executor and
 rich evidence source. All commands remain independent of Bazel; ingestion
 remains open to external artifacts; and diffs remain useful even when the full

@@ -104,7 +104,7 @@ fn analyse_ignores_untrusted_checkout_configuration_and_bounds_run_retention() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         "version: 1\nprofiles:\n  analyse:\n    producers: [static]\nproducers:\n  static:\n    executor: command\n    argv: [sh, -c, \"mkdir -p .giga/artifacts && printf '{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[]}' > .giga/artifacts/static.sarif\"]\n    produces:\n      - kind: sarif\n        format: sarif\n        path: .giga/artifacts/static.sarif\n        complete: false\n",
     )
     .unwrap();
@@ -149,7 +149,7 @@ fn interrupted_standalone_analysis_run_cannot_block_the_next_ci_publication() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         complete_profile_config(),
     )
     .unwrap();
@@ -193,7 +193,7 @@ fn analyse_selects_a_trusted_custom_profile_and_stages_its_sarif() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         "version: 1\nprofiles:\n  security:\n    producers: [adapter]\nproducers:\n  adapter:\n    executor: command\n    argv: [sh, -c, \"mkdir -p .giga/artifacts && printf '{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[]}' > .giga/artifacts/adapter.sarif\"]\n    produces:\n      - kind: sarif\n        format: sarif\n        path: .giga/artifacts/adapter.sarif\n",
     )
     .unwrap();
@@ -287,7 +287,7 @@ fn analyse_refuses_an_untrusted_profile_that_would_modify_tracked_source() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         "version: 1\nprofiles:\n  unsafe:\n    producers: [bad]\nproducers:\n  bad:\n    executor: command\n    argv: [sh, -c, \"printf changed > lib.rs\"]\n",
     )
     .unwrap();
@@ -453,7 +453,7 @@ fn diff_analyse_applies_configured_sarif_as_a_worktree_overlay() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         "version: 1\nprofiles:\n  analyse:\n    producers: [static]\nproducers:\n  static:\n    executor: command\n    argv: [sh, -c, \"mkdir -p .giga/artifacts && printf '{\\\"version\\\":\\\"2.1.0\\\",\\\"runs\\\":[{\\\"tool\\\":{\\\"driver\\\":{\\\"name\\\":\\\"Test Analyzer\\\"}},\\\"properties\\\":{\\\"gigasail.proof_boundary\\\":[\\\"partial analyzer\\\"]},\\\"results\\\":[{\\\"ruleId\\\":\\\"T001\\\",\\\"level\\\":\\\"warning\\\",\\\"message\\\":{\\\"text\\\":\\\"overlay finding\\\"},\\\"properties\\\":{\\\"tier\\\":1,\\\"category\\\":\\\"static-hazard\\\"},\\\"locations\\\":[{\\\"physicalLocation\\\":{\\\"artifactLocation\\\":{\\\"uri\\\":\\\"lib.rs\\\"},\\\"region\\\":{\\\"startLine\\\":1}}},{\\\"physicalLocation\\\":{\\\"artifactLocation\\\":{\\\"uri\\\":\\\"lib.rs\\\"},\\\"region\\\":{\\\"startLine\\\":2}}}]}]}]}' > .giga/artifacts/static.sarif\"]\n    produces:\n      - kind: sarif\n        format: sarif\n        path: .giga/artifacts/static.sarif\n        complete: false\n",
     )
     .unwrap();
@@ -492,7 +492,7 @@ fn ci_ingests_a_complete_profile_publishes_it_and_diff_requires_that_profile() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         complete_profile_config(),
     )
     .unwrap();
@@ -563,7 +563,7 @@ fn ci_failure_records_the_failing_producer_and_preserves_workspace_outputs() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         "version: 1\nprofiles:\n  ci:\n    producers: [broken]\nproducers:\n  broken:\n    executor: command\n    argv: [sh, -c, 'exit 7']\n    timeout_seconds: 1\n    max_output_bytes: 1024\n    produces:\n      - kind: coverage\n        format: generic\n        path: .giga/artifacts/coverage.json\n",
     )
     .unwrap();
@@ -615,7 +615,7 @@ fn next_ci_recovers_an_ingested_pending_run_before_its_own_clean_check() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         complete_profile_config(),
     )
     .unwrap();
@@ -667,13 +667,13 @@ fn ci_uses_the_reviewed_parent_config_when_lineage_yml_changes() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         complete_profile_config(),
     )
     .unwrap();
     commit_all(&repository, &signature, "reviewed configuration");
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         complete_profile_config().replace(
             "mkdir -p .giga/artifacts",
             "touch untrusted-config-executed && mkdir -p .giga/artifacts",
@@ -703,7 +703,7 @@ fn require_complete_rejects_a_profile_without_evidence_artifacts() {
     let signature = git2::Signature::now("Lineage", "lineage@example.test").unwrap();
     fs::write(directory.path().join("lib.rs"), "pub fn value() {}\n").unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         "version: 1\nprofiles:\n  ci:\n    producers: [check]\nproducers:\n  check:\n    executor: command\n    argv: [true]\n",
     )
     .unwrap();
@@ -735,7 +735,7 @@ fn next_ci_repairs_a_published_run_left_before_latest_pointer_update() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         complete_profile_config(),
     )
     .unwrap();
@@ -992,7 +992,7 @@ fn ingest_run_indexes_a_fresh_database_and_refreshes_the_manifest_revision() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         complete_profile_config(),
     )
     .unwrap();
@@ -1417,7 +1417,7 @@ fn ci_publishes_a_run_with_a_relative_repo_path() {
     )
     .unwrap();
     fs::write(
-        directory.path().join("gigasail.yml"),
+        directory.path().join("giga.yml"),
         complete_profile_config(),
     )
     .unwrap();

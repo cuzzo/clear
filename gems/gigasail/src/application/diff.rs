@@ -106,7 +106,7 @@ fn configured_evidence_report(
     let config_path = repo.join(crate::pipeline::CONFIG_FILE_NAME);
     let json_path = repo.join(crate::pipeline::CONFIG_JSON_FILE_NAME);
     if !config_path.exists() && !json_path.exists() {
-        return Ok("Configured evidence: unconfigured (no gigasail.yml)\n".into());
+        return Ok("Configured evidence: unconfigured (no giga.yml)\n".into());
     }
     let config = load_config(repo)?;
     let profile_name = request
