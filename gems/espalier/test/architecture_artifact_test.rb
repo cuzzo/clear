@@ -103,4 +103,36 @@ class ArchitectureArtifactTest < Minitest::Test
     assert_nil guessed_owner_fn["owner_id"],
                "a function whose only owner is a partial-confidence guess must not link to a fabricated node"
   end
+
+  def test_big_o_index_uses_the_known_component_when_the_bound_is_incomplete
+    manifest = [
+      {
+        file: "lib/x.rb",
+        functions: [
+          { name: "proven",
+            quality_metrics: { big_o: "O(1)", big_o_complete: true,
+                               big_o_space: "O(1)", big_o_space_complete: true } },
+          { name: "looped",
+            quality_metrics: { big_o: "unknown", big_o_known_component: "O(N^2)",
+                               big_o_complete: false } },
+          { name: "opaque",
+            quality_metrics: { big_o: "unknown", big_o_complete: false } }
+        ]
+      }
+    ]
+    index = Espalier::ArchitectureArtifact.big_o_index(manifest)
+
+    proven = index["lib/x.rb\u0000proven"]
+    assert_equal "O(1)", proven["big_o_time"]
+    assert_equal true, proven["time_complete"]
+
+    # A known-but-incomplete bound surfaces as a partial bound, not "unknown".
+    looped = index["lib/x.rb\u0000looped"]
+    assert_equal "O(N^2)", looped["big_o_time"]
+    assert_equal false, looped["time_complete"]
+
+    # No bound at all is not indexed.
+    assert_nil index["lib/x.rb\u0000opaque"]
+  end
+
 end
