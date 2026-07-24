@@ -593,34 +593,6 @@ fn findings_spans(h: &crate::cli::diff::summary::HazardTotals, ascii: bool) -> (
     (spans, width)
 }
 
-fn hazard_spans(h: &crate::cli::diff::summary::HazardTotals, ascii: bool) -> Vec<Span<'static>> {
-    if h.is_empty() {
-        return vec![Span::styled(
-            "no hazards or tier findings".to_string(),
-            Style::default().fg(Color::Green),
-        )];
-    }
-    let mut spans = Vec::new();
-    if h.hazards > 0 {
-        spans.push(Span::styled(
-            format!("{}\u{00d7}{}   ", GutterKind::Hazard.icon(ascii), h.hazards),
-            Style::default().fg(Color::Red),
-        ));
-    }
-    for (label, n, color) in [
-        ("T1", h.t1, Color::LightRed),
-        ("T2", h.t2, Color::Yellow),
-        ("T3", h.t3, Color::Gray),
-    ] {
-        if n > 0 {
-            spans.push(Span::styled(
-                format!("{label}\u{00d7}{n}   "),
-                Style::default().fg(color),
-            ));
-        }
-    }
-    spans
-}
 
 fn funnel_row(indent: &str, label: &str, spans: Vec<Span<'static>>) -> Line<'static> {
     let mut out = vec![Span::styled(
@@ -685,22 +657,9 @@ fn render_funnel(
     ));
     body.push(Line::from(""));
 
-    // Coverage bar + hazards.
-    let mut cov = vec![Span::styled(
-        "coverage ".to_string(),
-        Style::default().fg(Color::Gray),
-    )];
-    cov.extend(coverage_bar_spans(&summary.bar, bar_w));
-    body.push(Line::from(cov));
-    let mut haz = vec![Span::styled(
-        "hazards  ".to_string(),
-        Style::default().fg(Color::Gray),
-    )];
-    haz.extend(hazard_spans(&summary.hazards, app.ascii));
-    body.push(Line::from(haz));
-    body.push(Line::from(""));
-
     // Per-language table: language | public | private | findings | coverage.
+    // (Aggregate coverage/hazards are intentionally omitted here — they are
+    // shown per language in the table below.)
     const FIND_W: usize = 22;
     body.push(Line::from(Span::styled(
         format!(
