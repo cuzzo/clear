@@ -108,6 +108,22 @@ pub fn render_structured_diff_text(plan: &DiffPlan, full: bool) -> String {
         if !test.inventory_available {
             line.push_str(" (churn n/a: no base test evidence)");
         }
+        if let Some(timing) = &test.timing {
+            if timing.pending {
+                line.push_str("; time [ PENDING ]");
+            } else if timing.baseline_n == 0 {
+                line.push_str(&format!(
+                    "; time measured (n={}, baseline building)",
+                    timing.samples
+                ));
+            } else {
+                let sign = if timing.pct >= 0.0 { "+" } else { "" };
+                line.push_str(&format!(
+                    "; time {sign}{:.1}% ±{:.1}% (n={})",
+                    timing.pct, timing.ci_pct, timing.samples
+                ));
+            }
+        }
         let _ = writeln!(output, "{line}");
     }
     for dependency in &plan.dependency_changes {
@@ -258,6 +274,7 @@ mod tests {
             kill_no_distinct: 4,
             inventory_available: true,
             mutation_available: true,
+            timing: None,
         });
         // A group with no base evidence: churn is suppressed, not fabricated.
         plan.test_summaries.push(crate::test_summary::TestSummary {
@@ -267,6 +284,32 @@ mod tests {
             no_coverage: 2,
             inventory_available: false,
             mutation_available: false,
+            ..Default::default()
+        });
+        // A measured timing delta and a pending timing.
+        plan.test_summaries.push(crate::test_summary::TestSummary {
+            language: "rust".into(),
+            test_set: "unit".into(),
+            added: 2,
+            inventory_available: true,
+            timing: Some(crate::test_summary::TestTiming {
+                pending: false,
+                pct: 2.1,
+                ci_pct: 0.8,
+                samples: 4,
+                baseline_n: 5,
+            }),
+            ..Default::default()
+        });
+        plan.test_summaries.push(crate::test_summary::TestSummary {
+            language: "zig".into(),
+            test_set: "unit".into(),
+            added: 1,
+            inventory_available: true,
+            timing: Some(crate::test_summary::TestTiming {
+                pending: true,
+                ..Default::default()
+            }),
             ..Default::default()
         });
 
@@ -279,6 +322,9 @@ mod tests {
         assert!(text.contains(
             "Tests go:integration: 1 pending; 2 add no coverage (churn n/a: no base test evidence)"
         ));
+        // Timing: measured delta with the ± sign, and the pending caption.
+        assert!(text.contains("time +2.1% ±0.8% (n=4)"), "measured timing: {text}");
+        assert!(text.contains("Tests zig:unit:") && text.contains("time [ PENDING ]"));
     }
 
     #[test]

@@ -6,6 +6,7 @@
 pub mod affected;
 pub mod analyse;
 pub mod checks;
+pub mod time_tests;
 pub mod ci;
 pub mod diff;
 pub mod ingest;

@@ -401,6 +401,21 @@ enum Command {
         #[arg(long)]
         trust_current_config: bool,
     },
+    /// Measure how long a change's new tests take and record it, so the diff
+    /// Tests section can show a delta vs the recent baseline. Run in the
+    /// background; the diff shows `[ PENDING ]` until it lands.
+    TimeTests {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, default_value = ".giga/gigasail.db")]
+        db: PathBuf,
+        /// The tag the measured tests belong to (unit / integration / fuzz).
+        #[arg(long, default_value = "unit")]
+        test_set: String,
+        /// Command that runs just the new tests (the project selects them).
+        #[arg(long = "run")]
+        run: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -1137,6 +1152,22 @@ fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        Command::TimeTests {
+            repo,
+            db,
+            test_set,
+            run,
+        } => {
+            let result = gigasail::application::time_tests::execute(&repo, &db, &test_set, &run)?;
+            println!(
+                "giga time-tests: {} new-test time {:.1}ms (±{:.1}, n={}) recorded for {}",
+                result.test_set,
+                result.mean_ms,
+                result.stddev_ms,
+                result.samples,
+                &result.revision[..result.revision.len().min(9)],
+            );
         }
     }
     Ok(())

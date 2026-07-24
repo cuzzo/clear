@@ -85,6 +85,53 @@ fn apply_test_summaries(storage: &Storage, plan: &mut DiffPlan) -> Result<()> {
     }
     plan.test_summaries =
         crate::test_summary::test_summaries(&base, &head, &changed_lines, base_present);
+
+    // Enrich each group that added tests with new-test timing: the recorded
+    // measurement for this commit compared to the recent per-stage baseline, or
+    // pending when the (background) measurement has not landed yet.
+    let stage = crate::test_timing::TIMING_STAGE;
+    for summary in &mut plan.test_summaries {
+        if summary.added == 0 {
+            continue;
+        }
+        summary.timing = match storage.stage_timing_for_commit(
+            &plan.scope.head_oid,
+            stage,
+            &summary.test_set,
+        )? {
+            Some((mean, stddev, n)) => {
+                let baseline =
+                    storage.stage_timing_history(stage, &summary.test_set, 10, &plan.scope.head_oid)?;
+                Some(
+                    match crate::test_timing::timing_delta_from_stats(
+                        &baseline,
+                        mean,
+                        stddev,
+                        n as usize,
+                    ) {
+                        Some(d) => crate::test_summary::TestTiming {
+                            pending: false,
+                            pct: d.pct,
+                            ci_pct: d.ci_pct,
+                            samples: d.samples,
+                            baseline_n: d.baseline_n,
+                        },
+                        // Measured, but no baseline to compare against yet.
+                        None => crate::test_summary::TestTiming {
+                            pending: false,
+                            samples: n as usize,
+                            baseline_n: 0,
+                            ..Default::default()
+                        },
+                    },
+                )
+            }
+            None => Some(crate::test_summary::TestTiming {
+                pending: true,
+                ..Default::default()
+            }),
+        };
+    }
     Ok(())
 }
 

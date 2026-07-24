@@ -1839,6 +1839,7 @@ impl Storage {
                stage TEXT NOT NULL,
                test_set TEXT NOT NULL,
                elapsed_ms REAL NOT NULL,
+               stddev_ms REAL NOT NULL DEFAULT 0,
                n_samples INTEGER NOT NULL DEFAULT 1,
                timestamp INTEGER NOT NULL DEFAULT 0,
                UNIQUE(commit_hash, stage, test_set)
@@ -1846,6 +1847,7 @@ impl Storage {
              CREATE INDEX IF NOT EXISTS idx_test_stage_timings_lookup
                ON test_stage_timings(stage, test_set, timestamp);",
         )?;
+        self.ensure_column("test_stage_timings", "stddev_ms", "REAL NOT NULL DEFAULT 0")?;
         Ok(())
     }
 
@@ -1858,17 +1860,18 @@ impl Storage {
         stage: &str,
         test_set: &str,
         elapsed_ms: f64,
+        stddev_ms: f64,
         n_samples: i64,
         timestamp: i64,
     ) -> Result<()> {
         self.ensure_test_stage_timings_table()?;
         self.conn.execute(
             "INSERT INTO test_stage_timings \
-               (commit_hash, stage, test_set, elapsed_ms, n_samples, timestamp) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+               (commit_hash, stage, test_set, elapsed_ms, stddev_ms, n_samples, timestamp) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
              ON CONFLICT(commit_hash, stage, test_set) DO UPDATE SET \
-               elapsed_ms = ?4, n_samples = ?5, timestamp = ?6",
-            params![commit_hash, stage, test_set, elapsed_ms, n_samples, timestamp],
+               elapsed_ms = ?4, stddev_ms = ?5, n_samples = ?6, timestamp = ?7",
+            params![commit_hash, stage, test_set, elapsed_ms, stddev_ms, n_samples, timestamp],
         )?;
         Ok(())
     }
@@ -1896,20 +1899,22 @@ impl Storage {
     }
 
     /// The recorded new-test time for a specific commit/stage/test_set, if any.
+    /// The recorded new-test measurement `(mean_ms, stddev_ms, n_samples)` for a
+    /// commit/stage/test_set, if any.
     pub fn stage_timing_for_commit(
         &self,
         commit_hash: &str,
         stage: &str,
         test_set: &str,
-    ) -> Result<Option<(f64, i64)>> {
+    ) -> Result<Option<(f64, f64, i64)>> {
         self.ensure_test_stage_timings_table()?;
         Ok(self
             .conn
             .query_row(
-                "SELECT elapsed_ms, n_samples FROM test_stage_timings \
+                "SELECT elapsed_ms, stddev_ms, n_samples FROM test_stage_timings \
                  WHERE commit_hash = ?1 AND stage = ?2 AND test_set = ?3",
                 params![commit_hash, stage, test_set],
-                |row| Ok((row.get::<_, f64>(0)?, row.get::<_, i64>(1)?)),
+                |row| Ok((row.get::<_, f64>(0)?, row.get::<_, f64>(1)?, row.get::<_, i64>(2)?)),
             )
             .optional()?)
     }
@@ -2640,6 +2645,7 @@ fn checked_table(table: &str) -> Result<&str> {
         | "quality_events"
         | "crash_events"
         | "test_exposure_events"
+        | "test_stage_timings"
         | "unit_hazards"
         | "unit_hotness"
         | "coverage_line_events"
@@ -3059,23 +3065,23 @@ mod tests {
     #[test]
     fn stage_timings_record_history_and_current() {
         let storage = Storage::open_memory().unwrap();
-        storage.record_stage_timing("c1", "precommit", "unit", 100.0, 1, 10).unwrap();
-        storage.record_stage_timing("c2", "precommit", "unit", 102.0, 1, 20).unwrap();
-        storage.record_stage_timing("c3", "precommit", "unit", 98.0, 3, 30).unwrap();
+        storage.record_stage_timing("c1", "precommit", "unit", 100.0, 2.0, 1, 10).unwrap();
+        storage.record_stage_timing("c2", "precommit", "unit", 102.0, 2.0, 1, 20).unwrap();
+        storage.record_stage_timing("c3", "precommit", "unit", 98.0, 1.5, 3, 30).unwrap();
         // Baseline is the history excluding the current commit.
         let hist = storage.stage_timing_history("precommit", "unit", 10, "c3").unwrap();
         assert_eq!(hist.len(), 2);
         assert!(hist.contains(&100.0) && hist.contains(&102.0));
-        // The current commit's own measurement is retrievable.
+        // The current commit's own measurement (mean, stddev, n) is retrievable.
         assert_eq!(
             storage.stage_timing_for_commit("c3", "precommit", "unit").unwrap(),
-            Some((98.0, 3))
+            Some((98.0, 1.5, 3))
         );
         // Re-recording upserts.
-        storage.record_stage_timing("c3", "precommit", "unit", 95.0, 4, 31).unwrap();
+        storage.record_stage_timing("c3", "precommit", "unit", 95.0, 0.5, 4, 31).unwrap();
         assert_eq!(
             storage.stage_timing_for_commit("c3", "precommit", "unit").unwrap(),
-            Some((95.0, 4))
+            Some((95.0, 0.5, 4))
         );
         // A different test_set is isolated.
         assert!(storage

@@ -111,7 +111,24 @@ pub struct TestInventoryRow {
 
 /// Per `(language, test_set)` test-churn + quality summary. Only groups with at
 /// least one nonzero count are emitted (the "only show tags that changed" rule).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, TS)]
+/// New-test timing for a group: how the change's new tests compare to the
+/// recent per-stage baseline. `pending` means a measurement was expected but has
+/// not landed yet (the background runner fills it in).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
+pub struct TestTiming {
+    pub pending: bool,
+    /// Percent change vs the baseline (+ is slower).
+    pub pct: f64,
+    /// Confidence half-width in percentage points (the `±`).
+    pub ci_pct: f64,
+    /// Repeat measurements behind the estimate.
+    pub samples: usize,
+    /// Historical commits behind the baseline; 0 means measured-but-no-baseline
+    /// yet (the delta is not meaningful, the baseline is still building).
+    pub baseline_n: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
 pub struct TestSummary {
     pub language: String,
     pub test_set: String,
@@ -130,6 +147,9 @@ pub struct TestSummary {
     /// True when head tests carried mutation evidence, so `kill_no_mutants` /
     /// `kill_no_distinct` reflect real kill data rather than absence.
     pub mutation_available: bool,
+    /// New-test timing (delta ± CI), or pending, when this group added tests.
+    #[serde(default)]
+    pub timing: Option<TestTiming>,
 }
 
 impl TestSummary {

@@ -11,6 +11,11 @@
 //! historical coefficient of variation, honestly reflecting that one run can't
 //! bound its own noise.
 
+/// The stage label new-test timings are stored under; the diff looks them up by
+/// this label + test_set. Distinct from review stages: it identifies the "new
+/// tests" measurement, independent of which review triggered it.
+pub const TIMING_STAGE: &str = "new-tests";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimingDelta {
     /// Robust baseline (median of recent per-commit stage times), milliseconds.
@@ -105,6 +110,50 @@ pub fn timing_delta(baseline: &[f64], new_samples: &[f64]) -> Option<TimingDelta
     })
 }
 
+/// Like [`timing_delta`] but from the stored summary statistics (mean + stddev +
+/// sample count) rather than raw samples - what a recorded measurement carries.
+pub fn timing_delta_from_stats(
+    baseline: &[f64],
+    new_mean: f64,
+    new_stddev: f64,
+    n: usize,
+) -> Option<TimingDelta> {
+    let baseline_ms = median(baseline.to_vec())?;
+    if baseline_ms <= 0.0 || n == 0 {
+        return None;
+    }
+    let pct = (new_mean - baseline_ms) / baseline_ms * 100.0;
+    let ci_pct = if n >= 2 {
+        let se = new_stddev / (n as f64).sqrt();
+        t95(n) * se / baseline_ms * 100.0
+    } else {
+        historical_cv(baseline) * 100.0
+    };
+    Some(TimingDelta {
+        baseline_ms,
+        new_ms: new_mean,
+        pct,
+        ci_pct,
+        samples: n,
+        baseline_n: baseline.len(),
+    })
+}
+
+/// Sample mean and (population-corrected) standard deviation of measurements.
+/// The runner stores these; `timing_delta_from_stats` consumes them.
+pub fn mean_stddev(samples: &[f64]) -> (f64, f64) {
+    let n = samples.len();
+    if n == 0 {
+        return (0.0, 0.0);
+    }
+    let mean = samples.iter().sum::<f64>() / n as f64;
+    if n < 2 {
+        return (mean, 0.0);
+    }
+    let var = samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0);
+    (mean, var.sqrt())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +204,17 @@ mod tests {
         assert_eq!(noisy.samples, 1);
         assert!(noisy.ci_pct > steady.ci_pct);
         assert!(approx(steady.ci_pct, 0.0, 0.001), "steady history -> tiny CI");
+    }
+
+    #[test]
+    fn delta_from_stats_matches_raw_samples() {
+        let baseline = [100.0, 100.0, 100.0];
+        let samples = [98.0, 102.0, 100.0, 104.0];
+        let (mean, sd) = mean_stddev(&samples);
+        let raw = timing_delta(&baseline, &samples).unwrap();
+        let stats = timing_delta_from_stats(&baseline, mean, sd, samples.len()).unwrap();
+        assert!(approx(raw.pct, stats.pct, 1e-9));
+        assert!(approx(raw.ci_pct, stats.ci_pct, 1e-9));
     }
 
     #[test]
