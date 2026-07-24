@@ -9,7 +9,10 @@ deliberately **forward-compatible**: several fields (perf, tags, test depth,
 class purity, per-span branch coverage) are reserved and specced now so they can
 light up later without a schema break, even though only the core review path is
 built first. It also ties into the artifact-pruning TODO so pruning never
-deletes evidence a review still needs.
+deletes evidence a review still needs. **§9 is the design rationale for the MCP
+surface itself** — the four ways to get an LLM to verify before "done", their
+context-token costs, and why a small, verdict-first tool plus a CI backstop
+minimizes cost while maximizing enforcement.
 
 The goal: let a project declare **which findings matter, how much, and when a
 change must be blocked for human/LLM review** — once, in `giga.yml` — and have
@@ -504,3 +507,85 @@ review base** — the last `review_window` commits on the current line, plus any
 branch merge-base. `review.retain` (§3f) is the declaration the pruner consults;
 until it exists, the pruner must be conservative (keep evidence for HEAD and its
 first parent at minimum, plus anything the incremental `engine_state` reads).
+
+---
+
+## 9. Getting an LLM to actually verify before "done" — four strategies and their cost
+
+Computing whether a change is safe is the easy half (§4). The hard half is
+getting an agent to *consult that verdict and honor it* instead of declaring
+victory. Two failure modes dominate:
+
+- **Skip-and-assert** — the agent never runs verification and writes "all tests
+  pass / fully covered."
+- **See-red-and-rationalize** — it runs the check, sees a FAIL/`critical`, and
+  reframes it as out-of-scope / pre-existing / acceptable, then ships.
+
+**No mechanism eliminates the second failure.** An LLM can always read a red
+result and lie about it. The realistic goal is to make the honest path the
+*cheap* path, make a red result *hard to reinterpret*, and keep a backstop the
+agent cannot talk past.
+
+There is also a cost that is easy to forget: **MCP tool schemas and skill
+instructions occupy context on every turn.** A tool's name + description +
+parameter schema sits in the tool list whether or not it is called; a skill's
+teaching text is resident whenever it is loaded. "Add a tool" is a *fixed
+per-turn token tax* paid across the whole session. So the real design question
+is *net* context: does a tool save more — by keeping verbose verification output
+out of the window — than its schema costs by sitting in the tool list?
+
+### The four strategies
+
+| Strategy | LLM effort | Token / context cost | Reliability | Residual failure |
+|---|---|---|---|---|
+| **1. YOLO** (no tests, no gate) | none | ~0 | ~0% | everything ships unverified |
+| **2. Tests exist, hope it runs them / rely on CI** | high, self-directed: discover the command, run it, parse a large log | **huge & variable** — a raw suite/coverage dump is 5k–50k tokens into the window; or a slow out-of-band CI round-trip | low–medium | declares done before running, or before CI finishes; CI catches it late and out of band |
+| **3. Plain-English gates in AGENTS.md** (or link CI config) | medium: read prose, self-enforce | **persistent** — gate text sits in context every turn; linking CI trades that for a fetch+parse of the CI YAML | medium | advisory only; interpretation drifts ("this change is trivial, skipping") |
+| **4. MCP review tool** (deterministic verdict) | one tool call; the tool runs the gate | **small fixed schema tax + a bounded verdict** (verdict-first, capped) — the verbose work happens *outside* the window | highest | can still see `critical` and lie — but it is now a single unambiguous field, and auditable |
+
+### Why the MCP tool wins the *net* context math
+
+Strategy 2's real cost is not running the tests — it is that the agent must pull
+the entire test/coverage/SARIF output *into its context* to interpret it, and
+that output is large and unbounded. Strategy 4 inverts this: the evaluator (§4)
+runs the suite and reduces ~50k tokens of raw output to a ~500–2k-token verdict
+(`verdict`, `gates_triggered`, top-N findings with actions — §5). The agent pays
+a small fixed schema tax for the tool but avoids the large variable dump. **On
+any non-trivial change the tool is strictly cheaper *and* more reliable.**
+
+This is exactly why the MCP surface must stay **small and terse**:
+
+- **Few tools.** Each schema is resident every turn; many near-identical tools
+  measurably degrade tool-selection accuracy (see `mcp.md`'s "5 tools, not 17").
+  Two review tools (`giga_review`, `giga_premerge`) — **not** one per metric.
+- **Verdict-first, bounded responses.** Never return raw logs; return the
+  conclusion and capped, actionable findings (§5). Overflow is a *count*, not a
+  wall of text.
+- **Config in `giga.yml`, not in context.** The gates live in a file the *tool*
+  reads (§3), not in AGENTS.md prose the *agent* must keep resident. This moves
+  strategy 3's persistent token cost off the context budget entirely — the
+  English gate is paid once, on disk, by the evaluator, not on every turn.
+
+### Recommended layering (defense in depth, one source of truth)
+
+No single strategy suffices; combine them so each covers the others' failure:
+
+1. **MCP review tool** — the in-loop, cheap, hard-to-fake check the agent runs
+   after each commit (`giga_review`) and before merge (`giga_premerge`). Fast
+   feedback, bounded context.
+2. **A one-line AGENTS.md pointer** — *not* the gates, just: "before declaring
+   done, call `giga_review`; a `critical` verdict blocks." A few resident tokens
+   telling the agent the tool exists and is mandatory. The *rules* stay in
+   `giga.yml`.
+3. **CI runs the identical evaluator** — the non-bypassable backstop. Because CI
+   and the MCP tool share one evaluator and one `giga.yml`, the agent cannot
+   declare done past a red CI, and a human sees the same verdict the agent saw.
+   This is what bounds the irreducible "saw-red-and-lied" case: the lie is caught
+   out of band and is auditable against the same machine verdict.
+
+**The single-evaluator invariant is the crux:** MCP, CI, and the diff UI must
+all read the same `review:` config and the same evaluator (§4). One source of
+truth means the agent's in-loop check, the merge gate, and the human's view can
+never disagree — so an agent that games the in-loop check still hits an
+identical wall at CI. Design the surface to make the honest path the cheapest
+one, and let CI make the dishonest path fail loudly.
