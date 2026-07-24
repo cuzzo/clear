@@ -771,6 +771,22 @@ fn render_funnel(
             count_span("other: ", summary.other_vis, Color::DarkGray),
         ],
     ));
+    if summary.binaries_added > 0 {
+        let noun = if summary.binaries_added == 1 {
+            "binary"
+        } else {
+            "binaries"
+        };
+        body.push(Line::from(Span::styled(
+            format!(
+                "\u{26a0} {} {} added, {}",
+                summary.binaries_added,
+                noun,
+                crate::diff::fmt_bytes(summary.binaries_bytes),
+            ),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )));
+    }
     body.push(Line::from(""));
 
     // CODE: per-language table (language | public | private | findings | coverage).

@@ -165,6 +165,10 @@ pub struct DiffSummary {
     /// Per language:test_set test-suite churn + quality + timing (the change's
     /// effect on the tests), for the TESTS section.
     pub tests: Vec<crate::test_summary::TestSummary>,
+    /// Binary files newly added by the change (count + total bytes). Rendered as
+    /// a red warning - added binaries in a source diff are almost always wrong.
+    pub binaries_added: usize,
+    pub binaries_bytes: u64,
 }
 
 /// Build the funnel from the plan (line splits, coverage, visibility) and the
@@ -300,6 +304,10 @@ pub fn build_summary(plan: &DiffPlan, changes: &[FileChange]) -> DiffSummary {
     // TESTS: the change's effect on the test suite (already scoped to changed
     // test files and only the groups it touched).
     summary.tests = plan.test_summaries.clone();
+
+    // Binaries: warn loudly when a source diff adds binary files.
+    summary.binaries_added = plan.inventory.binary_added.len();
+    summary.binaries_bytes = plan.inventory.binary_added.iter().map(|b| b.bytes).sum();
     summary
 }
 

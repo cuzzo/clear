@@ -68,6 +68,10 @@ pub struct ChangeInventory {
     pub deleted_files: usize,
     pub renamed_files: usize,
     pub by_role: BTreeMap<String, usize>,
+    /// Binary files newly added by this change (path, byte size). Surfaced as a
+    /// red warning - added binaries in a source diff are usually a mistake.
+    #[serde(default)]
+    pub binary_added: Vec<BinaryFile>,
     pub configuration_paths: Vec<ConfigFile>,
     pub documentation_paths: Vec<String>,
     pub generated_paths: Vec<String>,
@@ -78,6 +82,29 @@ pub struct ChangeInventory {
 pub struct ConfigFile {
     pub path: String,
     pub kind: String,
+}
+
+/// A binary file added by the change, with its byte size.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct BinaryFile {
+    pub path: String,
+    pub bytes: u64,
+}
+
+/// Human-readable byte size: `12 B`, `3.4 KB`, `1.2 MB`, `5.0 GB` (base 1024).
+pub fn fmt_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{size:.1} {}", UNITS[unit])
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -2186,6 +2213,16 @@ fn language_for_path(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fmt_bytes_scales_by_1024_and_keeps_bytes_exact() {
+        assert_eq!(fmt_bytes(0), "0 B");
+        assert_eq!(fmt_bytes(512), "512 B");
+        assert_eq!(fmt_bytes(1024), "1.0 KB");
+        assert_eq!(fmt_bytes(1536), "1.5 KB");
+        assert_eq!(fmt_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(fmt_bytes(3 * 1024 * 1024 * 1024), "3.0 GB");
+    }
 
     fn file(path: &str, contents: &str) -> RevisionFile {
         RevisionFile {

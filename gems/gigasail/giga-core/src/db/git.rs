@@ -141,18 +141,20 @@ impl GitProvider {
         let base_oid = self.resolve_commit(base_revision)?;
         let repo = Repository::open(&self.path)?;
         let base_tree = repo.find_commit(git2::Oid::from_str(&base_oid)?)?.tree()?;
-        let (head_oid, base, head, renames, override_contents) =
+        let (head_oid, base, head, renames, override_contents, binaries) =
             if head_revision == WORKTREE_REVISION {
                 let mut diff = repo.diff_tree_to_workdir_with_index(Some(&base_tree), None)?;
                 let (base, mut head, renames) =
                     self.changed_snapshots(&repo, &base_tree, None, &mut diff)?;
                 self.add_untracked_worktree_files(&repo, &mut head)?;
+                let binaries = self.collect_added_binaries(&repo, &diff);
                 (
                     WORKTREE_REVISION.to_string(),
                     base,
                     head,
                     renames,
                     self.file_contents_in_worktree(".giga/diff.toml")?,
+                    binaries,
                 )
             } else {
                 let head_oid = self.resolve_commit(head_revision)?;
@@ -160,18 +162,54 @@ impl GitProvider {
                 let mut diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
                 let (base, head, renames) =
                     self.changed_snapshots(&repo, &base_tree, Some(&head_tree), &mut diff)?;
+                let binaries = self.collect_added_binaries(&repo, &diff);
                 (
                     head_oid.clone(),
                     base,
                     head,
                     renames,
                     self.file_contents_at_commit(&head_oid, ".giga/diff.toml")?,
+                    binaries,
                 )
             };
         let overrides = classification_overrides(override_contents.as_deref());
-        Ok(build_diff_plan_with_renames_and_overrides(
+        let mut plan = build_diff_plan_with_renames_and_overrides(
             base_oid, head_oid, base, head, renames, overrides,
-        ))
+        );
+        plan.inventory.binary_added = binaries;
+        Ok(plan)
+    }
+
+    /// Binary files newly added by a diff, with their byte sizes, so the review
+    /// can warn about them. Reads each added delta's blob to classify it.
+    fn collect_added_binaries(
+        &self,
+        repo: &Repository,
+        diff: &git2::Diff,
+    ) -> Vec<crate::diff::BinaryFile> {
+        let mut out = Vec::new();
+        for delta in diff.deltas() {
+            if delta.status() != git2::Delta::Added {
+                continue;
+            }
+            let new_file = delta.new_file();
+            let Some(path) = new_file.path().and_then(|p| p.to_str()) else {
+                continue;
+            };
+            let Some(path) = self.scoped_path(path) else {
+                continue;
+            };
+            if let Ok(blob) = repo.find_blob(new_file.id()) {
+                if blob.is_binary() {
+                    out.push(crate::diff::BinaryFile {
+                        path,
+                        bytes: blob.size() as u64,
+                    });
+                }
+            }
+        }
+        out.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
+        out
     }
 
     fn in_scope(&self, path: &str) -> bool {
