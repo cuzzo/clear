@@ -110,6 +110,58 @@ This revises the "don't build" of `minimal-call-graph-feasibility.md`, whose
 data was Ruby (dynamic dispatch). Go's static typing makes the same lever pay
 off very differently.
 
+## Experiment: precomputed stdlib bounds + "trust the known component"
+
+Built `config/stdlib_complexity/go.stdlib.json.gz` (2,412 functions) by running
+`espalier -f architecture` over 330 files of the commonly-imported stdlib, then
+tested two consumption models.
+
+**1. Propagating stdlib bounds by corpus union gives ~zero uplift.** Analyzing
+unslop *together with* the stdlib source left production completeness at
+**24% -> 24%**. Because the stdlib is only 38% self-complete (1,172/3,071), its
+bounds are themselves `unknown`, and transitive completeness cascades the
+incompleteness straight back to the caller. Requiring transitive completeness is
+the wrong bar.
+
+**2. "Trust the known component unless a hidden callee can exceed it" reaches
+~90%.** For every incomplete function we already emit a known structural
+component (`O(1)`, `O(N)`, ...). It is only *wrong* if a hidden callee is
+asymptotically larger - which needs FFI (opaque C/syscall/runtime/unsafe),
+reflection, or a super-linear callback. Classifying incomplete functions by
+whether any blocker is in those danger categories:
+
+| Corpus | incomplete | known component RIGHT | risky: FFI | superlinear | reflection |
+|---|---:|---:|---:|---:|---:|
+| Go stdlib (worst case for FFI) | 1,708 | **81%** | 18% | 0% | 1% |
+| unslop | 92 | **88%** | 11% | 1% | 0% |
+| boobytrap | 46 | **83%** | 2% | 15% | 0% |
+
+Combined with the already-complete fraction, **effective trustworthy Big-O is
+~88-91%** on all three, and the residual risk is concentrated exactly where you
+predicted: FFI, plus a little super-linear-stdlib-in-a-cheap-function
+(boobytrap's `sort` usage). This holds on the stdlib itself, the most
+FFI-dense Go there is; ordinary application code is safer.
+
+**Caveat - the known component is also sometimes *over*-estimated.** The
+analyzer emits garbage for interface-callback and unbounded-recursion functions:
+`sort.Sort` -> a nonsensical multivariate blob (should be `O(N log N)`),
+`os.MkdirAll` -> `O(2^N)` (should be `O(depth)`). "Trust the known component"
+therefore also needs the structural analyzer's recursion/callback handling
+tightened, or those cases would be confidently wrong.
+
+## Revised recommendation
+
+The lever for >80% Go is **not** propagating stdlib completeness (0 uplift) and
+**not** a name-matched bounds table (fragile keys, self-incomplete source). It
+is a **completeness-model change**: report the known component as an
+*authoritative, confidence-tiered* answer, and reserve `unknown` for functions
+whose blockers are FFI / reflection / unbounded callback. That alone yields
+~88-91% trustworthy bounds. Support it with two fixes: (a) an explicit
+FFI/reflection boundary tag on facts, and (b) tighter structural handling of
+recursion and interface-callbacks so the trusted component is not over-estimated
+(`sort.Sort`, `os.MkdirAll`). `go.stdlib.json.gz` remains useful as a reference
+for the ~38% of stdlib functions that *are* complete, not as a propagation feed.
+
 ## Recommended validation before building
 
 Assert the top ~30 Go stdlib bounds (package fns + type methods) in `go.yml`,
