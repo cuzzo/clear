@@ -1,9 +1,46 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "tmpdir"
 require_relative "../lib/espalier"
 
 class ArchitectureArtifactTest < Minitest::Test
+  def test_emits_import_edges_scanned_from_source
+    Dir.mktmpdir do |root|
+      File.write(File.join(root, "svc.go"), <<~GO)
+        package svc
+
+        import (
+          "fmt"
+          "os/exec"
+        )
+
+        import "strings"
+
+        func Run() { fmt.Println("x") }
+      GO
+      evidence = {
+        "root" => root,
+        "corpus" => { "complete" => true },
+        "owners" => [],
+        "methods" => [{ "id" => "fn:1", "owner" => "svc", "name" => "Run", "language" => "go",
+                        "path" => File.join(root, "svc.go"), "line" => 10, "span" => [10, 0, 10, 30] }],
+        "fields" => [],
+        "facts" => { "calls" => [], "state_accesses" => [] }
+      }
+      artifact = Espalier::ArchitectureArtifact.build(evidence, root: root, commit: "abc")
+      imports = artifact["edges"].select { |edge| edge["kind"] == "imports" }
+      modules = imports.map { |edge| edge.dig("metadata", "module") }.sort
+      assert_equal ["fmt", "os/exec", "strings"], modules
+      # Each import edge carries the source line and targets a named module node.
+      fmt = imports.find { |edge| edge.dig("metadata", "module") == "fmt" }
+      assert_equal "svc.go", fmt.dig("spans", 0, "path")
+      assert_equal 4, fmt.dig("spans", 0, "start_line")
+      target = artifact["nodes"].find { |node| node["id"] == fmt["target"] }
+      assert_equal "fmt", target["name"]
+    end
+  end
+
   def test_projects_first_class_state_edges_and_citations
     evidence = {
       "root" => "/repo",

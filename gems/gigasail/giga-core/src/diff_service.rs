@@ -62,11 +62,21 @@ fn apply_known_architecture(storage: &Storage, plan: &mut DiffPlan) -> Result<()
     for site in &sites {
         by_path.entry(site.path.as_str()).or_default().push(site);
     }
+    use crate::architecture::FactKind;
     for file in &mut plan.files {
         let Some(file_sites) = by_path.get(file.path.as_str()) else {
             continue;
         };
         let added = file.added_line_numbers();
+        // File-level imports: any import site on an added line.
+        let mut imports = std::collections::BTreeSet::new();
+        for site in file_sites {
+            if site.kind == FactKind::Import && added.contains(&site.line) {
+                imports.insert(site.label.clone());
+            }
+        }
+        file.added_imports = imports.into_iter().collect();
+        // Unit-level calls and state: sites on an added line inside a group span.
         for group in &mut file.groups {
             let mut deps = std::collections::BTreeSet::new();
             let mut state = std::collections::BTreeSet::new();
@@ -77,10 +87,14 @@ fn apply_known_architecture(storage: &Storage, plan: &mut DiffPlan) -> Result<()
                 {
                     continue;
                 }
-                if site.is_state {
-                    state.insert(site.label.clone());
-                } else {
-                    deps.insert(site.label.clone());
+                match site.kind {
+                    FactKind::Call => {
+                        deps.insert(site.label.clone());
+                    }
+                    FactKind::State => {
+                        state.insert(site.label.clone());
+                    }
+                    FactKind::Import => {}
                 }
             }
             group.added_dependencies = deps.into_iter().collect();

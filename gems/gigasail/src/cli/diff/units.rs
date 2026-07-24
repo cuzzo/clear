@@ -69,6 +69,9 @@ pub struct FileChange {
     pub file_removed: u32,
     pub unattributed_added: u32,
     pub unattributed_removed: u32,
+    /// Modules newly imported/required on this file's added lines, from the
+    /// architecture graph. Shown as `New Dependencies` on file/dir views.
+    pub added_imports: Vec<String>,
 }
 
 /// Find the innermost (smallest-span) unit enclosing a 1-based new-side line.
@@ -191,6 +194,7 @@ pub fn assign_units(file: &FileDiff, new_source: Option<&str>) -> FileChange {
         file_removed,
         unattributed_added,
         unattributed_removed,
+        added_imports: Vec::new(),
     }
 }
 

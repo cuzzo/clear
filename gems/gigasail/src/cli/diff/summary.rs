@@ -341,6 +341,7 @@ mod tests {
             file_removed: 0,
             unattributed_added: 0,
             unattributed_removed: 0,
+            added_imports: Vec::new(),
         }
     }
 
@@ -474,6 +475,7 @@ mod tests {
             file_removed: removed,
             unattributed_added: 0,
             unattributed_removed: 0,
+            added_imports: Vec::new(),
         };
         let changes = vec![mk("README.md", 2, 0), mk("package.json", 1, 1)];
         let summary = build_summary(&plan, &changes);

@@ -498,18 +498,28 @@ fn latest_artifact_id(storage: &Storage) -> Result<i64> {
         .context("no architecture artifact has been ingested")
 }
 
-/// A single call or state-access site from the architecture graph, tagged with
-/// the source location where it occurs. The diff service intersects these with
-/// a diff's added lines to surface *new* dependencies and state per unit.
+/// What an architecture fact site represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactKind {
+    /// A resolved call/collaboration (`Owner#name`), attributed to a unit.
+    Call,
+    /// A state read/write (`read:field` / `write:field`), attributed to a unit.
+    State,
+    /// A source import/require (the module string), attributed to a file.
+    Import,
+}
+
+/// A single call, state-access, or import site from the architecture graph,
+/// tagged with the source location where it occurs. The diff service intersects
+/// these with a diff's added lines to surface *new* facts per unit or file.
 #[derive(Debug, Clone)]
 pub struct ArchitectureFactSite {
     pub path: String,
     pub line: u32,
-    /// `Owner#name` (or a bare name for externals) for a call edge;
-    /// `read:field` / `write:field` for a state access.
+    /// `Owner#name` for a call, `read:field`/`write:field` for state, or the
+    /// module string for an import.
     pub label: String,
-    /// True for a state read/write, false for a call/collaboration edge.
-    pub is_state: bool,
+    pub kind: FactKind,
 }
 
 /// Every call and state-access site from the architecture graph ingested for
@@ -566,7 +576,7 @@ pub fn architecture_fact_sites_for_commit(
                         path,
                         line,
                         label: format!("write:{name}"),
-                        is_state: true,
+                        kind: FactKind::State,
                     });
                 }
             }
@@ -577,7 +587,18 @@ pub fn architecture_fact_sites_for_commit(
                         path,
                         line,
                         label: format!("read:{name}"),
-                        is_state: true,
+                        kind: FactKind::State,
+                    });
+                }
+            }
+            // An import/require: the module string is the target external node's name.
+            "imports" => {
+                if let Some((name, _)) = nodes.get(&target) {
+                    sites.push(ArchitectureFactSite {
+                        path,
+                        line,
+                        label: name.clone(),
+                        kind: FactKind::Import,
                     });
                 }
             }
@@ -596,7 +617,7 @@ pub fn architecture_fact_sites_for_commit(
                         path,
                         line,
                         label,
-                        is_state: false,
+                        kind: FactKind::Call,
                     });
                 }
             }
@@ -736,9 +757,11 @@ mod tests {
                 {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"start_column":0,"end_line":9,"end_column":3,"metadata":{}},
                 {"id":"fn:run","kind":"function","name":"run","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":2,"start_column":0,"end_line":6,"end_column":3,"metadata":{}},
                 {"id":"fn:help","kind":"function","name":"help","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":7,"start_column":0,"end_line":8,"end_column":3,"metadata":{}},
-                {"id":"state:v","kind":"state","name":"@value","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":3,"start_column":2,"end_line":3,"end_column":8,"metadata":{}}
+                {"id":"state:v","kind":"state","name":"@value","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":3,"start_column":2,"end_line":3,"end_column":8,"metadata":{}},
+                {"id":"external:import:s","kind":"external","name":"strings","owner":null,"language":"ruby","path":null,"start_line":0,"start_column":0,"end_line":0,"end_column":0,"metadata":{"import":true}}
             ],
             "edges": [
+                {"id":"e:import","source":"file:demo.rb","target":"external:import:s","kind":"imports","conditional":false,"weight":1,"confidence":"high","metadata":{"module":"strings"},"spans":[{"path":"demo.rb","start_line":1,"start_column":0,"end_line":1,"end_column":0}]},
                 {"id":"e:call","source":"fn:run","target":"fn:help","kind":"calls","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":4,"start_column":4,"end_line":4,"end_column":10}]},
                 {"id":"e:write","source":"fn:run","target":"state:v","kind":"writes","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":3,"start_column":2,"end_line":3,"end_column":8}]},
                 {"id":"e:read","source":"state:v","target":"fn:help","kind":"reads","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":7,"start_column":2,"end_line":7,"end_column":8}]},
@@ -751,14 +774,30 @@ mod tests {
 
         let sites = architecture_fact_sites_for_commit(&storage, "deadbeef").unwrap();
         // The call resolves to `Owner#name`; the external call is dropped.
-        let call = sites.iter().find(|s| !s.is_state && s.line == 4).unwrap();
+        let call = sites
+            .iter()
+            .find(|s| s.kind == FactKind::Call && s.line == 4)
+            .unwrap();
         assert_eq!(call.label, "Demo#help");
         assert!(sites.iter().all(|s| s.label != "puts"), "external calls dropped");
         // Write names the state target; read names the state source (reversed).
-        let write = sites.iter().find(|s| s.is_state && s.line == 3).unwrap();
+        let write = sites
+            .iter()
+            .find(|s| s.kind == FactKind::State && s.line == 3)
+            .unwrap();
         assert_eq!(write.label, "write:@value");
-        let read = sites.iter().find(|s| s.is_state && s.line == 7).unwrap();
+        let read = sites
+            .iter()
+            .find(|s| s.kind == FactKind::State && s.line == 7)
+            .unwrap();
         assert_eq!(read.label, "read:@value");
+        // The import target names the module and is tagged as an import.
+        let import = sites
+            .iter()
+            .find(|s| s.kind == FactKind::Import)
+            .unwrap();
+        assert_eq!(import.label, "strings");
+        assert_eq!(import.line, 1);
 
         // An unknown commit yields nothing rather than erroring.
         assert!(architecture_fact_sites_for_commit(&storage, "cafe").unwrap().is_empty());

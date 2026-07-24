@@ -268,6 +268,7 @@ pub fn plan_to_view(plan: &DiffPlan) -> View {
             file_removed: real_removed,
             unattributed_added: 0,
             unattributed_removed: 0,
+            added_imports: file.added_imports.clone(),
         });
 
         line_ev.insert(file.path.clone(), line_evidence_for(file));

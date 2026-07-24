@@ -664,8 +664,8 @@ impl App {
     }
 
     /// An info box for a whole-file view: aggregate the file's unit evidence.
-    /// File-level `New Dependencies` is imports (a separate architecture fact),
-    /// so the units' call-deps/state are not surfaced here.
+    /// File-level `New Dependencies` is the file's newly-added imports (not the
+    /// units' call-deps/state, which belong on class/function views).
     fn file_info(&self, path: &str) -> InfoBox {
         let units: Vec<&ChangedUnit> = self
             .changes
@@ -674,9 +674,19 @@ impl App {
             .flat_map(|c| &c.units)
             .collect();
         let mut info = Self::info_from_units(path.to_string(), &units);
-        info.new_dependencies.clear();
+        info.new_dependencies = self.imports_under(|c| c.path == path);
         info.new_state.clear();
         info
+    }
+
+    /// Sorted, de-duplicated newly-added imports across the changed files that
+    /// match `select` (one file for a file view, a whole subtree for a dir view).
+    fn imports_under(&self, select: impl Fn(&FileChange) -> bool) -> Vec<String> {
+        let mut imports = std::collections::BTreeSet::new();
+        for change in self.changes.iter().filter(|c| select(c)) {
+            imports.extend(change.added_imports.iter().cloned());
+        }
+        imports.into_iter().collect()
     }
 
     /// Fallback: the raw hunk lines within a unit's span (no full source).
@@ -822,10 +832,19 @@ impl App {
             let title = node.path.clone().unwrap_or_else(|| node.label.clone());
             let mut info = Self::info_from_units(title.clone(), &units);
             // A class aggregates its methods' call-deps and state; file/dir
-            // containers show imports instead (a separate architecture fact).
+            // containers show newly-added imports instead.
             if node.kind != NodeKind::Class {
-                info.new_dependencies.clear();
                 info.new_state.clear();
+                info.new_dependencies = match &node.path {
+                    Some(path) if node.kind == NodeKind::File => {
+                        self.imports_under(|c| &c.path == path)
+                    }
+                    Some(path) if node.kind == NodeKind::Directory => {
+                        let prefix = format!("{path}/");
+                        self.imports_under(|c| c.path.starts_with(&prefix))
+                    }
+                    _ => Vec::new(),
+                };
             }
             return RightPane {
                 title,
@@ -937,6 +956,7 @@ mod tests {
             file_removed: 0,
             unattributed_added: 0,
             unattributed_removed: 0,
+            added_imports: Vec::new(),
         };
         let file = FileDiff {
             path: "proj/a.rs".into(),
@@ -1155,6 +1175,7 @@ mod tests {
             file_removed: 1,
             unattributed_added: 0,
             unattributed_removed: 0,
+            added_imports: Vec::new(),
         };
         let file = FileDiff {
             path: "proj/a.rs".into(),
@@ -1255,6 +1276,16 @@ mod tests {
     }
 
     #[test]
+    fn file_info_surfaces_added_imports_as_dependencies() {
+        let mut app = sample_app();
+        app.changes[0].added_imports = vec!["os/exec".into(), "strings".into()];
+        let info = app.file_info("proj/a.rs");
+        // A file view shows its imports as New Dependencies, and no state.
+        assert_eq!(info.new_dependencies, vec!["os/exec", "strings"]);
+        assert!(info.new_state.is_empty());
+    }
+
+    #[test]
     fn search_backspace_on_empty_is_safe() {
         let mut app = sample_app();
         app.handle_key(key(KeyCode::Char('/')));
@@ -1311,6 +1342,7 @@ mod tests {
             file_removed: 0,
             unattributed_added: 0,
             unattributed_removed: 0,
+            added_imports: Vec::new(),
         };
         let root = build_tree(std::slice::from_ref(&change), project_root_of);
         let summary = crate::cli::diff::summary::DiffSummary {
@@ -1345,6 +1377,7 @@ mod tests {
             file_removed: 1,
             unattributed_added: 0,
             unattributed_removed: 0,
+            added_imports: Vec::new(),
         };
         let file = FileDiff {
             path: "proj/a.rs".into(),
@@ -1428,6 +1461,7 @@ mod tests {
             file_removed: 0,
             unattributed_added: 0,
             unattributed_removed: 0,
+            added_imports: Vec::new(),
         };
         let file = FileDiff {
             path: "proj/s.rs".into(),

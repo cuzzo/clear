@@ -62,6 +62,17 @@ module Espalier
         edges << relationship_edge(access, source, target, access["kind"], root)
       end
 
+      # Source-level imports are not part of FactMine's call/state facts, so we
+      # scan each analyzed file once for its import/require statements and emit
+      # them as `imports` edges (target: an external node named for the module).
+      source_files(owners, methods, fields).each do |path, language|
+        extract_imports(path, language).each do |mod, line|
+          external_id = "external:import:#{Digest::SHA256.hexdigest(mod)[0, 16]}"
+          nodes_by_id[external_id] ||= import_target_node(external_id, mod, language)
+          edges << import_edge(path, mod, line, external_id, root)
+        end
+      end
+
       nodes = nodes_by_id.values
       edges = merge_edges(edges)
       cyclic = cyclic_node_ids(edges)
@@ -352,6 +363,106 @@ module Espalier
       status.success? ? output.strip : ""
     rescue StandardError
       ""
+    end
+
+    # Unique {absolute_path => language} over every record that carries a path,
+    # so we scan each analyzed source file for imports exactly once.
+    def source_files(owners, methods, fields)
+      files = {}
+      (owners + methods + fields).each do |record|
+        path = record["path"]
+        next if path.to_s.empty?
+
+        files[path] ||= record["language"]
+      end
+      files
+    end
+
+    def import_target_node(id, mod, language)
+      {
+        "id" => id, "kind" => "external", "name" => mod, "owner" => nil,
+        "language" => language, "path" => nil,
+        "start_line" => 0, "start_column" => 0, "end_line" => 0, "end_column" => 0,
+        "metadata" => { "confidence" => "high", "import" => true }
+      }
+    end
+
+    def import_edge(path, mod, line, target, root)
+      rel = relative_path(path, root)
+      {
+        "id" => "import:#{Digest::SHA256.hexdigest([rel, mod].join("\0"))[0, 16]}",
+        "source" => "file:#{rel}", "target" => target, "kind" => "imports",
+        "conditional" => false, "confidence" => "high", "weight" => 1,
+        "spans" => [{ "path" => rel, "start_line" => line, "start_column" => 0,
+                      "end_line" => line, "end_column" => 0 }],
+        "metadata" => { "module" => mod }
+      }
+    end
+
+    # Language-specific import/require statements as [module, line] pairs. This
+    # is a deliberately small line scanner: the module string as written is what
+    # a reviewer wants to see, so no resolution or path normalization is done.
+    def extract_imports(path, language)
+      source = File.read(path)
+      lang = (language || File.extname(path).delete_prefix(".")).to_s.downcase
+      case lang
+      when "go" then go_imports(source)
+      when "ruby", "rb" then scan_imports(source, /^\s*require(?:_relative)?\s+['"]([^'"]+)['"]/)
+      when "python", "py" then scan_imports(source, /^\s*(?:from\s+(\S+)\s+import\b|import\s+([^\s,]+))/)
+      when "javascript", "js", "jsx", "typescript", "ts", "tsx" then js_imports(source)
+      when "rust", "rs" then scan_imports(source, /^\s*use\s+([A-Za-z_][\w:]*)/)
+      when "java", "kotlin", "kt" then scan_imports(source, /^\s*import\s+(?:static\s+)?([\w.]+)/)
+      when "c", "cpp", "cc", "h", "hpp" then scan_imports(source, /^\s*#\s*include\s+[<"]([^>"]+)[>"]/)
+      else []
+      end
+    rescue StandardError
+      []
+    end
+
+    # A single capture group per matching line; supports two alternative groups
+    # (Python `from X`/`import X`) by taking whichever captured.
+    def scan_imports(source, pattern)
+      out = []
+      source.each_line.with_index(1) do |line, number|
+        next unless (match = pattern.match(line))
+
+        mod = match[1] || match[2]
+        out << [mod, number] if mod
+      end
+      out
+    end
+
+    # Go supports both `import "x"` and a parenthesized block of quoted paths
+    # (optionally aliased). We track the block so the block members are captured.
+    def go_imports(source)
+      out = []
+      in_block = false
+      source.each_line.with_index(1) do |line, number|
+        if in_block
+          break_block = line.include?(")")
+          if (match = /["`]([^"`]+)["`]/.match(line))
+            out << [match[1], number]
+          end
+          in_block = false if break_block
+        elsif line =~ /^\s*import\s*\(/
+          in_block = true
+        elsif (match = /^\s*import\s+(?:[\w.]+\s+)?["`]([^"`]+)["`]/.match(line))
+          out << [match[1], number]
+        end
+      end
+      out
+    end
+
+    def js_imports(source)
+      out = []
+      source.each_line.with_index(1) do |line, number|
+        if (match = /^\s*import\b.*?from\s+['"]([^'"]+)['"]/.match(line)) ||
+           (match = /^\s*import\s+['"]([^'"]+)['"]/.match(line)) ||
+           (match = /require\(\s*['"]([^'"]+)['"]\s*\)/.match(line))
+          out << [match[1], number]
+        end
+      end
+      out
     end
 
     def relative_path(path, root)

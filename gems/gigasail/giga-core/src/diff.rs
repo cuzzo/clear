@@ -129,6 +129,9 @@ pub struct DiffFile {
     pub line_annotations: Vec<LineAnnotation>,
     pub residual_lines: AddedLines,
     pub groups: Vec<DiffGroup>,
+    /// Modules imported/required on this file's added lines, from the ingested
+    /// architecture graph. Empty when no graph is available.
+    pub added_imports: Vec<String>,
     /// Commit-matching SARIF observations. They are intentionally kept out of
     /// risk scoring until their artifact scope can prove completeness.
     pub sarif_findings: Vec<SarifFindingSummary>,
@@ -527,6 +530,7 @@ fn plan_file(
         verification,
         line_annotations: Vec::new(),
         groups,
+        added_imports: Vec::new(),
         sarif_findings: Vec::new(),
         base_source,
         head_source,

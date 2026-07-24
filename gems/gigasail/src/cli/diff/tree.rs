@@ -267,6 +267,7 @@ mod tests {
             file_removed: 0,
             unattributed_added: 0,
             unattributed_removed: 0,
+            added_imports: Vec::new(),
         }
     }
 
