@@ -59,12 +59,6 @@ pub struct HazardTotals {
     pub t3: u32,
 }
 
-impl HazardTotals {
-    pub fn is_empty(&self) -> bool {
-        self.hazards + self.t1 + self.t2 + self.t3 == 0
-    }
-}
-
 /// One language's production-code breakdown by visibility, with its coverage
 /// and hazard/tier findings.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -388,8 +382,112 @@ mod tests {
         assert_eq!(bar.total(), 10);
         assert_eq!(bar.covered_killed, 2);
         assert_eq!(bar.uncovered, 4);
+        // measured excludes unknown; has_coverage reflects it.
+        assert_eq!(bar.measured(), 10);
+        assert!(bar.has_coverage());
+        let unknown_only = CoverageBar {
+            unknown: 5,
+            ..Default::default()
+        };
+        assert_eq!(unknown_only.measured(), 0);
+        assert!(!unknown_only.has_coverage());
         // VisibilityVerificationSlices default is all-zero.
         let vis = VisibilityVerificationSlices::default();
         assert_eq!(slice_total(&vis.public), 0);
+    }
+
+    #[test]
+    fn other_type_maps_common_file_kinds() {
+        for (path, kind) in [
+            ("docs/README.md", "Markdown"),
+            ("notes.markdown", "Markdown"),
+            ("ci/build.yml", "YAML"),
+            ("k8s/pod.yaml", "YAML"),
+            ("pkg/data.json", "JSON"),
+            ("Cargo.toml", "TOML"),
+            ("pom.xml", "XML"),
+            ("app.ini", "Config"),
+            ("server.conf", "Config"),
+            ("notes.txt", "Text"),
+            ("scripts/run.sh", "Shell"),
+            ("Dockerfile", "Dockerfile"),
+            ("Dockerfile.prod", "Dockerfile"),
+            ("Makefile", "Makefile"),
+            ("rules.mk", "Makefile"),
+            ("Gemfile", "Gemfile"),
+            ("Gemfile.lock", "Gemfile"),
+            ("Rakefile", "Rakefile"),
+            ("BUILD", "Bazel"),
+            ("lib.bzl", "Bazel"),
+            ("app.bazel", "Bazel"),
+            ("build.gradle", "Gradle"),
+            ("deps.lock", "Lockfile"),
+            ("LICENSE", "Other"),
+            ("weird.xyz", "Other"),
+        ] {
+            assert_eq!(other_type(path), kind, "other_type({path})");
+        }
+    }
+
+    #[test]
+    fn build_summary_aggregates_other_files_and_dependencies() {
+        // package.json: left-pad removed, keep bumped, tokio added.
+        let base_pkg = r#"{"dependencies":{"left-pad":"1.0.0","keep":"1.0.0"}}"#;
+        let head_pkg = r#"{"dependencies":{"keep":"2.0.0","tokio":"1.0.0"}}"#;
+        let plan = build_diff_plan_with_renames(
+            "b".repeat(40),
+            "h".repeat(40),
+            vec![
+                RevisionFile {
+                    path: "package.json".into(),
+                    contents: Some(base_pkg.into()),
+                },
+                RevisionFile {
+                    path: "README.md".into(),
+                    contents: Some("# Title\n".into()),
+                },
+            ],
+            vec![
+                RevisionFile {
+                    path: "package.json".into(),
+                    contents: Some(head_pkg.into()),
+                },
+                RevisionFile {
+                    path: "README.md".into(),
+                    contents: Some("# Title\nNew line.\nMore.\n".into()),
+                },
+            ],
+            BTreeMap::new(),
+        );
+        // The summary reads real per-file counts from the changes.
+        let mk = |path: &str, added: u32, removed: u32| FileChange {
+            path: path.into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            is_test: false,
+            units: vec![],
+            file_added: added,
+            file_removed: removed,
+            unattributed_added: 0,
+            unattributed_removed: 0,
+        };
+        let changes = vec![mk("README.md", 2, 0), mk("package.json", 1, 1)];
+        let summary = build_summary(&plan, &changes);
+
+        // OTHER: a Markdown row with the real line delta.
+        let md = summary
+            .other
+            .iter()
+            .find(|o| o.type_label == "Markdown")
+            .expect("markdown row");
+        assert_eq!((md.added, md.removed), (2, 0));
+        assert!(summary.total_added >= 3);
+
+        // Dependencies: tokio added, left-pad removed, keep changed.
+        let kinds: std::collections::HashMap<&str, DepKind> =
+            summary.deps.iter().map(|d| (d.name.as_str(), d.kind)).collect();
+        assert_eq!(kinds.get("tokio"), Some(&DepKind::Added));
+        assert_eq!(kinds.get("left-pad"), Some(&DepKind::Removed));
+        assert_eq!(kinds.get("keep"), Some(&DepKind::Changed));
     }
 }

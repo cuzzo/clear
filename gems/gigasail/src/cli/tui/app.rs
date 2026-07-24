@@ -1249,4 +1249,182 @@ mod tests {
             "expanded fold shows all lines"
         );
     }
+
+    #[test]
+    fn apply_view_swaps_the_diff_data_and_keeps_a_valid_selection() {
+        let mut app = sample_app();
+        let change = FileChange {
+            path: "other/z.rs".into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            is_test: false,
+            units: vec![ChangedUnit {
+                path: "other/z.rs".into(),
+                ..unit("zeta", Visibility::Public, 1, 3, 2)
+            }],
+            file_added: 2,
+            file_removed: 0,
+            unattributed_added: 0,
+            unattributed_removed: 0,
+        };
+        let root = build_tree(std::slice::from_ref(&change), project_root_of);
+        let summary = crate::cli::diff::summary::DiffSummary {
+            total_added: 42,
+            ..Default::default()
+        };
+        app.selected = 999; // out of range on purpose
+        app.apply_view(
+            root,
+            vec![change],
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            summary,
+        );
+        assert_eq!(app.summary.total_added, 42);
+        assert!(app.selected < app.rows.len());
+        assert!(app.rows.iter().any(|r| r.label.contains("zeta") || r.label.contains("z.rs")));
+    }
+
+    #[test]
+    fn function_without_source_falls_back_to_hunk_lines() {
+        // With no new-side source available, the code view uses the raw hunk
+        // lines within the unit's span (including deletions).
+        let change = FileChange {
+            path: "proj/a.rs".into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            is_test: false,
+            units: vec![unit("gamma", Visibility::Public, 1, 3, 2)],
+            file_added: 2,
+            file_removed: 1,
+            unattributed_added: 0,
+            unattributed_removed: 0,
+        };
+        let file = FileDiff {
+            path: "proj/a.rs".into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_lines: 2,
+                new_start: 1,
+                new_lines: 3,
+                lines: vec![
+                    DiffLine {
+                        origin: LineOrigin::Context,
+                        old_lineno: Some(1),
+                        new_lineno: Some(1),
+                        content: "fn gamma() {".into(),
+                    },
+                    DiffLine {
+                        origin: LineOrigin::Del,
+                        old_lineno: Some(2),
+                        new_lineno: None,
+                        content: "  removed()".into(),
+                    },
+                    DiffLine {
+                        origin: LineOrigin::Add,
+                        old_lineno: None,
+                        new_lineno: Some(2),
+                        content: "  added()".into(),
+                    },
+                ],
+            }],
+        };
+        let root = build_tree(std::slice::from_ref(&change), project_root_of);
+        let mut app = App::new(
+            PathBuf::from("."),
+            PathBuf::from("/nonexistent/gigasail.db"),
+            root,
+            vec![change],
+            vec![file],
+            HashMap::new(), // no sources -> hunk fallback
+            HashMap::new(),
+            "HEAD".into(),
+        );
+        select(&mut app, "gamma()");
+        match app.right_pane().body {
+            PaneBody::Code { lines, .. } => {
+                assert!(lines.iter().any(|l| l.content.contains("added")));
+                assert!(lines.iter().any(|l| l.content.contains("removed")));
+            }
+            other => panic!("expected code view, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn class_node_without_child_functions_renders_its_code() {
+        // A struct/type (Class) with no changed methods shows its own inline
+        // diff rather than an empty summary table.
+        let class = ChangedUnit {
+            name: "MyStruct".into(),
+            kind: UnitKind::Class,
+            path: "proj/s.rs".into(),
+            start_line: 1,
+            end_line: 3,
+            signature: String::new(),
+            visibility: Visibility::Public,
+            is_test: false,
+            added: 2,
+            removed: 0,
+            added_lines: vec![2, 3],
+            evidence: Evidence::default(),
+        };
+        let change = FileChange {
+            path: "proj/s.rs".into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            is_test: false,
+            units: vec![class],
+            file_added: 2,
+            file_removed: 0,
+            unattributed_added: 0,
+            unattributed_removed: 0,
+        };
+        let file = FileDiff {
+            path: "proj/s.rs".into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: 3,
+                lines: vec![DiffLine {
+                    origin: LineOrigin::Add,
+                    old_lineno: None,
+                    new_lineno: Some(2),
+                    content: "  field int".into(),
+                }],
+            }],
+        };
+        let mut sources = HashMap::new();
+        sources.insert(
+            "proj/s.rs".to_string(),
+            "type MyStruct struct {\n  field int\n}\n".to_string(),
+        );
+        let root = build_tree(std::slice::from_ref(&change), project_root_of);
+        let mut app = App::new(
+            PathBuf::from("."),
+            PathBuf::from("/nonexistent/gigasail.db"),
+            root,
+            vec![change],
+            vec![file],
+            sources,
+            HashMap::new(),
+            "HEAD".into(),
+        );
+        app.selected = app
+            .rows
+            .iter()
+            .position(|r| r.label.contains("MyStruct"))
+            .expect("MyStruct row present");
+        match app.right_pane().body {
+            PaneBody::Code { lines, .. } => {
+                assert!(lines.iter().any(|l| l.content.contains("field int")));
+            }
+            other => panic!("expected code view for a childless struct, got {other:?}"),
+        }
+    }
 }

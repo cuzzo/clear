@@ -552,6 +552,25 @@ mod tests {
     }
 
     #[test]
+    fn evidence_stale_tracks_the_head_analysis_run() {
+        let dir = repo_with_two_commits();
+        let db = dir.path().join(".giga/gigasail.db");
+        // No analysis runs yet -> stale.
+        assert!(evidence_stale(dir.path(), &db, None));
+        // A run directory naming the head commit -> up to date.
+        let head = crate::git::GitProvider::open(dir.path())
+            .unwrap()
+            .resolve_commit("HEAD")
+            .unwrap();
+        let runs = crate::watch::giga_dir(&db).join("artifacts/runs");
+        std::fs::create_dir_all(&runs).unwrap();
+        std::fs::create_dir(runs.join(format!("analysis-{}-1-1", &head[..16]))).unwrap();
+        assert!(!evidence_stale(dir.path(), &db, None));
+        // A run for a different commit does not count.
+        assert!(evidence_stale(dir.path(), &db, Some("HEAD~1")));
+    }
+
+    #[test]
     fn run_diff_no_tui_renders_changes() {
         let dir = repo_with_two_commits();
         let db = dir.path().join("gigasail.db");

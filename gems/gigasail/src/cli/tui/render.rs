@@ -682,14 +682,14 @@ fn render_funnel(
         "",
         vec![
             count_span("prod ", summary.prod_code, Color::LightGreen),
-            count_span("tests ", summary.test_code, Color::Cyan),
+            count_span("tests ", summary.test_code, Color::Magenta),
         ],
     ));
     body.push(funnel_row(
-        "│   ",
+        "├ ",
         "",
         vec![
-            count_span("public ", summary.public, Color::White),
+            count_span("public ", summary.public, Color::Green),
             count_span("private ", summary.private, Color::Gray),
             count_span("other ", summary.other_vis, Color::DarkGray),
         ],
@@ -1238,6 +1238,92 @@ mod tests {
         // rows carry no line number).
         let twos = text.matches("    2 +").count() + text.matches("    2  ").count();
         assert!(twos <= 1, "line number must not repeat on wrapped rows");
+    }
+
+    #[test]
+    fn fold_marker_renders_under_cursor_and_expands_on_space() {
+        use crate::cli::tui::app::{FoldRow, Focus};
+        // A function spanning 18 lines with a single change near the top, so the
+        // long unchanged tail folds.
+        let mut src = String::from("pub fn handler() {\n    let b = 2;\n");
+        for i in 0..15 {
+            src.push_str(&format!("    filler{i}\n"));
+        }
+        src.push_str("}\n");
+        let unit = ChangedUnit {
+            name: "handler".into(),
+            kind: UnitKind::Function,
+            path: "src/app.rs".into(),
+            start_line: 1,
+            end_line: 18,
+            signature: "pub fn handler()".into(),
+            visibility: Visibility::Public,
+            is_test: false,
+            added: 1,
+            removed: 0,
+            added_lines: vec![3],
+            evidence: Evidence::default(),
+        };
+        let change = FileChange {
+            path: "src/app.rs".into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            is_test: false,
+            units: vec![unit],
+            file_added: 1,
+            file_removed: 0,
+            unattributed_added: 0,
+            unattributed_removed: 0,
+        };
+        let file = FileDiff {
+            path: "src/app.rs".into(),
+            old_path: None,
+            status: ChangeStatus::Modified,
+            hunks: vec![Hunk {
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: 18,
+                lines: vec![DiffLine {
+                    origin: LineOrigin::Add,
+                    old_lineno: None,
+                    new_lineno: Some(3),
+                    content: "    filler0".into(),
+                }],
+            }],
+        };
+        let mut sources = HashMap::new();
+        sources.insert("src/app.rs".to_string(), src);
+        let root = build_tree(std::slice::from_ref(&change), project_root_of);
+        let mut app = App::new(
+            PathBuf::from("."),
+            PathBuf::from("/nonexistent/gigasail.db"),
+            root,
+            vec![change],
+            vec![file],
+            sources,
+            HashMap::new(),
+            "HEAD".into(),
+        );
+        select(&mut app, "handler()");
+        app.focus = Focus::Code;
+        let folded = buffer_text(&draw(&app, 0.0));
+        assert!(folded.contains("unchanged lines"), "middle run should fold");
+
+        // Cursor onto the fold marker (renders it highlighted), then space expands.
+        let fold_idx = app
+            .code_fold_rows()
+            .iter()
+            .position(|r| matches!(r, FoldRow::Fold { .. }))
+            .expect("a fold marker");
+        app.code_cursor = fold_idx;
+        let _ = buffer_text(&draw(&app, 0.0)); // fold_marker_line with cursor = true
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(' '),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        let expanded = buffer_text(&draw(&app, 0.0));
+        assert!(expanded.contains("filler7"), "expanding shows hidden lines");
     }
 
     #[test]
