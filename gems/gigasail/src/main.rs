@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
+use std::io::IsTerminal;
 use gigasail::application::analyse::{execute as execute_analysis, AnalyseRequest};
 #[cfg(test)]
 use gigasail::application::ci::{
@@ -113,8 +114,10 @@ enum Command {
         base: Option<String>,
         #[arg(value_name = "HEAD")]
         head: Option<String>,
-        #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
-        format: DiffFormat,
+        /// Output format. Defaults to the interactive TUI on a terminal and to
+        /// text when stdout is piped or redirected.
+        #[arg(long, value_enum)]
+        format: Option<DiffFormat>,
         /// Include logical-unit and SARIF detail under every changed file.
         #[arg(long)]
         full: bool,
@@ -439,6 +442,15 @@ fn main() -> Result<()> {
             require_complete,
         } => {
             let db = repository_path(&repo, &db);
+            // Default to the interactive TUI on a terminal; fall back to text
+            // when piped so scripts keep a machine-readable default.
+            let format = format.unwrap_or_else(|| {
+                if std::io::stdout().is_terminal() {
+                    DiffFormat::Tui
+                } else {
+                    DiffFormat::Text
+                }
+            });
             // If a `giga watch` is analysing exactly this commit, wait so the
             // diff renders complete evidence; a previously analysed commit shows
             // immediately. Applies to every output format.
