@@ -272,6 +272,25 @@ fn hl_style(kind: HlKind) -> Style {
 
 const GUTTER_W: usize = 3;
 
+/// Expand tab characters to spaces on 4-column stops. Terminals advance a raw
+/// `\t` to the next hardware tab stop, which ratatui cannot account for in its
+/// cell buffer; rendering the expanded form keeps the screen and buffer in sync.
+fn expand_tabs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut col = 0usize;
+    for ch in text.chars() {
+        if ch == '\t' {
+            let n = 4 - (col % 4);
+            out.extend(std::iter::repeat(' ').take(n));
+            col += n;
+        } else {
+            out.push(ch);
+            col += 1;
+        }
+    }
+    out
+}
+
 /// Fixed-width gutter column of single-column glyphs (already de-duplicated).
 fn gutter_str(line: &PaneLine, ascii: bool) -> String {
     let mut s = String::new();
@@ -346,17 +365,24 @@ fn pane_line_spans(
     };
     let prefix = format!("{cover}{}{num} {sign} ", gutter_str(line, ascii));
 
+    // Expand tabs to spaces: a raw `\t` written to the terminal moves the
+    // cursor to the next hardware tab stop, desyncing ratatui's cell model from
+    // the screen and cascading into garbled, artifact-laden rows.
+    let content = expand_tabs(&line.content);
+
     let mut spans = vec![Span::styled(
         prefix.clone(),
         paint(origin_style(line.origin)),
     )];
     // Syntax-highlight the content for every origin; the tint conveys add/remove.
-    for (text, kind) in highlight_line(&line.content, lang) {
+    for (text, kind) in highlight_line(&content, lang) {
         spans.push(Span::styled(text, paint(hl_style(kind))));
     }
-    // Pad to full width so the row tint fills the pane (GitHub-like).
-    let used = prefix.chars().count() + line.content.chars().count();
-    if (bg.is_some()) && width > used {
+    // Always pad to full width: it fills the GitHub-like row tint on truecolor
+    // and, on every terminal, overwrites any stale cells left by a longer line
+    // from a previously selected node.
+    let used = prefix.chars().count() + content.chars().count();
+    if width > used {
         spans.push(Span::styled(
             " ".repeat(width - used),
             paint(Style::default()),
@@ -366,9 +392,13 @@ fn pane_line_spans(
 }
 
 /// The indented SARIF/hazard/dark-arm detail rows shown under a line on Space.
-fn detail_lines(line: &PaneLine, ascii: bool, width: usize) -> Vec<Line<'static>> {
+fn detail_lines(line: &PaneLine, ascii: bool, truecolor: bool, width: usize) -> Vec<Line<'static>> {
     let mut out = Vec::new();
-    let bg = Style::default().bg(Color::Rgb(28, 28, 40));
+    let bg = if truecolor {
+        Style::default().bg(Color::Rgb(28, 28, 40))
+    } else {
+        Style::default()
+    };
     let pad = |text: String| {
         let used = text.chars().count();
         if width > used {
@@ -480,7 +510,7 @@ fn render_code(
                 i == app.code_cursor,
             ));
             if app.detail_open.contains(&i) {
-                out.extend(detail_lines(line, app.ascii, width));
+                out.extend(detail_lines(line, app.ascii, app.truecolor, width));
             }
         }
         let h = code_area.height.saturating_sub(2);
@@ -785,6 +815,40 @@ mod tests {
             }
         }
         greens
+    }
+
+    #[test]
+    fn expand_tabs_uses_four_column_stops() {
+        assert_eq!(expand_tabs("\tx"), "    x");
+        assert_eq!(expand_tabs("ab\tc"), "ab  c");
+        assert_eq!(expand_tabs("abc\td"), "abc d");
+        assert_eq!(expand_tabs("no tabs"), "no tabs");
+    }
+
+    #[test]
+    fn tab_indented_code_renders_without_raw_tabs() {
+        // Go/Rust code indented with tabs must not leak a raw `\t` into the
+        // rendered cells (it would drift the terminal cursor and garble rows).
+        let mut app = app_no_evidence();
+        app.sources.insert(
+            "src/app.rs".to_string(),
+            "pub fn handler() {\n\tlet a = 1;\n\tlet b = 2;\n\tlet c = 3;\n\ta + b\n}\n".to_string(),
+        );
+        select(&mut app, "handler()");
+        app.focus = crate::cli::tui::app::Focus::Code;
+        let term = draw(&app, 0.0);
+        let buf = term.backend().buffer();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                assert_ne!(
+                    buf.cell((x, y)).unwrap().symbol(),
+                    "\t",
+                    "raw tab leaked into the render buffer at ({x},{y})"
+                );
+            }
+        }
+        // The indented body is still present (expanded).
+        assert!(buffer_text(&term).contains("let b = 2;"));
     }
 
     #[test]
