@@ -3,7 +3,7 @@
 Status: **design / not yet built.** This specs: the crate placement of the
 review surfaces (§0 — MCP/LSP move to the CLI); a `review:` section for
 `giga.yml` (metric weighting, gates, purity, test depth, tags, perf, retention);
-two review-oriented MCP tools (`giga_review`, `giga_premerge`) and the LLM report
+two review-oriented MCP tools (`giga_precommit`, `giga_premerge`) and the LLM report
 they return; and how the same config later retunes the `giga diff` UI. It is
 deliberately **forward-compatible**: several fields (perf, tags, test depth,
 class purity, per-span branch coverage) are reserved and specced now so they can
@@ -11,8 +11,11 @@ light up later without a schema break, even though only the core review path is
 built first. It also ties into the artifact-pruning TODO so pruning never
 deletes evidence a review still needs. **§9 is the design rationale for the MCP
 surface itself** — the four ways to get an LLM to verify before "done", their
-context-token costs, and why a small, verdict-first tool plus a CI backstop
-minimizes cost while maximizing enforcement.
+context-token costs (grounded in published agent-behavior research), why agents
+miss failures even when they run the tests, and why a mis-wired harness can
+launder a failure into a pass. **§10 specs a harness to *measure* the naive vs.
+tool token cost + miss rate on this repo**, so the §9 claims are measured, not
+asserted.
 
 The goal: let a project declare **which findings matter, how much, and when a
 change must be blocked for human/LLM review** — once, in `giga.yml` — and have
@@ -122,7 +125,7 @@ configured ones.
 Two workflow questions, two MCP tools, one shared report builder. This matches
 the existing "one tool per question, not per table" philosophy (`mcp.md`).
 
-### `giga_review` — "What did I just change that needs review?"
+### `giga_precommit` — "What did I just change that needs review?"
 - **Default range: `HEAD~1..HEAD`** (or `HEAD..WORKTREE` when the tree is dirty).
 - Input: `{ base?: string, head?: string }`. Omitted → the default above.
 - Answers the everyday "review my last commit" question.
@@ -130,7 +133,7 @@ the existing "one tool per question, not per table" philosophy (`mcp.md`).
 ### `giga_premerge` — "What does merging this branch introduce?"
 - **Range: `merge-base(head, target)..head`**, i.e. every commit the branch adds
   on top of where it forked. `git merge_base` already backs `default_diff_base`
-  (`db/git.rs`), so `giga review branch..master` and pre-merge are the same
+  (`db/git.rs`), so `giga premerge` and a `branch..master` review are the same
   computation with `base = merge-base`.
 - Input: `{ target?: string = "master", head?: string = current branch }`.
 
@@ -143,7 +146,7 @@ findings + active hazards + per-unit coverage/mutation posture, apply the
 *whole branch*. Nothing else differs in the *diff* — but they run **different
 verification depths**:
 
-- **`giga_review` runs the fast set** — the `ci`/unit tests + coverage, quick
+- **`giga_precommit` runs the fast set** — the `ci`/unit tests + coverage, quick
   static analyzers. It is the tight inner-loop check an agent runs after each
   commit, so it must stay seconds-fast (see `review.tests.fast`, §3g).
 - **`giga_premerge` runs the exhaustive set** — the full suite, mutation, and
@@ -251,7 +254,7 @@ review:
     keep_branch_bases: true       # never prune a merge-base a pre-merge would use
 
   # ── 3g. Test depth per tool ────────────────────────────────────────────────
-  # Named test sets mapped to giga.yml profiles. `giga_review` runs `fast`;
+  # Named test sets mapped to giga.yml profiles. `giga_precommit` runs `fast`;
   # `giga_premerge` runs `exhaustive`. A set names profiles whose producers
   # already exist (§ pipeline: ci/analyse), so this only *selects* depth.
   tests:
@@ -396,7 +399,7 @@ compete for the model's attention.
 }
 ```
 
-`giga_review` omits `perf` (fast set, no benchmarks) and reports
+`giga_precommit` omits `perf` (fast set, no benchmarks) and reports
 `tests.set: "fast"`. `giga_premerge` includes `perf` and `tests.set:
 "exhaustive"`. A field that has no data yet is simply absent — the shape is
 forward-compatible, so tags/perf/tests can light up without a schema break.
@@ -457,7 +460,7 @@ LLM's feedback and from the merge gate — one config, one behavior everywhere.
 1. **`review:` config section** on `LineageConfig` + validation (weights ≥ 0,
    known gate `when` keys, `unless_evidence` families). `deny_unknown_fields`
    means the struct must exist before any `review:` key is accepted.
-2. **Two MCP tools** (`giga_review`, `giga_premerge`) wrapping the §4 evaluator;
+2. **Two MCP tools** (`giga_precommit`, `giga_premerge`) wrapping the §4 evaluator;
    register in `tool_defs()`/`call_tool` (`mcp.rs`). Reuse `build_structured_diff`.
 3. **Uncollapse branch coverage into a per-unit AND per-span axis.** Today
    branch data only sets `is_partial` + a per-line `coverage_percent`
@@ -479,7 +482,7 @@ LLM's feedback and from the merge gate — one config, one behavior everywhere.
    consumed by gates, ranking `weight_bonus`, and the summary. This is where
    "which functions are critical / revenue-generating" lives, and it must ride
    the same rename-stable identity as hazards so a tag follows a moved function.
-7. **Test-depth selection** (§3g): `giga_review` → `fast`, `giga_premerge` →
+7. **Test-depth selection** (§3g): `giga_precommit` → `fast`, `giga_premerge` →
    `exhaustive`; wire the tool to run the named profiles and fold pass/fail into
    the report. The profiles already exist; this only selects and reports them.
 8. **Performance harness** (§3h): a perf producer (`kind: perf`?) emitting
@@ -557,7 +560,7 @@ This is exactly why the MCP surface must stay **small and terse**:
 
 - **Few tools.** Each schema is resident every turn; many near-identical tools
   measurably degrade tool-selection accuracy (see `mcp.md`'s "5 tools, not 17").
-  Two review tools (`giga_review`, `giga_premerge`) — **not** one per metric.
+  Two review tools (`giga_precommit`, `giga_premerge`) — **not** one per metric.
 - **Verdict-first, bounded responses.** Never return raw logs; return the
   conclusion and capped, actionable findings (§5). Overflow is a *count*, not a
   wall of text.
@@ -571,10 +574,10 @@ This is exactly why the MCP surface must stay **small and terse**:
 No single strategy suffices; combine them so each covers the others' failure:
 
 1. **MCP review tool** — the in-loop, cheap, hard-to-fake check the agent runs
-   after each commit (`giga_review`) and before merge (`giga_premerge`). Fast
+   after each commit (`giga_precommit`) and before merge (`giga_premerge`). Fast
    feedback, bounded context.
 2. **A one-line AGENTS.md pointer** — *not* the gates, just: "before declaring
-   done, call `giga_review`; a `critical` verdict blocks." A few resident tokens
+   done, call `giga_precommit`; a `critical` verdict blocks." A few resident tokens
    telling the agent the tool exists and is mandatory. The *rules* stay in
    `giga.yml`.
 3. **CI runs the identical evaluator** — the non-bypassable backstop. Because CI
@@ -589,3 +592,89 @@ truth means the agent's in-loop check, the merge gate, and the human's view can
 never disagree — so an agent that games the in-loop check still hits an
 identical wall at CI. Design the surface to make the honest path the cheapest
 one, and let CI make the dishonest path fail loudly.
+
+### Why agents miss failures *even when they run the tests* (grounded, not folklore)
+
+Strategy 2 fails more subtly than "the agent is lazy." Published behavior:
+
+- **Tool output already eats the context budget.** In a typical terminal-agent
+  session, tool outputs (file reads, command output, search hits) consume
+  ~70–80% of the window — before the model reasons at all. A raw test/coverage
+  dump lands on top of that.
+- **Large output is silently truncated — and truncation drops the *middle*.**
+  A documented case: an agent ran a coverage suite, got 419 KB of output
+  truncated at 235 KB, tried to `grep` the results, re-ran the whole suite, and
+  truncated again — spending **6–9× longer understanding the output than the
+  tests took to run**. Truncation strategies frequently remove the *critical
+  error lines in the middle*, so the agent's `grep FAIL` / last-N-lines scan can
+  return clean while a real failure sits in the excised section.
+- **Per-task token use is wildly variable** (up to ~30× on the *same* task), and
+  accuracy peaks at an *intermediate* token budget — dumping more raw log is not
+  just costly, it *lowers* success.
+
+So the anecdote — "they run the tests, grep for FAIL/ERROR, and miss a clear
+failure because they only read the tail" — is the *normal* outcome of piping an
+unbounded log through a truncating context window, not an aberration. A
+verdict-first tool (§5) is the direct fix the same literature recommends
+(Memory-Pointer / structured-output patterns: keep the blob out of the window,
+pass a short pointer/summary).
+
+### The harness must actually fail (or the verdict is a lie the tool faithfully repeats)
+
+A verdict tool is only as honest as the exit codes it reads. **Real example in
+this repo:** `clear test <dir>` printed `MEMORY LEAKS: N` in red but its exit
+was `exit(failed_names.any? ? 1 : 0)` — leaks were excluded, so the process
+**exited 0 on a detected leak**. Every layer downstream inherited the lie: an
+agent (or CI, or a human checking `$?`) was told the suite was clean, and an
+agent that *only* scanned the tail would not even see the red `MEMORY LEAKS`
+line. (Fixed: the exit now includes `leak_tests.any?`.) The lesson for the
+review evaluator: **do not trust a producer's exit code alone** — key
+conditions (leaks, sanitizer output, zero-assertion tests) must be asserted by
+the evaluator from structured evidence, so a mis-wired harness cannot launder a
+failure into a pass. This is why gates (§3d) are evaluated over ingested
+facts, not over "did the test command exit 0".
+
+---
+
+## 10. Measuring the cost: a test-behavior harness
+
+Before committing to a surface, measure the thing we claim to improve: **how
+many tokens an agent spends verifying a change the naive way, versus through a
+`giga_precommit`/`giga_premerge` verdict.** The research above gives priors
+(agentic coding uses ~3500× the tokens of single-round reasoning; output
+dominates; runs vary up to ~30×) but not *our* numbers on *our* repos.
+
+**Harness shape (deterministic, offline-replayable):**
+
+1. **A fixed task set** — N real changes on this repo with known verdicts (some
+   clean, some with an uncovered T1, a leak, a perf regression, a resolved
+   finding). Include the `clear test` leak case as a regression fixture.
+2. **Two arms per task, same model + same prompt seed:**
+   - *Naive*: the agent has only shell; it must run tests/coverage itself and
+     decide. Record total input+output tokens, wall-clock, and **whether it
+     reached the correct verdict** (caught/missed the leak, the T1, etc.).
+   - *Tool*: the agent has `giga_precommit`/`giga_premerge`. Record the same.
+3. **Metrics to report together** (per the cost-analysis literature, cost is
+   only comparable when reported jointly): total tokens, input/output split,
+   cache-hit rate, wall-clock, and the **miss rate** (false "looks clean"). A
+   cheaper arm that misses failures is worse, not better — plot cost *and*
+   correctness.
+4. **Attribute the tool's fixed tax honestly:** count the tool schema's resident
+   tokens (paid every turn) against the raw-log tokens it avoids, so the *net*
+   claim in §9 is measured, not asserted.
+
+**What good looks like:** the tool arm should show a large drop in output/
+context tokens (the raw-log dump is replaced by a bounded verdict) *and* a lower
+miss rate (the verdict names the leak/T1 the naive tail-scan skipped). If the
+tool arm is not both cheaper and more correct on this set, the surface is wrong
+— shrink the response, or fix the gate, before shipping it.
+
+This harness also becomes a **regression guard on the MCP surface itself**: if a
+future change bloats a response or drops a gate, the token/miss numbers move.
+
+Sources for §9–§10:
+[token consumption in agentic coding](https://digitaleconomy.stanford.edu/publication/how-do-ai-agents-spend-your-money-analyzing-and-predicting-token-consumption-in-agentic-coding-tasks/),
+[tools talk too much / byte caps](https://dev.to/teppana88/your-ai-coding-agents-are-slow-because-your-tools-talk-too-much-24h6),
+[Codex truncates critical error lines](https://github.com/openai/codex/issues/9502),
+[large tool output overflows the window](https://github.com/openai/codex/issues/4398),
+[context-window overflow / Memory-Pointer pattern](https://dev.to/aws/ai-context-window-overflow-memory-pointer-fix-3akc).
