@@ -213,22 +213,24 @@ impl GitProvider {
     ) -> Result<(String, String)> {
         let head_revision = head_revision.filter(|revision| !revision.trim().is_empty());
         let base_revision = base_revision.filter(|revision| !revision.trim().is_empty());
-        if head_revision.is_some_and(|revision| revision == WORKTREE_REVISION) {
-            let base = match base_revision {
-                Some(base) => self.resolve_commit(base)?,
-                None => self.resolve_commit("HEAD")?,
-            };
-            return Ok((base, WORKTREE_REVISION.into()));
-        }
         // The interactive default is intentionally a working-tree review: it
         // includes staged, unstaged, and non-ignored untracked files. Passing
         // an explicit head continues to request an immutable commit review.
-        if head_revision.is_none() {
+        if head_revision.is_none() || head_revision == Some(WORKTREE_REVISION) {
             let base = match base_revision {
                 Some(base) => self.resolve_commit(base)?,
                 None => self.resolve_commit("HEAD")?,
             };
-            return Ok((base, WORKTREE_REVISION.into()));
+            // A clean worktree is byte-identical to HEAD, so pin the head to the
+            // HEAD commit: the diff is unchanged but commit-scoped evidence
+            // (coverage, mutation, SARIF) now attaches. Only fall back to the
+            // synthetic WORKTREE revision when there really are local changes.
+            let head = if self.worktree_is_clean()? {
+                self.resolve_commit("HEAD")?
+            } else {
+                WORKTREE_REVISION.into()
+            };
+            return Ok((base, head));
         }
         let head_oid = self.resolve_commit(head_revision.unwrap_or("HEAD"))?;
         let base_oid = match base_revision {
@@ -236,6 +238,22 @@ impl GitProvider {
             None => self.default_diff_base(&head_oid)?,
         };
         Ok((base_oid, head_oid))
+    }
+
+    /// Whether the worktree matches HEAD exactly: no staged, unstaged, or
+    /// non-ignored untracked changes. Ignored paths (e.g. `.giga/`) do not count.
+    fn worktree_is_clean(&self) -> Result<bool> {
+        let repo = Repository::open(&self.path)?;
+        if repo.head().is_err() {
+            // Unborn HEAD (no commits): nothing to compare against.
+            return Ok(false);
+        }
+        let mut opts = git2::StatusOptions::new();
+        opts.include_ignored(false)
+            .include_untracked(true)
+            .recurse_untracked_dirs(true);
+        let statuses = repo.statuses(Some(&mut opts))?;
+        Ok(statuses.is_empty())
     }
 
     fn default_diff_base(&self, head_oid: &str) -> Result<String> {
@@ -841,16 +859,22 @@ mod tests {
     }
 
     #[test]
-    fn default_diff_pair_uses_head_against_the_working_tree() -> Result<()> {
+    fn default_diff_pair_pins_head_when_the_worktree_is_clean() -> Result<()> {
         let dir = tempdir()?;
         let repo = Repository::init(dir.path())?;
         let base = create_commit(&repo, "base", &[("app.rb", "puts :base\n")])?;
         let head = create_commit(&repo, "head", &[("app.rb", "puts :head\n")])?;
         let provider = GitProvider::open(dir.path())?;
 
+        // Clean worktree: the default head pins to the HEAD commit (not the
+        // synthetic WORKTREE revision) so commit-scoped evidence attaches.
         assert_eq!(
             provider.diff_revisions(None, None)?,
-            (head.clone(), WORKTREE_REVISION.into())
+            (head.clone(), head.clone())
+        );
+        assert_eq!(
+            provider.diff_revisions(Some(&base), None)?,
+            (base.clone(), head.clone())
         );
         assert_eq!(
             provider.diff_revisions(Some(&base), Some("HEAD"))?,
