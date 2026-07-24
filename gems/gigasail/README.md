@@ -459,13 +459,37 @@ for per-language recipes, resolution tiers, and known gaps.
 
 ### MCP server
 
-`giga mcp --db gigasail.db --repo .` exposes five read-only,
-workflow-shaped tools (file risk, unit context, verification gaps, change
-history, find-definition) over stdio MCP - not one tool per table. `--db`
-is optional: omitting it runs a DB-less mode serving live-disk structure
-and in-process hazard scans only. See
-[mcp.md](docs/agents/mcp.md) for the tool list, why 5 and not 17, the
-uncommitted-changes and DB-less designs, and known gaps.
+`giga mcp --db gigasail.db --repo .` exposes seven read-only,
+workflow-shaped tools over stdio MCP - not one tool per table. Five are
+context tools (file risk, unit context, verification gaps, change history,
+find-definition); two are review tools (see below). `--db` is optional:
+omitting it runs a DB-less mode serving live-disk structure and in-process
+hazard scans only. See [mcp.md](docs/agents/mcp.md) for the context tools,
+why 7 and not 17, the uncommitted-changes and DB-less designs, and known gaps.
+
+### Review: verify before you ship
+
+Two MCP tools give an agent (or CI) a machine-checked verdict instead of a
+raw test log:
+
+- **Setup.** `giga build`/`giga sync` first, then point the agent at
+  `giga mcp`. `giga_precommit` reviews `HEAD~1..HEAD`; `giga_premerge`
+  reviews `merge-base(HEAD, target)..HEAD` (whole branch, `target` defaults
+  to `master`).
+- **What it does.** Returns `verdict` (`pass` / `needs_review` / `critical`),
+  the gates it triggered, and the ranked *new* findings by tier with each
+  line's coverage - a compact JSON report, not test output. A `critical`
+  verdict blocks.
+- **Configure.** A `review:` block in `giga.yml` sets which findings matter
+  (show / deprioritize / ignore), ranking weights, purity thresholds, and the
+  gates. Absent config gates only on an uncovered T1. See
+  [tuning-configs.md](docs/agents/tuning-configs.md).
+- **Token impact.** The evaluator runs the checks and hands back a
+  ~500-2k-token verdict, keeping the 5k-50k-token raw suite/coverage log out
+  of the model's context. The one fixed cost is the two extra tool schemas in
+  the tool list every turn; on any non-trivial change the verdict is far
+  cheaper - and harder to misread - than piping a truncated log through the
+  window. Rationale and the cost analysis: tuning-configs.md §9.
 
 ## Supported Languages Roadmap
 
