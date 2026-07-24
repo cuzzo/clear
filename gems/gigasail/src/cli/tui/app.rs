@@ -227,6 +227,17 @@ fn count_hazards(changes: &[FileChange]) -> u32 {
         .sum()
 }
 
+/// The directory portion of a repo-relative path (a file's package); "" at root.
+fn dep_scope_dir(path: &str) -> &str {
+    path.rfind('/').map_or("", |i| &path[..i])
+}
+
+/// The repo-relative target of a first-party (`./internal/ui`) dependency;
+/// `None` for stdlib / third-party deps, which are never self-references.
+fn first_party_target(dep: &str) -> Option<&str> {
+    dep.strip_prefix("./")
+}
+
 impl App {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -709,7 +720,12 @@ impl App {
             .flat_map(|c| &c.units)
             .collect();
         let mut info = Self::info_from_units(path.to_string(), &units);
-        info.new_dependencies = self.imports_under(|c| c.path == path);
+        let pkg = dep_scope_dir(path);
+        info.new_dependencies = self
+            .imports_under(|c| c.path == path)
+            .into_iter()
+            .filter(|dep| first_party_target(dep) != Some(pkg))
+            .collect();
         info.new_state.clear();
         info
     }
@@ -886,11 +902,26 @@ impl App {
                 info.new_state.clear();
                 info.new_dependencies = match &node.path {
                     Some(path) if node.kind == NodeKind::File => {
+                        // A file must not list a dependency on its own package.
+                        let pkg = dep_scope_dir(path);
                         self.imports_under(|c| &c.path == path)
+                            .into_iter()
+                            .filter(|dep| first_party_target(dep) != Some(pkg))
+                            .collect()
                     }
                     Some(path) if node.kind == NodeKind::Directory => {
+                        // A directory must not list dependencies within its own
+                        // subtree (a dependency on a sibling file in the same dir).
                         let prefix = format!("{path}/");
                         self.imports_under(|c| c.path.starts_with(&prefix))
+                            .into_iter()
+                            .filter(|dep| match first_party_target(dep) {
+                                Some(target) => {
+                                    target != path.as_str() && !target.starts_with(&prefix)
+                                }
+                                None => true,
+                            })
+                            .collect()
                     }
                     _ => Vec::new(),
                 };
