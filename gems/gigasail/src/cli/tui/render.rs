@@ -2,7 +2,6 @@
 //! pane with gutters and an info box, and the bottom background-progress box.
 
 use crate::cli::diff::gitdiff::LineOrigin;
-use crate::cli::diff::risk::CoverageState;
 use crate::cli::diff::tree::NodeKind;
 use crate::cli::highlight::{highlight_line, lang_for_path, HlKind, Lang};
 use crate::cli::tui::app::{App, InfoBox, PaneBody, PaneLine};
@@ -43,16 +42,6 @@ pub fn progress_bar(percent: u8, width: usize, ascii: bool) -> String {
         bar.push(if i < filled { full } else { empty });
     }
     bar
-}
-
-fn coverage_style(state: CoverageState) -> Style {
-    match state {
-        CoverageState::CoveredKilled => Style::default().fg(Color::Green),
-        CoverageState::Covered => Style::default().fg(Color::LightGreen),
-        CoverageState::Partial => Style::default().fg(Color::Yellow),
-        CoverageState::Uncovered => Style::default().fg(Color::Red),
-        CoverageState::Unknown => Style::default().fg(Color::DarkGray),
-    }
 }
 
 fn origin_style(origin: LineOrigin) -> Style {
@@ -228,25 +217,48 @@ fn render_left(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(list, inner[1]);
 }
 
-fn info_lines(info: &InfoBox) -> Vec<Line<'static>> {
-    let header = format!(
-        "{} Hazards ({} uncovered)   {} T1  {} T2  {} T3",
-        info.hazards_total, info.hazards_uncovered, info.t1, info.t2, info.t3
+/// The top of the right pane, shared by function/file/class/dir views:
+/// compact findings on the left, coverage bar on the right, one line.
+fn info_lines(info: &InfoBox, ascii: bool, inner_w: usize) -> Vec<Line<'static>> {
+    let hz = crate::cli::diff::summary::HazardTotals {
+        hazards: info.hazards_total,
+        t1: info.t1,
+        t2: info.t2,
+        t3: info.t3,
+    };
+    let (mut spans, mut find_w) = findings_spans(&hz, ascii);
+    if spans.is_empty() {
+        let label = "clean";
+        spans.push(Span::styled(
+            label.to_string(),
+            Style::default().fg(Color::Green),
+        ));
+        find_w = label.len();
+    }
+    let bar_w = inner_w.saturating_sub(find_w + 2).clamp(10, 30);
+    let pad = inner_w.saturating_sub(find_w + bar_w).max(1);
+    spans.push(Span::raw(" ".repeat(pad)));
+    spans.extend(coverage_bar_spans(&info.bar, bar_w));
+    vec![Line::from(spans)]
+}
+
+/// Draw the shared info box (border + title + one findings/coverage line).
+fn render_info_box(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    info: &InfoBox,
+    ascii: bool,
+    border: Style,
+) {
+    let inner_w = (area.width as usize).saturating_sub(2);
+    let widget = Paragraph::new(info_lines(info, ascii, inner_w)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(border)
+            .title(title.to_string()),
     );
-    let state = format!("coverage: {}", info.coverage.label());
-    // The filename/function is already the info box's border title, so it is not
-    // repeated here.
-    vec![
-        Line::from(Span::styled(
-            header,
-            Style::default().fg(if info.hazards_uncovered > 0 {
-                Color::Red
-            } else {
-                Color::Yellow
-            }),
-        )),
-        Line::from(Span::styled(state, coverage_style(info.coverage))),
-    ]
+    frame.render_widget(widget, area);
 }
 
 /// A row to draw in the code pane: a real line or an elision marker for a
@@ -658,6 +670,11 @@ fn render_funnel(
     let mut body: Vec<Line> = Vec::new();
 
     // Funnel: total -> code/other -> prod/test -> visibility.
+    let commits = if summary.commits == 1 {
+        "1 commit".to_string()
+    } else {
+        format!("{} commits", summary.commits)
+    };
     body.push(Line::from(vec![
         Span::styled(
             format!("+{} ", summary.total_added),
@@ -667,7 +684,10 @@ fn render_funnel(
             format!("-{} ", summary.total_removed),
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
-        Span::styled("lines changed".to_string(), Style::default().fg(Color::Gray)),
+        Span::styled(
+            format!("lines changed:  {commits}"),
+            Style::default().fg(Color::Gray),
+        ),
     ]));
     body.push(funnel_row(
         "├ ",
@@ -828,17 +848,9 @@ fn render_code(
 ) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(1)])
+        .constraints([Constraint::Length(3), Constraint::Min(1)])
         .split(area);
-    let info_widget = Paragraph::new(info_lines(info))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border)
-                .title(pane.title.clone()),
-        )
-        .wrap(Wrap { trim: true });
-    frame.render_widget(info_widget, layout[0]);
+    render_info_box(frame, layout[0], &pane.title, info, app.ascii, border);
 
     let code_area = layout[1];
     let width = code_area.width.saturating_sub(2) as usize;
@@ -904,6 +916,15 @@ fn render_summary(
     const NAME_W: usize = 30;
     const DELTA_W: usize = 12;
     const FIND_W: usize = 20;
+
+    // Same info box as the code views on top; the members table below.
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .split(area);
+    render_info_box(frame, layout[0], title, &summary.info, app.ascii, border);
+    let area = layout[1];
+
     let mut body: Vec<Line> = Vec::new();
 
     // Header row: function | delta | findings | coverage.
@@ -971,7 +992,7 @@ fn render_summary(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(border)
-                .title(title.to_string()),
+                .title("changes"),
         )
         .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
@@ -991,7 +1012,7 @@ fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use crate::cli::diff::gitdiff::{ChangeStatus, DiffLine, FileDiff, Hunk};
-    use crate::cli::diff::risk::Evidence;
+    use crate::cli::diff::risk::{CoverageState, Evidence};
     use crate::cli::diff::tree::build_tree;
     use crate::cli::diff::units::{ChangedUnit, FileChange};
     use crate::cli::diff::visibility::Visibility;
@@ -1344,6 +1365,7 @@ mod tests {
         use crate::cli::diff::summary::{CoverageBar, DiffSummary, HazardTotals, LangRow};
         let mut app = app_no_evidence();
         app.summary = DiffSummary {
+            commits: 3,
             total_added: 9000,
             total_removed: 50,
             code_added: 8000,
@@ -1412,6 +1434,7 @@ mod tests {
         let text = buffer_text(&draw(&app, 0.0));
         assert!(text.contains("[SUMMARY]"), "left pane lists the summary row");
         assert!(text.contains("+9000"), "funnel shows total added");
+        assert!(text.contains("3 commits"), "header shows the commit span");
         assert!(text.contains("code +8000"), "code vs other split");
         assert!(text.contains("public +800"), "visibility split");
         assert!(text.contains("CODE") && text.contains("language") && text.contains("ruby"));
@@ -1481,8 +1504,9 @@ mod tests {
         let mut app = app_with_change();
         select(&mut app, "verify()");
         let text = buffer_text(&draw(&app, 0.0));
-        assert!(text.contains("Hazards"));
-        assert!(text.contains("uncovered"));
+        // Compact findings (one hazard, one T1) plus a coverage bar on one line.
+        assert!(text.contains("T1"));
+        assert!(text.contains("NO COVERAGE DATA"));
     }
 
     #[test]

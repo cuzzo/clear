@@ -75,7 +75,9 @@ pub fn run_diff(
         return Ok(());
     }
 
-    let (root, changes, files, sources, line_ev, summary) = plan_to_view(&result.plan);
+    let commits = commit_span(repo, &result.plan);
+    let (root, changes, files, sources, line_ev, mut summary) = plan_to_view(&result.plan);
+    summary.commits = commits;
 
     if no_tui || !std::io::stdout().is_terminal() {
         print_tree(&label, &root);
@@ -108,7 +110,9 @@ pub fn run_diff(
     };
     let reload = |app: &mut tui::app::App| {
         if let Ok(result) = crate::application::diff::prepare(request(base.clone(), head.clone())) {
-            let (root, changes, files, sources, line_ev, summary) = plan_to_view(&result.plan);
+            let commits = commit_span(repo, &result.plan);
+            let (root, changes, files, sources, line_ev, mut summary) = plan_to_view(&result.plan);
+            summary.commits = commits;
             app.apply_view(root, changes, files, sources, line_ev, summary);
         }
     };
@@ -144,6 +148,19 @@ pub fn wait_for_in_flight_analysis(repo: &Path, db: &Path, head: Option<&str>) {
             }
         },
     );
+}
+
+/// How many commits the diffed range spans, for the summary header. Best-effort:
+/// 0 when the range cannot be resolved (e.g. outside a Git repo).
+fn commit_span(repo: &Path, plan: &DiffPlan) -> usize {
+    crate::git::GitProvider::open(repo)
+        .ok()
+        .and_then(|provider| {
+            provider
+                .commit_count(&plan.scope.base_oid, &plan.scope.head_oid)
+                .ok()
+        })
+        .unwrap_or(0)
 }
 
 /// Whether the diffed head commit has no analysis run yet in the `.giga` store

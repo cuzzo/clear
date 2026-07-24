@@ -138,6 +138,8 @@ pub struct InfoBox {
     pub t2: u32,
     pub t3: u32,
     pub coverage: CoverageState,
+    /// Coverage of the added lines, for the bar shown beside the findings.
+    pub bar: crate::cli::diff::summary::CoverageBar,
 }
 
 /// Coverage breakdown of the units under a container node.
@@ -176,6 +178,8 @@ impl SummaryRow {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SummaryView {
+    /// The shared info-box header (findings + coverage bar) for this container.
+    pub info: InfoBox,
     pub stats: SummaryStats,
     pub rows: Vec<SummaryRow>,
 }
@@ -655,26 +659,13 @@ impl App {
 
     /// An info box for a whole-file view: aggregate the file's unit evidence.
     fn file_info(&self, path: &str) -> InfoBox {
-        let mut info = InfoBox {
-            title: path.to_string(),
-            hazards_total: 0,
-            hazards_uncovered: 0,
-            t1: 0,
-            t2: 0,
-            t3: 0,
-            coverage: CoverageState::Unknown,
-        };
-        for change in self.changes.iter().filter(|c| c.path == path) {
-            for unit in &change.units {
-                let ev = &unit.evidence;
-                info.hazards_total += ev.hazards_total;
-                info.hazards_uncovered += ev.hazards_uncovered;
-                info.t1 += ev.t1_findings;
-                info.t2 += ev.t2_findings;
-                info.t3 += ev.t3_findings;
-            }
-        }
-        info
+        let units: Vec<&ChangedUnit> = self
+            .changes
+            .iter()
+            .filter(|c| c.path == path)
+            .flat_map(|c| &c.units)
+            .collect();
+        Self::info_from_units(path.to_string(), &units)
     }
 
     /// Fallback: the raw hunk lines within a unit's span (no full source).
@@ -712,16 +703,41 @@ impl App {
     }
 
     fn info_for(unit: &ChangedUnit) -> InfoBox {
-        let ev = &unit.evidence;
-        InfoBox {
-            title: format!("{} :: {}", unit.path, unit.name),
-            hazards_total: ev.hazards_total,
-            hazards_uncovered: ev.hazards_uncovered,
-            t1: ev.t1_findings,
-            t2: ev.t2_findings,
-            t3: ev.t3_findings,
-            coverage: ev.coverage,
+        let title = format!("{} :: {}", unit.path, unit.name);
+        Self::info_from_units(title, std::slice::from_ref(&unit))
+    }
+
+    /// Aggregate findings and coverage across a set of units into an info box.
+    /// Shared by function, file, class, and directory views so the top of the
+    /// right pane looks the same everywhere.
+    fn info_from_units(title: String, units: &[&ChangedUnit]) -> InfoBox {
+        let mut info = InfoBox {
+            title,
+            hazards_total: 0,
+            hazards_uncovered: 0,
+            t1: 0,
+            t2: 0,
+            t3: 0,
+            coverage: CoverageState::Unknown,
+            bar: crate::cli::diff::summary::CoverageBar::default(),
+        };
+        for unit in units {
+            let ev = &unit.evidence;
+            info.hazards_total += ev.hazards_total;
+            info.hazards_uncovered += ev.hazards_uncovered;
+            info.t1 += ev.t1_findings;
+            info.t2 += ev.t2_findings;
+            info.t3 += ev.t3_findings;
+            info.bar.covered_killed += ev.cov_killed;
+            info.bar.covered += ev.cov_covered;
+            info.bar.partial += ev.cov_partial;
+            info.bar.uncovered += ev.cov_uncovered;
+            info.bar.unknown += ev.cov_unknown;
         }
+        if units.len() == 1 {
+            info.coverage = units[0].evidence.coverage;
+        }
+        info
     }
 
     /// Minimum risk for a child to appear in a container summary.
@@ -784,9 +800,11 @@ impl App {
             if rows.iter().any(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD) {
                 rows.retain(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD);
             }
+            let title = node.path.clone().unwrap_or_else(|| node.label.clone());
+            let info = Self::info_from_units(title.clone(), &units);
             return RightPane {
-                title: node.path.clone().unwrap_or_else(|| node.label.clone()),
-                body: PaneBody::Summary(SummaryView { stats, rows }),
+                title,
+                body: PaneBody::Summary(SummaryView { info, stats, rows }),
                 path: node.path.clone(),
             };
         }

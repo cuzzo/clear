@@ -119,6 +119,24 @@ impl GitProvider {
         Ok(commit.id().to_string())
     }
 
+    /// Number of commits reachable from `head` but not `base` (i.e. how many
+    /// commits the diff range spans). `WORKTREE` head counts as its parent's
+    /// range since it carries no commit of its own.
+    pub fn commit_count(&self, base_revision: &str, head_revision: &str) -> Result<usize> {
+        let head_revision = if head_revision == WORKTREE_REVISION {
+            "HEAD"
+        } else {
+            head_revision
+        };
+        let base_oid = git2::Oid::from_str(&self.resolve_commit(base_revision)?)?;
+        let head_oid = git2::Oid::from_str(&self.resolve_commit(head_revision)?)?;
+        let repo = Repository::open(&self.path)?;
+        let mut walk = repo.revwalk()?;
+        walk.push(head_oid)?;
+        walk.hide(base_oid)?;
+        Ok(walk.count())
+    }
+
     pub fn diff_plan(&self, base_revision: &str, head_revision: &str) -> Result<DiffPlan> {
         let base_oid = self.resolve_commit(base_revision)?;
         let repo = Repository::open(&self.path)?;
@@ -1014,6 +1032,19 @@ mod tests {
         let changes = provider.changes_at_commit(Some(&base), &head, &all)?;
         assert_eq!(changes.added_or_modified.len(), 1);
         assert_eq!(changes.added_or_modified[0].path, "lib/value.rb");
+        Ok(())
+    }
+
+    #[test]
+    fn commit_count_spans_the_range() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = Repository::init(dir.path())?;
+        let base = create_commit(&repo, "base", &[("a.txt", "1\n")])?;
+        create_commit(&repo, "second", &[("a.txt", "2\n")])?;
+        let head = create_commit(&repo, "third", &[("a.txt", "3\n")])?;
+        let provider = GitProvider::open(dir.path())?;
+        assert_eq!(provider.commit_count(&base, &head)?, 2);
+        assert_eq!(provider.commit_count(&base, &base)?, 0);
         Ok(())
     }
 

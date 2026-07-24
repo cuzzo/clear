@@ -140,6 +140,8 @@ pub fn other_type(path: &str) -> &'static str {
 /// The funnel, widest row first.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DiffSummary {
+    /// Number of commits the diff range spans (0 when unknown).
+    pub commits: usize,
     pub total_added: u32,
     pub total_removed: u32,
     /// Added source-code lines (production + test).
