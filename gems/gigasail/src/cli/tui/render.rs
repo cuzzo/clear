@@ -259,10 +259,16 @@ pub fn fold_lines(lines: &[PaneLine], max_rows: usize) -> Vec<DisplayRow<'_>> {
     out
 }
 
-fn elision_line() -> Line<'static> {
+/// The collapsed `...` marker for a folded run of unchanged lines. Reversed
+/// when the code-pane cursor is on it (space expands/collapses the run).
+fn fold_marker_line(count: usize, cursor: bool) -> Line<'static> {
+    let mut style = Style::default().fg(Color::DarkGray);
+    if cursor {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
     Line::from(Span::styled(
-        "   ...    . . . . . . . . . . . . . . .".to_string(),
-        Style::default().fg(Color::DarkGray),
+        format!("   \u{2026}  {count} unchanged lines  (space to expand)"),
+        style,
     ))
 }
 
@@ -806,43 +812,42 @@ fn render_code(
     let lang = lang_for_path(pane.path.as_deref().unwrap_or(""));
     let focused = app.focus == Focus::Code;
 
-    let (rendered, scroll) = if focused {
-        // Cursor mode: full body + inline detail drop-downs, scrolled to cursor.
-        let mut out: Vec<Line> = Vec::new();
-        let mut cursor_row = 0u16;
-        for (i, line) in lines.iter().enumerate() {
-            if i == app.code_cursor {
-                cursor_row = out.len() as u16;
-            }
-            out.extend(pane_line_rows(
-                line,
-                app.ascii,
-                app.truecolor,
-                &lang,
-                width,
-                i == app.code_cursor,
-            ));
-            if app.detail_open.contains(&i) {
-                out.extend(detail_lines(line, app.ascii, app.truecolor, width));
-            }
+    // Unchanged runs fold to a single `...` marker; focusing the pane lets you
+    // move the cursor onto a marker and press space to expand/collapse it.
+    let fold_rows = crate::cli::tui::app::compute_fold_rows(lines, &app.expanded_folds);
+    let mut out: Vec<Line> = Vec::new();
+    let mut cursor_row = 0u16;
+    for (ri, row) in fold_rows.iter().enumerate() {
+        let is_cursor = focused && ri == app.code_cursor;
+        if is_cursor {
+            cursor_row = out.len() as u16;
         }
-        let h = code_area.height.saturating_sub(2);
-        let scroll = cursor_row.saturating_sub(h / 2);
-        (out, scroll)
-    } else {
-        // Overview mode: fold unchanged runs.
-        let max_rows = code_area.height.saturating_sub(2) as usize;
-        let mut out: Vec<Line> = Vec::new();
-        for row in fold_lines(lines, max_rows) {
-            match row {
-                DisplayRow::Code(l) => {
-                    out.extend(pane_line_rows(l, app.ascii, app.truecolor, &lang, width, false))
+        match *row {
+            crate::cli::tui::app::FoldRow::Line(i) => {
+                out.extend(pane_line_rows(
+                    &lines[i],
+                    app.ascii,
+                    app.truecolor,
+                    &lang,
+                    width,
+                    is_cursor,
+                ));
+                if app.detail_open.contains(&i) {
+                    out.extend(detail_lines(&lines[i], app.ascii, app.truecolor, width));
                 }
-                DisplayRow::Elision => out.push(elision_line()),
+            }
+            crate::cli::tui::app::FoldRow::Fold { count, .. } => {
+                out.push(fold_marker_line(count, is_cursor));
             }
         }
-        (out, 0)
+    }
+    let scroll = if focused {
+        let h = code_area.height.saturating_sub(2);
+        cursor_row.saturating_sub(h / 2)
+    } else {
+        0
     };
+    let (rendered, scroll) = (out, scroll);
 
     let code = Paragraph::new(rendered).scroll((scroll, 0)).block(
         Block::default()
@@ -1443,14 +1448,16 @@ mod tests {
             }],
         };
         let root = build_tree(std::slice::from_ref(&change), project_root_of);
-        // Select the file node (its subtree has no unit -> empty hint pane).
+        let mut sources = HashMap::new();
+        sources.insert("proj/notes.txt".to_string(), "note\ntail\n".to_string());
+        // Select the file node: no unit -> the whole-file inline diff.
         let mut app = App::new(
             PathBuf::from("."),
             PathBuf::from("/nonexistent/gigasail.db"),
             root,
             vec![change],
             vec![file],
-            HashMap::new(),
+            sources,
             HashMap::new(),
             "staged vs HEAD".into(),
         );
@@ -1463,13 +1470,14 @@ mod tests {
     }
 
     #[test]
-    fn unitless_file_shows_empty_summary() {
+    fn unitless_file_shows_its_inline_diff() {
         let app = app_without_units();
         let terminal = draw(&app, 0.0);
         let text = buffer_text(&terminal);
         assert!(text.contains("notes.txt"));
-        // No logical units -> a summary with no changed children to list.
-        assert!(text.contains("no changed children"));
+        // No logical units -> show the whole-file inline diff, not an empty table.
+        assert!(text.contains("note"), "file diff content should render");
+        assert!(!text.contains("no changed children"));
     }
 
     fn pane_line(origin: LineOrigin, n: u32) -> PaneLine {

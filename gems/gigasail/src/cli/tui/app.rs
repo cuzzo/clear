@@ -53,6 +53,58 @@ pub struct App {
     pub code_cursor: usize,
     /// Code-pane line indices whose SARIF detail drop-down is open.
     pub detail_open: HashSet<usize>,
+    /// Fold regions (by their first hidden line index) expanded in the code pane.
+    pub expanded_folds: HashSet<usize>,
+}
+
+/// A visible row in the folded code pane: a real diff line, or a collapsed run
+/// of unchanged lines shown as a single `...` marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoldRow {
+    Line(usize),
+    Fold { id: usize, count: usize },
+}
+
+/// Fold unchanged runs (away from any change) into single markers. Lines within
+/// `expanded` are shown in full. Changed lines and a few lines of context around
+/// them are always shown.
+pub fn compute_fold_rows(lines: &[PaneLine], expanded: &HashSet<usize>) -> Vec<FoldRow> {
+    const CTX: usize = 3;
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    let mut keep = vec![false; lines.len()];
+    for (i, line) in lines.iter().enumerate() {
+        if matches!(line.origin, LineOrigin::Add | LineOrigin::Del) {
+            let lo = i.saturating_sub(CTX);
+            let hi = (i + CTX).min(lines.len() - 1);
+            for k in keep.iter_mut().take(hi + 1).skip(lo) {
+                *k = true;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if keep[i] {
+            out.push(FoldRow::Line(i));
+            i += 1;
+        } else {
+            let start = i;
+            while i < lines.len() && !keep[i] {
+                i += 1;
+            }
+            if expanded.contains(&start) {
+                out.extend((start..i).map(FoldRow::Line));
+            } else {
+                out.push(FoldRow::Fold {
+                    id: start,
+                    count: i - start,
+                });
+            }
+        }
+    }
+    out
 }
 
 /// One rendered line of the right pane (inline diff or private-signature list).
@@ -192,6 +244,7 @@ impl App {
             focus: Focus::Tree,
             code_cursor: 0,
             detail_open: HashSet::new(),
+            expanded_folds: HashSet::new(),
         };
         app.refresh_rows();
         app.select_riskiest_file();
@@ -248,6 +301,15 @@ impl App {
     fn on_selection_changed(&mut self) {
         self.code_cursor = 0;
         self.detail_open.clear();
+        self.expanded_folds.clear();
+    }
+
+    /// The folded, navigable rows of the current code pane (empty for non-code).
+    pub fn code_fold_rows(&self) -> Vec<FoldRow> {
+        match self.right_pane().body {
+            PaneBody::Code { lines, .. } => compute_fold_rows(&lines, &self.expanded_folds),
+            _ => Vec::new(),
+        }
     }
 
     fn move_down(&mut self) {
@@ -284,12 +346,9 @@ impl App {
         self.set_open(open);
     }
 
-    /// Number of code lines in the right pane (0 for summary views).
+    /// Number of visible (folded) rows in the code pane (0 for summary views).
     fn code_len(&self) -> usize {
-        match self.right_pane().body {
-            PaneBody::Code { lines, .. } => lines.len(),
-            _ => 0,
-        }
+        self.code_fold_rows().len()
     }
 
     fn move_code_cursor(&mut self, delta: isize) {
@@ -302,12 +361,25 @@ impl App {
         self.code_cursor = next.clamp(0, len as isize - 1) as usize;
     }
 
-    /// Toggle the SARIF/hazard detail drop-down under the cursor's code line.
-    fn toggle_detail(&mut self) {
-        if self.detail_open.contains(&self.code_cursor) {
-            self.detail_open.remove(&self.code_cursor);
-        } else {
-            self.detail_open.insert(self.code_cursor);
+    /// Space in the code pane: expand/collapse a `...` fold under the cursor,
+    /// otherwise toggle that line's SARIF/hazard detail drop-down.
+    fn toggle_code_row(&mut self) {
+        match self.code_fold_rows().get(self.code_cursor).copied() {
+            Some(FoldRow::Fold { id, .. }) => {
+                if self.expanded_folds.contains(&id) {
+                    self.expanded_folds.remove(&id);
+                } else {
+                    self.expanded_folds.insert(id);
+                }
+            }
+            Some(FoldRow::Line(idx)) => {
+                if self.detail_open.contains(&idx) {
+                    self.detail_open.remove(&idx);
+                } else {
+                    self.detail_open.insert(idx);
+                }
+            }
+            None => {}
         }
     }
 
@@ -363,7 +435,7 @@ impl App {
             Focus::Code => match key.code {
                 KeyCode::Down | KeyCode::Char('j') => self.move_code_cursor(1),
                 KeyCode::Up | KeyCode::Char('k') => self.move_code_cursor(-1),
-                KeyCode::Char(' ') | KeyCode::Enter => self.toggle_detail(),
+                KeyCode::Char(' ') | KeyCode::Enter => self.toggle_code_row(),
                 _ => {}
             },
         }
@@ -507,14 +579,26 @@ impl App {
     /// with added lines marked and removed lines interleaved. Falls back to the
     /// raw hunk lines when the source is unavailable (e.g. a deleted file).
     fn full_unit_lines(&self, unit: &ChangedUnit) -> Vec<PaneLine> {
-        let (added, dels_before) = self.file_change_index(&unit.path);
-        let source = match self.sources.get(&unit.path) {
+        if self.sources.contains_key(&unit.path) {
+            self.full_span_lines(&unit.path, unit.start_line, unit.end_line)
+        } else {
+            self.hunk_pane_lines(unit)
+        }
+    }
+
+    /// Build the inline-diff pane lines for a `[start, end]` line span of a
+    /// file: every source line in the span (added lines marked, unchanged lines
+    /// as context), with removed lines interleaved before the new-side line they
+    /// preceded. Used for functions, structs/types, and whole files alike.
+    fn full_span_lines(&self, path: &str, start: u32, end: u32) -> Vec<PaneLine> {
+        let (added, dels_before) = self.file_change_index(path);
+        let source = match self.sources.get(path) {
             Some(source) => source,
-            None => return self.hunk_pane_lines(unit),
+            None => return Vec::new(),
         };
         let lines: Vec<&str> = source.lines().collect();
         let mut out = Vec::new();
-        for n in unit.start_line..=unit.end_line {
+        for n in start..=end {
             if let Some(dels) = dels_before.get(&n) {
                 out.extend(dels.iter().map(|d| Self::del_line(d)));
             }
@@ -524,13 +608,47 @@ impl App {
                 } else {
                     LineOrigin::Context
                 };
-                out.push(self.code_line(&unit.path, origin, n, (*text).to_string()));
+                out.push(self.code_line(path, origin, n, (*text).to_string()));
             }
         }
-        if let Some(dels) = dels_before.get(&(unit.end_line + 1)) {
+        if let Some(dels) = dels_before.get(&(end + 1)) {
             out.extend(dels.iter().map(|d| Self::del_line(d)));
         }
         out
+    }
+
+    /// The inline diff of an entire file (for file/doc nodes with no functions).
+    fn full_file_lines(&self, path: &str) -> Vec<PaneLine> {
+        let end = self
+            .sources
+            .get(path)
+            .map(|s| s.lines().count() as u32)
+            .unwrap_or(0);
+        self.full_span_lines(path, 1, end)
+    }
+
+    /// An info box for a whole-file view: aggregate the file's unit evidence.
+    fn file_info(&self, path: &str) -> InfoBox {
+        let mut info = InfoBox {
+            title: path.to_string(),
+            hazards_total: 0,
+            hazards_uncovered: 0,
+            t1: 0,
+            t2: 0,
+            t3: 0,
+            coverage: CoverageState::Unknown,
+        };
+        for change in self.changes.iter().filter(|c| c.path == path) {
+            for unit in &change.units {
+                let ev = &unit.evidence;
+                info.hazards_total += ev.hazards_total;
+                info.hazards_uncovered += ev.hazards_uncovered;
+                info.t1 += ev.t1_findings;
+                info.t2 += ev.t2_findings;
+                info.t3 += ev.t3_findings;
+            }
+        }
+        info
     }
 
     /// Fallback: the raw hunk lines within a unit's span (no full source).
@@ -618,7 +736,7 @@ impl App {
             }
         }
 
-        // Container -> summary of its changed direct children, riskiest first.
+        // Container with changed children -> a risk summary of those children.
         let mut units = Vec::new();
         Self::collect_units(node, &mut units);
         let stats = Self::summary_stats(&units);
@@ -635,16 +753,48 @@ impl App {
                 .then(b.changed_loc.cmp(&a.changed_loc))
                 .then(a.label.cmp(&b.label))
         });
-        // Keep only the risk-bearing children when any clear the threshold, so a
-        // signal-rich diff stays focused; otherwise show every changed child so
-        // the view is never empty (e.g. a freshly built repo with no evidence).
-        if rows.iter().any(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD) {
-            rows.retain(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD);
+        if !rows.is_empty() {
+            // Keep only the risk-bearing children when any clear the threshold.
+            if rows.iter().any(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD) {
+                rows.retain(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD);
+            }
+            return RightPane {
+                title: node.path.clone().unwrap_or_else(|| node.label.clone()),
+                body: PaneBody::Summary(SummaryView { stats, rows }),
+                path: node.path.clone(),
+            };
+        }
+
+        // No changed children (a struct/type, a docs/config file, ...): show the
+        // inline diff of this node's own span, GitHub-style, instead of an empty
+        // table. A node that carries a changed unit shows that unit's span; a
+        // file node shows the whole file.
+        if let Some(unit) = &node.unit {
+            return RightPane {
+                title: format!("{} :: {}", unit.path, unit.name),
+                body: PaneBody::Code {
+                    info: Self::info_for(unit),
+                    lines: self.full_unit_lines(unit),
+                },
+                path: Some(unit.path.clone()),
+            };
+        }
+        if let Some(path) = &node.path {
+            if self.sources.contains_key(path) {
+                return RightPane {
+                    title: path.clone(),
+                    body: PaneBody::Code {
+                        info: self.file_info(path),
+                        lines: self.full_file_lines(path),
+                    },
+                    path: Some(path.clone()),
+                };
+            }
         }
 
         RightPane {
             title: node.path.clone().unwrap_or_else(|| node.label.clone()),
-            body: PaneBody::Summary(SummaryView { stats, rows }),
+            body: PaneBody::Empty("no changes to show".into()),
             path: node.path.clone(),
         }
     }
@@ -1039,5 +1189,38 @@ mod tests {
         app.handle_key(key(KeyCode::Char('/')));
         app.handle_key(key(KeyCode::Backspace));
         assert_eq!(app.search, "");
+    }
+
+    #[test]
+    fn compute_fold_rows_collapses_and_expands_unchanged_runs() {
+        let mk = |origin| PaneLine {
+            origin,
+            new_lineno: Some(1),
+            content: "x".into(),
+            gutters: vec![],
+            covered: None,
+            findings: vec![],
+            hazards: vec![],
+            dark_arms: vec![],
+        };
+        let mut lines: Vec<PaneLine> = (0..20).map(|_| mk(LineOrigin::Context)).collect();
+        lines[2].origin = LineOrigin::Add;
+
+        let mut expanded = HashSet::new();
+        let rows = compute_fold_rows(&lines, &expanded);
+        // The change near the top keeps a few lines; the long tail folds.
+        let fold = rows.iter().find_map(|r| match r {
+            FoldRow::Fold { id, .. } => Some(*id),
+            _ => None,
+        });
+        assert!(fold.is_some(), "unchanged tail should fold to a marker");
+
+        // Expanding that region shows every line.
+        expanded.insert(fold.unwrap());
+        let rows = compute_fold_rows(&lines, &expanded);
+        assert!(
+            rows.iter().all(|r| matches!(r, FoldRow::Line(_))),
+            "expanded fold shows all lines"
+        );
     }
 }
