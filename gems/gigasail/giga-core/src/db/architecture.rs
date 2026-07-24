@@ -433,13 +433,16 @@ fn apply_node_big_o(tx: &rusqlite::Connection, node: &Value, unit_id: &str) -> R
     if time.is_none() && space.is_none() {
         return Ok(());
     }
+    // The analyzer may return "unknown" as the bound itself (couldn't determine
+    // one); treat that - and an absent bound - as unknown, a proven bound as
+    // complete, and a known-but-unproven bound as partial.
     let status = |val: &Option<String>, complete_key: &str| -> &'static str {
-        if val.is_none() {
-            "unknown"
-        } else if node.get(complete_key).and_then(Value::as_bool).unwrap_or(false) {
-            "complete"
-        } else {
-            "partial"
+        match val.as_deref() {
+            None | Some("") | Some("unknown") | Some("Unknown") => "unknown",
+            Some(_) if node.get(complete_key).and_then(Value::as_bool).unwrap_or(false) => {
+                "complete"
+            }
+            Some(_) => "partial",
         }
     };
     tx.execute(
@@ -891,6 +894,36 @@ mod tests {
         );
         storage.upsert_logical_unit(&plain, 10).unwrap();
         assert_eq!(storage.logical_unit_big_o(&plain.id).unwrap().1, "unknown");
+
+        // An "unknown" bound string (analyzer couldn't determine one) is unknown,
+        // not "partial".
+        let loopy = LogicalUnit::new(
+            "loopy",
+            crate::model::UnitKind::Function,
+            "demo.rb",
+            2,
+            20,
+            25,
+            "def loopy",
+            "def loopy\nx\nend",
+        );
+        storage.upsert_logical_unit(&loopy, 10).unwrap();
+        let payload2 = json!({
+            "schema_version": 1, "kind": "espalier.architecture.v1",
+            "analyzer": {"name": "espalier", "version": "t"},
+            "generated_at": "2026-07-11T00:00:00Z",
+            "corpus": {"commit": "abc", "root": ".", "complete": true, "languages": ["ruby"]},
+            "nodes": [{
+                "id": "fn:2", "kind": "function", "name": "loopy", "path": "demo.rb",
+                "start_line": 20, "end_line": 25,
+                "big_o_time": "unknown", "time_complete": false,
+                "metadata": {"confidence": "high"}
+            }],
+            "edges": [], "pressure": [], "hazards": []
+        })
+        .to_string();
+        ingest_architecture_json(&storage, &payload2).unwrap();
+        assert_eq!(storage.logical_unit_big_o(&loopy.id).unwrap().1, "unknown");
     }
 
     #[test]

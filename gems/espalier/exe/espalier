@@ -153,7 +153,24 @@ evidence = Espalier::StaticEvidence.build(
 )
 
 if options[:format] == :architecture
-  output_contents = JSON.pretty_generate(Espalier::ArchitectureArtifact.build(evidence, root: Dir.pwd))
+  # Big-O complexity is computed by the aggregator (which needs the parsed
+  # modules), not the lean static-evidence pipeline the architecture artifact
+  # otherwise uses. Run it here and attach per-function Big-O to the nodes so
+  # Lineage can surface time/space complexity per function.
+  big_o_modules = Espalier::StaticEvidence.project_modules(evidence)
+  nil_kill_evidence.apply!(big_o_modules)
+  big_o_index = Espalier::ArchitectureArtifact.big_o_index(
+    Espalier::Aggregator.new(
+      decomplex_data: decomplex_data,
+      nil_kill_data: nil_kill_data,
+      risk_data: risk_data,
+      nil_kill_loops: nil_kill_evidence.loop_counts,
+      nil_kill_evidence: nil_kill_evidence
+    ).aggregate(big_o_modules)
+  )
+  output_contents = JSON.pretty_generate(
+    Espalier::ArchitectureArtifact.build(evidence, root: Dir.pwd, big_o: big_o_index)
+  )
   if options[:output]
     File.write(options[:output], output_contents)
   else
