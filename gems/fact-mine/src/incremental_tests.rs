@@ -433,10 +433,20 @@ fn corrupt_json_identity_and_manifest_entries_are_misses() -> Result<()> {
         &cache_config,
         false,
     )?;
-    let shard_path = fs::read_dir(cache_config.directory.join("shards"))?
-        .next()
-        .expect("shard")?
-        .path();
+    // Target this file's own shard, not `read_dir().next()`: a build may also
+    // emit stdlib shards, and directory iteration order is unspecified, so
+    // picking the first entry corrupted an arbitrary shard and made the later
+    // `candidate`-keyed assertions flake.
+    let candidate = candidate(
+        &file,
+        None,
+        Profile::Espalier,
+        directory.path(),
+        &stdlib_registry_digest()?,
+        &configuration_digest()?,
+    )?;
+    let shard_path = ShardCache::new(cache_config.directory.clone())
+        .shard_path(&candidate.cache_key);
 
     let mut bad_json = GzEncoder::new(Vec::new(), Compression::default());
     bad_json.write_all(b"{}")?;
@@ -451,14 +461,6 @@ fn corrupt_json_identity_and_manifest_entries_are_misses() -> Result<()> {
     )?;
     assert_eq!(json_miss.metrics.corrupt_entries, 1);
 
-    let candidate = candidate(
-        &file,
-        None,
-        Profile::Espalier,
-        directory.path(),
-        &stdlib_registry_digest()?,
-        &configuration_digest()?,
-    )?;
     let cache = ShardCache::new(cache_config.directory.clone());
     let mut cached = match cache.load(&candidate)? {
         CacheRead::Hit(shard, _) => CachedShard {
