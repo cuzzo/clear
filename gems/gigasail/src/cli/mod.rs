@@ -217,6 +217,17 @@ pub fn plan_to_view(plan: &DiffPlan) -> View {
             .filter_map(|line| line.new_lineno)
             .collect();
 
+        // Real added/removed line counts from the diff. The plan's `added_lines`
+        // only counts recognized *source code*, so config/docs/YAML would read
+        // as 0; count the actual hunk lines instead.
+        let real_added = added_line_numbers.len() as u32;
+        let real_removed = file_diff
+            .hunks
+            .iter()
+            .flat_map(|hunk| &hunk.lines)
+            .filter(|line| line.origin == LineOrigin::Del)
+            .count() as u32;
+
         let mut units: Vec<ChangedUnit> = file
             .groups
             .iter()
@@ -236,8 +247,8 @@ pub fn plan_to_view(plan: &DiffPlan) -> View {
             status,
             is_test,
             units,
-            file_added: file.added_lines.code as u32,
-            file_removed: file.removed_lines.code as u32,
+            file_added: real_added,
+            file_removed: real_removed,
             unattributed_added: 0,
             unattributed_removed: 0,
         });

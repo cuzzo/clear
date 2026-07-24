@@ -173,11 +173,16 @@ pub struct DiffSummary {
 pub fn build_summary(plan: &DiffPlan, changes: &[FileChange]) -> DiffSummary {
     let mut summary = DiffSummary::default();
 
-    for file in &plan.files {
-        let a = &file.added_lines;
-        summary.total_added += (a.code + a.comments + a.other) as u32;
-        let r = &file.removed_lines;
-        summary.total_removed += (r.code + r.comments + r.other) as u32;
+    // Real per-file added/removed counts (from the actual diff), keyed by path.
+    // The plan's `added_lines` only counts recognized source code, so config,
+    // docs, and other non-code files would otherwise read as zero.
+    let counts: std::collections::HashMap<&str, (u32, u32)> = changes
+        .iter()
+        .map(|c| (c.path.as_str(), (c.file_added, c.file_removed)))
+        .collect();
+    for (added, removed) in counts.values() {
+        summary.total_added += added;
+        summary.total_removed += removed;
     }
 
     // Map each changed path to its language, then aggregate hazard/tier findings
@@ -246,12 +251,11 @@ pub fn build_summary(plan: &DiffPlan, changes: &[FileChange]) -> DiffSummary {
         if matches!(file.role, SourceRole::Production | SourceRole::Test) {
             continue;
         }
-        let a = &file.added_lines;
-        let r = &file.removed_lines;
+        let (added, removed) = counts.get(file.path.as_str()).copied().unwrap_or((0, 0));
         let row = other.entry(other_type(&file.path)).or_default();
         row.type_label = other_type(&file.path).to_string();
-        row.added += (a.code + a.comments + a.other) as u32;
-        row.removed += (r.code + r.comments + r.other) as u32;
+        row.added += added;
+        row.removed += removed;
     }
     summary.other = other.into_values().collect();
     summary
