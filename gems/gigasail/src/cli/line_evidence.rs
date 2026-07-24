@@ -141,6 +141,8 @@ mod tests {
             removed: 0,
             // The added lines are the first `added` lines of the span.
             added_lines: (start..start + added).collect(),
+            added_dependencies: Vec::new(),
+            added_state: Vec::new(),
             evidence: Evidence::default(),
         }
     }

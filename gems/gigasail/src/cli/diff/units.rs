@@ -25,6 +25,12 @@ pub struct ChangedUnit {
     /// New-side line numbers added within this unit (for accurate
     /// uncovered-changed-LoC; pre-existing uncovered lines are excluded).
     pub added_lines: Vec<u32>,
+    /// Collaboration targets (`Owner#name`) newly called on this unit's added
+    /// lines, from the architecture graph. Empty when none is ingested.
+    pub added_dependencies: Vec<String>,
+    /// State accesses (`read:field` / `write:field`) newly made on this unit's
+    /// added lines, from the architecture graph.
+    pub added_state: Vec<String>,
     pub evidence: Evidence,
 }
 
@@ -162,6 +168,8 @@ pub fn assign_units(file: &FileDiff, new_source: Option<&str>) -> FileChange {
             added: added[idx],
             removed: removed[idx],
             added_lines: std::mem::take(&mut added_lines[idx]),
+            added_dependencies: Vec::new(),
+            added_state: Vec::new(),
             evidence: Evidence::default(),
         });
     }
@@ -371,6 +379,8 @@ mod tests {
             added: 1,
             removed: 0,
             added_lines: vec![],
+            added_dependencies: Vec::new(),
+            added_state: Vec::new(),
             evidence: Evidence::default(),
         };
         assert_eq!(unit.owner(), Some("Store"));

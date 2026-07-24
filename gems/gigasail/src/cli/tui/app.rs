@@ -140,6 +140,12 @@ pub struct InfoBox {
     pub coverage: CoverageState,
     /// Coverage of the added lines, for the bar shown beside the findings.
     pub bar: crate::cli::diff::summary::CoverageBar,
+    /// Newly-added collaboration targets (`Owner#name`), for the
+    /// `New Dependencies:` line. Empty when no architecture graph is ingested.
+    pub new_dependencies: Vec<String>,
+    /// Newly-added state accesses (`read:field` / `write:field`), for the
+    /// `New State:` line. Only meaningful for class/function views.
+    pub new_state: Vec<String>,
 }
 
 /// Coverage breakdown of the units under a container node.
@@ -658,6 +664,8 @@ impl App {
     }
 
     /// An info box for a whole-file view: aggregate the file's unit evidence.
+    /// File-level `New Dependencies` is imports (a separate architecture fact),
+    /// so the units' call-deps/state are not surfaced here.
     fn file_info(&self, path: &str) -> InfoBox {
         let units: Vec<&ChangedUnit> = self
             .changes
@@ -665,7 +673,10 @@ impl App {
             .filter(|c| c.path == path)
             .flat_map(|c| &c.units)
             .collect();
-        Self::info_from_units(path.to_string(), &units)
+        let mut info = Self::info_from_units(path.to_string(), &units);
+        info.new_dependencies.clear();
+        info.new_state.clear();
+        info
     }
 
     /// Fallback: the raw hunk lines within a unit's span (no full source).
@@ -720,7 +731,11 @@ impl App {
             t3: 0,
             coverage: CoverageState::Unknown,
             bar: crate::cli::diff::summary::CoverageBar::default(),
+            new_dependencies: Vec::new(),
+            new_state: Vec::new(),
         };
+        let mut deps = std::collections::BTreeSet::new();
+        let mut state = std::collections::BTreeSet::new();
         for unit in units {
             let ev = &unit.evidence;
             info.hazards_total += ev.hazards_total;
@@ -733,7 +748,11 @@ impl App {
             info.bar.partial += ev.cov_partial;
             info.bar.uncovered += ev.cov_uncovered;
             info.bar.unknown += ev.cov_unknown;
+            deps.extend(unit.added_dependencies.iter().cloned());
+            state.extend(unit.added_state.iter().cloned());
         }
+        info.new_dependencies = deps.into_iter().collect();
+        info.new_state = state.into_iter().collect();
         if units.len() == 1 {
             info.coverage = units[0].evidence.coverage;
         }
@@ -801,7 +820,13 @@ impl App {
                 rows.retain(|r| r.risk >= Self::SUMMARY_RISK_THRESHOLD);
             }
             let title = node.path.clone().unwrap_or_else(|| node.label.clone());
-            let info = Self::info_from_units(title.clone(), &units);
+            let mut info = Self::info_from_units(title.clone(), &units);
+            // A class aggregates its methods' call-deps and state; file/dir
+            // containers show imports instead (a separate architecture fact).
+            if node.kind != NodeKind::Class {
+                info.new_dependencies.clear();
+                info.new_state.clear();
+            }
             return RightPane {
                 title,
                 body: PaneBody::Summary(SummaryView { info, stats, rows }),
@@ -886,6 +911,8 @@ mod tests {
             added,
             removed: 0,
             added_lines: vec![],
+            added_dependencies: Vec::new(),
+            added_state: Vec::new(),
             evidence: Evidence {
                 t1_findings: added,
                 hazards_total: if vis == Visibility::Public { 1 } else { 0 },
@@ -1387,6 +1414,8 @@ mod tests {
             added: 2,
             removed: 0,
             added_lines: vec![2, 3],
+            added_dependencies: Vec::new(),
+            added_state: Vec::new(),
             evidence: Evidence::default(),
         };
         let change = FileChange {

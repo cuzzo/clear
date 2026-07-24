@@ -498,6 +498,126 @@ fn latest_artifact_id(storage: &Storage) -> Result<i64> {
         .context("no architecture artifact has been ingested")
 }
 
+/// A single call or state-access site from the architecture graph, tagged with
+/// the source location where it occurs. The diff service intersects these with
+/// a diff's added lines to surface *new* dependencies and state per unit.
+#[derive(Debug, Clone)]
+pub struct ArchitectureFactSite {
+    pub path: String,
+    pub line: u32,
+    /// `Owner#name` (or a bare name for externals) for a call edge;
+    /// `read:field` / `write:field` for a state access.
+    pub label: String,
+    /// True for a state read/write, false for a call/collaboration edge.
+    pub is_state: bool,
+}
+
+/// Every call and state-access site from the architecture graph ingested for
+/// `commit_hash`. Returns an empty vec when no graph was ingested for it.
+pub fn architecture_fact_sites_for_commit(
+    storage: &Storage,
+    commit_hash: &str,
+) -> Result<Vec<ArchitectureFactSite>> {
+    let Some(artifact_id) = artifact_id_for_commit(storage, commit_hash)? else {
+        return Ok(Vec::new());
+    };
+    // node id -> (name, owner)
+    let mut nodes = HashMap::<String, (String, Option<String>)>::new();
+    {
+        let mut stmt = storage.connection().prepare(
+            "SELECT analyzer_node_id, name, owner FROM architecture_nodes WHERE artifact_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![artifact_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                (row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?),
+            ))
+        })?;
+        for row in rows {
+            let (id, value) = row?;
+            nodes.insert(id, value);
+        }
+    }
+    let mut sites = Vec::new();
+    let mut stmt = storage.connection().prepare(
+        "SELECT e.source_node_id, e.target_node_id, e.kind, s.path, s.start_line \
+         FROM architecture_edges e \
+         JOIN architecture_edge_spans s \
+           ON s.artifact_id = e.artifact_id AND s.edge_id = e.edge_id \
+         WHERE e.artifact_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![artifact_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i64>(4)?,
+        ))
+    })?;
+    for row in rows {
+        let (source, target, kind, path, line) = row?;
+        let line = line.max(0) as u32;
+        match kind.as_str() {
+            // `writes` is fn -> state; the state field is the edge target.
+            "writes" => {
+                if let Some((name, _)) = nodes.get(&target) {
+                    sites.push(ArchitectureFactSite {
+                        path,
+                        line,
+                        label: format!("write:{name}"),
+                        is_state: true,
+                    });
+                }
+            }
+            // `reads` is deliberately reversed: state -> fn, so the field is the source.
+            "reads" => {
+                if let Some((name, _)) = nodes.get(&source) {
+                    sites.push(ArchitectureFactSite {
+                        path,
+                        line,
+                        label: format!("read:{name}"),
+                        is_state: true,
+                    });
+                }
+            }
+            // Only calls that resolve to a real unit in the corpus become
+            // dependencies. `external_call` (stdlib/builtins) and
+            // `unresolved_call` (method on an untyped local) are dropped: they
+            // are bare, unqualified names (`append`, `len`, `filepath`, a local
+            // variable) rather than a `Owner#name` collaboration.
+            "calls" | "internal_call" | "resolved_call" | "delegation" => {
+                if let Some((name, owner)) = nodes.get(&target) {
+                    let label = match owner {
+                        Some(owner) if !owner.is_empty() => format!("{owner}#{name}"),
+                        _ => name.clone(),
+                    };
+                    sites.push(ArchitectureFactSite {
+                        path,
+                        line,
+                        label,
+                        is_state: false,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(sites)
+}
+
+fn artifact_id_for_commit(storage: &Storage, commit_hash: &str) -> Result<Option<i64>> {
+    storage
+        .connection()
+        .query_row(
+            "SELECT id FROM architecture_artifacts WHERE commit_hash = ?1 ORDER BY id DESC LIMIT 1",
+            params![commit_hash],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
 fn artifact_health(storage: &Storage, artifact_id: i64) -> Result<Value> {
     storage.connection().query_row(
         ARTIFACT_HEALTH_SQL,
@@ -600,6 +720,48 @@ mod tests {
                 .prepare(sql)
                 .unwrap_or_else(|error| panic!("standalone SQL failed to prepare: {error}\n{sql}"));
         }
+    }
+
+    #[test]
+    fn fact_sites_classify_calls_and_state_by_span() {
+        let storage = Storage::open_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let payload = json!({
+            "schema_version": 1,
+            "kind": "espalier.architecture.v1",
+            "analyzer": {"name": "espalier", "version": "test"},
+            "generated_at": "2026-07-11T00:00:00Z",
+            "corpus": {"commit": "deadbeef", "root": dir.path().to_str().unwrap(), "complete": true, "languages": ["ruby"]},
+            "nodes": [
+                {"id":"owner:1","kind":"owner","name":"Demo","owner":"Demo","path":"demo.rb","start_line":1,"start_column":0,"end_line":9,"end_column":3,"metadata":{}},
+                {"id":"fn:run","kind":"function","name":"run","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":2,"start_column":0,"end_line":6,"end_column":3,"metadata":{}},
+                {"id":"fn:help","kind":"function","name":"help","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":7,"start_column":0,"end_line":8,"end_column":3,"metadata":{}},
+                {"id":"state:v","kind":"state","name":"@value","owner":"Demo","owner_id":"owner:1","path":"demo.rb","start_line":3,"start_column":2,"end_line":3,"end_column":8,"metadata":{}}
+            ],
+            "edges": [
+                {"id":"e:call","source":"fn:run","target":"fn:help","kind":"calls","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":4,"start_column":4,"end_line":4,"end_column":10}]},
+                {"id":"e:write","source":"fn:run","target":"state:v","kind":"writes","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":3,"start_column":2,"end_line":3,"end_column":8}]},
+                {"id":"e:read","source":"state:v","target":"fn:help","kind":"reads","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":7,"start_column":2,"end_line":7,"end_column":8}]},
+                {"id":"e:ext","source":"fn:run","target":"external:puts","kind":"external_call","conditional":false,"weight":1,"confidence":"high","metadata":{},"spans":[{"path":"demo.rb","start_line":5,"start_column":4,"end_line":5,"end_column":8}]}
+            ],
+            "pressure": [],
+            "hazards": []
+        }).to_string();
+        ingest_architecture_json(&storage, &payload).unwrap();
+
+        let sites = architecture_fact_sites_for_commit(&storage, "deadbeef").unwrap();
+        // The call resolves to `Owner#name`; the external call is dropped.
+        let call = sites.iter().find(|s| !s.is_state && s.line == 4).unwrap();
+        assert_eq!(call.label, "Demo#help");
+        assert!(sites.iter().all(|s| s.label != "puts"), "external calls dropped");
+        // Write names the state target; read names the state source (reversed).
+        let write = sites.iter().find(|s| s.is_state && s.line == 3).unwrap();
+        assert_eq!(write.label, "write:@value");
+        let read = sites.iter().find(|s| s.is_state && s.line == 7).unwrap();
+        assert_eq!(read.label, "read:@value");
+
+        // An unknown commit yields nothing rather than erroring.
+        assert!(architecture_fact_sites_for_commit(&storage, "cafe").unwrap().is_empty());
     }
 
     #[test]

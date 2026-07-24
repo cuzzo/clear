@@ -245,6 +245,8 @@ mod tests {
             added,
             removed: 0,
             added_lines: vec![],
+            added_dependencies: Vec::new(),
+            added_state: Vec::new(),
             evidence: Evidence {
                 t1_findings: added, // more churn -> more findings, for deterministic risk
                 ..Default::default()

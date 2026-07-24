@@ -267,6 +267,8 @@ mod tests {
             added_lines: Default::default(),
             verification: Default::default(),
             sarif_findings: Vec::new(),
+            added_dependencies: Vec::new(),
+            added_state: Vec::new(),
             risk: Default::default(),
         });
 

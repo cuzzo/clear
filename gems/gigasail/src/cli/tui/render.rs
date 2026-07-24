@@ -218,7 +218,8 @@ fn render_left(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// The top of the right pane, shared by function/file/class/dir views:
-/// compact findings on the left, coverage bar on the right, one line.
+/// compact findings on the left and coverage bar on the right (line 1), then
+/// optional `New Dependencies:` / `New State:` lines from the architecture graph.
 fn info_lines(info: &InfoBox, ascii: bool, inner_w: usize) -> Vec<Line<'static>> {
     let hz = crate::cli::diff::summary::HazardTotals {
         hazards: info.hazards_total,
@@ -239,7 +240,33 @@ fn info_lines(info: &InfoBox, ascii: bool, inner_w: usize) -> Vec<Line<'static>>
     let pad = inner_w.saturating_sub(find_w + bar_w).max(1);
     spans.push(Span::raw(" ".repeat(pad)));
     spans.extend(coverage_bar_spans(&info.bar, bar_w));
-    vec![Line::from(spans)]
+    let mut lines = vec![Line::from(spans)];
+    if !info.new_dependencies.is_empty() {
+        lines.push(fact_line("New Dependencies: ", &info.new_dependencies, Color::Cyan));
+    }
+    if !info.new_state.is_empty() {
+        lines.push(fact_line("New State: ", &info.new_state, Color::Magenta));
+    }
+    lines
+}
+
+/// `Label: [ a, b, c ]` - the architecture-derived dependency/state lines.
+fn fact_line(label: &'static str, items: &[String], value: Color) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(label, Style::default().fg(Color::Gray)),
+        Span::styled(
+            format!("[ {} ]", items.join(", ")),
+            Style::default().fg(value),
+        ),
+    ])
+}
+
+/// Height (including borders) the info box needs for its content lines.
+fn info_box_height(info: &InfoBox) -> u16 {
+    let content = 1
+        + u16::from(!info.new_dependencies.is_empty())
+        + u16::from(!info.new_state.is_empty());
+    content + 2
 }
 
 /// Draw the shared info box (border + title + one findings/coverage line).
@@ -840,7 +867,7 @@ fn render_code(
 ) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .constraints([Constraint::Length(info_box_height(info)), Constraint::Min(1)])
         .split(area);
     render_info_box(frame, layout[0], &pane.title, info, app.ascii, border);
 
@@ -938,7 +965,10 @@ fn render_summary(
     // Same info box as the code views on top; the members table below.
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(info_box_height(&summary.info)),
+            Constraint::Min(1),
+        ])
         .split(area);
     render_info_box(frame, layout[0], title, &summary.info, app.ascii, border);
     let area = layout[1];
@@ -1080,6 +1110,8 @@ mod tests {
             added: 2,
             removed: 0,
             added_lines: vec![],
+            added_dependencies: vec!["Token#decode".into()],
+            added_state: vec!["write:self.count".into()],
             evidence: Evidence {
                 hazards_total: 1,
                 hazards_uncovered: 1,
@@ -1164,6 +1196,8 @@ mod tests {
             added: 1,
             removed: 0,
             added_lines: vec![3],
+            added_dependencies: Vec::new(),
+            added_state: Vec::new(),
             evidence: Evidence::default(),
         };
         let change = FileChange {
@@ -1318,6 +1352,8 @@ mod tests {
             added: 1,
             removed: 0,
             added_lines: vec![3],
+            added_dependencies: Vec::new(),
+            added_state: Vec::new(),
             evidence: Evidence::default(),
         };
         let change = FileChange {
@@ -1545,6 +1581,9 @@ mod tests {
         // Compact findings (one hazard, one T1) plus a coverage bar on one line.
         assert!(text.contains("T1"));
         assert!(text.contains("NO COVERAGE DATA"));
+        // Architecture-derived dependency/state lines from the info box.
+        assert!(text.contains("New Dependencies:") && text.contains("Token#decode"));
+        assert!(text.contains("New State:") && text.contains("write:self.count"));
     }
 
     #[test]

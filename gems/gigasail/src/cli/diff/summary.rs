@@ -327,6 +327,8 @@ mod tests {
                 added: 1,
                 removed: 0,
                 added_lines: vec![1],
+                added_dependencies: Vec::new(),
+                added_state: Vec::new(),
                 evidence: Evidence {
                     hazards_total: 4,
                     t1_findings: 10,

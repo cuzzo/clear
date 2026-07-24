@@ -316,6 +316,8 @@ fn group_to_unit(
         added: group.added_lines.code as u32,
         removed: 0,
         added_lines,
+        added_dependencies: group.added_dependencies.clone(),
+        added_state: group.added_state.clone(),
         evidence,
     }
 }

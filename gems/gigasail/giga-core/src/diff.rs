@@ -138,6 +138,14 @@ pub struct DiffFile {
     line_verification: BTreeMap<u32, LineVerification>,
 }
 
+impl DiffFile {
+    /// New-side code line numbers this diff introduced (added source lines).
+    /// Used to decide which architecture facts are *newly* added.
+    pub fn added_line_numbers(&self) -> BTreeSet<u32> {
+        self.line_verification.keys().copied().collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct EvidenceAvailability {
     pub coverage: EvidenceState,
@@ -291,6 +299,13 @@ pub struct DiffGroup {
     pub added_lines: AddedLines,
     pub verification: VerificationSlices,
     pub sarif_findings: Vec<SarifFindingSummary>,
+    /// Collaboration targets (`Owner#name`, or a bare name for externals) whose
+    /// call site first appears on this group's added lines. Sourced from the
+    /// ingested architecture graph; empty when none is available.
+    pub added_dependencies: Vec<String>,
+    /// State accesses (`read:field` / `write:field`) whose site first appears on
+    /// this group's added lines. Sourced from the ingested architecture graph.
+    pub added_state: Vec<String>,
     pub risk: RiskSummary,
 }
 
@@ -1145,6 +1160,8 @@ fn semantic_groups(
                     risk,
                     verification,
                     sarif_findings: Vec::new(),
+                    added_dependencies: Vec::new(),
+                    added_state: Vec::new(),
                     added_lines,
                 }
             })

@@ -43,8 +43,51 @@ pub fn build_structured_diff(
         apply_known_coverage(storage, &mut plan, request.coverage_source.as_deref())?;
         apply_known_mutation_kills(storage, &mut plan)?;
         apply_known_sarif(storage, &mut plan, request.sarif_source.as_deref())?;
+        apply_known_architecture(storage, &mut plan)?;
     }
     Ok(plan)
+}
+
+/// Attach newly-added collaboration targets and state accesses to each changed
+/// group, sourced from the architecture graph ingested for the head commit. A
+/// fact counts as *new* when its call/access site lands on an added line inside
+/// the group's span. No graph ingested -> groups keep their empty defaults.
+fn apply_known_architecture(storage: &Storage, plan: &mut DiffPlan) -> Result<()> {
+    let sites =
+        crate::architecture::architecture_fact_sites_for_commit(storage, &plan.scope.head_oid)?;
+    if sites.is_empty() {
+        return Ok(());
+    }
+    let mut by_path: std::collections::HashMap<&str, Vec<&_>> = std::collections::HashMap::new();
+    for site in &sites {
+        by_path.entry(site.path.as_str()).or_default().push(site);
+    }
+    for file in &mut plan.files {
+        let Some(file_sites) = by_path.get(file.path.as_str()) else {
+            continue;
+        };
+        let added = file.added_line_numbers();
+        for group in &mut file.groups {
+            let mut deps = std::collections::BTreeSet::new();
+            let mut state = std::collections::BTreeSet::new();
+            for site in file_sites {
+                if site.line < group.start_line
+                    || site.line > group.end_line
+                    || !added.contains(&site.line)
+                {
+                    continue;
+                }
+                if site.is_state {
+                    state.insert(site.label.clone());
+                } else {
+                    deps.insert(site.label.clone());
+                }
+            }
+            group.added_dependencies = deps.into_iter().collect();
+            group.added_state = state.into_iter().collect();
+        }
+    }
+    Ok(())
 }
 
 fn bind_requested_evidence_scope(plan: &mut DiffPlan, request: &DiffRequest) -> Result<()> {
