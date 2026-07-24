@@ -14,8 +14,42 @@ const INSERT_NODE_SQL: &str = include_str!("../../sql/architecture/insert_node.s
 const INSERT_EDGE_SQL: &str = include_str!("../../sql/architecture/insert_edge.sql");
 const INSERT_EDGE_SPAN_SQL: &str = include_str!("../../sql/architecture/insert_edge_span.sql");
 const INSERT_PRESSURE_SQL: &str = include_str!("../../sql/architecture/insert_pressure.sql");
-const RECONCILE_LOGICAL_UNIT_SQL: &str =
-    include_str!("../../sql/architecture/reconcile_logical_unit.sql");
+
+/// One-shot: current (latest-event) location per unit, into an indexed temp
+/// table, so per-node reconciliation is an indexed probe rather than a repeated
+/// full latest-event join.
+// Refresh contents in place (DELETE + INSERT), never DROP: a cached reconcile
+// statement from a prior ingest on the same connection still references this
+// table, and DROP would fail with "database table is locked".
+const BUILD_RECONCILE_TEMP_SQL: &str = "\
+CREATE TEMP TABLE IF NOT EXISTS arch_reconcile (
+  unit_id TEXT, path TEXT, start_line INTEGER, name TEXT, type TEXT
+);
+CREATE INDEX IF NOT EXISTS arch_reconcile_idx ON arch_reconcile(path, type, name);
+DELETE FROM arch_reconcile;
+INSERT INTO arch_reconcile
+SELECT u.id,
+       COALESCE(le.path, u.original_path),
+       COALESCE(le.start_line, u.start_line, 1),
+       u.name,
+       u.type
+FROM logical_units u
+LEFT JOIN (
+  SELECT e.unit_id AS unit_id, e.path AS path, e.start_line AS start_line
+  FROM events e
+  WHERE e.id = (
+    SELECT x.id FROM events x WHERE x.unit_id = e.unit_id
+    ORDER BY x.timestamp DESC, x.id DESC LIMIT 1
+  )
+) le ON le.unit_id = u.id;";
+
+/// Per-node reconcile against the materialized temp table (params identical to
+/// the original `reconcile_logical_unit.sql`).
+const RECONCILE_TEMP_SQL: &str = "\
+SELECT unit_id FROM arch_reconcile
+WHERE path = ?1 AND (name = ?2 OR name LIKE ?3) AND type IN (?4, ?5)
+ORDER BY ABS(start_line - ?6), unit_id
+LIMIT 1;";
 const SEARCH_SQL: &str = include_str!("../../sql/architecture/search.sql");
 const LATEST_ARTIFACT_SQL: &str = include_str!("../../sql/architecture/latest_artifact.sql");
 const ARTIFACT_HEALTH_SQL: &str = include_str!("../../sql/architecture/artifact_health.sql");
@@ -103,6 +137,13 @@ pub fn ingest_architecture_json(
         ..ArchitectureIngestStats::default()
     };
 
+    // Reconciling each architecture node to its logical unit needs each unit's
+    // *current* path/start-line (from its latest event). Computing that latest-
+    // event join per node re-scans the events table ~N times (60s for a real
+    // graph). Materialize it once into an indexed temp table; the per-node
+    // lookup is then a single indexed probe.
+    tx.execute_batch(BUILD_RECONCILE_TEMP_SQL)?;
+
     for node in document
         .get("nodes")
         .and_then(Value::as_array)
@@ -127,8 +168,7 @@ pub fn ingest_architecture_json(
             .get("confidence")
             .and_then(Value::as_str)
             .unwrap_or("high");
-        tx.execute(
-            INSERT_NODE_SQL,
+        tx.prepare_cached(INSERT_NODE_SQL)?.execute(
             params![
                 artifact_id,
                 id,
@@ -157,8 +197,7 @@ pub fn ingest_architecture_json(
         .flatten()
     {
         let edge_id = text(edge, "id");
-        tx.execute(
-            INSERT_EDGE_SQL,
+        tx.prepare_cached(INSERT_EDGE_SQL)?.execute(
             params![
                 artifact_id,
                 edge_id,
@@ -181,8 +220,7 @@ pub fn ingest_architecture_json(
             .into_iter()
             .flatten()
         {
-            tx.execute(
-                INSERT_EDGE_SPAN_SQL,
+            tx.prepare_cached(INSERT_EDGE_SPAN_SQL)?.execute(
                 params![
                     artifact_id,
                     edge_id,
@@ -207,8 +245,7 @@ pub fn ingest_architecture_json(
             .get("components")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        tx.execute(
-            INSERT_PRESSURE_SQL,
+        tx.prepare_cached(INSERT_PRESSURE_SQL)?.execute(
             params![
                 artifact_id,
                 text(pressure, "node_id"),
@@ -397,7 +434,8 @@ fn reconcile_logical_unit(
     } else {
         vec![kind]
     };
-    let mut stmt = tx.prepare(RECONCILE_LOGICAL_UNIT_SQL)?;
+    // Cached probe against the materialized temp table (built once per ingest).
+    let mut stmt = tx.prepare_cached(RECONCILE_TEMP_SQL)?;
     let suffix = format!("%{name}");
     Ok(stmt
         .query_row(
@@ -751,7 +789,6 @@ mod tests {
             INSERT_EDGE_SQL,
             INSERT_EDGE_SPAN_SQL,
             INSERT_PRESSURE_SQL,
-            RECONCILE_LOGICAL_UNIT_SQL,
             SEARCH_SQL,
             LATEST_ARTIFACT_SQL,
             ARTIFACT_HEALTH_SQL,

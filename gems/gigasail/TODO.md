@@ -1,15 +1,5 @@
 # GigaSail TODO
 
-## Speed up architecture-graph ingest (batched inserts)
-
-Dogfooding on CLEAR (`compiler/ruby`, 21.7k nodes / 66.7k edges / 106k spans)
-`ingest-architecture` took ~59s while the espalier analysis that produced the
-graph took ~23s - ingest is the bottleneck. Likely per-row inserts and a
-`reconcile_logical_unit` SELECT per node (7.2k). Batch the node/edge/span inserts
-in one prepared statement / multi-row transaction and cache/join the unit
-reconciliation, so per-commit analysis ingest is seconds, not a minute. This
-directly gates the premerge/sync overhead the README dogfooding section reports.
-
 ## Prune stale analysis reports on sync (branch-aware)
 
 On a new `giga sync`, reclaim disk by deleting persisted analysis reports that

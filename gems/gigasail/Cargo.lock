@@ -820,14 +820,17 @@ dependencies = [
  "anyhow",
  "clap",
  "crossterm",
+ "flate2",
  "giga-core",
  "git2",
  "hex",
  "ratatui",
+ "rmcp",
  "rusqlite",
  "serde_json",
  "sha2",
  "tempfile",
+ "tokio",
  "ts-rs",
 ]
 
