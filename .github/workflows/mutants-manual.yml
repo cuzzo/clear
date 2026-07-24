@@ -176,12 +176,15 @@ jobs:
             args+=(--since "${BASE_SHA}")
           fi
           MUTANT_JOBS="$(nproc)" bundle exec ruby gems/gigasail/tools/mutant-converters/ruby_mutant.rb "${args[@]}"
+          # Store facts compressed (giga ingest-mutants reads .gz transparently).
+          facts="/tmp/clear-ruby-mutants-${{ matrix.shard }}/mutant-facts.json"
+          [ -f "$facts" ] && gzip -f "$facts"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ruby-mutant-facts-${{ matrix.shard }}
           path: |
-            /tmp/clear-ruby-mutants-${{ matrix.shard }}/mutant-facts.json
+            /tmp/clear-ruby-mutants-${{ matrix.shard }}/mutant-facts.json.gz
             /tmp/clear-ruby-mutants-${{ matrix.shard }}/*.log
           if-no-files-found: warn
           retention-days: 14

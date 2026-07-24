@@ -31,6 +31,7 @@ ts-rs = "10.1"
 rmcp = { version = "2.2.0", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["io-std", "macros", "rt", "rt-multi-thread"] }
 rusqlite = { version = "0.30", features = ["bundled"] }
+flate2 = "1.1"
 
 [dev-dependencies]
 tempfile = "=3.10.1"

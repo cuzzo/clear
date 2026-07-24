@@ -677,7 +677,7 @@ fn main() -> Result<()> {
             let git = GitProvider::open(&repo)?;
             let extractor = HeuristicExtractor::default();
             let normalizer = RepoPathNormalizer::new(&repo);
-            let payload = fs::read_to_string(&input)?;
+            let payload = read_maybe_gzip(&input)?;
             let stats = ingest_test_exposure_json(
                 &storage,
                 &normalizer,
@@ -713,7 +713,7 @@ fn main() -> Result<()> {
             let git = GitProvider::open(&repo)?;
             let extractor = HeuristicExtractor::default();
             let normalizer = RepoPathNormalizer::new(&repo);
-            let payload = fs::read_to_string(&input)?;
+            let payload = read_maybe_gzip(&input)?;
             let mutation_corpus = mutation_corpus.unwrap_or_default();
             let evidence_scope = match (selection, test_set) {
                 (Some(selection), Some(test_set)) => Some(EvidenceScopeFingerprint {
@@ -916,7 +916,7 @@ fn main() -> Result<()> {
             let git = GitProvider::open(&repo)?;
             let extractor = HeuristicExtractor::default();
             let normalizer = RepoPathNormalizer::new(&repo);
-            let payload = fs::read_to_string(&input)?;
+            let payload = read_maybe_gzip(&input)?;
             let stats = match provider.as_str() {
                 "sentry" => ingest_stack_traces(
                     &storage,
@@ -943,6 +943,21 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Read a facts file, transparently gunzipping it when it is gzip-compressed
+/// (magic `1f 8b`). Mutant/coverage/exposure artifacts are stored `.gz` to keep
+/// the run store and CI uploads compact; ingestion should not care.
+fn read_maybe_gzip(path: &std::path::Path) -> anyhow::Result<String> {
+    let bytes = std::fs::read(path)?;
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        use std::io::Read;
+        let mut out = String::new();
+        flate2::read::GzDecoder::new(&bytes[..]).read_to_string(&mut out)?;
+        Ok(out)
+    } else {
+        Ok(String::from_utf8(bytes)?)
+    }
 }
 
 fn print_json_summary(units: &[gigasail::UnitSummary]) {
