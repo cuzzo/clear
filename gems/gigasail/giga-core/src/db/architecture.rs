@@ -72,7 +72,14 @@ pub fn ingest_architecture_json(
         .and_then(Value::as_str)
         .unwrap_or("");
 
-    let tx = storage.connection().unchecked_transaction()?;
+    // Nest safely inside the sync ingest's outer transaction; own one only when
+    // called standalone (`ingest-architecture`).
+    let owns_transaction = !storage.transaction_active();
+    if owns_transaction {
+        storage.begin_transaction()?;
+    }
+    let result = (|| -> Result<ArchitectureIngestStats> {
+    let tx = storage.connection();
     tx.execute(DELETE_SNAPSHOT_SQL, params![analyzer, commit])?;
     tx.execute(
         INSERT_ARTIFACT_SQL,
@@ -356,13 +363,26 @@ pub fn ingest_architecture_json(
         })?;
     }
 
-    tx.commit()?;
-
-    Ok(stats)
+        Ok(stats)
+    })();
+    match result {
+        Ok(stats) => {
+            if owns_transaction {
+                storage.commit_transaction()?;
+            }
+            Ok(stats)
+        }
+        Err(error) => {
+            if owns_transaction {
+                let _ = storage.rollback_transaction();
+            }
+            Err(error)
+        }
+    }
 }
 
 fn reconcile_logical_unit(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     path: Option<&str>,
     name: &str,
     kind: &str,

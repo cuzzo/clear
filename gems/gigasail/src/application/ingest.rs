@@ -166,6 +166,14 @@ fn ingest_validated_run_manifest(
                             .push((scope, artifact.complete));
                     }
                 }
+                ArtifactKind::Architecture => {
+                    // The graph is a self-describing snapshot keyed by its own
+                    // `corpus.commit`; ingestion upserts per (analyzer, commit).
+                    crate::architecture::ingest_architecture_json(
+                        &storage,
+                        std::str::from_utf8(&payload)?,
+                    )?;
+                }
             }
         }
         for (source, inputs) in sarif_inputs {
@@ -346,6 +354,7 @@ fn validate_manifest_provenance(
             ),
             ArtifactKind::Mutants => artifact.format == "mutant-facts",
             ArtifactKind::Sarif => artifact.format == "sarif",
+            ArtifactKind::Architecture => artifact.format == "architecture",
         };
         if !format_matches_family {
             anyhow::bail!(

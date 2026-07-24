@@ -147,6 +147,9 @@ pub enum ArtifactKind {
     Coverage,
     Mutants,
     Sarif,
+    /// An espalier architecture graph (`espalier.architecture.v1`), ingested to
+    /// power New Dependencies / New State in the diff.
+    Architecture,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
