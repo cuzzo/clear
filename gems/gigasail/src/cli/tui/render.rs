@@ -898,6 +898,24 @@ fn render_funnel(
         }
     }
 
+    // NEW PACKAGES: third-party imports introduced by the change, by language.
+    if !summary.new_packages.is_empty() {
+        body.push(Line::from(""));
+        body.push(Line::from(Span::styled(
+            "NEW PACKAGES".to_string(),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        for (lang, pkgs) in &summary.new_packages {
+            body.push(Line::from(vec![
+                Span::styled(
+                    format!(" {:<10} ", truncate(lang, 10)),
+                    Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(pkgs.join(", "), Style::default().fg(Color::LightGreen)),
+            ]));
+        }
+    }
+
     // TESTS: how the change affected the test suite, per language:test_set.
     if !summary.tests.is_empty() {
         body.push(Line::from(""));
@@ -1630,6 +1648,12 @@ mod tests {
                 },
             ],
             tests: Vec::new(),
+            binaries_added: 0,
+            binaries_bytes: 0,
+            new_packages: std::collections::BTreeMap::from([(
+                "go".to_string(),
+                vec!["github.com/spf13/cobra".to_string()],
+            )]),
         };
         app.refresh_rows();
         app.selected = 0; // the [SUMMARY] row
@@ -1642,6 +1666,10 @@ mod tests {
         assert!(text.contains("CODE") && text.contains("language") && text.contains("ruby"));
         assert!(text.contains("OTHER") && text.contains("Markdown"));
         assert!(text.contains("dependencies"));
+        assert!(
+            text.contains("NEW PACKAGES") && text.contains("github.com/spf13/cobra"),
+            "third-party imports render under NEW PACKAGES"
+        );
         assert!(text.contains("T1"), "hazard tier row");
         // The coverage bar drew colored segment glyphs, with red dots for misses.
         assert!(text.contains('*') && text.contains('+') && text.contains('-'));

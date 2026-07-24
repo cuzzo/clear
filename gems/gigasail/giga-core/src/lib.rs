@@ -22,6 +22,8 @@ pub mod ingest_service;
 pub mod lock;
 #[path = "db/model.rs"]
 pub mod model;
+
+pub mod new_packages;
 #[path = "db/mutant.rs"]
 pub mod mutant;
 pub mod pipeline;

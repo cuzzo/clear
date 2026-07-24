@@ -44,6 +44,7 @@ pub fn build_structured_diff(
         apply_known_mutation_kills(storage, &mut plan)?;
         apply_known_sarif(storage, &mut plan, request.sarif_source.as_deref())?;
         apply_known_architecture(storage, &mut plan)?;
+        apply_new_packages(provider, &mut plan)?;
         apply_function_big_o(storage, &mut plan)?;
         apply_test_summaries(storage, &mut plan)?;
     }
@@ -162,6 +163,33 @@ fn apply_test_summaries(storage: &Storage, plan: &mut DiffPlan) -> Result<()> {
             }),
         };
     }
+    Ok(())
+}
+
+/// Aggregate the change's newly-added imports into third-party packages grouped
+/// by language, for the summary's NEW PACKAGES section. Uses the per-file
+/// `added_imports` already stamped by [`apply_known_architecture`], filtered to
+/// external packages via the repository's own module roots (read from go.mod /
+/// Cargo.toml at head). Stdlib and first-party (same-repo) imports are dropped.
+fn apply_new_packages(provider: &GitProvider, plan: &mut DiffPlan) -> Result<()> {
+    use crate::new_packages::{first_party_roots, group_third_party};
+    let head = &plan.scope.head_oid;
+    let go_mod = provider.file_contents_at_commit(head, "go.mod").ok().flatten();
+    let cargo = provider.file_contents_at_commit(head, "Cargo.toml").ok().flatten();
+    let roots = first_party_roots(go_mod.as_deref(), cargo.as_deref());
+
+    let entries: Vec<(String, &[String])> = plan
+        .files
+        .iter()
+        .filter_map(|file| {
+            crate::diff::language_for_path(&file.path)
+                .map(|lang| (lang, file.added_imports.as_slice()))
+        })
+        .collect();
+    plan.inventory.new_packages = group_third_party(
+        entries.iter().map(|(lang, imports)| (lang.as_str(), *imports)),
+        &roots,
+    );
     Ok(())
 }
 

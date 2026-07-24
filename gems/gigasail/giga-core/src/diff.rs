@@ -72,6 +72,10 @@ pub struct ChangeInventory {
     /// red warning - added binaries in a source diff are usually a mistake.
     #[serde(default)]
     pub binary_added: Vec<BinaryFile>,
+    /// Third-party packages newly imported by this change, keyed by language.
+    /// Excludes stdlib and first-party (same-repo) imports. Sorted, unique.
+    #[serde(default)]
+    pub new_packages: BTreeMap<String, Vec<String>>,
     pub configuration_paths: Vec<ConfigFile>,
     pub documentation_paths: Vec<String>,
     pub generated_paths: Vec<String>,
@@ -2187,7 +2191,7 @@ fn is_manifest_path(path: &str) -> bool {
         )
 }
 
-fn language_for_path(path: &str) -> Option<String> {
+pub(crate) fn language_for_path(path: &str) -> Option<String> {
     let extension = path.rsplit('.').next()?.to_ascii_lowercase();
     let language = match extension.as_str() {
         "c" | "h" => "c",

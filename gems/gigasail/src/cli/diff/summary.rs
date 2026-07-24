@@ -169,6 +169,9 @@ pub struct DiffSummary {
     /// a red warning - added binaries in a source diff are almost always wrong.
     pub binaries_added: usize,
     pub binaries_bytes: u64,
+    /// Third-party packages newly imported by the change, keyed by language
+    /// (stdlib and first-party imports excluded). Rendered as NEW PACKAGES.
+    pub new_packages: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// Build the funnel from the plan (line splits, coverage, visibility) and the
@@ -308,6 +311,9 @@ pub fn build_summary(plan: &DiffPlan, changes: &[FileChange]) -> DiffSummary {
     // Binaries: warn loudly when a source diff adds binary files.
     summary.binaries_added = plan.inventory.binary_added.len();
     summary.binaries_bytes = plan.inventory.binary_added.iter().map(|b| b.bytes).sum();
+
+    // NEW PACKAGES: third-party imports introduced by the change, by language.
+    summary.new_packages = plan.inventory.new_packages.clone();
     summary
 }
 
