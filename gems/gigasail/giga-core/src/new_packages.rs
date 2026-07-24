@@ -108,6 +108,81 @@ pub fn package_name(language: &str, raw: &str) -> String {
     }
 }
 
+/// Short, origin-aware display form for an import in the New Dependencies list:
+/// - first-party (this repo): `./internal/ui` - a relative path, no module root.
+/// - third-party: `unslop:internal/ui` - `repo:subpath`, domain/owner stripped.
+/// - stdlib: unchanged (`fmt`, `os`).
+pub fn display_import(language: &str, raw: &str, first_party: &[String]) -> String {
+    let label = raw.trim().trim_matches('"');
+    match classify_import(language, label, first_party) {
+        ImportOrigin::Internal => {
+            // Rust's own crate roots are relative by keyword, not a module path.
+            for kw in ["crate", "self", "super"] {
+                if let Some(rest) = label.strip_prefix(&format!("{kw}::")) {
+                    return format!("./{}", rest.replace("::", "/"));
+                }
+            }
+            for root in first_party {
+                if root.is_empty() {
+                    continue;
+                }
+                if label == root {
+                    return "./".to_string();
+                }
+                if let Some(rest) = label.strip_prefix(&format!("{root}/")) {
+                    return format!("./{rest}");
+                }
+                if let Some(rest) = label.strip_prefix(&format!("{root}::")) {
+                    return format!("./{}", rest.replace("::", "/"));
+                }
+            }
+            label.to_string()
+        }
+        ImportOrigin::Stdlib => label.to_string(),
+        ImportOrigin::ThirdParty => short_third_party(language, label),
+    }
+}
+
+/// A third-party import shortened to `repo:subpath` (or just `repo`): the host
+/// and owner are dropped, keeping the repository name and the path within it.
+pub fn short_third_party(language: &str, raw: &str) -> String {
+    let label = raw.trim().trim_matches('"');
+    match language {
+        "go" => {
+            let segs: Vec<&str> = label.split('/').collect();
+            // A hosted module root is host/owner/repo; a bare host/repo is two.
+            let root_len = if segs[0].contains('.') {
+                segs.len().min(3)
+            } else {
+                1
+            };
+            let repo = segs.get(root_len - 1).copied().unwrap_or(label);
+            if segs.len() > root_len {
+                format!("{repo}:{}", segs[root_len..].join("/"))
+            } else {
+                repo.to_string()
+            }
+        }
+        "rust" => {
+            let mut it = label.splitn(2, "::");
+            let krate = it.next().unwrap_or(label);
+            match it.next().filter(|rest| !rest.is_empty()) {
+                Some(rest) => format!("{krate}:{}", rest.replace("::", "/")),
+                None => krate.to_string(),
+            }
+        }
+        "javascript" | "typescript" => {
+            let pkg = package_name(language, label);
+            let bare = label.strip_prefix("node:").unwrap_or(label);
+            match bare.strip_prefix(&format!("{pkg}/")) {
+                Some(sub) => format!("{pkg}:{sub}"),
+                None => pkg,
+            }
+        }
+        _ => label.to_string(),
+    }
+}
+
 /// Group a change's per-file added imports into the third-party packages it
 /// introduces, keyed by language, sorted and de-duplicated. `files` yields one
 /// `(language, imports)` entry per changed file; stdlib and first-party imports
@@ -211,6 +286,33 @@ mod tests {
         assert_eq!(classify_import("typescript", "@scope/pkg/sub", &[]), ImportOrigin::ThirdParty);
         assert_eq!(package_name("typescript", "@scope/pkg/sub"), "@scope/pkg");
         assert_eq!(package_name("javascript", "lodash/fp"), "lodash");
+    }
+
+    #[test]
+    fn display_first_party_is_relative_third_party_is_repo_colon_subpath() {
+        let fp = vec!["github.com/yahn/unslop".to_string()];
+        // First-party in this repo -> relative path, no module root.
+        assert_eq!(
+            display_import("go", "github.com/yahn/unslop/internal/ui", &fp),
+            "./internal/ui"
+        );
+        // Stdlib is left as-is.
+        assert_eq!(display_import("go", "fmt", &fp), "fmt");
+        assert_eq!(display_import("go", "path/filepath", &fp), "path/filepath");
+        // A third-party repo -> repo:subpath (host + owner stripped).
+        assert_eq!(
+            display_import("go", "github.com/yahn/unslop/internal/ui", &[]),
+            "unslop:internal/ui"
+        );
+        assert_eq!(display_import("go", "github.com/spf13/cobra", &[]), "cobra");
+        assert_eq!(
+            display_import("go", "golang.org/x/sync/errgroup", &[]),
+            "sync:errgroup"
+        );
+        // Rust: crate-local relative, third-party crate:subpath.
+        let rs = vec!["myapp".to_string()];
+        assert_eq!(display_import("rust", "crate::foo::bar", &rs), "./foo/bar");
+        assert_eq!(display_import("rust", "serde::de::Visitor", &rs), "serde:de/Visitor");
     }
 
     #[test]

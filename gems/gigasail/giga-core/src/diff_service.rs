@@ -172,7 +172,7 @@ fn apply_test_summaries(storage: &Storage, plan: &mut DiffPlan) -> Result<()> {
 /// external packages via the repository's own module roots (read from go.mod /
 /// Cargo.toml at head). Stdlib and first-party (same-repo) imports are dropped.
 fn apply_new_packages(provider: &GitProvider, plan: &mut DiffPlan) -> Result<()> {
-    use crate::new_packages::{first_party_roots, group_third_party};
+    use crate::new_packages::{display_import, first_party_roots, group_third_party};
     let head = &plan.scope.head_oid;
     let go_mod = provider.file_contents_at_commit(head, "go.mod").ok().flatten();
     let cargo = provider.file_contents_at_commit(head, "Cargo.toml").ok().flatten();
@@ -190,6 +190,16 @@ fn apply_new_packages(provider: &GitProvider, plan: &mut DiffPlan) -> Result<()>
         entries.iter().map(|(lang, imports)| (lang.as_str(), *imports)),
         &roots,
     );
+
+    // Rewrite each file's added-import labels to the short, origin-aware display
+    // form used in the New Dependencies list (`./internal/ui`, `repo:subpath`).
+    for file in &mut plan.files {
+        if let Some(language) = crate::diff::language_for_path(&file.path) {
+            for import in &mut file.added_imports {
+                *import = display_import(&language, import, &roots);
+            }
+        }
+    }
     Ok(())
 }
 
