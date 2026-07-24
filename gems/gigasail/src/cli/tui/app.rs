@@ -57,6 +57,8 @@ pub struct App {
     pub expanded_folds: HashSet<usize>,
     /// True while a background `giga sync` is refreshing this diff's evidence.
     pub syncing: bool,
+    /// Vertical scroll offset of the whole-change summary (funnel) pane.
+    pub summary_scroll: u16,
 }
 
 /// A visible row in the folded code pane: a real diff line, or a collapsed run
@@ -262,6 +264,7 @@ impl App {
             detail_open: HashSet::new(),
             expanded_folds: HashSet::new(),
             syncing: false,
+            summary_scroll: 0,
         };
         app.refresh_rows();
         app.select_riskiest_file();
@@ -340,8 +343,27 @@ impl App {
     /// Reset the right pane when the selected function changes.
     fn on_selection_changed(&mut self) {
         self.code_cursor = 0;
+        self.summary_scroll = 0;
         self.detail_open.clear();
         self.expanded_folds.clear();
+    }
+
+    /// Rough upper bound on the funnel's content rows, so summary scrolling can't
+    /// run away past the end. Mirrors the sections render_funnel emits.
+    fn summary_content_len(&self) -> u16 {
+        let s = &self.summary;
+        // funnel header rows + CODE(header+langs) + OTHER(header+rows+deps) + TESTS(header+rows)
+        let rows = 12
+            + s.langs.len()
+            + if s.other.is_empty() && s.deps.is_empty() { 0 } else { 2 + s.other.len() + s.deps.len() }
+            + if s.tests.is_empty() { 0 } else { 2 + s.tests.len() };
+        rows as u16
+    }
+
+    fn scroll_summary(&mut self, delta: i32) {
+        let max = self.summary_content_len();
+        let next = self.summary_scroll as i32 + delta;
+        self.summary_scroll = next.clamp(0, max as i32) as u16;
     }
 
     /// The folded, navigable rows of the current code pane (empty for non-code).
@@ -470,6 +492,15 @@ impl App {
                 KeyCode::Char('l') | KeyCode::Enter => self.set_open(true),
                 KeyCode::Char('h') => self.set_open(false),
                 KeyCode::Char(' ') => self.toggle_open(),
+                _ => {}
+            },
+            Focus::Code if self.summary_selected() => match key.code {
+                // The whole-change summary (funnel) is a scrollable panel, not a
+                // line-cursor view.
+                KeyCode::Down | KeyCode::Char('j') => self.scroll_summary(1),
+                KeyCode::Up | KeyCode::Char('k') => self.scroll_summary(-1),
+                KeyCode::PageDown => self.scroll_summary(10),
+                KeyCode::PageUp => self.scroll_summary(-10),
                 _ => {}
             },
             Focus::Code => match key.code {

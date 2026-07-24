@@ -906,8 +906,13 @@ fn render_funnel(
                 quality.push(format!("{} no-distinct", t.kill_no_distinct));
             }
             let timing = match &t.timing {
-                Some(ti) if ti.pending => " time [PENDING]".to_string(),
-                Some(ti) if ti.baseline_n == 0 => format!(" time n={} (building)", ti.samples),
+                Some(ti) if ti.pending => " time [ PENDING ]".to_string(),
+                Some(ti) if ti.processing => " time [ PROCESSING ]".to_string(),
+                Some(ti) if ti.baseline_n == 0 => format!(
+                    " time {} (n={}, building baseline)",
+                    crate::test_timing::fmt_ms(ti.new_ms),
+                    ti.samples
+                ),
                 Some(ti) => format!(
                     " time {}{:.1}% \u{00b1}{:.1}%",
                     if ti.pct >= 0.0 { "+" } else { "" },
@@ -933,6 +938,10 @@ fn render_funnel(
         }
     }
 
+    // Clamp the scroll so the last content line can reach the top but we never
+    // scroll into a fully blank pane.
+    let max_scroll = (body.len() as u16).saturating_sub(area.height.saturating_sub(2));
+    let scroll = app.summary_scroll.min(max_scroll);
     let widget = Paragraph::new(body)
         .block(
             Block::default()
@@ -940,7 +949,8 @@ fn render_funnel(
                 .border_style(border)
                 .title(title.to_string()),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
     frame.render_widget(widget, area);
 }
 

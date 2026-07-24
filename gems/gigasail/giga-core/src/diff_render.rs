@@ -111,9 +111,12 @@ pub fn render_structured_diff_text(plan: &DiffPlan, full: bool) -> String {
         if let Some(timing) = &test.timing {
             if timing.pending {
                 line.push_str("; time [ PENDING ]");
+            } else if timing.processing {
+                line.push_str("; time [ PROCESSING ]");
             } else if timing.baseline_n == 0 {
                 line.push_str(&format!(
-                    "; time measured (n={}, baseline building)",
+                    "; time {} (n={}, baseline building)",
+                    crate::test_timing::fmt_ms(timing.new_ms),
                     timing.samples
                 ));
             } else {
@@ -298,6 +301,7 @@ mod tests {
                 ci_pct: 0.8,
                 samples: 4,
                 baseline_n: 5,
+                ..Default::default()
             }),
             ..Default::default()
         });

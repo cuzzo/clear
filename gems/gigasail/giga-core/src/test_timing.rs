@@ -32,6 +32,15 @@ pub struct TimingDelta {
     pub baseline_n: usize,
 }
 
+/// Human time: `7.3s` for a second or more, else `123ms`.
+pub fn fmt_ms(ms: f64) -> String {
+    if ms >= 1000.0 {
+        format!("{:.1}s", ms / 1000.0)
+    } else {
+        format!("{ms:.0}ms")
+    }
+}
+
 /// Median of a sample. `None` for an empty input.
 pub fn median(mut xs: Vec<f64>) -> Option<f64> {
     if xs.is_empty() {

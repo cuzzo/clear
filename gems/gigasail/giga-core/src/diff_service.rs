@@ -120,6 +120,11 @@ fn apply_test_summaries(storage: &Storage, plan: &mut DiffPlan) -> Result<()> {
             stage,
             &summary.test_set,
         )? {
+            // A processing sentinel (0 samples): the background runner is timing.
+            Some((_, _, 0)) => Some(crate::test_summary::TestTiming {
+                processing: true,
+                ..Default::default()
+            }),
             Some((mean, stddev, n)) => {
                 let baseline =
                     storage.stage_timing_history(stage, &summary.test_set, 10, &plan.scope.head_oid)?;
@@ -134,12 +139,16 @@ fn apply_test_summaries(storage: &Storage, plan: &mut DiffPlan) -> Result<()> {
                             pending: false,
                             pct: d.pct,
                             ci_pct: d.ci_pct,
+                            new_ms: mean,
                             samples: d.samples,
                             baseline_n: d.baseline_n,
+                            ..Default::default()
                         },
-                        // Measured, but no baseline to compare against yet.
+                        // Measured, but no baseline to compare against yet -
+                        // surface the absolute time rather than nothing.
                         None => crate::test_summary::TestTiming {
                             pending: false,
+                            new_ms: mean,
                             samples: n as usize,
                             baseline_n: 0,
                             ..Default::default()

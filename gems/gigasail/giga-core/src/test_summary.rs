@@ -117,10 +117,15 @@ pub struct TestInventoryRow {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
 pub struct TestTiming {
     pub pending: bool,
+    /// A measurement is in flight (the background runner is timing the new tests).
+    pub processing: bool,
     /// Percent change vs the baseline (+ is slower).
     pub pct: f64,
     /// Confidence half-width in percentage points (the `±`).
     pub ci_pct: f64,
+    /// The measured new-test time in milliseconds (shown when there is no
+    /// baseline to compute a delta against yet).
+    pub new_ms: f64,
     /// Repeat measurements behind the estimate.
     pub samples: usize,
     /// Historical commits behind the baseline; 0 means measured-but-no-baseline

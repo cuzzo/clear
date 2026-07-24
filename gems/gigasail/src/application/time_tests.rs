@@ -32,6 +32,15 @@ pub fn execute(
 ) -> Result<TimeTestsResult> {
     let git = GitProvider::open(repo)?;
     let revision = git.resolve_commit("HEAD")?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    // Mark "processing" (0 samples) so a concurrent `giga diff` shows
+    // [ PROCESSING ] while the measurement runs. Replaced by the result below.
+    let storage = Storage::open(db)?;
+    storage.record_stage_timing(&revision, TIMING_STAGE, test_set, 0.0, 0.0, 0, timestamp)?;
 
     let mut samples = vec![run_and_time(repo, run_command)?];
     // Fast suite: the single measurement is dominated by process launch and
@@ -43,12 +52,7 @@ pub fn execute(
         }
     }
     let (mean_ms, stddev_ms) = mean_stddev(&samples);
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-
-    let storage = Storage::open(db)?;
+    // Replace the processing sentinel with the real measurement.
     storage.record_stage_timing(
         &revision,
         TIMING_STAGE,
