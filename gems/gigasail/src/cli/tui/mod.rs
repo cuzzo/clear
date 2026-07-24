@@ -27,17 +27,38 @@ pub fn detect_ascii() -> bool {
     !utf8
 }
 
-/// Whether the terminal advertises 24-bit color. Without it, crossterm's RGB
-/// escapes are downsampled by the terminal to the nearest ANSI-16 color, which
-/// turns the subtle diff background tints into a loud bright green/red. When
-/// false the TUI drops the row tints and relies on the `+`/`-` gutter instead.
+/// Whether to emit the subtle RGB diff row tints. Genuinely limited terminals
+/// (16-color, `linux` console, `dumb`) downsample RGB to a loud bright green, so
+/// the tint is dropped there in favor of the `+`/`-` gutter. Everything else —
+/// including 256-color terminals and tmux/screen, which clear `COLORTERM` even
+/// when truecolor passes through — keeps the tint, since that is how it has
+/// always rendered.
 pub fn detect_truecolor() -> bool {
-    std::env::var("COLORTERM")
-        .map(|v| {
-            let v = v.to_ascii_lowercase();
-            v.contains("truecolor") || v.contains("24bit")
-        })
-        .unwrap_or(false)
+    truecolor_from_env(
+        std::env::var("COLORTERM").ok().as_deref(),
+        std::env::var("TERM").ok().as_deref(),
+    )
+}
+
+fn truecolor_from_env(colorterm: Option<&str>, term: Option<&str>) -> bool {
+    if let Some(ct) = colorterm {
+        let ct = ct.to_ascii_lowercase();
+        if ct.contains("truecolor") || ct.contains("24bit") {
+            return true;
+        }
+    }
+    match term {
+        // No TERM at all: assume a capable modern terminal.
+        None => true,
+        Some(term) => {
+            let term = term.to_ascii_lowercase();
+            !(term.is_empty()
+                || term == "dumb"
+                || term == "linux"
+                || term.contains("16color")
+                || term.contains("mono"))
+        }
+    }
 }
 
 /// Run the interactive review UI until the user quits, returning the final app
@@ -88,5 +109,22 @@ mod tests {
     fn detect_ascii_returns_a_bool_without_panic() {
         // Reads the ambient locale; just assert it evaluates cleanly.
         let _ = detect_ascii();
+    }
+
+    #[test]
+    fn truecolor_keeps_the_tint_for_capable_terminals() {
+        // Explicit truecolor.
+        assert!(truecolor_from_env(Some("truecolor"), Some("xterm-256color")));
+        assert!(truecolor_from_env(Some("24bit"), None));
+        // tmux/screen clear COLORTERM but still render the tint.
+        assert!(truecolor_from_env(None, Some("tmux-256color")));
+        assert!(truecolor_from_env(None, Some("screen-256color")));
+        assert!(truecolor_from_env(None, Some("xterm-256color")));
+        assert!(truecolor_from_env(None, None));
+        // Genuinely limited terminals drop the RGB tint.
+        assert!(!truecolor_from_env(None, Some("dumb")));
+        assert!(!truecolor_from_env(None, Some("linux")));
+        assert!(!truecolor_from_env(None, Some("xterm-16color")));
+        assert!(!truecolor_from_env(None, Some("")));
     }
 }
