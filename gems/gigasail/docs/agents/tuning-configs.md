@@ -1,14 +1,63 @@
 # Tuning configs: review gates, metric weighting, and the review MCP surface
 
-Status: **design / not yet built.** This specs a `review:` section for `giga.yml`,
-two new review-oriented MCP tools, the report format they return to an LLM, and
-how the same config later retunes the `giga diff` UI. It also ties into the
-artifact-pruning TODO so pruning never deletes evidence a review still needs.
+Status: **design / not yet built.** This specs: the crate placement of the
+review surfaces (§0 — MCP/LSP move to the CLI); a `review:` section for
+`giga.yml` (metric weighting, gates, purity, test depth, tags, perf, retention);
+two review-oriented MCP tools (`giga_review`, `giga_premerge`) and the LLM report
+they return; and how the same config later retunes the `giga diff` UI. It is
+deliberately **forward-compatible**: several fields (perf, tags, test depth,
+class purity, per-span branch coverage) are reserved and specced now so they can
+light up later without a schema break, even though only the core review path is
+built first. It also ties into the artifact-pruning TODO so pruning never
+deletes evidence a review still needs.
 
 The goal: let a project declare **which findings matter, how much, and when a
 change must be blocked for human/LLM review** — once, in `giga.yml` — and have
 that single declaration drive (a) the MCP review report an agent reads, (b) the
 diff-UI ranking and line visibility, and (c) the CI gate.
+
+---
+
+## 0. Architecture: where the review surfaces live
+
+**Decision: MCP and LSP are protocol adapters, not UI. They move to the `giga`
+CLI crate; `giga-ui` becomes web-only.** Today `giga-ui` bundles three surfaces
+— the axum web UI, the LSP (`tower-lsp`), and the MCP server (`rmcp`) — so
+running the stdio MCP server links the entire web stack it never uses, and the
+crate name mislabels LSP/MCP as "UI".
+
+- **`giga-core` stays a dependency-light library** (rusqlite, tree-sitter,
+  git2 — *zero* server deps today). It must never gain `rmcp`/`tower-lsp`/
+  `axum`/`tokio`, or every embedder inherits them. The shared query layer
+  (`Storage`) already lives here; that is the right amount.
+- **Target:**
+  ```
+  giga-core  (engine + Storage + per-line annotation layer — no server deps)
+  giga-ui    (axum web UI only)
+  gigasail/giga (CLI)
+    ├─ giga mcp   (rmcp)
+    ├─ giga lsp   (tower-lsp)
+    └─ giga diff/build/sync/review/...
+  ```
+
+### Sequencing (a real finding, not a formality)
+- **MCP is self-contained** over `giga-core` (`mcp.rs` imports only
+  `crate::{storage,hazard,extract,model}`, all re-exported from `giga-core`).
+  The root crate already does `pub use giga_core::*`, so **MCP folds into the
+  CLI with no logic changes** — add `rmcp`+`tokio`, move the file, add a `giga
+  mcp` subcommand. Do this first.
+- **LSP is entangled with the web UI.** `lsp.rs` depends on
+  `line_annotations()` and the `UiOverlays`/`UiLineAnnotation`/`UiHazard` types,
+  which are buried in the 11,986-line, axum-coupled `giga-ui/src/ui/ui.rs`.
+  That per-line annotation computation is **pure query logic, not rendering** —
+  the web UI, the LSP, and (partly) the MCP `giga_unit_context` tool all need
+  it. **Prerequisite for the LSP move: lift the annotation layer
+  (`line_annotations` + the `Ui*` annotation structs) out of `ui.rs` into
+  `giga-core`.** Then the web UI, LSP, and MCP all consume one giga-core
+  annotation API, and LSP folds into the CLI as cleanly as MCP.
+
+This ordering (MCP now → extract annotation layer → LSP) keeps each step
+build-green and independently committable.
 
 ---
 
@@ -88,7 +137,19 @@ findings + active hazards + per-unit coverage/mutation posture, apply the
 `review:` config (visibility/weight/gates), and emit the report (§5).
 
 `review` shows the delta of *one step*; `pre-merge` shows the delta of the
-*whole branch*. Nothing else differs — same report, same gates.
+*whole branch*. Nothing else differs in the *diff* — but they run **different
+verification depths**:
+
+- **`giga_review` runs the fast set** — the `ci`/unit tests + coverage, quick
+  static analyzers. It is the tight inner-loop check an agent runs after each
+  commit, so it must stay seconds-fast (see `review.tests.fast`, §3g).
+- **`giga_premerge` runs the exhaustive set** — the full suite, mutation, and
+  **benchmarks / performance tests** (`review.tests.exhaustive` +
+  `review.perf`, §3g/§3h). It is the gate before a branch merges, so it can
+  afford minutes. Only pre-merge surfaces **performance regressions**.
+
+The verification depth is config, not code: each tool names a test set that maps
+to giga.yml profiles, so a project decides what "fast" and "exhaustive" mean.
 
 ---
 
@@ -185,7 +246,41 @@ review:
   retain:
     review_window: 20             # keep evidence for the last N commits on a line
     keep_branch_bases: true       # never prune a merge-base a pre-merge would use
-```
+
+  # ── 3g. Test depth per tool ────────────────────────────────────────────────
+  # Named test sets mapped to giga.yml profiles. `giga_review` runs `fast`;
+  # `giga_premerge` runs `exhaustive`. A set names profiles whose producers
+  # already exist (§ pipeline: ci/analyse), so this only *selects* depth.
+  tests:
+    fast: [ci]                    # unit tests + coverage; seconds
+    exhaustive: [ci, mutation, bench]   # full suite + mutation + benchmarks
+
+  # ── 3h. Performance testing & regression (pre-merge only, for now) ─────────
+  # A perf producer emits per-benchmark numbers; the evaluator compares head vs
+  # base and flags regressions beyond tolerance. Not built now — the config and
+  # report field are reserved so it can light up later without a schema break.
+  perf:
+    enabled: false
+    regression_tolerance: 0.05    # >5% slower than base = regression
+    gate: warn                    # warn | critical when a regression is found
+    # producer emits { benchmark, ns_per_op, allocs } per name; base comes from
+    # the merge-base's stored perf artifact.
+
+  # ── 3i. Semantic tags on functions/classes ─────────────────────────────────
+  # Tags let a project mark units that deserve extra scrutiny or that the diff
+  # summary should call out (e.g. revenue paths, security-critical entrypoints).
+  # Sources compose: manual annotations in source, path globs, or a SARIF rule.
+  # Tags feed gates (§3d `when: { tag: critical }`), ranking weight, and the
+  # `giga diff` summary. Reserved now; wired incrementally.
+  tags:
+    critical:
+      match: { paths: ["internal/auth/**", "internal/billing/**"] }
+      weight_bonus: 4.0           # added to a tagged unit's ranking score
+      gate: critical              # any finding on a `critical` unit escalates
+    revenue:
+      match: { annotation: "giga:revenue" }   # e.g. a `// giga:revenue` marker
+      # revenue-generating paths: highlighted in the summary; perf-sensitive
+      summary: true
 
 ### Defaults when `review:` is absent
 - `metrics`: everything `show`.
@@ -211,13 +306,22 @@ Pure function over a `DiffPlan` + the `review:` config → a `ReviewReport`
      deprioritized so it can still note it without treating it as blocking.
    - `threshold` → a finding whose metric value is below the threshold is
      dropped entirely (as if `ignore` for that instance).
-3. **Classify purity** per unit (§3c source):
-   - `effects`: a unit with **no `write:` `added_state`** (from the architecture
+3. **Classify purity** per unit (§3c source), for **functions and classes**:
+   - **Function**, `effects`: **no `write:` state edge** (from the architecture
      graph) **and no side-effecting active hazard** ⇒ `pure`; otherwise
      `stateful`. Unknown when no architecture graph is ingested.
+   - **Class**, `effects`: a class is `pure` iff **none of its methods write
+     state** (no `write:` edge sourced from any member) **and it declares no
+     mutable field** — i.e. the class is derivably immutable/stateless.
+     Otherwise `stateful`. This reuses the same `write:` edges, rolled up over
+     the class's members (the architecture graph already links members to their
+     owner node).
    - `sarif`: presence of an `espalier.function` "impure function" note ⇒
-     `stateful`; "read-only function" ⇒ `pure`.
+     `stateful`; "read-only function" ⇒ `pure` (class-level would need an
+     analogous `espalier.class` note — not emitted today; prefer `effects`).
    - `off`: purity gates are skipped.
+   Purity gates (§3d) apply the class bucket to method-less/aggregate units and
+   the function bucket to individual methods.
 4. **Evaluate gates** (§3d). A `when` selects units/findings; `require` checks
    coverage/branch/mutation thresholds (branch coverage needs §7 item 3). Any
    fired `critical` gate ⇒ `verdict = critical`; only `warn` gates ⇒
@@ -275,9 +379,24 @@ compete for the model's attention.
   ],
   "deprioritized": { "count": 40, "note": "T3 shown with 0 weight per giga.yml review.metrics" },
   "new_dependencies": ["GitAnalyzer#populateFileSizes"],   // from the architecture graph
-  "new_state": ["write:count"]
+  "new_state": ["write:count"],
+
+  // ── reserved / depth-dependent fields (present when the data exists) ──
+  "tests": { "set": "fast", "passed": 128, "failed": 0, "skipped": 3 },
+  "tags": [ { "unit": "internal/billing/Charge", "tag": "revenue" } ],
+  "perf": {                                // giga_premerge only
+    "regressions": [
+      { "benchmark": "ParseLedger", "base_ns": 1200, "head_ns": 1470,
+        "delta": 0.225, "tolerance": 0.05, "gate": "warn" }
+    ]
+  }
 }
 ```
+
+`giga_review` omits `perf` (fast set, no benchmarks) and reports
+`tests.set: "fast"`. `giga_premerge` includes `perf` and `tests.set:
+"exhaustive"`. A field that has no data yet is simply absent — the shape is
+forward-compatible, so tags/perf/tests can light up without a schema break.
 
 - **`verdict` + `gates_triggered`** are the first thing the agent reads: a CI
   gate and an LLM instruction in one. `critical` == block.
@@ -313,6 +432,16 @@ it only changes weights and visibility of what already renders:
 - **Gates** surface as a banner on the `[SUMMARY]` funnel ("CRITICAL: 2 gates —
   uncovered-tier1, stateful-undercovered") and a `units_below_gate` filter in
   the tree, reusing the existing risk-sort machinery.
+- **Tags** (§3i) render on the summary and beside tagged units (`revenue`,
+  `critical`), and their `weight_bonus` re-ranks. When revenue/criticality data
+  exists it belongs on the summary, exactly like the language/coverage funnel.
+- **Performance** (when `review.perf` is on): the summary shows a perf line and
+  flags regressions from the pre-merge run, next to the coverage/hazard lines.
+- **Partially-covered spans** — today the CLI only shows a per-line covered/
+  uncovered gutter; the web UI shows the *exact partially-covered spans*. Once
+  branch coverage is uncollapsed (§7 item 3) the CLI diff can highlight the
+  same partial spans inline (the yellow `-` bar already exists per line; this
+  extends it to the sub-line arm ranges the web UI renders).
 
 Because the MCP report, the CI gate, and the UI all read the *same* evaluator
 (§4), a finding the user chose not to see in the UI is also absent from the
@@ -327,23 +456,42 @@ LLM's feedback and from the merge gate — one config, one behavior everywhere.
    means the struct must exist before any `review:` key is accepted.
 2. **Two MCP tools** (`giga_review`, `giga_premerge`) wrapping the §4 evaluator;
    register in `tool_defs()`/`call_tool` (`mcp.rs`). Reuse `build_structured_diff`.
-3. **Branch coverage as a numeric per-unit axis.** Today branch data only sets
-   `is_partial` + `coverage_percent` (`db/quality.rs`); the `branch_coverage`
-   gates need a real `covered_branches/total_branches` rollup per unit. This is
-   the one genuinely new metric plumbing.
-4. **Derived purity signal.** No typed field exists. Cheapest: compute
-   `pure = (no write: added_state) && (no side-effecting active hazard)` in the
-   evaluator from data already in the plan; optionally consume the
-   `espalier.function` SARIF note. Consider persisting it on `logical_units`
-   later so the LSP/UI can show it too.
+3. **Uncollapse branch coverage into a per-unit AND per-span axis.** Today
+   branch data only sets `is_partial` + a per-line `coverage_percent`
+   (`db/quality.rs`) — the arm detail is thrown away. Persist
+   `covered_branches/total_branches` per unit (for the gates) **and the
+   partially-covered sub-line spans** (for display). The web UI already renders
+   exact partial spans; storing them lets the CLI diff do the same (§6) instead
+   of a whole-line yellow bar. This is the one genuinely new *metric* plumbing.
+4. **Derived purity signal for functions and classes.** No typed field exists.
+   Compute `pure` in the evaluator from data already in the plan: a function is
+   pure with no `write:` state edge + no side-effecting hazard; a class is pure
+   when no member writes state and it declares no mutable field (§4). Consider
+   persisting purity on `logical_units` later so the LSP/UI/summary can show it
+   without recomputation.
 5. **Config-driven risk weights.** Replace the constants in
    `apply_tier_one_hazards` with `review.weights` (fall back to today's values).
-6. **Branch-aware retention** (the `TODO.md` item). Reviews read evidence for
-   *both* endpoints of a range; `review.retain` (§3f) must be honored by the
-   pruner so a `pre-merge` never loses its merge-base's evidence. Pruning
-   remains safe only when an artifact is (a) sequential/superseded on the same
-   line, (b) not in the `review_window`, and (c) not an incremental-processing
-   input — exactly the TODO's three conditions.
+6. **Semantic tags** (§3i): a `unit_tags` store keyed by logical-unit id
+   (rename-stable), populated from annotations / path globs / SARIF rules;
+   consumed by gates, ranking `weight_bonus`, and the summary. This is where
+   "which functions are critical / revenue-generating" lives, and it must ride
+   the same rename-stable identity as hazards so a tag follows a moved function.
+7. **Test-depth selection** (§3g): `giga_review` → `fast`, `giga_premerge` →
+   `exhaustive`; wire the tool to run the named profiles and fold pass/fail into
+   the report. The profiles already exist; this only selects and reports them.
+8. **Performance harness** (§3h): a perf producer (`kind: perf`?) emitting
+   per-benchmark numbers, a base-vs-head comparator, and the `perf` report
+   block + summary line. Pre-merge only. Reserved in config now so it slots in
+   without a schema break.
+9. **Crate move** (§0): fold MCP into the `giga` CLI now (clean); lift the
+   `line_annotations`/`Ui*` annotation layer from the axum-coupled `ui.rs` into
+   `giga-core`; then fold LSP into the CLI. `giga-ui` ends web-only.
+10. **Branch-aware retention** (the `TODO.md` item). Reviews read evidence for
+    *both* endpoints of a range; `review.retain` (§3f) must be honored by the
+    pruner so a `pre-merge` never loses its merge-base's evidence. Pruning
+    remains safe only when an artifact is (a) sequential/superseded on the same
+    line, (b) not in the `review_window`, and (c) not an incremental-processing
+    input — exactly the TODO's three conditions.
 
 ---
 
