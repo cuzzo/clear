@@ -44,8 +44,48 @@ pub fn build_structured_diff(
         apply_known_mutation_kills(storage, &mut plan)?;
         apply_known_sarif(storage, &mut plan, request.sarif_source.as_deref())?;
         apply_known_architecture(storage, &mut plan)?;
+        apply_test_summaries(storage, &mut plan)?;
     }
     Ok(plan)
+}
+
+/// Compute the "Tests" section: for each changed test file, aggregate the base-
+/// and head-commit test inventories (from `test_exposure_events`) and diff them
+/// per `language:test_set`. Scoped to tests whose own file changed in this diff -
+/// tests without a known definition file are excluded (can't attribute them).
+fn apply_test_summaries(storage: &Storage, plan: &mut DiffPlan) -> Result<()> {
+    use crate::diff::SourceRole;
+    use std::collections::{BTreeMap, BTreeSet};
+    let changed_test_files: BTreeSet<String> = plan
+        .files
+        .iter()
+        .filter(|f| f.role == SourceRole::Test)
+        .map(|f| f.path.clone())
+        .collect();
+    if changed_test_files.is_empty() {
+        return Ok(());
+    }
+    let base_full = storage.test_inventory_for_commit(&plan.scope.base_oid)?;
+    let head_full = storage.test_inventory_for_commit(&plan.scope.head_oid)?;
+    let base_present = !base_full.is_empty();
+    let scope = |rows: Vec<crate::test_summary::TestInventoryRow>| {
+        rows.into_iter()
+            .filter(|r| changed_test_files.contains(&r.test_path))
+            .collect::<Vec<_>>()
+    };
+    let base = scope(base_full);
+    let head = scope(head_full);
+    // Lines the diff added inside each changed test file — a test whose span
+    // contains one of these is "changed".
+    let mut changed_lines: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    for file in &plan.files {
+        if file.role == SourceRole::Test {
+            changed_lines.insert(file.path.clone(), file.added_line_numbers());
+        }
+    }
+    plan.test_summaries =
+        crate::test_summary::test_summaries(&base, &head, &changed_lines, base_present);
+    Ok(())
 }
 
 /// Attach newly-added collaboration targets and state accesses to each changed

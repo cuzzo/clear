@@ -49,6 +49,11 @@ pub struct DiffPlan {
     pub inventory: ChangeInventory,
     pub dependency_changes: Vec<DependencyChange>,
     pub language_summaries: Vec<LanguageSummary>,
+    /// Per `language:test_set` test-suite churn + quality, for the "Tests"
+    /// section. Only groups the change touched appear. Empty when no test files
+    /// changed or no test evidence is ingested.
+    #[serde(default)]
+    pub test_summaries: Vec<crate::test_summary::TestSummary>,
     pub evidence: EvidenceAvailability,
     pub resolved_sarif_findings: Vec<ResolvedSarifFinding>,
     pub files: Vec<DiffFile>,
@@ -421,6 +426,7 @@ pub fn build_diff_plan_with_renames_and_overrides(
         inventory,
         dependency_changes,
         language_summaries,
+        test_summaries: Vec::new(),
         evidence: unavailable_evidence(),
         resolved_sarif_findings: Vec::new(),
         files,

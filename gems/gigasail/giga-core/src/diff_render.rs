@@ -84,6 +84,32 @@ pub fn render_structured_diff_text(plan: &DiffPlan, full: bool) -> String {
                 .map_or_else(|| "unavailable".to_string(), |count| count.to_string()),
         );
     }
+    for test in &plan.test_summaries {
+        let mut churn: Vec<String> = Vec::new();
+        if test.inventory_available {
+            churn.push(format!("+{} added", test.added));
+            churn.push(format!("-{} deleted", test.deleted));
+            churn.push(format!("{} changed", test.changed));
+        }
+        churn.push(format!("{} pending", test.pending));
+        let mut quality: Vec<String> = Vec::new();
+        if test.mutation_available {
+            quality.push(format!("{} kill no mutants", test.kill_no_mutants));
+            quality.push(format!("{} kill no distinct mutants", test.kill_no_distinct));
+        }
+        quality.push(format!("{} add no coverage", test.no_coverage));
+        let mut line = format!(
+            "Tests {}:{}: {}",
+            test.language,
+            test.test_set,
+            churn.join(", ")
+        );
+        line.push_str(&format!("; {}", quality.join(", ")));
+        if !test.inventory_available {
+            line.push_str(" (churn n/a: no base test evidence)");
+        }
+        let _ = writeln!(output, "{line}");
+    }
     for dependency in &plan.dependency_changes {
         let detail = if dependency.status == crate::diff::DependencyStatus::Exact {
             format!("{} declared changes", dependency.entries.len())
@@ -215,6 +241,44 @@ mod tests {
         assert_eq!(json["format_version"], STRUCTURED_DIFF_FORMAT_VERSION);
         assert_eq!(json["plan"]["scope"]["base_oid"], "base");
         assert_eq!(json["plan"]["files"][0]["path"], "lib/app.rb");
+    }
+
+    #[test]
+    fn renders_the_tests_section_per_language_and_tag() {
+        let mut plan = sample_plan();
+        plan.test_summaries.push(crate::test_summary::TestSummary {
+            language: "ruby".into(),
+            test_set: "unit".into(),
+            added: 3,
+            deleted: 1,
+            changed: 2,
+            pending: 1,
+            kill_no_mutants: 2,
+            no_coverage: 1,
+            kill_no_distinct: 4,
+            inventory_available: true,
+            mutation_available: true,
+        });
+        // A group with no base evidence: churn is suppressed, not fabricated.
+        plan.test_summaries.push(crate::test_summary::TestSummary {
+            language: "go".into(),
+            test_set: "integration".into(),
+            pending: 1,
+            no_coverage: 2,
+            inventory_available: false,
+            mutation_available: false,
+            ..Default::default()
+        });
+
+        let text = render_structured_diff_text(&plan, false);
+        assert!(text.contains(
+            "Tests ruby:unit: +3 added, -1 deleted, 2 changed, 1 pending; \
+             2 kill no mutants, 4 kill no distinct mutants, 1 add no coverage"
+        ));
+        // No base evidence -> only head-derived counts, with the caveat note.
+        assert!(text.contains(
+            "Tests go:integration: 1 pending; 2 add no coverage (churn n/a: no base test evidence)"
+        ));
     }
 
     #[test]

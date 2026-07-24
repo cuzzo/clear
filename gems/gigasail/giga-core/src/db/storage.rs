@@ -1823,6 +1823,104 @@ impl Storage {
         Ok(changed > 0)
     }
 
+    /// Aggregate `test_exposure_events` for one commit into a per-test inventory
+    /// for the diff "Tests" section. Test-level attributes (the test's own file
+    /// and definition span, pending status, and the set of mutants it killed)
+    /// ride in `payload_json` — runners that don't emit them degrade gracefully
+    /// (no def-span → never "changed"; no killed ids → falls back to the killed
+    /// coverage lines as a coarse mutant identity for redundancy).
+    pub fn test_inventory_for_commit(
+        &self,
+        commit_hash: &str,
+    ) -> Result<Vec<crate::test_summary::TestInventoryRow>> {
+        use std::collections::{BTreeMap, BTreeSet};
+        let mut stmt = self.conn.prepare(
+            "SELECT test_id, test_type, path, line, is_mutation_verified, \
+                    mutation_status, is_mutation_killed, payload_json \
+             FROM test_exposure_events WHERE commit_hash = ?1",
+        )?;
+        struct Agg {
+            test_type: String,
+            lines: BTreeSet<(String, i64)>,
+            had_mutation: bool,
+            killed: BTreeSet<String>,
+            payload: String,
+        }
+        let mut map: BTreeMap<String, Agg> = BTreeMap::new();
+        let rows = stmt.query_map([commit_hash], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, i64>(6)?,
+                r.get::<_, String>(7)?,
+            ))
+        })?;
+        for row in rows {
+            let (test_id, test_type, path, line, verified, status, killed, payload) = row?;
+            let agg = map.entry(test_id).or_insert_with(|| Agg {
+                test_type,
+                lines: BTreeSet::new(),
+                had_mutation: false,
+                killed: BTreeSet::new(),
+                payload: "{}".to_string(),
+            });
+            if let Some(l) = line {
+                agg.lines.insert((path.clone(), l));
+            }
+            if verified == 1 || status.is_some() {
+                agg.had_mutation = true;
+            }
+            // Coarse fallback mutant identity when the runner gives no id: the
+            // killed line. Overwritten below if payload carries explicit ids.
+            if killed == 1 {
+                if let Some(l) = line {
+                    agg.killed.insert(format!("{path}:{l}"));
+                }
+            }
+            if payload.len() > agg.payload.len() {
+                agg.payload = payload;
+            }
+        }
+        Ok(map
+            .into_iter()
+            .map(|(test_id, agg)| {
+                let meta = crate::test_summary::TestPayloadMeta::parse(&agg.payload);
+                let killed = if meta.killed_mutants.is_empty() {
+                    agg.killed
+                } else {
+                    meta.killed_mutants
+                };
+                // Fall back to a covered file's language when the runner did not
+                // emit the test's own path.
+                let language = if meta.language == "unknown" {
+                    agg.lines
+                        .iter()
+                        .next()
+                        .map(|(p, _)| crate::test_summary::language_from_path(p))
+                        .unwrap_or_else(|| "unknown".to_string())
+                } else {
+                    meta.language
+                };
+                crate::test_summary::TestInventoryRow {
+                    test_id,
+                    test_set: agg.test_type,
+                    language,
+                    test_path: meta.test_path,
+                    start_line: meta.start_line,
+                    end_line: meta.end_line,
+                    pending: meta.pending,
+                    covered_lines: agg.lines.len(),
+                    had_mutation: agg.had_mutation,
+                    killed_mutants: killed,
+                }
+            })
+            .collect())
+    }
+
     /// unit_hotness postdates many deployed databases and Storage::open only
     /// initializes brand-new files, so every hotness path self-heals the
     /// table (idempotent, matching the ensure_column migration style).
@@ -2795,6 +2893,68 @@ mod tests {
 
         assert_eq!(storage.count_rows("test_exposure_events").unwrap(), 3);
         assert_eq!(summary, (2, "integration,unit".into(), 1, 1, 10));
+    }
+
+    #[test]
+    fn test_inventory_aggregates_payload_and_kills_per_test() {
+        let storage = Storage::open_memory().unwrap();
+        let unit = LogicalUnit::new(
+            "run",
+            UnitKind::Function,
+            "src/a.rb",
+            1,
+            1,
+            3,
+            "def run",
+            "def run\n1\nend",
+        );
+        storage.upsert_logical_unit(&unit, 10).unwrap();
+        let event = |test_id: &str, line: u32, killed: bool, payload: &str| TestExposureEvent {
+            unit_id: unit.id.clone(),
+            commit_hash: "abc".into(),
+            timestamp: 10,
+            path: "src/a.rb".into(),
+            function: Some("run".into()),
+            line: Some(line),
+            branch_id: Some(format!("{test_id}:{line}")),
+            test_id: test_id.into(),
+            test_type: "unit".into(),
+            mutation_status: Some(if killed { "killed" } else { "alive" }.into()),
+            mutation_kind: Some("stochastic".into()),
+            mutation_corpus: String::new(),
+            is_mutation_verified: true,
+            is_mutation_killed: killed,
+            is_verified: true,
+            payload_json: payload.into(),
+        };
+        // One test covering two lines, with explicit payload metadata + kills.
+        let meta = r#"{"test_path":"spec/a_spec.rb","test_start_line":4,"test_end_line":9,"pending":false,"killed_mutant_ids":["m1","m2"]}"#;
+        storage.insert_test_exposure_event(&event("spec/a_spec.rb:killer", 2, true, meta)).unwrap();
+        storage.insert_test_exposure_event(&event("spec/a_spec.rb:killer", 3, true, meta)).unwrap();
+        // A pending test with no coverage lines and no payload kill ids.
+        let pmeta = r#"{"test_path":"spec/a_spec.rb","test_start_line":11,"test_end_line":13,"pending":true}"#;
+        let mut pending = event("spec/a_spec.rb:pending", 2, false, pmeta);
+        pending.line = None; // no covered line
+        storage.insert_test_exposure_event(&pending).unwrap();
+
+        let mut inv = storage.test_inventory_for_commit("abc").unwrap();
+        inv.sort_by(|a, b| a.test_id.cmp(&b.test_id));
+        assert_eq!(inv.len(), 2);
+        let killer = &inv[0];
+        assert_eq!(killer.test_id, "spec/a_spec.rb:killer");
+        assert_eq!(killer.language, "ruby");
+        assert_eq!(killer.test_path, "spec/a_spec.rb");
+        assert_eq!((killer.start_line, killer.end_line), (4, 9));
+        assert_eq!(killer.covered_lines, 2, "two distinct covered lines");
+        assert!(killer.had_mutation);
+        assert_eq!(
+            killer.killed_mutants,
+            ["m1".to_string(), "m2".to_string()].into_iter().collect()
+        );
+        let pending = &inv[1];
+        assert!(pending.pending);
+        assert_eq!(pending.covered_lines, 0);
+        assert!(pending.killed_mutants.is_empty());
     }
 
     #[test]
