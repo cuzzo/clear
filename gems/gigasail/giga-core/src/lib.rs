@@ -35,6 +35,7 @@ pub mod stack_trace;
 #[path = "db/storage.rs"]
 pub mod storage;
 pub mod test_summary;
+pub mod test_timing;
 #[path = "db/test_exposure.rs"]
 pub mod test_exposure;
 #[path = "db/vcs.rs"]
