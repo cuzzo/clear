@@ -722,23 +722,47 @@ fn render_funnel(
             ]));
         }
         if !summary.deps.is_empty() {
-            let mut parts = Vec::new();
-            if summary.deps.added > 0 {
-                parts.push(format!("+{} added", summary.deps.added));
+            use crate::cli::diff::summary::DepKind;
+            body.push(Line::from(Span::styled(
+                format!(" dependencies ({})", summary.deps.len()),
+                Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD),
+            )));
+            for dep in &summary.deps {
+                let (sign, color, detail) = match dep.kind {
+                    DepKind::Added => (
+                        "+",
+                        Color::Green,
+                        dep.after.clone().unwrap_or_default(),
+                    ),
+                    DepKind::Removed => (
+                        "-",
+                        Color::Red,
+                        dep.before.clone().unwrap_or_default(),
+                    ),
+                    DepKind::Changed => (
+                        "~",
+                        Color::Yellow,
+                        format!(
+                            "{} \u{2192} {}",
+                            dep.before.clone().unwrap_or_default(),
+                            dep.after.clone().unwrap_or_default()
+                        ),
+                    ),
+                };
+                let scope = if dep.scope.is_empty() || dep.scope == "runtime" {
+                    String::new()
+                } else {
+                    format!(" ({})", dep.scope)
+                };
+                body.push(Line::from(vec![
+                    Span::styled(
+                        format!("   {sign} {:<24} ", truncate(&dep.name, 24)),
+                        Style::default().fg(color),
+                    ),
+                    Span::styled(detail, Style::default().fg(Color::DarkGray)),
+                    Span::styled(scope, Style::default().fg(Color::DarkGray)),
+                ]));
             }
-            if summary.deps.removed > 0 {
-                parts.push(format!("-{} removed", summary.deps.removed));
-            }
-            if summary.deps.changed > 0 {
-                parts.push(format!("~{} changed", summary.deps.changed));
-            }
-            body.push(Line::from(vec![
-                Span::styled(
-                    " dependencies  ".to_string(),
-                    Style::default().fg(Color::Gray),
-                ),
-                Span::styled(parts.join(", "), Style::default().fg(Color::White)),
-            ]));
         }
     }
 
@@ -1229,11 +1253,22 @@ mod tests {
                 added: 1000,
                 removed: 0,
             }],
-            deps: crate::cli::diff::summary::DepSummary {
-                added: 3,
-                removed: 1,
-                changed: 2,
-            },
+            deps: vec![
+                crate::cli::diff::summary::DepChange {
+                    name: "tokio".into(),
+                    scope: "runtime".into(),
+                    kind: crate::cli::diff::summary::DepKind::Added,
+                    before: None,
+                    after: Some("1.35".into()),
+                },
+                crate::cli::diff::summary::DepChange {
+                    name: "anyhow".into(),
+                    scope: "runtime".into(),
+                    kind: crate::cli::diff::summary::DepKind::Changed,
+                    before: Some("1.0".into()),
+                    after: Some("1.1".into()),
+                },
+            ],
         };
         app.refresh_rows();
         app.selected = 0; // the [SUMMARY] row

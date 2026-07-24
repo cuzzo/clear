@@ -85,18 +85,22 @@ pub struct OtherRow {
     pub removed: u32,
 }
 
-/// Added / removed / version-changed dependency counts across all manifests.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DepSummary {
-    pub added: u32,
-    pub removed: u32,
-    pub changed: u32,
+/// How a dependency changed between the two revisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DepKind {
+    Added,
+    Removed,
+    Changed,
 }
 
-impl DepSummary {
-    pub fn is_empty(&self) -> bool {
-        self.added + self.removed + self.changed == 0
-    }
+/// One dependency that changed between the two revisions, with its versions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DepChange {
+    pub name: String,
+    pub scope: String,
+    pub kind: DepKind,
+    pub before: Option<String>,
+    pub after: Option<String>,
 }
 
 /// A display type for a non-code file, from its name/extension. giga-core owns
@@ -160,8 +164,8 @@ pub struct DiffSummary {
     pub langs: Vec<LangRow>,
     /// Non-code file types (Markdown, YAML, Dockerfile, ...), by line delta.
     pub other: Vec<OtherRow>,
-    /// Added/removed/changed dependencies across all manifests.
-    pub deps: DepSummary,
+    /// Dependencies changed between the two revisions, across all manifests.
+    pub deps: Vec<DepChange>,
 }
 
 /// Build the funnel from the plan (line splits, coverage, visibility) and the
@@ -254,17 +258,36 @@ pub fn build_summary(plan: &DiffPlan, changes: &[FileChange]) -> DiffSummary {
         .other
         .sort_by(|a, b| (b.added + b.removed).cmp(&(a.added + a.removed)));
 
-    // Dependency changes across all manifests, from the plan.
+    // Dependency changes across all manifests, from the plan: the actual
+    // dependencies added/removed/version-changed between the two revisions.
     for change in &plan.dependency_changes {
         for entry in &change.entries {
-            match (entry.before.is_some(), entry.after.is_some()) {
-                (false, true) => summary.deps.added += 1,
-                (true, false) => summary.deps.removed += 1,
-                (true, true) if entry.before != entry.after => summary.deps.changed += 1,
-                _ => {}
-            }
+            let kind = match (entry.before.is_some(), entry.after.is_some()) {
+                (false, true) => DepKind::Added,
+                (true, false) => DepKind::Removed,
+                (true, true) if entry.before != entry.after => DepKind::Changed,
+                _ => continue,
+            };
+            summary.deps.push(DepChange {
+                name: entry.name.clone(),
+                scope: entry.scope.clone(),
+                kind,
+                before: entry.before.clone(),
+                after: entry.after.clone(),
+            });
         }
     }
+    // Added first, then removed, then changed; alphabetical within each.
+    summary.deps.sort_by(|a, b| {
+        let order = |k: DepKind| match k {
+            DepKind::Added => 0,
+            DepKind::Removed => 1,
+            DepKind::Changed => 2,
+        };
+        order(a.kind)
+            .cmp(&order(b.kind))
+            .then_with(|| a.name.cmp(&b.name))
+    });
 
     // Riskiest / largest languages first.
     summary
