@@ -38,6 +38,8 @@ pub struct App {
     pub searching: bool,
     pub should_quit: bool,
     pub ascii: bool,
+    /// Whether the terminal supports 24-bit color (gates the diff row tints).
+    pub truecolor: bool,
     pub target_label: String,
     /// Files with a diff, in display order (for header counts).
     pub file_count: usize,
@@ -175,6 +177,7 @@ impl App {
             searching: false,
             should_quit: false,
             ascii: false,
+            truecolor: true,
             target_label,
             focus: Focus::Tree,
             code_cursor: 0,

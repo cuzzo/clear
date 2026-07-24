@@ -284,8 +284,14 @@ fn gutter_str(line: &PaneLine, ascii: bool) -> String {
     s
 }
 
-/// GitHub-style subtle row tint for added/removed lines.
-fn origin_bg(origin: LineOrigin) -> Option<Color> {
+/// GitHub-style subtle row tint for added/removed lines. Only on truecolor
+/// terminals: without 24-bit color the terminal downsamples these to a loud
+/// bright green/red, so we drop the tint and let the `+`/`-` gutter carry the
+/// diff instead.
+fn origin_bg(origin: LineOrigin, truecolor: bool) -> Option<Color> {
+    if !truecolor {
+        return None;
+    }
     match origin {
         LineOrigin::Add => Some(Color::Rgb(22, 48, 28)),
         LineOrigin::Del => Some(Color::Rgb(58, 26, 26)),
@@ -296,15 +302,17 @@ fn origin_bg(origin: LineOrigin) -> Option<Color> {
 fn pane_line_spans(
     line: &PaneLine,
     ascii: bool,
+    truecolor: bool,
     lang: &Lang,
     width: usize,
     cursor: bool,
 ) -> Line<'static> {
     // Cursor tint overrides the diff tint; otherwise diff add/remove tint.
-    let bg = if cursor {
+    // On non-truecolor terminals a reversed-video cursor replaces the RGB tint.
+    let bg = if cursor && truecolor {
         Some(Color::Rgb(48, 48, 84))
     } else {
-        origin_bg(line.origin)
+        origin_bg(line.origin, truecolor)
     };
     let paint = move |style: Style| {
         let style = match bg {
@@ -312,7 +320,12 @@ fn pane_line_spans(
             None => style,
         };
         if cursor {
-            style.add_modifier(Modifier::BOLD)
+            let style = style.add_modifier(Modifier::BOLD);
+            if truecolor {
+                style
+            } else {
+                style.add_modifier(Modifier::REVERSED)
+            }
         } else {
             style
         }
@@ -461,6 +474,7 @@ fn render_code(
             out.push(pane_line_spans(
                 line,
                 app.ascii,
+                app.truecolor,
                 &lang,
                 width,
                 i == app.code_cursor,
@@ -478,7 +492,9 @@ fn render_code(
         let out = fold_lines(lines, max_rows)
             .iter()
             .map(|row| match row {
-                DisplayRow::Code(l) => pane_line_spans(l, app.ascii, &lang, width, false),
+                DisplayRow::Code(l) => {
+                    pane_line_spans(l, app.ascii, app.truecolor, &lang, width, false)
+                }
                 DisplayRow::Elision => elision_line(),
             })
             .collect();
@@ -753,6 +769,42 @@ mod tests {
         let root = build_tree(std::slice::from_ref(&change), project_root_of);
         App::new(PathBuf::from("."), PathBuf::from("/nonexistent/gigasail.db"),
             root, vec![change], vec![file], sources, HashMap::new(), "HEAD".into())
+    }
+
+    fn green_bg_cells(app: &App) -> usize {
+        let term = draw(app, 0.0);
+        let buf = term.backend().buffer();
+        let mut greens = 0;
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                if let ratatui::style::Color::Rgb(r, g, b) = buf.cell((x, y)).unwrap().bg {
+                    if g > r && g > b {
+                        greens += 1;
+                    }
+                }
+            }
+        }
+        greens
+    }
+
+    #[test]
+    fn diff_row_tint_is_gated_on_truecolor() {
+        let mut app = app_no_evidence();
+        select(&mut app, "handler()");
+        // Truecolor: the added line carries the subtle green background tint.
+        app.truecolor = true;
+        assert!(
+            green_bg_cells(&app) > 0,
+            "truecolor terminals should show the added-line tint"
+        );
+        // Non-truecolor: no RGB tint (the terminal would downsample it to a loud
+        // bright green); the +/- gutter carries the diff instead.
+        app.truecolor = false;
+        assert_eq!(
+            green_bg_cells(&app),
+            0,
+            "non-truecolor terminals must not emit RGB background tints"
+        );
     }
 
     #[test]

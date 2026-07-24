@@ -91,6 +91,7 @@ pub fn run_diff(
         label,
     );
     app.ascii = tui::detect_ascii();
+    app.truecolor = tui::detect_truecolor();
     let _ = tui::run(app)?;
     Ok(())
 }

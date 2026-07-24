@@ -27,6 +27,19 @@ pub fn detect_ascii() -> bool {
     !utf8
 }
 
+/// Whether the terminal advertises 24-bit color. Without it, crossterm's RGB
+/// escapes are downsampled by the terminal to the nearest ANSI-16 color, which
+/// turns the subtle diff background tints into a loud bright green/red. When
+/// false the TUI drops the row tints and relies on the `+`/`-` gutter instead.
+pub fn detect_truecolor() -> bool {
+    std::env::var("COLORTERM")
+        .map(|v| {
+            let v = v.to_ascii_lowercase();
+            v.contains("truecolor") || v.contains("24bit")
+        })
+        .unwrap_or(false)
+}
+
 /// Run the interactive review UI until the user quits, returning the final app
 /// state (so background-stage durations can be persisted).
 pub fn run(mut app: App) -> Result<App> {
