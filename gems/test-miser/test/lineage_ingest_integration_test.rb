@@ -11,11 +11,11 @@ require "tmpdir"
 # mutant-facts/v1 plus the combined Weak Tests SARIF) ingests into lineage.db
 # through gems/lineage/tools/ingest_mutation_corpus.rb.
 class LineageIngestIntegrationTest < Minitest::Test
-  LINEAGE_BIN = File.expand_path("../../lineage/target/release/lineage", __dir__)
-  INGEST_TOOL = File.expand_path("../../lineage/tools/ingest_mutation_corpus.rb", __dir__)
+  LINEAGE_BIN = File.expand_path("../../gigasail/target/release/giga", __dir__)
+  INGEST_TOOL = File.expand_path("../../gigasail/tools/ingest_mutation_corpus.rb", __dir__)
 
   def test_materialized_corpus_ingests_mutants_and_weak_tests
-    skip "lineage binary missing; build gems/lineage first" unless File.executable?(LINEAGE_BIN)
+    skip "lineage binary missing; build gems/gigasail first" unless File.executable?(LINEAGE_BIN)
     begin
       require "sqlite3"
     rescue LoadError
@@ -86,11 +86,11 @@ class LineageIngestIntegrationTest < Minitest::Test
         }]
       ))
 
-      db = File.join(repo, "lineage.db")
+      db = File.join(repo, "gigasail.db")
       run!([LINEAGE_BIN, "init", "--db", db], repo)
       run!([LINEAGE_BIN, "build", "--db", db, "--repo", repo], repo)
       out = run!(["ruby", INGEST_TOOL, "--db=#{db}", "--repo=#{repo}",
-                  "--materialized=#{materialized}", "--lineage-bin=#{LINEAGE_BIN}"], repo)
+                  "--materialized=#{materialized}", "--giga-bin=#{LINEAGE_BIN}"], repo)
 
       assert_includes out, "exposure_events=3"
       assert_includes out, "ingested 1 mutant-facts file(s) at commit #{commit}"
@@ -114,12 +114,12 @@ class LineageIngestIntegrationTest < Minitest::Test
   # wrong, commit for every suite - corrupting the ledger's history with no
   # visible error.
   def test_mixed_commit_facts_files_are_rejected_not_silently_merged
-    skip "lineage binary missing; build gems/lineage first" unless File.executable?(LINEAGE_BIN)
+    skip "lineage binary missing; build gems/gigasail first" unless File.executable?(LINEAGE_BIN)
 
     Dir.mktmpdir do |root|
       materialized = File.join(root, "materialized")
       FileUtils.mkdir_p(materialized)
-      db = File.join(root, "lineage.db")
+      db = File.join(root, "gigasail.db")
 
       write_mutant_facts(materialized, "abc111", suite: "ruby:one")
       write_mutant_facts(materialized, "def222", suite: "ruby:two")
@@ -127,7 +127,7 @@ class LineageIngestIntegrationTest < Minitest::Test
 
       stdout, stderr, status = Open3.capture3(
         "ruby", INGEST_TOOL, "--db=#{db}", "--repo=#{root}",
-        "--materialized=#{materialized}", "--lineage-bin=#{LINEAGE_BIN}"
+        "--materialized=#{materialized}", "--giga-bin=#{LINEAGE_BIN}"
       )
 
       refute status.success?, "expected mixed-commit ingestion to fail, got: #{stdout}"
@@ -140,7 +140,7 @@ class LineageIngestIntegrationTest < Minitest::Test
   # explicitly requested ingestion of an incomplete corpus looked
   # indistinguishable from a full, successful one.
   def test_missing_weak_tests_sarif_fails_loudly_rather_than_warning
-    skip "lineage binary missing; build gems/lineage first" unless File.executable?(LINEAGE_BIN)
+    skip "lineage binary missing; build gems/gigasail first" unless File.executable?(LINEAGE_BIN)
 
     Dir.mktmpdir do |root|
       repo = File.join(root, "repo")
@@ -154,7 +154,7 @@ class LineageIngestIntegrationTest < Minitest::Test
         system("git add -A && git commit -qm init", exception: true)
       end
       commit = Dir.chdir(repo) { `git rev-parse HEAD`.strip }
-      db = File.join(repo, "lineage.db")
+      db = File.join(repo, "gigasail.db")
 
       write_mutant_facts(materialized, commit, suite: "ruby:one")
 
@@ -162,7 +162,7 @@ class LineageIngestIntegrationTest < Minitest::Test
       run!([LINEAGE_BIN, "build", "--db", db, "--repo", repo], repo)
       stdout, stderr, status = Open3.capture3(
         "ruby", INGEST_TOOL, "--db=#{db}", "--repo=#{repo}",
-        "--materialized=#{materialized}", "--lineage-bin=#{LINEAGE_BIN}"
+        "--materialized=#{materialized}", "--giga-bin=#{LINEAGE_BIN}"
       )
 
       refute status.success?, "expected a missing weak-tests.sarif to fail, got: #{stdout}"

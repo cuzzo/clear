@@ -170,16 +170,16 @@ jobs:
       - name: Install Jest oracle fixture runtime
         run: npm install --no-save --no-package-lock jest@30.0.5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build Lineage release binary
+      - name: Build Gigasail release binary
         # The ingestion round-trip test below skips silently (not fails)
         # when this binary is absent, so without this step CI could report
         # green while that contract was never actually exercised.
-        run: cargo build --release --manifest-path gems/lineage/Cargo.toml
+        run: cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
       - name: Verify runner adapters, dynamic planning, and canonical checkpoints
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/test_miser_test.rb
       - name: Verify PR step summary tallies
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/step_summary_test.rb
-      - name: Verify Lineage corpus ingestion round-trip
+      - name: Verify Gigasail corpus ingestion round-trip
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/lineage_ingest_integration_test.rb
       - name: Verify Test Miser evidence analyzers and product formats
         run: |
@@ -261,7 +261,7 @@ jobs:
           cargo build --release --manifest-path gems/fact-mine/Cargo.toml
           cargo build --release --manifest-path gems/nil-kill/Cargo.toml
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
-          cargo build --release --manifest-path gems/lineage/Cargo.toml
+          cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
       - name: Run Ruby gem tests with SimpleCov
         run: bundle exec ruby tools/run_ruby_gem_coverage.rb
         env:
@@ -356,8 +356,8 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  lineage-rust-coverage:
-    name: Lineage Rust coverage
+  gigasail-rust-coverage:
+    name: Gigasail Rust coverage
     needs: changes
     if: ${{ needs.changes.outputs.run_gems == 'true' }}
     runs-on: ubuntu-latest
@@ -365,24 +365,24 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Run cargo llvm-cov for Lineage
+      - name: Run cargo llvm-cov for Gigasail
         run: |
-          mkdir -p tmp/lineage-rust-coverage
+          mkdir -p tmp/gigasail-rust-coverage
           cargo llvm-cov \
-            --manifest-path gems/lineage/Cargo.toml \
+            --manifest-path gems/gigasail/Cargo.toml --workspace --all-targets \
             --all-features \
             --cobertura \
-            --output-path ${{ github.workspace }}/tmp/lineage-rust-coverage/cobertura.xml
+            --output-path ${{ github.workspace }}/tmp/gigasail-rust-coverage/cobertura.xml
       - uses: actions/upload-artifact@v4
         with:
-          name: lineage-rust-coverage
-          path: tmp/lineage-rust-coverage/cobertura.xml
+          name: gigasail-rust-coverage
+          path: tmp/gigasail-rust-coverage/cobertura.xml
           retention-days: 7
       - uses: codecov/codecov-action@v5
         with:
-          files: ./tmp/lineage-rust-coverage/cobertura.xml
+          files: ./tmp/gigasail-rust-coverage/cobertura.xml
           disable_search: true
-          flags: lineage-rust
+          flags: gigasail-rust
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -469,7 +469,7 @@ jobs:
           cargo build --release --manifest-path gems/fact-mine/Cargo.toml
           cargo build --release --manifest-path gems/nil-kill/Cargo.toml
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
-          cargo build --release --manifest-path gems/lineage/Cargo.toml
+          cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
           # The release FactMine binary is built once above. The focused Ruby
           # consumer suite reuses that same executable; LLVM coverage comes
           # from FactMine's instrumented Rust test run rather than rebuilding
@@ -1644,7 +1644,7 @@ jobs:
             --base="$base" --sarif=tmp/arch-cycles.sarif
           ruby gems/espalier/tools/reach_through_report.rb . \
             --base="$base" --sarif=tmp/arch-reach-through.sarif
-          ruby gems/lineage/tools/change_coupling.rb . 8 \
+          ruby gems/gigasail/tools/change_coupling.rb . 8 \
             --base="$base" --sarif=tmp/arch-change-coupling.sarif
       - name: Upload cycles SARIF
         uses: github/codeql-action/upload-sarif@v4
@@ -1756,7 +1756,7 @@ jobs:
       - bc-lower-coverage-shard
       - zig-coverage
       - zig-mutants-coverage
-      - lineage-rust-coverage
+      - gigasail-rust-coverage
     if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     permissions:
       contents: read
@@ -1785,12 +1785,12 @@ jobs:
         with:
           pattern: zig-coverage-*
           path: tmp/sarif-coverage
-      - name: Download Lineage Rust coverage artifact
-        if: ${{ needs['lineage-rust-coverage'].result == 'success' }}
+      - name: Download Gigasail Rust coverage artifact
+        if: ${{ needs['gigasail-rust-coverage'].result == 'success' }}
         uses: actions/download-artifact@v4
         with:
-          name: lineage-rust-coverage
-          path: tmp/sarif-coverage/lineage-rust-coverage
+          name: gigasail-rust-coverage
+          path: tmp/sarif-coverage/gigasail-rust-coverage
       - name: Generate Boobytrap report
         run: |
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
@@ -1838,7 +1838,7 @@ jobs:
       - bc-lower-coverage-shard
       - zig-coverage
       - zig-mutants-coverage
-      - lineage-rust-coverage
+      - gigasail-rust-coverage
     if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     permissions:
       contents: read
@@ -1867,12 +1867,12 @@ jobs:
         with:
           pattern: zig-coverage-*
           path: tmp/sarif-coverage
-      - name: Download Lineage Rust coverage artifact
-        if: ${{ needs['lineage-rust-coverage'].result == 'success' }}
+      - name: Download Gigasail Rust coverage artifact
+        if: ${{ needs['gigasail-rust-coverage'].result == 'success' }}
         uses: actions/download-artifact@v4
         with:
-          name: lineage-rust-coverage
-          path: tmp/sarif-coverage/lineage-rust-coverage
+          name: gigasail-rust-coverage
+          path: tmp/sarif-coverage/gigasail-rust-coverage
       - name: Generate SlopCop report
         run: |
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
@@ -2032,7 +2032,7 @@ jobs:
           timeout 10m ./tools/generate_sql_cov_sarif.rb \
             --repo=. \
             --out-dir=tmp/sql-cov-sarif \
-            --setup=gems/lineage/sql/storage/init_schema.sql \
+            --setup=gems/gigasail/giga-core/sql/storage/init_schema.sql \
             --sql-cov-bin=tmp/sarif-binaries/sql-cov
       - uses: github/codeql-action/upload-sarif@v4
         with:
@@ -2068,7 +2068,7 @@ jobs:
             --repo=. \
             --out-dir=tmp/sqlfluff-sarif \
             --config=.sqlfluff \
-            --sql-path=gems/lineage/sql
+            --sql-path=gems/gigasail/giga-core/sql
       - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/sqlfluff-sarif/sqlfluff.sarif
