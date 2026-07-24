@@ -10,12 +10,16 @@
 //! reused `.sql` files and typed `Storage` methods the UI/LSP already use,
 //! not a reimplementation.
 
+use crate::diff_service::{build_structured_diff, DiffRequest};
 use crate::extract::{BoundaryExtractor, HeuristicExtractor, SourceFilter};
+use crate::git::GitProvider;
 use crate::hazard::{
     scan_c_sites, scan_cpp_sites, scan_csharp_sites, scan_go_sites, scan_rust_sites,
     scan_zig_sites, HazardSite,
 };
 use crate::model::BlobFile;
+use crate::pipeline::load_config;
+use crate::review::ReviewMode;
 use crate::storage::Storage;
 use anyhow::{Context, Result};
 use rmcp::model::{
@@ -169,6 +173,33 @@ fn tool_defs() -> Vec<Tool> {
                 "required": ["name"]
             })),
         ),
+        Tool::new(
+            "giga_precommit",
+            "Review the change you just made (default HEAD~1..HEAD): a pass/needs_review/critical \
+             verdict plus the gates it triggered and the ranked new findings by tier, with each \
+             finding's coverage posture. Call before declaring work done - a `critical` verdict \
+             blocks. Returns a compact verdict, not raw test output. Requires a gigasail.db.",
+            obj(json!({
+                "type": "object",
+                "properties": {
+                    "base": {"type": "string", "description": "Base revision (default: HEAD's first parent)"},
+                    "head": {"type": "string", "description": "Head revision (default: HEAD)"}
+                }
+            })),
+        ),
+        Tool::new(
+            "giga_premerge",
+            "Review everything a branch introduces before merging: the same verdict as \
+             giga_precommit but over merge-base(head, target)..head, i.e. the whole branch. Call \
+             before a merge/PR. Requires a gigasail.db.",
+            obj(json!({
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Branch being merged into (default: master)"},
+                    "head": {"type": "string", "description": "Branch tip to review (default: HEAD)"}
+                }
+            })),
+        ),
     ]
 }
 
@@ -236,6 +267,22 @@ impl ServerHandler for LineageMcp {
                     args.get("path").and_then(Value::as_str),
                     args.get("commit").and_then(Value::as_str),
                 ),
+                "giga_precommit" => review(
+                    require_db(&storage, "giga_precommit")?,
+                    &self.repo,
+                    ReviewMode::Precommit,
+                    args.get("base").and_then(Value::as_str),
+                    args.get("head").and_then(Value::as_str),
+                    None,
+                ),
+                "giga_premerge" => review(
+                    require_db(&storage, "giga_premerge")?,
+                    &self.repo,
+                    ReviewMode::Premerge,
+                    None,
+                    args.get("head").and_then(Value::as_str),
+                    Some(args.get("target").and_then(Value::as_str).unwrap_or("master")),
+                ),
                 other => Err(format!("unknown tool: {other}")),
             }
         };
@@ -246,6 +293,49 @@ impl ServerHandler for LineageMcp {
             Err(message) => Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
         }
     }
+}
+
+/// `giga_precommit` / `giga_premerge`: build the review DiffPlan and run the
+/// shared evaluator over the repo's `review:` config. Returns the compact
+/// verdict report (verdict + gates + ranked findings), never raw test output.
+fn review(
+    storage: &Storage,
+    repo: &Path,
+    mode: ReviewMode,
+    base: Option<&str>,
+    head: Option<&str>,
+    target: Option<&str>,
+) -> Result<Value, String> {
+    let provider = GitProvider::open(repo).map_err(|e| e.to_string())?;
+    // Resolve the range: pre-merge diffs merge-base(head, target)..head; pre-commit
+    // uses the given base or falls back to HEAD's first parent (base = None).
+    let (base_revision, head_revision) = if let Some(target) = target {
+        let head_ref = head.unwrap_or("HEAD");
+        let mb = provider
+            .merge_base(head_ref, target)
+            .map_err(|e| e.to_string())?;
+        (Some(mb), Some(head_ref.to_string()))
+    } else {
+        (
+            base.map(str::to_string),
+            Some(head.unwrap_or("HEAD").to_string()),
+        )
+    };
+    let request = DiffRequest {
+        base_revision,
+        head_revision,
+        coverage_source: None,
+        sarif_source: None,
+        selection: None,
+        mutant_corpus: None,
+        test_set: None,
+    };
+    let plan =
+        build_structured_diff(&provider, Some(storage), &request).map_err(|e| e.to_string())?;
+    // Missing giga.yml → default review policy (gate only on uncovered T1).
+    let config = load_config(repo).map(|c| c.review).unwrap_or_default();
+    let report = crate::review::evaluate(&plan, &config, mode);
+    serde_json::to_value(report).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

@@ -96,9 +96,17 @@ class McpServerTest < Minitest::Test
         tool_names = client.list_tools
         assert_equal(
           %w[giga_file_risk giga_unit_context giga_verification_gaps
-             giga_change_history giga_find_definition].sort,
+             giga_change_history giga_find_definition
+             giga_precommit giga_premerge].sort,
           tool_names.sort
         )
+
+        # The review tool returns a structured verdict, not raw output. With
+        # no SARIF ingested here, a clean single commit passes with no findings.
+        review = client.call_tool("giga_precommit", { "base" => "HEAD~1", "head" => "HEAD" })
+        assert_equal "pass", review["verdict"]
+        assert_empty review["gates_triggered"]
+        assert_equal({ "t1" => 0, "t2" => 0, "t3" => 0 }, review["summary"]["findings"])
 
         context = client.call_tool("giga_unit_context", { "path" => "src/worker.rb", "line" => 3 })
         assert_equal "Worker.run", context.dig("unit", "name")

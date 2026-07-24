@@ -256,6 +256,15 @@ impl GitProvider {
         Ok(statuses.is_empty())
     }
 
+    /// The merge base of two revisions (their common ancestor). Backs the
+    /// `giga_premerge` review range: `merge_base(branch, target)..branch`.
+    pub fn merge_base(&self, a: &str, b: &str) -> Result<String> {
+        let a_oid = git2::Oid::from_str(&self.resolve_commit(a)?)?;
+        let b_oid = git2::Oid::from_str(&self.resolve_commit(b)?)?;
+        let repo = Repository::open(&self.path)?;
+        Ok(repo.merge_base(a_oid, b_oid)?.to_string())
+    }
+
     fn default_diff_base(&self, head_oid: &str) -> Result<String> {
         let repo = Repository::open(&self.path)?;
         let head = repo.find_commit(git2::Oid::from_str(head_oid)?)?;
