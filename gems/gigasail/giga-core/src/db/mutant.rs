@@ -8,6 +8,221 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+/// One test's per-mutant attribution, distilled from an audit-capable
+/// mutant-facts artifact (test-miser's normalized output). This is the
+/// language-agnostic source for the diff "Tests" section's kill metrics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditTest {
+    pub id: String,
+    pub file: String,
+    pub line: Option<u32>,
+    /// Mutant ids this test killed.
+    pub killed: BTreeSet<String>,
+    /// Whether this test covered any mutant (ran against mutated code).
+    pub covered: bool,
+}
+
+/// Extract per-test attribution from an audit-capable mutant-facts value,
+/// accepting both the native `mutant-facts/v1` shape (top-level `tests` +
+/// `mutants` with `covered_by`/`killed_by`) and the Mutation Testing Elements
+/// shape (`files.*.mutants[coveredBy/killedBy]` + `testFiles.*.tests`). Returns
+/// empty when the artifact carries no per-test attribution (subject-only facts).
+pub fn collect_audit_tests(value: &Value) -> Vec<AuditTest> {
+    use std::collections::BTreeMap;
+    // test_id -> (file, line, killed set, covered)
+    let mut tests: BTreeMap<String, AuditTest> = BTreeMap::new();
+    let entry = |tests: &mut BTreeMap<String, AuditTest>, id: &str, file: &str, line: Option<u32>| {
+        let t = tests.entry(id.to_string()).or_insert_with(|| AuditTest {
+            id: id.to_string(),
+            file: String::new(),
+            line: None,
+            killed: BTreeSet::new(),
+            covered: false,
+        });
+        if t.file.is_empty() && !file.is_empty() {
+            t.file = file.to_string();
+        }
+        if t.line.is_none() {
+            t.line = line;
+        }
+    };
+
+    // Native mutant-facts/v1: authoritative test inventory with file/line.
+    if let Some(arr) = value.get("tests").and_then(Value::as_array) {
+        for test in arr {
+            let Some(id) = test.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let file = test.get("file").and_then(Value::as_str).unwrap_or("");
+            let line = test.get("line").and_then(Value::as_u64).map(|n| n as u32);
+            entry(&mut tests, id, file, line);
+        }
+    }
+    let apply_mutant = |tests: &mut BTreeMap<String, AuditTest>,
+                        mutant_id: &str,
+                        covered_by: &Value,
+                        killed_by: &Value| {
+        if let Some(cov) = covered_by.as_array() {
+            for t in cov.iter().filter_map(Value::as_str) {
+                entry(tests, t, "", None);
+                tests.get_mut(t).unwrap().covered = true;
+            }
+        }
+        if let Some(killed) = killed_by.as_array() {
+            for t in killed.iter().filter_map(Value::as_str) {
+                entry(tests, t, "", None);
+                let row = tests.get_mut(t).unwrap();
+                row.covered = true;
+                row.killed.insert(mutant_id.to_string());
+            }
+        }
+    };
+
+    if let Some(mutants) = value.get("mutants").and_then(Value::as_array) {
+        for mutant in mutants {
+            let id = mutant.get("id").and_then(Value::as_str).unwrap_or("");
+            apply_mutant(
+                &mut tests,
+                id,
+                mutant.get("covered_by").unwrap_or(&Value::Null),
+                mutant.get("killed_by").unwrap_or(&Value::Null),
+            );
+        }
+    }
+
+    // Mutation Testing Elements shape (Stryker family). Mutant ids are qualified
+    // by their source path so they stay unique across files.
+    if let Some(files) = value.get("files").and_then(Value::as_object) {
+        for (path, file) in files {
+            if let Some(mutants) = file.get("mutants").and_then(Value::as_array) {
+                for mutant in mutants {
+                    let raw = mutant.get("id").and_then(Value::as_str).unwrap_or("");
+                    let qualified = format!("{path}:{raw}");
+                    apply_mutant(
+                        &mut tests,
+                        &qualified,
+                        mutant.get("coveredBy").unwrap_or(&Value::Null),
+                        mutant.get("killedBy").unwrap_or(&Value::Null),
+                    );
+                }
+            }
+        }
+    }
+    if let Some(test_files) = value.get("testFiles").and_then(Value::as_object) {
+        for (path, tf) in test_files {
+            if let Some(arr) = tf.get("tests").and_then(Value::as_array) {
+                for test in arr {
+                    if let Some(id) = test.get("id").and_then(Value::as_str) {
+                        let line = test
+                            .get("location")
+                            .and_then(|l| l.get("start"))
+                            .and_then(|s| s.get("line"))
+                            .and_then(Value::as_u64)
+                            .map(|n| n as u32);
+                        entry(&mut tests, id, path, line);
+                    }
+                }
+            }
+        }
+    }
+
+    tests.into_values().collect()
+}
+
+/// Ingest per-test attribution from an audit-capable mutant-facts artifact into
+/// `test_exposure_events`, so the diff "Tests" section can report kill metrics.
+/// Independent of the subject-summary ingest and of any production-unit
+/// resolution (tests key on a synthetic unit id). Returns the number of tests
+/// recorded; zero when the artifact carries no attribution.
+pub fn ingest_audit_test_attribution(
+    storage: &Storage,
+    input: &str,
+    commit_hash: &str,
+    timestamp: Option<i64>,
+    test_type: &str,
+) -> Result<usize> {
+    if !storage.commit_exists(commit_hash)? {
+        anyhow::bail!("commit {commit_hash} is not present in gigasail metadata");
+    }
+    let value: Value = serde_json::from_str(input).context("parse mutant-facts JSON")?;
+    let tests = collect_audit_tests(&value);
+    if tests.is_empty() {
+        return Ok(0);
+    }
+    let ts = timestamp
+        .or(storage.commit_timestamp(commit_hash)?)
+        .unwrap_or_default();
+    let tag = normalize_test_type(test_type);
+    let owns_transaction = !storage.transaction_active();
+    if owns_transaction {
+        storage.begin_transaction()?;
+    }
+    let result = (|| -> Result<usize> {
+        for test in &tests {
+            let killed_any = !test.killed.is_empty();
+            let line = test.line.unwrap_or(1);
+            let path = if test.file.is_empty() {
+                format!("test:{}", test.id)
+            } else {
+                test.file.clone()
+            };
+            // Each test is a logical unit (a test method) so the exposure event's
+            // FK resolves; test units carry no production risk of their own.
+            let unit = LogicalUnit::new(
+                test.id.clone(),
+                crate::model::UnitKind::Function,
+                path.clone(),
+                0,
+                line,
+                line,
+                test.id.clone(),
+                &test.id,
+            );
+            storage.upsert_logical_unit(&unit, ts)?;
+            let payload = serde_json::json!({
+                "test_path": test.file,
+                "test_start_line": test.line,
+                "test_end_line": test.line,
+                "killed_mutant_ids": test.killed.iter().collect::<Vec<_>>(),
+            })
+            .to_string();
+            storage.insert_test_exposure_event(&TestExposureEvent {
+                unit_id: unit.id.clone(),
+                commit_hash: commit_hash.to_string(),
+                timestamp: ts,
+                path,
+                function: None,
+                line: test.line,
+                branch_id: None,
+                test_id: test.id.clone(),
+                test_type: tag.clone(),
+                mutation_status: Some(if killed_any { "killed" } else { "alive" }.to_string()),
+                mutation_kind: Some("stochastic".to_string()),
+                mutation_corpus: String::new(),
+                is_mutation_verified: true,
+                is_mutation_killed: killed_any,
+                is_verified: true,
+                payload_json: payload,
+            })?;
+        }
+        Ok(tests.len())
+    })();
+    match result {
+        Ok(count) => {
+            if owns_transaction {
+                storage.commit_transaction()?;
+            }
+            Ok(count)
+        }
+        Err(error) => {
+            if owns_transaction {
+                let _ = storage.rollback_transaction();
+            }
+            Err(error)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MutantFact {
     pub file: String,
@@ -110,6 +325,11 @@ where
             anyhow::bail!("mutation corpus must match the evidence scope fingerprint");
         }
     }
+
+    // Record per-test attribution when the artifact is audit-capable (test-miser's
+    // tests[] + killed_by, or MTE). No-op for subject-only facts, so every mutant
+    // ingest path picks it up without changing subject-summary behavior.
+    ingest_audit_test_attribution(storage, input, commit_hash, timestamp, test_type)?;
 
     let facts = parse_mutant_facts(input)?;
     let timestamp = timestamp
@@ -654,6 +874,93 @@ fn u32_at(value: &Value, keys: &[&str]) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collect_audit_tests_reads_native_and_mte_shapes() {
+        // Native mutant-facts/v1: tests inventory + per-mutant killed_by.
+        let native = serde_json::json!({
+            "schema": "mutant-facts/v1",
+            "tests": [
+                {"id": "t:a", "name": "A", "file": "spec/a_spec.rb", "line": 5},
+                {"id": "t:b", "name": "B", "file": "spec/a_spec.rb", "line": 12}
+            ],
+            "mutants": [
+                {"id": "m1", "covered_by": ["t:a", "t:b"], "killed_by": ["t:a"]},
+                {"id": "m2", "covered_by": ["t:b"], "killed_by": ["t:b"]}
+            ]
+        });
+        let mut tests = collect_audit_tests(&native);
+        tests.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(tests.len(), 2);
+        assert_eq!(tests[0].id, "t:a");
+        assert_eq!(tests[0].file, "spec/a_spec.rb");
+        assert_eq!(tests[0].line, Some(5));
+        assert_eq!(tests[0].killed, ["m1".to_string()].into_iter().collect());
+        assert!(tests[0].covered);
+        assert_eq!(tests[1].killed, ["m2".to_string()].into_iter().collect());
+
+        // MTE shape: mutant ids qualified by file; test file from testFiles key.
+        let mte = serde_json::json!({
+            "schemaVersion": "2.0",
+            "files": {"lib/x.rb": {"mutants": [
+                {"id": "1", "coveredBy": ["t:a", "t:b"], "killedBy": ["t:a"]}
+            ]}},
+            "testFiles": {"test/x_test.rb": {"tests": [
+                {"id": "t:a", "name": "A"}, {"id": "t:b", "name": "B"}
+            ]}}
+        });
+        let mut tests = collect_audit_tests(&mte);
+        tests.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(tests[0].file, "test/x_test.rb");
+        assert_eq!(tests[0].killed, ["lib/x.rb:1".to_string()].into_iter().collect());
+        assert!(
+            tests[1].covered && tests[1].killed.is_empty(),
+            "t:b covered but killed nothing"
+        );
+
+        // Subject-only facts carry no per-test attribution.
+        assert!(collect_audit_tests(&serde_json::json!({"subjects": []})).is_empty());
+    }
+
+    #[test]
+    fn audit_attribution_ingest_populates_test_inventory() {
+        let storage = Storage::open_memory().unwrap();
+        storage
+            .insert_metadata(&CommitMetadata {
+                hash: "abc".into(),
+                message: "m".into(),
+                timestamp: 10,
+            })
+            .unwrap();
+        let facts = json!({
+            "schema": "mutant-facts/v1",
+            "tests": [
+                {"id": "t:a", "name": "A", "file": "spec/a_spec.rb", "line": 5},
+                {"id": "t:b", "name": "B", "file": "spec/a_spec.rb", "line": 12}
+            ],
+            "mutants": [
+                {"id": "m1", "covered_by": ["t:a", "t:b"], "killed_by": ["t:a"]},
+                {"id": "m2", "covered_by": ["t:b"], "killed_by": []}
+            ]
+        })
+        .to_string();
+
+        let n = ingest_audit_test_attribution(&storage, &facts, "abc", Some(10), "unit").unwrap();
+        assert_eq!(n, 2);
+
+        let mut inv = storage.test_inventory_for_commit("abc").unwrap();
+        inv.sort_by(|a, b| a.test_id.cmp(&b.test_id));
+        assert_eq!(inv.len(), 2);
+        assert_eq!(inv[0].test_id, "t:a");
+        assert_eq!(inv[0].test_set, "unit");
+        assert_eq!(inv[0].test_path, "spec/a_spec.rb");
+        assert_eq!(inv[0].start_line, 5);
+        assert_eq!(inv[0].killed_mutants, ["m1".to_string()].into_iter().collect());
+        assert!(inv[0].had_mutation);
+        // t:b covered a mutant but killed none -> a "kills no mutants" candidate.
+        assert!(inv[1].killed_mutants.is_empty());
+        assert!(inv[1].had_mutation);
+    }
     use crate::extract::HeuristicExtractor;
     use crate::model::{BlobFile, CommitMetadata};
     use crate::stack_trace::RepoPathNormalizer;
