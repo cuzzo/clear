@@ -368,6 +368,12 @@ enum Command {
         /// instead of diffing git. Preview/testing which producers a change runs.
         #[arg(long = "changed")]
         changed: Vec<String>,
+        /// Run affected packages' pre-test check gates (lint/format) before
+        /// tests, overriding `review.checks_enabled`. `--no-checks` forces off.
+        #[arg(long, overrides_with = "no_checks")]
+        checks: bool,
+        #[arg(long = "no-checks")]
+        no_checks: bool,
         /// Print the resolved producer plan without running anything.
         #[arg(long)]
         dry_run: bool,
@@ -988,6 +994,8 @@ fn main() -> Result<()> {
             no_cov,
             premerge,
             changed,
+            checks,
+            no_checks,
             dry_run,
             trust_current_config,
         } => {
@@ -1014,6 +1022,13 @@ fn main() -> Result<()> {
                 no_cov,
                 stage,
                 changed_override: (!changed.is_empty()).then_some(changed),
+                run_checks: if checks {
+                    Some(true)
+                } else if no_checks {
+                    Some(false)
+                } else {
+                    None
+                },
                 trust_current_config,
                 dry_run,
             })?;
@@ -1022,6 +1037,10 @@ fn main() -> Result<()> {
             } else {
                 ""
             };
+            if !result.checks.is_empty() {
+                let verb = if result.dry_run { "would gate" } else { "gated" };
+                println!("giga test checks ({verb}): {}", result.checks.join(", "));
+            }
             if result.dry_run {
                 println!("giga test plan{forced}: {}", result.producers.join(", "));
             } else {

@@ -44,6 +44,12 @@ pub struct ReviewConfig {
     /// a build system (see tuning-configs.md §12–§13).
     #[serde(default)]
     pub packages: BTreeMap<String, Package>,
+    /// Opt-in pre-test check gates. When true, `giga test` runs each affected
+    /// package's `checks` (lint/format gates) before its producers and stops
+    /// early if any fail. Off by default — checks only run when turned on (here
+    /// or via `giga test --checks`). See tuning-configs.md §14.
+    #[serde(default)]
+    pub checks_enabled: bool,
     // Reserved (parsed, not yet evaluated) — see tuning-configs.md §3f–§3i.
     #[serde(default)]
     pub retain: Option<serde_json::Value>,
@@ -71,6 +77,11 @@ pub struct Package {
     /// Additional producers to run only at premerge (e.g. fuzz suites).
     #[serde(default)]
     pub premerge: Vec<String>,
+    /// Pre-test check gates for this package (lint/format). Each entry is either
+    /// a `contrib:<category>:<lang>` reference to a bundled recommended script,
+    /// or a repo-relative script path. Only run when checks are enabled.
+    #[serde(default)]
+    pub checks: Vec<String>,
 }
 
 impl ReviewConfig {
@@ -79,11 +90,45 @@ impl ReviewConfig {
     /// package that transitively depends on it). Empty when no `packages` graph
     /// is configured — callers then fall back to the stage's profiles.
     pub fn affected_producers(&self, changed_paths: &[String], mode: ReviewMode) -> Vec<String> {
+        let mut producers: BTreeSet<String> = BTreeSet::new();
+        for name in self.affected_packages(changed_paths) {
+            if let Some(pkg) = self.packages.get(name) {
+                producers.extend(pkg.producers.iter().cloned());
+                if mode == ReviewMode::Premerge {
+                    producers.extend(pkg.premerge.iter().cloned());
+                }
+            }
+        }
+        producers.into_iter().collect()
+    }
+
+    /// The pre-test check refs for a set of changed paths: the union of `checks`
+    /// over every affected package. Same affected-package set as
+    /// `affected_producers`; checks do not vary by stage.
+    pub fn affected_checks(&self, changed_paths: &[String]) -> Vec<String> {
+        let mut checks: Vec<String> = Vec::new();
+        for name in self.affected_packages(changed_paths) {
+            if let Some(pkg) = self.packages.get(name) {
+                for c in &pkg.checks {
+                    if !checks.contains(c) {
+                        checks.push(c.clone());
+                    }
+                }
+            }
+        }
+        checks
+    }
+
+    /// The set of packages affected by a change: every package whose files
+    /// changed, plus every package that transitively depends on one of those
+    /// (reverse-transitive closure). Empty when no `packages` graph is
+    /// configured. Ordering is deterministic (BTreeSet over package names).
+    fn affected_packages(&self, changed_paths: &[String]) -> BTreeSet<&str> {
+        let mut affected: BTreeSet<&str> = BTreeSet::new();
         if self.packages.is_empty() {
-            return Vec::new();
+            return affected;
         }
         // Directly-changed packages.
-        let mut affected: BTreeSet<&str> = BTreeSet::new();
         for (name, pkg) in &self.packages {
             if changed_paths
                 .iter()
@@ -102,17 +147,7 @@ impl ReviewConfig {
                 }
             }
         }
-        // Union the affected packages' producers (+ premerge producers at premerge).
-        let mut producers: BTreeSet<String> = BTreeSet::new();
-        for name in &affected {
-            if let Some(pkg) = self.packages.get(*name) {
-                producers.extend(pkg.producers.iter().cloned());
-                if mode == ReviewMode::Premerge {
-                    producers.extend(pkg.premerge.iter().cloned());
-                }
-            }
-        }
-        producers.into_iter().collect()
+        affected
     }
 }
 
@@ -969,6 +1004,27 @@ packages:
         assert!(ReviewConfig::default()
             .affected_producers(&["x".into()], ReviewMode::Precommit)
             .is_empty());
+    }
+
+    #[test]
+    fn affected_checks_unions_over_the_reverse_dependency_closure() {
+        let c = cfg(r#"
+checks_enabled: true
+packages:
+  fact-mine:  { paths: ["gems/fact-mine/**"], checks: ["contrib:lint:rust"] }
+  slopcop:    { paths: ["gems/slopcop/**"], checks: ["contrib:lint:ruby"], depends_on: [fact-mine] }
+  compiler:   { paths: ["compiler/ruby/**"], checks: ["contrib:lint:ruby", "tools/custom.rb"] }
+"#);
+        assert!(c.checks_enabled);
+        // A fact-mine change pulls slopcop's checks in too (dedup keeps one ruby lint).
+        let checks = c.affected_checks(&["gems/fact-mine/src/x.rs".into()]);
+        assert_eq!(checks, ["contrib:lint:rust", "contrib:lint:ruby"]);
+        // A compiler change runs only the compiler's checks.
+        let checks = c.affected_checks(&["compiler/ruby/ast/parser.rb".into()]);
+        assert_eq!(checks, ["contrib:lint:ruby", "tools/custom.rb"]);
+        // No match / no packages -> no checks.
+        assert!(c.affected_checks(&["docs/README.md".into()]).is_empty());
+        assert!(ReviewConfig::default().affected_checks(&["x".into()]).is_empty());
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! only translate flags to requests and render the returned results.
 
 pub mod analyse;
+pub mod checks;
 pub mod ci;
 pub mod diff;
 pub mod ingest;

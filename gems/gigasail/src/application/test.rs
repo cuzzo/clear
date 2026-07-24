@@ -26,6 +26,9 @@ pub struct TestRequest {
     pub stage: ReviewMode,
     /// Explicit changed-path set (from `--changed`), bypassing the git diff.
     pub changed_override: Option<Vec<String>>,
+    /// `--checks`/`--no-checks`: force pre-test check gates on/off. `None` uses
+    /// the config default (`review.checks_enabled`).
+    pub run_checks: Option<bool>,
     pub trust_current_config: bool,
     /// Print the resolved producer plan without running anything.
     pub dry_run: bool,
@@ -33,6 +36,8 @@ pub struct TestRequest {
 
 pub struct TestResult {
     pub producers: Vec<String>,
+    /// Pre-test check gates that ran (or would run, in dry-run) before producers.
+    pub checks: Vec<String>,
     pub mutation_forced: bool,
     pub revision: Option<String>,
     pub artifact_count: usize,
@@ -149,14 +154,26 @@ pub fn execute(req: TestRequest) -> Result<TestResult> {
             req.no_cov
         );
     }
+    // Pre-test check gates: when enabled, the affected packages' `checks`
+    // (lint/format) run before producers and stop the run early on failure.
+    let checks_on = req.run_checks.unwrap_or(config.review.checks_enabled);
+    let checks = match (checks_on, &changed) {
+        (true, Some(paths)) => config.review.affected_checks(paths),
+        _ => Vec::new(),
+    };
     if req.dry_run {
         return Ok(TestResult {
             producers,
+            checks,
             mutation_forced,
             revision: None,
             artifact_count: 0,
             dry_run: true,
         });
+    }
+    if !checks.is_empty() {
+        let changed_paths = changed.as_deref().unwrap_or(&[]);
+        crate::application::checks::run(&req.repo, &checks, changed_paths)?;
     }
 
     // Run the selected producers as a synthetic profile, then ingest. Tests run
@@ -180,6 +197,7 @@ pub fn execute(req: TestRequest) -> Result<TestResult> {
     crate::storage::Storage::open(&req.db)?.refresh_ui_summaries()?;
     Ok(TestResult {
         producers,
+        checks,
         mutation_forced,
         revision: Some(completed.manifest.revision),
         artifact_count: completed.manifest.artifacts.len(),
@@ -226,6 +244,7 @@ mod tests {
             no_cov,
             stage,
             changed_override: None,
+            run_checks: None,
             trust_current_config: true,
             dry_run: true,
         }

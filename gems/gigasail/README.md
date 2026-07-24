@@ -505,6 +505,8 @@ giga test --premerge      # premerge: + fuzz suites + mutation
 giga test --mutants       # add mutation even at precommit
 giga test --no-cov        # skip coverage-only producers
 giga test --unit          # only producers tagged evidence_scope.test_set: unit
+giga test --changed P...  # treat P... as the changed set (preview / bypass git)
+giga test --checks        # run pre-test lint/format gates (--no-checks forces off)
 giga test --dry-run       # print the resolved plan, run nothing
 ```
 
@@ -520,19 +522,39 @@ review:
     compiler:  { paths: [compiler/ruby/**], producers: [compiler-spec, transpile], premerge: [fuzz-compiler] }
     zig:       { paths: [zig/**],           producers: [zig-test, transpile],       premerge: [fuzz-zig] }
     fact-mine: { paths: [gems/fact-mine/**], producers: [fact-mine-test] }
-    giga-core: { paths: [gems/gigasail/giga-core/**], producers: [giga-core-test] }
-    boobytrap: { paths: [gems/boobytrap/**], depends_on: [giga-core, fact-mine], producers: [boobytrap-test] }
-    slopcop:   { paths: [gems/slopcop/**],   depends_on: [boobytrap], producers: [slopcop-test] }
+    decomplex: { paths: [gems/decomplex/**], depends_on: [fact-mine], producers: [decomplex-test] }
+    boobytrap: { paths: [gems/boobytrap/**], producers: [boobytrap-test] }
+    slopcop:   { paths: [gems/slopcop/**],   depends_on: [fact-mine, boobytrap], producers: [slopcop-test] }
 ```
 
-So editing `gems/fact-mine/**` runs fact-mine's tests **and** boobytrap's (it
-depends on fact-mine) **and** slopcop's (depends on boobytrap); editing
+So editing `gems/fact-mine/**` runs fact-mine's tests **and** decomplex's (it
+depends on fact-mine) **and** slopcop's (depends on fact-mine); editing
 `compiler/ruby/**` runs the spec + transpile suites (and fuzz at premerge);
 `zig/**` runs zig + transpile. `precommit` runs each package's `producers`;
 `premerge` adds its `premerge` producers and turns mutation on. With no
 `packages` graph, `giga test` falls back to the `review.tests.<stage>` profiles.
 This is the same affected-set idea as Nx/Turborepo, kept to a declarative graph
-rather than a build system.
+rather than a build system. `depends_on` edges must be your project's **real**
+dependencies (gemspec/import) - a wrong edge over-runs (false dependent) or, worse,
+under-runs (a missing dependent skips tests it should have run). Preview any
+change with `giga test --dry-run --changed <path>`.
+
+**Optional pre-test gates.** Set `checks_enabled: true` (or pass `--checks`) to
+run lint/format gates *before* a package's tests, stopping early on failure. Each
+package lists `checks`; a check is either `contrib:<cat>:<lang>` (a bundled
+recommended script - `contrib:lint:ruby`, `contrib:lint:rust`, `contrib:fmt:zig`,
+each scoped to the changed files and skipped if the tool is absent) or a
+repo-relative script path. Every check gets `$GIGA_CHANGED`. This is a gate, not
+CI - keep anything heavier in a producer's argv. See
+[tuning-configs.md](docs/agents/tuning-configs.md) §13-§14.
+
+```yaml
+review:
+  checks_enabled: false   # opt-in; or `giga test --checks`
+  packages:
+    compiler: { paths: [compiler/ruby/**], producers: [compiler-spec], checks: [contrib:lint:ruby] }
+    zig:      { paths: [zig/**], producers: [zig-test], checks: [contrib:fmt:zig] }
+```
 
 ### Dogfooding on CLEAR: is the overhead worth it?
 

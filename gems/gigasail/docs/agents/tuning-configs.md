@@ -796,6 +796,8 @@ giga test --premerge      # premerge set: + integration/fuzz + mutation
 giga test --mutants       # add mutation producers even at precommit
 giga test --no-cov        # skip coverage-only producers
 giga test --unit          # only producers tagged evidence_scope.test_set: unit
+giga test --changed P...  # treat P... as the changed set (bypass git diff)
+giga test --checks        # run pre-test lint/format gates (§14); --no-checks forces off
 giga test --dry-run       # print the resolved producer plan, run nothing
 ```
 
@@ -837,3 +839,64 @@ unrelated edit does nothing, and a diff N commits back reads indexed evidence
 rather than re-running. This is change detection at the producer level: simple
 path/tag rules by default, delegating to Bazel's affected-targets query only
 when a project opts in.
+
+## 13. The project graph: which files trigger which tests
+
+`review.packages` (IMPLEMENTED) is an Nx/Turborepo-style "affected" graph. Each
+package declares its `paths`, the packages it `depends_on`, its `producers`, and
+optional `premerge`-only producers:
+
+```yaml
+review:
+  packages:
+    fact-mine:  { paths: [gems/fact-mine/**], producers: [fact-mine-test] }
+    decomplex:  { paths: [gems/decomplex/**], depends_on: [fact-mine], producers: [decomplex-test] }
+    compiler:   { paths: [compiler/ruby/**], producers: [compiler-spec, transpile], premerge: [fuzz-compiler] }
+```
+
+`affected_producers(changed_paths, mode)` computes the changed packages, closes
+over the **reverse** dependency edges (a change to `fact-mine` pulls in every
+package that transitively depends on it), and unions their producers - adding
+`premerge` producers only at premerge. `giga test` diffs the stage base
+(`HEAD~1` precommit, `merge-base` premerge) for the changed set, or takes
+`--changed P...` to preview a specific change deterministically. With no
+`packages` graph configured, `giga test` falls back to the stage's profiles.
+
+`depends_on` edges are the project's real dependencies (gemspec/import), not
+guesses - a wrong edge either over-runs (a false dependent) or, worse, under-runs
+(a missing dependent silently skips tests that should have run). `paths` globs
+support a trailing `/**` for a subtree; other entries match exactly.
+
+## 14. Pre-test check gates (lint/format)
+
+`review.checks_enabled` + per-package `checks` (IMPLEMENTED) add optional
+fail-fast gates that run **before** a package's producers and stop the run early
+on failure - lint, format, or any custom script. They are **off by default**;
+turn them on globally (`checks_enabled: true`) or per-run (`giga test --checks`,
+`--no-checks` to force off). They ride the same affected-package set as producers
+(§13), so a change runs only the affected packages' checks, deduplicated.
+
+```yaml
+review:
+  checks_enabled: false          # opt-in
+  packages:
+    compiler: { paths: [compiler/ruby/**], producers: [compiler-spec], checks: [contrib:lint:ruby] }
+    zig:      { paths: [zig/**], producers: [zig-test], checks: [contrib:fmt:zig] }
+```
+
+A check ref is one of:
+
+- **`contrib:<category>:<lang>`** - a bundled recommended script at
+  `gems/gigasail/contrib/<category>/<lang>.sh` (override the dir with
+  `$GIGA_CONTRIB_DIR`). Shipped: `contrib:lint:ruby` (rubocop),
+  `contrib:lint:rust` (rustfmt --check), `contrib:fmt:zig` (zig fmt --check).
+  Each scopes itself to the changed files of its language and **skips cleanly**
+  when the tool isn't installed - a recommended gate must not become a hard dep.
+- **a repo-relative script path** (`tools/my_check.rb`) - run by extension
+  (`.rb` -> ruby, `.sh` -> sh, else executed directly). A missing script is an
+  error, not a silent skip.
+
+Every check receives `$GIGA_CHANGED` (space-separated changed paths) so it can
+lint only what changed rather than the whole tree. This is a gate, not CI: it
+runs a command and reads the exit code. Anything heavier (matrices, caching,
+remote execution) belongs in a producer's `argv` or a real CI system, not here.
