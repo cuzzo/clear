@@ -95,6 +95,21 @@ fn ensure_clean_worktree_with_scope(
             .map(|suffix| format!("{database}{suffix}"))
             .collect::<Vec<_>>()
     });
+    // The whole `.giga/` state directory (database, artifacts, coordination
+    // lock, and any future run state) is Gigasail's own workspace and must
+    // never count as worktree dirtiness. Derive it from the database's parent
+    // so a custom `--db` location is honored; skip it when the database sits at
+    // the repository root (an empty relative parent would mask everything).
+    let state_dir_prefix = database
+        .and_then(|path| path.strip_prefix(repo).ok())
+        .and_then(|relative| relative.parent())
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(|parent| {
+            repository_prefix
+                .join(parent)
+                .to_string_lossy()
+                .replace('\\', "/")
+        });
     let dirty = porcelain_v1_dirty_paths(&output.stdout)?
         .into_iter()
         .find(|path| {
@@ -102,7 +117,11 @@ fn ensure_clean_worktree_with_scope(
             let inside_selected_repo = repository_prefix.as_os_str().is_empty()
                 || path == &prefix
                 || path.starts_with(&format!("{prefix}/"));
+            let in_state_dir = state_dir_prefix
+                .as_deref()
+                .is_some_and(|dir| path == dir || path.starts_with(&format!("{dir}/")));
             (require_full_worktree || inside_selected_repo)
+                && !in_state_dir
                 && path != &artifact_prefix
                 && !path.starts_with(&format!("{artifact_prefix}/"))
                 && database_path.as_deref() != Some(path)

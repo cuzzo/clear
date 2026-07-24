@@ -81,6 +81,26 @@ enum Command {
         #[arg(long)]
         require_complete: bool,
     },
+    /// Watch HEAD and analyse+ingest ("ci then sync") each new commit,
+    /// coordinating through the .giga/ lock so an MCP server or a second
+    /// watcher never indexes the database at the same time.
+    Watch {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long, default_value = ".giga/gigasail.db")]
+        db: PathBuf,
+        #[arg(long, default_value = "analyse")]
+        profile: String,
+        /// Seconds between HEAD polls.
+        #[arg(long, default_value_t = 2)]
+        interval: u64,
+        /// Explicitly authorize commands from the checkout's gigasail.yml.
+        #[arg(long)]
+        trust_current_config: bool,
+        /// Process the current HEAD once and exit instead of looping.
+        #[arg(long)]
+        once: bool,
+    },
     /// Print a revision-pinned, evidence-aware architectural diff.
     Diff {
         #[arg(long, default_value = ".")]
@@ -380,6 +400,24 @@ fn main() -> Result<()> {
                 "gigasail ci: profile={} revision={} artifacts={}",
                 result.profile, result.revision, result.artifact_count
             );
+        }
+        Command::Watch {
+            repo,
+            db,
+            profile,
+            interval,
+            trust_current_config,
+            once,
+        } => {
+            let db = repository_path(&repo, &db);
+            gigasail::watch::run(gigasail::watch::WatchRequest {
+                repo,
+                db,
+                profile,
+                trust_current_config,
+                interval: std::time::Duration::from_secs(interval),
+                once,
+            })?;
         }
         Command::Diff {
             repo,

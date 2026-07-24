@@ -13,3 +13,4 @@ pub use giga_core::{
 
 pub mod application;
 pub mod cli;
+pub mod watch;

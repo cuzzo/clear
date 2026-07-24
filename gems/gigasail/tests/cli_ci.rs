@@ -1406,6 +1406,40 @@ producers:
 "#
 }
 
+#[test]
+fn watch_once_analyses_and_syncs_head_then_releases_the_lock() {
+    let directory = tempdir().unwrap();
+    let repository = git2::Repository::init(directory.path()).unwrap();
+    let signature = git2::Signature::now("Gigasail", "giga@example.test").unwrap();
+    fs::write(
+        directory.path().join("lib.rs"),
+        "pub unsafe fn raw() { unsafe { core::ptr::read(0 as *const u8); } }\n",
+    )
+    .unwrap();
+    commit_all(&repository, &signature, "initial");
+
+    let watch = Command::new(env!("CARGO_BIN_EXE_giga"))
+        .args(["watch", "--once", "--repo"])
+        .arg(directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        watch.status.success(),
+        "{}",
+        String::from_utf8_lossy(&watch.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&watch.stdout).contains("synced"),
+        "expected a sync line, got: {}",
+        String::from_utf8_lossy(&watch.stdout)
+    );
+    // HEAD's evidence was ingested and its run staged.
+    assert!(directory.path().join(".giga/gigasail.db").exists());
+    assert!(directory.path().join(".giga/artifacts/runs").exists());
+    // The coordination lock is released once the pass completes.
+    assert!(!directory.path().join(".giga/lock.json").exists());
+}
+
 fn commit_all(
     repository: &git2::Repository,
     signature: &git2::Signature<'_>,
