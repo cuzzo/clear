@@ -272,9 +272,19 @@ module Espalier
     def intern_domains(domains)
       @domain_pool ||= {}
       canonical = domains.sort_by { |id, _| id.to_s }.to_h do |id, domain|
-        [id.to_s.freeze, deep_freeze_copy(domain)]
-      end.freeze
-      @domain_pool[canonical] ||= canonical
+        [id.to_s.freeze, intern_domain_value(domain)]
+      end
+      @domain_pool[canonical] ||= canonical.freeze
+    end
+
+    # Deep-freeze a single domain once and reuse it across every expression that
+    # references the same domain. `normalize` used to re-`deep_freeze_copy` every
+    # domain on every call, which dominated GC; the per-domain pool collapses that
+    # to one copy per distinct domain (facts are read-only, so keying on the raw
+    # domain hash is safe).
+    def intern_domain_value(domain)
+      @domain_value_pool ||= {}
+      @domain_value_pool[domain] ||= deep_freeze_copy(domain)
     end
 
     def deep_freeze_copy(value)
@@ -284,7 +294,9 @@ module Espalier
       when Array
         value.map { |child| deep_freeze_copy(child) }.freeze
       when String
-        value.dup.freeze
+        # `-string` returns a frozen, de-duplicated copy (shared fstring), which
+        # is cheaper and lower-churn than dup+freeze for the repeated domain text.
+        -value
       else
         value.freeze
       end
