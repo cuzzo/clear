@@ -487,7 +487,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     }
 
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
-        super::normalized_behavior::type_after_go_local_name(source, name)
+        type_after_go_local_name(source, name)
     }
 
     fn stdlib_language(&self) -> Option<&'static str> {
@@ -1349,6 +1349,41 @@ fn receiver_owner_from_go_function(source: &str) -> Option<String> {
     .filter(|value| !value.is_empty())
 }
 
+/// Parse a Go `var name Type` declaration for the local `name`'s declared type.
+/// Short declarations (`:=`) are inferred values and intentionally excluded.
+fn type_after_go_local_name(source: &str, name: &str) -> Option<String> {
+    let body = source.trim().strip_prefix("var ")?.trim();
+    // A grouped declaration `var ( a T1; b T2 )` holds one spec per line; a
+    // single declaration `var a T1` is the lone spec. Scan each spec for the
+    // target name so grouped blocks are not dropped.
+    let body = body
+        .strip_prefix('(')
+        .map(|inner| inner.trim_end_matches(')'))
+        .unwrap_or(body);
+    for spec in body.split([';', '\n']) {
+        let spec = spec.trim();
+        let Some(suffix) = spec.strip_prefix(name) else {
+            continue;
+        };
+        let boundary = spec[name.len()..].chars().next();
+        if boundary.is_some_and(|character| character.is_alphanumeric() || character == '_') {
+            continue;
+        }
+        let type_name = suffix
+            .trim_start()
+            .split(['=', ';'])
+            .next()
+            .unwrap_or_default()
+            .trim();
+        if let Some(resolved) =
+            super::normalized_behavior::usable_declared_local_type(type_name)
+        {
+            return Some(resolved);
+        }
+    }
+    None
+}
+
 fn receiver_name_from_go_function(source: &str) -> Option<String> {
     let source = source.trim_start();
     let receiver = source.strip_prefix('(')?.split_once(')')?.0;
@@ -1761,6 +1796,19 @@ mod tests {
                 "{symbol}"
             );
         }
+    }
+
+    #[test]
+    fn go_local_type_reads_single_and_grouped_var_blocks() {
+        assert_eq!(
+            type_after_go_local_name("var b Value", "b"),
+            Some("Value".to_string())
+        );
+        let grouped = "var (\n\tb   Value\n\tpos int\n)";
+        assert_eq!(
+            type_after_go_local_name(grouped, "b"),
+            Some("Value".to_string())
+        );
     }
 
     #[test]
