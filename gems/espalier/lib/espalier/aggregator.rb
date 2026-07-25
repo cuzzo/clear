@@ -839,6 +839,8 @@ module Espalier
         index[key] = row if !index[key] || row["power"].to_i > index[key]["power"].to_i
       end
       contexts_by_line = contexts.group_by { |row| [row["message"].to_s, row["line"].to_i] }
+      callback_params = Array(method[:callback_params]).map(&:to_s).to_set
+      iterations = Array(method[:complexity_facts]).flat_map { |fact| Array(fact["iterations"]) }
       nodes = Array(method[:delegations]).map do |delegation|
         message = delegation[:message].to_s
         span = normalized_call_span(delegation[:span])
@@ -846,6 +848,27 @@ module Espalier
         if !context
           line_rows = contexts_by_line[[message, (delegation[:line] || method[:line] || 0).to_i]]
           context = line_rows.first if line_rows&.one?
+        end
+        # A call to a callback parameter has a cost parametric in that callback
+        # (C), a complete algebraic atom that a loop composes to O(N*C) and a
+        # caller resolves by substituting the passed callable's cost.
+        callback_cost = if callback_params.include?(message) &&
+            !delegation[:target_method] && !delegation[:known_time_complexity]
+          # The callback runs once per iteration of its enclosing loop, so its
+          # cost is that loop's size domain times C. Match the loop by span
+          # containment and reuse its parameter size domain (which a caller can
+          # also substitute), giving O(N*C); no enclosing loop gives O(C).
+          cb_line = (delegation[:line] || method[:line] || 0).to_i
+          loop_fact = iterations.find do |it|
+            bounds = it["span"]
+            bounds && cb_line >= bounds[0].to_i && cb_line <= bounds[2].to_i
+          end
+          mult_id = loop_fact && Array(loop_fact.dig("symbolic_time", "factors")).first&.fetch("domain_id", nil)
+          mult_domains = mult_id ? [{ "id" => mult_id, "name" => Array(loop_fact["parameter_domains"]).first.to_s, "source_kind" => "parameter" }] : []
+          Espalier::SymbolicComplexity.parameterized_cost(
+            id: "cost:#{delegation[:call_id]}", name: message, source_kind: "callback_cost",
+            multiplicity_domain: mult_id, domains: mult_domains
+          )
         end
         {
           type: :call,
@@ -858,18 +881,19 @@ module Espalier
           # The canonical CallRecord is enriched after syntax normalization by
           # SCIP and dependency summaries. Its exact symbol cost must outrank
           # an earlier adapter-level context model for the same source span.
-          known_time_complexity: delegation[:known_time_complexity] || (context && context["known_time_complexity"]),
+          known_time_complexity: (callback_cost && (Espalier::SymbolicComplexity.render(callback_cost)&.first || "O(C)")) ||
+            delegation[:known_time_complexity] || (context && context["known_time_complexity"]),
           known_space_complexity: delegation[:known_space_complexity] || (context && context["known_space_complexity"]),
           complexity_provenance: delegation[:complexity_provenance],
           complexity_bound_quality: delegation[:complexity_bound_quality],
           complexity_candidates: delegation[:complexity_candidates],
           complexity_assumptions: delegation[:complexity_assumptions],
-          evidence_gap: if delegation[:known_time_complexity] || delegation[:known_space_complexity]
+          evidence_gap: if delegation[:known_time_complexity] || delegation[:known_space_complexity] || callback_cost
                           nil
                         else
                           context && context["evidence_gap"]
                         end,
-          symbolic_time: parametric_call_symbolic(delegation, context) ||
+          symbolic_time: callback_cost || parametric_call_symbolic(delegation, context) ||
             (context && symbolic_call_complexity(context)),
           collection_arguments: context && context["power"].to_i.positive? &&
             (Array(context["parameter_arguments"]) & Array(context["collection_parameters"])),

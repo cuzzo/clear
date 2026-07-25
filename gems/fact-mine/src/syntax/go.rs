@@ -384,6 +384,43 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         true
     }
 
+    /// Parameters whose type is a Go function type (`f func(...) ...`) are
+    /// callbacks: the function's cost is parametric in them, so a caller can
+    /// substitute the passed callable's cost. Parsed from the signature's
+    /// parameter list (Go params come from the signature, not `LASGN` nodes),
+    /// splitting on top-level commas so a `func(a, b) c` type is not torn apart.
+    fn callback_parameter_names(&self, function: &Node) -> Vec<String> {
+        let params_source = self.parameter_list_source(&function.text);
+        if params_source.is_empty() {
+            return Vec::new();
+        }
+        let mut depth = 0i32;
+        let mut start = 0usize;
+        let mut parts: Vec<&str> = Vec::new();
+        for (index, byte) in params_source.bytes().enumerate() {
+            match byte {
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => depth -= 1,
+                b',' if depth == 0 => {
+                    parts.push(&params_source[start..index]);
+                    start = index + 1;
+                }
+                _ => {}
+            }
+        }
+        parts.push(&params_source[start..]);
+        parts
+            .into_iter()
+            .filter_map(|part| {
+                let (name, ty) = part.trim().split_once(char::is_whitespace)?;
+                let ty = ty.trim_start();
+                (ty.starts_with("func(") || ty.starts_with("func "))
+                    .then(|| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+            })
+            .collect()
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,

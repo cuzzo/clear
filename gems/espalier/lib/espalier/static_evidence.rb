@@ -101,6 +101,7 @@ module Espalier
           signature: m["signature"],
           parameters: Array(m["params"]),
           visibility: (m["visibility"] || :public).to_sym,
+          callback_params: Array(m["callback_params"]).map(&:to_s),
           line: m["line"]&.to_i,
           span: m["span"],
           file: m["path"],
