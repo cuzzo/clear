@@ -309,6 +309,8 @@ const GO_BUILTIN_OPERATORS: &[&str] = &[
     "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^",
     "<<", ">>", "&^", "&&", "||", "!",
 ];
+// Fixed-arg predeclared builtins that reduce to a constant-time comparison.
+const GO_BUILTIN_FUNCTIONS: &[&str] = &["max", "min"];
 const GO_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "nil"];
 const GO_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const GO_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
@@ -774,11 +776,14 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         receiver: Option<&str>,
         message: &str,
     ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
-        if GO_BUILTIN_OPERATORS.contains(&message) {
+        // Unary operators carry a trailing `@` (e.g. `-@`); strip it so the
+        // same table matches unary and binary forms.
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if GO_BUILTIN_OPERATORS.contains(&operator) || GO_BUILTIN_FUNCTIONS.contains(&message) {
             // Go has no operator overloading: arithmetic, comparison, bitwise
-            // and logical operators are builtin constant-time on primitives.
-            // Without this they are recorded as unresolved call targets, which
-            // wrongly marks otherwise-O(1) functions incomplete.
+            // and logical operators - and the fixed-arg builtins max/min - are
+            // constant-time on primitives. Without this they are recorded as
+            // unresolved call targets, wrongly marking O(1) functions incomplete.
             return Some(super::normalized_behavior::NormalizedCallComplexity {
                 time: "O(1)",
                 space: "O(1)",
@@ -1761,7 +1766,7 @@ mod tests {
     #[test]
     fn go_builtin_operators_are_constant_time_intrinsics() {
         let behavior = GoNormalizedBehavior;
-        for op in ["<", "==", "+", "*", "&", "<<", "!="] {
+        for op in ["<", "==", "+", "*", "&", "<<", "!=", "-@", "+@", "max", "min"] {
             let complexity = behavior.intrinsic_call_complexity(Some("x"), op);
             assert_eq!(
                 complexity.map(|c| c.time),
