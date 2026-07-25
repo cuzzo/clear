@@ -1488,8 +1488,14 @@ fn immutable_struct_reader_sets(
 ) -> BTreeMap<String, BTreeSet<String>> {
     let mut readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut class_stack = Vec::new();
-    let method_ranges: Vec<(usize, usize)> =
-        functions.iter().map(|f| (f.span[0], f.span[2])).collect();
+    // Exclude lambdas: a `factory: -> { [] }` default on a `prop`/`const` line
+    // is an inline expression, not a method body, and must not mask the
+    // struct-field line from this line-based reader.
+    let method_ranges: Vec<(usize, usize)> = functions
+        .iter()
+        .filter(|f| f.dispatch_kind != "lambda")
+        .map(|f| (f.span[0], f.span[2]))
+        .collect();
     for (idx, line) in source.lines().enumerate() {
         let line_num = idx + 1;
         if method_ranges
@@ -1545,8 +1551,14 @@ fn immutable_struct_reader_types(
 ) -> BTreeMap<String, BTreeMap<String, String>> {
     let mut reader_types: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     let mut class_stack = Vec::new();
-    let method_ranges: Vec<(usize, usize)> =
-        functions.iter().map(|f| (f.span[0], f.span[2])).collect();
+    // Exclude lambdas: a `factory: -> { [] }` default on a `prop`/`const` line
+    // is an inline expression, not a method body, and must not mask the
+    // struct-field line from this line-based reader.
+    let method_ranges: Vec<(usize, usize)> = functions
+        .iter()
+        .filter(|f| f.dispatch_kind != "lambda")
+        .map(|f| (f.span[0], f.span[2]))
+        .collect();
     for (idx, line) in source.lines().enumerate() {
         let line_num = idx + 1;
         if method_ranges

@@ -3,6 +3,104 @@
     {
       "control_flow_edges": [
         {
+          "from": "cfg:CfgCallbacks#<lambda@10:18>:entry:0:10:18",
+          "function": "<lambda@10:18>",
+          "kind": "entry",
+          "line": 10,
+          "owner": "CfgCallbacks",
+          "span": [
+            10,
+            18,
+            14,
+            5
+          ],
+          "to": "cfg:CfgCallbacks#<lambda@10:18>:stmt:1:11:6"
+        },
+        {
+          "from": "cfg:CfgCallbacks#<lambda@10:18>:stmt:1:11:6",
+          "function": "<lambda@10:18>",
+          "kind": "fallthrough",
+          "line": 11,
+          "owner": "CfgCallbacks",
+          "span": [
+            11,
+            6,
+            13,
+            8
+          ],
+          "to": "cfg:CfgCallbacks#<lambda@10:18>:exit:2:14:5"
+        },
+        {
+          "from": "cfg:CfgCallbacks#<lambda@11:16>:entry:0:11:16",
+          "function": "<lambda@11:16>",
+          "kind": "entry",
+          "line": 11,
+          "owner": "CfgCallbacks",
+          "span": [
+            11,
+            16,
+            13,
+            7
+          ],
+          "to": "cfg:CfgCallbacks#<lambda@11:16>:stmt:1:12:8"
+        },
+        {
+          "from": "cfg:CfgCallbacks#<lambda@11:16>:stmt:1:12:8",
+          "function": "<lambda@11:16>",
+          "kind": "fallthrough",
+          "line": 12,
+          "owner": "CfgCallbacks",
+          "span": [
+            12,
+            8,
+            12,
+            24
+          ],
+          "to": "cfg:CfgCallbacks#<lambda@11:16>:exit:2:13:7"
+        },
+        {
+          "from": "cfg:CfgCallbacks#<lambda@19:18>:entry:0:19:18",
+          "function": "<lambda@19:18>",
+          "kind": "fallthrough",
+          "line": 19,
+          "owner": "CfgCallbacks",
+          "span": [
+            19,
+            18,
+            19,
+            26
+          ],
+          "to": "cfg:CfgCallbacks#<lambda@19:18>:exit:1:19:26"
+        },
+        {
+          "from": "cfg:CfgCallbacks#<lambda@3:18>:entry:0:3:18",
+          "function": "<lambda@3:18>",
+          "kind": "entry",
+          "line": 3,
+          "owner": "CfgCallbacks",
+          "span": [
+            3,
+            18,
+            5,
+            5
+          ],
+          "to": "cfg:CfgCallbacks#<lambda@3:18>:stmt:1:4:6"
+        },
+        {
+          "from": "cfg:CfgCallbacks#<lambda@3:18>:stmt:1:4:6",
+          "function": "<lambda@3:18>",
+          "kind": "fallthrough",
+          "line": 4,
+          "owner": "CfgCallbacks",
+          "span": [
+            4,
+            6,
+            4,
+            22
+          ],
+          "to": "cfg:CfgCallbacks#<lambda@3:18>:exit:2:5:5"
+        },
+        {
           "from": "cfg:CfgCallbacks#callbackBlock:entry:0:2:2",
           "function": "callbackBlock",
           "kind": "entry",
@@ -172,6 +270,171 @@
         }
       ],
       "control_flow_nodes": [
+        {
+          "function": "<lambda@10:18>",
+          "id": "cfg:CfgCallbacks#<lambda@10:18>:entry:0:10:18",
+          "kind": "entry",
+          "line": 10,
+          "owner": "CfgCallbacks",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            10,
+            18,
+            14,
+            5
+          ]
+        },
+        {
+          "function": "<lambda@10:18>",
+          "id": "cfg:CfgCallbacks#<lambda@10:18>:exit:2:14:5",
+          "kind": "exit",
+          "line": 14,
+          "owner": "CfgCallbacks",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            10,
+            18,
+            14,
+            5
+          ]
+        },
+        {
+          "function": "<lambda@10:18>",
+          "id": "cfg:CfgCallbacks#<lambda@10:18>:stmt:1:11:6",
+          "kind": "statement",
+          "line": 11,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "this.hook(() => { this.audit(user); })",
+          "span": [
+            11,
+            6,
+            13,
+            8
+          ]
+        },
+        {
+          "function": "<lambda@11:16>",
+          "id": "cfg:CfgCallbacks#<lambda@11:16>:entry:0:11:16",
+          "kind": "entry",
+          "line": 11,
+          "owner": "CfgCallbacks",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            11,
+            16,
+            13,
+            7
+          ]
+        },
+        {
+          "function": "<lambda@11:16>",
+          "id": "cfg:CfgCallbacks#<lambda@11:16>:exit:2:13:7",
+          "kind": "exit",
+          "line": 13,
+          "owner": "CfgCallbacks",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            11,
+            16,
+            13,
+            7
+          ]
+        },
+        {
+          "function": "<lambda@11:16>",
+          "id": "cfg:CfgCallbacks#<lambda@11:16>:stmt:1:12:8",
+          "kind": "statement",
+          "line": 12,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "this.audit(user)",
+          "span": [
+            12,
+            8,
+            12,
+            24
+          ]
+        },
+        {
+          "function": "<lambda@19:18>",
+          "id": "cfg:CfgCallbacks#<lambda@19:18>:entry:0:19:18",
+          "kind": "entry",
+          "line": 19,
+          "owner": "CfgCallbacks",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            19,
+            18,
+            19,
+            26
+          ]
+        },
+        {
+          "function": "<lambda@19:18>",
+          "id": "cfg:CfgCallbacks#<lambda@19:18>:exit:1:19:26",
+          "kind": "exit",
+          "line": 19,
+          "owner": "CfgCallbacks",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            19,
+            18,
+            19,
+            26
+          ]
+        },
+        {
+          "function": "<lambda@3:18>",
+          "id": "cfg:CfgCallbacks#<lambda@3:18>:entry:0:3:18",
+          "kind": "entry",
+          "line": 3,
+          "owner": "CfgCallbacks",
+          "role": "function_entry",
+          "source": "",
+          "span": [
+            3,
+            18,
+            5,
+            5
+          ]
+        },
+        {
+          "function": "<lambda@3:18>",
+          "id": "cfg:CfgCallbacks#<lambda@3:18>:exit:2:5:5",
+          "kind": "exit",
+          "line": 5,
+          "owner": "CfgCallbacks",
+          "role": "function_exit",
+          "source": "",
+          "span": [
+            3,
+            18,
+            5,
+            5
+          ]
+        },
+        {
+          "function": "<lambda@3:18>",
+          "id": "cfg:CfgCallbacks#<lambda@3:18>:stmt:1:4:6",
+          "kind": "statement",
+          "line": 4,
+          "owner": "CfgCallbacks",
+          "role": "linear_statement",
+          "source": "this.audit(user)",
+          "span": [
+            4,
+            6,
+            4,
+            22
+          ]
+        },
         {
           "function": "callbackBlock",
           "id": "cfg:CfgCallbacks#callbackBlock:entry:0:2:2",

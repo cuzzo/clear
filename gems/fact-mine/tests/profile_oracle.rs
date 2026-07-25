@@ -529,8 +529,12 @@ fn go_type_assertions_and_channel_receives_export_presence_without_payload_proof
         .iter()
         .map(|correlation| correlation.semantics.as_str())
         .collect::<Vec<_>>();
+    // Order follows group-id sort (lambda-owned correlations sort first); the
+    // meaningful contract is the multiset plus the per-correlation spans below.
+    let mut semantics_sorted = semantics.clone();
+    semantics_sorted.sort_unstable();
     assert_eq!(
-        semantics,
+        semantics_sorted,
         vec![
             "channel_receive",
             "type_assertion",
@@ -1983,7 +1987,16 @@ end
 
     let output = profile::extract(&document, Profile::TracePlan);
 
-    assert_eq!(output.methods.len(), 1);
+    // `call` plus the `factory: -> { [] }` lambda, extracted as a first-class
+    // method so its complexity resolves like any named function.
+    let method_names = output
+        .methods
+        .iter()
+        .map(|method| method.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(method_names.contains(&"call"));
+    assert!(method_names.iter().any(|name| name.starts_with("<lambda@")));
+    assert_eq!(output.methods.len(), 2);
     assert!(output
         .tlet_sites
         .iter()
@@ -2010,7 +2023,7 @@ end
 
     let merged = profile::merge(vec![output], Profile::TracePlan);
     assert_eq!(merged.tlet_sites.len(), 1);
-    assert_eq!(merged.methods.len(), 1);
+    assert_eq!(merged.methods.len(), 2);
     Ok(())
 }
 

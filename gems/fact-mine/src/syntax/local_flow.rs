@@ -54,7 +54,7 @@ pub struct Boundary {
 }
 
 const OWNER_TYPES: &[&str] = &["CLASS", "MODULE"];
-const METHOD_TYPES: &[&str] = &["DEFN", "DEFS"];
+const METHOD_TYPES: &[&str] = &["DEFN", "DEFS", "LAMBDA"];
 const SKIP_NESTED_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA"];
 const LOCAL_READ_TYPES: &[&str] = &["LVAR", "DVAR", "IVAR", "CVAR"];
 const LOCAL_WRITE_TYPES: &[&str] = &["LASGN", "DASGN", "IASGN", "CVASGN"];
@@ -253,11 +253,35 @@ impl<'a> LocalFlow<'a> {
                 for child in node.children.iter().filter_map(ast::node) {
                     self.collect_methods(child, owners, out);
                 }
+            } else {
+                // Even where the language does not treat nested named functions
+                // as local callables, a lambda body is its own function and must
+                // receive complexity facts so a caller can substitute its cost.
+                for child in node.children.iter().filter_map(ast::node) {
+                    self.collect_lambdas(child, out);
+                }
             }
         } else {
             for child in node.children.iter().filter_map(ast::node) {
                 self.collect_methods(child, owners, out);
             }
+        }
+    }
+
+    fn collect_lambdas(&self, node: &Node, out: &mut Vec<MethodSummary>) {
+        if node.r#type == "LAMBDA" {
+            let span = [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ];
+            if !out.iter().any(|method| method.span == span) {
+                out.push(self.method_summary(node, None));
+            }
+        }
+        for child in node.children.iter().filter_map(ast::node) {
+            self.collect_lambdas(child, out);
         }
     }
 

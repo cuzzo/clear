@@ -83,10 +83,19 @@ fn raw_presence_correlations(
         function: &str,
         rows: &mut Vec<RawPresenceCorrelation>,
     ) {
+        // A `func_literal` closure is normalized to a first-class lambda whose
+        // synthetic name is `<lambda@{1-based row}:{0-based col}>` of its start.
+        // Attribute presence correlations declared inside it to that same name
+        // so the normalized seed and this raw span reconcile by function.
+        let lambda_name;
         let function = if node.kind() == "function_declaration" {
             node.child_by_field_name("name")
                 .and_then(|name| text(name, source))
                 .unwrap_or(function)
+        } else if node.kind() == "func_literal" {
+            let start = node.start_position();
+            lambda_name = format!("<lambda@{}:{}>", start.row + 1, start.column);
+            lambda_name.as_str()
         } else {
             function
         };

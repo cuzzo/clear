@@ -55,6 +55,7 @@ pub(crate) fn extract(
     let mut declaration_spans = BTreeMap::<(GraphKey, String), Span>::new();
     let mut method_spans = BTreeMap::<GraphKey, Span>::new();
     let mut graph_key_by_node = BTreeMap::new();
+    let mut lambda_entry_by_graph: BTreeMap<GraphKey, (String, Span)> = BTreeMap::new();
     let duplicate_functions = methods
         .iter()
         .fold(BTreeMap::new(), |mut counts, method| {
@@ -83,6 +84,9 @@ pub(crate) fn extract(
         };
 
         if node.kind == "entry" {
+            if method.node.r#type == "LAMBDA" {
+                lambda_entry_by_graph.insert(graph_key.clone(), (node.id.clone(), node.span));
+            }
             raw.writes.extend(method.params.iter().cloned());
             for name in &method.params {
                 raw.record_place(name.clone(), "local");
@@ -175,6 +179,72 @@ pub(crate) fn extract(
                 .or_insert(node.span);
         }
         raw_by_node.insert(node.id.clone(), raw);
+    }
+
+    // Index the local place names used in each graph so captures can be told
+    // apart from a lambda's own locals.
+    let mut graph_local_names: BTreeMap<GraphKey, BTreeSet<String>> = BTreeMap::new();
+    for (node_id, node_graph_key) in &graph_key_by_node {
+        let raw = &raw_by_node[node_id];
+        let names = graph_local_names.entry(node_graph_key.clone()).or_default();
+        for name in raw.reads.iter().chain(raw.writes.iter()) {
+            if raw.place_kinds.get(name).is_some_and(|kind| kind == "local") {
+                names.insert(name.clone());
+            }
+        }
+    }
+
+    // A lambda's free variables (captured from the enclosing scope) are inputs
+    // to the closure. In the lambda's own graph they are read with no local
+    // definition, which would strand them as disconnected reads. A capture is a
+    // local read with no local write in the lambda that is also a local of an
+    // enclosing method -- this excludes the lambda's own multi-assign locals,
+    // whose declarations are recorded as reads rather than writes. Seed each
+    // capture as a definition at the lambda's entry node, exactly as params are.
+    for (graph_key, (entry_id, entry_span)) in &lambda_entry_by_graph {
+        let lambda_span = method_spans[graph_key];
+        let enclosing_locals = graph_local_names
+            .iter()
+            .filter(|(other_key, _)| {
+                *other_key != graph_key && span_contains(method_spans[*other_key], lambda_span)
+            })
+            .flat_map(|(_, names)| names.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        let local_reads = graph_local_names.get(graph_key).cloned().unwrap_or_default();
+        let local_writes = graph_key_by_node
+            .iter()
+            .filter(|(_, node_graph_key)| *node_graph_key == graph_key)
+            .flat_map(|(node_id, _)| {
+                let raw = &raw_by_node[node_id];
+                raw.writes
+                    .iter()
+                    .filter(|name| raw.place_kinds.get(*name).is_some_and(|kind| kind == "local"))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .collect::<BTreeSet<_>>();
+        let captures = local_reads
+            .difference(&local_writes)
+            .filter(|name| enclosing_locals.contains(*name))
+            .cloned()
+            .collect::<Vec<_>>();
+        if captures.is_empty() {
+            continue;
+        }
+        let entry_raw = raw_by_node
+            .get_mut(entry_id)
+            .expect("lambda entry node has a raw effect");
+        for name in &captures {
+            entry_raw.writes.insert(name.clone());
+            entry_raw.record_place(name.clone(), "local");
+        }
+        let places = all_places.entry(graph_key.clone()).or_default();
+        for name in &captures {
+            places.entry(name.clone()).or_insert_with(|| "local".to_string());
+            declaration_spans
+                .entry((graph_key.clone(), name.clone()))
+                .or_insert(*entry_span);
+        }
     }
 
     let mut place_id_by_name = BTreeMap::new();

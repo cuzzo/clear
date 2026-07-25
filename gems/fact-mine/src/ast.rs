@@ -228,7 +228,14 @@ pub fn slice(node: &Node, _lines: &[String]) -> String {
 }
 
 pub fn body_stmts(defn_node: &Node) -> Vec<&Node> {
-    let scope_index = if defn_node.r#type == "DEFS" { 2 } else { 1 };
+    // A normalized function wraps its SCOPE at a type-specific child index: a
+    // singleton-method DEFS after its receiver/name, a LAMBDA directly, an
+    // ordinary DEFN after its name.
+    let scope_index = match defn_node.r#type.as_str() {
+        "DEFS" => 2,
+        "LAMBDA" => 0,
+        _ => 1,
+    };
     let Some(scope) = defn_node.children.get(scope_index).and_then(node) else {
         return Vec::new();
     };
@@ -418,6 +425,7 @@ const STATEMENT_BLOCK_PARENT_KINDS: &[&str] = &[
     "finally_clause",
     "do_statement",
     "lambda_expression",
+    "func_literal",
 ];
 const EMPTY_BODY_WRAPPER_KINDS: &[&str] = &["body_statement", "block", "block_body", "statement"];
 const HEREDOC_BODY_WRAPPER_KINDS: &[&str] = &["body_statement", "block_body", "statement", "then"];
