@@ -159,6 +159,7 @@ impl<'a> Extractor<'a> {
             "AND" | "OR" => self.scan_boolean(node),
             "CALL" | "QCALL" | "FCALL" | "VCALL" => self.record_call_node(node, false),
             "ITER" => self.scan_iter(node),
+            "LAMBDA" => self.scan_lambda(node),
             "YIELD" => self.scan_yield(node),
             "XSTR" => self.scan_command_string(node),
             "SCLASS" => self.scan_singleton_class(node),
@@ -391,6 +392,51 @@ impl<'a> Extractor<'a> {
         if owner_pushed {
             self.owners.pop();
         }
+    }
+
+    /// A lambda / function literal is analyzed as a first-class function so its
+    /// Big-O is computed with the same pipeline as a named function. It is owned
+    /// by the enclosing owner and given a synthetic, span-stable name; its body
+    /// is scanned as that function (its calls/loops attribute to the lambda, not
+    /// the enclosing function), which is what lets a passed callback carry its
+    /// own cost.
+    fn scan_lambda(&mut self, node: &Node) {
+        let owner = self.current_owner();
+        let lambda_span = span(node);
+        let name = format!("<lambda@{}:{}>", lambda_span[0], lambda_span[1]);
+        let params = function_params(node, self.behavior);
+        self.facts.function_defs.push(FunctionDef {
+            file: self.file.clone(),
+            name: name.clone(),
+            owner: owner.clone(),
+            dispatch_kind: "lambda".to_string(),
+            line: node.first_lineno,
+            span: lambda_span,
+            body: raw_from_normalized(node),
+            visibility: Some("private".to_string()),
+            params: params.clone(),
+            callback_params: self.behavior.callback_parameter_names(node),
+            signature: String::new(),
+        });
+        self.functions.push(name);
+        self.function_params.push(params);
+        self.local_owned_values.push(BTreeSet::new());
+        self.receiver_aliases
+            .push(self.behavior.receiver_aliases_for_function(node));
+        if let Some(scope) = function_scope(node) {
+            if let Some(args) = scope_args(scope) {
+                self.scan(args);
+            }
+            if let Some(body) = scope_body(scope) {
+                self.scan(body);
+            }
+        } else {
+            self.scan_children(node);
+        }
+        self.receiver_aliases.pop();
+        self.local_owned_values.pop();
+        self.function_params.pop();
+        self.functions.pop();
     }
 
     fn scan_iter(&mut self, node: &Node) {

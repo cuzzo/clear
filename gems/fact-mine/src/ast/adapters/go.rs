@@ -46,6 +46,17 @@ impl AstNormalizationAdapter for GoAstAdapter {
         (package, imports)
     }
 
+    /// A Go function literal `func(...) ... { ... }` is a lambda, so it is
+    /// normalized (and later extracted) as a first-class function whose Big-O is
+    /// computed with the same pipeline as a named function.
+    fn lambda_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "func_literal").then_some(node)
+    }
+
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
         go_statement_without_inner_call(node)
     }
