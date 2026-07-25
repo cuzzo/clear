@@ -1429,6 +1429,52 @@ fn exact_native_stdlib_calls_emit_normalized_complexity_facts() -> Result<()> {
 }
 
 #[test]
+fn typed_atomics_reflect_and_builder_methods_are_constant_time() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+import (
+	"strings"
+	"sync/atomic"
+	"reflect"
+)
+
+type Counter struct{ n atomic.Uint64 }
+
+func work(c *Counter, b *strings.Builder, v reflect.Value) {
+	c.n.CompareAndSwap(1, 2)
+	c.n.Add(1)
+	b.WriteRune('x')
+	_ = v.NumMethod()
+	_ = v.Cap()
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let contexts: Vec<_> = output
+        .complexity_facts
+        .iter()
+        .flat_map(|facts| facts.call_contexts.iter())
+        .collect();
+    for message in ["CompareAndSwap", "Add", "WriteRune", "NumMethod", "Cap"] {
+        let call = contexts
+            .iter()
+            .find(|call| call.message == message)
+            .with_context(|| format!("missing {message} complexity fact"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(1)"),
+            "{message} must be modeled as constant-time",
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn go_builtins_are_modeled_as_language_intrinsics_without_scip_targets() -> Result<()> {
     use std::io::Write;
 

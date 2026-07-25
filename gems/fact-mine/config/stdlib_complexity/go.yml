@@ -32,6 +32,22 @@ reflect.Value:
   Convert: linear_materialize
   Type: constant
   Uint: constant
+  Addr: constant
+  Bytes: constant
+  CanInterface: constant
+  Cap: constant
+  IsZero: constant
+  MapRange: constant
+  NumMethod: constant
+  OverflowFloat: constant
+  OverflowInt: constant
+  OverflowUint: constant
+  Pointer: constant
+  SetBytes: constant
+  SetLen: constant
+  SetZero: constant
+  UnsafePointer: constant
+  Grow: linear_materialize
 reflect.Type:
   AssignableTo: constant
   Bits: constant
@@ -41,13 +57,21 @@ reflect.Type:
   Kind: constant
   Len: constant
   NumField: constant
+  NumMethod: constant
+  Implements: constant
   ConvertibleTo: constant
 reflect.StructTag:
   Get: linear_scan
 strings.Builder:
   Len: constant
+  Cap: constant
   String: constant
+  Reset: constant
+  Grow: constant
+  WriteByte: constant
+  WriteRune: constant
   WriteString: linear_materialize
+  Write: linear_materialize
 time.Time:
   Add: constant
   After: constant
@@ -70,6 +94,24 @@ context.Context:
 sync.Pool:
   Get: constant
   Put: constant
+# Go 1.19+ typed atomics: lock-free single-word ops, all O(1).
+atomic.Bool: &atomic_methods
+  Load: constant
+  Store: constant
+  Swap: constant
+  CompareAndSwap: constant
+  Add: constant
+atomic.Int32: *atomic_methods
+atomic.Int64: *atomic_methods
+atomic.Uint32: *atomic_methods
+atomic.Uint64: *atomic_methods
+atomic.Uintptr: *atomic_methods
+atomic.Pointer: *atomic_methods
+atomic.Value:
+  Load: constant
+  Store: constant
+  Swap: constant
+  CompareAndSwap: constant
 list.List:
   Back: constant
   Front: constant

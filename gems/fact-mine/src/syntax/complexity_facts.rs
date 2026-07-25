@@ -585,6 +585,34 @@ fn fact_for_method(
         .iter()
         .map(|owner| owner.name.clone())
         .collect::<BTreeSet<_>>();
+    // Global (owner -> field -> type) table for `base.field` receiver typing,
+    // built once from every type's declared fields.
+    let mut field_types: BTreeMap<String, BTreeMap<String, TypeExpr>> = BTreeMap::new();
+    for state in &document.state_declarations {
+        let Some(declared) = state.r#type.as_deref() else {
+            continue;
+        };
+        let Some(owner_name) = type_owner_name(&TypeExpr::parse(&state.owner, language)) else {
+            continue;
+        };
+        field_types.entry(owner_name).or_default().insert(
+            state.field.trim_start_matches('@').to_string(),
+            TypeExpr::parse(declared, language),
+        );
+    }
+    // Bind the method receiver variable (Go's `c`, etc.) to the owner type so
+    // `c.field.method()` resolves the same as `self.field.method()`. The adapter
+    // reports which locals alias the receiver; other languages use `self`/`this`
+    // and need no binding here.
+    let mut augmented_parameter_types = parameter_types.clone();
+    for (receiver_var, target) in behavior.receiver_aliases_for_function(node) {
+        if target == "self" {
+            augmented_parameter_types
+                .entry(receiver_var)
+                .or_insert_with(|| TypeExpr::parse(owner, language));
+        }
+    }
+    let parameter_types = &augmented_parameter_types;
     visit_loops(
         node,
         params,
@@ -603,6 +631,7 @@ fn fact_for_method(
         state_types,
         type_aliases,
         &type_names,
+        &field_types,
         language,
         behavior,
         &mut domain_registry,
@@ -630,6 +659,7 @@ fn fact_for_method(
         &collection_mutations,
         parameter_types,
         state_types,
+        &field_types,
         &mut allocations,
         behavior,
     );
@@ -1017,6 +1047,7 @@ fn collect_allocations(
     collection_mutations: &BTreeMap<String, Vec<(usize, usize)>>,
     parameter_types: &BTreeMap<String, TypeExpr>,
     state_types: &BTreeMap<String, TypeExpr>,
+    field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
     output: &mut Vec<AllocationFact>,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
@@ -1029,6 +1060,7 @@ fn collect_allocations(
             parameter_types,
             assignments,
             state_types,
+            field_types,
             (node.first_lineno, node.first_column),
             behavior,
         )
@@ -1107,6 +1139,7 @@ fn collect_allocations(
             collection_mutations,
             parameter_types,
             state_types,
+            field_types,
             output,
             behavior,
         );
@@ -1132,6 +1165,7 @@ fn visit_loops(
     state_types: &BTreeMap<String, TypeExpr>,
     type_aliases: &BTreeMap<String, String>,
     type_names: &BTreeSet<String>,
+    field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
     language: &str,
     behavior: &dyn NormalizedLanguageBehavior,
     domain_registry: &mut DomainRegistry,
@@ -1181,6 +1215,7 @@ fn visit_loops(
                 state_types,
                 type_aliases,
                 type_names,
+                field_types,
                 language,
                 behavior,
                 domain_registry,
@@ -1208,6 +1243,7 @@ fn visit_loops(
                 state_types,
                 type_aliases,
                 type_names,
+                field_types,
                 language,
                 behavior,
                 domain_registry,
@@ -1512,6 +1548,7 @@ fn visit_loops(
                 state_types,
                 type_aliases,
                 type_names,
+                field_types,
                 language,
                 behavior,
                 domain_registry,
@@ -1536,6 +1573,7 @@ fn visit_loops(
                 state_types,
                 type_aliases,
                 type_names,
+                field_types,
                 language,
                 behavior,
                 domain_registry,
@@ -1641,6 +1679,7 @@ fn visit_loops(
                 parameter_types,
                 assignments,
                 state_types,
+                field_types,
                 (node.first_lineno, node.first_column),
                 behavior,
             );
@@ -1725,6 +1764,7 @@ fn visit_loops(
                 state_types,
                 type_aliases,
                 type_names,
+                field_types,
                 language,
                 behavior,
                 domain_registry,
@@ -1738,6 +1778,7 @@ fn call_receiver_type(
     parameter_types: &BTreeMap<String, TypeExpr>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
     state_types: &BTreeMap<String, TypeExpr>,
+    field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
     before: (usize, usize),
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> Option<TypeExpr> {
@@ -1751,6 +1792,14 @@ fn call_receiver_type(
             return Some(state_type.clone());
         }
     }
+    // `base.field` receiver: resolve the base's type, then read the field's
+    // declared type. Runs before the plain local-name fallback, which would
+    // otherwise yield the base's own type for `c.field.method()`.
+    if let Some(field_type) =
+        field_access_type(receiver.text.trim(), parameter_types, state_types, field_types)
+    {
+        return Some(field_type);
+    }
     let receiver_names = local_names(receiver);
     for name in &receiver_names {
         if let Some(parameter_type) = parameter_types.get(name) {
@@ -1762,6 +1811,60 @@ fn call_receiver_type(
     domains
         .into_iter()
         .find_map(|name| parameter_types.get(&name).cloned())
+}
+
+/// Resolve a `base.field` receiver to the field's declared type: resolve the
+/// base expression, then read the field from the global (owner -> field -> type)
+/// table. Recurses for nested access (`a.b.field`). Language-neutral.
+fn field_access_type(
+    receiver: &str,
+    parameter_types: &BTreeMap<String, TypeExpr>,
+    state_types: &BTreeMap<String, TypeExpr>,
+    field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
+) -> Option<TypeExpr> {
+    let (base, field) = receiver.rsplit_once('.')?;
+    let base = base.trim();
+    let field = field.trim();
+    if base.is_empty() || field.is_empty() || field.contains(['(', '[', ']', ' ']) {
+        return None;
+    }
+    let base_type = resolve_expr_type(base, parameter_types, state_types, field_types)?;
+    let owner = type_owner_name(&base_type)?;
+    field_types
+        .get(&owner)
+        .and_then(|fields| fields.get(field))
+        .cloned()
+}
+
+/// Type of a base expression: a param/local, a self-field, or a nested access.
+fn resolve_expr_type(
+    expr: &str,
+    parameter_types: &BTreeMap<String, TypeExpr>,
+    state_types: &BTreeMap<String, TypeExpr>,
+    field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
+) -> Option<TypeExpr> {
+    if let Some(parameter_type) = parameter_types.get(expr) {
+        return Some(parameter_type.clone());
+    }
+    if let Some(state_type) = state_types.get(expr.trim_start_matches('@')) {
+        return Some(state_type.clone());
+    }
+    field_access_type(expr, parameter_types, state_types, field_types)
+}
+
+/// Bare nominal name of a type (strips pointer/ref, generics, and package/module
+/// qualifiers) for keying the field table.
+fn type_owner_name(type_expr: &TypeExpr) -> Option<String> {
+    match type_expr {
+        TypeExpr::Primitive(name) => {
+            let bare = name.trim().trim_start_matches(['*', '&']).trim();
+            let bare = bare.split(['<', '[']).next().unwrap_or(bare);
+            let bare = bare.rsplit(['.', ':']).next().unwrap_or(bare).trim();
+            (!bare.is_empty()).then(|| bare.to_string())
+        }
+        TypeExpr::Nilable(inner) => type_owner_name(inner),
+        _ => None,
+    }
 }
 
 fn record_collection_growth(
