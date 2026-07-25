@@ -1698,6 +1698,11 @@ fn visit_loops(
                     (call_receiver(node).is_none() && type_names.contains(message))
                         .then(|| behavior.type_name_conversion_complexity())
                         .flatten()
+                })
+                .or_else(|| {
+                    // A paren-less member access is a constant-time field/
+                    // property read, not an unresolved method call.
+                    behavior.complexity_member_read_complexity(node)
                 });
             let evidence_gap = known_call_complexity.is_none().then(|| {
                 if behavior.callback_invocation_message(message) {

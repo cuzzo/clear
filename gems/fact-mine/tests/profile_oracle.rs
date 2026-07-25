@@ -1578,6 +1578,45 @@ fn kotlin_expression_body_functions_extract_complexity_facts() -> Result<()> {
 }
 
 #[test]
+fn paren_less_member_reads_are_constant_time_but_not_in_ruby() -> Result<()> {
+    use std::io::Write;
+
+    // Go: `n.parent` / `n.line` are field reads - O(1), must not block.
+    let mut go = tempfile::Builder::new().suffix(".go").tempfile()?;
+    go.write_all(
+        b"package p\ntype Node struct { line int; parent *Node }\nfunc depth(n *Node) int { return n.parent.line }\n",
+    )?;
+    let go_doc = syntax::parse_file(go.path().to_path_buf(), Language::Go)?;
+    let go_out = profile::extract(&go_doc, Profile::Espalier);
+    let line = go_out
+        .complexity_facts
+        .iter()
+        .flat_map(|f| f.call_contexts.iter())
+        .find(|c| c.message == "line")
+        .context("missing go line read")?;
+    assert_eq!(line.known_time_complexity.as_deref(), Some("O(1)"));
+
+    // Ruby: `obj.foo` (no parens) is a real call - must stay unpriced, not O(1).
+    let mut rb = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    rb.write_all(b"class Foo\n  def run(obj)\n    obj.expensive\n  end\nend\n")?;
+    let rb_doc = syntax::parse_file(rb.path().to_path_buf(), Language::Ruby)?;
+    let rb_out = profile::extract(&rb_doc, Profile::Espalier);
+    if let Some(call) = rb_out
+        .complexity_facts
+        .iter()
+        .flat_map(|f| f.call_contexts.iter())
+        .find(|c| c.message == "expensive")
+    {
+        assert_ne!(
+            call.known_time_complexity.as_deref(),
+            Some("O(1)"),
+            "a Ruby paren-less call must not be assumed constant-time",
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn c_operators_and_subscript_are_constant_time_intrinsics() -> Result<()> {
     use std::io::Write;
 

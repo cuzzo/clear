@@ -406,6 +406,15 @@ const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    // In Ruby `obj.foo` (no parens) is a real method call, not a field read, so
+    // it must not be assumed constant-time.
+    fn complexity_member_read_complexity(
+        &self,
+        _node: &Node,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        None
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,

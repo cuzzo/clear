@@ -1446,6 +1446,18 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    /// Cost of a paren-less member access (`obj.field`) in the complexity path:
+    /// a constant-time field/property read, not a method call. Returns None when
+    /// the node is not such a read, or (Ruby) where `obj.foo` is itself a call.
+    /// Without this, property reads are recorded as unresolved typed operations
+    /// and wrongly block an otherwise-complete function.
+    fn complexity_member_read_complexity(&self, node: &Node) -> Option<NormalizedCallComplexity> {
+        (node.r#type == "CALL" && !node.text.contains('(')).then_some(NormalizedCallComplexity {
+            time: "O(1)",
+            space: "O(1)",
+        })
+    }
+
     fn case_pattern_values(&self, pattern_values: Vec<String>) -> Vec<String> {
         pattern_values
     }
