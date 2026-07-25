@@ -170,6 +170,10 @@ module Espalier
             node["big_o_space"] = space
             node["space_complete"] = space_complete
           end
+          status = quality[:big_o_status] || quality["big_o_status"]
+          node["big_o_status"] = status.to_s if status
+          provenance = quality[:big_o_provenance] || quality["big_o_provenance"]
+          node["big_o_provenance"] = provenance.to_s if provenance
           index[big_o_key(file, fn[:name] || fn["name"])] = node
         end
       end

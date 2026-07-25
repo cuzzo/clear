@@ -388,6 +388,102 @@ class AggregatorTest < Minitest::Test
     refute fn[:quality_metrics].key?(:big_o_unknowns)
   end
 
+  def incomplete_recursive_module(language, owner, fn_name)
+    [
+      {
+        # project_modules disambiguates owners as "name@path"; the override
+        # must key on the bare leaf.
+        type: :class, name: "#{owner}@src/#{owner}.x", file: "src/#{owner}.x", states: Set.new,
+        language: language,
+        methods: [
+          {
+            name: fn_name, signature: "func #{fn_name}()",
+            parameters: ["data"], visibility: :public, line: 20, span: [20, 0, 40, 1],
+            effects: { reads: Set.new, writes: Set.new },
+            complexity_facts: [{
+              "line" => 20, "parameters" => ["data"], "collection_parameters" => ["data"],
+              "iterations" => [], "allocations" => [], "size_domains" => [],
+              "recursion" => { "calls" => 2, "unknown_progress_calls" => 2 },
+              "call_contexts" => []
+            }]
+          }
+        ]
+      }
+    ]
+  end
+
+  def test_manual_override_completes_only_incomplete_registered_functions
+    modules = incomplete_recursive_module(:go, "sort", "Sort")
+    fn = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+
+    assert_equal "O(N log N)", fn[:quality_metrics][:big_o]
+    assert_equal true, fn[:quality_metrics][:big_o_complete]
+    assert_equal :manual_override, fn[:quality_metrics][:big_o_provenance]
+    assert_equal :complete_override, fn[:quality_metrics][:big_o_status]
+    assert_equal "O(log N)", fn[:quality_metrics][:big_o_space]
+  end
+
+  def test_manual_override_ignores_unregistered_functions
+    # Same incomplete shape, but no registry entry for sort.Frobnicate.
+    modules = incomplete_recursive_module(:go, "sort", "Frobnicate")
+    fn = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+
+    refute_equal true, fn[:quality_metrics][:big_o_complete]
+    refute_equal :manual_override, fn[:quality_metrics][:big_o_provenance]
+    assert_equal :incomplete, fn[:quality_metrics][:big_o_status]
+  end
+
+  def test_manual_override_never_replaces_a_complete_bound
+    # A registered name (list.sort / python) but a COMPLETE derived bound:
+    # the override must not fire.
+    modules = [
+      {
+        type: :class, name: "list", file: "x.py", states: Set.new, language: :python,
+        methods: [{
+          name: "sort", signature: "def sort(self)", parameters: [], visibility: :public,
+          line: 1, span: [1, 0, 2, 1], effects: { reads: Set.new, writes: Set.new },
+          complexity_facts: [{
+            "line" => 1, "parameters" => [], "collection_parameters" => [],
+            "iterations" => [], "allocations" => [], "size_domains" => [],
+            "recursion" => { "calls" => 0 }, "call_contexts" => []
+          }]
+        }]
+      }
+    ]
+    fn = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+
+    assert_equal true, fn[:quality_metrics][:big_o_complete]
+    refute_equal :manual_override, fn[:quality_metrics][:big_o_provenance]
+    refute_equal "O(N log N)", fn[:quality_metrics][:big_o]
+    assert_equal :complete, fn[:quality_metrics][:big_o_status]
+  end
+
+  def test_big_o_status_distinguishes_parametric_from_complete
+    # The core "complete" vs "complete worst case" distinction. A bound carrying
+    # an open callback/reflective parameter (C/R) is complete only parametrically
+    # - it is the tier a worst-case substitution upgrades to :complete_worst_case
+    # and must NOT read as a plain (closed) :complete bound.
+    agg = Espalier::Aggregator.new
+    classify = ->(q) { agg.send(:classify_big_o_status, q) }
+
+    assert_equal :complete, classify.call(big_o: "O(N)", big_o_complete: true)
+    assert_equal :parametric, classify.call(big_o: "O(N * C)", big_o_complete: true)
+    assert_equal :parametric, classify.call(big_o: "O(R)", big_o_complete: true)
+    assert_equal :incomplete, classify.call(big_o: "unknown", big_o_complete: false)
+    assert_equal :complete_override,
+                 classify.call(big_o: "O(N log N)", big_o_complete: true,
+                               big_o_provenance: :manual_override)
+  end
+
+  def test_complexity_overrides_lookup_semantics
+    assert_equal "O(N log N)",
+                 Espalier::ComplexityOverrides.lookup(:go, "sort", "Sort")["time"]
+    # Unknown function / wrong language / missing owner all miss.
+    assert_nil Espalier::ComplexityOverrides.lookup(:go, "sort", "Frobnicate")
+    assert_nil Espalier::ComplexityOverrides.lookup(:rust, "sort", "Sort")
+    assert_nil Espalier::ComplexityOverrides.lookup(:go, nil, nil)
+  end
+
   def test_big_o_joins_same_line_calls_by_exact_span
     method = {
       id: "caller", name: "run", line: 2,

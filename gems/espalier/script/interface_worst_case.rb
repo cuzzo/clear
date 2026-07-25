@@ -46,6 +46,7 @@ end
 # Coarse worst-case ordering over Big-O classes. A parametric cost (contains an
 # unresolved callback C or reflective R) ranks above any concrete class of the
 # same N-structure: worst-case, an unbounded parameter can be anything.
+parametric = lambda { |c| c.to_s.include?("C") || c.to_s.include?("R") }
 rank = lambda do |c|
   s = c.to_s
   base = if s.include?("^") then 5
@@ -54,8 +55,7 @@ rank = lambda do |c|
          elsif s.include?("log") then 1
          else 0
          end
-  parametric = s.include?("C") || s.include?("R")
-  parametric ? base + 10 : base
+  parametric.call(c) ? base + 10 : base
 end
 
 results = []
@@ -72,11 +72,17 @@ impls.each do |iface, edges|
     next if priced.empty?
     worst = priced.max_by { |(_, t)| rank.call(t) }
     variance = priced.map { |(_, t)| t }.uniq.size
+    # A caller's `O(N * C)` bound for this method resolves to a concrete
+    # "complete worst case" only when the worst implementation is itself
+    # concrete. If the worst impl is still parametric (its own C/R), the
+    # substitution stays parametric and the caller bound cannot be closed.
+    status = parametric.call(worst[1]) ? "worst_case_parametric" : "complete_worst_case"
     results << {
       interface: iface, method: m,
       worst_impl: worst[0], worst_cost: worst[1],
       implementers_priced: priced.size, distinct_costs: variance,
       significant: rank.call(worst[1]) > 0,      # non-O(1) -> may dominate a caller
+      status: status,
       distribution: priced.sort_by { |(_, t)| -rank.call(t) }.first(4)
     }
   end
@@ -89,9 +95,12 @@ if as_json
 else
   significant = results.count { |r| r[:significant] }
   varying = results.count { |r| r[:distinct_costs] > 1 }
+  resolvable = results.count { |r| r[:status] == "complete_worst_case" }
   puts "interface methods analyzed: #{results.size}"
   puts "  non-trivial worst case (may dominate a caller): #{significant}"
   puts "  worst case varies across implementations:        #{varying}"
+  puts "  complete worst case (C resolves to a concrete bound): #{resolvable}"
+  puts "  worst-case parametric (C stays open):                 #{results.size - resolvable}"
   puts
   puts "phase 3 - worst-case implementation per interface method:"
   results.first(25).each do |r|

@@ -135,4 +135,30 @@ class ArchitectureArtifactTest < Minitest::Test
     assert_nil index["lib/x.rb\u0000opaque"]
   end
 
+
+  def test_big_o_index_threads_status_and_provenance
+    manifest = [
+      {
+        file: "x.go",
+        functions: [
+          { name: "each",
+            quality_metrics: { big_o: "O(N * C)", big_o_complete: true,
+                               big_o_status: :parametric } },
+          { name: "Sort",
+            quality_metrics: { big_o: "O(N log N)", big_o_complete: true,
+                               big_o_status: :complete_override,
+                               big_o_provenance: :manual_override } }
+        ]
+      }
+    ]
+    index = Espalier::ArchitectureArtifact.big_o_index(manifest)
+    each = index.values.find { |node| node["big_o_time"] == "O(N * C)" }
+    sort = index.values.find { |node| node["big_o_provenance"] }
+
+    assert_equal "parametric", each["big_o_status"]
+    assert_equal "complete_override", sort["big_o_status"]
+    assert_equal "manual_override", sort["big_o_provenance"]
+    refute each.key?("big_o_provenance")
+  end
+
 end

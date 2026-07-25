@@ -1,0 +1,53 @@
+# Manual complexity overrides - targeted escape hatch.
+#
+# These entries are applied ONLY to functions that Espalier's structural
+# analysis reports as INCOMPLETE, and ONLY when an entry exists here. A
+# complete (fully derived) bound is never overridden. This is NOT a blanket
+# stdlib registry: every entry documents an *algorithmic guarantee that static
+# structural analysis provably cannot derive* - typically an amortized or
+# randomized bound enforced by a runtime fallback the analyzer cannot see.
+#
+# Measured scope of the irreducible set: 0.4% of Go stdlib functions, ~1.9% of
+# Ruby/Python functions (unknown-progress recursion). Overriding the public API
+# entry short-circuits its incomplete internal recursion for all callers.
+#
+# key format: "<owner>.<name>" (owner = declaring type or package leaf)
+# fields: time (required), space, note (why it is irreducible - required)
+
+go:
+  "sort.Sort":
+    time: "O(N log N)"
+    space: "O(log N)"
+    note: "introsort: pdqsort recursion + heapsort fallback at depth limit; the N-log-N guarantee is the depth-limit switch, not derivable from the recursive structure"
+  "sort.Stable":
+    time: "O(N (log N)^2)"
+    space: "O(1)"
+    note: "in-place stable block merge; symmetric-swap rotation counts are not structurally derivable"
+  "sort.Slice":
+    time: "O(N log N * C)"
+    space: "O(log N)"
+    note: "introsort over a less-callback C; same depth-limit guarantee as sort.Sort"
+  "sort.SliceStable":
+    time: "O(N (log N)^2 * C)"
+    space: "O(N)"
+    note: "stable sort over a less-callback C"
+
+ruby:
+  "Array.sort":
+    time: "O(N log N)"
+    space: "O(log N)"
+    note: "introsort in C (qsort_r with fallback); native, not analyzable from Ruby source"
+  "Array.sort_by":
+    time: "O(N log N * C)"
+    space: "O(N)"
+    note: "Schwartzian transform + native introsort over a key-callback C"
+
+python:
+  "list.sort":
+    time: "O(N log N)"
+    space: "O(N)"
+    note: "Timsort in C; adaptive merge run-detection is native, not analyzable from Python source"
+  "sorted":
+    time: "O(N log N)"
+    space: "O(N)"
+    note: "Timsort in C over an optional key-callback"

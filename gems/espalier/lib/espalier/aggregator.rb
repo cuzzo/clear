@@ -3,6 +3,7 @@
 require "set"
 require_relative "big_o_analyzer"
 require_relative "structural_big_o"
+require_relative "complexity_overrides"
 
 module Espalier
   # Coalescing agent that imports the static skeleton maps and merges secondary
@@ -147,6 +148,8 @@ module Espalier
           quality[:big_o_variables] = big_o_result[:complexity_variables] unless big_o_result[:complexity_variables].empty?
           quality[:big_o_complete] = big_o_result[:time_complete]
           quality[:big_o_space_complete] = big_o_result[:space_complete]
+          apply_complexity_override!(quality, mod, m)
+          quality[:big_o_status] = classify_big_o_status(quality)
           quality[:big_o_dynamic] = big_o_result[:is_dynamic]
           quality[:complexity_trigger] = big_o_result[:trigger] if big_o_result[:trigger]
           quality[:big_o_warnings] = big_o_result[:warnings] unless big_o_result[:warnings].empty?
@@ -192,6 +195,43 @@ module Espalier
     end
 
     private
+
+    # Targeted escape hatch: consult the manual-override registry ONLY when the
+    # derived bound is incomplete, and apply only when an entry exists. A fully
+    # derived (complete) bound is never overridden. Marks provenance so an
+    # override-sourced bound is distinguishable from a structurally derived one.
+    def apply_complexity_override!(quality, mod, m)
+      return if quality[:big_o_complete]
+
+      # project_modules disambiguates owners as "name@path"; the override
+      # registry keys on the bare owner (package leaf / type name).
+      owner = mod[:name].to_s.split("@", 2).first
+      entry = ComplexityOverrides.lookup(mod[:language], owner, m[:name])
+      return unless entry
+
+      quality[:big_o] = entry["time"]
+      quality[:big_o_complete] = true
+      quality[:big_o_provenance] = :manual_override
+      quality[:big_o_override_note] = entry["note"]
+      return unless entry["space"]
+
+      quality[:big_o_space] = entry["space"]
+      quality[:big_o_space_complete] = true
+    end
+
+    # Distinguishes a fully-resolved bound from one that is only "complete"
+    # parametrically - i.e. still carries an open callback/reflective parameter
+    # (C/R) that a worst-case substitution would have to close. The parametric
+    # tier is what the interface worst-case pass upgrades to :complete_worst_case.
+    def classify_big_o_status(quality)
+      return :incomplete unless quality[:big_o_complete]
+      return :complete_override if quality[:big_o_provenance] == :manual_override
+
+      bound = quality[:big_o].to_s
+      return :parametric if bound.include?("C") || bound.include?("R")
+
+      :complete
+    end
 
     def internal_edges_for(mod)
       legacy_internal_edges_for(mod)
