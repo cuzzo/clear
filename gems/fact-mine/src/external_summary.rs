@@ -231,6 +231,7 @@ mod tests {
             local_complexity: 0.0,
             complexity_signals: BTreeMap::new(),
             params: Vec::new(),
+            callback_params: Vec::new(),
             raw_source: "void run() {}".into(),
             normalized_source: "void run() {}".into(),
             untraceable_params: Vec::new(),

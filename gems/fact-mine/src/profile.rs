@@ -598,6 +598,11 @@ pub struct MethodRecord {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub complexity_signals: BTreeMap<String, usize>,
     pub params: Vec<String>,
+    /// Parameter names invoked as callbacks in the body. Such a function has a
+    /// cost parametric in that callback (C); a caller can substitute the passed
+    /// callable's cost.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub callback_params: Vec<String>,
     /// Exact source covered by the parser's function span. Consumers that need
     /// function bodies must use this projection rather than re-parsing files.
     pub raw_source: String,
@@ -3788,6 +3793,7 @@ fn extract_methods(
                     .map(|row| row.signals.clone())
                     .unwrap_or_default(),
                 params: fn_def.params.clone(),
+                callback_params: fn_def.callback_params.clone(),
                 raw_source,
                 normalized_source,
                 untraceable_params: extract_untraceable_params(lines, fn_def, language),
