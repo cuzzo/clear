@@ -210,7 +210,7 @@ module Espalier
       if receiver_name.include?(".")
         parts = receiver_name.split(".")
         current_type = resolve_simple_type(parts.first, line)
-        parts[1..].each do |part|
+        Array(parts[1..]).each do |part|
           return nil unless current_type
           current_type = resolve_method_return_type(current_type, part)
         end
@@ -225,6 +225,8 @@ module Espalier
     end
 
     def raw_simple_type(receiver_name, line)
+      return nil if receiver_name.nil?
+
       if receiver_name == "self"
         return @class_name
       end
