@@ -5832,7 +5832,18 @@ fn canonical_declared_type_origin(document: &Document, name: &str) -> Option<Str
 }
 
 fn declared_dispatch_owner_name(document: &Document, name: &str) -> Option<String> {
-    let mut name = name.strip_prefix("declared:").unwrap_or(name).trim();
+    let base = name.strip_prefix("declared:").unwrap_or(name).trim();
+    // Pointer/reference sigils (Go `*T`/`&T`, C/C++ `T*`, Rust `&T`/`&mut T`)
+    // do not change which type owns a method, so strip them before resolving
+    // the dispatch owner. A pointer-typed value (e.g. a constructor result like
+    // `*os.File`) must resolve the same owner as the base type. No-op for
+    // languages without pointer spelling.
+    let mut name = base
+        .trim_start_matches(['*', '&'])
+        .trim_start_matches("mut ")
+        .trim_start_matches(['*', '&'])
+        .trim_end_matches(['*', '&'])
+        .trim();
     let mut visited = BTreeSet::new();
     while let Some(target) = document.type_aliases.get(name) {
         if !visited.insert(name.to_string()) {
