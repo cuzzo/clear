@@ -89,6 +89,26 @@ module Espalier
           message = context["message"].to_s
           line = context.fetch("line", method[:line]).to_i
           span = normalized_call_span(context["span"])
+          # FactMine already priced this call site (a builtin operator, a
+          # language intrinsic, or a stdlib-registry hit). Use that proven bound
+          # directly instead of demanding a resolved project target - otherwise
+          # a trivially O(1) operator leaves the function unknown.
+          if (known_time = context["known_time_complexity"])
+            hints << {
+              type: :structural,
+              line: line,
+              complexity: propagated_call_complexity(context, known_time),
+              space: context["known_space_complexity"] || "O(1)",
+              is_dynamic: known_time != "O(1)",
+              operation: message,
+              reason: "fact-mine modeled call cost",
+              confidence: "high",
+              time_complete: true,
+              space_complete: true,
+              fact_source: "fact_mine"
+            }
+            next
+          end
           resolved_target = resolved_call(method_id, owner.to_s, caller, message, span, line)
           candidate_call = candidate_call(method_id, owner.to_s, caller, message, span, line)
           if !resolved_target && candidate_call &&

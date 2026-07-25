@@ -303,6 +303,12 @@ const GO_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
     ..EffectLexicon::empty()
 };
 
+// Go builtin operators, emitted as call messages by the normalizer. They carry
+// no overload in Go, so each is constant-time on primitive operands.
+const GO_BUILTIN_OPERATORS: &[&str] = &[
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^",
+    "<<", ">>", "&^", "&&", "||", "!",
+];
 const GO_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "nil"];
 const GO_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const GO_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
@@ -768,6 +774,16 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         receiver: Option<&str>,
         message: &str,
     ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        if GO_BUILTIN_OPERATORS.contains(&message) {
+            // Go has no operator overloading: arithmetic, comparison, bitwise
+            // and logical operators are builtin constant-time on primitives.
+            // Without this they are recorded as unresolved call targets, which
+            // wrongly marks otherwise-O(1) functions incomplete.
+            return Some(super::normalized_behavior::NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            });
+        }
         configured_intrinsic_call_complexity("go", receiver, message)
     }
 
@@ -1731,6 +1747,23 @@ mod tests {
                 "{symbol}"
             );
         }
+    }
+
+    #[test]
+    fn go_builtin_operators_are_constant_time_intrinsics() {
+        let behavior = GoNormalizedBehavior;
+        for op in ["<", "==", "+", "*", "&", "<<", "!="] {
+            let complexity = behavior.intrinsic_call_complexity(Some("x"), op);
+            assert_eq!(
+                complexity.map(|c| c.time),
+                Some("O(1)"),
+                "operator {op} should be O(1)"
+            );
+        }
+        // A real method name is not an operator and stays unmodeled here.
+        assert!(behavior
+            .intrinsic_call_complexity(Some("x"), "Frobnicate")
+            .is_none());
     }
 
     #[test]
