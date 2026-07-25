@@ -2899,8 +2899,27 @@ fn conservative_inherited_target_ids(
         if exact.len() == 1 {
             return exact.into_iter().next();
         }
-        if exact.len() > 1 || identity.contains(['.', ':']) {
+        if exact.len() > 1 {
             return None;
+        }
+        if identity.contains(['.', ':']) {
+            // A package-qualified supertype (e.g. a Go embed `bytes.Buffer`)
+            // carries only the import-leaf `package.Type`, while the declaring
+            // owner's canonical symbol prefixes the namespace directory. Match
+            // the identity as that symbol's trailing `.package.Type` suffix,
+            // binding only a unique owner.
+            let suffix = format!(".{}", identity.replace("::", "."));
+            let qualified = owners
+                .iter()
+                .filter(|owner| owner.language == source.language)
+                .filter(|owner| {
+                    owner
+                        .symbol
+                        .as_deref()
+                        .is_some_and(|symbol| symbol.ends_with(&suffix))
+                })
+                .collect::<Vec<_>>();
+            return (qualified.len() == 1).then(|| qualified.into_iter().next().unwrap());
         }
         if let Some(namespace) =
             context

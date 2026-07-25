@@ -568,6 +568,41 @@ fn go_self_calls_resolve_to_sibling_declarations() -> Result<()> {
 }
 
 #[test]
+fn go_embedded_field_promotes_methods_across_packages() -> Result<()> {
+    // `encoder` embeds `pkga.Buffer`; its promoted methods (`WriteString`,
+    // `Len`) are absent from `encoder`'s own method set and must resolve to the
+    // embedded type's declarations through the supertype (embedding) chain.
+    let doc_base = syntax::parse_file(fixture("go_embed_base.go"), Language::Go)?;
+    let doc_user = syntax::parse_file(fixture("go_embed_user.go"), Language::Go)?;
+    let merged = profile::merge(
+        vec![
+            profile::extract(&doc_base, Profile::Espalier),
+            profile::extract(&doc_user, Profile::Espalier),
+        ],
+        Profile::Espalier,
+    );
+
+    for message in ["WriteString", "Len"] {
+        let target_id = merged
+            .methods
+            .iter()
+            .find(|method| method.owner == "Buffer" && method.name == message)
+            .map(|method| method.id.clone());
+        assert!(target_id.is_some(), "Buffer#{message} declaration present");
+        let call = merged
+            .calls
+            .iter()
+            .find(|call| call.message == message)
+            .unwrap_or_else(|| panic!("promoted e.{message} call present"));
+        assert_eq!(
+            call.target, target_id,
+            "promoted embedded method e.{message} did not resolve"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn go_cross_file_receiver_calls_resolve_in_same_namespace() -> Result<()> {
     // `Builder` is declared in one file and used through a typed receiver in
     // another. The type is absent from the use-site document's owner set, so
