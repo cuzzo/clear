@@ -503,6 +503,107 @@ fn ruby_case_equality_disjunction_refines_the_else_path() -> Result<()> {
 }
 
 #[test]
+fn go_self_calls_resolve_to_sibling_declarations() -> Result<()> {
+    let document = syntax::parse_file(fixture("go_self_calls.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let method_by_owner_name = output
+        .methods
+        .iter()
+        .map(|method| ((method.owner.as_str(), method.name.as_str()), method.id.as_str()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    // A method calling a sibling method on its own receiver (`l.insert(...)`
+    // inside a `*List` method) is emitted with receiver "self" and owner "List".
+    // Its target is the same-owner declaration and must resolve.
+    let self_calls = output
+        .calls
+        .iter()
+        .filter(|call| {
+            (call.receiver == "self" || call.receiver == "this")
+                && method_by_owner_name.contains_key(&(call.owner.as_str(), call.message.as_str()))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        self_calls.len() >= 3,
+        "expected the fixture's self-calls (insert/lazyInit/insertValue), got {}",
+        self_calls.len()
+    );
+    let unresolved = self_calls
+        .iter()
+        .filter(|call| call.target.is_none())
+        .map(|call| format!("{}.{}", call.owner, call.message))
+        .collect::<Vec<_>>();
+    assert!(
+        unresolved.is_empty(),
+        "self-calls left unresolved: {unresolved:?}"
+    );
+    for call in &self_calls {
+        let expected = method_by_owner_name[&(call.owner.as_str(), call.message.as_str())];
+        assert_eq!(
+            call.target.as_deref(),
+            Some(expected),
+            "{}.{} resolved to the wrong declaration",
+            call.owner,
+            call.message
+        );
+    }
+
+    // A bare same-package function call (`rawHelper(x)`) must also resolve.
+    let helper_id = output
+        .methods
+        .iter()
+        .find(|method| method.name == "rawHelper")
+        .map(|method| method.id.clone());
+    let raw_call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "rawHelper")
+        .expect("rawCaller's call to rawHelper is present");
+    assert_eq!(
+        raw_call.target, helper_id,
+        "bare same-package function call did not resolve"
+    );
+    Ok(())
+}
+
+#[test]
+fn go_cross_file_receiver_calls_resolve_in_same_namespace() -> Result<()> {
+    // `Builder` is declared in one file and used through a typed receiver in
+    // another. The type is absent from the use-site document's owner set, so
+    // resolution falls to the same-namespace pass, which must reconcile the
+    // receiver against the canonical owner symbol the declaration carries.
+    let doc_type = syntax::parse_file(fixture("go_crossfile_type.go"), Language::Go)?;
+    let doc_use = syntax::parse_file(fixture("go_crossfile_use.go"), Language::Go)?;
+    let merged = profile::merge(
+        vec![
+            profile::extract(&doc_type, Profile::Espalier),
+            profile::extract(&doc_use, Profile::Espalier),
+        ],
+        Profile::Espalier,
+    );
+
+    for message in ["WriteString", "Len"] {
+        let target_id = merged
+            .methods
+            .iter()
+            .find(|method| method.owner == "Builder" && method.name == message)
+            .map(|method| method.id.clone());
+        assert!(target_id.is_some(), "Builder#{message} declaration present");
+        let call = merged
+            .calls
+            .iter()
+            .find(|call| call.message == message && call.receiver == "b")
+            .unwrap_or_else(|| panic!("cross-file b.{message} call present"));
+        assert_eq!(
+            call.target, target_id,
+            "cross-file receiver call b.{message} did not resolve"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_presence.go"), Language::Go)?;
     let output = profile::extract(&document, Profile::NilKill);

@@ -2697,17 +2697,21 @@ fn resolve_same_namespace_declared_receiver_calls(
         if nominal.contains(['.', ':']) {
             continue;
         }
-        let expected_dot = format!("{namespace}.{nominal}");
-        let expected_scope = format!("{namespace}::{nominal}");
-        let candidates = [expected_dot.as_str(), expected_scope.as_str()]
+        // Declarations carry the canonical owner symbol built by
+        // `canonical_symbol_owner`, which normalizes the namespace separator to
+        // ".". Build the same form here so a cross-file receiver in the same
+        // namespace matches its type's methods (a raw "::ns" would never hit).
+        let canonical_namespace = namespace.replace("::", ".");
+        let expected = if canonical_namespace.is_empty() {
+            nominal.clone()
+        } else {
+            format!("{canonical_namespace}.{nominal}")
+        };
+        let candidates = by_dispatch
+            .get(&(expected.as_str(), call.message.as_str(), "instance"))
             .into_iter()
-            .flat_map(|owner| {
-                by_dispatch
-                    .get(&(owner, call.message.as_str(), "instance"))
-                    .into_iter()
-                    .flatten()
-                    .copied()
-            })
+            .flatten()
+            .copied()
             .filter(|method| method.language == source.language)
             .collect::<Vec<_>>();
         let Some(candidate) =
@@ -6277,6 +6281,20 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             let parametric_complexity = parametric_cost
                 .as_deref()
                 .and_then(crate::syntax::parametric_call_complexity);
+            // A self/this call dispatches on the enclosing definition's owner:
+            // that owner IS the receiver type. There is no receiver variable to
+            // type, so resolve the owner to the same canonical symbol the
+            // sibling declarations carry, letting the dispatch index bind the
+            // call to its target. Exclude calls already modeled as a language
+            // intrinsic (a bare Go `len` shares no dispatch with a same-named
+            // method - Go has no implicit method dispatch).
+            let self_receiver_symbol = (matches!(call.receiver.as_str(), "self" | "this")
+                && static_receiver_symbol.is_none()
+                && instance_receiver_type.is_none()
+                && known_complexity.is_none()
+                && parametric_complexity.is_none())
+            .then(|| canonical_receiver_symbol(document, &call.owner))
+            .flatten();
             let instance_receiver_owner = instance_receiver_type
                 .as_deref()
                 .and_then(|type_name| exact_document_owner(document, type_name));
@@ -6294,7 +6312,9 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .as_deref()
                     .and_then(|type_name| canonical_declared_type_origin(document, type_name))
             };
-            let receiver_symbol = static_receiver_symbol.or(instance_receiver_symbol.clone());
+            let receiver_symbol = static_receiver_symbol
+                .or(instance_receiver_symbol.clone())
+                .or_else(|| self_receiver_symbol.clone());
             let source_dispatch = source_definition
                 .map(|definition| definition.dispatch_kind.as_str())
                 .filter(|kind| !kind.is_empty());
@@ -6485,7 +6505,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     reaching_call_result_spans(document, &call.function, &call.receiver, call.span)
                 },
                 receiver_symbol,
-                receiver_type: instance_receiver_type,
+                receiver_type: instance_receiver_type
+                    .or_else(|| self_receiver_symbol.as_ref().map(|_| call.owner.clone())),
                 receiver_type_origin,
                 receiver_symbol_origin,
                 implicit_receiver: implicit,
