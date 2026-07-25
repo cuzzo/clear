@@ -167,6 +167,7 @@ module Espalier
           confidence: call["confidence"],
           unresolved_reason: (target || known_time || known_space) ? nil : call["unresolved_reason"],
           call_id: call["id"],
+          arguments: Array(call["arguments"]).map(&:to_s),
           target_id: target && target[:id],
           target_owner: target && target[:projected_owner],
           target_method: target && target[:name],

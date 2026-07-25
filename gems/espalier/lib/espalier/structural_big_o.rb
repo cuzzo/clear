@@ -329,9 +329,17 @@ module Espalier
         id if domain.is_a?(Hash) && domain["source_kind"].to_s == "callback_cost"
       end
       unless callback_domain_ids.empty?
-        lam = lambda_argument_for(caller_fact, context["span"])
-        if lam && @method_complexities[lam[:id]].to_s == "O(1)"
-          callee_symbolic = Espalier::SymbolicComplexity.without_domains(callee_symbolic, callback_domain_ids)
+        cb_id = @callback_arg_by_call && @callback_arg_by_call[[caller_fact["path"], context["span"]]]
+        if cb_id
+          cb_symbolic = @method_symbolic_time && @method_symbolic_time[cb_id]
+          reduced = Espalier::SymbolicComplexity.without_domains(callee_symbolic, callback_domain_ids)
+          # O(1) callback drops C -> O(N); a costlier callback multiplies its own
+          # cost in -> O(N * callback), treating its domains as independent.
+          callee_symbolic = if cb_symbolic && Espalier::SymbolicComplexity.degree(cb_symbolic) > 0
+                              Espalier::SymbolicComplexity.multiply(reduced, cb_symbolic)
+                            else
+                              reduced
+                            end
         end
       end
       substituted = Espalier::SymbolicComplexity.substitute(
@@ -362,23 +370,6 @@ module Espalier
       else
         nil
       end
-    end
-
-    # The lambda passed as a callback argument at a call site: a lambda function
-    # in the caller's file whose span lies inside the call's span.
-    def lambda_argument_for(caller_fact, call_span)
-      return nil unless call_span && @lambda_index
-
-      file = caller_fact["path"]
-      @lambda_index.find do |lam|
-        lam[:file] == file && span_within?(lam[:span], call_span)
-      end
-    end
-
-    def span_within?(inner, outer)
-      return false unless inner && outer && inner.length >= 3 && outer.length >= 3
-
-      inner[0].to_i >= outer[0].to_i && inner[2].to_i <= outer[2].to_i
     end
 
     def annotate_propagated_domains(expression, callee_expression, mapping, caller_domains, owner, callee, caller_fact, context)

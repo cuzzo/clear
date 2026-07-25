@@ -393,6 +393,11 @@ pub struct CallRecord {
     pub complexity_assumptions: Vec<String>,
     pub message: String,
     pub argument_count: usize,
+    /// Argument spellings at the call site, so a caller can link a callback
+    /// argument (a named function reference) to its definition and substitute
+    /// its cost for the callee's callback C.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arguments: Vec<String>,
     pub path: String,
     pub line: usize,
     pub span: [usize; 4],
@@ -6516,6 +6521,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 complexity_assumptions: Vec::new(),
                 message: call.message.clone(),
                 argument_count: call.arguments.len(),
+                arguments: call.arguments.clone(),
                 path: path.to_string(),
                 line: call.line,
                 span: call.span,

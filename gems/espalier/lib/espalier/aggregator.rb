@@ -387,14 +387,52 @@ module Espalier
       structural_big_o.instance_variable_set(:@method_symbolic_time, symbolic_time)
       structural_big_o.instance_variable_set(:@method_bound_qualities, bound_qualities)
       structural_big_o.instance_variable_set(:@method_assumptions, assumptions)
-      # Lambdas passed as callback arguments: indexed by (file, span) so a call
-      # site can find the lambda inside its argument span and substitute its cost
-      # for the callee's callback C.
-      lambda_index = modules.flat_map do |mod|
-        Array(mod[:methods]).select { |m| m[:dispatch_kind].to_s == "lambda" && m[:span] }
-          .map { |m| { file: mod[:file], span: m[:span], id: m[:id] } }
+      # Index each callback-taking call site to the id of the callable it passes
+      # as its callback argument - an inline lambda (found by span containment)
+      # or a named function reference (resolved by argument spelling) - so a
+      # caller can substitute that callable's cost for the callee's callback C.
+      methods_by_id = {}
+      methods_by_owner_name = {}
+      lambdas_by_file = Hash.new { |hash, key| hash[key] = [] }
+      modules.each do |mod|
+        Array(mod[:methods]).each do |m|
+          methods_by_id[m[:id]] = m if m[:id]
+          methods_by_owner_name[[m[:raw_owner].to_s, m[:name].to_s]] = m
+          lambdas_by_file[mod[:file]] << m if m[:dispatch_kind].to_s == "lambda" && m[:span]
+        end
       end
-      structural_big_o.instance_variable_set(:@lambda_index, lambda_index)
+      within = lambda do |inner, outer|
+        inner && outer && inner.length >= 3 && outer.length >= 3 &&
+          inner[0].to_i >= outer[0].to_i && inner[2].to_i <= outer[2].to_i
+      end
+      callback_arg_by_call = {}
+      modules.each do |mod|
+        Array(mod[:methods]).each do |m|
+          Array(m[:delegations]).each do |delegation|
+            callee = (delegation[:target_id] && methods_by_id[delegation[:target_id]]) ||
+              (delegation[:target_method] && methods_by_owner_name[[delegation[:target_owner].to_s, delegation[:target_method].to_s]])
+            next unless callee
+
+            params = Array(callee[:parameters]).map(&:to_s)
+            Array(callee[:callback_params]).each do |callback_param|
+              position = params.index(callback_param.to_s)
+              next unless position
+
+              lam = lambdas_by_file[mod[:file]].find { |candidate| within.call(candidate[:span], delegation[:span]) }
+              cb_id = if lam
+                        lam[:id]
+                      else
+                        arg = Array(delegation[:arguments])[position].to_s.strip
+                        fn = methods_by_owner_name[[m[:raw_owner].to_s, arg]] ||
+                          methods_by_owner_name[[mod[:name].to_s, arg]]
+                        fn && fn[:id]
+                      end
+              callback_arg_by_call[[mod[:file], delegation[:span]]] = cb_id if cb_id
+            end
+          end
+        end
+      end
+      structural_big_o.instance_variable_set(:@callback_arg_by_call, callback_arg_by_call)
 
       local_analyzer = Espalier::BigOAnalyzer.new(
         nil_kill: @nil_kill_evidence,
