@@ -1139,6 +1139,7 @@ mod tests {
             complexity_assumptions: Vec::new(),
             message: message.into(),
             argument_count: 0,
+            arguments: Vec::new(),
             path: path.into(),
             line: span[0],
             span,

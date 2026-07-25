@@ -171,6 +171,7 @@ mod tests {
             complexity_assumptions: Vec::new(),
             message: "read".into(),
             argument_count: 0,
+            arguments: Vec::new(),
             path: "Demo.java".into(),
             line: 1,
             span: [1, 0, 1, 10],

@@ -813,6 +813,7 @@ mod tests {
             complexity_assumptions: Vec::new(),
             message: String::new(),
             argument_count: 0,
+            arguments: Vec::new(),
             path: String::new(),
             line: 1,
             span: [1, 0, 1, 0],

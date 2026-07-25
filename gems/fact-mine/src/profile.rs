@@ -7907,6 +7907,7 @@ def py_fn(a: int) -> str:
             receiver: "self".into(),
             message: "b".into(),
             argument_count: 0,
+            arguments: Vec::new(),
             path: "demo.rb".into(),
             line: 2,
             receiver_kind: "value".into(),
