@@ -6096,6 +6096,75 @@ fn valid_java_declared_local_type(name: &str) -> bool {
         && !name.contains("&&")
 }
 
+/// Resolve the type of a `base.field` (or `base.field[i]`) receiver expression:
+/// resolve the base's type, then look up `field` in that type's declared field
+/// table. Language-neutral - reads `state_declarations`, which every adapter
+/// populates for struct/class fields. Composes with the other receiver
+/// resolvers and recurses for nested access (`outer.inner.field`). This is what
+/// lets `h.field.method()` resolve even though `h.field` is not a call the
+/// direct-call-result linker can see.
+fn field_access_receiver_type(
+    document: &Document,
+    definition: Option<&syntax::FunctionDef>,
+    function: &str,
+    owner: &str,
+    receiver: &str,
+    call_span: [usize; 4],
+    language: &str,
+) -> Option<String> {
+    let (base, field_expr) = receiver.rsplit_once('.')?;
+    let base = base.trim();
+    let field_expr = field_expr.trim();
+    // Strip a trailing index (`fs[0]`) and remember we must return the element
+    // type of the field rather than the field type itself.
+    let (field, indexed) = match field_expr.find('[') {
+        Some(bracket) => (field_expr[..bracket].trim(), true),
+        None => (field_expr, false),
+    };
+    if base.is_empty()
+        || field.is_empty()
+        || base.contains(['(', ')', '['])
+        || field.contains(['(', ')'])
+    {
+        return None;
+    }
+    let base_type = declared_receiver_type(document, definition, base)
+        .or_else(|| flow_receiver_type(document, function, base, call_span))
+        .or_else(|| declared_state_receiver_type(document, owner, base))
+        .or_else(|| {
+            field_access_receiver_type(
+                document, definition, function, owner, base, call_span, language,
+            )
+        })?;
+    let base_owner = declared_dispatch_owner_name_from_type(&base_type, language)?;
+    let field_type = document
+        .state_declarations
+        .iter()
+        .find(|declaration| {
+            declaration.field == field
+                && declared_dispatch_owner_name_from_type(&declaration.owner, language).as_deref()
+                    == Some(base_owner.as_str())
+        })
+        .and_then(|declaration| declaration.r#type.clone())?;
+    if indexed {
+        collection_element_type(&field_type, language)
+    } else {
+        Some(field_type)
+    }
+}
+
+/// The element type of an indexed collection field (`[]T`, `List<T>`, `[T]`,
+/// `Vec<T>`), via the language-aware type parser. Returns None for non-arrays.
+fn collection_element_type(type_name: &str, language: &str) -> Option<String> {
+    match TypeExpr::parse(type_name, language) {
+        TypeExpr::Array(inner) | TypeExpr::Set(inner) => match *inner {
+            TypeExpr::Primitive(name) => Some(name),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn reaching_call_result_spans(
     document: &Document,
     function: &str,
@@ -6345,19 +6414,38 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 && flow_receiver_type.is_none())
             .then(|| declared_state_receiver_type(document, &call.owner, &call.receiver))
             .flatten();
+            let field_access_receiver_type = (!receiver_is_type
+                && declared_receiver_type.is_none()
+                && flow_receiver_type.is_none()
+                && state_receiver_type.is_none())
+            .then(|| {
+                field_access_receiver_type(
+                    document,
+                    source_definition,
+                    &call.function,
+                    &call.owner,
+                    &call.receiver,
+                    call.span,
+                    language,
+                )
+            })
+            .flatten();
             let receiver_type_origin = if declared_receiver_type.is_some() {
                 Some("declared_parameter".to_string())
             } else if flow_receiver_type.is_some() {
                 Some("flow".to_string())
             } else if state_receiver_type.is_some() {
                 Some("declared_state".to_string())
+            } else if field_access_receiver_type.is_some() {
+                Some("field_access".to_string())
             } else {
                 None
             };
             let receiver_has_flow_type = flow_receiver_type.is_some();
             let instance_receiver_type = declared_receiver_type
                 .or(flow_receiver_type)
-                .or(state_receiver_type);
+                .or(state_receiver_type)
+                .or(field_access_receiver_type);
             let known_complexity = instance_receiver_type
                 .as_deref()
                 .map(|type_name| TypeExpr::parse(type_name, language))

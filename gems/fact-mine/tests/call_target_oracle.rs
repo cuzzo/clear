@@ -1406,3 +1406,53 @@ fn csharp_namespace_is_retained_as_canonical_owner_identity() -> Result<()> {
     assert_eq!(target.symbol_owner.as_deref(), Some("Demo.Core.Target"));
     Ok(())
 }
+
+/// A `base.field` receiver whose base type resolves must inherit the declared
+/// field type, so `b.f.work()` resolves to the field type's method. This is a
+/// language-neutral path (reads the declared field table), verified across the
+/// statically-typed adapters that populate it.
+#[test]
+fn field_access_receiver_inherits_declared_field_type() -> Result<()> {
+    let cases: &[(&str, &str, Language)] = &[
+        (
+            "go",
+            "package demo\ntype Foo struct{}\nfunc (f Foo) Work() int { return 1 }\ntype Box struct { f Foo }\nfunc Field(b Box) int { return b.f.Work() }\n",
+            Language::Go,
+        ),
+        (
+            "rust",
+            "struct Foo;\nimpl Foo { fn work(&self) -> i32 { 1 } }\nstruct Box { f: Foo }\nfn field(b: &Box) -> i32 { b.f.work() }\n",
+            Language::Rust,
+        ),
+        (
+            "java",
+            "class Foo { int work() { return 1; } }\nclass Box { Foo f; }\nclass M { int field(Box b) { return b.f.work(); } }\n",
+            Language::Java,
+        ),
+        (
+            "swift",
+            "struct Foo { func work() -> Int { return 1 } }\nstruct Box {\n    let f: Foo\n}\nfunc field(_ b: Box) -> Int { return b.f.work() }\n",
+            Language::Swift,
+        ),
+    ];
+    for (label, source, language) in cases {
+        let suffix = format!(".{label}");
+        let output = extract_source(source, &suffix, *language)?;
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.message.eq_ignore_ascii_case("work"))
+            .with_context(|| format!("{label}: missing work call"))?;
+        assert!(
+            call.target.is_some(),
+            "{label}: b.f.work() must resolve a target (got receiver_type {:?})",
+            call.receiver_type
+        );
+        assert_eq!(
+            call.receiver_type_origin.as_deref(),
+            Some("field_access"),
+            "{label}: receiver type must come from the field-access resolver",
+        );
+    }
+    Ok(())
+}
