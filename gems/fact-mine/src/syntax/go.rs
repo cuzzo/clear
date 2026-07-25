@@ -805,6 +805,10 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         })
     }
 
+    fn type_kind_is_abstract_dispatch(&self, kind: &str) -> bool {
+        kind == "interface"
+    }
+
     fn split_case_source(&self, source: &str) -> Vec<String> {
         vec![source.to_string()]
     }

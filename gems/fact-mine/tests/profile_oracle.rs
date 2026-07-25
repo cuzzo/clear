@@ -568,6 +568,35 @@ fn go_self_calls_resolve_to_sibling_declarations() -> Result<()> {
 }
 
 #[test]
+fn go_interface_method_call_is_priced_as_a_callback() -> Result<()> {
+    // A call on an interface-typed receiver (`c.Less` where c is a Comparer)
+    // dispatches to an unknown implementation, so it is priced as a callback of
+    // unknown per-call cost - making the enclosing function complete-parametric
+    // instead of unknown.
+    let document = syntax::parse_file(fixture("go_interface_dispatch.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "Less")
+        .context("c.Less call present")?;
+    assert_eq!(
+        call.known_time_complexity.as_deref(),
+        Some("O(C)"),
+        "interface method call should carry a callback cost"
+    );
+    assert_eq!(
+        call.complexity_bound_quality.as_deref(),
+        Some("upper_bound_parametric_callback_once"),
+        "interface dispatch is a parametric callback bound"
+    );
+    // It must NOT be resolved to a concrete target - there is none.
+    assert!(call.target.is_none(), "interface call has no single target");
+    Ok(())
+}
+
+#[test]
 fn go_named_type_conversion_is_constant_time() -> Result<()> {
     // `ByteCode(b)` converts to a declared type; it is a constant-time cast, not
     // an unresolved call. Left unpriced it strands otherwise-O(1) functions

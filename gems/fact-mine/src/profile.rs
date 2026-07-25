@@ -6159,6 +6159,25 @@ fn owner_name_matches(left: &str, right: &str) -> bool {
 
 /// Follow declared state projections to the selected field. The language
 /// adapter proves whether the final native declared type is callable.
+/// A method call on a receiver whose static type is an abstract dispatch type
+/// (interface / trait / protocol / abstract class) has no single body: it is a
+/// callback whose per-call cost is set by the eventual implementation. Price it
+/// as `callback_once` so the enclosing function's bound is parametric in that
+/// cost, exactly like an injected function value.
+fn abstract_dispatch_callback_cost(
+    document: &Document,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    receiver_type: &str,
+) -> Option<String> {
+    let nominal = declared_dispatch_owner_name_from_type(receiver_type, document.language.as_str())
+        .unwrap_or_else(|| receiver_type.to_string());
+    document
+        .owner_defs
+        .iter()
+        .any(|owner| owner.name == nominal && behavior.type_kind_is_abstract_dispatch(&owner.kind))
+        .then(|| "callback_once".to_string())
+}
+
 fn declared_field_callback_cost(
     document: &Document,
     behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
@@ -6295,6 +6314,11 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                             behavior.parametric_call_cost(&receiver_type, &call.message)
                         })
                         .or_else(|| declared_field_callback_cost(document, behavior, call))
+                        .or_else(|| {
+                            instance_receiver_type.as_deref().and_then(|receiver_type| {
+                                abstract_dispatch_callback_cost(document, behavior, receiver_type)
+                            })
+                        })
                 })
                 .flatten();
             let parametric_complexity = parametric_cost

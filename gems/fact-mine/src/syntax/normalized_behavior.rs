@@ -1351,6 +1351,15 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Whether an owner declared with this kind dispatches at runtime to an
+    /// implementation chosen elsewhere - an interface, trait, protocol, or
+    /// abstract class. A call to such a type's method has no single body, so it
+    /// is priced as a callback of unknown per-call cost (see the interface
+    /// dispatch design). Adapters name their abstract kinds.
+    fn type_kind_is_abstract_dispatch(&self, _kind: &str) -> bool {
+        false
+    }
+
     fn receiver_is_type_reference(&self, _receiver: &str) -> bool {
         false
     }
