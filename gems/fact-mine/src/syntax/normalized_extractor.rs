@@ -310,12 +310,17 @@ impl<'a> Extractor<'a> {
             file: self.file.clone(),
             name: name.clone(),
             owner: owner.clone(),
-            dispatch_kind: if self.owners.is_empty() && owner == self.file_owner {
+            dispatch_kind: if self.owners.is_empty()
+                && owner == self.file_owner
+                && !self.behavior.function_defines_receiver(node)
+            {
                 // The extractor creates a stable file owner for lexical
                 // declarations. That storage identity is not an instance
                 // dispatch fact. A real declaration may legitimately have
                 // the same name as its file, so owner-stack context is the
-                // proof that distinguishes the two.
+                // proof that distinguishes the two -- unless the declaration
+                // binds an explicit receiver (a Go method on a type named
+                // after its file), which is an instance method regardless.
                 "top".to_string()
             } else {
                 self.behavior

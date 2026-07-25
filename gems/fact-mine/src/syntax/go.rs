@@ -639,6 +639,14 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             .unwrap_or_else(|| current_owner.to_string())
     }
 
+    fn function_defines_receiver(&self, node: &Node) -> bool {
+        node.text
+            .trim_start()
+            .strip_prefix("func")
+            .and_then(receiver_owner_from_go_function)
+            .is_some()
+    }
+
     fn receiver_aliases_for_function(
         &self,
         node: &Node,

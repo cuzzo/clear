@@ -568,6 +568,34 @@ fn go_self_calls_resolve_to_sibling_declarations() -> Result<()> {
 }
 
 #[test]
+fn go_method_on_type_named_after_its_file_dispatches_as_instance() -> Result<()> {
+    // The fixture's file stem ("widget") equals its receiver type, which used
+    // to collide with the synthetic file owner and mark every method a
+    // top-level free function - so `w.tally()` could not dispatch.
+    let document = syntax::parse_file(fixture("widget.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let tally = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "widget" && method.name == "tally")
+        .context("widget.tally method present")?;
+    assert_eq!(tally.kind, "instance", "receiver method must dispatch as instance");
+
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "tally")
+        .context("w.tally() call present")?;
+    assert_eq!(
+        call.target.as_deref(),
+        Some(tally.id.as_str()),
+        "method call on a type named after its file did not resolve"
+    );
+    Ok(())
+}
+
+#[test]
 fn go_embedded_field_promotes_methods_across_packages() -> Result<()> {
     // `encoder` embeds `pkga.Buffer`; its promoted methods (`WriteString`,
     // `Len`) are absent from `encoder`'s own method set and must resolve to the

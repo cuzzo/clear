@@ -1335,6 +1335,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         self.function_dispatch_kind(name, owner)
     }
 
+    /// Whether a function declaration binds an explicit instance receiver (a
+    /// method). Languages with top-level method syntax (Go, Rust) override this
+    /// so a method whose receiver type happens to match its file name is not
+    /// mistaken for a free function stored under the synthetic file owner.
+    fn function_defines_receiver(&self, _node: &Node) -> bool {
+        false
+    }
+
     fn receiver_is_type_reference(&self, _receiver: &str) -> bool {
         false
     }
