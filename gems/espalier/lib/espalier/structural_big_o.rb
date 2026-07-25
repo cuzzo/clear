@@ -321,6 +321,19 @@ module Espalier
           mapping[domain["id"]] = Array(actual) if domain && actual
         end
       end
+      # Substitute the callee's callback cost C with the cost of the callable
+      # passed at this call site. A lambda argument is found by span containment
+      # (its span lies inside the call span); an O(1) callable removes C, turning
+      # O(N*C) into O(N).
+      callback_domain_ids = Array(callee_symbolic[:domains]).filter_map do |id, domain|
+        id if domain.is_a?(Hash) && domain["source_kind"].to_s == "callback_cost"
+      end
+      unless callback_domain_ids.empty?
+        lam = lambda_argument_for(caller_fact, context["span"])
+        if lam && @method_complexities[lam[:id]].to_s == "O(1)"
+          callee_symbolic = Espalier::SymbolicComplexity.without_domains(callee_symbolic, callback_domain_ids)
+        end
+      end
       substituted = Espalier::SymbolicComplexity.substitute(
         callee_symbolic,
         mapping,
@@ -349,6 +362,23 @@ module Espalier
       else
         nil
       end
+    end
+
+    # The lambda passed as a callback argument at a call site: a lambda function
+    # in the caller's file whose span lies inside the call's span.
+    def lambda_argument_for(caller_fact, call_span)
+      return nil unless call_span && @lambda_index
+
+      file = caller_fact["path"]
+      @lambda_index.find do |lam|
+        lam[:file] == file && span_within?(lam[:span], call_span)
+      end
+    end
+
+    def span_within?(inner, outer)
+      return false unless inner && outer && inner.length >= 3 && outer.length >= 3
+
+      inner[0].to_i >= outer[0].to_i && inner[2].to_i <= outer[2].to_i
     end
 
     def annotate_propagated_domains(expression, callee_expression, mapping, caller_domains, owner, callee, caller_fact, context)

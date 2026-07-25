@@ -387,6 +387,14 @@ module Espalier
       structural_big_o.instance_variable_set(:@method_symbolic_time, symbolic_time)
       structural_big_o.instance_variable_set(:@method_bound_qualities, bound_qualities)
       structural_big_o.instance_variable_set(:@method_assumptions, assumptions)
+      # Lambdas passed as callback arguments: indexed by (file, span) so a call
+      # site can find the lambda inside its argument span and substitute its cost
+      # for the callee's callback C.
+      lambda_index = modules.flat_map do |mod|
+        Array(mod[:methods]).select { |m| m[:dispatch_kind].to_s == "lambda" && m[:span] }
+          .map { |m| { file: mod[:file], span: m[:span], id: m[:id] } }
+      end
+      structural_big_o.instance_variable_set(:@lambda_index, lambda_index)
 
       local_analyzer = Espalier::BigOAnalyzer.new(
         nil_kill: @nil_kill_evidence,

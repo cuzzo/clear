@@ -139,6 +139,25 @@ module Espalier
       )
     end
 
+    # Drop the given domain ids from an expression, treating them as constant.
+    # Resolves a callback C to an O(1) callable: O(N*C) -> O(N).
+    def without_domains(expression, ids)
+      return expression if expression.nil? || Array(ids).empty?
+
+      drop = Array(ids).map(&:to_s)
+      terms = Array(expression[:terms]).map do |term|
+        {
+          factors: term[:factors].reject { |id, _| drop.include?(id.to_s) },
+          logs: term[:logs].reject { |id, _| drop.include?(id.to_s) }
+        }
+      end
+      normalize(
+        terms: terms,
+        domains: (expression[:domains] || {}).reject { |id, _| drop.include?(id.to_s) },
+        complete: expression.fetch(:complete, true)
+      )
+    end
+
     def render(expression)
       return nil unless expression
 
