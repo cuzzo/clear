@@ -1543,6 +1543,40 @@ func (h *holder) len() int {
 }
 
 #[test]
+fn c_operators_and_subscript_are_constant_time_intrinsics() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".c").tempfile()?;
+    tmp.write_all(
+        br#"int compute(int *a, int n, int k) {
+    int s = a[0] * k + n - (k >> 1);
+    if (s == 0 && n < k) s = -s;
+    return s & 0xff;
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::C)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    // C has no operator overloading: every operator and `[]` is constant-time,
+    // so the function's only cost is O(1) - none of them may block completeness.
+    let contexts: Vec<_> = output
+        .complexity_facts
+        .iter()
+        .flat_map(|facts| facts.call_contexts.iter())
+        .collect();
+    for op in ["*", "+", "-", ">>", "==", "<", "&", "[]"] {
+        if let Some(call) = contexts.iter().find(|call| call.message == op) {
+            assert_eq!(
+                call.known_time_complexity.as_deref(),
+                Some("O(1)"),
+                "operator {op} must be constant-time",
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn go_top_level_calls_retain_declared_parameter_receiver_types() -> Result<()> {
     use std::io::Write;
 

@@ -165,6 +165,18 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         receiver: Option<&str>,
         message: &str,
     ) -> Option<NormalizedCallComplexity> {
+        // C has no operator overloading: arithmetic, comparison, bitwise,
+        // shift, logical and unary operators - plus array subscript `[]`
+        // (pointer arithmetic) - are constant-time. Unary forms carry a
+        // trailing `@` (e.g. `-@`). Without this they are recorded as
+        // unresolved call targets, wrongly marking O(1) functions incomplete.
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if operator == "[]" || super::normalized_behavior::PRIMITIVE_OPERATORS.contains(&operator) {
+            return Some(NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            });
+        }
         // The generic call extractor represents a bare C function as a
         // synthetic `self` receiver. C has no instance dispatch here, so
         // translate only that parser sentinel back to a free intrinsic.

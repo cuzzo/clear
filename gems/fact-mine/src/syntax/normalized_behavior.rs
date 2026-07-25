@@ -228,6 +228,16 @@ impl NormalizedCollectionOperation {
 
 type StdlibOperationMap = BTreeMap<String, BTreeMap<String, String>>;
 
+/// Lexical operator tokens that are primitive, constant-time operations in
+/// languages WITHOUT operator overloading (comparison, arithmetic, bitwise,
+/// shift, logical, unary). Adapters for such languages price these O(1); without
+/// it the call extractor records them as unresolved targets and wrongly marks
+/// O(1) functions incomplete. Overloading languages must NOT blanket-apply this.
+pub(crate) const PRIMITIVE_OPERATORS: &[&str] = &[
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^",
+    "<<", ">>", "&^", "~", "&&", "||", "!",
+];
+
 const RUBY_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/ruby.yml");
 const PYTHON_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/python.yml");
 const TYPESCRIPT_STDLIB_OPERATIONS: &str =
