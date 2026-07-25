@@ -580,6 +580,11 @@ fn fact_for_method(
     let state_progress = collect_state_progress(node, &mut domain_registry, behavior);
     let state_cursor_domains = collect_state_cursor_domains(node, &mut domain_registry, behavior);
     let mut collection_growth = BTreeMap::new();
+    let type_names = document
+        .owner_defs
+        .iter()
+        .map(|owner| owner.name.clone())
+        .collect::<BTreeSet<_>>();
     visit_loops(
         node,
         params,
@@ -597,6 +602,7 @@ fn fact_for_method(
         block_summaries,
         state_types,
         type_aliases,
+        &type_names,
         language,
         behavior,
         &mut domain_registry,
@@ -1125,6 +1131,7 @@ fn visit_loops(
     block_summaries: &BTreeMap<(String, String), BlockSummary>,
     state_types: &BTreeMap<String, TypeExpr>,
     type_aliases: &BTreeMap<String, String>,
+    type_names: &BTreeSet<String>,
     language: &str,
     behavior: &dyn NormalizedLanguageBehavior,
     domain_registry: &mut DomainRegistry,
@@ -1173,6 +1180,7 @@ fn visit_loops(
                 block_summaries,
                 state_types,
                 type_aliases,
+                type_names,
                 language,
                 behavior,
                 domain_registry,
@@ -1199,6 +1207,7 @@ fn visit_loops(
                 block_summaries,
                 state_types,
                 type_aliases,
+                type_names,
                 language,
                 behavior,
                 domain_registry,
@@ -1502,6 +1511,7 @@ fn visit_loops(
                 block_summaries,
                 state_types,
                 type_aliases,
+                type_names,
                 language,
                 behavior,
                 domain_registry,
@@ -1525,6 +1535,7 @@ fn visit_loops(
                 block_summaries,
                 state_types,
                 type_aliases,
+                type_names,
                 language,
                 behavior,
                 domain_registry,
@@ -1641,6 +1652,13 @@ fn visit_loops(
                         call_receiver(node).map(|receiver| receiver.text.trim()),
                         message,
                     )
+                })
+                .or_else(|| {
+                    // `T(x)` where T names a declared type is a conversion, not
+                    // a call. The adapter owns whether that is constant-time.
+                    (call_receiver(node).is_none() && type_names.contains(message))
+                        .then(|| behavior.type_name_conversion_complexity())
+                        .flatten()
                 });
             let evidence_gap = known_call_complexity.is_none().then(|| {
                 if behavior.callback_invocation_message(message) {
@@ -1706,6 +1724,7 @@ fn visit_loops(
                 block_summaries,
                 state_types,
                 type_aliases,
+                type_names,
                 language,
                 behavior,
                 domain_registry,

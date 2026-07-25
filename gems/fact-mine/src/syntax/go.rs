@@ -791,6 +791,15 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         false
     }
 
+    fn type_name_conversion_complexity(
+        &self,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        Some(super::normalized_behavior::NormalizedCallComplexity {
+            time: "O(1)",
+            space: "O(1)",
+        })
+    }
+
     fn split_case_source(&self, source: &str) -> Vec<String> {
         vec![source.to_string()]
     }

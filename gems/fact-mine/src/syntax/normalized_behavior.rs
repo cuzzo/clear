@@ -1343,6 +1343,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    /// The cost of a bare call whose callee names a declared type. In languages
+    /// where `T(x)` is a representation conversion (Go) this is constant; a
+    /// language whose type-name call is a constructor returns None so it is
+    /// resolved as an ordinary call instead.
+    fn type_name_conversion_complexity(&self) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
     fn receiver_is_type_reference(&self, _receiver: &str) -> bool {
         false
     }

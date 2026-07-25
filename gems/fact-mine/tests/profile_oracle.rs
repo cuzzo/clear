@@ -568,6 +568,36 @@ fn go_self_calls_resolve_to_sibling_declarations() -> Result<()> {
 }
 
 #[test]
+fn go_named_type_conversion_is_constant_time() -> Result<()> {
+    // `ByteCode(b)` converts to a declared type; it is a constant-time cast, not
+    // an unresolved call. Left unpriced it strands otherwise-O(1) functions
+    // (and everything that calls them) as incomplete.
+    let document = syntax::parse_file(fixture("go_named_type_conversion.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let classify = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "classify")
+        .context("classify complexity facts present")?;
+    let conversion = classify
+        .call_contexts
+        .iter()
+        .find(|context| context.message == "ByteCode")
+        .context("ByteCode conversion recorded")?;
+    assert_eq!(
+        conversion.known_time_complexity.as_deref(),
+        Some("O(1)"),
+        "named-type conversion should be priced O(1)"
+    );
+    assert_eq!(
+        conversion.evidence_gap, None,
+        "a priced conversion carries no evidence gap"
+    );
+    Ok(())
+}
+
+#[test]
 fn go_package_function_called_from_method_resolves() -> Result<()> {
     // A bare call to a package-level free function from inside a method
     // (`helper(s.n)` in `State.compute`) is not an implicit self dispatch in
