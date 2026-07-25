@@ -1543,6 +1543,41 @@ func (h *holder) len() int {
 }
 
 #[test]
+fn kotlin_expression_body_functions_extract_complexity_facts() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".kt").tempfile()?;
+    // `fun f() = expr` bodies were dropped as assignment RHS - the function's
+    // whole body (calls, loops) vanished. Both forms must extract facts.
+    tmp.write_all(
+        br#"class Foo {
+    fun blockBody(xs: List<Int>): Int {
+        var s = 0
+        for (x in xs) { s = s + compute(x) }
+        return s
+    }
+    fun exprBody(xs: List<Int>): Int = xs.sumOf { compute(it) }
+    fun compute(x: Int): Int = x * 2
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Kotlin)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for name in ["blockBody", "exprBody", "compute"] {
+        let facts = output
+            .complexity_facts
+            .iter()
+            .find(|facts| facts.function == name)
+            .with_context(|| format!("{name} must produce complexity facts"))?;
+        assert!(
+            !facts.call_contexts.is_empty(),
+            "{name} must extract its body's calls (got none)",
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn c_operators_and_subscript_are_constant_time_intrinsics() -> Result<()> {
     use std::io::Write;
 

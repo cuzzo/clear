@@ -17,6 +17,17 @@ impl AstNormalizationAdapter for KotlinAstAdapter {
         matches!(kind, "for_statement").then_some("FOR")
     }
 
+    // `fun f() = expr`: the expression is the function body, wrapped in a
+    // `function_body` node whose leading `=` is expression-body syntax, not an
+    // assignment. Without this the generic `assignment_rhs` check (prev sibling
+    // is `=`) skips the expression, dropping the whole body - so expression-body
+    // functions produced no calls, loops, or complexity facts at all.
+    fn single_assignment_block_child(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        node.parent()
+            .map(|parent| parent.kind() == "function_body")
+            .unwrap_or(false)
+    }
+
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
         matches!(node.kind(), "call_expression")
     }
