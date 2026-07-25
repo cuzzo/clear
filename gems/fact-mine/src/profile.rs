@@ -6357,11 +6357,17 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .get(&call.receiver)
                     .map(|namespace| format!("{namespace}::{}", call.message))
             };
+            // A bare call is a package free-function reference when the caller
+            // is itself top-level, or in any language without implicit method
+            // dispatch (Go): there a bare `helper(x)` is never `self.helper`, so
+            // even inside a method it names a package function.
+            let bare_names_package_function = source_dispatch == Some("top")
+                || (implicit && !behavior.supports_implicit_owner_dispatch());
             let lexical_symbol_origin = imported_lexical_symbol
                 .as_ref()
                 .map(|_| "explicit_import".to_string())
                 .or_else(|| {
-                    (implicit && document.symbol_scope.canonical && source_dispatch == Some("top"))
+                    (implicit && document.symbol_scope.canonical && bare_names_package_function)
                         .then(|| "project_namespace".to_string())
                 });
             let target_candidates = document
@@ -6507,7 +6513,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                                 } else {
                                     None
                                 }
-                            } else if source_dispatch == Some("top") {
+                            } else if bare_names_package_function {
                                 source_namespace
                                     .map(|namespace| format!("{namespace}::{}", call.message))
                             } else {

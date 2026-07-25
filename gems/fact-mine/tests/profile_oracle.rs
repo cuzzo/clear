@@ -568,6 +568,32 @@ fn go_self_calls_resolve_to_sibling_declarations() -> Result<()> {
 }
 
 #[test]
+fn go_package_function_called_from_method_resolves() -> Result<()> {
+    // A bare call to a package-level free function from inside a method
+    // (`helper(s.n)` in `State.compute`) is not an implicit self dispatch in
+    // Go, and must resolve to the free function, not stay unattributed.
+    let document = syntax::parse_file(fixture("go_pkg_func_from_method.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let helper = output
+        .methods
+        .iter()
+        .find(|method| method.name == "helper")
+        .context("free function helper present")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "helper")
+        .context("helper() call present")?;
+    assert_eq!(
+        call.target.as_deref(),
+        Some(helper.id.as_str()),
+        "package function called from a method did not resolve"
+    );
+    Ok(())
+}
+
+#[test]
 fn go_method_on_type_named_after_its_file_dispatches_as_instance() -> Result<()> {
     // The fixture's file stem ("widget") equals its receiver type, which used
     // to collide with the synthetic file owner and mark every method a
