@@ -488,6 +488,12 @@ pub struct OwnerDef {
     /// them before any hierarchy traversal.
     #[serde(default)]
     pub supertypes: Vec<String>,
+    /// For an abstract-dispatch type (interface/protocol) in a structurally-typed
+    /// language, the method names it requires. Used to compute which concrete
+    /// types satisfy it. Empty for concrete types and nominal-satisfaction
+    /// languages (which express conformance through `supertypes`).
+    #[serde(default)]
+    pub requirements: Vec<String>,
     pub line: usize,
     pub span: Span,
 }

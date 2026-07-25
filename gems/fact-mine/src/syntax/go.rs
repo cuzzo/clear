@@ -809,6 +809,13 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         kind == "interface"
     }
 
+    fn abstract_type_requirements(&self, node: &Node) -> Vec<String> {
+        if !is_interface_declaration(&node.text) {
+            return Vec::new();
+        }
+        interface_method_names(&node.text)
+    }
+
     fn split_case_source(&self, source: &str) -> Vec<String> {
         vec![source.to_string()]
     }
@@ -1333,6 +1340,28 @@ fn type_name(text: &str) -> Option<String> {
         .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
         .find(|part| !part.is_empty())
         .map(str::to_string)
+}
+
+/// The method names declared by a Go `interface { ... }` body. Embedded
+/// interfaces (a bare type name, no parameter list) are conformance edges, not
+/// methods, and are handled through `supertypes`.
+fn interface_method_names(text: &str) -> Vec<String> {
+    let Some(open) = text
+        .find("interface")
+        .and_then(|i| text[i..].find('{').map(|j| i + j + 1))
+    else {
+        return Vec::new();
+    };
+    let body = &text[open..];
+    let body = body.rfind('}').map(|close| &body[..close]).unwrap_or(body);
+    body.split([';', '\n'])
+        .filter_map(|spec| {
+            let spec = spec.trim();
+            let paren = spec.find('(')?;
+            let name = spec[..paren].trim();
+            simple_identifier(name).then(|| name.to_string())
+        })
+        .collect()
 }
 
 fn receiver_owner_from_go_function(source: &str) -> Option<String> {

@@ -568,6 +568,34 @@ fn go_self_calls_resolve_to_sibling_declarations() -> Result<()> {
 }
 
 #[test]
+fn go_structural_interface_satisfaction_is_computed() -> Result<()> {
+    // `Ints` has Len+Less so it structurally satisfies `Sorter`; `Partial` has
+    // only Len and must not be recorded as an implementer.
+    let document = syntax::parse_file(fixture("go_dispatch_satisfaction.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let implementers = output
+        .dispatch_impls
+        .iter()
+        .filter(|edge| edge.interface == "Sorter")
+        .map(|edge| edge.implementer.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        implementers.contains(&"Ints"),
+        "Ints structurally satisfies Sorter, got {implementers:?}"
+    );
+    assert!(
+        !implementers.contains(&"Partial"),
+        "Partial (only Len) must not satisfy Sorter"
+    );
+    assert!(output
+        .dispatch_impls
+        .iter()
+        .any(|edge| edge.interface == "Sorter" && edge.basis == "structural"));
+    Ok(())
+}
+
+#[test]
 fn go_interface_method_call_is_priced_as_a_callback() -> Result<()> {
     // A call on an interface-typed receiver (`c.Less` where c is a Comparer)
     // dispatches to an unknown implementation, so it is priced as a callback of

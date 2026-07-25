@@ -284,6 +284,7 @@ impl<'a> Extractor<'a> {
             kind: kind.to_string(),
             reopenable: self.behavior.reopenable_owner(node),
             supertypes: self.behavior.owner_supertypes(node),
+            requirements: self.behavior.abstract_type_requirements(node),
             line: owner_span[0],
             span: owner_span,
         }

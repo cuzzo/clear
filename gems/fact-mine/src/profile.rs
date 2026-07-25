@@ -148,6 +148,8 @@ pub struct ProfileOutput {
     pub input_coverage: InputCoverage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<OwnerRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dispatch_impls: Vec<DispatchImpl>,
     pub methods: Vec<MethodRecord>,
     pub fields: Vec<FieldRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -287,6 +289,77 @@ pub struct OwnerRecord {
     pub symbol: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supertypes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requirements: Vec<String>,
+}
+
+/// A concrete type that can stand in for an abstract-dispatch type at runtime.
+/// Espalier resolves an interface method's cost to the worst-case over these.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DispatchImpl {
+    pub interface: String,
+    pub implementer: String,
+    pub language: String,
+    /// "structural" (method-set superset) or "nominal" (declared conformance).
+    pub basis: String,
+}
+
+/// For every abstract-dispatch type, find the concrete types that satisfy it -
+/// structurally (method set superset, e.g. Go) or nominally (declared
+/// conformance via supertypes, e.g. Java/Rust). This is the whole-program
+/// satisfaction relation that drives worst-case interface costing.
+fn compute_dispatch_impls(owners: &[OwnerRecord], methods: &[MethodRecord]) -> Vec<DispatchImpl> {
+    // An interface carries no method bodies, so its method-set is empty and it
+    // never becomes a spurious structural implementer of another interface.
+    let mut methodset: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
+    for method in methods {
+        methodset
+            .entry((method.language.as_str(), method.owner.as_str()))
+            .or_default()
+            .insert(method.dispatch_name.as_str());
+    }
+    let mut edges = Vec::new();
+    for iface in owners {
+        let required = iface
+            .requirements
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        for concrete in owners {
+            if concrete.language != iface.language || concrete.name == iface.name {
+                continue;
+            }
+            // Structural: the concrete method-set is a superset of what the
+            // interface requires (Go, TypeScript).
+            let structural = !required.is_empty()
+                && methodset
+                    .get(&(concrete.language.as_str(), concrete.name.as_str()))
+                    .is_some_and(|set| required.iter().all(|method| set.contains(method)));
+            // Nominal: the concrete declares conformance (Java/Rust/Swift/... via
+            // `implements` / `impl` / `: P`, canonicalized into supertypes).
+            let nominal = concrete.supertypes.iter().any(|supertype| {
+                supertype == &iface.name
+                    || supertype.rsplit(['.', ':']).next() == Some(iface.name.as_str())
+            });
+            if structural || nominal {
+                edges.push(DispatchImpl {
+                    interface: iface.name.clone(),
+                    implementer: concrete.name.clone(),
+                    language: iface.language.clone(),
+                    basis: if structural { "structural" } else { "nominal" }.to_string(),
+                });
+            }
+        }
+    }
+    // A type declared across several files (or matching structurally and
+    // nominally) yields duplicate edges; keep one per (interface, implementer).
+    edges.sort_by(|a, b| {
+        (&a.language, &a.interface, &a.implementer).cmp(&(&b.language, &b.interface, &b.implementer))
+    });
+    edges.dedup_by(|a, b| {
+        a.language == b.language && a.interface == b.interface && a.implementer == b.implementer
+    });
+    edges
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1254,6 +1327,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             incremental_metrics: None,
             input_coverage: InputCoverage::default(),
             owners,
+            dispatch_impls: Vec::new(),
             methods,
             fields,
             struct_declarations,
@@ -1355,6 +1429,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     );
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
     output.call_graph_edges = extract_call_graph_edges(&output.calls);
+    output.dispatch_impls = compute_dispatch_impls(&output.owners, &output.methods);
     output
 }
 
@@ -1362,6 +1437,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
 pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut output = merge_local(outputs, profile);
     finalize_project_output(&mut output);
+    output.dispatch_impls = compute_dispatch_impls(&output.owners, &output.methods);
     output
 }
 
@@ -1523,6 +1599,7 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         incremental_metrics: None,
         input_coverage: InputCoverage::default(),
         owners,
+        dispatch_impls: Vec::new(),
         methods,
         fields,
         struct_declarations,
@@ -3853,6 +3930,7 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
                         .unwrap_or_else(|| supertype.clone())
                 })
                 .collect(),
+            requirements: owner.requirements.clone(),
         })
         .collect::<Vec<_>>();
 
@@ -3874,6 +3952,7 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
             confidence: "partial".to_string(),
             symbol: canonical_symbol_owner(document, &function.owner, Some(function.span)),
             supertypes: Vec::new(),
+            requirements: Vec::new(),
         });
     }
     owners
@@ -6747,6 +6826,7 @@ pub(crate) mod tests {
                 kind: "class".to_string(),
                 reopenable: false,
                 supertypes: Vec::new(),
+                requirements: Vec::new(),
                 line: 1,
                 span: [1, 0, 1, 16],
             }],
@@ -7398,6 +7478,7 @@ def py_fn(a: int) -> str:
             kind: "class".to_string(),
             reopenable: false,
             supertypes: Vec::new(),
+            requirements: Vec::new(),
             line: 1,
             span: [1, 0, 1, 15],
         });

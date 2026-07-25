@@ -1360,6 +1360,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    /// The method names an abstract type requires, for structural satisfaction
+    /// (a concrete type implements it if its method set is a superset). Only
+    /// structurally-typed languages (Go) populate this; nominal languages express
+    /// conformance through `owner_supertypes`.
+    fn abstract_type_requirements(&self, _node: &Node) -> Vec<String> {
+        Vec::new()
+    }
+
     fn receiver_is_type_reference(&self, _receiver: &str) -> bool {
         false
     }

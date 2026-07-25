@@ -1164,6 +1164,7 @@ mod tests {
             confidence: "high".into(),
             symbol: Some("/project.ants.Logger".into()),
             supertypes: Vec::new(),
+            requirements: Vec::new(),
         };
         let symbol =
             "scip-go gomod example.test/ants/v2 v1.0.0 `example.test/ants/v2`/Logger#Printf.";
