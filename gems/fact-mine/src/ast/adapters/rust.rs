@@ -1,4 +1,4 @@
-use super::super::named_children;
+use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
 use tree_sitter::Node as TreeSitterNode;
 
@@ -49,6 +49,22 @@ impl AstNormalizationAdapter for RustAstAdapter {
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         matches!(kind, "for_expression").then_some("FOR")
+    }
+
+    fn scoped_call_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, String)> {
+        if node.kind() != "scoped_identifier" {
+            return None;
+        }
+        // `Cell::new` -> receiver `Cell` (the `path` field), method `new` (the
+        // `name` field). `std::mem::replace` -> receiver `std::mem`, method
+        // `replace`. Only the terminal segment becomes the message.
+        let path = node.child_by_field_name("path")?;
+        let name = node.child_by_field_name("name")?;
+        Some((path, node_text(name, source).to_string()))
     }
 
     fn hash_literal_target<'tree>(

@@ -443,6 +443,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    /// Split a path-qualified call callee (`Cell::new`, `Foo::bar`) into its
+    /// receiver node and method name, so the normalized call carries the real
+    /// method as its message instead of a generic `call` placeholder. Returns
+    /// None for languages/nodes that are not scope-path callees.
+    fn scoped_call_parts<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, String)> {
+        None
+    }
+
     fn singleton_function_kind(&self, _kind: &str) -> bool {
         false
     }

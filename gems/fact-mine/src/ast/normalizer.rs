@@ -2485,6 +2485,22 @@ impl<'source> TreeSitterNormalizer<'source> {
             }
             return Some(self.wrap("CALL", children, node));
         }
+        if let Some((receiver, method)) = self
+            .normalization_adapter
+            .scoped_call_parts(function, self.source)
+        {
+            let receiver = optional_node(self.normalize_node(receiver));
+            let args = if let Some(source) = call_source.as_ref() {
+                self.list_or_nil_from_source_node(args, source)
+            } else {
+                list_or_nil(args, node, self)
+            };
+            let children = vec![receiver, Child::Symbol(method), args];
+            if let Some(source) = call_source.as_ref() {
+                return Some(self.wrap_from_source_node("CALL", children, source));
+            }
+            return Some(self.wrap("CALL", children, node));
+        }
         let function = optional_node(self.normalize_node(function));
         let args = if let Some(source) = call_source.as_ref() {
             self.list_or_nil_from_source_node(args, source)

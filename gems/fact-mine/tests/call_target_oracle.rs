@@ -1485,3 +1485,31 @@ fn generic_impl_methods_file_under_the_base_type() -> Result<()> {
     );
     Ok(())
 }
+
+/// A Rust path-qualified associated call (`Cell::new(..)`) must carry the real
+/// method as its message (not a `call` placeholder) and resolve to the impl's
+/// associated function by owner-name match, so its cost propagates.
+#[test]
+fn rust_associated_function_calls_resolve_by_type_receiver() -> Result<()> {
+    let output = extract_source(
+        "struct Cell<T> { v: T }\nimpl<T> Cell<T> {\n    fn new(v: T) -> Cell<T> { Cell { v } }\n    fn make() -> Cell<i32> { Cell::new(0) }\n}\n",
+        ".rs",
+        Language::Rust,
+    )?;
+    let target = output
+        .methods
+        .iter()
+        .find(|m| m.owner == "Cell" && m.name == "new")
+        .context("missing Cell::new method")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "make" && call.message == "new")
+        .context("Cell::new must normalize to message `new`, not `call`")?;
+    assert_eq!(
+        call.target.as_deref(),
+        Some(target.id.as_str()),
+        "Cell::new must resolve to the associated function",
+    );
+    Ok(())
+}
