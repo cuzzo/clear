@@ -26,6 +26,14 @@ Array:
   dedup: linear_scan
   dedup_by: linear_scan
   retain: linear_scan
+  as_slice: constant
+  last_mut: constant
+  # Lazy adapter over the existing buffer; no element is touched.
+  windows: constant
+  # Drops every element it holds.
+  clear: linear_scan
+  with_capacity: linear_materialize
+  sort_unstable: sort
 Hash:
   len: constant
   is_empty: constant
@@ -33,12 +41,16 @@ Hash:
   contains_key: constant
   insert: constant
   remove: constant
+  new: constant
+  entry: constant
+  clone: linear_materialize
 Set:
   len: constant
   is_empty: constant
   contains: constant
   insert: constant
   remove: constant
+  new: constant
 String:
   len: constant
   is_empty: constant
@@ -72,6 +84,19 @@ String:
   char_indices: constant
   push: linear_materialize
   cmp: linear_scan
+  # Scans and validates the whole input.
+  parse: linear_scan
+  from_utf8: linear_scan
+  # Lazy adapters; the scan happens on the iterator, not here.
+  bytes: constant
+  splitn: constant
+  matches: constant
+  match_indices: constant
+  is_char_boundary: constant
+  # Sets the length after a boundary check; no element is moved.
+  truncate: constant
+  to_lowercase: linear_materialize
+  push_str: linear_materialize
 BTreeMap:
   len: constant
   is_empty: constant
@@ -86,6 +111,11 @@ BTreeMap:
   keys: constant
   into_iter: constant
   extend: sort
+  get_mut: logarithmic
+  values: constant
+  into_values: constant
+  # `From<[(K, V); N]>` builds the tree from an unsorted array.
+  from: sort
 BTreeSet:
   len: constant
   is_empty: constant
@@ -98,6 +128,10 @@ BTreeSet:
   extend: sort
   is_disjoint: linear_scan
   intersection: constant
+  difference: constant
+  new: constant
+  # `From<[T; N]>` builds the tree from an unsorted array.
+  from: sort
 Option:
   unwrap: constant
   expect: constant
@@ -114,11 +148,17 @@ Option:
   or: constant
   ok: constant
   clone: linear_materialize
+  transpose: constant
+  take: constant
+  as_mut: constant
 Result:
   unwrap: constant
   expect: constant
   ok: constant
   is_ok: constant
+  is_err: constant
+  unwrap_or: constant
+  unwrap_or_default: constant
 Iterator:
   iter: constant
   into_iter: constant
@@ -147,6 +187,11 @@ Iterator:
   min_by_key: linear_scan
   max_by_key: linear_scan
   next_back: constant
+  take: constant
+  peekable: constant
+  sum: linear_scan
+  max: linear_scan
+  min: linear_scan
 Box:
   new: constant
   as_ref: constant
@@ -159,8 +204,24 @@ Path:
   join: linear_materialize
   to_string_lossy: linear_materialize
   to_path_buf: linear_materialize
+  # Scan the path text for the relevant component boundary.
+  file_stem: linear_scan
+  file_name: linear_scan
+  extension: linear_scan
+  strip_prefix: linear_scan
+  starts_with: linear_scan
+  components: constant
+  is_absolute: constant
 PathBuf:
   from: linear_materialize
+  clone: linear_materialize
+OsStr:
+  # Unix `to_str` validates the bytes as UTF-8.
+  to_str: linear_scan
+  to_string_lossy: linear_materialize
+DirEntry:
+  path: linear_materialize
+  file_name: linear_materialize
 char:
   is_ascii_alphanumeric: constant
   is_ascii_alphabetic: constant
@@ -168,13 +229,57 @@ char:
   is_ascii_digit: constant
   is_alphanumeric: constant
   len_utf8: constant
+  is_whitespace: constant
+  is_uppercase: constant
+  is_lowercase: constant
+  is_ascii_lowercase: constant
+u8:
+  is_ascii_alphanumeric: constant
+  is_ascii_alphabetic: constant
+  is_ascii_digit: constant
+  is_ascii_whitespace: constant
 bool:
   then_some: constant
 usize:
   saturating_sub: constant
   cmp: constant
+  from: constant
+  checked_sub: constant
 u32:
   saturating_sub: constant
+f64:
+  round: constant
+  abs: constant
+VecDeque:
+  push_back: linear_materialize
+  pop_front: constant
+  from: linear_materialize
+  extend: linear_materialize
+  len: constant
+  is_empty: constant
+Instant:
+  now: constant
+  elapsed: constant
+Duration:
+  as_millis: constant
+  as_secs: constant
+  as_secs_f64: constant
+Peekable:
+  peek: constant
+RefCell:
+  borrow: constant
+  borrow_mut: constant
+mem:
+  take: constant
+  replace: constant
+  swap: constant
+env:
+  # Process environment access; the map itself is small and O(1)-indexed.
+  var: constant
+  var_os: constant
+  set_var: constant
+  remove_var: constant
+  temp_dir: constant
 Ord:
   min: constant
   max: constant
@@ -202,6 +307,73 @@ SemanticSymbol:
   'file/impl#[`NamedTempFile<F>`]path().': constant
   'impl#[`Builder<''a, ''b>`]new().': constant
   'impl#[`Builder<''a, ''b>`]suffix().': constant
+  # `Entry` is the owner name of both map families, so the tree and the table
+  # variants must be keyed exactly rather than through one owner table.
+  'collections/btree/map/entry/impl#[`Entry<''a, K, V, A>`]or_default().': logarithmic
+  'collections/hash/map/impl#[`Entry<''a, K, V>`]or_default().': constant
+  # `[T; N]` is not the nominal array shape the shared parser recognises.
+  'array/iter/impl#[`[T; N]`][IntoIterator]into_iter().': constant
+  'array/impl#[`[T; N]`][Ord]cmp().': linear_scan
+  'slice/raw/from_ref().': constant
+  'io/stdio/stdout().': constant
+  'io/stdio/impl#[Stdout]lock().': constant
+  'process/impl#[Command]new().': constant
+  'thread/builder/impl#[Builder]new().': constant
+  'thread/builder/impl#[Builder]name().': linear_materialize
+  'thread/builder/impl#[Builder]stack_size().': constant
+  'io/buffered/bufwriter/impl#[`BufWriter<W>`]new().': constant
+  # tree-sitter cursor and node accessors are pointer arithmetic on the parse
+  # tree; `utf8_text` slices the source and validates it as UTF-8.
+  'impl#[`Node<''tree>`]utf8_text().': linear_scan
+  'impl#[`Node<''tree>`]id().': constant
+  'impl#[`Node<''tree>`]start_position().': constant
+  'impl#[`Node<''tree>`]end_position().': constant
+  'impl#[`Node<''tree>`]byte_range().': constant
+  'impl#[`Node<''tree>`]child_count().': constant
+  'impl#[`Node<''tree>`]named_child_count().': constant
+  'impl#[`Node<''tree>`]next_sibling().': constant
+  'impl#[`Node<''tree>`]prev_sibling().': constant
+  'impl#[`Node<''tree>`]next_named_sibling().': constant
+  'impl#[`Node<''tree>`]prev_named_sibling().': constant
+  'impl#[`Node<''tree>`]named_children().': constant
+  'impl#[`Node<''tree>`]is_missing().': constant
+  'impl#[`Node<''tree>`]is_error().': constant
+  'impl#[`Node<''tree>`]is_extra().': constant
+  'impl#[`Node<''tree>`]named_child().': constant
+  'impl#[Parser]new().': constant
+  'impl#[Query]capture_names().': constant
+  'Point#row.': constant
+  'Point#column.': constant
+  # regex construction compiles the pattern; matching is linear in the input.
+  'regex/string/impl#[Regex]new().': linear_materialize
+  'regex/string/impl#[Regex]is_match().': linear_scan
+  'regex/string/impl#[`Match<''h>`]as_str().': constant
+  'regex/string/impl#[`Captures<''h>`]get().': constant
+  # serde_json Value accessors are tagged-union reads.
+  'value/impl#[Value]as_u64().': constant
+  'value/impl#[Value]as_bool().': constant
+  'value/impl#[Value]as_array().': constant
+  'value/impl#[Value]as_array_mut().': constant
+  'value/impl#[Value]as_object().': constant
+  'value/impl#[Value]as_object_mut().': constant
+  'value/impl#[Value]get_mut().': logarithmic
+  'value/impl#[Value]pointer().': linear_scan
+  'map/impl#[`Map<String, Value>`]get().': logarithmic
+  'map/impl#[`Map<String, Value>`]remove().': logarithmic
+  'map/impl#[`Map<String, Value>`]entry().': logarithmic
+  'map/impl#[`Map<String, Value>`]is_empty().': constant
+  'map/impl#[`Map<String, Value>`]len().': constant
+  'map/impl#[`Map<String, Value>`][IntoIterator]into_iter().': constant
+  # flate2 stream handles; `finish` flushes the whole compressed buffer.
+  'gz/write/impl#[`GzEncoder<W>`]new().': constant
+  'gz/write/impl#[`GzEncoder<W>`]finish().': linear_materialize
+  'gz/read/impl#[`GzDecoder<R>`]new().': constant
+  'file/impl#[`NamedTempFile<F>`]as_file_mut().': constant
+  # anyhow context attachment stores the value; it does not walk the chain.
+  'context/impl#[`Result<T, E>`][`Context<T, E>`]context().': constant
+  'context/impl#[`Option<T>`][`Context<T, Infallible>`]context().': constant
+  # a digest absorbs every input byte.
+  'digest/impl#[D][Digest]update().': linear_materialize
 SemanticSymbolParametricCost:
   'string/impl#[T][ToString]to_string().': reflective_once
   'iter/traits/iterator/Iterator#collect().': callback_linear
@@ -223,10 +395,56 @@ SemanticSymbolParametricCost:
   'vec/impl#[`Vec<T, A>`][Clone]clone().': callback_linear
   'context/impl#[`Option<T>`][`Context<T, Infallible>`]with_context().': callback_once
   'context/impl#[`Result<T, E>`][`Context<T, E>`]with_context().': callback_once
+  # Blanket trait dispatch: the cost is the selected `From`/`Clone` impl, which
+  # the symbol does not name. Constant would be a claim we cannot make.
+  'convert/impl#[T][`Into<U>`]into().': reflective_once
+  'clone/Clone#clone().': reflective_once
+  # Closure-running standard-library APIs.
+  'sync/once_lock/impl#[`OnceLock<T>`]get_or_init().': callback_once
+  'option/impl#[`Option<T>`]is_none_or().': callback_once
+  'result/impl#[`Result<T, E>`]map().': callback_once
+  'result/impl#[`Result<T, E>`]unwrap_or_else().': callback_once
+  'collections/btree/map/entry/impl#[`Entry<''a, K, V, A>`]or_insert_with().': callback_once
+  'iter/traits/iterator/Iterator#reduce().': callback_linear
+  'iter/traits/iterator/Iterator#fold().': callback_linear
+  'iter/traits/iterator/Iterator#for_each().': callback_linear
+  'slice/iter/impl#[`Iter<''a, T>`][Iterator]fold().': callback_linear
+  'iter/adapters/filter/impl#[`Filter<I, P>`][Iterator]fold().': callback_linear
+  'iter/adapters/filter_map/impl#[`FilterMap<I, F>`][Iterator]fold().': callback_linear
+  'slice/iter/impl#[`Iter<''a, T>`][Iterator]rposition().': callback_linear
+  'iter/traits/double_ended/DoubleEndedIterator#rfind().': callback_linear
+  # serde traverses the value against a Deserialize/Serialize impl it selects
+  # at the call site; the impl, not the call, carries the cost.
+  'value/from_value().': reflective_once
+  'value/to_value().': reflective_once
+  'ser/to_vec().': reflective_once
+  'ser/to_string().': reflective_once
+  'ser/to_string_pretty().': reflective_once
+  'ser/to_writer().': reflective_once
+  'de/from_str().': reflective_once
+  'de/from_slice().': reflective_once
+  'map/impl#[`Entry<''a>`]or_insert_with().': callback_once
 ExternalLatency:
   fs.write: linear_materialize
   fs.read_to_string: linear_materialize
   fs.create_dir_all: linear_materialize
+  fs.read: linear_materialize
+  fs.read_dir: linear_materialize
+  fs.canonicalize: linear_materialize
+  fs.remove_dir_all: linear_materialize
+  fs.remove_file: constant
+  fs.rename: constant
+  fs.metadata: constant
+  Path.exists: constant
+  Path.is_dir: constant
+  Path.is_file: constant
+  env.current_dir: constant
+  Write.write_all: linear_materialize
+  Write.flush: constant
+  Read.read_to_end: linear_materialize
+  BufWriter.write_all: linear_materialize
+  BufWriter.flush: constant
   Builder.tempfile: constant
   dir.tempdir: constant
+  NamedTempFile.new: constant
   NamedTempFile.write_all: linear_materialize

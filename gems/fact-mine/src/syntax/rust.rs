@@ -863,6 +863,81 @@ mod tests {
     }
 
     #[test]
+    fn reviewed_external_cost_models_resolve_through_every_registry_path() {
+        let core = "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core ";
+        let alloc = "rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc ";
+        let std = "rust-analyzer cargo std https://github.com/rust-lang/rust/library/std ";
+
+        // Owner table: the descriptor's `impl#[Path]` owner selects the Path map.
+        for (symbol, message, time) in [
+            (format!("{std}path/impl#[Path]file_stem()."), "file_stem", "O(N)"),
+            (format!("{std}ffi/os_str/impl#[OsStr]to_str()."), "to_str", "O(N)"),
+            (format!("{core}str/impl#[str]parse()."), "parse", "O(N)"),
+            (format!("{core}str/impl#[str]splitn()."), "splitn", "O(1)"),
+            (format!("{std}collections/hash/set/impl#[`HashSet<T>`]new()."), "new", "O(1)"),
+            (format!("{alloc}vec/impl#[`Vec<T, A>`]as_slice()."), "as_slice", "O(1)"),
+            (format!("{alloc}collections/btree/set/impl#[`BTreeSet<T>`][`From<[T; N]>`]from()."), "from", "O(N log N)"),
+            (format!("{alloc}collections/btree/map/impl#[`BTreeMap<K, V, A>`]get_mut()."), "get_mut", "O(log N)"),
+        ] {
+            let complexity = external_symbol_call_complexity(&symbol, message)
+                .unwrap_or_else(|| panic!("no cost model for {symbol}"));
+            assert_eq!(complexity.time, time, "{symbol}");
+            assert_eq!(complexity.provenance, "rust_stdlib_registry", "{symbol}");
+        }
+
+        // Exact descriptors: both map families name their entry type `Entry`, so
+        // the owner table cannot separate the tree cost from the table cost.
+        let btree_entry = format!("{alloc}collections/btree/map/entry/impl#[`Entry<'a, K, V, A>`]or_default().");
+        let hash_entry = format!("{std}collections/hash/map/impl#[`Entry<'a, K, V>`]or_default().");
+        assert_eq!(
+            external_symbol_call_complexity(&btree_entry, "or_default").map(|c| c.time),
+            Some("O(log N)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(&hash_entry, "or_default").map(|c| c.time),
+            Some("O(1)")
+        );
+
+        // A dependency crate has no owner-table fallback: it is priced only by an
+        // exact reviewed descriptor.
+        let utf8_text = "rust-analyzer cargo tree-sitter 0.25.8 impl#[`Node<'tree>`]utf8_text().";
+        let node_id = "rust-analyzer cargo tree-sitter 0.25.8 impl#[`Node<'tree>`]id().";
+        assert_eq!(
+            external_symbol_call_complexity(utf8_text, "utf8_text").map(|c| c.time),
+            Some("O(N)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(node_id, "id").map(|c| c.provenance),
+            Some("rust_dependency_registry")
+        );
+
+        // Blanket trait dispatch and closure-running APIs must stay parametric:
+        // the symbol proves identity but never names the selected impl.
+        for (symbol, cost) in [
+            (format!("{core}convert/impl#[T][`Into<U>`]into()."), "reflective_once"),
+            (format!("{core}clone/Clone#clone()."), "reflective_once"),
+            (format!("{std}sync/once_lock/impl#[`OnceLock<T>`]get_or_init()."), "callback_once"),
+            (format!("{core}iter/traits/iterator/Iterator#fold()."), "callback_linear"),
+        ] {
+            assert_eq!(
+                external_symbol_metadata(&symbol).parametric_cost.as_deref(),
+                Some(cost),
+                "{symbol}"
+            );
+            assert!(
+                external_symbol_call_complexity(&symbol, "into").is_none(),
+                "{symbol} must not carry a closed bound"
+            );
+        }
+
+        // Filesystem entry points keep their excluded-latency assumption.
+        let read = format!("{std}fs/read().");
+        let complexity = external_symbol_call_complexity(&read, "read").unwrap();
+        assert_eq!(complexity.bound_quality, "upper_bound_external_latency_excluded");
+        assert!(complexity.assumption.is_some());
+    }
+
+    #[test]
     fn rust_callback_and_iterator_contracts_remain_parametric() {
         let collect = "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core iter/traits/iterator/Iterator#collect().";
         let metadata = external_symbol_metadata(collect);
