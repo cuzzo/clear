@@ -248,7 +248,7 @@
         "function": "update",
         "line": 19,
         "message": "ok",
-        "receiver": "std::fs::read_to_string.call(\"config\")",
+        "receiver": "std::fs.read_to_string(\"config\")",
         "safe_navigation": false
       }
     ],
@@ -270,18 +270,18 @@
         "child_fingerprints": [
           "assignment<value=>(id id argument_list(id))",
           "call(id id)",
-          "call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit)))",
+          "call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit)))",
           "macro_invocation(id token_tree(lit id))"
         ],
         "child_masses": [
           4,
           2,
-          9,
+          7,
           5
         ],
-        "fingerprint": "body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))",
+        "fingerprint": "body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit))) macro_invocation(id token_tree(lit id)))",
         "line": 16,
-        "mass": 21,
+        "mass": 19,
         "method_name": "update",
         "node_name": "body_statement"
       },
@@ -289,18 +289,18 @@
         "child_fingerprints": [
           "assignment<value=>(id id argument_list(id))",
           "call(id id)",
-          "call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit)))",
+          "call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit)))",
           "macro_invocation(id token_tree(lit id))"
         ],
         "child_masses": [
           4,
           2,
-          9,
+          7,
           5
         ],
-        "fingerprint": "if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id))))",
+        "fingerprint": "if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit))) macro_invocation(id token_tree(lit id))))",
         "line": 16,
-        "mass": 26,
+        "mass": 24,
         "method_name": "update",
         "node_name": "if"
       },
@@ -349,14 +349,14 @@
       },
       {
         "child_fingerprints": [
-          "call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))"
+          "call<read_to_string>(id scoped_identifier(id id) argument_list(lit))"
         ],
         "child_masses": [
-          8
+          6
         ],
-        "fingerprint": "call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit)))",
+        "fingerprint": "call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit)))",
         "line": 19,
-        "mass": 9,
+        "mass": 7,
         "method_name": "update",
         "node_name": "call"
       },
@@ -470,26 +470,39 @@
       },
       {
         "child_fingerprints": [
-          "let_declaration(assignment(id call(id scoped_identifier(id id))))",
+          "id"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "call(id id)",
+        "line": 8,
+        "mass": 2,
+        "method_name": "update",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "let_declaration(assignment(id call(id id)))",
           "let_declaration(id generic_type(id type_arguments(id)))",
           "let_declaration(assignment(id id))",
           "if(call(id id) macro_invocation(id token_tree(lit)))",
-          "if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id))))",
+          "if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit))) macro_invocation(id token_tree(lit id))))",
           "call<push_str>(id id argument_list(lit))",
           "call<Some>(id argument_list(id))"
         ],
         "child_masses": [
-          6,
+          4,
           6,
           3,
           7,
-          26,
+          24,
           4,
           3
         ],
-        "fingerprint": "body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))",
+        "fingerprint": "body_statement(let_declaration(assignment(id call(id id))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))",
         "line": 7,
-        "mass": 56,
+        "mass": 52,
         "method_name": "update",
         "node_name": "body_statement"
       },
@@ -521,53 +534,40 @@
       },
       {
         "child_fingerprints": [
-          "method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
+          "method(id body(body_statement(let_declaration(assignment(id call(id id))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
           "method(id body(call(id call(id id))))"
         ],
         "child_masses": [
-          58,
+          54,
           5
         ],
-        "fingerprint": "body_statement(method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id))))) method(id body(call(id call(id id)))))",
+        "fingerprint": "body_statement(method(id body(body_statement(let_declaration(assignment(id call(id id))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id))))) method(id body(call(id call(id id)))))",
         "line": 6,
-        "mass": 64,
+        "mass": 60,
         "method_name": "(top-level)",
         "node_name": "body_statement"
       },
       {
         "child_fingerprints": [
-          "scoped_identifier(id id)"
-        ],
-        "child_masses": [
-          3
-        ],
-        "fingerprint": "call(id scoped_identifier(id id))",
-        "line": 8,
-        "mass": 4,
-        "method_name": "update",
-        "node_name": "call"
-      },
-      {
-        "child_fingerprints": [
-          "scoped_identifier(scoped_identifier(id id) id)",
+          "scoped_identifier(id id)",
           "argument_list(lit)"
         ],
         "child_masses": [
-          5,
+          3,
           2
         ],
-        "fingerprint": "call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))",
+        "fingerprint": "call<read_to_string>(id scoped_identifier(id id) argument_list(lit))",
         "line": 19,
-        "mass": 8,
+        "mass": 6,
         "method_name": "update",
         "node_name": "call"
       },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(body_statement(let_declaration(assignment(id call(id scoped_identifier(id id)))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<call>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
+        "fingerprint": "method(id body(body_statement(let_declaration(assignment(id call(id id))) let_declaration(id generic_type(id type_arguments(id))) let_declaration(assignment(id id)) if(call(id id) macro_invocation(id token_tree(lit))) if(and(call(id id) id) body_statement(assignment<value=>(id id argument_list(id)) call(id id) call(id call<read_to_string>(id scoped_identifier(id id) argument_list(lit))) macro_invocation(id token_tree(lit id)))) call<push_str>(id id argument_list(lit)) call<Some>(id argument_list(id)))))",
         "line": 7,
-        "mass": 58,
+        "mass": 54,
         "method_name": "update",
         "node_name": "defn"
       },
@@ -774,8 +774,6 @@
       {}
     ],
     "flow_types": [
-      {},
-      {},
       {},
       {},
       {},
@@ -1085,8 +1083,7 @@
       },
       {
         "reads": [
-          "place:RustSourceFactBehavior#update:local:String",
-          "place:RustSourceFactBehavior#update:local:new"
+          "place:RustSourceFactBehavior#update:local:String"
         ],
         "writes": [
           "place:RustSourceFactBehavior#update:local:String",
@@ -1128,7 +1125,6 @@
       {
         "reads": [
           "place:RustSourceFactBehavior#update:local:fs",
-          "place:RustSourceFactBehavior#update:local:read_to_string",
           "place:RustSourceFactBehavior#update:local:std"
         ],
         "writes": [
@@ -1254,11 +1250,6 @@
         "name": "input"
       },
       {
-        "id": "place:RustSourceFactBehavior#update:local:new",
-        "kind": "local",
-        "name": "new"
-      },
-      {
         "id": "place:RustSourceFactBehavior#update:local:panic",
         "kind": "local",
         "name": "panic"
@@ -1267,11 +1258,6 @@
         "id": "place:RustSourceFactBehavior#update:local:println",
         "kind": "local",
         "name": "println"
-      },
-      {
-        "id": "place:RustSourceFactBehavior#update:local:read_to_string",
-        "kind": "local",
-        "name": "read_to_string"
       },
       {
         "id": "place:RustSourceFactBehavior#update:local:String",
@@ -1404,8 +1390,6 @@
       {},
       {},
       {},
-      {},
-      {},
       {}
     ],
     "redundant_nil_guards": [],
@@ -1435,7 +1419,7 @@
         "line": 19
       },
       {
-        "detail": "std::fs::read_to_string.call(\"config\").ok",
+        "detail": "std::fs.read_to_string(\"config\").ok",
         "function": "update",
         "kind": "hidden_io",
         "line": 19
