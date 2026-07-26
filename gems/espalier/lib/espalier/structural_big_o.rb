@@ -342,25 +342,13 @@ module Espalier
         end
       end
       # Substitute the callee's callback cost C with the cost of the callable
-      # passed at this call site. A lambda argument is found by span containment
-      # (its span lies inside the call span); an O(1) callable removes C, turning
-      # O(N*C) into O(N).
-      callback_domain_ids = Array(callee_symbolic[:domains]).filter_map do |id, domain|
-        id if domain.is_a?(Hash) && domain["source_kind"].to_s == "callback_cost"
-      end
-      unless callback_domain_ids.empty?
-        cb_id = @callback_arg_by_call && @callback_arg_by_call[[caller_fact["path"], context["span"]]]
-        if cb_id
-          cb_symbolic = @method_symbolic_time && @method_symbolic_time[cb_id]
-          reduced = Espalier::SymbolicComplexity.without_domains(callee_symbolic, callback_domain_ids)
-          # O(1) callback drops C -> O(N); a costlier callback multiplies its own
-          # cost in -> O(N * callback), treating its domains as independent.
-          callee_symbolic = if cb_symbolic && Espalier::SymbolicComplexity.degree(cb_symbolic) > 0
-                              Espalier::SymbolicComplexity.multiply(reduced, cb_symbolic)
-                            else
-                              reduced
-                            end
-        end
+      # passed at this call site, under the same rule the externally-parametric
+      # path uses.
+      callable = callback_argument_cost(caller_fact["path"], context["span"])
+      if callable
+        callee_symbolic = Espalier::SymbolicComplexity.substitute_callback_cost(
+          callee_symbolic, callable.fetch(:expression), callable_constant: callable.fetch(:constant)
+        )
       end
       substituted = Espalier::SymbolicComplexity.substitute(
         callee_symbolic,
@@ -390,6 +378,23 @@ module Espalier
       else
         nil
       end
+    end
+
+    # The cost of the callable passed at one call site, as the shared
+    # substitution rule wants it.
+    def callback_argument_cost(path, span)
+      ids = Array(@callback_arg_by_call && @callback_arg_by_call[[path, normalized_call_span(span)]])
+      return nil if ids.empty?
+
+      Espalier::SymbolicComplexity.worst_callable(
+        ids.map do |id|
+          key = id.to_s
+          {
+            expression: @method_symbolic_time && @method_symbolic_time[key],
+            constant: @method_complexities[key] == "O(1)" && @method_time_complete[key] != false
+          }
+        end
+      )
     end
 
     def annotate_propagated_domains(expression, callee_expression, mapping, caller_domains, owner, callee, caller_fact, context)

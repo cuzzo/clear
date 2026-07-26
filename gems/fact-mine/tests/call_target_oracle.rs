@@ -1541,3 +1541,44 @@ fn synthetic_lambda_names_survive_qualified_name_handling() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn closures_are_extracted_as_first_class_functions() -> Result<()> {
+    // A callback's cost can only be substituted for a callee's parametric C if
+    // the callable itself was analyzed as a function.
+    let cases: &[(&str, &str, &str, Language)] = &[
+        (
+            "rust",
+            "fn run(xs: &[i32]) -> Vec<i32> { xs.iter().map(|x| helper(*x)).collect() }\nfn helper(v: i32) -> i32 { v }\n",
+            ".rs",
+            Language::Rust,
+        ),
+        (
+            "go",
+            "package demo\nfunc helper(v int) int { return v }\nfunc run(xs []int) { _ = func(x int) int { return helper(x) } }\n",
+            ".go",
+            Language::Go,
+        ),
+    ];
+    for (label, source, suffix, language) in cases {
+        let output = extract_source(source, suffix, *language)?;
+        let lambda = output
+            .methods
+            .iter()
+            .find(|method| method.name.starts_with("<lambda@"))
+            .with_context(|| {
+                format!(
+                    "{label}: no lambda function extracted, got {:?}",
+                    output.methods.iter().map(|m| m.name.as_str()).collect::<Vec<_>>()
+                )
+            })?;
+        assert!(
+            output
+                .calls
+                .iter()
+                .any(|call| call.source == lambda.id && call.message == "helper"),
+            "{label}: the closure body's call must attribute to the closure, not its enclosing function"
+        );
+    }
+    Ok(())
+}

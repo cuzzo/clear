@@ -158,6 +158,55 @@ module Espalier
       )
     end
 
+    # Ids of the open callback-cost parameters in an expression. Reflective
+    # costs are deliberately excluded: no callable is passed at those sites, so
+    # nothing can close them.
+    def callback_domain_ids(expression)
+      (expression && expression[:domains] || {}).filter_map do |id, domain|
+        next unless domain.is_a?(Hash)
+
+        id if (domain["source_kind"] || domain[:source_kind]).to_s == "callback_cost"
+      end
+    end
+
+    # Choose the substitution for a call site that several callables reach
+    # (`fold(seed, |a, b| ...)`, a nesting chain). The bound must hold for all
+    # of them, so one callable of unknown cost forces C to stay open; otherwise
+    # the costliest known cost is the substitution.
+    #
+    # Each row is `{ expression:, constant: }` - the callable's symbolic cost,
+    # and whether it is proven constant.
+    def worst_callable(rows)
+      rows = Array(rows)
+      return nil if rows.empty?
+      return { expression: nil, constant: false } if rows.any? do |row|
+        row[:expression].nil? && !row[:constant]
+      end
+
+      {
+        expression: rows.filter_map { |row| row[:expression] }.max_by { |value| degree(value) },
+        constant: true
+      }
+    end
+
+    # Replace an open callback cost C with the cost of the callable actually
+    # passed at that call site. An O(1) callable removes C (O(N*C) -> O(N)); a
+    # costlier one multiplies its own cost in (O(N*C) -> O(N*M)).
+    #
+    # A callable whose own cost is neither symbolically known nor proven
+    # constant leaves C open. Dropping it there would silently price a
+    # non-constant callback as free.
+    def substitute_callback_cost(expression, callable, callable_constant: false)
+      ids = callback_domain_ids(expression)
+      return expression if ids.empty?
+      return expression unless callable || callable_constant
+
+      reduced = without_domains(expression, ids)
+      return reduced unless callable && degree(callable).positive?
+
+      multiply(reduced, callable)
+    end
+
     def render(expression)
       return nil unless expression
 

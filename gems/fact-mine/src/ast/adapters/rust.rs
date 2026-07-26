@@ -52,6 +52,17 @@ impl AstNormalizationAdapter for RustAstAdapter {
         Some((path, node_text(name, source).to_string()))
     }
 
+    /// A Rust closure `|x| ...` is a lambda, so it is normalized (and later
+    /// extracted) as a first-class function. Its own Big-O is what a caller
+    /// substitutes for the callee's parametric callback cost.
+    fn lambda_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "closure_expression").then_some(node)
+    }
+
     fn type_argument_callee<'tree>(
         &self,
         node: TreeSitterNode<'tree>,

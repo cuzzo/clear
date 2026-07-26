@@ -27,6 +27,18 @@
           "writes": []
         }
       ]
+    },
+    {
+      "boundaries": [],
+      "method": "<lambda@2:18>",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
     }
   ],
   "path_condition": {
@@ -54,7 +66,7 @@
         "block": false,
         "conditional": false,
         "control": "always",
-        "function": "method_two",
+        "function": "<lambda@2:18>",
         "line": 3,
         "message": "Err",
         "receiver": "self",
@@ -140,19 +152,6 @@
       },
       {
         "child_fingerprints": [
-          "closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id)))))"
-        ],
-        "child_masses": [
-          10
-        ],
-        "fingerprint": "call(id closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id))))))",
-        "line": 2,
-        "mass": 11,
-        "method_name": "method_two",
-        "node_name": "call"
-      },
-      {
-        "child_fingerprints": [
           "id",
           "when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id)))"
         ],
@@ -194,31 +193,31 @@
       },
       {
         "child_fingerprints": [
-          "let_declaration(assignment(id call(id closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id))))))))",
+          "lambda(body(return(call<Err>(id argument_list(id)))))"
+        ],
+        "child_masses": [
+          6
+        ],
+        "fingerprint": "call(id lambda(body(return(call<Err>(id argument_list(id))))))",
+        "line": 2,
+        "mass": 7,
+        "method_name": "method_two",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "let_declaration(assignment(id call(id lambda(body(return(call<Err>(id argument_list(id))))))))",
           "case(id when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id))))",
           "id"
         ],
         "child_masses": [
-          13,
+          9,
           10,
           1
         ],
-        "fingerprint": "body_statement(let_declaration(assignment(id call(id closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id)))))))) case(id when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id)))) id)",
+        "fingerprint": "body_statement(let_declaration(assignment(id call(id lambda(body(return(call<Err>(id argument_list(id)))))))) case(id when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id)))) id)",
         "line": 1,
-        "mass": 25,
-        "method_name": "method_two",
-        "node_name": "body_statement"
-      },
-      {
-        "child_fingerprints": [
-          "return(call<Err>(id argument_list(id)))"
-        ],
-        "child_masses": [
-          4
-        ],
-        "fingerprint": "body_statement(return(call<Err>(id argument_list(id))))",
-        "line": 2,
-        "mass": 5,
+        "mass": 21,
         "method_name": "method_two",
         "node_name": "body_statement"
       },
@@ -238,15 +237,21 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(body_statement(let_declaration(assignment(id call(id closure_expression(generic_type(id type_arguments(id)) body_statement(return(call<Err>(id argument_list(id)))))))) case(id when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id)))) id)))",
+        "fingerprint": "method(id body(body_statement(let_declaration(assignment(id call(id lambda(body(return(call<Err>(id argument_list(id)))))))) case(id when(argument_list(tuple_struct_pattern(id id)) call<log>(id argument_list(id)))) id)))",
         "line": 1,
-        "mass": 27,
+        "mass": 23,
         "method_name": "method_two",
         "node_name": "defn"
       }
     ],
     "comparisons": [],
     "control_flow_edges": [
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
       {
         "kind": "entry"
       },
@@ -270,9 +275,25 @@
       }
     ],
     "control_flow_metrics": [
+      {},
       {}
     ],
     "control_flow_nodes": [
+      {
+        "id": "cfg:(top-level)#<lambda@2:18>:entry:0:2:18",
+        "kind": "entry",
+        "line": 2
+      },
+      {
+        "id": "cfg:(top-level)#<lambda@2:18>:exit:2:4:5",
+        "kind": "exit",
+        "line": 4
+      },
+      {
+        "id": "cfg:(top-level)#<lambda@2:18>:stmt:1:3:8",
+        "kind": "statement",
+        "line": 3
+      },
       {
         "id": "cfg:(top-level)#method_two:entry:0:1:0",
         "kind": "entry",
@@ -315,6 +336,9 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
       {}
     ],
     "flow_types": [
@@ -329,9 +353,19 @@
         "owner": "rust",
         "params": [],
         "visibility": "private"
+      },
+      {
+        "line": 2,
+        "name": "<lambda@2:18>",
+        "owner": "rust",
+        "params": [],
+        "visibility": "private"
       }
     ],
     "liveness": [
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -341,6 +375,11 @@
     ],
     "local_complexity_scores": [
       {
+        "id": "(top-level)#<lambda@2:18>",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
         "id": "(top-level)#method_two",
         "score": 1.5,
         "signals": {
@@ -349,6 +388,32 @@
       }
     ],
     "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#<lambda@2:18>",
+        "line": 2,
+        "local_contract_assignments": {},
+        "name": "<lambda@2:18>",
+        "owner": "(top-level)",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 3,
+            "index": 0,
+            "line": 3,
+            "reads": [],
+            "source": "return Err(Error)",
+            "span": [
+              3,
+              8,
+              3,
+              25
+            ],
+            "writes": []
+          }
+        ]
+      },
       {
         "boundaries": [],
         "id": "(top-level)#method_two",
@@ -425,14 +490,26 @@
       },
       {
         "reads": [
+          "place:(top-level)#<lambda@2:18>:local:Error"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
           "place:(top-level)#method_two:local:e"
         ],
         "writes": []
       },
       {
-        "reads": [
-          "place:(top-level)#method_two:local:Error"
-        ],
+        "reads": [],
         "writes": [
           "place:(top-level)#method_two:local:result"
         ]
@@ -452,14 +529,14 @@
     "path_conditions": [],
     "places": [
       {
-        "id": "place:(top-level)#method_two:local:Error",
-        "kind": "local",
-        "name": "Error"
-      },
-      {
         "id": "place:(top-level)#method_two:local:e",
         "kind": "local",
         "name": "e"
+      },
+      {
+        "id": "place:(top-level)#<lambda@2:18>:local:Error",
+        "kind": "local",
+        "name": "Error"
       },
       {
         "id": "place:(top-level)#method_two:local:result",
@@ -480,7 +557,14 @@
               3,
               25
             ]
-          },
+          }
+        ],
+        "line": 2,
+        "name": "<lambda@2:18>",
+        "owner": "rust"
+      },
+      {
+        "calls": [
           {
             "line": 6,
             "mid": "log",
@@ -509,16 +593,6 @@
       {
         "calls": [
           {
-            "line": 3,
-            "mid": "Err",
-            "span": [
-              3,
-              15,
-              3,
-              25
-            ]
-          },
-          {
             "line": 9,
             "mid": "cleanup",
             "span": [
@@ -540,14 +614,25 @@
         "name": "method_two",
         "owner": "rust",
         "reads": [
-          "Err",
           "cleanup",
           "log"
+        ],
+        "writes": []
+      },
+      {
+        "line": 2,
+        "name": "<lambda@2:18>",
+        "owner": "rust",
+        "reads": [
+          "Err"
         ],
         "writes": []
       }
     ],
     "reachability": [
+      {},
+      {},
+      {},
       {},
       {},
       {},

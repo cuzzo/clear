@@ -441,37 +441,8 @@ module Espalier
           lambdas_by_file[mod[:file]] << m if m[:dispatch_kind].to_s == "lambda" && m[:span]
         end
       end
-      within = lambda do |inner, outer|
-        inner && outer && inner.length >= 3 && outer.length >= 3 &&
-          inner[0].to_i >= outer[0].to_i && inner[2].to_i <= outer[2].to_i
-      end
-      callback_arg_by_call = {}
-      modules.each do |mod|
-        Array(mod[:methods]).each do |m|
-          Array(m[:delegations]).each do |delegation|
-            callee = (delegation[:target_id] && methods_by_id[delegation[:target_id]]) ||
-              (delegation[:target_method] && methods_by_owner_name[[delegation[:target_owner].to_s, delegation[:target_method].to_s]])
-            next unless callee
-
-            params = Array(callee[:parameters]).map(&:to_s)
-            Array(callee[:callback_params]).each do |callback_param|
-              position = params.index(callback_param.to_s)
-              next unless position
-
-              lam = lambdas_by_file[mod[:file]].find { |candidate| within.call(candidate[:span], delegation[:span]) }
-              cb_id = if lam
-                        lam[:id]
-                      else
-                        arg = Array(delegation[:arguments])[position].to_s.strip
-                        fn = methods_by_owner_name[[m[:raw_owner].to_s, arg]] ||
-                          methods_by_owner_name[[mod[:name].to_s, arg]]
-                        fn && fn[:id]
-                      end
-              callback_arg_by_call[[mod[:file], delegation[:span]]] = cb_id if cb_id
-            end
-          end
-        end
-      end
+      callback_arg_by_call = callback_arguments_by_call_site(modules, methods_by_id, methods_by_owner_name, lambdas_by_file)
+      @callback_arg_by_call = callback_arg_by_call
       structural_big_o.instance_variable_set(:@callback_arg_by_call, callback_arg_by_call)
 
       local_analyzer = Espalier::BigOAnalyzer.new(
@@ -482,7 +453,7 @@ module Espalier
       # Components are ordered callee-first. Acyclic components therefore run
       # exactly once. Within a recursive SCC, only callers of a changed method
       # are re-enqueued; unrelated methods are never rescanned.
-      summary_dependency_components(modules).each do |component|
+      summary_dependency_components(modules, callback_arg_by_call).each do |component|
         entries = component.fetch(:entries)
         by_identity = entries.to_h { |identity, mod, method| [identity, [mod, method]] }
         base_nodes = entries.to_h do |identity, mod, method|
@@ -501,7 +472,9 @@ module Espalier
           local_analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
           key = "#{mod[:name]}##{method[:name]}"
           sig = @nil_kill_data[key] || method[:signature]
-          nodes = base_nodes.fetch(graph_identity) +
+          nodes = substitute_callback_arguments(
+            base_nodes.fetch(graph_identity), mod, symbolic_time, complexities, time_complete
+          ) +
             structural_big_o.hints_for(mod[:file], method, mod[:name])
           result = local_analyzer.analyze_method(key, nodes, local_types: local_types_for_signature(sig))
           @structural_big_o_results[graph_identity] = result
@@ -558,7 +531,7 @@ module Espalier
       [complexities, spaces, time_complete, space_complete, symbolic_time, bound_qualities, assumptions]
     end
 
-    def summary_dependency_components(modules)
+    def summary_dependency_components(modules, callback_arg_by_call = {})
       entries = {}
       aliases = {}
       modules.each do |mod|
@@ -585,6 +558,14 @@ module Espalier
           Array(delegation[:candidate_target_ids]).each do |candidate|
             candidate_target = aliases[candidate.to_s]
             graph[source] << candidate_target if candidate_target
+          end
+          # A callable passed at this call site is a real summary dependency:
+          # its cost is substituted for the callee's open C, so it must be
+          # summarized first and must re-enqueue this caller when it changes.
+          span = normalized_call_span(delegation[:span])
+          Array(span && callback_arg_by_call[[mod[:file], span]]).each do |callable|
+            callable_target = aliases[callable.to_s]
+            graph[source] << callable_target if callable_target && callable_target != source
           end
         end
       end
@@ -737,6 +718,119 @@ module Espalier
           end
         end
       end.compact
+    end
+
+    # A call priced parametrically from its compiler symbol carries an open C.
+    # When the callables passed at that site are analyzed, C is not open, so
+    # substitute the costliest of them. Runs per fixpoint iteration, on the
+    # current summaries, rather than on the cached base nodes.
+    def substitute_callback_arguments(nodes, mod, symbolic_time, complexities, time_complete)
+      return nodes if @callback_arg_by_call.nil? || @callback_arg_by_call.empty?
+
+      nodes.map do |node|
+        expression = node[:symbolic_time]
+        next node if expression.nil? ||
+          Espalier::SymbolicComplexity.callback_domain_ids(expression).empty?
+
+        callable = worst_callable(
+          @callback_arg_by_call[[mod[:file], node[:span]]], symbolic_time, complexities, time_complete
+        )
+        next node unless callable
+
+        substituted = Espalier::SymbolicComplexity.substitute_callback_cost(
+          expression, callable.fetch(:expression), callable_constant: callable.fetch(:constant)
+        )
+        next node if substituted.equal?(expression)
+
+        node.merge(
+          symbolic_time: substituted,
+          known_time_complexity: Espalier::SymbolicComplexity.render(substituted)&.first ||
+            node[:known_time_complexity]
+        )
+      end
+    end
+
+    def worst_callable(ids, symbolic_time, complexities, time_complete)
+      Espalier::SymbolicComplexity.worst_callable(
+        Array(ids).map do |id|
+          key = id.to_s
+          {
+            expression: symbolic_time[key],
+            constant: complexities[key] == "O(1)" && time_complete[key] != false
+          }
+        end
+      )
+    end
+
+    # Index every call site to the callables passed there, so a caller can
+    # substitute their cost for an open callback C. Two sources of a callable:
+    # a closure literal, which lies inside the call's own span, and a named
+    # function passed positionally into a declared callback parameter.
+    #
+    # The closure rule is deliberately independent of the callee: a stdlib
+    # higher-order call is priced parametrically from its compiler symbol and
+    # has no analyzed body to declare `callback_params`, yet the closure at its
+    # call site is exactly what closes its C.
+    def callback_arguments_by_call_site(modules, methods_by_id, methods_by_owner_name, lambdas_by_file)
+      index = Hash.new { |hash, key| hash[key] = [] }
+      delegations_by_file = Hash.new { |hash, key| hash[key] = [] }
+      modules.each do |mod|
+        Array(mod[:methods]).each do |method|
+          Array(method[:delegations]).each do |delegation|
+            span = normalized_call_span(delegation[:span])
+            next unless span
+
+            delegations_by_file[mod[:file]] << span
+            named_callback_argument(mod, method, delegation, methods_by_id, methods_by_owner_name)
+              &.then { |id| index[[mod[:file], span]] << id }
+          end
+        end
+      end
+      lambdas_by_file.each do |file, lambdas|
+        spans = delegations_by_file[file]
+        lambdas.each do |lambda_method|
+          span = normalized_call_span(lambda_method[:span])
+          # Every call whose span encloses the closure may run it: in
+          # `xs.iter().map(|x| ...).collect()` the parametric cost sits on
+          # `collect`, while the closure is lexically an argument of `map`.
+          # Charging the closure to each enclosing call is the worst-case
+          # reading, and the substitution takes the costliest callable anyway.
+          spans.select { |candidate| span_contains?(candidate, span) }
+               .each { |candidate| index[[file, candidate]] << lambda_method[:id] }
+        end
+      end
+      index.transform_values { |ids| ids.compact.uniq }
+    end
+
+    def named_callback_argument(mod, method, delegation, methods_by_id, methods_by_owner_name)
+      callee = (delegation[:target_id] && methods_by_id[delegation[:target_id]]) ||
+        (delegation[:target_method] &&
+          methods_by_owner_name[[delegation[:target_owner].to_s, delegation[:target_method].to_s]])
+      return nil unless callee
+
+      params = Array(callee[:parameters]).map(&:to_s)
+      Array(callee[:callback_params]).each do |callback_param|
+        position = params.index(callback_param.to_s)
+        next unless position
+
+        argument = Array(delegation[:arguments])[position].to_s.strip
+        function = methods_by_owner_name[[method[:raw_owner].to_s, argument]] ||
+          methods_by_owner_name[[mod[:name].to_s, argument]]
+        return function[:id] if function
+      end
+      nil
+    end
+
+    def span_contains?(outer, inner)
+      return false unless outer && inner
+
+      starts = outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1])
+      ends = outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3])
+      starts && ends
+    end
+
+    def span_extent(span)
+      [span[2] - span[0], span[3] - span[1]]
     end
 
     def candidate_calls_by_site(modules)

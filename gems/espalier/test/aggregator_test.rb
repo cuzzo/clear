@@ -475,6 +475,172 @@ class AggregatorTest < Minitest::Test
                                big_o_provenance: :manual_override)
   end
 
+  def test_lambda_argument_closes_an_external_parametric_callback_bound
+    # A stdlib higher-order call is priced O(N*C) from its compiler symbol. The
+    # closure passed at that call site is analyzed like any other function, so C
+    # is not open - substituting it is what turns a partial bound into a closed
+    # one.
+    modules = [{
+      type: :class, name: "demo", file: "demo.rs", states: Set.new, language: :rust,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 1], parameters: ["xs"],
+        visibility: :public, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c1", receiver: "xs.iter()", message: "map", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N)",
+          complexity_bound_quality: "upper_bound_parametric_callback_linear"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["xs"], "collection_parameters" => ["xs"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "map",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "argument_size_domains" => [["param:xs"]],
+            "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }]
+          }]
+        }]
+      }, {
+        id: "lambda", name: "<lambda@2:20>", line: 2, span: [2, 20, 2, 34],
+        dispatch_kind: "lambda", parameters: ["x"], visibility: :private,
+        effects: { reads: Set.new, writes: Set.new }, delegations: [],
+        complexity_facts: [{
+          "line" => 2, "parameters" => ["x"], "collection_parameters" => [],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [], "call_contexts" => []
+        }]
+      }]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    quality = functions.find { |fn| fn[:name] == "run" }.fetch(:quality_metrics)
+
+    assert_equal "O(N)", quality[:big_o]
+    assert_equal :complete, quality[:big_o_status]
+  end
+
+  def test_costly_lambda_argument_keeps_its_own_cost_in_the_bound
+    # Substitution is not erasure: an O(M) callable multiplies in rather than
+    # dropping out, so O(N*C) becomes O(N*M), not O(N).
+    modules = [{
+      type: :class, name: "demo", file: "demo.rs", states: Set.new, language: :rust,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 1], parameters: ["xs"],
+        visibility: :public, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c1", receiver: "xs.iter()", message: "map", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N)",
+          complexity_bound_quality: "upper_bound_parametric_callback_linear"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["xs"], "collection_parameters" => ["xs"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "map",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "argument_size_domains" => [["param:xs"]],
+            "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }]
+          }]
+        }]
+      }, {
+        id: "lambda", name: "<lambda@2:20>", line: 2, span: [2, 20, 2, 34],
+        dispatch_kind: "lambda", parameters: ["y"], visibility: :private,
+        effects: { reads: Set.new, writes: Set.new }, delegations: [],
+        complexity_facts: [{
+          "line" => 2, "parameters" => ["y"], "collection_parameters" => ["y"],
+          "iterations" => [{
+            "line" => 2, "span" => [2, 20, 2, 34], "power" => 1,
+            "parameter_domains" => ["y"],
+            "symbolic_time" => { "factors" => [{ "domain_id" => "param:y", "exponent" => 1 }] }
+          }],
+          "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{ "id" => "param:y", "name" => "y", "source_kind" => "parameter" }],
+          "call_contexts" => []
+        }]
+      }]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    quality = functions.find { |fn| fn[:name] == "run" }.fetch(:quality_metrics)
+
+    assert_equal "O(N*M)", quality[:big_o]
+    assert_equal :complete, quality[:big_o_status]
+  end
+
+  def test_callable_of_unknown_cost_leaves_the_callback_parameter_open
+    # Substitution must never price an unproven callable as free. A closure
+    # whose own bound is not symbolically known keeps C open rather than
+    # silently dropping out of the caller's bound.
+    modules = [{
+      type: :class, name: "demo", file: "demo.rs", states: Set.new, language: :rust,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 1], parameters: ["xs"],
+        visibility: :public, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c1", receiver: "xs.iter()", message: "map", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N)",
+          complexity_bound_quality: "upper_bound_parametric_callback_linear"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["xs"], "collection_parameters" => ["xs"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "map",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "argument_size_domains" => [["param:xs"]],
+            "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }]
+          }]
+        }]
+      }, {
+        id: "lambda", name: "<lambda@2:20>", line: 2, span: [2, 20, 2, 34],
+        dispatch_kind: "lambda", parameters: ["x"], visibility: :private,
+        effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c2", receiver: "sink", message: "consume", line: 2, span: [2, 24, 2, 33]
+        }],
+        complexity_facts: [{
+          "line" => 2, "parameters" => ["x"], "collection_parameters" => [],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 24, 2, 33], "message" => "consume",
+            "execution_multiplicity" => "O(1)", "power" => 0
+          }]
+        }]
+      }]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    caller = functions.find { |fn| fn[:name] == "run" }.fetch(:quality_metrics)
+    callable = functions.find { |fn| fn[:name] == "<lambda@2:20>" }.fetch(:quality_metrics)
+
+    refute callable[:big_o_complete], "the closure's own cost must be unproven for this case"
+    assert_equal "O(N*C)", caller[:big_o]
+    assert_equal :parametric, caller[:big_o_status]
+  end
+
+  def test_worst_callable_rule
+    worst = ->(rows) { Espalier::SymbolicComplexity.worst_callable(rows) }
+    linear = Espalier::SymbolicComplexity.from_fact(
+      { "factors" => [{ "domain_id" => "param:y", "exponent" => 1 }] },
+      [{ "id" => "param:y", "name" => "y", "source_kind" => "parameter" }]
+    )
+
+    assert_nil worst.call([])
+    # One unknown callable poisons the site.
+    assert_equal({ expression: nil, constant: false },
+                 worst.call([{ expression: linear, constant: false },
+                             { expression: nil, constant: false }]))
+    # Otherwise the costliest known cost wins, and constants alone close it.
+    assert_equal linear, worst.call([{ expression: linear, constant: false },
+                                     { expression: nil, constant: true }]).fetch(:expression)
+    assert_equal({ expression: nil, constant: true },
+                 worst.call([{ expression: nil, constant: true }]))
+  end
+
   def test_complexity_overrides_lookup_semantics
     assert_equal "O(N log N)",
                  Espalier::ComplexityOverrides.lookup(:go, "sort", "Sort")["time"]
