@@ -293,40 +293,11 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
                 space: "O(1)",
             });
         }
-        // Empty stdlib collection / smart-pointer constructors allocate no
-        // elements: O(1). Same gate as `constructor_return_type`, so the
-        // constructor call and the local it types are both priced.
-        if self.constructor_return_type(receiver.unwrap_or(""), message).is_some() {
-            return Some(super::normalized_behavior::NormalizedCallComplexity {
-                time: "O(1)",
-                space: "O(1)",
-            });
-        }
         self.stdlib_language().and_then(|language| {
             super::normalized_behavior::configured_intrinsic_call_complexity(
                 language, receiver, message,
             )
         })
-    }
-
-    fn constructor_return_type(&self, receiver: &str, message: &str) -> Option<String> {
-        if !matches!(message, "new" | "with_capacity" | "default") {
-            return None;
-        }
-        // Representative generic shapes: the nominal parser folds `Vec<Value>`
-        // into the Array family and `HashMap<Value, Value>` into the Hash family,
-        // so the local's method calls dispatch to the right registry block.
-        let ty = match receiver {
-            "Vec" | "VecDeque" | "LinkedList" | "BinaryHeap" => "Vec<Value>",
-            "String" => "String",
-            "HashMap" => "HashMap<Value, Value>",
-            "BTreeMap" => "BTreeMap<Value, Value>",
-            "HashSet" => "HashSet<Value>",
-            "BTreeSet" => "BTreeSet<Value>",
-            "Box" | "Rc" | "Arc" | "Cell" | "RefCell" | "Mutex" | "RwLock" => receiver,
-            _ => return None,
-        };
-        Some(ty.to_string())
     }
 
     fn external_symbol_call_complexity(
@@ -654,17 +625,6 @@ fn is_simple_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn stdlib_constructor_return_types_are_gated() {
-        let b = RustNormalizedBehavior;
-        assert_eq!(b.constructor_return_type("Vec", "new").as_deref(), Some("Vec<Value>"));
-        assert_eq!(b.constructor_return_type("HashMap", "with_capacity").as_deref(), Some("HashMap<Value, Value>"));
-        assert_eq!(b.constructor_return_type("String", "new").as_deref(), Some("String"));
-        assert_eq!(b.constructor_return_type("Box", "new").as_deref(), Some("Box"));
-        assert_eq!(b.constructor_return_type("Widget", "new"), None, "project types are not guessed");
-        assert_eq!(b.constructor_return_type("Vec", "push"), None, "only constructor messages");
-    }
 
     #[test]
     fn function_visibility_distinguishes_crate_scope() {

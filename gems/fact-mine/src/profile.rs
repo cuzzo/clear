@@ -2733,7 +2733,6 @@ fn resolve_project_calls(
     resolve_inherited_calls(owners, methods, calls);
 
     resolve_direct_call_result_calls(methods, type_definitions, calls, &by_dispatch);
-    resolve_type_receiver_name_calls(methods, calls);
     for call in calls.iter_mut().filter(|call| call.target.is_some()) {
         call.candidate_targets.clear();
         call.candidate_reason = None;
@@ -2741,57 +2740,6 @@ fn resolve_project_calls(
     annotate_project_candidate_sets(owners, methods, calls, &by_lexical, &by_dispatch);
 }
 
-/// Resolve a type-qualified associated/static call (`Cell::new`, `Type::method`)
-/// by matching the receiver against a method's owner NAME and the message
-/// against its dispatch name. This is the name-based counterpart to the
-/// symbol-keyed passes: it resolves calls whose declarations carry no canonical
-/// symbol (e.g. a Rust `Type::method` in a project with no module namespace, so
-/// `symbol_owner` is absent and the dispatch index never indexed the method).
-/// Only fires on a bare type receiver and only when the (owner, message, lang)
-/// match is unique, so it never fabricates an ambiguous binding.
-fn resolve_type_receiver_name_calls(methods: &[MethodRecord], calls: &mut [CallRecord]) {
-    let mut by_owner_name: BTreeMap<(&str, &str, &str), Vec<&MethodRecord>> = BTreeMap::new();
-    for method in methods {
-        by_owner_name
-            .entry((
-                method.owner.as_str(),
-                method.dispatch_name.as_str(),
-                method.language.as_str(),
-            ))
-            .or_default()
-            .push(method);
-    }
-    let source_languages = methods
-        .iter()
-        .map(|method| (method.id.as_str(), method.language.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    for call in calls
-        .iter_mut()
-        .filter(|call| call.target.is_none() && call.receiver_kind == "type")
-    {
-        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
-            continue;
-        };
-        if call.receiver.is_empty()
-            || call.receiver.contains(['.', ':', '(', ')', '[', ']', ' ', '<'])
-        {
-            continue;
-        }
-        let candidates = by_owner_name
-            .get(&(call.receiver.as_str(), call.message.as_str(), language))
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let Some(candidate) = unique_call_candidate(candidates, call, Some(language)) else {
-            continue;
-        };
-        call.target = Some(candidate.id.clone());
-        call.receiver_symbol = candidate.symbol_owner.clone();
-        call.receiver_symbol_origin = Some("type_receiver_name_match".to_string());
-        call.kind = "resolved_call".to_string();
-        call.confidence = "high".to_string();
-        call.unresolved_reason = None;
-    }
-}
 
 /// Bind an unqualified declared receiver type only when the merged project
 /// index contains the exact owner in the call's canonical namespace. The

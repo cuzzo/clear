@@ -14,29 +14,14 @@ impl AstNormalizationAdapter for RustAstAdapter {
         node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        let target = node.child_by_field_name("type").or_else(|| {
+        node.child_by_field_name("type").or_else(|| {
             named_children(node).into_iter().find(|child| {
                 matches!(
                     child.kind(),
                     "type_identifier" | "scoped_type_identifier" | "identifier"
                 )
             })
-        })?;
-        // `impl<T> Cell<T>` yields a `generic_type` (`Cell<T>`); unwrap it to the
-        // base identifier `Cell` so associated-function calls at the bare type
-        // (`Cell::new`) resolve to these methods, and the impl owner unifies with
-        // the struct owner instead of splitting into `Cell` and `Cell<T>`.
-        if target.kind() == "generic_type" {
-            return target.child_by_field_name("type").or_else(|| {
-                named_children(target).into_iter().find(|child| {
-                    matches!(
-                        child.kind(),
-                        "type_identifier" | "scoped_type_identifier" | "identifier"
-                    )
-                })
-            });
-        }
-        Some(target)
+        })
     }
 
     fn class_like_owner_body<'tree>(
