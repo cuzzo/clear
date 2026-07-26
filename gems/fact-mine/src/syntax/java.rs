@@ -214,6 +214,20 @@ const JAVA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
+    // java declares `Ret name(T a)`, not `name(a: T) -> Ret`.
+    fn parse_signature(
+        &self,
+        signature: &str,
+    ) -> super::normalized_behavior::NormalizedSignature {
+        super::normalized_behavior::parse_c_family_declarator(signature)
+    }
+
+    // The Java indexer emits several overlapping occurrences per call site; the
+    // first semantic one is the callee.
+    fn scip_prefers_first_semantic_occurrence(&self) -> bool {
+        true
+    }
+
     fn type_kind_is_abstract_dispatch(&self, kind: &str) -> bool {
         kind == "interface"
     }

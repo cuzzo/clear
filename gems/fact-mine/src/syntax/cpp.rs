@@ -219,6 +219,14 @@ fn nullable_contract_call(node: &Node) -> &Node {
 }
 
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    // C++ declares `Ret name(T a)`, not `name(a: T) -> Ret`.
+    fn parse_signature(
+        &self,
+        signature: &str,
+    ) -> super::normalized_behavior::NormalizedSignature {
+        super::normalized_behavior::parse_c_family_declarator(signature)
+    }
+
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         if node.r#type == "VCALL" {
             return local_call_subject(node).map(|subject| NormalizedNullableOperation {

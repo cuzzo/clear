@@ -228,6 +228,145 @@ impl NormalizedCollectionOperation {
 
 type StdlibOperationMap = BTreeMap<String, BTreeMap<String, String>>;
 
+/// A declaration signature reduced to language-neutral facts: the declared
+/// return type and the declared parameter types, in order. Produced by each
+/// adapter's `parse_signature` from that language's own signature grammar, so
+/// every downstream consumer sees one shape regardless of source language.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct NormalizedSignature {
+    pub return_type: Option<String>,
+    /// (parameter name, declared type). Either may be empty when the language's
+    /// signature omits it (e.g. a C-family declarator with unnamed parameters).
+    pub params: Vec<(String, String)>,
+}
+
+impl NormalizedSignature {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.return_type.is_none() && self.params.is_empty()
+    }
+}
+
+/// Default signature grammar: `name(a: T, b: U) -> Ret` or `... : Ret`, which
+/// covers Rust/Go/Swift/Kotlin/TypeScript-shaped declarations. Adapters whose
+/// grammar differs override `parse_signature`.
+pub(crate) fn parse_arrow_or_colon_signature(signature: &str) -> NormalizedSignature {
+    let signature = signature.trim();
+    let (Some(open), Some(close)) = (signature.find('('), signature.rfind(')')) else {
+        return NormalizedSignature::default();
+    };
+    if close < open {
+        return NormalizedSignature::default();
+    }
+    let tail = signature[close + 1..].trim();
+    let return_type = tail
+        .strip_prefix("->")
+        .or_else(|| tail.strip_prefix(':'))
+        .map(|rest| {
+            rest.trim()
+                .trim_end_matches(['{', ';'])
+                .trim()
+                .to_string()
+        })
+        .filter(|value| !value.is_empty());
+    let params = split_top_level_commas(&signature[open + 1..close])
+        .into_iter()
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() {
+                return None;
+            }
+            match part.split_once(':') {
+                Some((name, declared)) => {
+                    Some((name.trim().to_string(), declared.trim().to_string()))
+                }
+                // `func f(a int)` style: trailing token is the type.
+                None => part
+                    .rsplit_once(char::is_whitespace)
+                    .map(|(name, declared)| {
+                        (name.trim().to_string(), declared.trim().to_string())
+                    }),
+            }
+        })
+        .collect();
+    NormalizedSignature {
+        return_type,
+        params,
+    }
+}
+
+/// C-family declarator grammar: `[modifiers] Ret name(T a, U b)`, where the
+/// return type precedes the name and each parameter is `Type name`. Shared by the
+/// C/C++/C#/Java adapters, which select it from their own `parse_signature`.
+pub(crate) fn parse_c_family_declarator(signature: &str) -> NormalizedSignature {
+    let signature = signature.trim();
+    let (Some(open), Some(close)) = (signature.find('('), signature.rfind(')')) else {
+        return NormalizedSignature::default();
+    };
+    if close < open {
+        return NormalizedSignature::default();
+    }
+    // Everything before the name is the return type; the name is the last token
+    // before `(`. Modifiers (`public`, `static`, …) are dropped with it.
+    let head = signature[..open].trim();
+    let return_type = head
+        .rsplit_once(char::is_whitespace)
+        .map(|(before, _name)| before.trim())
+        .and_then(|before| before.rsplit_once(char::is_whitespace).map_or(
+            (!before.is_empty()).then_some(before),
+            |(_modifiers, last)| (!last.is_empty()).then_some(last),
+        ))
+        .map(str::to_string)
+        .filter(|value| !value.is_empty() && value != "return");
+    let params = split_top_level_commas(&signature[open + 1..close])
+        .into_iter()
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() || part == "void" {
+                return None;
+            }
+            // `Type name` — the trailing token is the parameter name.
+            part.rsplit_once(char::is_whitespace)
+                .map(|(declared, name)| {
+                    (
+                        name.trim().trim_start_matches('*').to_string(),
+                        declared.trim().to_string(),
+                    )
+                })
+                .or_else(|| Some((String::new(), part.to_string())))
+        })
+        .collect();
+    NormalizedSignature {
+        return_type,
+        params,
+    }
+}
+
+/// Split on commas that are not nested inside brackets or angle brackets, so a
+/// generic parameter type (`Map<K, V>`) stays one parameter.
+pub(crate) fn split_top_level_commas(source: &str) -> Vec<String> {
+    let mut depth = 0i32;
+    let mut angle = 0i32;
+    let mut start = 0usize;
+    let mut previous = b' ';
+    let mut parts = Vec::new();
+    for (index, byte) in source.bytes().enumerate() {
+        match byte {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b'<' => angle += 1,
+            b'>' if previous != b'-' && angle > 0 => angle -= 1,
+            b',' if depth == 0 && angle == 0 => {
+                parts.push(source[start..index].to_string());
+                start = index + 1;
+            }
+            _ => {}
+        }
+        previous = byte;
+    }
+    parts.push(source[start..].to_string());
+    parts
+}
+
 /// Lexical operator tokens that are primitive, constant-time operations in
 /// languages WITHOUT operator overloading (comparison, arithmetic, bitwise,
 /// shift, logical, unary). Adapters for such languages price these O(1); without
@@ -1443,6 +1582,25 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     fn property_read_call(&self, _node: &Node, _parts: &NormalizedCallParts) -> bool {
+        false
+    }
+
+    /// Parse a declaration signature into normalized parts. The signature TEXT is
+    /// language-specific - a Sorbet `sig {}`, a Python annotation, a C-family
+    /// declarator, or a SCIP `signature_documentation` - so each adapter owns its
+    /// grammar; the returned shape is language-neutral.
+    ///
+    /// This is the single seam through which any signature, source-derived or
+    /// SCIP-supplied, becomes normalized type facts. The default handles the
+    /// `name(params) -> Ret` / `name(params): Ret` family.
+    fn parse_signature(&self, signature: &str) -> NormalizedSignature {
+        parse_arrow_or_colon_signature(signature)
+    }
+
+    /// Whether SCIP occurrence selection should prefer the first *semantic*
+    /// occurrence at a call site. Languages whose indexer emits several
+    /// overlapping occurrences per call (Java) need this; most do not.
+    fn scip_prefers_first_semantic_occurrence(&self) -> bool {
         false
     }
 

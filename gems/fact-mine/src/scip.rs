@@ -75,6 +75,18 @@ struct SymbolInformation {
     symbol: String,
     #[serde(default)]
     relationships: Vec<Relationship>,
+    /// The indexer's rendering of the declaration, e.g.
+    /// `func newRootCmd(ctx context.Context, version string) (*gremlinsCmd, error)`.
+    /// Its grammar is language-specific, so it is only ever read through the
+    /// adapter seam `NormalizedLanguageBehavior::parse_signature`.
+    #[serde(default, alias = "signatureDocumentation")]
+    signature_documentation: Option<SignatureDocumentation>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SignatureDocumentation {
+    #[serde(default)]
+    text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -219,6 +231,7 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
         );
     }
     assign_method_symbols(&mut output.methods, &index.documents);
+    apply_signature_types(output, &index);
     let methods_by_path = methods_by_document(&output.methods, &index.documents);
     let definitions = definitions_by_symbol(&index.documents, &methods_by_path);
     let implementation_targets = implementation_targets(&index.documents, &definitions);
@@ -513,6 +526,70 @@ fn equivalent_external_cost(
         && left.assumption == right.assumption
 }
 
+/// Adopt the indexer's declared signatures.
+///
+/// SCIP carries a `signature_documentation` for nearly every symbol - the
+/// compiler frontend's own rendering of the declaration, including parameter and
+/// return types. That is authoritative type information we would otherwise try
+/// to re-derive from source. The signature *text* is language-specific, so it is
+/// normalized exclusively through the adapter seam
+/// (`NormalizedLanguageBehavior::parse_signature`); nothing language-specific
+/// belongs here.
+///
+/// A method's own source-derived signature wins when it has one; this only fills
+/// the gaps, so a language whose extractor already recovers signatures is
+/// unaffected.
+fn apply_signature_types(output: &mut ProfileOutput, index: &Index) -> usize {
+    let signatures = index
+        .documents
+        .iter()
+        .flat_map(|document| &document.symbols)
+        .filter_map(|information| {
+            let text = information.signature_documentation.as_ref()?.text.trim();
+            (!text.is_empty()).then(|| (information.symbol.as_str(), text))
+        })
+        .collect::<BTreeMap<_, _>>();
+    if signatures.is_empty() {
+        return 0;
+    }
+    let mut adopted = 0;
+    for method in output.methods.iter_mut() {
+        if !method.signature.trim().is_empty() {
+            continue;
+        }
+        let Some(symbol) = method.semantic_symbol.as_deref() else {
+            continue;
+        };
+        let Some(text) = signatures.get(symbol) else {
+            continue;
+        };
+        // Only adopt a signature the adapter can actually normalize, so an
+        // unparsable rendering never becomes a bogus declared type.
+        let Ok(language) = crate::syntax::Language::parse(&method.language) else {
+            continue;
+        };
+        if crate::syntax::normalized_behavior::behavior(language)
+            .parse_signature(text)
+            .is_empty()
+        {
+            continue;
+        }
+        method.signature = (*text).to_string();
+        adopted += 1;
+    }
+    adopted
+}
+
+/// Whether this language's indexer emits several overlapping occurrences per
+/// call site, so the first semantic one is the callee. Owned by the adapter -
+/// this file must not branch on language.
+fn prefers_first_semantic_occurrence(language: &str) -> bool {
+    crate::syntax::Language::parse(language).is_ok_and(|language| {
+        crate::syntax::normalized_behavior::behavior(language)
+            .scip_prefers_first_semantic_occurrence()
+    })
+}
+
 fn implementation_targets(
     documents: &[Document],
     definitions: &BTreeMap<String, Vec<Definition>>,
@@ -792,7 +869,7 @@ fn select_call_occurrences<'a>(
                     .is_some_and(|span| !contains(receiver_span, span))
             })
             .collect::<Vec<_>>();
-        if language == "java" {
+        if prefers_first_semantic_occurrence(language) {
             if let Some(selected) = first_semantic_occurrence(&outside_receiver) {
                 return selected_occurrences(&[selected]);
             }
@@ -849,7 +926,7 @@ fn select_call_occurrences<'a>(
             callable_symbol(&occurrence.symbol) || occurrence.symbol.starts_with("local ")
         })
         .collect::<Vec<_>>();
-    if language == "java" {
+    if prefers_first_semantic_occurrence(language) {
         if let Some(selected) = first_semantic_occurrence(&callable) {
             return selected_occurrences(&[selected]);
         }

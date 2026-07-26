@@ -206,6 +206,14 @@ const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    // C# declares `Ret name(T a)`, not `name(a: T) -> Ret`.
+    fn parse_signature(
+        &self,
+        signature: &str,
+    ) -> super::normalized_behavior::NormalizedSignature {
+        super::normalized_behavior::parse_c_family_declarator(signature)
+    }
+
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         (node.r#type == "CALL")
             .then(|| node.children.first().and_then(crate::ast::node))
