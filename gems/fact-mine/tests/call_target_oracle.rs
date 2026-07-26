@@ -1456,3 +1456,32 @@ fn field_access_receiver_inherits_declared_field_type() -> Result<()> {
     }
     Ok(())
 }
+
+/// `impl<T> Cell<T>` must file its methods under the base type `Cell`, not
+/// `Cell<T>`, so an instance call on a concrete `Cell<i32>` (and a bare
+/// `Cell::new` associated call) can reach them. Before, the generic suffix
+/// split the owner and nothing on a generic type resolved.
+#[test]
+fn generic_impl_methods_file_under_the_base_type() -> Result<()> {
+    let output = extract_source(
+        "struct Cell<T> { v: T }\nimpl<T> Cell<T> {\n    fn get(&self) -> i32 { 0 }\n}\nfn use_it(c: &Cell<i32>) -> i32 { c.get() }\n",
+        ".rs",
+        Language::Rust,
+    )?;
+    assert!(
+        output.methods.iter().any(|m| m.owner == "Cell" && m.name == "get"),
+        "method must be filed under base owner Cell, got owners {:?}",
+        output.methods.iter().map(|m| m.owner.as_str()).collect::<Vec<_>>()
+    );
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "get")
+        .context("missing get call")?;
+    assert!(
+        call.target.is_some(),
+        "instance method on a generic type must resolve (receiver_type {:?})",
+        call.receiver_type
+    );
+    Ok(())
+}
