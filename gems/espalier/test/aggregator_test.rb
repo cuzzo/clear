@@ -473,6 +473,52 @@ class AggregatorTest < Minitest::Test
     assert_equal :complete_override,
                  classify.call(big_o: "O(N log N)", big_o_complete: true,
                                big_o_provenance: :manual_override)
+
+    # The open parameter can sit on the space axis alone: a parametric contract
+    # prices auxiliary space as O(S) / O(N*S), and substitution rewrites only
+    # the time expression. Reading only the time bound published those as closed.
+    assert_equal :parametric,
+                 classify.call(big_o: "O(N^2)", big_o_complete: true,
+                               big_o_space: "O(S)", big_o_space_complete: true)
+    assert_equal :parametric,
+                 classify.call(big_o: "O(N)", big_o_complete: true,
+                               big_o_space: "O(N*S)", big_o_space_complete: true)
+    assert_equal :complete,
+                 classify.call(big_o: "O(N)", big_o_complete: true, big_o_space: "O(N)")
+  end
+
+  def test_open_space_parameter_is_parametric_through_the_aggregation_pipeline
+    # The classifier is only correct if it runs against a quality record that
+    # already carries the space bound. A reflective contract closes no space,
+    # so the reported tier must be parametric even though the time bound is a
+    # closed O(N).
+    modules = [{
+      type: :class, name: "demo", file: "demo.go", states: Set.new, language: :go,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 1], parameters: ["xs"],
+        visibility: :public, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c1", receiver: "fmt", message: "Sprintf", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N)",
+          known_space_complexity: "O(S)"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["xs"], "collection_parameters" => ["xs"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [], "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "Sprintf",
+            "execution_multiplicity" => "O(1)", "power" => 0
+          }]
+        }]
+      }]
+    }]
+
+    quality = Espalier::Aggregator.new.aggregate(modules)
+      .first[:functions].find { |fn| fn[:name] == "run" }.fetch(:quality_metrics)
+
+    assert_equal "O(N)", quality[:big_o]
+    assert_equal "O(S)", quality[:big_o_space]
+    assert_equal :parametric, quality[:big_o_status]
   end
 
   def test_lambda_argument_closes_an_external_parametric_callback_bound

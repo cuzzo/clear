@@ -221,14 +221,24 @@ module Espalier
 
     # Distinguishes a fully-resolved bound from one that is only "complete"
     # parametrically - i.e. still carries an open callback/reflective parameter
-    # (C/R) that a worst-case substitution would have to close. The parametric
-    # tier is what the interface worst-case pass upgrades to :complete_worst_case.
+    # that a worst-case substitution would have to close. The parametric tier is
+    # what the interface worst-case pass upgrades to :complete_worst_case.
+    #
+    # A parametric contract opens a parameter on BOTH axes - time O(N*C) and
+    # auxiliary space O(S) / O(N*S) - and the space one outlives the time one,
+    # because callback substitution rewrites only the time expression. Reading
+    # the time bound alone therefore publishes a space bound whose parameter
+    # nothing can bind as if it were closed.
+    #
+    # `S` is unambiguous in a space bound today: space carries no domain-symbol
+    # table of its own, so no size domain is ever rendered as `S` there.
     def classify_big_o_status(quality)
       return :incomplete unless quality[:big_o_complete]
       return :complete_override if quality[:big_o_provenance] == :manual_override
 
       bound = quality[:big_o].to_s
       return :parametric if bound.include?("C") || bound.include?("R")
+      return :parametric if quality[:big_o_space].to_s.include?("S")
 
       :complete
     end
