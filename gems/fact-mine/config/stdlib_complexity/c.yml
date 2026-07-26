@@ -59,9 +59,70 @@ Intrinsic:
   isdigit: declaration
   isalpha: declaration
   isalnum: declaration
-  floor: declaration
-  ceil: declaration
-  sqrt: declaration
-  pow: declaration
   kevent: declaration
   kqueue: declaration
+  # C99 <math.h>: constant-time on a fixed-width float/double (the value is one
+  # scalar; there is no input-size dimension to grow in). Classification (not
+  # `signbit`), rounding, scaling, decomposition, and elementary functions.
+  isnan: constant
+  isinf: constant
+  isfinite: constant
+  isnormal: constant
+  signbit: constant
+  fpclassify: constant
+  fabs: constant
+  floor: constant
+  ceil: constant
+  round: constant
+  roundf: constant
+  roundl: constant
+  lround: constant
+  llround: constant
+  trunc: constant
+  truncf: constant
+  truncl: constant
+  rint: constant
+  rintf: constant
+  rintl: constant
+  lrint: constant
+  nearbyint: constant
+  scalbn: constant
+  scalbnf: constant
+  scalbnl: constant
+  scalbln: constant
+  ldexp: constant
+  frexp: constant
+  modf: constant
+  ilogb: constant
+  logb: constant
+  copysign: constant
+  nextafter: constant
+  nexttoward: constant
+  fmod: constant
+  remainder: constant
+  fdim: constant
+  fmax: constant
+  fmin: constant
+  fma: constant
+  sqrt: constant
+  sqrtf: constant
+  cbrt: constant
+  hypot: constant
+  pow: constant
+  exp: constant
+  exp2: constant
+  expm1: constant
+  log: constant
+  log2: constant
+  log10: constant
+  log1p: constant
+  sin: constant
+  cos: constant
+  tan: constant
+  asin: constant
+  acos: constant
+  atan: constant
+  atan2: constant
+  sinh: constant
+  cosh: constant
+  tanh: constant
