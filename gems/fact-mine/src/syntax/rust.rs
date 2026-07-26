@@ -279,6 +279,27 @@ const RUST_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RustNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RustNormalizedBehavior {
+    fn intrinsic_call_complexity(
+        &self,
+        receiver: Option<&str>,
+        message: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        // Enum-variant constructors (`Some`/`None`/`Ok`/`Err`) wrap a value in
+        // O(1); `transmute` is a reinterpret cast. These have no analyzable body
+        // in source-only mode, so without this they read as unresolved calls.
+        if matches!(message, "Some" | "None" | "Ok" | "Err" | "transmute") {
+            return Some(super::normalized_behavior::NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            });
+        }
+        self.stdlib_language().and_then(|language| {
+            super::normalized_behavior::configured_intrinsic_call_complexity(
+                language, receiver, message,
+            )
+        })
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,

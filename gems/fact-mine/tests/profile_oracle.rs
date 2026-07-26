@@ -3023,3 +3023,30 @@ class Greeter {
 
     Ok(())
 }
+
+#[test]
+fn rust_enum_constructors_and_transmute_are_constant_time() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    tmp.write_all(
+        b"fn wrap(x: i32) -> Option<i32> { Some(x) }\nfn ok() -> Result<i32, ()> { Ok(1) }\nfn bad() -> Result<i32, ()> { Err(()) }\nfn nope() -> Option<i32> { None }\n",
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let contexts: Vec<_> = output
+        .complexity_facts
+        .iter()
+        .flat_map(|facts| facts.call_contexts.iter())
+        .collect();
+    for message in ["Some", "Ok", "Err", "None"] {
+        if let Some(call) = contexts.iter().find(|call| call.message == message) {
+            assert_eq!(
+                call.known_time_complexity.as_deref(),
+                Some("O(1)"),
+                "enum constructor {message} must be O(1)",
+            );
+        }
+    }
+    Ok(())
+}
