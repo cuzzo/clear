@@ -755,6 +755,19 @@ pub fn parse_files(files: &[PathBuf], language: Language) -> Result<Vec<Document
     parallel::map_ordered(files, |file| parse_file(file.clone(), language))
 }
 
+/// The synthetic name a lambda is extracted under. It encodes the start
+/// position so it is stable and unique within a file.
+pub(crate) fn lambda_function_name(row: usize, column: usize) -> String {
+    format!("<lambda@{row}:{column}>")
+}
+
+/// Whether a function name is one of those synthetic names. The `:` inside it
+/// separates row from column, not a namespace from a member, so qualified-name
+/// handling must leave it alone.
+pub(crate) fn is_lambda_function_name(name: &str) -> bool {
+    name.starts_with("<lambda@") && name.ends_with('>')
+}
+
 pub(crate) fn protocol_method_effects(document: &Document) -> Vec<ProtocolMethodEffect> {
     document.protocol_method_effects.clone()
 }

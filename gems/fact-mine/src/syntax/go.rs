@@ -94,7 +94,7 @@ fn raw_presence_correlations(
                 .unwrap_or(function)
         } else if node.kind() == "func_literal" {
             let start = node.start_position();
-            lambda_name = format!("<lambda@{}:{}>", start.row + 1, start.column);
+            lambda_name = crate::syntax::lambda_function_name(start.row + 1, start.column);
             lambda_name.as_str()
         } else {
             function

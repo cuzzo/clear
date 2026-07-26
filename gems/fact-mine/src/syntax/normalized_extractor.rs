@@ -409,7 +409,7 @@ impl<'a> Extractor<'a> {
     fn scan_lambda(&mut self, node: &Node) {
         let owner = self.current_owner();
         let lambda_span = span(node);
-        let name = format!("<lambda@{}:{}>", lambda_span[0], lambda_span[1]);
+        let name = crate::syntax::lambda_function_name(lambda_span[0], lambda_span[1]);
         let params = function_params(node, self.behavior);
         self.facts.function_defs.push(FunctionDef {
             file: self.file.clone(),

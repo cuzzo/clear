@@ -1511,3 +1511,33 @@ fn explicit_type_arguments_do_not_replace_the_call_message() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn synthetic_lambda_names_survive_qualified_name_handling() -> Result<()> {
+    // `<lambda@2:24>` carries a row:column span, not a namespace. The shared
+    // qualified-name split reported such a method as `24>`.
+    let source = "package demo\nfunc helper(v int) int { return v }\nfunc run() { _ = func(x int) int { return helper(x) } }\n";
+    let mut file = tempfile::Builder::new().suffix(".go").tempfile()?;
+    file.write_all(source.as_bytes())?;
+    let document = syntax::parse_file(file.path().to_path_buf(), Language::Go)?;
+    let names = document
+        .protocol_call_paths
+        .iter()
+        .map(|path| path.name.clone())
+        .chain(
+            document
+                .protocol_method_effects
+                .iter()
+                .map(|effect| effect.name.clone()),
+        )
+        .collect::<Vec<_>>();
+    assert!(
+        names.iter().any(|name| name.starts_with("<lambda@") && name.ends_with('>')),
+        "expected an intact synthetic lambda name, got {names:?}"
+    );
+    assert!(
+        !names.iter().any(|name| name.ends_with('>') && !name.starts_with('<')),
+        "a lambda name was split on its span separator, got {names:?}"
+    );
+    Ok(())
+}
