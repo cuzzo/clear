@@ -474,12 +474,95 @@ class BigOTest < Minitest::Test
       resolved_recursive_edges: { ["Caller", "run", "Target", "work"] => true }
     ).hints_for(nil, { name: "run", line: 2 }, "Caller")
       .find { |hint| hint[:operation] == "work" }
-    assert_equal "O(2^N)", recursive[:complexity]
-    assert_equal "O(N)", recursive[:space]
-    assert recursive[:time_complete]
-    assert recursive[:space_complete]
-    assert_equal "upper_bound_acyclic_project_scc", recursive[:complexity_bound_quality]
-    assert recursive[:complexity_assumptions].first.include?("finite and acyclic")
+    assert_equal "unknown", recursive[:complexity]
+    assert_equal "unknown", recursive[:space]
+    refute recursive[:time_complete]
+    refute recursive[:space_complete]
+    assert_includes recursive[:evidence_gaps], "unresolved_recursive_progress"
+  end
+
+  # An exact recursive edge whose progress cannot be proven is not a proven
+  # exponential: it is an unproven bound. Reporting O(2^N) as complete both
+  # asserts a bound nothing established and hides the missing proof from the
+  # gap diagnostics, which key on evidence gaps.
+  def test_resolved_recursive_edge_without_progress_proof_is_unknown_not_exponential
+    facts = {
+      ["Walker", "visit"] => [{
+        "line" => 1, "parameters" => ["node"], "iterations" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{
+          "line" => 2, "message" => "visit", "execution_multiplicity" => "O(1)",
+          "argument_progress" => "unknown", "argument_cardinality_relation" => "same"
+        }]
+      }]
+    }
+    hint = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "Walker" => { "visit" => "O(N)" } },
+      resolved_calls: { ["Walker", "visit", "visit", 2] => ["Walker", "visit"] },
+      resolved_recursive_edges: { ["Walker", "visit", "Walker", "visit"] => true }
+    ).hints_for(nil, { name: "visit", line: 1 }, "Walker")
+      .find { |row| row[:operation] == "visit" }
+
+    assert_equal "unknown", hint[:complexity]
+    assert_equal "unknown", hint[:space]
+    refute hint[:time_complete]
+    refute hint[:space_complete]
+    assert_includes hint[:evidence_gaps], "unresolved_recursive_progress"
+    assert_nil hint[:complexity_bound_quality]
+  end
+
+  # A recursive call over a loop's own partition binding reaches each element
+  # once. The shrinking-token heuristic must not outrank that proof: ordering
+  # the loop-contained branch first reports O(N!) for a plain traversal.
+  def test_loop_contained_recursion_over_a_partition_is_linear_not_factorial
+    facts = {
+      ["Tree", "walk"] => [{
+        "line" => 1, "parameters" => ["node"], "iterations" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{
+          "line" => 2, "message" => "walk", "execution_multiplicity" => "O(N)",
+          "argument_progress" => "shrinking",
+          "argument_cardinality_relation" => "partition_of"
+        }]
+      }]
+    }
+    hint = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "Tree" => { "walk" => "O(N)" } },
+      resolved_calls: { ["Tree", "walk", "walk", 2] => ["Tree", "walk"] },
+      resolved_recursive_edges: { ["Tree", "walk", "Tree", "walk"] => true }
+    ).hints_for(nil, { name: "walk", line: 1 }, "Tree")
+      .find { |row| row[:operation] == "walk" }
+
+    assert_equal "O(N)", hint[:complexity]
+    assert hint[:time_complete]
+    assert hint[:space_complete]
+  end
+
+  # Unresolved mutual recursion already degrades to unknown, but published no
+  # evidence gap, so the diagnostics could not attribute the incompleteness.
+  def test_unproven_mutual_recursion_publishes_a_recursive_progress_gap
+    facts = {
+      ["Pair", "ping"] => [{
+        "line" => 1, "parameters" => [], "iterations" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{
+          "line" => 2, "message" => "pong", "execution_multiplicity" => "O(1)",
+          "argument_cardinality_relation" => "same"
+        }]
+      }]
+    }
+    hint = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      internal_calls: { "Pair" => { "ping" => ["pong"] } },
+      recursive_edges: { ["Pair", "ping", "pong"] => true }
+    ).hints_for(nil, { name: "ping", line: 1 }, "Pair")
+      .find { |row| row[:operation] == "pong" }
+
+    assert_equal "unknown", hint[:complexity]
+    refute hint[:time_complete]
+    assert_includes hint[:evidence_gaps], "unresolved_recursive_progress"
   end
 
   def test_remaining_complexity_lattice_and_type_resolution_paths

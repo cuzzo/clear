@@ -147,6 +147,7 @@ module Espalier
                                 state_rescan_recursion_summary(owner.to_s, caller)
                             end
               recursive_bound = state_bound || resolved_recursive_bound(context)
+              proven = recursive_bound.fetch(:time) != "unknown"
               hints << {
                 type: :structural,
                 line: line,
@@ -155,9 +156,14 @@ module Espalier
                 is_dynamic: true,
                 operation: message,
                 reason: recursive_bound.fetch(:reason),
-                confidence: recursive_bound[:quality] ? "partial" : "high",
-                time_complete: true,
-                space_complete: true,
+                confidence: if proven
+                              recursive_bound[:quality] ? "partial" : "high"
+                            else
+                              "unknown"
+                            end,
+                time_complete: proven,
+                space_complete: proven,
+                evidence_gaps: proven ? nil : ["unresolved_recursive_progress"],
                 complexity_bound_quality: recursive_bound[:quality],
                 complexity_assumptions: Array(recursive_bound[:assumption]),
                 fact_source: "fact_mine"
@@ -189,8 +195,9 @@ module Espalier
                 confidence: mutual ? "high" : "unknown",
                 time_complete: !mutual.nil?,
                 space_complete: !mutual.nil?,
+                evidence_gaps: mutual ? nil : ["unresolved_recursive_progress"],
                 fact_source: "fact_mine"
-              }
+              }.compact
             end
             next
           end
@@ -886,6 +893,19 @@ module Espalier
       if multiplicity == "O(1)" && progress == "shrinking"
         return { time: "O(N)", space: "O(N)", reason: "exact recursive edge with normalized shrinking progress" }
       end
+      # A recursive edge whose argument is a partition of the receiver - the
+      # loop's own iteration binding over a decomposition, i.e. a tree/graph
+      # traversal - reaches every element exactly once, so the work is linear
+      # in the structure. This proof outranks the multiplicity reading below:
+      # a traversal argument that merely happens to spell an offset
+      # (`walk(kids[i - 1])`) reads as loop-contained shrinking progress and
+      # would otherwise be priced O(N!).
+      if context["argument_cardinality_relation"] == "partition_of"
+        return {
+          time: "O(N)", space: "O(N)",
+          reason: "recursive traversal over a partition of the input reaches each element once"
+        }
+      end
       if %w[halving shrinking].include?(progress)
         return {
           time: "O(N!)", space: "O(N)",
@@ -893,23 +913,15 @@ module Espalier
           quality: "upper_bound_recursive_multiplicity"
         }
       end
-      # A recursive edge whose argument is a partition of the receiver - the
-      # loop's own iteration binding over a decomposition, i.e. a tree/graph
-      # traversal - reaches every element exactly once. The work is linear in
-      # the structure; treating the repeated subgraphs as independent branches
-      # (below) would be exponentially wrong, not merely conservative.
-      if context["argument_cardinality_relation"] == "partition_of"
-        return {
-          time: "O(N)", space: "O(N)",
-          reason: "recursive traversal over a partition of the input reaches each element once"
-        }
-      end
 
+      # Nothing proved this edge makes progress, and one call context cannot
+      # establish a branching factor, so no bound follows - not even an
+      # exponential one. Report the missing proof the way the syntactic
+      # classifier does, so the gap is attributable instead of being published
+      # as a complete result.
       {
-        time: "O(2^N)", space: "O(N)",
-        reason: "conservative upper bound for an exact project recursive component",
-        quality: "upper_bound_acyclic_project_scc",
-        assumption: "the reachable input object graph is finite and acyclic; repeated subgraphs are conservatively treated as independent recursive branches"
+        time: "unknown", space: "unknown",
+        reason: "exact recursive edge progress is unknown"
       }
     end
 
