@@ -234,6 +234,19 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
     apply_signature_types(output, &index);
     apply_local_variable_types(output, &index);
     let methods_by_path = methods_by_document(&output.methods, &index.documents);
+    // An index that joins to no analyzed method contributes no identity, yet
+    // every downstream metric would still be stamped with the SCIP resolution
+    // tier. Indexers produce this silently: `scip-go .` on a multi-package
+    // module writes a valid, empty index and exits 0. Refuse it rather than
+    // degrade to source-only under a tier label that is no longer true.
+    if !output.methods.is_empty() && methods_by_path.values().all(|methods| methods.is_empty()) {
+        anyhow::bail!(
+            "SCIP index covers none of the {} analyzed methods ({} indexed documents); \
+             re-index the whole project (for example `scip-go ./...`, not `scip-go .`)",
+            output.methods.len(),
+            index.documents.len()
+        );
+    }
     let definitions = definitions_by_symbol(&index.documents, &methods_by_path);
     let implementation_targets = implementation_targets(&index.documents, &definitions);
     let method_languages = output
@@ -1351,6 +1364,42 @@ mod tests {
             "symbol": symbol,
             "symbol_roles": roles
         })
+    }
+
+    /// `scip-go .` on a multi-package module emits a well-formed 87-byte index
+    /// with zero documents, and exits 0. Accepting it degrades every result to
+    /// source-only while the run still reports the SCIP resolution tier, so the
+    /// import must fail instead of succeeding with nothing.
+    #[test]
+    fn an_index_that_covers_none_of_the_profile_is_rejected() {
+        let build = || {
+            let mut output = ProfileOutput::default();
+            output.methods = vec![method("callee", "/repo/demo.java", "callee", [1, 1, 1, 20])];
+            output
+        };
+
+        let empty = json!({"documents": []});
+        let error = apply_json(&mut build(), &empty.to_string()).unwrap_err();
+        assert!(
+            error.to_string().contains("covers none"),
+            "unexpected error: {error}"
+        );
+
+        let foreign = json!({"documents": [{
+            "relative_path": "other/Unrelated.java",
+            "occurrences": []
+        }]});
+        assert!(apply_json(&mut build(), &foreign.to_string()).is_err());
+
+        let covering = json!({"documents": [{
+            "relative_path": "demo.java",
+            "occurrences": []
+        }]});
+        assert!(apply_json(&mut build(), &covering.to_string()).is_ok());
+
+        // A profile with no methods has nothing to cover and must not be
+        // reported as an indexing failure.
+        assert!(apply_json(&mut ProfileOutput::default(), &empty.to_string()).is_ok());
     }
 
     #[test]
