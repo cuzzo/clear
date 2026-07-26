@@ -888,6 +888,17 @@ module Espalier
           quality: "upper_bound_recursive_multiplicity"
         }
       end
+      # A recursive edge whose argument is a partition of the receiver - the
+      # loop's own iteration binding over a decomposition, i.e. a tree/graph
+      # traversal - reaches every element exactly once. The work is linear in
+      # the structure; treating the repeated subgraphs as independent branches
+      # (below) would be exponentially wrong, not merely conservative.
+      if context["argument_cardinality_relation"] == "partition_of"
+        return {
+          time: "O(N)", space: "O(N)",
+          reason: "recursive traversal over a partition of the input reaches each element once"
+        }
+      end
 
       {
         time: "O(2^N)", space: "O(N)",
