@@ -952,7 +952,7 @@ module Espalier
           mult_id = loop_fact && Array(loop_fact.dig("symbolic_time", "factors")).first&.fetch("domain_id", nil)
           mult_domains = mult_id ? [{ "id" => mult_id, "name" => Array(loop_fact["parameter_domains"]).first.to_s, "source_kind" => "parameter" }] : []
           Espalier::SymbolicComplexity.parameterized_cost(
-            id: "cost:#{delegation[:call_id]}", name: message, source_kind: "callback_cost",
+            id: unknown_cost_id(delegation), name: message, source_kind: "callback_cost",
             multiplicity_domain: mult_id, domains: mult_domains
           )
         end
@@ -1048,12 +1048,25 @@ module Espalier
       end
       reflective = quality.include?("reflective")
       Espalier::SymbolicComplexity.parameterized_cost(
-        id: "cost:#{delegation[:call_id]}",
+        id: unknown_cost_id(delegation),
         name: "#{delegation[:receiver]}.#{delegation[:message]}",
         source_kind: reflective ? "reflective_target_cost" : "callback_cost",
         multiplicity_domain: multiplicity_domain,
         domains: context_domains
       )
+    end
+
+
+    # A cost symbol names the *callee's* unknown cost, so every call to the same
+    # callee must share one symbol. Keying it on the call site instead minted a
+    # fresh C per call, producing unusable bounds (observed: 294 distinct symbols
+    # in one function) and making substitution impossible.
+    def unknown_cost_id(delegation)
+      callee = delegation[:target_id].to_s
+      callee = "#{delegation[:target_owner]}##{delegation[:target_method]}" if callee.empty? &&
+        !delegation[:target_method].to_s.empty?
+      callee = "#{delegation[:receiver]}.#{delegation[:message]}" if callee.empty?
+      "cost:#{callee}"
     end
 
     def local_types_for_signature(signature)
