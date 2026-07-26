@@ -3050,3 +3050,39 @@ fn rust_enum_constructors_and_transmute_are_constant_time() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn rust_local_bound_to_constructor_types_its_method_calls() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    tmp.write_all(
+        b"fn build(n: i32) -> usize {\n    let mut v = Vec::new();\n    v.push(n);\n    v.len()\n}\n",
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let contexts: Vec<_> = output
+        .complexity_facts
+        .iter()
+        .flat_map(|facts| facts.call_contexts.iter())
+        .collect();
+    // `v` inferred as Vec from `Vec::new()`, so its method calls resolve.
+    let len = contexts
+        .iter()
+        .find(|call| call.message == "len")
+        .context("missing len call")?;
+    assert_eq!(
+        len.known_time_complexity.as_deref(),
+        Some("O(1)"),
+        "v.len() must price via the inferred Vec type",
+    );
+    let push = contexts
+        .iter()
+        .find(|call| call.message == "push")
+        .context("missing push call")?;
+    assert!(
+        push.known_time_complexity.is_some(),
+        "v.push() must resolve via the inferred Vec type",
+    );
+    Ok(())
+}

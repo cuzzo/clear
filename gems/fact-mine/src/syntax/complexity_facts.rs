@@ -612,6 +612,55 @@ fn fact_for_method(
                 .or_insert_with(|| TypeExpr::parse(owner, language));
         }
     }
+    // Params/locals whose declared type the CFG flow layer resolved but that
+    // never reached `method_param_types` (Rust populates flow types, not the
+    // param-type map). The place_id join is exact; a name with conflicting flow
+    // types is dropped, and a declared param type is never overridden.
+    {
+        let place_name = document
+            .places
+            .iter()
+            .filter(|place| place.function == function)
+            .map(|place| (place.id.as_str(), place.name.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        let mut flow_types_by_name: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for fact in &document.flow_types {
+            if !fact.complete || fact.function != function {
+                continue;
+            }
+            let Some(name) = place_name.get(fact.place_id.as_str()) else {
+                continue;
+            };
+            for declared in fact
+                .types
+                .iter()
+                .filter_map(|ty| ty.strip_prefix("declared:"))
+            {
+                flow_types_by_name.entry(name).or_default().insert(declared);
+            }
+        }
+        for (name, types) in flow_types_by_name {
+            if let (1, Some(declared)) = (types.len(), types.iter().next()) {
+                augmented_parameter_types
+                    .entry(name.to_string())
+                    .or_insert_with(|| TypeExpr::parse(declared, language));
+            }
+        }
+    }
+    // Infer a local's type from the call it is bound to (`let v = Vec::new()` ->
+    // v: Vec) so the local's own method calls resolve and price. A name bound to
+    // conflicting types is dropped; a declared type is never overridden.
+    {
+        let mut inferred: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        collect_call_result_types(node, behavior, &mut inferred);
+        for (name, types) in inferred {
+            if let (1, Some(declared)) = (types.len(), types.iter().next()) {
+                augmented_parameter_types
+                    .entry(name)
+                    .or_insert_with(|| TypeExpr::parse(declared, language));
+            }
+        }
+    }
     let parameter_types = &augmented_parameter_types;
     visit_loops(
         node,
@@ -1950,6 +1999,39 @@ fn fixpoint_loop(
     contains_boolean_assignment(body, &flag, true)
         && contains_boolean_assignment(body, &flag, false)
         && contains_loop(body, behavior)
+}
+
+/// Map a local bound to a stdlib-constructor call result to the constructor's
+/// return type: `let v = Vec::new()` records `v -> Vec<Value>`. Only the
+/// adapter-recognized stdlib constructors resolve, so an arbitrary project
+/// `Type::new` is never guessed. A name is recorded once per binding site; the
+/// caller drops any name with conflicting types.
+fn collect_call_result_types(
+    node: &Node,
+    behavior: &dyn NormalizedLanguageBehavior,
+    output: &mut BTreeMap<String, BTreeSet<String>>,
+) {
+    if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
+        if let (Some(name), Some(rhs)) = (
+            child_string(node.children.first()),
+            node.children.get(1).and_then(ast::node),
+        ) {
+            if let Some(message) = direct_call_message(rhs) {
+                let receiver = call_receiver(rhs)
+                    .map(|receiver| receiver.text.trim())
+                    .unwrap_or("");
+                if let Some(return_type) = behavior.constructor_return_type(receiver, message) {
+                    output
+                        .entry(name.to_string())
+                        .or_default()
+                        .insert(return_type);
+                }
+            }
+        }
+    }
+    for child in child_nodes(node) {
+        collect_call_result_types(child, behavior, output);
+    }
 }
 
 fn collect_assignments(

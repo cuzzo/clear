@@ -1446,6 +1446,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    /// Return type of a stdlib constructor call (`Vec::new` -> `Vec<Value>`), so
+    /// a local bound to it (`let v = Vec::new()`) can be typed and its method
+    /// calls priced. Gated on concrete stdlib types in the adapter so an
+    /// arbitrary project `Type::new` is never guessed. Returns None otherwise.
+    fn constructor_return_type(&self, _receiver: &str, _message: &str) -> Option<String> {
+        None
+    }
+
     /// Cost of a paren-less member access (`obj.field`) in the complexity path:
     /// a constant-time field/property read, not a method call. Returns None when
     /// the node is not such a read, or (Ruby) where `obj.foo` is itself a call.
