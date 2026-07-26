@@ -147,6 +147,84 @@ base64.Encoding:
 big.Int:
   FillBytes: linear_materialize
   SetBytes: linear_materialize
+# `testing.common` is the embedded base of T/B/F, so t.Errorf resolves here.
+# Recording a failure is bounded by the message it formats; the variadic
+# formatting itself is reflective and lives in SemanticSymbolParametricCost.
+testing.common:
+  Helper: constant
+  Name: constant
+  Fail: constant
+  FailNow: constant
+  Failed: constant
+  SkipNow: constant
+  Skipped: constant
+  Cleanup: constant
+testing.T:
+  Parallel: constant
+  Setenv: constant
+  Deadline: constant
+bytes.Buffer:
+  Len: constant
+  Cap: constant
+  Reset: constant
+  Bytes: constant
+  Truncate: constant
+  String: linear_materialize
+  Grow: linear_materialize
+  Write: linear_materialize
+  WriteString: linear_materialize
+  WriteByte: constant
+  WriteRune: constant
+  Read: linear_scan
+  ReadString: linear_scan
+  Next: linear_scan
+fs.FileInfo:
+  Name: constant
+  Size: constant
+  Mode: constant
+  ModTime: constant
+  IsDir: constant
+  Sys: constant
+fs.DirEntry:
+  Name: constant
+  IsDir: constant
+  Type: constant
+os.ProcessState:
+  ExitCode: constant
+  Success: constant
+  Exited: constant
+  Pid: constant
+os.File:
+  Name: constant
+  Fd: constant
+# Registering a flag stores one descriptor; parsing walks the argument list.
+flag.FlagSet:
+  Bool: constant
+  BoolVar: constant
+  String: constant
+  StringVar: constant
+  Int: constant
+  IntVar: constant
+  Int64: constant
+  Uint: constant
+  Float64: constant
+  Float64Var: constant
+  Duration: constant
+  Var: constant
+  NArg: constant
+  NFlag: constant
+  Args: constant
+  Arg: constant
+  Lookup: constant
+  Parse: linear_scan
+  SetOutput: constant
+bufio.Scanner:
+  Text: linear_materialize
+  Bytes: constant
+  Err: constant
+  Scan: linear_scan
+  Buffer: constant
+  Split: constant
 Intrinsic:
   len: constant
   cap: constant
@@ -415,6 +493,41 @@ Intrinsic:
   uintptr: constant
   print: declaration
   println: declaration
+  # Path manipulation is bounded by the path text. Join/Clean/Dir/Base build a
+  # new string; Ext and IsAbs only scan the argument.
+  filepath.Join: linear_materialize
+  filepath.Clean: linear_materialize
+  filepath.Dir: linear_materialize
+  filepath.Base: linear_materialize
+  filepath.Rel: linear_materialize
+  filepath.ToSlash: linear_materialize
+  filepath.FromSlash: linear_materialize
+  filepath.Split: linear_scan
+  filepath.Ext: linear_scan
+  filepath.IsAbs: linear_scan
+  filepath.Match: linear_scan
+  filepath.VolumeName: linear_scan
+  # Environment access scans the process environment block.
+  os.Getenv: linear_scan
+  os.LookupEnv: linear_scan
+  os.Setenv: linear_scan
+  os.Unsetenv: linear_scan
+  os.Environ: linear_materialize
+  os.IsNotExist: constant
+  os.IsExist: constant
+  os.IsPermission: constant
+  os.Getpid: constant
+  os.NewFile: constant
+  exec.Command: linear_materialize
+  exec.CommandContext: linear_materialize
+  bytes.NewReader: constant
+  bytes.NewBuffer: constant
+  bytes.NewBufferString: linear_materialize
+  bufio.NewScanner: constant
+  bufio.ScanLines: linear_scan
+  bufio.ScanWords: linear_scan
+  time.Since: constant
+  errors.New: linear_materialize
 ParametricCall:
   # `error` is a predeclared open interface. The declared receiver proves one
   # dispatch, but the implementation cost remains the symbolic callback C.
@@ -442,6 +555,50 @@ ExternalLatency:
   "sync.WaitGroup.Done": constant
   "sync.WaitGroup.Wait": constant
   "time.Sleep": constant
+  # Filesystem and process syscalls. The computational bound is what the call
+  # does with the bytes it moves; device, scheduler, and network latency are
+  # excluded and declared as an assumption by the caller of this table.
+  "os.WriteFile": linear_scan
+  "os.Stat": constant
+  "os.Lstat": constant
+  "os.Mkdir": constant
+  "os.MkdirAll": linear_scan
+  "os.MkdirTemp": constant
+  "os.CreateTemp": constant
+  "os.Create": constant
+  "os.OpenFile": constant
+  "os.Remove": constant
+  "os.RemoveAll": linear_scan
+  "os.Rename": constant
+  "os.Chmod": constant
+  "os.Chtimes": constant
+  "os.Chdir": constant
+  "os.Getwd": linear_materialize
+  "os.UserHomeDir": linear_materialize
+  "os.UserCacheDir": linear_materialize
+  "os.ReadDir": linear_materialize
+  "os.Symlink": constant
+  "os.Readlink": linear_materialize
+  "os.Truncate": constant
+  "os.File.Write": linear_scan
+  "os.File.WriteString": linear_scan
+  "os.File.Read": linear_scan
+  "os.File.Sync": constant
+  "os.File.Stat": constant
+  "os.File.Seek": constant
+  "fs.DirEntry.Info": constant
+  "filepath.Abs": linear_materialize
+  "filepath.EvalSymlinks": linear_materialize
+  "filepath.Glob": linear_materialize
+  "exec.LookPath": linear_scan
+  "exec.Cmd.Run": constant
+  "exec.Cmd.Start": constant
+  "exec.Cmd.Wait": constant
+  "exec.Cmd.Output": linear_materialize
+  "exec.Cmd.CombinedOutput": linear_materialize
+  "exec.Cmd.String": linear_materialize
+  # Creating the harness temp dir registers a cleanup and makes one directory.
+  "testing.common.TempDir": constant
 SemanticSymbolParametricCost:
   'sort/Sort().': callback_sort
   '`crypto/elliptic`/Curve#Params().': callback_once
@@ -460,6 +617,29 @@ SemanticSymbolParametricCost:
   '`encoding/json`/MarshalIndent().': reflective_once
   'errors/Is().': reflective_once
   'flag/Parse().': reflective_once
+  # A subtest runs an arbitrary body, so its cost is the callback's.
+  'testing/T#Run().': callback_once
+  'testing/B#Run().': callback_once
+  # The harness failure/log calls format a variadic `...any` exactly the way
+  # fmt does, so they carry the same open reflective cost rather than a
+  # fabricated constant.
+  'testing/common#Errorf().': reflective_once
+  'testing/common#Error().': reflective_once
+  'testing/common#Fatalf().': reflective_once
+  'testing/common#Fatal().': reflective_once
+  'testing/common#Logf().': reflective_once
+  'testing/common#Log().': reflective_once
+  'testing/common#Skipf().': reflective_once
+  'testing/common#Skip().': reflective_once
+  'fmt/Fprintln().': reflective_once
+  'fmt/Sprint().': reflective_once
+  'fmt/Sprintln().': reflective_once
+  'fmt/Fprint().': reflective_once
+  'fmt/Sscanf().': reflective_once
+  'reflect/DeepEqual().': reflective_once
+  # Walking a tree runs the visitor once per entry.
+  '`path/filepath`/WalkDir().': callback_linear
+  '`path/filepath`/Walk().': callback_linear
   'flag/PrintDefaults().': reflective_once
   'flag/Var().': reflective_once
   '`net/http`/Request#ParseMultipartForm().': reflective_once

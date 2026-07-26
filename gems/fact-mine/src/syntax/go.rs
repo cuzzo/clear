@@ -1782,6 +1782,70 @@ mod tests {
             .is_none());
     }
 
+    /// The harness, path, filesystem and buffer surface is what actually
+    /// blocks Go completeness on real corpora, and each family resolves
+    /// through a different table: an embedded-struct owner (`testing.common`),
+    /// a package intrinsic (`filepath`), external latency (`os`), and a
+    /// parametric contract (`t.Run`, `t.Errorf`). Pin one of each against the
+    /// exact symbol scip-go emits, because a key that misses resolves to
+    /// nothing and silently leaves the caller unknown.
+    #[test]
+    fn scip_go_harness_and_filesystem_surface_is_priced() {
+        let go = |descriptor: &str| {
+            format!("scip-go gomod github.com/golang/go/src go1.22 {descriptor}")
+        };
+        let time_of = |descriptor: &str, message: &str| {
+            external_symbol_call_complexity(&go(descriptor), message)
+                .map(|complexity| complexity.time)
+        };
+
+        // Owner table reached through the embedded `common` base of *testing.T.
+        assert_eq!(time_of("testing/common#Helper().", "Helper"), Some("O(1)"));
+        // Package intrinsic.
+        assert_eq!(
+            time_of("`path/filepath`/Join().", "Join"),
+            Some("O(N)"),
+            "filepath.Join builds a new path from its arguments"
+        );
+        assert_eq!(time_of("`path/filepath`/Ext().", "Ext"), Some("O(N)"));
+        // Owner table on a pointer receiver.
+        assert_eq!(time_of("bytes/Buffer#Len().", "Len"), Some("O(1)"));
+        assert_eq!(time_of("bytes/Buffer#String().", "String"), Some("O(N)"));
+        assert_eq!(time_of("`io/fs`/FileInfo#ModTime().", "ModTime"), Some("O(1)"));
+        assert_eq!(time_of("flag/FlagSet#Bool().", "Bool"), Some("O(1)"));
+        assert_eq!(time_of("bufio/Scanner#Text().", "Text"), Some("O(N)"));
+
+        // External latency: priced, and flagged as excluding device time.
+        let write = external_symbol_call_complexity(&go("os/WriteFile()."), "WriteFile").unwrap();
+        assert_eq!(write.time, "O(N)");
+        assert_eq!(write.bound_quality, "upper_bound_external_latency_excluded");
+        assert!(write.assumption.is_some());
+        assert_eq!(time_of("os/Stat().", "Stat"), Some("O(1)"));
+        assert_eq!(time_of("`os/exec`/Cmd#Output().", "Output"), Some("O(N)"));
+        assert_eq!(time_of("`os/exec`/Command().", "Command"), Some("O(N)"));
+
+        // Parametric contracts must NOT return a closed cost here - they are
+        // reported through metadata so espalier keeps the open parameter.
+        for (descriptor, message, kind) in [
+            ("testing/T#Run().", "Run", "callback_once"),
+            ("testing/common#Errorf().", "Errorf", "reflective_once"),
+            ("`path/filepath`/WalkDir().", "WalkDir", "callback_linear"),
+        ] {
+            assert_eq!(time_of(descriptor, message), None, "{descriptor}");
+            assert_eq!(
+                external_symbol_metadata(&go(descriptor)).parametric_cost.as_deref(),
+                Some(kind),
+                "{descriptor}"
+            );
+        }
+
+        // Anything still unmodeled must keep reporting itself as unmodeled.
+        assert_eq!(
+            external_symbol_metadata(&go("testing/common#Setenv().")).missing_cost_kind,
+            "stdlib_cost_model_missing"
+        );
+    }
+
     #[test]
     fn scip_go_symbols_use_proven_stdlib_identity() {
         let value_type = "scip-go gomod github.com/golang/go/src go1.22 reflect/Value#Type().";
