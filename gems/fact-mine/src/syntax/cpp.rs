@@ -219,6 +219,14 @@ fn nullable_contract_call(node: &Node) -> &Node {
 }
 
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    // C-family indexers render a local as `Type name` - the type leads.
+    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+        let text = text.trim().trim_end_matches(';').trim();
+        let (declared, _name) = text.rsplit_once(char::is_whitespace)?;
+        let declared = declared.trim();
+        (!declared.is_empty() && !declared.contains('=')).then(|| declared.to_string())
+    }
+
     // C++ declares `Ret name(T a)`, not `name(a: T) -> Ret`.
     fn parse_signature(
         &self,

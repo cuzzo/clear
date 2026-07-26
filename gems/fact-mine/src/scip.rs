@@ -232,6 +232,7 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
     }
     assign_method_symbols(&mut output.methods, &index.documents);
     apply_signature_types(output, &index);
+    apply_local_variable_types(output, &index);
     let methods_by_path = methods_by_document(&output.methods, &index.documents);
     let definitions = definitions_by_symbol(&index.documents, &methods_by_path);
     let implementation_targets = implementation_targets(&index.documents, &definitions);
@@ -578,6 +579,86 @@ fn apply_signature_types(output: &mut ProfileOutput, index: &Index) -> usize {
         adopted += 1;
     }
     adopted
+}
+
+/// Adopt the indexer's local-variable types.
+///
+/// SCIP emits a `local N` symbol per local binding, carrying the frontend's own
+/// rendering of its declaration (`let out: Output`, `var uc *unleashCmd`). That
+/// is authoritative typing for exactly the receivers a source-only analysis
+/// cannot type. For every call whose receiver is a plain local, find that
+/// receiver's occurrence inside the call span and attach the local's declared
+/// type.
+///
+/// The declaration grammar is language-specific and is read only through
+/// `NormalizedLanguageBehavior::parse_variable_declaration`; a receiver that
+/// already carries a type is never overwritten.
+fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usize {
+    let mut local_types: BTreeMap<&str, &str> = BTreeMap::new();
+    for information in index.documents.iter().flat_map(|document| &document.symbols) {
+        if !information.symbol.starts_with("local ") {
+            continue;
+        }
+        if let Some(text) = information.signature_documentation.as_ref() {
+            let text = text.text.trim();
+            if !text.is_empty() {
+                local_types.insert(information.symbol.as_str(), text);
+            }
+        }
+    }
+    if local_types.is_empty() {
+        return 0;
+    }
+    let languages = output
+        .methods
+        .iter()
+        .map(|method| (method.id.clone(), method.language.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut typed = 0;
+    for call in output.calls.iter_mut() {
+        if call.receiver_type.is_some() || call.receiver.is_empty() {
+            continue;
+        }
+        let Some(language) = languages
+            .get(&call.source)
+            .and_then(|name| crate::syntax::Language::parse(name).ok())
+        else {
+            continue;
+        };
+        let Some(document) = select_document_for_path(&call.path, &index.documents) else {
+            continue;
+        };
+        let source = fs::read_to_string(&call.path).unwrap_or_default();
+        // The receiver's own occurrence: inside the call, spelled like the
+        // receiver, and bound to a local symbol.
+        let declaration = document
+            .occurrences
+            .iter()
+            .filter(|occurrence| {
+                occurrence
+                    .span()
+                    .is_some_and(|span| contains(call.span, span))
+            })
+            .find(|occurrence| {
+                occurrence.symbol.starts_with("local ")
+                    && occurrence
+                        .span()
+                        .is_some_and(|span| occurrence_text(&source, span) == call.receiver)
+            })
+            .and_then(|occurrence| local_types.get(occurrence.symbol.as_str()).copied());
+        let Some(declaration) = declaration else {
+            continue;
+        };
+        let Some(declared) = crate::syntax::normalized_behavior::behavior(language)
+            .parse_variable_declaration(declaration)
+        else {
+            continue;
+        };
+        call.receiver_type = Some(declared);
+        call.receiver_type_origin = Some("scip_local_declaration".to_string());
+        typed += 1;
+    }
+    typed
 }
 
 /// Whether this language's indexer emits several overlapping occurrences per

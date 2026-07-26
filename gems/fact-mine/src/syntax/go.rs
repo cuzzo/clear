@@ -325,6 +325,14 @@ const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    // The Go indexer renders a local as `var name Type` - the type trails.
+    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+        let text = text.trim().trim_start_matches("var ").trim();
+        let (_name, declared) = text.split_once(char::is_whitespace)?;
+        let declared = declared.trim();
+        (!declared.is_empty() && !declared.contains('=')).then(|| declared.to_string())
+    }
+
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         let (subject, operation_kind, nil_behavior) = match node.r#type.as_str() {
             "UNARY_EXPRESSION" if node.text.trim_start().starts_with('*') => (

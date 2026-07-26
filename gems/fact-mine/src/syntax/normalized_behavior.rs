@@ -1597,6 +1597,18 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         parse_arrow_or_colon_signature(signature)
     }
 
+    /// Extract the declared type from a variable declaration as the indexer
+    /// renders it (SCIP emits one per local, e.g. Rust `let out: Output`, Go
+    /// `var uc *unleashCmd`, Java `Foo x`). Grammar is language-specific; the
+    /// returned type name is not. The default handles the `let x: T` / `var x: T`
+    /// colon form.
+    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+        let text = text.trim().trim_end_matches(';').trim();
+        let (_binding, declared) = text.split_once(':')?;
+        let declared = declared.trim();
+        (!declared.is_empty()).then(|| declared.to_string())
+    }
+
     /// Whether SCIP occurrence selection should prefer the first *semantic*
     /// occurrence at a call site. Languages whose indexer emits several
     /// overlapping occurrences per call (Java) need this; most do not.
