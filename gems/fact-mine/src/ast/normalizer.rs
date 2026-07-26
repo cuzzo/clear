@@ -2434,6 +2434,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                     .into_iter()
                     .find(|child| Some(*child) != block)
             })?;
+        let function = self.type_argument_callee(function).unwrap_or(function);
         let args = self.call_arguments(node, Some(function));
         if let Some(function_name) = self.identifier_text(function) {
             let node_type = if block.is_some() || !args.is_empty() {
@@ -5166,9 +5167,19 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .unwrap_or(false)
     }
 
+    /// A callee carrying explicit type arguments is the callee itself. Every
+    /// call-shape decision below must see through the wrapper, or the type
+    /// argument list is mistaken for the method name.
+    pub(in crate::ast) fn type_argument_callee<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        self.normalization_adapter.type_argument_callee(node)
+    }
+
     pub(in crate::ast) fn dotted_call(&self, node: TreeSitterNode<'_>) -> bool {
-        if node.kind() == "generic_function" {
-            return false;
+        if let Some(callee) = self.type_argument_callee(node) {
+            return self.dotted_call(callee);
         }
         let raw_named = self.raw_named_children(node);
         if raw_named.len() == 1
@@ -5227,6 +5238,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         node: TreeSitterNode<'tree>,
         block: Option<TreeSitterNode<'tree>>,
     ) -> Option<(TreeSitterNode<'tree>, String)> {
+        if let Some(callee) = self.type_argument_callee(node) {
+            return self.dotted_call_parts(callee, block);
+        }
         let raw_named = self.raw_named_children(node);
         if raw_named.len() == 1
             && node_text(node, self.source) == node_text(raw_named[0], self.source)
@@ -5277,6 +5291,9 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<(TreeSitterNode<'tree>, String)> {
+        if let Some(callee) = self.type_argument_callee(node) {
+            return self.member_parts(callee);
+        }
         if self
             .normalization_adapter
             .check_node_role(node, "expression_list")

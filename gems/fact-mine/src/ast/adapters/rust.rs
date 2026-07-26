@@ -52,6 +52,16 @@ impl AstNormalizationAdapter for RustAstAdapter {
         Some((path, node_text(name, source).to_string()))
     }
 
+    fn type_argument_callee<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() != "generic_function" {
+            return None;
+        }
+        node.child_by_field_name("function")
+    }
+
     fn hash_literal_target<'tree>(
         &self,
         _node: TreeSitterNode<'tree>,

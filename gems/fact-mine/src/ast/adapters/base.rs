@@ -455,6 +455,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    /// Unwrap a callee that carries explicit type arguments (`parse::<i64>`,
+    /// `collect::<Vec<_>>`) to the callee itself. The type arguments are a
+    /// parametric annotation, never a message: leaving the wrapper in place
+    /// makes the normalizer read `<i64>` as the method name, which loses the
+    /// real call and leaves a callee no indexer can resolve.
+    fn type_argument_callee<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     fn singleton_function_kind(&self, _kind: &str) -> bool {
         false
     }

@@ -1456,3 +1456,58 @@ fn field_access_receiver_inherits_declared_field_type() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn explicit_type_arguments_do_not_replace_the_call_message() -> Result<()> {
+    let cases: &[(&str, &str, Language, &str, &str)] = &[
+        (
+            "rust-method",
+            "fn parse_num(text: &str) -> i64 { text.parse::<i64>().unwrap_or(0) }\n",
+            Language::Rust,
+            "text",
+            "parse",
+        ),
+        (
+            "rust-chained",
+            "fn names(rows: &[String]) -> Vec<String> { rows.iter().cloned().collect::<Vec<_>>() }\n",
+            Language::Rust,
+            "rows.iter().cloned()",
+            "collect",
+        ),
+        (
+            "rust-free-function",
+            "fn ident<T>(x: T) -> T { x }\nfn run() -> i32 { ident::<i32>(1) }\n",
+            Language::Rust,
+            "self",
+            "ident",
+        ),
+    ];
+    for (label, source, language, receiver, message) in cases {
+        let output = extract_source(source, ".rs", *language)?;
+        assert!(
+            output
+                .calls
+                .iter()
+                .any(|call| call.message == *message && call.receiver == *receiver),
+            "{label}: expected `{receiver}.{message}` call, got {:?}",
+            output
+                .calls
+                .iter()
+                .map(|call| (call.receiver.clone(), call.message.clone()))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !output
+                .calls
+                .iter()
+                .any(|call| call.message.starts_with('<')),
+            "{label}: type arguments must not be extracted as a call message, got {:?}",
+            output
+                .calls
+                .iter()
+                .map(|call| (call.receiver.clone(), call.message.clone()))
+                .collect::<Vec<_>>()
+        );
+    }
+    Ok(())
+}
