@@ -63,7 +63,13 @@ pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     }
 }
 
-fn cpp_type_aliases(source: &str) -> (BTreeMap<String, String>, BTreeMap<String, usize>) {
+fn cpp_type_aliases(
+    source: &str,
+) -> (
+    BTreeMap<String, String>,
+    BTreeMap<String, usize>,
+    BTreeSet<String>,
+) {
     let mut candidates = BTreeMap::<String, BTreeSet<(String, usize)>>::new();
     let mut statement = String::new();
     let mut statement_line = 1usize;
@@ -134,7 +140,17 @@ fn cpp_type_aliases(source: &str) -> (BTreeMap<String, String>, BTreeMap<String,
 
     let mut aliases = BTreeMap::new();
     let mut lines = BTreeMap::new();
+    let mut dependent_aliases = BTreeSet::new();
     for (name, definitions) in candidates {
+        if definitions.iter().all(|(target, _)| {
+            cpp_identifier_tokens(target).any(|token| token == "typename")
+        }) {
+            // `typename X::Y` is a compiler-level declaration that Y depends
+            // on a template type. Preserve that proof even when an
+            // unqualified intermediate alias such as `super` has different
+            // meanings in multiple classes and is correctly omitted below.
+            dependent_aliases.insert(name.clone());
+        }
         let targets = definitions
             .iter()
             .map(|(target, _)| target)
@@ -156,7 +172,7 @@ fn cpp_type_aliases(source: &str) -> (BTreeMap<String, String>, BTreeMap<String,
         aliases.insert(name.clone(), target);
         lines.insert(name, line);
     }
-    (aliases, lines)
+    (aliases, lines, dependent_aliases)
 }
 
 fn cpp_identifier_tokens(source: &str) -> impl DoubleEndedIterator<Item = &str> {
@@ -270,6 +286,7 @@ fn cpp_declared_owner_template_types(source: &str) -> BTreeMap<String, BTreeSet<
 fn cpp_method_template_types(
     source: &str,
     functions: &[FunctionDef],
+    dependent_aliases: &BTreeSet<String>,
 ) -> BTreeMap<String, BTreeSet<String>> {
     let lines = source.lines().collect::<Vec<_>>();
     let declared_owners = cpp_declared_owner_template_types(source);
@@ -305,6 +322,9 @@ fn cpp_method_template_types(
             let prefix = prefix.into_iter().rev().collect::<Vec<_>>().join(" ");
             if let Some(template_start) = prefix.rfind("template") {
                 parameters.extend(cpp_declared_template_type_names(&prefix[template_start..]));
+            }
+            if !parameters.is_empty() {
+                parameters.extend(dependent_aliases.iter().cloned());
             }
             (!parameters.is_empty()).then(|| {
                 (
@@ -793,7 +813,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
     }
 
     fn syntax_metadata(&self, source: &str, functions: &[FunctionDef]) -> SyntaxMetadata {
-        let (type_aliases, type_alias_lines) = cpp_type_aliases(source);
+        let (type_aliases, type_alias_lines, dependent_aliases) = cpp_type_aliases(source);
         SyntaxMetadata {
             type_aliases,
             type_alias_lines,
@@ -802,7 +822,11 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                     self, source, functions,
                 ),
             method_local_types: cpp_method_local_types(source, functions),
-            method_template_types: cpp_method_template_types(source, functions),
+            method_template_types: cpp_method_template_types(
+                source,
+                functions,
+                &dependent_aliases,
+            ),
             ..SyntaxMetadata::default()
         }
     }
@@ -1215,7 +1239,7 @@ mod tests {
 
     #[test]
     fn cpp_aliases_keep_unambiguous_or_semantically_converged_bindings() {
-        let (aliases, lines) = cpp_type_aliases(
+        let (aliases, lines, _) = cpp_type_aliases(
             r#"
 using Items = std::list<
     Widget

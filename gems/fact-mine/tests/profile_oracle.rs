@@ -1857,7 +1857,8 @@ fn cpp_template_receiver_calls_keep_symbolic_dispatch_costs() -> Result<()> {
         r#"template <typename Policy, typename Formatter, typename Compare>
 struct Runner {
     using Queue = typename Policy::Queue;
-    using Threading = Policy;
+    using Base = Policy;
+    using Threading = typename Base::Threading;
     using Hook = void (*)(int);
     Queue queue;
     typename Threading::Atomic atomic;
@@ -1873,6 +1874,10 @@ struct Runner {
         Formatter{}.invoke(1);
         Compare(1, 2);
     }
+};
+template <typename Other>
+struct Noise {
+    using Base = Other;
 };
 struct Concrete {
     void execute() {}
