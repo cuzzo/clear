@@ -436,6 +436,8 @@ pub struct SymbolScope {
     pub explicit_imports: BTreeMap<String, String>,
     #[serde(default)]
     pub preprocessor_callables: BTreeSet<String>,
+    #[serde(default)]
+    pub preprocessor_definitions: BTreeMap<String, BTreeSet<String>>,
     /// Language-owned namespace enclosing a particular declaration span.
     /// File-level namespaces are insufficient for languages such as C++
     /// where one translation unit may contain several namespace blocks.

@@ -5,6 +5,7 @@ use super::{
 use crate::ast::normalize_tree_with_call_origins;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -53,6 +54,19 @@ fn parse_normalized_file(
         crate::ast::declaration_namespaces(parsed.tree.root_node(), &parsed.source, language);
     let preprocessor_callables =
         crate::ast::preprocessor_callable_names(parsed.tree.root_node(), &parsed.source, language);
+    let preprocessor_definitions = crate::ast::preprocessor_callable_definitions(
+        parsed.tree.root_node(),
+        &parsed.source,
+        language,
+    )
+    .into_iter()
+    .fold(
+        BTreeMap::<String, BTreeSet<String>>::new(),
+        |mut definitions, (name, definition)| {
+            definitions.entry(name).or_default().insert(definition);
+            definitions
+        },
+    );
     if language == Language::Go && !namespace.is_empty() {
         let directory = parsed
             .file
@@ -168,6 +182,7 @@ fn parse_normalized_file(
             namespace,
             explicit_imports: explicit_imports.into_iter().collect(),
             preprocessor_callables: preprocessor_callables.into_iter().collect(),
+            preprocessor_definitions,
             declaration_namespaces: declaration_namespaces.into_iter().collect(),
         },
         function_defs: facts.function_defs,
