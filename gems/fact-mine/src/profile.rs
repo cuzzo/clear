@@ -7067,7 +7067,7 @@ fn owner_type_name(value: &str) -> &str {
         .trim_end_matches(|character: char| {
             character.is_whitespace() || matches!(character, '&' | '*')
         });
-    let value = value.split(['[', '<']).next().unwrap_or(value);
+    let value = value.split(['[', '<']).next().unwrap_or(value).trim();
     value
         .rsplit([':', '.'])
         .find(|part| !part.is_empty())
@@ -7513,7 +7513,24 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 .and_then(|type_name| exact_document_owner(document, type_name));
             let instance_receiver_symbol = instance_receiver_type
                 .as_deref()
-                .and_then(|type_name| canonical_declared_type(document, type_name));
+                .and_then(|type_name| {
+                    (language == "cpp"
+                        && call.owner.contains('<')
+                        && owner_name_matches(type_name, &call.owner))
+                    .then(|| canonical_receiver_symbol(document, &call.owner))
+                    .flatten()
+                    .or_else(|| canonical_declared_type(document, type_name))
+                })
+                .or_else(|| {
+                    (language == "cpp")
+                        .then(|| {
+                            instance_receiver_type
+                                .as_deref()
+                                .filter(|type_name| owner_name_matches(type_name, &call.owner))
+                                .and_then(|_| canonical_receiver_symbol(document, &call.owner))
+                        })
+                        .flatten()
+                });
             let receiver_symbol_origin = if static_receiver_symbol.is_some() {
                 canonical_receiver_symbol_origin(document, &call.receiver).or_else(|| {
                     adapter_receiver_is_type
@@ -7521,9 +7538,17 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         .flatten()
                 })
             } else {
-                instance_receiver_type
-                    .as_deref()
-                    .and_then(|type_name| canonical_declared_type_origin(document, type_name))
+                (language == "cpp"
+                    && call.owner.contains('<')
+                    && instance_receiver_type
+                        .as_deref()
+                        .is_some_and(|type_name| owner_name_matches(type_name, &call.owner)))
+                .then(|| "current_template_specialization".to_string())
+                .or_else(|| {
+                    instance_receiver_type
+                        .as_deref()
+                        .and_then(|type_name| canonical_declared_type_origin(document, type_name))
+                })
             };
             let receiver_symbol = static_receiver_symbol
                 .or(instance_receiver_symbol.clone())
@@ -8203,6 +8228,14 @@ pub(crate) mod tests {
             receiver_state_field("this.name", &document),
             Some("name".to_string())
         );
+    }
+
+    #[test]
+    fn cpp_owner_name_matching_ignores_template_spacing() {
+        assert!(owner_name_matches(
+            "ScopedRemover &&",
+            "ScopedRemover < DispatcherType, Enable >"
+        ));
     }
 
     #[test]

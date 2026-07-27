@@ -2377,6 +2377,38 @@ struct Store {
 }
 
 #[test]
+fn cpp_injected_class_names_resolve_current_template_specialization() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template<typename T, typename Enable = void>
+struct Box;
+template<typename T>
+struct Box<T, typename Gate<T>::type> {
+    void reset() {}
+    Box(Box && other) {
+        other.reset();
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let reset = output
+        .calls
+        .iter()
+        .find(|call| call.function == "Box" && call.message == "reset")
+        .context("missing injected-class receiver call")?;
+    assert_eq!(reset.receiver_type.as_deref(), Some("Box &&"));
+    assert!(reset.target.is_some(), "{reset:?}");
+    assert_eq!(
+        reset.receiver_symbol_origin.as_deref(),
+        Some("current_template_specialization")
+    );
+    Ok(())
+}
+
+#[test]
 fn c_export_and_calling_convention_macros_preserve_parameters_and_recursion() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".c").tempfile()?;
     fs::write(
