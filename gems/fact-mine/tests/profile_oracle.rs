@@ -1769,6 +1769,34 @@ void run(const std::wstring& input) {
 }
 
 #[test]
+fn cpp_callable_fields_on_parameters_keep_parametric_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"using Hook = void (*)(int);
+struct Item { Hook dispatcher; };
+void run(const Item& item) {
+    item.dispatcher(1);
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let dispatcher = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "dispatcher")
+        .context("missing item.dispatcher call")?;
+
+    assert_eq!(dispatcher.known_time_complexity.as_deref(), Some("O(C)"));
+    assert_eq!(
+        dispatcher.complexity_provenance.as_deref(),
+        Some("parametric_declared_receiver_contract")
+    );
+    Ok(())
+}
+
+#[test]
 fn cpp_project_aliases_converge_across_configuration_branches_and_files() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let aliases = directory.path().join("aliases.hpp");
