@@ -2128,6 +2128,50 @@ bool run() { return make(1).size() > 0; }
 }
 
 #[test]
+fn cpp_trailing_return_types_flow_through_auto_locals() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Box {
+    void work() {}
+};
+auto make_box()
+    -> Box*
+{
+    return nullptr;
+}
+void run() {
+    auto box = make_box();
+    box->work();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let make_box_type = output
+        .type_definitions
+        .iter()
+        .find(|definition| definition.name == "make_box")
+        .context("missing trailing-return type definition")?;
+    assert_eq!(
+        make_box_type.signature.as_deref(),
+        Some("auto make_box() -> Box*")
+    );
+    let work = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "work")
+        .context("missing auto-local receiver call")?;
+    assert!(work.target.is_some());
+    assert_eq!(work.receiver_symbol.as_deref(), Some("Box"));
+    assert_eq!(
+        work.receiver_symbol_origin.as_deref(),
+        Some("declared_call_result")
+    );
+    Ok(())
+}
+
+#[test]
 fn cpp_template_receiver_calls_keep_symbolic_dispatch_costs() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(

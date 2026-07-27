@@ -4239,6 +4239,51 @@ fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {
     header
 }
 
+/// Collects a complete C++ declaration header, including a trailing return
+/// type that may begin on the line after the parameter list.
+///
+/// The generic header collector stops as soon as the outer parameter
+/// parentheses balance. That loses declarations such as:
+///
+/// `auto make() const`
+/// `    -> std::shared_ptr<Value>`
+/// `{`
+fn get_cpp_def_header(lines: &[String], start_line_1indexed: usize) -> String {
+    let start_idx = skip_annotation_lines(lines, start_line_1indexed.saturating_sub(1));
+    if start_idx >= lines.len() {
+        return String::new();
+    }
+
+    let mut header = String::new();
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    let mut saw_parameters = false;
+    for line in lines
+        .iter()
+        .take(std::cmp::min(lines.len(), start_idx + 20))
+        .skip(start_idx)
+    {
+        header.push_str(line);
+        header.push('\n');
+        for character in line.chars() {
+            match character {
+                '(' => {
+                    paren_depth += 1;
+                    saw_parameters = true;
+                }
+                ')' => paren_depth -= 1,
+                '[' => bracket_depth += 1,
+                ']' => bracket_depth -= 1,
+                '{' | ';' if saw_parameters && paren_depth <= 0 && bracket_depth <= 0 => {
+                    return header;
+                }
+                _ => {}
+            }
+        }
+    }
+    header
+}
+
 /// Truncates a declaration header at its own body-opening `{`, tracking
 /// paren AND bracket depth so a parameter type's own braces (Go's
 /// `interface{}`, a C# anonymous-object-adjacent `{}`, etc.) - whether
@@ -4581,7 +4626,11 @@ fn method_signature(lines: &[String], fn_def: &syntax::FunctionDef, language: &s
         // Typed adapters may keep FunctionDef.signature as display text
         // (`name (arg)`), which loses return annotations required by CFG/DFG.
         // Their declaration header is the source of truth for static facts.
-        "c" | "cpp" | "csharp" | "go" | "java" | "kotlin" | "php" | "rust" | "swift" | "zig" => {
+        "cpp" => header_before_body_brace(&get_cpp_def_header(lines, fn_def.line))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
+        "c" | "csharp" | "go" | "java" | "kotlin" | "php" | "rust" | "swift" | "zig" => {
             header_before_body_brace(&get_def_header(lines, fn_def.line))
                 .split_whitespace()
                 .collect::<Vec<_>>()
@@ -5651,6 +5700,27 @@ fn parse_c_family_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, 
     let Some(paren_open) = sig.find('(') else {
         return (None, params);
     };
+    let mut paren_depth = 0usize;
+    let mut paren_close = None;
+    for (offset, character) in sig[paren_open..].char_indices() {
+        match character {
+            '(' => paren_depth += 1,
+            ')' => {
+                paren_depth = paren_depth.saturating_sub(1);
+                if paren_depth == 0 {
+                    paren_close = Some(paren_open + offset);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let trailing_return_type = paren_close
+        .and_then(|close| sig[close + 1..].split_once("->"))
+        .map(|(_, declared)| declared.trim().trim_end_matches(['{', ';']).trim())
+        .filter(|declared| !declared.is_empty())
+        .map(str::to_string);
+
     let prefix = sig[..paren_open].trim();
     let return_prefix = if let Some(operator) = prefix.rfind(" operator") {
         &prefix[..operator]
@@ -5686,7 +5756,7 @@ fn parse_c_family_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, 
     }) {
         words.remove(0);
     }
-    let return_type = (!words.is_empty()).then(|| words.join(" "));
+    let return_type = trailing_return_type.or_else(|| (!words.is_empty()).then(|| words.join(" ")));
     (return_type, params)
 }
 
