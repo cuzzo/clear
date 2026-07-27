@@ -25,8 +25,8 @@ const CPP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     trim_prefix_chars: &[],
     trim_suffix_chars: &['&', '*'],
     array_names: &["vector", "array", "deque", "forward_list", "list", "span"],
-    hash_names: &["unordered_map"],
-    set_names: &["unordered_set"],
+    hash_names: &["map", "unordered_map"],
+    set_names: &["set", "unordered_set"],
     string_names: &[
         "string",
         "wstring",
