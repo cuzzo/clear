@@ -106,6 +106,27 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         }
     }
 
+    fn scoped_call_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, String)> {
+        if node.kind() != "conditional_access_expression" {
+            return None;
+        }
+        let children = named_children(node);
+        let receiver = *children.first()?;
+        let binding = *children.last()?;
+        let method = named_children(binding)
+            .into_iter()
+            .last()
+            .map(|name| node_text(name, source))
+            .unwrap_or_else(|| node_text(binding, source))
+            .trim_start_matches(['.', '?'])
+            .to_string();
+        (!method.is_empty()).then_some((receiver, method))
+    }
+
     fn function_body_prefix_nodes<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -382,6 +403,9 @@ class Widget : Parent {
   }
   static bool Accept(string value) => true;
   static void Use(string value) {}
+  void Notify(System.Action<string>? callback) {
+    callback?.Invoke("message");
+  }
 }
 "#,
         )?;
@@ -413,9 +437,11 @@ class Widget : Parent {
             "Use",
             "ToUpperInvariant",
             "ToLowerInvariant",
+            "Invoke",
         ] {
             assert!(messages.contains(expected), "calls={messages:?}");
         }
+        assert!(!messages.contains("call"), "calls={messages:?}");
         Ok(())
     }
 }
