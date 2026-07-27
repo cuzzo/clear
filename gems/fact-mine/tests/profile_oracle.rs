@@ -2870,6 +2870,16 @@ void release(const Alloc& alloc, T * pointer) {
         typename std::allocator_traits<Alloc>::template rebind_alloc<T>(alloc);
     rebound.deallocate(pointer, 1);
 }
+template <class T, class Compare>
+class Ordered : private std::list<T> {
+    void order() {
+        auto compare = Compare();
+        this->sort([compare](const T & a, const T & b) {
+            if (a.empty() || b.empty()) return false;
+            return compare(a.get(), b.get());
+        });
+    }
+};
 "#,
     )?;
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
@@ -2886,6 +2896,29 @@ void release(const Alloc& alloc, T * pointer) {
             "{function} {message}"
         );
     }
+    for call in output.calls.iter().filter(|call| {
+        call.function == "order" && matches!(call.message.as_str(), "empty" | "get" | "compare")
+    }) {
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(R)"),
+            "{call:?}"
+        );
+    }
+    let sort = output
+        .calls
+        .iter()
+        .find(|call| call.function == "order" && call.message == "sort")
+        .context("missing inherited list sort")?;
+    assert_eq!(sort.receiver_type.as_deref(), Some("std::list<T>"));
+    assert_eq!(
+        sort.receiver_type_origin.as_deref(),
+        Some("declared_supertype")
+    );
+    assert_eq!(
+        sort.known_time_complexity.as_deref(),
+        Some("O(N log N*C)")
+    );
     Ok(())
 }
 

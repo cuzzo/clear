@@ -10,7 +10,6 @@ Array:
   find: linear_scan
   begin: constant
   end: constant
-  sort: sort
   # Node transfer is constant for whole-list/single-element overloads and
   # linear for a range from another list. Use the conservative common bound.
   splice: linear_scan
@@ -180,6 +179,7 @@ ParametricCall:
   # user-defined pointee.
   'shared_ptr.reset': reflective_once
   'unique_ptr.reset': reflective_once
+  'Array.sort': callback_sort
 ModeledRuntime:
   # Exact source spellings seen only in compiler-inactive platform branches.
   # Calls receive an explicit modeled-world assumption; these entries never

@@ -8,11 +8,11 @@ use super::normalized_behavior::{
     configured_modeled_runtime_bound, configured_non_call_construct,
     configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    eliminable_guard_from_call, exact_direct_call_name, native_pointer_nullability_contract,
-    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
-    type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
-    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
-    NormalizedSemanticEffect, NormalizedStateRead, SyntaxMetadata,
+    configured_stdlib_type, eliminable_guard_from_call, exact_direct_call_name,
+    native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, split_top_level_commas, type_before_parameter_name, NormalizedCallParts,
+    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
+    NormalizedNullableOperation, NormalizedSemanticEffect, NormalizedStateRead, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata, FunctionDef};
 use crate::ast::{Child, Node, Span};
@@ -525,7 +525,10 @@ fn cpp_dependent_auto_binding(
             || initializer.contains(".template ")
             || initializer.contains("::template ")
             || initializer.contains(&format!("{dependency}."))
-            || initializer.contains(&format!("{dependency}->"));
+            || initializer.contains(&format!("{dependency}->"))
+            || initializer
+                .strip_prefix(dependency)
+                .is_some_and(|rest| rest.trim_start().starts_with(['(', '{']));
         if type_dependent_syntax {
             return Some(name.to_string());
         }
@@ -546,6 +549,9 @@ fn cpp_method_local_types(
             let body = lines.get(start..end)?.join("\n");
             let body = body.split_once('{').map(|(_, body)| body)?;
             let mut candidates = BTreeMap::<String, BTreeSet<String>>::new();
+            for (name, declared_type) in cpp_lambda_parameter_types(body) {
+                candidates.entry(name).or_default().insert(declared_type);
+            }
             for statement in body.split(';') {
                 let declaration = statement
                     .rsplit(['{', '}'])
@@ -624,6 +630,59 @@ fn cpp_method_local_types(
             })
         })
         .collect()
+}
+
+fn cpp_lambda_parameter_types(source: &str) -> Vec<(String, String)> {
+    let mut parameters = Vec::new();
+    for (capture_end, _) in source.match_indices(']') {
+        let Some(capture_start) = source[..capture_end].rfind('[') else {
+            continue;
+        };
+        if source[capture_start..capture_end].contains([';', '{', '}']) {
+            continue;
+        }
+        let after_capture = source[capture_end + 1..].trim_start();
+        let Some(parameter_text) = after_capture.strip_prefix('(') else {
+            continue;
+        };
+        let mut depth = 1usize;
+        let mut parameter_end = None;
+        for (index, character) in parameter_text.char_indices() {
+            match character {
+                '(' => depth += 1,
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        parameter_end = Some(index);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(parameter_end) = parameter_end else {
+            continue;
+        };
+        // Keep this proof boundary deliberately narrow. A braced body after
+        // the parameter list distinguishes a lambda from subscripted callable
+        // expressions such as `handlers[index](value)`.
+        if !parameter_text[parameter_end + 1..]
+            .trim_start()
+            .starts_with('{')
+        {
+            continue;
+        }
+        for parameter in split_top_level_commas(&parameter_text[..parameter_end]) {
+            let Some(name) = cpp_identifier_tokens(&parameter).next_back() else {
+                continue;
+            };
+            let Some(declared_type) = type_before_parameter_name(&parameter) else {
+                continue;
+            };
+            parameters.push((name.to_string(), declared_type));
+        }
+    }
+    parameters
 }
 
 fn cpp_scalar_primitive(name: &str) -> bool {
@@ -1140,6 +1199,21 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
     fn inherited_identity_prefers_specialization(&self, identity: &str) -> bool {
         identity.contains('<')
+    }
+
+    fn inherited_call_receiver_type(
+        &self,
+        supertypes: &[String],
+        message: &str,
+    ) -> Option<String> {
+        let [supertype] = supertypes else {
+            return None;
+        };
+        let receiver = parse_declared_type(supertype);
+        (configured_stdlib_type("cpp", &receiver)
+            && (self.call_complexity(&receiver, message).is_some()
+                || self.parametric_call_cost(&receiver, message).is_some()))
+        .then(|| supertype.clone())
     }
 
     fn preserve_supertype_identity(&self, supertype: &str) -> bool {

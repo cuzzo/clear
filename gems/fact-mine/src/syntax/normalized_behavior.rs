@@ -1016,6 +1016,17 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    /// Select a declared library supertype as the static receiver for an
+    /// inherited call. Adapters opt in only when native lookup and the
+    /// reviewed stdlib registry prove the operation on one exact base type.
+    fn inherited_call_receiver_type(
+        &self,
+        _supertypes: &[String],
+        _message: &str,
+    ) -> Option<String> {
+        None
+    }
+
     /// Whether overload compatibility can be proven from argument count alone.
     /// The conservative default accepts all declarations and therefore leaves
     /// a multi-candidate set unresolved.
