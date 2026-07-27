@@ -1832,7 +1832,15 @@ fn preprocessor_definition_source(source: &str, line: usize) -> Option<String> {
     let lines = source.lines().collect::<Vec<_>>();
     let mut index = line;
     let first = lines.get(index)?.trim_start();
-    if !first.starts_with("#define") {
+    let directive = first.strip_prefix('#')?.trim_start();
+    let Some(after_define) = directive.strip_prefix("define") else {
+        return None;
+    };
+    if after_define
+        .chars()
+        .next()
+        .is_some_and(|character| !character.is_whitespace())
+    {
         return None;
     }
     let mut definition = String::new();
@@ -4302,5 +4310,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(occurrence.span(), Some([0, 0, 0, 4]));
+    }
+
+    #[test]
+    fn reads_indented_preprocessor_define_directives() {
+        let source = "#if ENABLED\n#   define WRAP(value) value\n#endif\n";
+        assert_eq!(
+            preprocessor_definition_source(source, 1).as_deref(),
+            Some("#   define WRAP(value) value")
+        );
     }
 }

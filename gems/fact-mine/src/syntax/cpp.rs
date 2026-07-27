@@ -653,6 +653,17 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         external_symbol_owner(symbol)
     }
 
+    fn preprocessor_definition_call_complexity(
+        &self,
+        definition: &str,
+    ) -> Option<ExternalCallComplexity> {
+        super::c::preprocessor_definition_call_complexity(definition)
+    }
+
+    fn preprocessor_definition_location(&self, symbol: &str) -> Option<(String, usize)> {
+        super::c::preprocessor_definition_location(symbol)
+    }
+
     fn owner_supertypes(&self, node: &Node) -> Vec<String> {
         let header = node.text.split('{').next().unwrap_or(&node.text);
         header
@@ -1102,6 +1113,22 @@ mod tests {
             "swap"
         )
         .is_none());
+    }
+
+    #[test]
+    fn cpp_consumes_scip_indexed_macro_definitions() {
+        let literal_wrapper = CppNormalizedBehavior
+            .preprocessor_definition_call_complexity("#define PLOG_NSTR(x) x")
+            .expect("an exact compile-time wrapper is constant");
+        assert_eq!(
+            (literal_wrapper.time, literal_wrapper.space),
+            ("O(1)", "O(1)")
+        );
+        assert_eq!(
+            CppNormalizedBehavior
+                .preprocessor_definition_location("cxx . . $ `include/plog/Util.h:91:12`!"),
+            Some(("include/plog/Util.h".to_string(), 91))
+        );
     }
 
     #[test]
