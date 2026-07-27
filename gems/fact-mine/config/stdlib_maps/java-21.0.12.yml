@@ -1,0 +1,60 @@
+schema: fact-mine.stdlib-map.v1
+language: java
+
+source:
+  revision: jdk-21.0.12+8
+  git:
+    repository: https://github.com/adoptium/jdk21u.git
+    commit: 9de4f68c88a0a1510373f291d1a95b1f6b0db8c8
+    sparse_paths:
+      - src/java.base/share/classes/java/lang
+      - src/java.base/share/classes/java/util
+  root_suffix: src/java.base/share/classes
+  include:
+    - "java/{lang,util}/**/*.java"
+
+index:
+  command:
+    - scip-java
+    - index
+    - --output
+    - "{index}"
+    - --build-tool
+    - maven
+    - --
+    - package
+    - "-Dstdlib.source={source_root}/java"
+  working_directory: jdk-21.0.12
+  output: java-stdlib.scip
+  expected:
+    tool: scip-java
+    version: 0.12.3
+
+soundness:
+  minimum_export_eligible_methods: 5000
+
+summary:
+  corpus: java-stdlib-lang-util
+  output: ../complexity_summaries/java-stdlib.jdk21.0.12.json.gz
+  minimum_symbols: 1
+  expected_symbol_prefix: "semanticdb maven jdk 21 "
+  symbol_relocation:
+    from: "semanticdb maven maven/jdk/java.base 21.0.12 "
+    to: "semanticdb maven jdk 21 "
+
+consumers:
+  - name: java-21-exact-symbol
+    source_root: consumers/java-21
+    include: ["src/main/java/**/*.java"]
+    index:
+      command:
+        - scip-java
+        - index
+        - --output
+        - "{index}"
+        - --build-tool
+        - maven
+        - --
+        - package
+      output: java-consumer.scip
+    minimum_complete_percent: 100

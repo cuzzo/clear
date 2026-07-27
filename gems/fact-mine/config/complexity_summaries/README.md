@@ -14,7 +14,7 @@ syscall os time flag bytes bufio encoding/json encoding/xml sort strings
 io/fs strconv math regexp fmt
 ```
 
-The bundle contains 371 exact symbols whose time and space bounds are proven
+The bundle contains 322 exact symbols whose time and space bounds are proven
 from analyzed bodies, exact analyzed targets, CFG/DFG structure, or
 compiler-provided closed candidate sets. A function is intentionally omitted
 when its apparent completeness depends on a reviewed/manual receiver registry,
@@ -22,17 +22,11 @@ an external-latency or modeled-world contract, an unknown cardinality relation,
 or an unresolved call-evidence gap. Those omissions remain eligible for the
 manual incomplete-data fallback.
 
-Rebuild it by generating a SCIP index for those package patterns, profiling
-the non-test `.go` implementation files with FactMine using
-`--no-bundled-complexity-summaries`, and running:
+Rebuild it through the shared manifest producer:
 
 ```bash
-gems/espalier/script/export_complexity_summary.rb \
-  --corpus go-stdlib-core-surface \
-  --source-revision go1.22.2 \
-  --indexer scip-go@0.2.7 \
-  go-stdlib.profile.json \
-  gems/fact-mine/config/complexity_summaries/go-stdlib.go1.22.2.json.gz
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/go-1.22.2.yml
 ```
 
 The gzip header is deterministic. The v2 envelope records the complete input
@@ -43,7 +37,7 @@ exact-version join test whenever a new bundle is registered in
 
 `rust-stdlib.rustc1.96.0.json.gz` was built from the installed Rust 1.96.0
 `core`, `alloc`, and `std` implementation sources at compiler commit
-`ac68faa20c58`, indexed by rust-analyzer from the same build. It contains 1,697
+`ac68faa20c58`, indexed by rust-analyzer from the same build. It contains 1,543
 source-proven exact symbols. rust-analyzer identifies those crates by their
 source repository URL rather than a release number, so FactMine applies the
 bundle only when the consumer SCIP metadata reports the exact compatible
@@ -55,15 +49,40 @@ its empty source body hides a destructor selected by `T`. Conflicting duplicate
 symbols emitted by rust-analyzer for two test-only declarations are omitted
 rather than selected by order.
 
-Rebuild the Rust bundle by indexing the installed Rust library workspace,
-profiling all `.rs` files below `library/core`, `library/alloc`, and
-`library/std`, then running:
+Rebuild it through the same producer:
 
 ```bash
-gems/espalier/script/export_complexity_summary.rb \
-  --corpus rust-stdlib-core-alloc-std \
-  --source-revision rustc-1.96.0-ac68faa20c58 \
-  --indexer 'rust-analyzer@1.96.0 (ac68faa 2026-05-25)' \
-  rust-stdlib.profile.json \
-  gems/fact-mine/config/complexity_summaries/rust-stdlib.rustc1.96.0.json.gz
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/rust-1.96.0.yml
 ```
+
+`java-stdlib.jdk21.0.12.json.gz` contains 2,598 exact symbols from
+`java.lang` and `java.util` in the pinned Adoptium JDK 21.0.12+8 source.
+scip-java indexes the source in a patch-module Maven project. The generic
+producer first verifies its exact producer symbols, then relocates the Maven
+project prefix to the `semanticdb maven jdk 21` identity emitted in user
+projects. A complete disagreement with the existing Java fallback remains a
+hard error; this process found and corrected the former `Objects.hash`
+auxiliary-space overestimate.
+
+```bash
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/java-21.0.12.yml
+```
+
+`python-stdlib.cpython3.11.9.json.gz` contains 200 exact symbols from 43
+selected pure-Python CPython 3.11.9 implementation files. The source selection
+is staged into an isolated index workspace because scip-python 0.6.6 crashes
+while indexing an unrelated `signal.py`; staging is a generic manifest feature,
+not Python behavior in the shared producer.
+
+```bash
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/python-3.11.9.yml
+```
+
+FactMine discovers all `.json.gz` files in this directory at build time.
+Adding a generated bundle therefore requires no language-specific registration
+code. `../stdlib_maps/support.yml` records the fail-closed status of maintained
+SCIP languages whose source bodies or consumer version identity are currently
+insufficient for safe publication.

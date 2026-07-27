@@ -567,6 +567,11 @@ pub struct CallResolutionCoverage {
     /// are retained separately so a source-scope policy is not misreported as
     /// a function extractor defect.
     pub raw_calls_not_normalized_inside_function: usize,
+    /// Export-eligible methods that still overlap an unmatched parser call.
+    /// Extraction must revoke eligibility for every such method; a non-zero
+    /// value is a soundness bug, not a diagnostic sampling condition.
+    #[serde(default)]
+    pub source_export_eligible_methods_overlapping_raw_call_loss: usize,
     /// Raw parser calls outside every extracted executable function.
     pub raw_calls_not_normalized_outside_function: usize,
     /// Grammar-node kinds for the raw-call subset with no normalized call at
@@ -1367,10 +1372,31 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             method.source_export_eligible = false;
         }
     }
+    let source_export_eligible_methods_overlapping_raw_call_loss = raw_calls_not_normalized
+        .iter()
+        .filter_map(|gap| {
+            methods
+                .iter()
+                .filter(|method| {
+                    method
+                        .span
+                        .is_some_and(|method_span| span_contains(method_span, *gap))
+                })
+                .min_by_key(|method| {
+                    let span = method.span.unwrap_or([0, 0, usize::MAX, usize::MAX]);
+                    (
+                        span[2].saturating_sub(span[0]),
+                        span[3].abs_diff(span[1]),
+                    )
+                })
+        })
+        .filter(|method| method.source_export_eligible)
+        .count();
     let call_resolution_coverage = CallResolutionCoverage {
         raw_parser_call_sites: raw_call_spans.len(),
         raw_calls_not_normalized: raw_calls_not_normalized.len(),
         raw_calls_not_normalized_inside_function,
+        source_export_eligible_methods_overlapping_raw_call_loss,
         raw_calls_not_normalized_outside_function: raw_calls_not_normalized.len()
             - raw_calls_not_normalized_inside_function,
         raw_calls_not_normalized_by_kind,
@@ -1562,6 +1588,7 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut raw_parser_call_sites = 0usize;
     let mut raw_calls_not_normalized = 0usize;
     let mut raw_calls_not_normalized_inside_function = 0usize;
+    let mut source_export_eligible_methods_overlapping_raw_call_loss = 0usize;
     let mut raw_calls_not_normalized_outside_function = 0usize;
     let mut raw_calls_not_normalized_by_kind = BTreeMap::new();
     let mut raw_call_normalization_gap_samples = Vec::new();
@@ -1575,6 +1602,9 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         raw_calls_not_normalized_inside_function += output
             .call_resolution_coverage
             .raw_calls_not_normalized_inside_function;
+        source_export_eligible_methods_overlapping_raw_call_loss += output
+            .call_resolution_coverage
+            .source_export_eligible_methods_overlapping_raw_call_loss;
         raw_calls_not_normalized_outside_function += output
             .call_resolution_coverage
             .raw_calls_not_normalized_outside_function;
@@ -1691,6 +1721,7 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
             raw_parser_call_sites,
             raw_calls_not_normalized,
             raw_calls_not_normalized_inside_function,
+            source_export_eligible_methods_overlapping_raw_call_loss,
             raw_calls_not_normalized_outside_function,
             raw_calls_not_normalized_by_kind,
             raw_call_normalization_gap_samples,
@@ -1823,6 +1854,8 @@ fn finalize_project_output(output: &mut ProfileOutput) {
     coverage.raw_calls_not_normalized = raw_coverage.raw_calls_not_normalized;
     coverage.raw_calls_not_normalized_inside_function =
         raw_coverage.raw_calls_not_normalized_inside_function;
+    coverage.source_export_eligible_methods_overlapping_raw_call_loss =
+        raw_coverage.source_export_eligible_methods_overlapping_raw_call_loss;
     coverage.raw_calls_not_normalized_outside_function =
         raw_coverage.raw_calls_not_normalized_outside_function;
     coverage.raw_calls_not_normalized_by_kind = raw_coverage.raw_calls_not_normalized_by_kind;
@@ -7928,19 +7961,40 @@ pub(crate) mod tests {
     #[test]
     fn raw_call_loss_revokes_only_the_innermost_source_export_body() {
         let mut document = test_document();
+        let mut outer = document.function_defs[0].clone();
+        outer.name = "outer".to_string();
+        outer.span = [1, 0, 3, 0];
+        document.function_defs.push(outer);
         document.raw_call_sites = vec![crate::ast::RawCallSite {
             span: [1, 2, 1, 8],
             kind: "call_expression".to_string(),
         }];
 
         let output = extract(&document, Profile::Espalier);
-        assert_eq!(output.methods.len(), 1);
-        assert!(!output.methods[0].source_export_eligible);
+        assert_eq!(output.methods.len(), 2);
+        assert!(!output
+            .methods
+            .iter()
+            .find(|method| method.name == "hello")
+            .unwrap()
+            .source_export_eligible);
+        assert!(output
+            .methods
+            .iter()
+            .find(|method| method.name == "outer")
+            .unwrap()
+            .source_export_eligible);
         assert_eq!(
             output
                 .call_resolution_coverage
                 .raw_calls_not_normalized_inside_function,
             1
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .source_export_eligible_methods_overlapping_raw_call_loss,
+            0
         );
     }
 

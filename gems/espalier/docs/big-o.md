@@ -302,9 +302,10 @@ not shared Ruby or Rust code. Language-specific behavior is confined to the
 language's syntax/normalization module and the manifest's source/index recipe.
 Everything after SCIP production is language-neutral.
 
-The shared soundness gate requires an executable source body, complete parser
-call evidence for every export-eligible method, no overlapping parser recovery,
-an exact compatible SCIP producer, and source-proven time and space bounds.
+The shared soundness gate requires an executable source body, zero
+export-eligible methods overlapping parser call loss, no overlapping parser
+recovery, an exact compatible SCIP producer, and source-proven time and space
+bounds.
 Open implementation candidate sets are not exported. Parametric callback bounds
 are exported only when the callback is an actual declared parameter. Generated
 complete data replaces incomplete fallback data; a generated/manual complete
@@ -328,10 +329,11 @@ Summary joins require the exact compiler symbol already attached by SCIP. They
 never guess from an owner or method name. Unknown schema versions, malformed
 metadata, empty bounds, and contradictory files fail closed. The v1 reader
 remains available for previously generated artifacts, but new exports are v2.
-FactMine bundles the safely regenerated Go 1.22.2 core-surface summary (322
-exact symbols from 655 source-proven methods) and Rust 1.96.0
-`core`/`alloc`/`std` summary (1,543 exact symbols from 3,002 source-proven
-methods).
+FactMine discovers every generated bundle in
+`config/complexity_summaries/*.json.gz` at build time; adding a language does
+not require shared Rust registration code. The current set is Go 1.22.2 (322
+exact symbols), Rust 1.96.0 (1,543), JDK 21.0.12 `java.lang`/`java.util`
+(2,598), and CPython 3.11.9 selected pure-Python core (200).
 The exporter rejects apparently complete functions whose proof depends on a
 manual receiver registry, modeled-world/external-latency contract, unknown
 cardinality relation, or unresolved call-evidence gap. Bundled data is applied
