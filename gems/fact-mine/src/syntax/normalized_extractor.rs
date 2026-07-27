@@ -325,7 +325,7 @@ impl<'a> Extractor<'a> {
                 "top".to_string()
             } else {
                 self.behavior
-                    .function_dispatch_kind_from_node(&name, node, &owner)
+                    .function_dispatch_kind_from_source(&name, node, &owner, &self.lines)
             },
             line: node.first_lineno,
             span: span(node),

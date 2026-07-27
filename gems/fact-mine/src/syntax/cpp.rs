@@ -224,6 +224,43 @@ fn cpp_identifier_tokens(source: &str) -> impl DoubleEndedIterator<Item = &str> 
         })
 }
 
+fn cpp_function_imports_symbol(source: &str, qualified: &str) -> bool {
+    let declaration = format!("using {qualified};");
+    source.lines().any(|line| {
+        let code = line.split_once("//").map_or(line, |(code, _)| code).trim();
+        code == declaration
+            || code.strip_suffix(&declaration).is_some_and(|prefix| {
+                prefix
+                    .chars()
+                    .all(|character| character.is_ascii_whitespace() || character == '{')
+            })
+    })
+}
+
+fn cpp_function_is_friend(node: &Node, lines: &[String]) -> bool {
+    let normalized_node_has_friend = node
+        .text
+        .trim_start()
+        .strip_prefix("friend")
+        .is_some_and(|rest| {
+            rest.chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_whitespace())
+        });
+    if normalized_node_has_friend || node.first_lineno == 0 {
+        return normalized_node_has_friend;
+    }
+    lines
+        .get(node.first_lineno - 1)
+        .and_then(|line| line.get(..node.first_column.min(line.len())))
+        .is_some_and(|prefix| {
+            prefix
+                .split_whitespace()
+                .next_back()
+                .is_some_and(|modifier| modifier == "friend")
+        })
+}
+
 fn symbol_without_template_arguments(name: &str) -> String {
     let mut output = String::with_capacity(name.len());
     let mut depth = 0usize;
@@ -1289,6 +1326,15 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         }
     }
 
+    fn function_local_lexical_call_symbol(
+        &self,
+        function: &FunctionDef,
+        message: &str,
+    ) -> Option<String> {
+        let qualified = format!("std::{message}");
+        cpp_function_imports_symbol(&function.body.text, &qualified).then_some(qualified)
+    }
+
     fn merged_alias_call_name(
         &self,
         message: &str,
@@ -1309,6 +1355,20 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
             .map(owner_identity_name)
             .filter(|name| !name.is_empty())
             .map(|name| (name, false))
+    }
+
+    fn function_dispatch_kind_from_source(
+        &self,
+        _name: &str,
+        node: &Node,
+        owner: &str,
+        lines: &[String],
+    ) -> String {
+        if cpp_function_is_friend(node, lines) {
+            "top".to_string()
+        } else {
+            self.function_dispatch_kind("", owner)
+        }
     }
 
     fn owner_kind(&self, node: &Node, default_kind: &str) -> String {
@@ -1955,6 +2015,33 @@ mod tests {
             "swap"
         )
         .is_none());
+    }
+
+    #[test]
+    fn friend_functions_and_function_local_using_declarations_keep_free_dispatch() {
+        assert!(cpp_function_is_friend(
+            &node(
+                "FUNCTION",
+                "friend void swap(Item & left, Item & right) { left.swap(right); }"
+            ),
+            &[]
+        ));
+        assert!(!cpp_function_is_friend(
+            &node(
+                "FUNCTION",
+                "void swap(Item & other) { using std::swap; swap(value, other.value); }"
+            ),
+            &[]
+        ));
+
+        assert!(cpp_function_imports_symbol(
+            "void swap(Item & other) {\n  using std::swap;\n  swap(value, other.value);\n}",
+            "std::swap"
+        ));
+        assert!(!cpp_function_imports_symbol(
+            "void swap(Item & other) {\n  // using std::swap;\n  swap(value, other.value);\n}",
+            "std::swap"
+        ));
     }
 
     #[test]

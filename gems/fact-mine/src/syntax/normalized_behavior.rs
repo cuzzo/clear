@@ -1165,6 +1165,17 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Resolve a call through a lexical import declared inside its enclosing
+    /// function. The adapter owns the source-language import grammar; the
+    /// shared profile only consumes the resulting canonical callee identity.
+    fn function_local_lexical_call_symbol(
+        &self,
+        _function: &FunctionDef,
+        _message: &str,
+    ) -> Option<String> {
+        None
+    }
+
     /// Recover the alias named by a call so merged project type aliases can be
     /// priced through the ordinary normalized call-cost interface. The boolean
     /// marks a constructor-shaped alias call.
@@ -1866,6 +1877,19 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// declaration modifier or receiver changes dispatch semantics.
     fn function_dispatch_kind_from_node(&self, name: &str, _node: &Node, owner: &str) -> String {
         self.function_dispatch_kind(name, owner)
+    }
+
+    /// Project dispatch when a native modifier falls outside the normalized
+    /// declaration node. Adapters may consult the original source lines while
+    /// the shared extractor remains unaware of modifier spellings.
+    fn function_dispatch_kind_from_source(
+        &self,
+        name: &str,
+        node: &Node,
+        owner: &str,
+        _lines: &[String],
+    ) -> String {
+        self.function_dispatch_kind_from_node(name, node, owner)
     }
 
     /// Whether a function declaration binds an explicit instance receiver (a

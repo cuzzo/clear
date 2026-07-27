@@ -2775,6 +2775,12 @@ fn resolve_project_calls(
 
     // Reconcile calls whose exact lexical coordinate did not match.
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        if matches!(
+            call.lexical_symbol_origin.as_deref(),
+            Some("explicit_import" | "function_local_import")
+        ) {
+            continue;
+        }
         let Some(language) = source_languages.get(call.source.as_str()).copied() else {
             continue;
         };
@@ -2873,6 +2879,12 @@ fn resolve_fallback_lexical_calls(
         .map(|method| (method.id.as_str(), method))
         .collect::<BTreeMap<_, _>>();
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        if matches!(
+            call.lexical_symbol_origin.as_deref(),
+            Some("explicit_import" | "function_local_import")
+        ) {
+            continue;
+        }
         let Some(language) = source_languages.get(call.source.as_str()).copied() else {
             continue;
         };
@@ -6684,6 +6696,9 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             );
             let source_definition =
                 source_function(document, &call.owner, &call.function, call.line);
+            let function_local_lexical_symbol = source_definition.and_then(|definition| {
+                behavior.function_local_lexical_call_symbol(definition, &call.message)
+            });
             let implicit =
                 call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
             // A type receiver is a normalized fact only when the language
@@ -6831,6 +6846,11 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     })
                 })
                 .or_else(|| {
+                    function_local_lexical_symbol
+                        .as_deref()
+                        .and_then(|symbol| behavior.intrinsic_call_complexity(None, symbol))
+                })
+                .or_else(|| {
                     if implicit {
                         // Bare calls may be language intrinsics (`len`) or
                         // implicit-owner dispatch (`self.foo`). Prefer the
@@ -6887,6 +6907,11 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                                         behavior
                                             .parametric_call_cost(&receiver_type, &call.message)
                                     })
+                            })
+                        })
+                        .or_else(|| {
+                            function_local_lexical_symbol.as_deref().and_then(|symbol| {
+                                behavior.intrinsic_parametric_call_cost(None, symbol)
                             })
                         })
                         .or_else(|| {
@@ -7074,9 +7099,14 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             // even inside a method it names a package function.
             let bare_names_package_function = source_dispatch == Some("top")
                 || (implicit && !behavior.supports_implicit_owner_dispatch());
-            let lexical_symbol_origin = imported_lexical_symbol
+            let lexical_symbol_origin = function_local_lexical_symbol
                 .as_ref()
-                .map(|_| "explicit_import".to_string())
+                .map(|_| "function_local_import".to_string())
+                .or_else(|| {
+                    imported_lexical_symbol
+                        .as_ref()
+                        .map(|_| "explicit_import".to_string())
+                })
                 .or_else(|| {
                     (implicit && document.symbol_scope.canonical && bare_names_package_function)
                         .then(|| "project_namespace".to_string())
@@ -7086,6 +7116,9 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 .iter()
                 .filter(|definition| {
                     if definition.name != call.message {
+                        return false;
+                    }
+                    if function_local_lexical_symbol.is_some() {
                         return false;
                     }
                     let dispatch = definition.dispatch_kind.as_str();
@@ -7211,26 +7244,28 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .canonical
                     .then(|| source_namespace.map(str::to_string))
                     .flatten(),
-                lexical_symbol: imported_lexical_symbol.or_else(|| {
-                    (implicit && document.symbol_scope.canonical)
-                        .then(|| {
-                            behavior
-                                .explicit_lexical_call_symbol(
-                                    &call.message,
-                                    source_namespace,
-                                    source_dispatch == Some("top"),
-                                )
-                                .or_else(|| {
-                                if bare_names_package_function {
-                                source_namespace
-                                    .map(|namespace| format!("{namespace}::{}", call.message))
-                                } else {
-                                    None
-                                }
+                lexical_symbol: function_local_lexical_symbol
+                    .or(imported_lexical_symbol)
+                    .or_else(|| {
+                        (implicit && document.symbol_scope.canonical)
+                            .then(|| {
+                                behavior
+                                    .explicit_lexical_call_symbol(
+                                        &call.message,
+                                        source_namespace,
+                                        source_dispatch == Some("top"),
+                                    )
+                                    .or_else(|| {
+                                    if bare_names_package_function {
+                                    source_namespace
+                                        .map(|namespace| format!("{namespace}::{}", call.message))
+                                    } else {
+                                        None
+                                    }
+                                })
                             })
-                        })
-                        .flatten()
-                }),
+                            .flatten()
+                    }),
                 lexical_symbol_origin,
                 receiver_call_span: receiver_call_spans.get(&call.span).copied(),
                 receiver_definition_call_spans: if receiver_is_type {

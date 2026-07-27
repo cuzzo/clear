@@ -2949,6 +2949,56 @@ class Ordered : private std::list<T> {
 }
 
 #[test]
+fn cpp_function_local_swap_imports_do_not_recurse_into_the_enclosing_method() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Base {
+    int value;
+    void swap(Base & other) {
+        using std::swap;
+        swap(value, other.value);
+    }
+};
+struct Item : Base {
+    friend void swap(Item & first, Item & second) {
+        first.swap(second);
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let member = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "Base" && method.name == "swap")
+        .context("missing Base swap")?;
+    let friend = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "Item" && method.name == "swap")
+        .context("missing Item friend swap")?;
+    assert_eq!(member.kind, "instance");
+    assert_eq!(friend.kind, "top");
+
+    let imported = output
+        .calls
+        .iter()
+        .find(|call| call.source == member.id && call.message == "swap")
+        .context("missing imported std/ADL swap")?;
+    assert_eq!(imported.lexical_symbol.as_deref(), Some("std::swap"));
+    assert_eq!(
+        imported.lexical_symbol_origin.as_deref(),
+        Some("function_local_import")
+    );
+    assert_eq!(imported.known_time_complexity.as_deref(), Some("O(R)"));
+    assert!(imported.target.is_none());
+    Ok(())
+}
+
+#[test]
 fn cpp_operators_are_constant_only_for_proven_scalar_operands() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(
