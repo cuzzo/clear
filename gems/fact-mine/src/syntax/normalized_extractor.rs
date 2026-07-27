@@ -792,10 +792,15 @@ impl<'a> Extractor<'a> {
             self.scan_children(node);
             return;
         };
-        let receiver_call_span = parts.receiver_node.and_then(direct_receiver_call_span);
         if let Some(receiver) = parts.receiver_node {
             self.scan(receiver);
         }
+        // The normalized IR also represents non-call member projections as
+        // CALL nodes. Only link an outer receiver to a nested node that was
+        // actually emitted as an executable call while scanning the receiver.
+        let receiver_call_span = parts
+            .receiver_node
+            .and_then(|receiver| self.direct_emitted_receiver_call_span(receiver));
         if let Some(args) = parts.args_node {
             self.scan(args);
         }
@@ -942,7 +947,8 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_call_receiver_projection(&mut self, node: &Node, outer_span: Span) {
-        let Some(receiver_call_span) = child_node(node, 0).and_then(direct_receiver_call_span)
+        let Some(receiver_call_span) = child_node(node, 0)
+            .and_then(|receiver| self.direct_emitted_receiver_call_span(receiver))
         else {
             return;
         };
@@ -952,6 +958,26 @@ impl<'a> Extractor<'a> {
                 outer_span,
                 receiver_call_span,
             });
+    }
+
+    fn direct_emitted_receiver_call_span(&self, node: &Node) -> Option<Span> {
+        let normalized_span = span(node);
+        if matches!(node.r#type.as_str(), "CALL" | "FCALL" | "QCALL" | "VCALL") {
+            if let Some(projection) = self
+                .facts
+                .call_node_projections
+                .iter()
+                .rev()
+                .find(|projection| projection.normalized_node_span == normalized_span)
+            {
+                return Some(projection.emitted_call_span);
+            }
+        }
+        let children = child_nodes(node);
+        if children.len() != 1 {
+            return None;
+        }
+        self.direct_emitted_receiver_call_span(children[0])
     }
 
     fn record_state_write(&mut self, node: &Node) {
@@ -2441,17 +2467,6 @@ fn state_receiver_field(receiver: &str) -> Option<String> {
         return simple_identifier(field).then(|| field.to_string());
     }
     None
-}
-
-fn direct_receiver_call_span(node: &Node) -> Option<Span> {
-    if matches!(node.r#type.as_str(), "CALL" | "FCALL" | "QCALL" | "VCALL") {
-        return Some(span(node));
-    }
-    let children = child_nodes(node);
-    if children.len() != 1 {
-        return None;
-    }
-    direct_receiver_call_span(children[0])
 }
 
 fn target_name_span(name: &str, node: &Node) -> Span {

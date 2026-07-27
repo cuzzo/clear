@@ -6279,7 +6279,19 @@ fn field_access_receiver_type(
                 document, definition, function, owner, base, call_span, language,
             )
         })?;
-    let base_owner = declared_dispatch_owner_name_from_type(&base_type, language)?;
+    let normalized_base_type = normalized_declared_alias(document, &base_type);
+    let behavior = crate::syntax::normalized_behavior::behavior(document.language);
+    let member_owner_type = definition
+        .and_then(|definition| {
+            behavior.pointer_member_receiver_type(
+                &definition.body.text,
+                base,
+                field,
+                &normalized_base_type,
+            )
+        })
+        .unwrap_or(normalized_base_type);
+    let base_owner = declared_dispatch_owner_name_from_type(&member_owner_type, language)?;
     let field_types =
         inherited_field_types(document, &base_owner, field, language, &mut BTreeSet::new());
     let field_type = (field_types.len() == 1)
@@ -6509,11 +6521,18 @@ fn owner_type_name(value: &str) -> &str {
         .trim_end_matches(|character: char| {
             character.is_whitespace() || matches!(character, '&' | '*')
         });
-    let value = value.split(['[', '<']).next().unwrap_or(value).trim();
-    value
-        .rsplit([':', '.'])
-        .find(|part| !part.is_empty())
-        .unwrap_or(value)
+    let mut generic_depth = 0usize;
+    let mut leaf_start = 0usize;
+    for (index, character) in value.char_indices() {
+        match character {
+            '<' => generic_depth += 1,
+            '>' => generic_depth = generic_depth.saturating_sub(1),
+            ':' | '.' if generic_depth == 0 => leaf_start = index + character.len_utf8(),
+            _ => {}
+        }
+    }
+    let leaf = value[leaf_start..].trim();
+    leaf.split(['[', '<']).next().unwrap_or(leaf).trim()
 }
 
 fn owner_name_matches(left: &str, right: &str) -> bool {
@@ -7664,6 +7683,14 @@ pub(crate) mod tests {
         assert!(owner_name_matches(
             "ScopedRemover &&",
             "ScopedRemover < DispatcherType, Enable >"
+        ));
+        assert!(owner_name_matches(
+            "Node",
+            "CallbackListBase< ReturnType (Args...), PoliciesType >::Node"
+        ));
+        assert!(!owner_name_matches(
+            "CallbackListBase",
+            "CallbackListBase< ReturnType (Args...), PoliciesType >::Node"
         ));
     }
 

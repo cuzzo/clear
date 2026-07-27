@@ -456,6 +456,24 @@ fn stdlib_operations(language: &str) -> Option<&'static StdlibOperationMap> {
     }
 }
 
+fn configured_nominal_names(name: &str) -> Vec<String> {
+    let unqualified = |value: &str| {
+        value
+            .rsplit([':', '.'])
+            .find(|part| !part.is_empty())
+            .unwrap_or(value)
+            .to_string()
+    };
+    let mut names = vec![name.to_string(), unqualified(name)];
+    if let Some(base) = name.split('<').next().map(str::trim) {
+        if base != name {
+            names.push(base.to_string());
+            names.push(unqualified(base));
+        }
+    }
+    names
+}
+
 /// Whether a declared receiver spelling is owned by the reviewed standard-
 /// library registry for this language. This deliberately proves identity only;
 /// the absence of a method model remains distinct from an unknown receiver.
@@ -465,13 +483,7 @@ pub(crate) fn configured_stdlib_type(language: &str, receiver_type: &TypeExpr) -
         TypeExpr::Array(_) => vec!["Array".to_string()],
         TypeExpr::Hash { .. } => vec!["Hash".to_string()],
         TypeExpr::Set(_) => vec!["Set".to_string()],
-        TypeExpr::Primitive(name) => {
-            let unqualified = name
-                .rsplit([':', '.'])
-                .find(|part| !part.is_empty())
-                .unwrap_or(name);
-            vec![name.clone(), unqualified.to_string()]
-        }
+        TypeExpr::Primitive(name) => configured_nominal_names(name),
         _ => return false,
     };
     stdlib_operations(language)
@@ -756,13 +768,7 @@ pub(crate) fn configured_parametric_call_cost(
         TypeExpr::Array(_) => vec!["Array".to_string()],
         TypeExpr::Hash { .. } => vec!["Hash".to_string()],
         TypeExpr::Set(_) => vec!["Set".to_string()],
-        TypeExpr::Primitive(name) => {
-            let unqualified = name
-                .rsplit([':', '.'])
-                .find(|part| !part.is_empty())
-                .unwrap_or(name);
-            vec![name.clone(), unqualified.to_string()]
-        }
+        TypeExpr::Primitive(name) => configured_nominal_names(name),
         _ => return None,
     };
     let operations = stdlib_operations(language)?;
