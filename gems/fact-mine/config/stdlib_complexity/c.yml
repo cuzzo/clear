@@ -18,32 +18,40 @@ Intrinsic:
   strncmp: linear_scan
   qsort: sort
   bsearch: logarithmic
-  malloc: declaration
-  calloc: declaration
-  realloc: declaration
-  free: declaration
-  printf: declaration
-  fprintf: declaration
-  sprintf: declaration
-  snprintf: declaration
-  puts: declaration
-  putchar: declaration
+  # Allocation is bounded by the requested byte count. Treat deallocation as
+  # a linear allocator upper bound rather than assuming a particular libc's
+  # constant-time free-list implementation.
+  malloc: linear_materialize
+  calloc: linear_materialize
+  realloc: linear_materialize
+  free: linear_scan
+  # Formatting/parsing and byte-stream transfer are bounded by the consumed or
+  # produced sequence. External latency is outside the in-process Big-O model.
+  printf: linear_scan
+  fprintf: linear_scan
+  sprintf: linear_scan
+  snprintf: linear_scan
+  puts: linear_scan
+  putchar: constant
   fopen: declaration
   fclose: declaration
-  fread: declaration
-  fwrite: declaration
-  abort: declaration
-  exit: declaration
+  fread: linear_scan
+  fwrite: linear_scan
+  abort: constant
+  exit: constant
   assert: declaration
   va_start: declaration
   va_arg: declaration
   va_copy: declaration
   va_end: declaration
-  tolower: declaration
-  toupper: declaration
+  tolower: constant
+  toupper: constant
   fabs: declaration
-  strtol: declaration
-  strtoul: declaration
+  strtol: linear_scan
+  strtoul: linear_scan
+  strtod: linear_scan
+  strtof: linear_scan
+  strtold: linear_scan
   ungetc: declaration
   ftell: declaration
   fseek: declaration
@@ -53,12 +61,14 @@ Intrinsic:
   vsnprintf: declaration
   strerror: declaration
   perror: declaration
-  sscanf: declaration
-  fscanf: declaration
-  isspace: declaration
-  isdigit: declaration
-  isalpha: declaration
-  isalnum: declaration
+  sscanf: linear_scan
+  fscanf: linear_scan
+  scanf: linear_scan
+  localeconv: constant
+  isspace: constant
+  isdigit: constant
+  isalpha: constant
+  isalnum: constant
   kevent: declaration
   kqueue: declaration
   # C99 <math.h>: constant-time on a fixed-width float/double (the value is one

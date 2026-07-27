@@ -11,9 +11,9 @@ impl AstNormalizationAdapter for CAstAdapter {
     }
 
     fn source_preprocessing(&self, source: &str) -> Option<String> {
-        Some(strip_native_nullability_annotations(
-            &strip_linkage_macros_before_type_name(source),
-        ))
+        let source = strip_linkage_macros_before_type_name(source);
+        let source = strip_calling_convention_macros_before_function_name(&source);
+        Some(strip_native_nullability_annotations(&source))
     }
 
     fn case_arm_body_nodes<'tree>(
@@ -61,6 +61,25 @@ impl AstNormalizationAdapter for CAstAdapter {
             .find(|child| child.kind() == "identifier")
             .map(|child| node_text(child, source).to_string())
     }
+}
+
+/// Calling-convention/export macros between a return type and the real
+/// function name can be consumed as the declarator by tree-sitter-c. Blank
+/// only convention-shaped tokens with reviewed suffixes, preserving offsets.
+fn strip_calling_convention_macros_before_function_name(source: &str) -> String {
+    let masked = mask_comments_and_strings(source);
+    let pattern = Regex::new(
+        r"\b([A-Z][A-Z0-9_]*(?:CDECL|CALLBACK|CALL|API|EXPORT|PUBLIC))[ \t]+[A-Za-z_]\w*[ \t]*\(",
+    )
+    .expect("static regex is valid");
+    let mut result = source.as_bytes().to_vec();
+    for caps in pattern.captures_iter(&masked) {
+        let convention = caps.get(1).expect("group 1 is present");
+        for byte in &mut result[convention.range()] {
+            *byte = b' ';
+        }
+    }
+    String::from_utf8(result).unwrap_or_else(|_| source.to_string())
 }
 
 /// A C/C++ linkage/visibility macro (`class MYLIB_API Foo`, `struct
@@ -239,6 +258,24 @@ mod tests {
         // Everything after the macro token keeps its original byte offset.
         let real_name_pos = source.find("Logger").unwrap();
         assert_eq!(stripped.find("Logger"), Some(real_name_pos));
+    }
+
+    #[test]
+    fn strips_calling_convention_macro_before_function_name() {
+        let source =
+            "static void * CJSON_CDECL internal_malloc(size_t size) { return malloc(size); }\n";
+        let stripped = strip_calling_convention_macros_before_function_name(source);
+        assert_eq!(stripped.len(), source.len());
+        assert!(!stripped.contains("CJSON_CDECL"));
+        assert_eq!(
+            stripped.find("internal_malloc"),
+            source.find("internal_malloc")
+        );
+        let legitimate = "static MYTYPE factory(void) { return value; }\n";
+        assert_eq!(
+            strip_calling_convention_macros_before_function_name(legitimate),
+            legitimate
+        );
     }
 
     #[test]

@@ -242,12 +242,17 @@ Current indexed smoke corpora are pinned by source commit and indexer version:
 | Language | Corpus commit | Indexer | Production complete, source → SCIP | Exact project targets, source → SCIP |
 | --- | --- | --- | ---: | ---: |
 | Java | Apache Commons CLI `afb0fd148517b1bf8316ebbc44ec9ec8b201452a` | scip-java 0.12.3 | 271/524 (51.72%) → 330/524 (62.98%) | 557 → 784 |
-| C | cJSON `fb16e5cf358798aabb049655975cde8427101056` | scip-clang 0.4.0 | 29/116 (25.00%) → 29/116 (25.00%) | 188 → 188 |
+| C | cJSON `fb16e5cf358798aabb049655975cde8427101056` | scip-clang 0.4.0 | 41/116 (35.34%) → 102/116 (87.93%) | 185 → 188 |
 
-The cJSON index still contributes 323 compiler-proven call symbols. Its flat
-function coverage is therefore a useful regression: identity ingestion works,
-while the remaining C header, macro, builtin, and external-cost layer is
-measured separately instead of being credited as complete.
+The C path resolves macro definitions from compiler-indexed source/header
+locations, prices bounded expansion bodies, treats compiler-proven
+function-pointer fields parametrically, and applies reviewed C runtime costs
+under an explicit modeled-world assumption for Clang's unpackaged external
+symbols. Calling-convention and return-type macros are normalized without
+changing source offsets, so parameter-rooted structural recursion remains
+provable. On cJSON all 326 executable calls are now semantically accounted for;
+the remaining 14 incomplete functions are recursive proof obligations rather
+than missing call identity or cost.
 
 ### Reusing analyzed dependency and standard-library bodies
 
