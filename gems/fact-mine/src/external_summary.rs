@@ -156,12 +156,41 @@ pub fn apply_json(output: &mut ProfileOutput, source: &str) -> Result<usize> {
 }
 
 fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<usize> {
+    // A complete result is authoritative regardless of where it came from. Audit
+    // every overlap before mutating the profile so a generated/manual
+    // disagreement fails atomically instead of being hidden by application
+    // order. Incomplete results are deliberately replaceable by a complete
+    // generated result.
+    for call in &output.calls {
+        if call.target.is_some() {
+            continue;
+        }
+        let Some(symbol) = call.semantic_symbol.as_deref() else {
+            continue;
+        };
+        let Some(cost) = summary.symbols.get(symbol) else {
+            continue;
+        };
+        let (Some(existing_time), Some(existing_space)) = (
+            call.known_time_complexity.as_deref(),
+            call.known_space_complexity.as_deref(),
+        ) else {
+            continue;
+        };
+        if existing_time != cost.time || existing_space != cost.space {
+            bail!(
+                "complete complexity conflict for {symbol}: existing {} has {existing_time}/{existing_space}, generated {} has {}/{}; fix the source analysis or fallback model instead of overriding either complete result",
+                call.complexity_provenance.as_deref().unwrap_or("unknown provenance"),
+                cost.provenance,
+                cost.time,
+                cost.space
+            );
+        }
+    }
+
     let mut applied = 0;
     for call in &mut output.calls {
-        if call.target.is_some()
-            || call.known_time_complexity.is_some()
-            || call.known_space_complexity.is_some()
-        {
+        if call.target.is_some() {
             continue;
         }
         let Some(symbol) = call.semantic_symbol.as_deref() else {
@@ -474,6 +503,112 @@ mod tests {
         assert_eq!(
             output.calls[0].known_time_complexity.as_deref(),
             Some("O(N)")
+        );
+    }
+
+    #[test]
+    fn complete_generated_result_replaces_incomplete_existing_result() {
+        let symbol = "scip-go gomod stdlib v1 strings#IndexByte().";
+        let mut partial = call(Some(symbol));
+        partial.known_time_complexity = Some("O(1)".into());
+        partial.complexity_provenance = Some("incomplete_fallback".into());
+        let mut output = ProfileOutput {
+            calls: vec![partial],
+            ..ProfileOutput::default()
+        };
+        let json = serde_json::json!({
+            "schema": SCHEMA_V1,
+            "symbols": {
+                symbol: {
+                    "time": "O(N)",
+                    "space": "O(1)",
+                    "provenance": "analyzed_source_summary"
+                }
+            }
+        });
+
+        assert_eq!(apply_json(&mut output, &json.to_string()).unwrap(), 1);
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(N)")
+        );
+        assert_eq!(
+            output.calls[0].known_space_complexity.as_deref(),
+            Some("O(1)")
+        );
+        assert_eq!(
+            output.calls[0].complexity_provenance.as_deref(),
+            Some("analyzed_source_summary")
+        );
+    }
+
+    #[test]
+    fn equal_complete_generated_result_becomes_canonical() {
+        let symbol = "scip-go gomod stdlib v1 strings#IndexByte().";
+        let mut fallback = call(Some(symbol));
+        fallback.known_time_complexity = Some("O(N)".into());
+        fallback.known_space_complexity = Some("O(1)".into());
+        fallback.complexity_provenance = Some("manual_fallback".into());
+        let mut output = ProfileOutput {
+            calls: vec![fallback],
+            ..ProfileOutput::default()
+        };
+        let json = serde_json::json!({
+            "schema": SCHEMA_V1,
+            "symbols": {
+                symbol: {
+                    "time": "O(N)",
+                    "space": "O(1)",
+                    "provenance": "analyzed_source_summary"
+                }
+            }
+        });
+
+        assert_eq!(apply_json(&mut output, &json.to_string()).unwrap(), 1);
+        assert_eq!(
+            output.calls[0].complexity_provenance.as_deref(),
+            Some("analyzed_source_summary")
+        );
+    }
+
+    #[test]
+    fn rejects_complete_generated_manual_conflict_without_mutating_output() {
+        let symbol = "scip-go gomod stdlib v1 strings#IndexByte().";
+        let mut fallback = call(Some(symbol));
+        fallback.known_time_complexity = Some("O(1)".into());
+        fallback.known_space_complexity = Some("O(1)".into());
+        fallback.complexity_provenance = Some("manual_fallback".into());
+        let untouched = call(Some("scip-go gomod stdlib v1 bytes#Clone()."));
+        let mut output = ProfileOutput {
+            calls: vec![untouched, fallback],
+            ..ProfileOutput::default()
+        };
+        let json = serde_json::json!({
+            "schema": SCHEMA_V1,
+            "symbols": {
+                "scip-go gomod stdlib v1 bytes#Clone().": {
+                    "time": "O(N)",
+                    "space": "O(N)"
+                },
+                symbol: {
+                    "time": "O(N)",
+                    "space": "O(1)",
+                    "provenance": "analyzed_source_summary"
+                }
+            }
+        });
+
+        let error = apply_json(&mut output, &json.to_string()).unwrap_err();
+        assert!(error.to_string().contains("complete complexity conflict"));
+        assert!(error.to_string().contains(symbol));
+        assert_eq!(output.calls[0].known_time_complexity, None);
+        assert_eq!(
+            output.calls[1].known_time_complexity.as_deref(),
+            Some("O(1)")
+        );
+        assert_eq!(
+            output.calls[1].complexity_provenance.as_deref(),
+            Some("manual_fallback")
         );
     }
 
