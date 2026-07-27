@@ -8,11 +8,11 @@
 use crate::profile::{summarize_call_resolution, CallRecord, MethodRecord, ProfileOutput};
 use crate::syntax;
 use anyhow::{Context, Result};
+use protobuf::Message;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ImportStats {
@@ -192,35 +192,38 @@ struct Definition {
 }
 
 pub fn apply_json_file(output: &mut ProfileOutput, index_path: &Path) -> Result<ImportStats> {
-    let json = if index_path
+    if index_path
         .extension()
         .and_then(|extension| extension.to_str())
         == Some("scip")
     {
-        let binary = std::env::var("SCIP_BINARY").unwrap_or_else(|_| "scip".to_string());
-        let result = Command::new(&binary)
-            .args(["print", "--json"])
-            .arg(index_path)
-            .output()
-            .with_context(|| format!("failed to execute {binary} print --json"))?;
-        if !result.status.success() {
-            anyhow::bail!(
-                "{binary} print --json failed for {}: {}",
-                index_path.display(),
-                String::from_utf8_lossy(&result.stderr)
-            );
-        }
-        String::from_utf8(result.stdout).context("SCIP JSON output was not UTF-8")?
+        let bytes = fs::read(index_path).with_context(|| {
+            format!("failed to read binary SCIP index {}", index_path.display())
+        })?;
+        let protobuf = scip::types::Index::parse_from_bytes(&bytes).with_context(|| {
+            format!(
+                "failed to decode binary SCIP index {}",
+                index_path.display()
+            )
+        })?;
+        let index = index_from_protobuf(protobuf)
+            .with_context(|| format!("invalid binary SCIP index {}", index_path.display()))?;
+        apply_index(output, index)
+            .with_context(|| format!("failed to import SCIP index {}", index_path.display()))
     } else {
-        fs::read_to_string(index_path)
-            .with_context(|| format!("failed to read SCIP JSON index {}", index_path.display()))?
-    };
-    apply_json(output, &json)
-        .with_context(|| format!("failed to import SCIP JSON index {}", index_path.display()))
+        let json = fs::read_to_string(index_path)
+            .with_context(|| format!("failed to read SCIP JSON index {}", index_path.display()))?;
+        apply_json(output, &json)
+            .with_context(|| format!("failed to import SCIP JSON index {}", index_path.display()))
+    }
 }
 
 pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats> {
     let index: Index = serde_json::from_str(json)?;
+    apply_index(output, index)
+}
+
+fn apply_index(output: &mut ProfileOutput, index: Index) -> Result<ImportStats> {
     if index
         .metadata
         .as_ref()
@@ -492,6 +495,107 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
     Ok(stats)
 }
 
+fn index_from_protobuf(index: scip::types::Index) -> Result<Index> {
+    let metadata = index.metadata.as_ref().map(|metadata| Metadata {
+        text_document_encoding: TextDocumentEncoding::Number(
+            u32::try_from(metadata.text_document_encoding.value()).unwrap_or(u32::MAX),
+        ),
+    });
+    let documents = index
+        .documents
+        .into_iter()
+        .map(|document| {
+            let occurrences = document
+                .occurrences
+                .into_iter()
+                .map(occurrence_from_protobuf)
+                .collect::<Result<Vec<_>>>()?;
+            let symbols = document
+                .symbols
+                .into_iter()
+                .map(|information| SymbolInformation {
+                    symbol: information.symbol,
+                    relationships: information
+                        .relationships
+                        .into_iter()
+                        .map(|relationship| Relationship {
+                            symbol: relationship.symbol,
+                            is_implementation: relationship.is_implementation,
+                        })
+                        .collect(),
+                    signature_documentation: information.signature_documentation.into_option().map(
+                        |signature| SignatureDocumentation {
+                            text: signature.text,
+                        },
+                    ),
+                })
+                .collect();
+            Ok(Document {
+                relative_path: document.relative_path,
+                occurrences,
+                symbols,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Index {
+        metadata,
+        documents,
+    })
+}
+
+fn occurrence_from_protobuf(occurrence: scip::types::Occurrence) -> Result<Occurrence> {
+    let range = occurrence
+        .range
+        .into_iter()
+        .map(|value| {
+            usize::try_from(value)
+                .with_context(|| format!("SCIP occurrence range contains negative value {value}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let typed_range = occurrence
+        .typed_range
+        .map(|range| -> Result<TypedRange> {
+            match range {
+                scip::types::occurrence::Typed_range::SingleLineRange(value) => {
+                    Ok(TypedRange::Single {
+                        value: SingleLineRange {
+                            line: nonnegative_position(value.line)?,
+                            start_character: nonnegative_position(value.start_character)?,
+                            end_character: nonnegative_position(value.end_character)?,
+                        },
+                    })
+                }
+                scip::types::occurrence::Typed_range::MultiLineRange(value) => {
+                    Ok(TypedRange::Multi {
+                        value: MultiLineRange {
+                            start_line: nonnegative_position(value.start_line)?,
+                            start_character: nonnegative_position(value.start_character)?,
+                            end_line: nonnegative_position(value.end_line)?,
+                            end_character: nonnegative_position(value.end_character)?,
+                        },
+                    })
+                }
+                _ => anyhow::bail!("SCIP occurrence uses an unsupported typed range"),
+            }
+        })
+        .transpose()?;
+    Ok(Occurrence {
+        range,
+        typed_range,
+        symbol: occurrence.symbol,
+        symbol_roles: u32::try_from(occurrence.symbol_roles).with_context(|| {
+            format!(
+                "SCIP occurrence symbol_roles contains negative value {}",
+                occurrence.symbol_roles
+            )
+        })?,
+    })
+}
+
+fn nonnegative_position(value: i32) -> Result<usize> {
+    usize::try_from(value).with_context(|| format!("SCIP range contains negative value {value}"))
+}
+
 fn compiler_proven_project_interface_call(
     owners: &[crate::profile::OwnerRecord],
     language: &str,
@@ -608,7 +712,11 @@ fn apply_signature_types(output: &mut ProfileOutput, index: &Index) -> usize {
 /// already carries a type is never overwritten.
 fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usize {
     let mut local_types: BTreeMap<&str, &str> = BTreeMap::new();
-    for information in index.documents.iter().flat_map(|document| &document.symbols) {
+    for information in index
+        .documents
+        .iter()
+        .flat_map(|document| &document.symbols)
+    {
         if !information.symbol.starts_with("local ") {
             continue;
         }
@@ -1238,6 +1346,7 @@ fn method_span_size(method: &&MethodRecord) -> (usize, usize) {
 mod tests {
     use super::*;
     use crate::profile::{CallRecord, MethodRecord, OwnerRecord};
+    use protobuf::Message;
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -1400,6 +1509,55 @@ mod tests {
         // A profile with no methods has nothing to cover and must not be
         // reported as an indexing failure.
         assert!(apply_json(&mut ProfileOutput::default(), &empty.to_string()).is_ok());
+    }
+
+    #[test]
+    fn imports_binary_scip_without_an_external_printer() {
+        let dir = tempdir().unwrap();
+        let source_path = dir.path().join("Demo.java");
+        let index_path = dir.path().join("index.scip");
+        let declaration = "void callee() {}";
+        let caller = "void caller() { callee(); }";
+        fs::write(&source_path, format!("{declaration}\n{caller}\n")).unwrap();
+        let symbol = "scip-java maven demo current Demo#callee().";
+        let mut document = scip::types::Document::new();
+        document.relative_path = "Demo.java".into();
+        for (line, column, roles) in [
+            (0, declaration.find("callee").unwrap(), 1),
+            (1, caller.find("callee").unwrap(), 8),
+        ] {
+            let mut occurrence = scip::types::Occurrence::new();
+            occurrence.range = vec![
+                line,
+                i32::try_from(column).unwrap(),
+                i32::try_from(column + "callee".len()).unwrap(),
+            ];
+            occurrence.symbol = symbol.into();
+            occurrence.symbol_roles = roles;
+            document.occurrences.push(occurrence);
+        }
+        let mut index = scip::types::Index::new();
+        index.documents.push(document);
+        fs::write(&index_path, index.write_to_bytes().unwrap()).unwrap();
+
+        let path = source_path.to_string_lossy().to_string();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![
+            method("callee", &path, "callee", [1, 0, 1, declaration.len()]),
+            method("caller", &path, "caller", [2, 0, 2, caller.len()]),
+        ];
+        output.calls = vec![call(
+            "caller",
+            &path,
+            "callee",
+            [2, caller.find("callee").unwrap(), 2, caller.len()],
+        )];
+
+        let stats = apply_json_file(&mut output, &index_path).unwrap();
+
+        assert_eq!(1, stats.exact_project_targets);
+        assert_eq!(output.calls[0].target.as_deref(), Some("callee"));
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
     }
 
     #[test]
