@@ -1696,7 +1696,11 @@ struct Queue {
     using Items = std::list<int>;
     Items items;
     bool empty() const { return items.empty(); }
-    void transfer(Items& other) { items.splice(items.end(), other); }
+    void transfer(Items& other) {
+        Items local;
+        local.splice(local.end(), other);
+        items.splice(items.end(), other);
+    }
 };
 "#,
     )?;
@@ -1717,6 +1721,15 @@ struct Queue {
         .context("missing aliased list splice call")?;
     assert_eq!(splice.receiver_type.as_deref(), Some("Items"));
     assert_eq!(splice.known_time_complexity.as_deref(), Some("O(N)"));
+    let local = output
+        .calls
+        .iter()
+        .find(|call| {
+            call.function == "transfer" && call.receiver == "local" && call.message == "splice"
+        })
+        .context("missing locally declared aliased list call")?;
+    assert_eq!(local.receiver_type.as_deref(), Some("Items"));
+    assert_eq!(local.known_time_complexity.as_deref(), Some("O(N)"));
     Ok(())
 }
 
@@ -1728,10 +1741,15 @@ fn cpp_template_receiver_calls_keep_symbolic_dispatch_costs() -> Result<()> {
         r#"template <typename Policy>
 struct Runner {
     using Queue = typename Policy::Queue;
+    using Hook = void (*)(int);
     Queue queue;
-    void run(Policy& policy) {
+    Hook hook;
+    template <typename Callback>
+    void run(Policy& policy, Callback callback) {
         policy.execute();
         queue.flush();
+        callback();
+        hook(1);
     }
 };
 struct Concrete {
@@ -1744,7 +1762,7 @@ void invoke(Concrete& concrete) {
     )?;
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
     let output = profile::extract(&document, Profile::Espalier);
-    for message in ["execute", "flush"] {
+    for message in ["execute", "flush", "callback"] {
         let call = output
             .calls
             .iter()
@@ -1761,6 +1779,12 @@ void invoke(Concrete& concrete) {
             Some("parametric_declared_receiver_contract")
         );
     }
+    let hook = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "hook")
+        .context("missing function-pointer field call")?;
+    assert_eq!(hook.known_time_complexity.as_deref(), Some("O(C)"));
     let concrete = output
         .calls
         .iter()
