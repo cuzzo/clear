@@ -277,10 +277,55 @@ SemanticSymbol:
   'System/UInt32#TryFormat(+1).': linear_materialize
   'System/UInt64#ToString(+3).': linear_materialize
   'System/UInt64#TryFormat(+1).': linear_materialize
+  'Linq/Enumerable#Any().': linear_scan
+  'Linq/Enumerable#FirstOrDefault().': constant
+  'Reflection/MemberInfo#IsDefined().': linear_scan
+  'System/Array#SetValue().': constant
+  'System/Char#IsLetter().': constant
+  'System/Char#IsLetterOrDigit().': constant
+  'System/Convert#ChangeType().': linear_materialize
+  'System/Convert#ToHexString().': linear_materialize
+  'System/Convert#ToHexString(+1).': linear_materialize
+  'System/Double#IsInfinity().': constant
+  'System/Double#IsNaN().': constant
+  'System/Single#IsInfinity().': constant
+  'System/Single#IsNaN().': constant
+  'System/ReadOnlySpan#Slice().': constant
+  'System/ReadOnlySpan#Slice(+1).': constant
+  'System/String#IndexOfAny(+1).': linear_scan
+  'System/String#ToLowerInvariant().': linear_materialize
+  'System/String#ToUpperInvariant().': linear_materialize
+  'System/String#TrimEnd().': linear_scan
+  'System/TimeProvider#GetElapsedTime().': constant
+  'System/TimeProvider#GetTimestamp().': constant
+  'System/TimeSpan#Add().': constant
+  'System/TimeSpan#FromMinutes(+1).': constant
+  'System/TimeSpan#FromSeconds(+1).': constant
+  'System/TimeSpan#FromTicks().': constant
+  'System/TimeSpan#Parse(+1).': linear_scan
+  'System/Type#Assembly.': constant
+  'System/Type#GetArrayRank().': constant
+  'System/Type#GetConstructors(+1).': linear_materialize
+  'System/Type#GetElementType().': constant
+  'System/Type#GetFields(+1).': linear_materialize
+  'System/Type#GetMethods(+1).': linear_materialize
+  'Tasks/ValueTask#AsTask().': constant
+  'Text/StringBuilder#Clear().': constant
+  'Channels/ChannelReader#TryPeek().': constant
+  'Channels/ChannelReader#WaitToReadAsync().': constant
+  'Channels/ChannelWriter#TryWrite().': constant
+  'CompilerServices/RuntimeHelpers#GetHashCode().': constant
+  'Diagnostics/ActivitySpanId#ToString().': constant
+  'Diagnostics/ActivityTraceId#ToString().': constant
+  'InteropServices/MemoryMarshal#CreateSpan().': constant
+  'RegularExpressions/Regex#IsMatch(+5).': linear_scan
+  'RegularExpressions/Regex#IsMatch(+7).': linear_scan
+  'RegularExpressions/Regex#Match().': linear_materialize
 
 # These contracts include user-supplied predicate/selector work. Treating
 # them as plain O(N) would silently erase a non-constant callback body.
 SemanticSymbolParametricCost:
+  'IO/TextWriter#Flush().': callback_once
   'IO/TextWriter#Write(+8).': callback_once
   'Linq/Enumerable#All().': callback_linear
   'Linq/Enumerable#Count().': callback_linear
@@ -291,8 +336,12 @@ SemanticSymbolParametricCost:
   'Linq/Enumerable#ToDictionary().': callback_linear
   'Linq/Enumerable#Where().': callback_linear
   'Reflection/ConstructorInfo#Invoke().': reflective_once
+  'Reflection/FieldInfo#GetValue().': reflective_once
+  'Reflection/MethodBase#Invoke().': reflective_once
   'Reflection/PropertyInfo#GetValue().': reflective_once
   'System/Action#Invoke().': callback_once
+  'System/EventHandler#Invoke().': callback_once
+  'System/Func#Invoke().': callback_once
   'System/IAsyncDisposable#DisposeAsync().': callback_once
   'System/ICustomFormatter#Format().': callback_once
   'System/IDisposable#Dispose().': callback_once
@@ -302,3 +351,8 @@ SemanticSymbolParametricCost:
   'System/Object#Equals(+1).': callback_once
   'System/Object#GetHashCode().': callback_once
   'System/Object#ToString().': callback_once
+  'System/String#Create().': callback_linear
+  'Tasks/Task#ContinueWith().': callback_once
+  'Tasks/Task#Run(+2).': callback_once
+  'Threading/CancellationTokenSource#Cancel().': callback_linear
+  'Channels/ChannelWriter#Complete().': callback_once
