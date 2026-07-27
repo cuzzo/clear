@@ -111,6 +111,16 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         node: TreeSitterNode<'tree>,
         source: &str,
     ) -> Option<(TreeSitterNode<'tree>, String)> {
+        if node.kind() == "member_access_expression" {
+            let receiver = node.child_by_field_name("expression")?;
+            let name = node.child_by_field_name("name")?;
+            if name.kind() == "generic_name" {
+                let identifier = named_children(name)
+                    .into_iter()
+                    .find(|child| child.kind() == "identifier")?;
+                return Some((receiver, node_text(identifier, source).to_string()));
+            }
+        }
         if node.kind() != "conditional_access_expression" {
             return None;
         }
@@ -125,6 +135,26 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
             .trim_start_matches(['.', '?'])
             .to_string();
         (!method.is_empty()).then_some((receiver, method))
+    }
+
+    fn member_read_excluded(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "member_access_expression"
+            && node
+                .child_by_field_name("name")
+                .is_some_and(|name| name.kind() == "generic_name")
+    }
+
+    fn type_argument_callee<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "generic_name")
+            .then(|| {
+                named_children(node)
+                    .into_iter()
+                    .find(|child| child.kind() == "identifier")
+            })
+            .flatten()
     }
 
     fn function_body_prefix_nodes<'tree>(
