@@ -837,13 +837,43 @@ fn compiler_proven_abstract_project_target(
     let Some(method) = methods.iter().find(|method| method.id == target_id) else {
         return false;
     };
-    if method.kind != "instance" {
-        return false;
-    }
     let Ok(language) = syntax::Language::parse(&method.language) else {
         return false;
     };
     let behavior = syntax::normalized_behavior::behavior(language);
+    // Recovery around conditional default-interface bodies can preserve the
+    // exact compiler symbol while losing the normalized method's instance
+    // shape and owner ID. The SCIP descriptor still proves the declared owner;
+    // match it to one unique normalized abstract owner instead of discarding
+    // that stronger identity.
+    let semantic_abstract_owner = method
+        .semantic_symbol
+        .as_deref()
+        .and_then(|symbol| behavior.external_symbol_owner(symbol))
+        .map(|owner| {
+            owner
+                .rsplit(['.', ':', '/'])
+                .find(|part| !part.is_empty())
+                .unwrap_or(&owner)
+                .to_string()
+        })
+        .is_some_and(|semantic_owner| {
+            owners
+                .iter()
+                .filter(|owner| {
+                    owner.language == method.language
+                        && owner.name.rsplit("::").next() == Some(semantic_owner.as_str())
+                        && behavior.type_kind_is_abstract_dispatch(&owner.kind)
+                })
+                .count()
+                == 1
+        });
+    if semantic_abstract_owner {
+        return true;
+    }
+    if method.kind != "instance" {
+        return false;
+    }
     let abstract_owner = owners.iter().any(|owner| {
         owner.id == method.owner_id
             && owner.language == method.language
@@ -3447,6 +3477,47 @@ mod tests {
             output.calls[0].complexity_provenance.as_deref(),
             Some("scip_local_declared_callable_contract")
         );
+    }
+
+    #[test]
+    fn csharp_recovery_methods_retain_compiler_proven_interface_dispatch() {
+        let owner = OwnerRecord {
+            id: "ilogger".into(),
+            name: "ILogger".into(),
+            kind: "interface".into(),
+            language: "csharp".into(),
+            path: "/project/ILogger.cs".into(),
+            line: 1,
+            span: [1, 0, 20, 1],
+            confidence: "high".into(),
+            symbol: Some("Serilog.ILogger".into()),
+            supertypes: Vec::new(),
+            requirements: Vec::new(),
+        };
+        let mut recovered = method(
+            "verbose",
+            "/project/ILogger.cs",
+            "FEATURE_DEFAULT_INTERFACE",
+            [10, 0, 15, 1],
+        );
+        recovered.language = "csharp".into();
+        recovered.kind = "top".into();
+        recovered.owner_id = "recovery-owner".into();
+        recovered.semantic_symbol =
+            Some("scip-dotnet nuget . . Serilog/ILogger#Verbose(+4).".into());
+        assert_eq!(
+            syntax::external_symbol_owner(
+                "csharp",
+                recovered.semantic_symbol.as_deref().unwrap()
+            ),
+            Some("ILogger".into())
+        );
+
+        assert!(compiler_proven_abstract_project_target(
+            &[owner],
+            &[recovered],
+            "verbose"
+        ));
     }
 
     #[test]

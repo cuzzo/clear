@@ -3910,6 +3910,10 @@ fn extract_methods(
 }
 
 fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerRecord> {
+    let behavior = syntax::Language::parse(language)
+        .ok()
+        .map(crate::syntax::normalized_behavior::behavior);
+    let source = std::fs::read_to_string(path).unwrap_or_default();
     let mut owners = document
         .owner_defs
         .iter()
@@ -3945,7 +3949,11 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
         owners.push(OwnerRecord {
             id: owner_id(language, path, &function.owner, None),
             name: function.owner.clone(),
-            kind: "owner".to_string(),
+            kind: behavior
+                .and_then(|behavior| {
+                    behavior.fallback_owner_kind(&function.owner, &source)
+                })
+                .unwrap_or_else(|| "owner".to_string()),
             language: language.to_string(),
             path: path.to_string(),
             line: function.line,
