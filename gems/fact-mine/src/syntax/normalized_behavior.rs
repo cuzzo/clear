@@ -261,12 +261,7 @@ pub(crate) fn parse_arrow_or_colon_signature(signature: &str) -> NormalizedSigna
     let return_type = tail
         .strip_prefix("->")
         .or_else(|| tail.strip_prefix(':'))
-        .map(|rest| {
-            rest.trim()
-                .trim_end_matches(['{', ';'])
-                .trim()
-                .to_string()
-        })
+        .map(|rest| rest.trim().trim_end_matches(['{', ';']).trim().to_string())
         .filter(|value| !value.is_empty());
     let params = split_top_level_commas(&signature[open + 1..close])
         .into_iter()
@@ -282,9 +277,7 @@ pub(crate) fn parse_arrow_or_colon_signature(signature: &str) -> NormalizedSigna
                 // `func f(a int)` style: trailing token is the type.
                 None => part
                     .rsplit_once(char::is_whitespace)
-                    .map(|(name, declared)| {
-                        (name.trim().to_string(), declared.trim().to_string())
-                    }),
+                    .map(|(name, declared)| (name.trim().to_string(), declared.trim().to_string())),
             }
         })
         .collect();
@@ -311,10 +304,12 @@ pub(crate) fn parse_c_family_declarator(signature: &str) -> NormalizedSignature 
     let return_type = head
         .rsplit_once(char::is_whitespace)
         .map(|(before, _name)| before.trim())
-        .and_then(|before| before.rsplit_once(char::is_whitespace).map_or(
-            (!before.is_empty()).then_some(before),
-            |(_modifiers, last)| (!last.is_empty()).then_some(last),
-        ))
+        .and_then(|before| {
+            before.rsplit_once(char::is_whitespace).map_or(
+                (!before.is_empty()).then_some(before),
+                |(_modifiers, last)| (!last.is_empty()).then_some(last),
+            )
+        })
         .map(str::to_string)
         .filter(|value| !value.is_empty() && value != "return");
     let params = split_top_level_commas(&signature[open + 1..close])
@@ -373,8 +368,8 @@ pub(crate) fn split_top_level_commas(source: &str) -> Vec<String> {
 /// it the call extractor records them as unresolved targets and wrongly marks
 /// O(1) functions incomplete. Overloading languages must NOT blanket-apply this.
 pub(crate) const PRIMITIVE_OPERATORS: &[&str] = &[
-    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^",
-    "<<", ">>", "&^", "~", "&&", "||", "!",
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "&^",
+    "~", "&&", "||", "!",
 ];
 
 const RUBY_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/ruby.yml");
@@ -954,6 +949,22 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         _symbol: &str,
         _message: &str,
     ) -> Option<super::ExternalCallComplexity> {
+        None
+    }
+
+    /// Price a compiler-indexed preprocessor definition. Adapters must reject
+    /// bodies with calls or control flow they cannot bound; the shared SCIP
+    /// importer supplies exact source text but does not interpret it.
+    fn preprocessor_definition_call_complexity(
+        &self,
+        _definition: &str,
+    ) -> Option<super::ExternalCallComplexity> {
+        None
+    }
+
+    /// Recover an indexer-encoded macro definition location. Only adapters
+    /// whose compiler symbol grammar carries such a location implement this.
+    fn preprocessor_definition_location(&self, _symbol: &str) -> Option<(String, usize)> {
         None
     }
 
@@ -2140,7 +2151,6 @@ pub(crate) fn type_after_local_colon(source: &str, name: &str) -> Option<String>
     usable_declared_local_type(type_name)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2154,7 +2164,6 @@ mod tests {
             true
         }
     }
-
 
     #[test]
     fn test_default_behavior_methods() {

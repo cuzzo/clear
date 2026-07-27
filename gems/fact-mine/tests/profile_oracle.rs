@@ -510,7 +510,12 @@ fn go_self_calls_resolve_to_sibling_declarations() -> Result<()> {
     let method_by_owner_name = output
         .methods
         .iter()
-        .map(|method| ((method.owner.as_str(), method.name.as_str()), method.id.as_str()))
+        .map(|method| {
+            (
+                (method.owner.as_str(), method.name.as_str()),
+                method.id.as_str(),
+            )
+        })
         .collect::<std::collections::BTreeMap<_, _>>();
 
     // A method calling a sibling method on its own receiver (`l.insert(...)`
@@ -693,7 +698,10 @@ fn go_method_on_type_named_after_its_file_dispatches_as_instance() -> Result<()>
         .iter()
         .find(|method| method.owner == "widget" && method.name == "tally")
         .context("widget.tally method present")?;
-    assert_eq!(tally.kind, "instance", "receiver method must dispatch as instance");
+    assert_eq!(
+        tally.kind, "instance",
+        "receiver method must dispatch as instance"
+    );
 
     let call = output
         .calls
@@ -1367,6 +1375,44 @@ int analyze(Data* data, int input) {
             .all(|message| !message.starts_with("static_cast<")),
         "calls={messages:?}"
     );
+    Ok(())
+}
+
+#[test]
+fn c_export_and_calling_convention_macros_preserve_parameters_and_recursion() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".c").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#define API(type) type
+#define PROJECT_CDECL
+typedef struct Node { struct Node *child; } Node;
+API(void) destroy(Node *item) {
+    if (item && item->child) {
+        destroy(item->child);
+    }
+}
+static void * PROJECT_CDECL allocate(unsigned long size) {
+    return 0;
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::C)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| (method.name.as_str(), method.params.as_slice()))
+        .collect::<Vec<_>>();
+    assert!(methods.contains(&("destroy", ["item".to_string()].as_slice())));
+    assert!(methods.contains(&("allocate", ["size".to_string()].as_slice())));
+    let destroy = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "destroy")
+        .context("missing destroy complexity facts")?;
+    assert_eq!(destroy.parameters, vec!["item"]);
+    assert_eq!(destroy.recursion.structural_calls, 1);
+    assert_eq!(destroy.recursion.unknown_progress_calls, 0);
     Ok(())
 }
 

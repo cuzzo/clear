@@ -68,6 +68,25 @@ pub(crate) fn external_symbol_call_complexity(
     normalized_behavior::behavior(language).external_symbol_call_complexity(symbol, message)
 }
 
+/// Price a compiler-indexed preprocessor definition through its owning
+/// language adapter. The SCIP importer supplies the exact definition text;
+/// generic ingestion never interprets C/C++ preprocessor grammar.
+pub(crate) fn preprocessor_definition_call_complexity(
+    language: &str,
+    definition: &str,
+) -> Option<ExternalCallComplexity> {
+    let language = Language::parse(language).ok()?;
+    normalized_behavior::behavior(language).preprocessor_definition_call_complexity(definition)
+}
+
+pub(crate) fn preprocessor_definition_location(
+    language: &str,
+    symbol: &str,
+) -> Option<(String, usize)> {
+    let language = Language::parse(language).ok()?;
+    normalized_behavior::behavior(language).preprocessor_definition_location(symbol)
+}
+
 /// Classify an exact external symbol at the language boundary. Shared SCIP
 /// ingestion and diagnostics consume only these normalized values.
 pub(crate) fn external_symbol_metadata(language: &str, symbol: &str) -> ExternalSymbolMetadata {

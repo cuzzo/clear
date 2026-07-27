@@ -13,7 +13,7 @@ use protobuf::Message;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ImportStats {
@@ -253,6 +253,11 @@ fn apply_index(output: &mut ProfileOutput, index: Index) -> Result<ImportStats> 
         );
     }
     let definitions = definitions_by_symbol(&index.documents, &methods_by_path);
+    let indexed_roots = indexed_source_roots(&methods_by_path);
+    let indexed_sources =
+        indexed_document_sources(&index.documents, &methods_by_path, &indexed_roots);
+    let preprocessor_definitions =
+        indexed_preprocessor_definitions(&index.documents, &indexed_sources);
     let implementation_targets = implementation_targets(&index.documents, &definitions);
     let method_languages = output
         .methods
@@ -299,17 +304,58 @@ fn apply_index(output: &mut ProfileOutput, index: Index) -> Result<ImportStats> 
                 syntax::external_symbol_call_complexity(language, &candidate.symbol, &call.message)
             })
             .collect::<Vec<_>>();
+        let compiler_macro = selected
+            .alternatives
+            .iter()
+            .all(|candidate| candidate.symbol.ends_with('!'));
+        let macro_costs = if call.preprocessor_callable || compiler_macro {
+            selected
+                .alternatives
+                .iter()
+                .filter_map(|candidate| {
+                    let definition = preprocessor_definitions
+                        .get(&candidate.symbol)
+                        .cloned()
+                        .or_else(|| {
+                            syntax::preprocessor_definition_location(language, &candidate.symbol)
+                                .and_then(|(path, line)| {
+                                    indexed_definition_at(
+                                        &indexed_sources,
+                                        &indexed_roots,
+                                        &path,
+                                        line,
+                                    )
+                                })
+                        });
+                    definition.as_deref().and_then(|definition| {
+                        syntax::preprocessor_definition_call_complexity(language, definition)
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let converged_cost = (selected_symbols.len() == 1
             || (candidate_costs.len() == selected_symbols.len()
                 && candidate_costs
                     .windows(2)
                     .all(|pair| equivalent_external_cost(&pair[0], &pair[1]))))
         .then(|| candidate_costs.into_iter().next())
-        .flatten();
+        .flatten()
+        .or_else(|| {
+            (selected_symbols.len() == 1
+                || (macro_costs.len() == selected_symbols.len()
+                    && macro_costs
+                        .windows(2)
+                        .all(|pair| equivalent_external_cost(&pair[0], &pair[1]))))
+            .then(|| macro_costs.into_iter().next())
+            .flatten()
+        });
 
         stats.matched_occurrences += 1;
         call.semantic_symbol = Some(occurrence.symbol.clone());
         call.target_provenance = Some("scip".to_string());
+        call.preprocessor_callable |= compiler_macro;
         call.candidate_targets.clear();
         call.candidate_reason = None;
 
@@ -494,7 +540,80 @@ fn apply_index(output: &mut ProfileOutput, index: Index) -> Result<ImportStats> 
     // contract after that replacement so cross-file callable declarations are
     // not lost merely because the compiler correctly rejected the heuristic.
     crate::profile::reapply_declared_callback_costs(output);
+    apply_resolved_call_costs_to_contexts(output);
     Ok(stats)
+}
+
+fn apply_resolved_call_costs_to_contexts(output: &mut ProfileOutput) -> usize {
+    let mut methods = BTreeMap::<(String, String, String, usize), BTreeSet<String>>::new();
+    for method in &output.methods {
+        methods
+            .entry((
+                method.path.clone(),
+                method.owner.clone(),
+                method.name.clone(),
+                method.line,
+            ))
+            .or_default()
+            .insert(method.id.clone());
+    }
+    let mut costs = BTreeMap::<(String, [usize; 4], String), BTreeSet<(String, String)>>::new();
+    for call in &output.calls {
+        let (Some(time), Some(space)) = (
+            call.known_time_complexity.as_deref(),
+            call.known_space_complexity.as_deref(),
+        ) else {
+            continue;
+        };
+        costs
+            .entry((
+                call.source.clone(),
+                call.span,
+                bare_message(&call.message).to_string(),
+            ))
+            .or_default()
+            .insert((time.to_string(), space.to_string()));
+    }
+
+    let mut applied = 0;
+    for fact in &mut output.complexity_facts {
+        let Some(method_ids) = methods.get(&(
+            fact.path.clone(),
+            fact.owner.clone(),
+            fact.function.clone(),
+            fact.line,
+        )) else {
+            continue;
+        };
+        if method_ids.len() != 1 {
+            continue;
+        }
+        let method_id = method_ids.iter().next().unwrap();
+        for context in &mut fact.call_contexts {
+            let Some(candidates) = costs.get(&(
+                method_id.clone(),
+                context.span,
+                bare_message(&context.message).to_string(),
+            )) else {
+                continue;
+            };
+            if candidates.len() != 1 {
+                continue;
+            }
+            let (time, space) = candidates.iter().next().unwrap();
+            if context.known_time_complexity.is_none() {
+                context.known_time_complexity = Some(time.clone());
+            }
+            if context.known_space_complexity.is_none() {
+                context.known_space_complexity = Some(space.clone());
+            }
+            if context.known_time_complexity.is_some() && context.known_space_complexity.is_some() {
+                context.evidence_gap = None;
+                applied += 1;
+            }
+        }
+    }
+    applied
 }
 
 fn index_from_protobuf(index: scip::types::Index) -> Result<Index> {
@@ -1129,6 +1248,153 @@ fn definitions_by_symbol(
     definitions
 }
 
+fn indexed_preprocessor_definitions(
+    documents: &[Document],
+    sources: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut definitions = BTreeMap::<String, BTreeSet<String>>::new();
+    for document in documents {
+        let Some(source) = sources.get(&document.relative_path) else {
+            continue;
+        };
+        for occurrence in document
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.symbol_roles & 1 == 1)
+            .filter(|occurrence| occurrence.symbol.ends_with('!'))
+        {
+            let Some(span) = occurrence.span() else {
+                continue;
+            };
+            let Some(definition) = preprocessor_definition_source(source, span[0]) else {
+                continue;
+            };
+            definitions
+                .entry(occurrence.symbol.clone())
+                .or_default()
+                .insert(definition);
+        }
+    }
+    definitions
+        .into_iter()
+        .filter_map(|(symbol, candidates)| {
+            (candidates.len() == 1).then(|| (symbol, candidates.into_iter().next().unwrap()))
+        })
+        .collect()
+}
+
+fn indexed_document_sources(
+    documents: &[Document],
+    methods_by_path: &BTreeMap<String, Vec<&MethodRecord>>,
+    roots: &BTreeSet<PathBuf>,
+) -> BTreeMap<String, String> {
+    documents
+        .iter()
+        .filter_map(|document| {
+            let path = indexed_document_path(document, methods_by_path, roots)?;
+            let source = fs::read_to_string(path).ok()?;
+            Some((document.relative_path.clone(), source))
+        })
+        .collect()
+}
+
+fn indexed_definition_at(
+    sources: &BTreeMap<String, String>,
+    roots: &BTreeSet<PathBuf>,
+    path: &str,
+    one_based_line: usize,
+) -> Option<String> {
+    let matching = sources
+        .iter()
+        .filter(|(relative, _source)| {
+            path_ends_with(relative, path) || path_ends_with(path, relative)
+        })
+        .collect::<Vec<_>>();
+    let source = if matching.len() == 1 {
+        matching[0].1.clone()
+    } else if matching.is_empty() {
+        let relative = Path::new(path);
+        let candidates = roots
+            .iter()
+            .map(|root| root.join(relative))
+            .filter(|candidate| candidate.is_file())
+            .collect::<BTreeSet<_>>();
+        if candidates.len() != 1 {
+            return None;
+        }
+        fs::read_to_string(candidates.iter().next().unwrap()).ok()?
+    } else {
+        return None;
+    };
+    preprocessor_definition_source(&source, one_based_line.saturating_sub(1))
+}
+
+fn indexed_source_roots(
+    methods_by_path: &BTreeMap<String, Vec<&MethodRecord>>,
+) -> BTreeSet<PathBuf> {
+    let mut roots = BTreeSet::new();
+    for (relative, methods) in methods_by_path {
+        let relative = Path::new(relative);
+        let depth = relative.components().count();
+        for method in methods {
+            let actual = Path::new(&method.path);
+            if !actual.ends_with(relative) {
+                continue;
+            }
+            if let Some(root) = actual.ancestors().nth(depth) {
+                roots.insert(root.to_path_buf());
+            }
+        }
+    }
+    roots
+}
+
+fn indexed_document_path(
+    document: &Document,
+    methods_by_path: &BTreeMap<String, Vec<&MethodRecord>>,
+    roots: &BTreeSet<PathBuf>,
+) -> Option<PathBuf> {
+    let mut candidates = methods_by_path
+        .get(&document.relative_path)
+        .into_iter()
+        .flatten()
+        .map(|method| PathBuf::from(&method.path))
+        .filter(|path| path.is_file())
+        .collect::<BTreeSet<_>>();
+    let relative = Path::new(&document.relative_path);
+    if relative.is_absolute() && relative.is_file() {
+        candidates.insert(relative.to_path_buf());
+    } else {
+        candidates.extend(
+            roots
+                .iter()
+                .map(|root| root.join(relative))
+                .filter(|path| path.is_file()),
+        );
+    }
+    (candidates.len() == 1).then(|| candidates.into_iter().next().unwrap())
+}
+
+fn preprocessor_definition_source(source: &str, line: usize) -> Option<String> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut index = line;
+    let first = lines.get(index)?.trim_start();
+    if !first.starts_with("#define") {
+        return None;
+    }
+    let mut definition = String::new();
+    loop {
+        let row = *lines.get(index)?;
+        definition.push_str(row);
+        if !row.trim_end().ends_with('\\') {
+            break;
+        }
+        definition.push('\n');
+        index += 1;
+    }
+    Some(definition)
+}
+
 fn select_call_occurrences<'a>(
     call: &CallRecord,
     document: &'a Document,
@@ -1223,16 +1489,14 @@ fn select_call_occurrences<'a>(
         })
         .collect::<Vec<_>>();
     if !outer_selector.is_empty() {
-        let preferred = if call.preprocessor_callable {
-            let macros = outer_selector
-                .iter()
-                .copied()
-                .filter(|occurrence| occurrence.symbol.ends_with('!'))
-                .collect::<Vec<_>>();
-            (!macros.is_empty()).then_some(macros)
-        } else {
-            None
-        };
+        let macros = outer_selector
+            .iter()
+            .copied()
+            .filter(|occurrence| {
+                syntax::preprocessor_definition_location(language, &occurrence.symbol).is_some()
+            })
+            .collect::<Vec<_>>();
+        let preferred = (!macros.is_empty()).then_some(macros);
         return selected_occurrences(preferred.as_deref().unwrap_or(&outer_selector));
     }
     let callable = exact
@@ -2884,6 +3148,71 @@ mod tests {
         assert_eq!(output.calls[0].semantic_symbol, None);
         assert_eq!(output.calls[0].target, None);
         assert_ne!(output.calls[0].kind, "resolved_call");
+    }
+
+    #[test]
+    fn imports_bounded_macro_cost_from_an_indexed_header_into_cfg_facts() {
+        let dir = tempdir().unwrap();
+        let header_path = dir.path().join("defs.h");
+        let source_path = dir.path().join("main.c");
+        let header = "#define VALUE_AT(buffer) ((buffer)->items[(buffer)->offset])\n";
+        let source = "#include \"defs.h\"\nint read_value(Buffer *buffer) {\n  return VALUE_AT(buffer);\n}\n";
+        fs::write(&header_path, header).unwrap();
+        fs::write(&source_path, source).unwrap();
+        let document =
+            crate::syntax::parse_file(source_path.clone(), crate::syntax::Language::C).unwrap();
+        let mut output = crate::profile::extract(&document, crate::profile::Profile::Espalier);
+        let macro_call = output
+            .calls
+            .iter()
+            .find(|call| call.message == "VALUE_AT")
+            .unwrap();
+        assert!(
+            !macro_call.preprocessor_callable,
+            "the source parser cannot see definitions from an included header"
+        );
+
+        let call_column = source.lines().nth(2).unwrap().find("VALUE_AT").unwrap();
+        let symbol = "cxx . . $ `defs.h:1:9`!";
+        let index = json!({"documents": [
+            {
+                "relative_path": "main.c",
+                "occurrences": [
+                    occurrence(
+                        [2, call_column, call_column + "VALUE_AT".len()],
+                        symbol,
+                        0
+                    )
+                ]
+            }
+        ]});
+
+        let stats = apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(stats.modeled_external_symbols, 1);
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.message == "VALUE_AT")
+            .unwrap();
+        assert!(call.preprocessor_callable);
+        assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(
+            call.complexity_provenance.as_deref(),
+            Some("compiler_indexed_macro_body")
+        );
+        let context = output
+            .complexity_facts
+            .iter()
+            .find(|fact| fact.function == "read_value")
+            .unwrap()
+            .call_contexts
+            .iter()
+            .find(|context| context.message == "VALUE_AT")
+            .unwrap();
+        assert_eq!(context.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(context.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(context.evidence_gap, None);
     }
 
     #[test]
