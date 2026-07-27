@@ -652,6 +652,7 @@ fn fact_for_method(
         false,
         params,
         &assignments,
+        &BTreeSet::new(),
         &visited_guards,
         &mut recursion,
         behavior,
@@ -1752,6 +1753,7 @@ fn visit_loops(
                     node,
                     params,
                     assignments,
+                    &parent.partition_locals,
                     (node.first_lineno, node.first_column),
                     behavior,
                 ),
@@ -2436,10 +2438,15 @@ fn call_argument_progress(
     node: &Node,
     params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
+    structural_bindings: &BTreeSet<String>,
     before: (usize, usize),
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> String {
     let arguments = call_argument_nodes(node);
+    let argument_names = arguments
+        .iter()
+        .flat_map(|argument| local_names(argument))
+        .collect::<BTreeSet<_>>();
     let symbols = arguments
         .iter()
         .flat_map(|argument| descendant_symbols(argument))
@@ -2465,7 +2472,9 @@ fn call_argument_progress(
         "halving".to_string()
     } else if symbols.iter().any(|symbol| symbol == "-") || assigned_shape.0 {
         "shrinking".to_string()
-    } else if structural_descent_argument(node, params, assignments, before, behavior) {
+    } else if !argument_names.is_disjoint(structural_bindings)
+        || structural_descent_argument(node, params, assignments, before, behavior)
+    {
         "structural".to_string()
     } else {
         "unknown".to_string()
@@ -2479,6 +2488,7 @@ fn collect_recursion(
     inside_loop: bool,
     params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
+    structural_bindings: &BTreeSet<String>,
     visited_guards: &BTreeSet<String>,
     out: &mut RecursionFacts,
     behavior: &dyn NormalizedLanguageBehavior,
@@ -2488,6 +2498,24 @@ fn collect_recursion(
         return;
     }
     let now_inside = inside_loop || loop_node(node, behavior);
+    let mut nested_structural_bindings = structural_bindings.clone();
+    if loop_node(node, behavior) {
+        let control_names = loop_control(node).map(local_names).unwrap_or_default();
+        let parameter_rooted = control_names.iter().any(|name| {
+            params.contains(name)
+                || params.iter().any(|parameter| {
+                    derived_from(
+                        name,
+                        parameter,
+                        (node.first_lineno, node.first_column),
+                        assignments,
+                    )
+                })
+        });
+        if parameter_rooted {
+            nested_structural_bindings.extend(loop_binding_names(node));
+        }
+    }
     if recursive_self_call(node, function, bare_self_calls_are_recursive) {
         out.calls += 1;
         let guarded = !local_names(node).is_disjoint(visited_guards);
@@ -2515,13 +2543,19 @@ fn collect_recursion(
             if now_inside {
                 out.loop_contained_shrinking_calls += 1;
             }
-        } else if structural_descent_argument(
-            node,
-            params,
-            assignments,
-            (node.first_lineno, node.first_column),
-            behavior,
-        ) {
+        } else if !call_argument_nodes(node)
+            .into_iter()
+            .flat_map(local_names)
+            .collect::<BTreeSet<_>>()
+            .is_disjoint(structural_bindings)
+            || structural_descent_argument(
+                node,
+                params,
+                assignments,
+                (node.first_lineno, node.first_column),
+                behavior,
+            )
+        {
             out.structural_calls += 1;
         }
     }
@@ -2532,6 +2566,7 @@ fn collect_recursion(
             now_inside,
             params,
             assignments,
+            &nested_structural_bindings,
             visited_guards,
             out,
             behavior,
@@ -3524,6 +3559,49 @@ class Node {
         );
         let walk = java.iter().find(|row| row.function == "walk").unwrap();
         assert_eq!(walk.recursion.structural_calls, 1);
+    }
+
+    #[test]
+    fn rust_recursive_calls_on_parameter_derived_loop_bindings_are_structural() {
+        let rows = language_facts(
+            r#"
+struct Node {
+    children: Vec<Node>,
+}
+
+fn walk(node: &Node) {
+    for child in node.children.iter() {
+        walk(child);
+    }
+}
+
+fn no_progress(node: &Node) {
+    for _child in node.children.iter() {
+        no_progress(node);
+    }
+}
+"#,
+            Language::Rust,
+            ".rs",
+        );
+        let walk = rows.iter().find(|row| row.function == "walk").unwrap();
+        assert_eq!(walk.recursion.structural_calls, 1);
+        assert_eq!(walk.recursion.unknown_progress_calls, 0);
+        assert_eq!(
+            walk.call_contexts
+                .iter()
+                .find(|call| call.message == "walk")
+                .unwrap()
+                .argument_progress,
+            "structural"
+        );
+
+        let no_progress = rows
+            .iter()
+            .find(|row| row.function == "no_progress")
+            .unwrap();
+        assert_eq!(no_progress.recursion.structural_calls, 0);
+        assert_eq!(no_progress.recursion.unknown_progress_calls, 1);
     }
 
     #[test]
