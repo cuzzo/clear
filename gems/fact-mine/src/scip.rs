@@ -367,6 +367,18 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
             .flatten()
         });
 
+        // A function-local import establishes a distinct lexical dispatch
+        // domain. A compiler occurrence that points the call back to its own
+        // enclosing definition contradicts that source fact (typically an
+        // unresolved dependent overload), so retain the adapter-proven import
+        // and its cost instead of manufacturing recursion.
+        if call.lexical_symbol_origin.as_deref() == Some("function_local_import")
+            && target_ids.len() == 1
+            && target_ids.iter().next().is_some_and(|target| *target == call.source)
+        {
+            continue;
+        }
+
         stats.matched_occurrences += 1;
         call.semantic_symbol = Some(occurrence.symbol.clone());
         call.target_provenance = Some("scip".to_string());
@@ -2719,6 +2731,58 @@ mod tests {
         assert_eq!(output.calls[0].target.as_deref(), Some("pick-int"));
         assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(int_symbol));
         assert_eq!(output.calls[0].target_provenance.as_deref(), Some("scip"));
+    }
+
+    #[test]
+    fn local_import_proof_rejects_a_contradictory_scip_self_target() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.cpp");
+        let source = "void swap(){ using std::swap; swap(a,b); }\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "cxx . . $ demo#swap().";
+        let definition_column = source.find("swap").unwrap();
+        let call_column = source.rfind("swap").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "demo.cpp",
+            "occurrences": [
+                canonical_occurrence(
+                    [0, definition_column, definition_column + "swap".len()],
+                    symbol,
+                    1
+                ),
+                canonical_occurrence(
+                    [0, call_column, call_column + "swap".len()],
+                    symbol,
+                    0
+                )
+            ]
+        }]});
+        let mut output = ProfileOutput::default();
+        output.methods = vec![method("swap", &path, "swap", [1, 0, 1, source.trim().len()])];
+        let mut imported = call(
+            "swap",
+            &path,
+            "swap",
+            [1, call_column, 1, call_column + "swap(a,b)".len()],
+        );
+        imported.lexical_symbol = Some("std::swap".to_string());
+        imported.lexical_symbol_origin = Some("function_local_import".to_string());
+        imported.known_time_complexity = Some("O(R)".to_string());
+        output.calls = vec![imported];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert!(output.calls[0].target.is_none());
+        assert!(output.calls[0].semantic_symbol.is_none());
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(R)")
+        );
+        assert_eq!(
+            output.calls[0].lexical_symbol.as_deref(),
+            Some("std::swap")
+        );
     }
 
     #[test]

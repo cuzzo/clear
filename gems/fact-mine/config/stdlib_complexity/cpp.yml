@@ -146,6 +146,9 @@ IntrinsicParametricCall:
   # element. Their qualified `std::` identity is source-proven even when clang
   # omits a dependent-template occurrence.
   'std::find_if': callback_linear
+  # `using std::swap; swap(a, b)` is the standard ADL customization pattern.
+  # It performs one selected swap/move operation whose cost is type-dependent.
+  'std::swap': reflective_once
 SemanticSymbol:
   # Exact scip-clang descriptors whose overload discriminator has been
   # reviewed. These cover operations which cannot be classified from a
