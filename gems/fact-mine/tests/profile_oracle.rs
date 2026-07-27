@@ -2279,6 +2279,38 @@ void invoke(Concrete& concrete) {
 }
 
 #[test]
+fn cpp_braced_initializer_reads_do_not_fabricate_local_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template<typename CallbackListType>
+struct Wrapper {
+    CallbackListType callbackList;
+    template<typename Condition>
+    void append(Condition condition) {
+        auto data = make_data(Data { condition, callbackList });
+        callbackList.append(data);
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let append = output
+        .calls
+        .iter()
+        .find(|call| call.function == "append" && call.message == "append")
+        .context("missing template state receiver call")?;
+    assert_eq!(append.receiver_type.as_deref(), Some("CallbackListType"));
+    assert_eq!(append.known_time_complexity.as_deref(), Some("O(R)"));
+    assert_eq!(
+        append.complexity_provenance.as_deref(),
+        Some("parametric_declared_receiver_contract")
+    );
+    Ok(())
+}
+
+#[test]
 fn c_export_and_calling_convention_macros_preserve_parameters_and_recursion() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".c").tempfile()?;
     fs::write(
