@@ -873,5 +873,16 @@ mod tests {
             metadata.parametric_cost.as_deref(),
             Some("callback_linear")
         );
+
+        let action = external_symbol_metadata(
+            "scip-dotnet nuget System.Runtime 10.0.0.0 System/Action#Invoke().",
+        );
+        assert_eq!(action.parametric_cost.as_deref(), Some("callback_once"));
+        assert_eq!(
+            CSharpNormalizedBehavior
+                .intrinsic_call_complexity(None, "nameof")
+                .map(|cost| cost.time),
+            Some("O(1)")
+        );
     }
 }
