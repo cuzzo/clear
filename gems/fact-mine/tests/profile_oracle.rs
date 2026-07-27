@@ -1794,6 +1794,29 @@ typedef std::ostringstream native_stream;
 }
 
 #[test]
+fn cpp_inactive_runtime_spelling_emits_modeled_world_evidence() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        "void run(const char* data) { ::write(1, data, 4); }\n",
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let write = output
+        .calls
+        .iter()
+        .find(|call| call.message == "::write")
+        .context("missing qualified runtime call")?;
+    assert_eq!(write.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(
+        write.complexity_bound_quality.as_deref(),
+        Some("upper_bound_modeled_world")
+    );
+    assert_eq!(write.complexity_assumptions.len(), 1);
+    Ok(())
+}
+
+#[test]
 fn cpp_template_receiver_calls_keep_symbolic_dispatch_costs() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(

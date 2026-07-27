@@ -854,6 +854,21 @@ pub(crate) fn configured_external_latency_bound(
         .map(NormalizedCollectionOperation::complexity)
 }
 
+/// Computational model for a reviewed runtime spelling when the selected
+/// compiler configuration has no SCIP occurrence (typically an inactive
+/// preprocessor branch). The adapter must expose the modeled-world assumption
+/// on the emitted call; this helper supplies only the operation algebra.
+pub(crate) fn configured_modeled_runtime_bound(
+    language: &str,
+    message: &str,
+) -> Option<NormalizedCallComplexity> {
+    stdlib_operations(language)?
+        .get("ModeledRuntime")?
+        .get(message.trim())
+        .and_then(|value| operation_from_config(value))
+        .map(NormalizedCollectionOperation::complexity)
+}
+
 /// Resolve a language-owned collection spelling through Fact-Mine's YAML
 /// configuration. Adapters provide the language identity and normalize native
 /// declaration grammar; Espalier never loads or interprets a language-specific
@@ -955,6 +970,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     fn external_symbol_call_complexity(
         &self,
         _symbol: &str,
+        _message: &str,
+    ) -> Option<super::ExternalCallComplexity> {
+        None
+    }
+
+    /// Price a reviewed source spelling when no compiler occurrence exists in
+    /// the selected preprocessor configuration. Implementations must return a
+    /// modeled-world quality and an explicit assumption.
+    fn modeled_runtime_call_complexity(
+        &self,
         _message: &str,
     ) -> Option<super::ExternalCallComplexity> {
         None

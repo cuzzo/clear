@@ -121,6 +121,89 @@ SemanticSymbolParametricCost:
   'std/optional#emplace(8cc437dbb5d7266f).': reflective_once
   'std/ranges/uninitialized_copy.': callback_linear
   'std/uninitialized_copy_n(31908fd9f87493f7).': callback_linear
+ModeledRuntime:
+  # Exact source spellings seen only in compiler-inactive platform branches.
+  # Calls receive an explicit modeled-world assumption; these entries never
+  # replace an available SCIP identity or a project declaration.
+  assert: constant
+  va_start: constant
+  va_copy: constant
+  va_end: constant
+  malloc: linear_materialize
+  free: linear_scan
+  vsnprintf: linear_scan
+  vsnprintf_s: linear_scan
+  vsnwprintf_s: linear_scan
+  _vsnwprintf_s: linear_scan
+  _vsnwprintf: linear_scan
+  _vscprintf: linear_scan
+  _vscwprintf: linear_scan
+  '::strlen': linear_scan
+  '::wcslen': linear_scan
+  '::strchr': linear_scan
+  '::localtime': constant
+  '::localtime_r': constant
+  '::localtime_s': constant
+  '::gmtime': constant
+  '::gmtime_r': constant
+  '::gmtime_s': constant
+  '::ftime': constant
+  '::gettimeofday': constant
+  '::syscall': constant
+  '::iconv_open': constant
+  '::iconv': linear_scan
+  '::iconv_close': constant
+  '::open': linear_scan
+  '::_wsopen': linear_scan
+  '::_wsopen_s': linear_scan
+  '::lseek': constant
+  '::_lseeki64': constant
+  _lseek: constant
+  '::close': constant
+  '::_close': constant
+  '::write': linear_scan
+  '::_write': linear_scan
+  '::rename': linear_scan
+  '::unlink': linear_scan
+  '::_wunlink': linear_scan
+  '::isatty': constant
+  MultiByteToWideChar: linear_materialize
+  WideCharToMultiByte: linear_materialize
+  GetCurrentThreadId: constant
+  pthread_threadid_np: constant
+  rtems_task_self: constant
+  xTaskGetCurrentTaskHandle: constant
+  GetStdHandle: constant
+  GetConsoleScreenBufferInfo: constant
+  SetConsoleTextAttribute: constant
+  InitializeCriticalSection: constant
+  DeleteCriticalSection: constant
+  EnterCriticalSection: constant
+  LeaveCriticalSection: constant
+  '::pthread_mutex_init': constant
+  '::pthread_mutex_destroy': constant
+  '::pthread_mutex_lock': constant
+  '::pthread_mutex_unlock': constant
+  xSemaphoreCreateBinary: constant
+  xSemaphoreGive: constant
+  xSemaphoreTake: constant
+  vSemaphoreDelete: constant
+  rtems_semaphore_create: constant
+  rtems_semaphore_delete: constant
+  rtems_semaphore_obtain: constant
+  rtems_semaphore_release: constant
+  MoveFileW: linear_scan
+  WriteConsoleW: linear_scan
+  OutputDebugStringW: linear_scan
+  RegisterEventSourceW: linear_scan
+  DeregisterEventSource: constant
+  RegCreateKeyExW: linear_scan
+  RegOpenKeyExW: linear_scan
+  RegSetValueExW: linear_scan
+  RegCloseKey: constant
+  RegDeleteKeyW: linear_scan
+  ReportEventW: linear_scan
+  __android_log_print: linear_scan
 NonCallPrefix:
   "static_cast<": declaration
   "reinterpret_cast<": declaration

@@ -6789,6 +6789,11 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             let parametric_complexity = parametric_cost
                 .as_deref()
                 .and_then(crate::syntax::parametric_call_complexity);
+            let modeled_runtime = (known_complexity.is_none()
+                && parametric_complexity.is_none()
+                && implicit)
+                .then(|| behavior.modeled_runtime_call_complexity(&call.message))
+                .flatten();
             // A self/this call dispatches on the enclosing definition's owner:
             // that owner IS the receiver type. There is no receiver variable to
             // type, so resolve the owner to the same canonical symbol the
@@ -6800,7 +6805,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 && static_receiver_symbol.is_none()
                 && instance_receiver_type.is_none()
                 && known_complexity.is_none()
-                && parametric_complexity.is_none())
+                && parametric_complexity.is_none()
+                && modeled_runtime.is_none())
             .then(|| canonical_receiver_symbol(document, &call.owner))
             .flatten();
             let instance_receiver_owner = instance_receiver_type
@@ -7035,15 +7041,30 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .constructor_dispatch_name(&call.receiver, &call.message, &call.owner),
                 known_time_complexity: known_complexity
                     .map(|cost| cost.time.to_string())
-                    .or_else(|| parametric_complexity.map(|cost| cost.0.to_string())),
+                    .or_else(|| parametric_complexity.map(|cost| cost.0.to_string()))
+                    .or_else(|| {
+                        modeled_runtime
+                            .as_ref()
+                            .map(|cost| cost.time.to_string())
+                    }),
                 known_space_complexity: known_complexity
                     .map(|cost| cost.space.to_string())
-                    .or_else(|| parametric_complexity.map(|cost| cost.1.to_string())),
+                    .or_else(|| parametric_complexity.map(|cost| cost.1.to_string()))
+                    .or_else(|| {
+                        modeled_runtime
+                            .as_ref()
+                            .map(|cost| cost.space.to_string())
+                    }),
                 complexity_provenance: known_complexity
                     .map(|_| "language_stdlib_registry".to_string())
                     .or_else(|| {
                         parametric_complexity
                             .map(|_| "parametric_declared_receiver_contract".to_string())
+                    })
+                    .or_else(|| {
+                        modeled_runtime
+                            .as_ref()
+                            .map(|cost| cost.provenance.to_string())
                     }),
                 complexity_bound_quality: known_complexity
                     .map(|_| "upper_bound_declared_receiver".to_string())
@@ -7051,9 +7072,21 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         parametric_cost
                             .as_ref()
                             .map(|kind| format!("upper_bound_parametric_{kind}"))
+                    })
+                    .or_else(|| {
+                        modeled_runtime
+                            .as_ref()
+                            .map(|cost| cost.bound_quality.to_string())
                     }),
-                complexity_candidates: Vec::new(),
-                complexity_assumptions: Vec::new(),
+                complexity_candidates: modeled_runtime
+                    .as_ref()
+                    .map(|cost| cost.candidates.clone())
+                    .unwrap_or_default(),
+                complexity_assumptions: modeled_runtime
+                    .as_ref()
+                    .and_then(|cost| cost.assumption.clone())
+                    .into_iter()
+                    .collect(),
                 message: call.message.clone(),
                 argument_count: call.arguments.len(),
                 arguments: call.arguments.clone(),

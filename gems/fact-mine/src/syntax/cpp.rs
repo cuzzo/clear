@@ -5,7 +5,8 @@ use super::cfg::ControlFlowProfile;
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     balanced_selector_name, configured_collection_operation, configured_intrinsic_call_complexity,
-    configured_non_call_construct, configured_semantic_symbol_call_complexity,
+    configured_modeled_runtime_bound, configured_non_call_construct,
+    configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
     eliminable_guard_from_call, exact_direct_call_name, native_pointer_nullability_contract,
     nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
@@ -493,6 +494,20 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
     }
 }
 
+fn modeled_runtime_call_complexity(message: &str) -> Option<ExternalCallComplexity> {
+    let complexity = configured_modeled_runtime_bound("cpp", message)?;
+    Some(ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "cpp_source_runtime_registry",
+        bound_quality: "upper_bound_modeled_world",
+        candidates: vec![message.to_string()],
+        assumption: Some(format!(
+            "`{message}` follows the reviewed C/C++ platform runtime contract in this preprocessor configuration"
+        )),
+    })
+}
+
 pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
     let (_package, descriptor) = scip_clang_parts(symbol)?;
     scip_descriptor_owner(descriptor)
@@ -676,6 +691,13 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         message: &str,
     ) -> Option<ExternalCallComplexity> {
         external_symbol_call_complexity(symbol, message)
+    }
+
+    fn modeled_runtime_call_complexity(
+        &self,
+        message: &str,
+    ) -> Option<ExternalCallComplexity> {
+        modeled_runtime_call_complexity(message)
     }
 
     fn external_symbol_metadata(&self, symbol: &str) -> ExternalSymbolMetadata {
@@ -1158,6 +1180,16 @@ mod tests {
         assert!(CppNormalizedBehavior
             .intrinsic_call_complexity(None, "vendor::strrchr")
             .is_none());
+    }
+
+    #[test]
+    fn inactive_platform_runtime_models_are_explicit_assumptions() {
+        let write = modeled_runtime_call_complexity("::write")
+            .expect("reviewed inactive POSIX branch");
+        assert_eq!((write.time, write.space), ("O(N)", "O(1)"));
+        assert_eq!(write.bound_quality, "upper_bound_modeled_world");
+        assert!(write.assumption.is_some());
+        assert!(modeled_runtime_call_complexity("project::write").is_none());
     }
 
     #[test]
