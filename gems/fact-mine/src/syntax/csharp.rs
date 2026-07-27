@@ -842,4 +842,36 @@ mod tests {
         assert_eq!(b.untyped_array_type(), "List<object>");
         assert_eq!(b.untyped_hash_type(), "Dictionary<string, object>");
     }
+
+    #[test]
+    fn scip_dotnet_symbols_use_reviewed_exact_and_parametric_costs() {
+        let symbol = |descriptor: &str| {
+            format!("scip-dotnet nuget System.Runtime 10.0.0.0 {descriptor}")
+        };
+        for (descriptor, message, expected) in [
+            ("IO/TextWriter#Write(+1).", "Write", "O(1)"),
+            ("IO/TextWriter#Write(+11).", "Write", "O(N)"),
+            ("System/Span#Slice(+1).", "Slice", "O(1)"),
+            (
+                "Reflection/MethodBase#GetParameters().",
+                "GetParameters",
+                "O(N)",
+            ),
+        ] {
+            let cost = external_symbol_call_complexity(&symbol(descriptor), message)
+                .unwrap_or_else(|| panic!("missing exact cost for {descriptor}"));
+            assert_eq!(cost.time, expected, "descriptor={descriptor}");
+            assert_eq!(cost.provenance, "csharp_scip_symbol_registry");
+        }
+
+        let callback =
+            "scip-dotnet nuget System.Linq 10.0.0.0 Linq/Enumerable#Where().";
+        assert!(external_symbol_call_complexity(callback, "Where").is_none());
+        let metadata = external_symbol_metadata(callback);
+        assert_eq!(metadata.scope, "stdlib");
+        assert_eq!(
+            metadata.parametric_cost.as_deref(),
+            Some("callback_linear")
+        );
+    }
 }
