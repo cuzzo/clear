@@ -608,10 +608,23 @@ fn fact_for_method(
     // reports which locals alias the receiver; other languages use `self`/`this`
     // and need no binding here.
     let mut augmented_parameter_types = parameter_types.clone();
-    if language == "rust" {
+    if language == "rust" || language == "cpp" {
         augmented_parameter_types.extend(invariant_flow_local_types(
             document, owner, function, language,
         ));
+    }
+    if language == "cpp" {
+        let type_key = method_parameter_type_key(owner, function, line);
+        augmented_parameter_types.extend(
+            document
+                .method_local_types
+                .get(&type_key)
+                .into_iter()
+                .flat_map(|types| types.iter())
+                .map(|(name, declared)| {
+                    (name.clone(), TypeExpr::parse(declared, language))
+                }),
+        );
     }
     for (receiver_var, target) in behavior.receiver_aliases_for_function(node) {
         if target == "self" {
