@@ -1444,6 +1444,15 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         default_kind.to_string()
     }
 
+    /// Classify an implicit owner that the parser attached functions to but
+    /// did not emit as a complete owner node. Recovery-heavy preprocessor
+    /// layouts can produce this shape; concrete languages may consult their
+    /// own declaration grammar, while the shared profile remains vocabulary
+    /// free.
+    fn fallback_owner_kind(&self, _owner: &str, _source: &str) -> Option<String> {
+        None
+    }
+
     /// Direct native base/interface spellings owned by this language's
     /// declaration grammar. Shared consumers canonicalize and traverse them.
     fn owner_supertypes(&self, _node: &Node) -> Vec<String> {

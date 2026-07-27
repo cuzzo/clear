@@ -290,6 +290,48 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
             .unwrap_or_default()
     }
 
+    fn owner_kind(&self, node: &Node, default_kind: &str) -> String {
+        if node.text.contains("interface ") {
+            "interface".to_string()
+        } else if node.text.contains("abstract class ") {
+            "abstract_class".to_string()
+        } else if node.text.contains("enum ") {
+            "enum".to_string()
+        } else if node.text.contains("record ") {
+            "record".to_string()
+        } else if node.text.contains("struct ") {
+            "struct".to_string()
+        } else {
+            default_kind.to_string()
+        }
+    }
+
+    fn type_kind_is_abstract_dispatch(&self, kind: &str) -> bool {
+        matches!(kind, "interface" | "abstract_class")
+    }
+
+    fn fallback_owner_kind(&self, owner: &str, source: &str) -> Option<String> {
+        let owner = owner.rsplit("::").next().unwrap_or(owner);
+        source.lines().find_map(|line| {
+            let tokens = line
+                .split(|character: char| {
+                    !(character == '_' || character.is_ascii_alphanumeric())
+                })
+                .filter(|token| !token.is_empty())
+                .collect::<Vec<_>>();
+            tokens
+                .windows(2)
+                .any(|pair| pair == ["interface", owner])
+                .then(|| "interface".to_string())
+                .or_else(|| {
+                    tokens
+                        .windows(3)
+                        .any(|triple| triple == ["abstract", "class", owner])
+                        .then(|| "abstract_class".to_string())
+                })
+        })
+    }
+
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
         super::normalized_behavior::type_before_local_name(source, name)
     }
@@ -700,6 +742,24 @@ mod tests {
     fn test_csharp_behavior_comprehensive() {
         let b = CSharpNormalizedBehavior;
         assert_eq!(b.self_member_receiver("Foo"), "Foo");
+        assert_eq!(
+            b.owner_kind(&node("CLASS", "public interface ILogger"), "owner"),
+            "interface"
+        );
+        assert_eq!(
+            b.owner_kind(&node("CLASS", "public abstract class Sink"), "owner"),
+            "abstract_class"
+        );
+        assert!(b.type_kind_is_abstract_dispatch("interface"));
+        assert!(b.type_kind_is_abstract_dispatch("abstract_class"));
+        assert!(!b.type_kind_is_abstract_dispatch("class"));
+        assert_eq!(
+            b.fallback_owner_kind(
+                "ILogger",
+                "namespace Demo;\npublic interface ILogger\n{\n}\n"
+            ),
+            Some("interface".to_string())
+        );
         assert_eq!(
             b.explicit_self_state_ref(&node("LVAR", "x"), "Foo"),
             "this.Foo"
