@@ -359,7 +359,35 @@ fn apply_index(output: &mut ProfileOutput, index: Index) -> Result<ImportStats> 
         call.candidate_targets.clear();
         call.candidate_reason = None;
 
-        if target_ids.len() == 1 {
+        if target_ids.len() == 1
+            && compiler_proven_abstract_project_target(
+                &output.owners,
+                &output.methods,
+                target_ids.iter().next().copied().unwrap(),
+            )
+        {
+            // The symbol selects an abstract declaration, not an executable
+            // body. Keeping it as an exact project target makes the
+            // aggregator wait for a summary that can never exist. The
+            // compiler-proven dispatch boundary is instead one invocation of
+            // an implementation supplied by the caller.
+            let (time, space) = syntax::parametric_call_complexity("callback_once").unwrap();
+            call.target = None;
+            call.kind = "interface_call".to_string();
+            call.callback_receiver = true;
+            call.external_symbol_scope = Some("project_interface".to_string());
+            call.known_time_complexity = Some(time.to_string());
+            call.known_space_complexity = Some(space.to_string());
+            call.complexity_provenance =
+                Some("compiler_proven_abstract_project_contract".to_string());
+            call.complexity_bound_quality =
+                Some("upper_bound_parametric_callback_once".to_string());
+            call.complexity_missing_kind = None;
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            call.empty_domain_cause = None;
+            stats.modeled_external_symbols += 1;
+        } else if target_ids.len() == 1 {
             let target = target_ids.into_iter().next().unwrap().to_string();
             call.kind = "resolved_call".to_string();
             call.target = Some(target);
@@ -751,6 +779,31 @@ fn compiler_proven_project_interface_call(
         })
         .count()
         == 1
+}
+
+fn compiler_proven_abstract_project_target(
+    owners: &[crate::profile::OwnerRecord],
+    methods: &[crate::profile::MethodRecord],
+    target_id: &str,
+) -> bool {
+    let Some(method) = methods.iter().find(|method| method.id == target_id) else {
+        return false;
+    };
+    if method.kind != "instance" {
+        return false;
+    }
+    let Ok(language) = syntax::Language::parse(&method.language) else {
+        return false;
+    };
+    let behavior = syntax::normalized_behavior::behavior(language);
+    let abstract_owner = owners.iter().any(|owner| {
+        owner.id == method.owner_id
+            && owner.language == method.language
+            && behavior.type_kind_is_abstract_dispatch(&owner.kind)
+    });
+    abstract_owner
+        && !method.raw_source.contains('{')
+        && method.raw_source.trim_end().ends_with(';')
 }
 
 fn equivalent_external_cost(
@@ -1830,6 +1883,86 @@ mod tests {
             "go",
             symbol
         ));
+    }
+
+    #[test]
+    fn exact_java_interface_declarations_are_parametric_not_body_targets() {
+        let dir = tempdir().unwrap();
+        let source_path = dir.path().join("Demo.java");
+        let declaration = "interface Demo { String value(); }";
+        let caller = "class Caller { String run(Demo demo) { return demo.value(); } }";
+        fs::write(&source_path, format!("{declaration}\n{caller}\n")).unwrap();
+        let path = source_path.to_string_lossy().to_string();
+        let symbol = "semanticdb maven demo current Demo#value().";
+        let declaration_column = declaration.find("value").unwrap();
+        let call_column = caller.find("value").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "Demo.java",
+            "occurrences": [
+                occurrence(
+                    [0, declaration_column, declaration_column + "value".len()],
+                    symbol,
+                    1,
+                ),
+                occurrence(
+                    [1, call_column, call_column + "value".len()],
+                    symbol,
+                    8,
+                ),
+            ]
+        }]});
+
+        let mut abstract_method = method("value", &path, "value", [1, 17, 1, 32]);
+        abstract_method.owner_id = "owner:Demo".into();
+        abstract_method.owner = "Demo".into();
+        abstract_method.kind = "instance".into();
+        abstract_method.raw_source = "String value();".into();
+        let mut caller_method = method("caller", &path, "run", [2, 0, 2, caller.len()]);
+        caller_method.owner_id = "owner:Caller".into();
+        caller_method.owner = "Caller".into();
+        let mut interface_call = call(
+            "caller",
+            &path,
+            "value",
+            [2, call_column, 2, call_column + "value".len() + 2],
+        );
+        interface_call.receiver = "demo".into();
+        interface_call.receiver_type = Some("Demo".into());
+        let mut output = ProfileOutput::default();
+        output.owners = vec![OwnerRecord {
+            id: "owner:Demo".into(),
+            name: "Demo".into(),
+            kind: "interface".into(),
+            language: "java".into(),
+            path: path.clone(),
+            line: 1,
+            span: [1, 0, 1, declaration.len()],
+            confidence: "high".into(),
+            symbol: Some("Demo".into()),
+            supertypes: Vec::new(),
+            requirements: vec!["value".into()],
+        }];
+        output.methods = vec![abstract_method, caller_method];
+        output.calls = vec![interface_call];
+
+        let stats = apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(stats.exact_project_targets, 0);
+        assert_eq!(stats.modeled_external_symbols, 1);
+        assert_eq!(output.calls[0].target, None);
+        assert_eq!(output.calls[0].kind, "interface_call");
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(C)")
+        );
+        assert_eq!(
+            output.calls[0].known_space_complexity.as_deref(),
+            Some("O(S)")
+        );
+        assert_eq!(
+            output.calls[0].complexity_provenance.as_deref(),
+            Some("compiler_proven_abstract_project_contract")
+        );
     }
 
     fn occurrence(range: [usize; 3], symbol: &str, roles: u32) -> serde_json::Value {
