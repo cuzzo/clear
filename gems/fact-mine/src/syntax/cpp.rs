@@ -11,18 +11,19 @@ use super::normalized_behavior::{
     nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
     type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
-    NormalizedSemanticEffect, NormalizedStateRead,
+    NormalizedSemanticEffect, NormalizedStateRead, SyntaxMetadata,
 };
-use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata};
+use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata, FunctionDef};
 use crate::ast::{Child, Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
 use crate::type_inference::TypeExpr;
+use std::collections::{BTreeMap, BTreeSet};
 
 const CPP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     strip_prefixes: &["const "],
     trim_prefix_chars: &[],
     trim_suffix_chars: &['&', '*'],
-    array_names: &["vector", "array", "span"],
+    array_names: &["vector", "array", "deque", "forward_list", "list", "span"],
     hash_names: &["unordered_map"],
     set_names: &["unordered_set"],
     string_names: &["string", "basic_string"],
@@ -33,6 +34,95 @@ const CPP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     nominal::parse(source, &CPP_NOMINAL_TYPE_SYNTAX)
+}
+
+fn cpp_type_aliases(source: &str) -> (BTreeMap<String, String>, BTreeMap<String, usize>) {
+    let mut candidates = BTreeMap::<String, BTreeSet<(String, usize)>>::new();
+    let mut statement = String::new();
+    let mut statement_line = 1usize;
+    for (line_index, line) in source.lines().enumerate() {
+        let code = line.split("//").next().unwrap_or_default();
+        if statement.trim().is_empty() {
+            statement_line = line_index + 1;
+        }
+        statement.push(' ');
+        statement.push_str(code);
+        while let Some(end) = statement.find(';') {
+            let current = statement[..end].trim().to_string();
+            statement = statement[end + 1..].to_string();
+            let using = current
+                .rfind("using ")
+                .and_then(|start| current.get(start + "using ".len()..))
+                .and_then(|declaration| declaration.split_once('='))
+                .and_then(|(name, target)| {
+                    let name = name.trim();
+                    let valid = !name.is_empty()
+                        && name
+                            .chars()
+                            .all(|character| character == '_' || character.is_ascii_alphanumeric())
+                        && name
+                            .chars()
+                            .next()
+                            .is_some_and(|character| {
+                                character == '_' || character.is_ascii_alphabetic()
+                            });
+                    valid.then(|| {
+                        (
+                            name.to_string(),
+                            target.split_whitespace().collect::<Vec<_>>().join(" "),
+                        )
+                    })
+                });
+            let typedef = current
+                .rfind("typedef ")
+                .and_then(|start| current.get(start + "typedef ".len()..))
+                .and_then(|declaration| {
+                    let split = declaration
+                        .trim()
+                        .rfind(char::is_whitespace)
+                        .filter(|index| *index > 0)?;
+                    let target = declaration[..split].trim();
+                    let name = declaration[split..].trim();
+                    (!target.is_empty()
+                        && !name.is_empty()
+                        && name.chars().all(|character| {
+                            character == '_' || character.is_ascii_alphanumeric()
+                        }))
+                    .then(|| {
+                        (
+                            name.to_string(),
+                            target.split_whitespace().collect::<Vec<_>>().join(" "),
+                        )
+                    })
+                });
+            if let Some((name, target)) = using.or(typedef).filter(|(_, target)| !target.is_empty()) {
+                candidates
+                    .entry(name)
+                    .or_default()
+                    .insert((target, statement_line));
+            }
+            statement_line = line_index + 1;
+        }
+    }
+
+    let mut aliases = BTreeMap::new();
+    let mut lines = BTreeMap::new();
+    for (name, definitions) in candidates {
+        let targets = definitions
+            .iter()
+            .map(|(target, _)| target)
+            .collect::<BTreeSet<_>>();
+        // An unqualified alias is usable only when this translation unit gives
+        // it one meaning. Repeated `super`/`Type` aliases in unrelated owners
+        // intentionally remain unresolved rather than cross-contaminating.
+        if targets.len() != 1 {
+            continue;
+        }
+        let (target, line) = definitions.into_iter().next().expect("one alias target");
+        aliases.insert(name.clone(), target);
+        lines.insert(name, line);
+    }
+    (aliases, lines)
 }
 
 fn scip_clang_parts(symbol: &str) -> Option<(&str, &str)> {
@@ -380,6 +470,19 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
     fn parameter_type_from_signature(&self, parameter: &str) -> Option<String> {
         type_before_parameter_name(parameter)
+    }
+
+    fn syntax_metadata(&self, source: &str, functions: &[FunctionDef]) -> SyntaxMetadata {
+        let (type_aliases, type_alias_lines) = cpp_type_aliases(source);
+        SyntaxMetadata {
+            type_aliases,
+            type_alias_lines,
+            method_param_types:
+                super::normalized_behavior::method_param_types_from_signatures(
+                    self, source, functions,
+                ),
+            ..SyntaxMetadata::default()
+        }
     }
 
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
@@ -748,6 +851,30 @@ mod tests {
             "swap"
         )
         .is_none());
+    }
+
+    #[test]
+    fn cpp_aliases_keep_only_unambiguous_translation_unit_bindings() {
+        let (aliases, lines) = cpp_type_aliases(
+            r#"
+using Items = std::list<
+    Widget
+>;
+typedef std::wstring WideName;
+struct First { using super = BaseOne; };
+struct Second { using super = BaseTwo; };
+"#,
+        );
+        assert_eq!(
+            aliases.get("Items").map(String::as_str),
+            Some("std::list< Widget >")
+        );
+        assert_eq!(
+            aliases.get("WideName").map(String::as_str),
+            Some("std::wstring")
+        );
+        assert_eq!(lines.get("Items"), Some(&2));
+        assert!(!aliases.contains_key("super"));
     }
 
     #[test]
