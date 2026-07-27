@@ -882,6 +882,18 @@ mod tests {
             ("Collections/Hashtable#Clear().", "Clear", "O(N)"),
             ("System/Array#GetLength().", "GetLength", "O(1)"),
             ("System/Array#GetValue(+3).", "GetValue", "O(1)"),
+            ("Linq/Enumerable#Any().", "Any", "O(N)"),
+            (
+                "RegularExpressions/Regex#IsMatch(+5).",
+                "IsMatch",
+                "O(N)",
+            ),
+            ("System/ReadOnlySpan#Slice(+1).", "Slice", "O(1)"),
+            (
+                "InteropServices/MemoryMarshal#CreateSpan().",
+                "CreateSpan",
+                "O(1)",
+            ),
         ] {
             let cost = external_symbol_call_complexity(&symbol(descriptor), message)
                 .unwrap_or_else(|| panic!("missing exact cost for {descriptor}"));
@@ -909,6 +921,13 @@ mod tests {
         assert_eq!(
             virtual_object.parametric_cost.as_deref(),
             Some("callback_once")
+        );
+        let string_create = external_symbol_metadata(
+            "scip-dotnet nuget System.Runtime 10.0.0.0 System/String#Create().",
+        );
+        assert_eq!(
+            string_create.parametric_cost.as_deref(),
+            Some("callback_linear")
         );
         assert_eq!(
             CSharpNormalizedBehavior
