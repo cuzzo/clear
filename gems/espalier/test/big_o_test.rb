@@ -494,6 +494,42 @@ class BigOTest < Minitest::Test
     assert_includes recursive[:evidence_gaps], "unresolved_recursive_progress"
   end
 
+  def test_structural_big_o_discharge_resolved_constant_project_calls
+    facts = {
+      "caller-id" => [{
+        "line" => 2, "parameters" => [], "iterations" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{
+          "line" => 3, "span" => [3, 4, 3, 12], "message" => "build",
+          "execution_multiplicity" => "O(1)",
+          "argument_cardinality_relation" => "same",
+          "evidence_gap" => "unresolved_call_target"
+        }]
+      }]
+    }
+    consumer = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "constructor-id" => "O(1)" },
+      method_spaces: { "constructor-id" => "O(1)" },
+      method_time_complete: { "constructor-id" => true },
+      method_space_complete: { "constructor-id" => true },
+      resolved_calls: {
+        ["caller-id", "build", [3, 4, 3, 12]] =>
+          ["Target", "Target", "constructor-id"]
+      }
+    )
+
+    hint = consumer
+      .hints_for(nil, { id: "caller-id", name: "run", line: 2 }, "Caller")
+      .find { |row| row[:operation] == "build" }
+    refute_nil hint
+    assert_equal "O(1)", hint[:complexity]
+    assert_equal "O(1)", hint[:space]
+    assert hint[:time_complete]
+    assert hint[:space_complete]
+    refute hint[:is_dynamic]
+  end
+
   # An exact recursive edge whose progress cannot be proven is not a proven
   # exponential: it is an unproven bound. Reporting O(2^N) as complete both
   # asserts a bound nothing established and hides the missing proof from the

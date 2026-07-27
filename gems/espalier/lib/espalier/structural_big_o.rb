@@ -210,8 +210,6 @@ module Espalier
           callee_bound_qualities = Array(summary_value(@method_bound_qualities, callee_id, callee_owner, callee))
           callee_assumptions = Array(summary_value(@method_assumptions, callee_id, callee_owner, callee))
           next unless callee_complexity || callee_space
-          next if callee_complexity == "O(1)" && (!callee_space || callee_space == "O(1)") &&
-            callee_time_complete && callee_space_complete
 
           propagated_symbolic = propagated_call_symbolic(
             callee_owner,
@@ -223,16 +221,17 @@ module Espalier
             receiver_state_dependent: receiver_state_dependent?(callee_owner, callee)
           )
           rendered_symbolic = Espalier::SymbolicComplexity.render(propagated_symbolic)&.first
+          propagated_complexity = rendered_symbolic || propagated_call_complexity(
+            context,
+            callee_complexity || "O(1)",
+            receiver_state_dependent: receiver_state_dependent?(callee_owner, callee)
+          )
           hints << {
             type: :structural,
             line: context.fetch("line", method[:line]).to_i,
-            complexity: rendered_symbolic || propagated_call_complexity(
-              context,
-              callee_complexity || "O(1)",
-              receiver_state_dependent: receiver_state_dependent?(callee_owner, callee)
-            ),
+            complexity: propagated_complexity,
             space: callee_space,
-            is_dynamic: true,
+            is_dynamic: propagated_complexity != "O(1)" || callee_space.to_s != "O(1)",
             operation: context["message"],
             reason: "normalized call containment and propagated callee complexity",
             confidence: "high",
