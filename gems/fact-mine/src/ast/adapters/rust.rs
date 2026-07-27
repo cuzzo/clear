@@ -74,6 +74,15 @@ impl AstNormalizationAdapter for RustAstAdapter {
             .flatten()
     }
 
+    fn loop_binding_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "for_expression")
+            .then(|| node.child_by_field_name("pattern"))
+            .flatten()
+    }
+
     fn scoped_call_parts<'tree>(
         &self,
         node: TreeSitterNode<'tree>,

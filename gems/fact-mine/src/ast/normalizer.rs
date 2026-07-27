@@ -1039,10 +1039,19 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_field(node, "body")
             .or_else(|| self.named_field(node, "consequence"))
             .or_else(|| self.block_child(node));
+        let binding = self
+            .normalization_adapter
+            .loop_binding_node(node)
+            .and_then(|binding| self.normalize_node(binding));
         let condition =
             optional_node(condition.and_then(|condition| self.normalize_node(condition)));
         let body = optional_node(body.and_then(|body| self.normalize_control_body(body)));
-        Some(self.wrap(node_type, vec![condition, body], node))
+        let children = if let Some(binding) = binding {
+            vec![Child::Node(Box::new(binding)), condition, body]
+        } else {
+            vec![condition, body]
+        };
+        Some(self.wrap(node_type, children, node))
     }
 
     pub(in crate::ast) fn normalize_else_or_branch(

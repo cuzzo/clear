@@ -1413,6 +1413,16 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    /// Supplies the binding/pattern for normalized `FOR` nodes. The canonical
+    /// shape is `[binding, iterable, body]`, which CFG and DFG consumers use
+    /// to connect each element to the collection it came from.
+    fn loop_binding_node<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     fn modifier_loop_kind(&self, _kind: &str) -> bool {
         false
     }
