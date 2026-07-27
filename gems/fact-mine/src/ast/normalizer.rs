@@ -518,6 +518,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                         .function_body(node, normalizer.source)
                 })?;
             let body = normalizer.normalize_body(body_node);
+            let body = normalizer.prepend_function_body_prefix(node, body);
             let body = normalizer.elide_tail_returns(body);
             let body = normalizer.prepend_inline_parameter_begin(node, body);
             normalizer.elide_implicit_nil_body(body)
@@ -531,6 +532,29 @@ impl<'source> TreeSitterNormalizer<'source> {
             vec![Child::Symbol(name), Child::Node(Box::new(scope))],
             declaration_node,
         ))
+    }
+
+    fn prepend_function_body_prefix(
+        &mut self,
+        function: TreeSitterNode<'_>,
+        body: Option<Node>,
+    ) -> Option<Node> {
+        let prefix_nodes = self
+            .normalization_adapter
+            .function_body_prefix_nodes(function, self.source);
+        if prefix_nodes.is_empty() {
+            return body;
+        }
+        let source = prefix_nodes.first().copied().unwrap_or(function);
+        let prefix = self.normalize_body_nodes(prefix_nodes, source);
+        let mut children = Vec::new();
+        if let Some(prefix) = prefix {
+            append_flattened_block(prefix, &mut children);
+        }
+        if let Some(body) = body {
+            append_flattened_block(body, &mut children);
+        }
+        Some(self.wrap("BLOCK", children, function))
     }
 
     pub(in crate::ast) fn normalize_leading_function_statement(

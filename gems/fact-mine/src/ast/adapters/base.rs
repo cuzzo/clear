@@ -461,6 +461,17 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    /// Executable nodes that precede the grammar's ordinary function body.
+    /// This is used for source constructs such as C# constructor delegation,
+    /// which tree-sitter stores beside (rather than inside) the body block.
+    fn function_body_prefix_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        Vec::new()
+    }
+
     /// Split a path-qualified call callee (`Cell::new`, `Foo::bar`) into its
     /// receiver node and method name, so the normalized call carries the real
     /// method as its message instead of a generic `call` placeholder. Returns
