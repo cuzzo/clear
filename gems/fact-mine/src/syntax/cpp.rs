@@ -68,6 +68,22 @@ pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     if normalized.starts_with("nlohmann::") && matches!(terminal, "json" | "basic_json") {
         return TypeExpr::Primitive("Json".to_string());
     }
+    if normalized.starts_with("std::atomic")
+        || matches!(
+            terminal,
+            "atomic_bool"
+                | "atomic_char"
+                | "atomic_int"
+                | "atomic_long"
+                | "atomic_llong"
+                | "atomic_uint"
+                | "atomic_ulong"
+                | "atomic_ullong"
+                | "atomic_size_t"
+        )
+    {
+        return TypeExpr::Primitive("StdAtomic".to_string());
+    }
     match terminal {
         "ostringstream"
         | "wostringstream"

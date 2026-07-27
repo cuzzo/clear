@@ -1807,6 +1807,45 @@ fn cpp_proven_file_stream_and_json_receivers_use_reviewed_costs() -> Result<()> 
 }
 
 #[test]
+fn cpp_arrow_field_projections_preserve_atomic_costs_and_full_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct strong_weak_compact_ptr_storage_base {
+    std::atomic_long strong_count = 1, weak_count = 1;
+};
+struct strong_weak_compact_ptr_storage : strong_weak_compact_ptr_storage_base {
+};
+struct Holder {
+    strong_weak_compact_ptr_storage* ptr_;
+    void increment() {
+        ptr_->weak_count.fetch_add(1);
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let field = output
+        .fields
+        .iter()
+        .find(|field| field.owner == "Holder" && field.name == "ptr_")
+        .context("missing pointer field")?;
+    assert_eq!(
+        field.declared_type.as_deref(),
+        Some("strong_weak_compact_ptr_storage*")
+    );
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "increment" && call.message == "fetch_add")
+        .context("missing atomic fetch_add")?;
+    assert_eq!(call.receiver_type.as_deref(), Some("std::atomic_long"));
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+    Ok(())
+}
+
+#[test]
 fn cpp_initializer_calls_do_not_hide_local_receiver_types() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(

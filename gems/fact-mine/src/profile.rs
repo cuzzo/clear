@@ -6685,7 +6685,22 @@ fn field_access_receiver_type(
     call_span: [usize; 4],
     language: &str,
 ) -> Option<String> {
-    let (base, field_expr) = receiver.rsplit_once('.')?;
+    let dot = receiver.rfind('.').map(|index| (index, 1usize));
+    let arrow = receiver.rfind("->").map(|index| (index, 2usize));
+    let (separator, width) = match (dot, arrow) {
+        (Some(dot), Some(arrow)) => {
+            if dot.0 > arrow.0 {
+                dot
+            } else {
+                arrow
+            }
+        }
+        (Some(dot), None) => dot,
+        (None, Some(arrow)) => arrow,
+        (None, None) => return None,
+    };
+    let base = &receiver[..separator];
+    let field_expr = &receiver[separator + width..];
     let base = base.trim();
     let field_expr = field_expr.trim();
     // Strip a trailing index (`fs[0]`) and remember we must return the element
@@ -6710,20 +6725,51 @@ fn field_access_receiver_type(
             )
         })?;
     let base_owner = declared_dispatch_owner_name_from_type(&base_type, language)?;
-    let field_type = document
-        .state_declarations
-        .iter()
-        .find(|declaration| {
-            declaration.field == field
-                && declared_dispatch_owner_name_from_type(&declaration.owner, language).as_deref()
-                    == Some(base_owner.as_str())
-        })
-        .and_then(|declaration| declaration.r#type.clone())?;
+    let field_types =
+        inherited_field_types(document, &base_owner, field, language, &mut BTreeSet::new());
+    let field_type = (field_types.len() == 1)
+        .then(|| field_types.into_iter().next())
+        .flatten()?;
     if indexed {
         collection_element_type(&field_type, language)
     } else {
         Some(field_type)
     }
+}
+
+fn inherited_field_types(
+    document: &Document,
+    owner: &str,
+    field: &str,
+    language: &str,
+    visited: &mut BTreeSet<String>,
+) -> BTreeSet<String> {
+    let owner_name = owner_type_name(owner).to_string();
+    if !visited.insert(owner_name.clone()) {
+        return BTreeSet::new();
+    }
+    let direct = document
+        .state_declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.field == field && owner_name_matches(&declaration.owner, &owner_name)
+        })
+        .filter_map(|declaration| declaration.r#type.clone())
+        .collect::<BTreeSet<_>>();
+    if !direct.is_empty() {
+        return direct;
+    }
+    document
+        .owner_defs
+        .iter()
+        .filter(|definition| owner_name_matches(&definition.name, &owner_name))
+        .flat_map(|definition| definition.supertypes.iter())
+        .flat_map(|supertype| {
+            let supertype = declared_dispatch_owner_name_from_type(supertype, language)
+                .unwrap_or_else(|| owner_type_name(supertype).to_string());
+            inherited_field_types(document, &supertype, field, language, visited)
+        })
+        .collect()
 }
 
 /// The element type of an indexed collection field (`[]T`, `List<T>`, `[T]`,
