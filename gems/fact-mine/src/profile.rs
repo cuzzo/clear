@@ -6798,6 +6798,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
         })
         .collect::<Vec<_>>();
     propagate_direct_call_result_receiver_types(&mut calls, language, behavior);
+    propagate_collection_callback_parameter_types(&mut calls, document, language, behavior);
     calls
 }
 
@@ -6866,6 +6867,75 @@ fn propagate_direct_call_result_receiver_types(
         if !changed {
             break;
         }
+    }
+}
+
+fn propagate_collection_callback_parameter_types(
+    calls: &mut [CallRecord],
+    document: &Document,
+    language: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) {
+    let contextual_types = calls
+        .iter()
+        .filter(|call| call.receiver_type.is_none())
+        .filter_map(|call| {
+            let definition = document.function_defs.iter().find(|definition| {
+                definition.name == call.function
+                    && definition.params.iter().any(|parameter| parameter == &call.receiver)
+                    && span_contains(definition.span, call.span)
+            })?;
+            let element_types = calls
+                .iter()
+                .filter(|outer| outer.source != call.source)
+                .filter(|outer| span_contains(outer.span, definition.span))
+                .filter(|outer| behavior.collection_callback_parameter(&outer.message))
+                .filter_map(|outer| {
+                    collection_element_type(outer.receiver_type.as_deref()?, language)
+                })
+                .collect::<BTreeSet<_>>();
+            (element_types.len() == 1).then(|| {
+                (
+                    call.id.clone(),
+                    element_types.into_iter().next().expect("one element type"),
+                )
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+    for call in calls.iter_mut() {
+        let Some(receiver_type) = contextual_types.get(&call.id) else {
+            continue;
+        };
+        let parsed = TypeExpr::parse(receiver_type, language);
+        let known = behavior.call_complexity(&parsed, &call.message);
+        let parametric = known
+            .is_none()
+            .then(|| behavior.parametric_call_cost(&parsed, &call.message))
+            .flatten();
+        let parametric_complexity = parametric
+            .as_deref()
+            .and_then(crate::syntax::parametric_call_complexity);
+        call.receiver_type = Some(receiver_type.clone());
+        call.receiver_type_origin = Some("collection_callback_parameter".to_string());
+        call.known_time_complexity = known
+            .map(|cost| cost.time.to_string())
+            .or_else(|| parametric_complexity.map(|cost| cost.0.to_string()));
+        call.known_space_complexity = known
+            .map(|cost| cost.space.to_string())
+            .or_else(|| parametric_complexity.map(|cost| cost.1.to_string()));
+        call.complexity_provenance = known
+            .map(|_| "language_stdlib_registry".to_string())
+            .or_else(|| {
+                parametric_complexity
+                    .map(|_| "parametric_declared_receiver_contract".to_string())
+            });
+        call.complexity_bound_quality = known
+            .map(|_| "upper_bound_declared_receiver".to_string())
+            .or_else(|| {
+                parametric
+                    .as_ref()
+                    .map(|kind| format!("upper_bound_parametric_{kind}"))
+            });
     }
 }
 

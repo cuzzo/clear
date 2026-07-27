@@ -1739,6 +1739,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
+    fn block_parameter_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
+    }
+
     fn function_parameter_nodes<'tree>(
         &self,
         _node: TreeSitterNode<'tree>,

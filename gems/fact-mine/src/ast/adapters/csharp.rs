@@ -171,6 +171,44 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         .then_some(node)
     }
 
+    fn normalize_block_parameters(&self) -> bool {
+        true
+    }
+
+    fn block_parameter_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        let parameters = node.child_by_field_name("parameters")?;
+        if parameters.kind() == "implicit_parameter" {
+            Some(vec![parameters])
+        } else {
+            Some(named_children(parameters))
+        }
+    }
+
+    fn is_parameter_name_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "identifier"
+                | "implicit_parameter"
+                | "hash_splat_parameter"
+                | "splat_parameter"
+                | "block_parameter"
+                | "keyword_parameter"
+                | "optional_parameter"
+        )
+    }
+
+    fn local_identifier_text(
+        &self,
+        node: TreeSitterNode<'_>,
+        source: &str,
+    ) -> Option<String> {
+        (node.kind() == "implicit_parameter").then(|| node_text(node, source).to_string())
+    }
+
     fn function_kind(&self, kind: &str) -> bool {
         matches!(
             kind,
@@ -499,7 +537,7 @@ class Widget : Parent {
   public Widget(string value) : base(Normalize(value)) {}
   static string Normalize(string value) => value;
   string Render(string value, string[] items) {
-    foreach (var item in items.Where(candidate => Accept(candidate)))
+    foreach (var item in items.Where(candidate => Accept(candidate.ToString())))
       Use(item);
     return value switch {
       "upper" => value.ToUpperInvariant(),
@@ -530,8 +568,20 @@ class Widget : Parent {
             output
                 .methods
                 .iter()
-                .any(|method| method.name.starts_with("<lambda@")),
-            "C# lambdas must be first-class project functions"
+                .any(|method| method.name.starts_with("<lambda@")
+                    && method.params == ["candidate"]),
+            "C# lambdas must be first-class project functions: {:?}",
+            output.methods
+        );
+        assert!(
+            output.calls.iter().any(|call| {
+                call.function.starts_with("<lambda@")
+                    && call.receiver == "candidate"
+                    && call.receiver_type.as_deref() == Some("String")
+                    && call.known_time_complexity.as_deref() == Some("O(1)")
+            }),
+            "C# collection callbacks must inherit their proven element type: {:?}",
+            output.calls
         );
         let messages = output
             .calls
