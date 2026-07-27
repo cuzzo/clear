@@ -251,7 +251,16 @@ fn owner_identity_name(value: &str) -> String {
         .trim_end_matches(|character: char| {
             character.is_whitespace() || matches!(character, '&' | '*')
         });
-    let value = value.split(['[', '<']).next().unwrap_or(value).trim();
+    // Erase template arguments without discarding a following nested owner.
+    // Splitting at the first `<` made `Base<T>::Nested` indistinguishable from
+    // `Base<T>`, which introduced a false specialization ambiguity during
+    // inherited lookup.
+    let without_templates = symbol_without_template_arguments(value);
+    let value = without_templates
+        .split('[')
+        .next()
+        .unwrap_or(&without_templates)
+        .trim();
     value
         .rsplit([':', '.'])
         .find(|part| !part.is_empty())

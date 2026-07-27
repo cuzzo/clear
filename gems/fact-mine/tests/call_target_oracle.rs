@@ -1398,7 +1398,7 @@ fn cpp_template_specialization_resolves_implicit_inherited_calls() -> Result<()>
     let output = extract_source(
         "template <class T, class U> class Base;\n\
          template <class T> class Base<T, void(T)> {\n\
-         public: struct Nested {}; void work() {}\n\
+         public: struct Nested { void work() {} }; void work() {}\n\
          };\n\
          template <class T> class Child;\n\
          template <class T> class Child<T> : public Base<T, void(T)> {\n\
@@ -1410,7 +1410,11 @@ fn cpp_template_specialization_resolves_implicit_inherited_calls() -> Result<()>
     let target = output
         .methods
         .iter()
-        .find(|method| method.owner.starts_with("Base") && method.name == "work")
+        .find(|method| {
+            method.owner.starts_with("Base")
+                && !method.owner.contains("::Nested")
+                && method.name == "work"
+        })
         .context("missing C++ Base::work")?;
     let call = output
         .calls
