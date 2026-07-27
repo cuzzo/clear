@@ -527,11 +527,17 @@ impl<'source> TreeSitterNormalizer<'source> {
         let declaration_node = self
             .normalization_adapter
             .function_declaration_node(node, self.source);
-        Some(self.wrap(
-            "DEFN",
-            vec![Child::Symbol(name), Child::Node(Box::new(scope))],
-            declaration_node,
-        ))
+        let children = vec![Child::Symbol(name), Child::Node(Box::new(scope))];
+        Some(
+            if let Some((start, end)) = self
+                .normalization_adapter
+                .function_declaration_span_nodes(node, self.source)
+            {
+                self.wrap_from_nodes("DEFN", children, start, end)
+            } else {
+                self.wrap("DEFN", children, declaration_node)
+            },
+        )
     }
 
     fn prepend_function_body_prefix(

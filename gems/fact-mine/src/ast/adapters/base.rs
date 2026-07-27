@@ -285,6 +285,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         node
     }
 
+    /// Start/end nodes for a callable whose declaration and executable body
+    /// are split by grammar recovery. Unlike `function_declaration_node`,
+    /// this preserves the exact union span without swallowing neighboring
+    /// declarations from a broad recovery wrapper.
+    fn function_declaration_span_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, TreeSitterNode<'tree>)> {
+        None
+    }
+
     /// Tree-sitter error recovery can occasionally label a malformed region
     /// as a function definition. Adapters with syntax that makes a reliable
     /// declaration check possible may reject that recovery node here.

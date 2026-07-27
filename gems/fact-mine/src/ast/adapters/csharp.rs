@@ -178,6 +178,21 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         )
     }
 
+    fn valid_function_definition(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        csharp_split_preprocessor_method(node, source)
+            .is_none_or(|split| split.declaration != node)
+    }
+
+    fn function_declaration_span_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, TreeSitterNode<'tree>)> {
+        csharp_split_preprocessor_method(node, source)
+            .filter(|split| split.implementation == node)
+            .map(|split| (split.declaration, split.implementation))
+    }
+
     fn function_body<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -285,6 +300,50 @@ fn csharp_has_any_ancestor(mut node: TreeSitterNode<'_>, kinds: &[&str]) -> bool
         node = parent;
     }
     false
+}
+
+#[derive(Clone, Copy)]
+struct CSharpSplitPreprocessorMethod<'tree> {
+    declaration: TreeSitterNode<'tree>,
+    implementation: TreeSitterNode<'tree>,
+}
+
+fn csharp_split_preprocessor_method<'tree>(
+    node: TreeSitterNode<'tree>,
+    source: &str,
+) -> Option<CSharpSplitPreprocessorMethod<'tree>> {
+    if node.kind() != "method_declaration" {
+        return None;
+    }
+    let wrapper = match node.parent()?.kind() {
+        "preproc_if" => node.parent()?,
+        "preproc_else" => node.parent()?.parent()?,
+        _ => return None,
+    };
+    if wrapper.kind() != "preproc_if" {
+        return None;
+    }
+    let declaration = named_children(wrapper)
+        .into_iter()
+        .find(|child| child.kind() == "method_declaration")?;
+    let alternative = named_children(wrapper)
+        .into_iter()
+        .find(|child| child.kind() == "preproc_else")?;
+    let implementation = named_children(alternative)
+        .into_iter()
+        .find(|child| child.kind() == "method_declaration")?;
+    let declaration_name = declaration.child_by_field_name("name")?;
+    let implementation_name = implementation.child_by_field_name("name")?;
+    if node_text(declaration_name, source) != node_text(implementation_name, source)
+        || declaration.child_by_field_name("body").is_some()
+        || implementation.child_by_field_name("body").is_none()
+    {
+        return None;
+    }
+    Some(CSharpSplitPreprocessorMethod {
+        declaration,
+        implementation,
+    })
 }
 
 fn csharp_attribute_invocation(node: TreeSitterNode<'_>, source: &str) -> bool {
@@ -442,6 +501,42 @@ class Widget : Parent {
             assert!(messages.contains(expected), "calls={messages:?}");
         }
         assert!(!messages.contains("call"), "calls={messages:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn preprocessor_split_signature_keeps_one_callable_with_its_body() -> Result<()> {
+        let tmp = tempfile::Builder::new().suffix(".cs").tempfile()?;
+        fs::write(
+            tmp.path(),
+            r#"class Demo {
+#if FEATURE_SPAN
+  void Process(System.Span<object> values)
+#else
+  void Process(object[] values)
+#endif
+  { Use(values); }
+  void Use(object value) {}
+}"#,
+        )?;
+        let document = syntax::parse_file(tmp.path().to_path_buf(), Language::CSharp)?;
+        let output = profile::extract(&document, profile::Profile::Espalier);
+        let process = output
+            .methods
+            .iter()
+            .filter(|method| method.name == "Process")
+            .collect::<Vec<_>>();
+        assert_eq!(process.len(), 1, "methods={:?}", output.methods);
+        assert!(
+            output
+                .calls
+                .iter()
+                .any(|call| call.source == process[0].id && call.message == "Use"),
+            "calls={:?}",
+            output.calls
+        );
+        let span = process[0].span.expect("process span");
+        assert_eq!(span, [3, 2, 7, 18]);
         Ok(())
     }
 }
