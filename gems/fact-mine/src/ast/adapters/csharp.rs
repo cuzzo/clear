@@ -324,7 +324,7 @@ fn csharp_split_preprocessor_method<'tree>(
         "preproc_else" => parent.parent().filter(|parent| parent.kind() == "preproc_if"),
         _ => None,
     };
-    let (declaration, implementation) = if let Some(wrapper) = structured {
+    let structured_pair = structured.and_then(|wrapper| {
         let declaration = named_children(wrapper)
             .into_iter()
             .find(|child| child.kind() == "method_declaration")?;
@@ -334,12 +334,18 @@ fn csharp_split_preprocessor_method<'tree>(
         let implementation = named_children(alternative)
             .into_iter()
             .find(|child| child.kind() == "method_declaration")?;
-        (declaration, implementation)
-    } else if parent.kind() == "ERROR" {
-        let methods = named_children(parent)
-            .into_iter()
-            .filter(|child| child.kind() == "method_declaration")
-            .collect::<Vec<_>>();
+        implementation
+            .child_by_field_name("body")
+            .map(|_| (declaration, implementation))
+    });
+    let (declaration, implementation) = if let Some(pair) = structured_pair {
+        pair
+    } else {
+        let mut recovery = Some(parent);
+        while recovery.is_some_and(|candidate| candidate.kind() != "ERROR") {
+            recovery = recovery.and_then(|candidate| candidate.parent());
+        }
+        let methods = csharp_descendant_methods(recovery?);
         let name = node.child_by_field_name("name")?;
         let name = node_text(name, source);
         let declaration = methods.iter().copied().find(|candidate| {
@@ -358,8 +364,6 @@ fn csharp_split_preprocessor_method<'tree>(
                 && source[declaration.end_byte()..candidate.start_byte()].contains("#else")
         })?;
         (declaration, implementation)
-    } else {
-        return None;
     };
     let declaration_name = declaration.child_by_field_name("name")?;
     let implementation_name = implementation.child_by_field_name("name")?;
@@ -373,6 +377,19 @@ fn csharp_split_preprocessor_method<'tree>(
         declaration,
         implementation,
     })
+}
+
+fn csharp_descendant_methods(node: TreeSitterNode<'_>) -> Vec<TreeSitterNode<'_>> {
+    let mut methods = Vec::new();
+    let mut stack = named_children(node);
+    while let Some(candidate) = stack.pop() {
+        if candidate.kind() == "method_declaration" {
+            methods.push(candidate);
+        } else {
+            stack.extend(named_children(candidate));
+        }
+    }
+    methods
 }
 
 fn csharp_attribute_invocation(node: TreeSitterNode<'_>, source: &str) -> bool {
@@ -561,6 +578,12 @@ class Widget : Parent {
   void Process(object[] values)
 #endif
   { Use(values); }
+#if FEATURE_SPAN
+  void Render(System.ReadOnlySpan<object?> values)
+#else
+  void Render(object?[] values)
+#endif
+  { Use(values); }
   void Use(object value) {}
 }"#,
         )?;
@@ -582,6 +605,16 @@ class Widget : Parent {
         );
         let span = process[0].span.expect("process span");
         assert_eq!(span, [3, 2, 7, 18]);
+        assert_eq!(
+            output
+                .methods
+                .iter()
+                .filter(|method| method.name == "Render")
+                .count(),
+            1,
+            "methods={:?}",
+            output.methods
+        );
         Ok(())
     }
 }
