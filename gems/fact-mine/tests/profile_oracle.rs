@@ -1870,6 +1870,7 @@ struct Runner {
         callback();
         hook(1);
         Formatter::format(1);
+        Formatter{}.invoke(1);
         Compare(1, 2);
     }
 };
@@ -1889,6 +1890,7 @@ void invoke(Concrete& concrete) {
         "load",
         "callback",
         "Formatter::format",
+        "invoke",
         "Compare",
     ] {
         let call = output
