@@ -357,13 +357,58 @@ module Espalier
       return "example" if (parts & %w[example examples sample samples]).any?
       return "test" if (parts & %w[test tests spec specs __tests__ jvmtest androidtest commontest nativetest nonwasmtest wasmtest integrationtest unittest uitest functionaltest]).any?
       return "test" if parts.any? { |part| part.end_with?("test") && part.match?(/\A(?:android|common|functional|integration|jvm|native|nonwasm|unit|ui|wasm)/) }
-      return "test" if basename.match?(/(?:\A|[_\.])test(?:[_\.]|\z)|(?:\A|[_\.])spec(?:[_\.]|\z)/)
+      return "test" if basename.match?(/(?:\A|[-_\.])test(?:[-_\.]|\z)|(?:\A|[-_\.])spec(?:[-_\.]|\z)/)
       # Test-helper products are executable support code, not production
       # library surface. Match common portable path spellings, including the
       # Swift Package Manager `ArgumentParserTestHelpers` convention.
       return "test" if parts.any? { |part| part.match?(/test(?:_|-)?(?:helpers?|support)/i) }
 
       "production"
+    end
+
+    # Classify callable records more precisely than their containing file.
+    # Rust commonly keeps `#[cfg(test)] mod tests` at the bottom of a
+    # production source file. rust-analyzer's SCIP symbol retains that module
+    # boundary, and synthetic closures inherit the role of the exact enclosing
+    # test callable by source span.
+    def self.method_source_roles(methods)
+      rows = Array(methods)
+      roles = rows.to_h { |method| [method.fetch("id").to_s, source_role(method["path"])] }
+      test_spans_by_path = Hash.new { |hash, path| hash[path] = [] }
+
+      rows.each do |method|
+        next unless roles.fetch(method.fetch("id").to_s) == "production"
+        next unless method["language"].to_s == "rust"
+        next unless rust_test_semantic_symbol?(method["semantic_symbol"])
+
+        roles[method.fetch("id").to_s] = "test"
+        test_spans_by_path[method["path"].to_s] << Array(method["span"])
+      end
+
+      rows.each do |method|
+        id = method.fetch("id").to_s
+        next unless roles.fetch(id) == "production"
+        next unless method["language"].to_s == "rust"
+
+        span = Array(method["span"])
+        next unless span.length == 4
+        next unless test_spans_by_path[method["path"].to_s].any? { |outer| span_contains?(outer, span) }
+
+        roles[id] = "test"
+      end
+
+      roles
+    end
+
+    def self.rust_test_semantic_symbol?(symbol)
+      symbol.to_s.match?(%r{(?:\s|/)(?:tests?|test_helpers?)/})
+    end
+
+    def self.span_contains?(outer, inner)
+      return false unless outer.length == 4 && inner.length == 4
+
+      ([inner[0].to_i, inner[1].to_i] <=> [outer[0].to_i, outer[1].to_i]) >= 0 &&
+        ([inner[2].to_i, inner[3].to_i] <=> [outer[2].to_i, outer[3].to_i]) <= 0
     end
 
 

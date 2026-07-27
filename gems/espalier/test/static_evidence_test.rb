@@ -304,6 +304,7 @@ class StaticEvidenceTest < Minitest::Test
 
   def test_source_roles_are_language_neutral_path_facts
     assert_equal "test", Espalier::StaticEvidence.source_role("src/widget_test.go")
+    assert_equal "test", Espalier::StaticEvidence.source_role("src/normalizer-test.rs")
     assert_equal "test", Espalier::StaticEvidence.source_role("tests/test_widget.py")
     assert_equal "test", Espalier::StaticEvidence.source_role("Tests/ArgumentParserTests/AnyArgumentTests.swift")
     assert_equal "test", Espalier::StaticEvidence.source_role("src/jvmTest/kotlin/Foo.kt")
@@ -312,6 +313,37 @@ class StaticEvidenceTest < Minitest::Test
     assert_equal "example", Espalier::StaticEvidence.source_role("examples/widget.rb")
     assert_equal "production", Espalier::StaticEvidence.source_role("rich/console.py")
     assert_equal "test", Espalier::StaticEvidence.source_role("Sources/ArgumentParserTestHelpers/Helpers.swift")
+  end
+
+  def test_method_source_roles_exclude_rust_inline_test_modules_and_their_lambdas
+    methods = [
+      {
+        "id" => "production",
+        "path" => "/project/src/lib.rs",
+        "language" => "rust",
+        "span" => [1, 0, 5, 1],
+        "semantic_symbol" => "rust-analyzer cargo demo 0.1.0 run()."
+      },
+      {
+        "id" => "test",
+        "path" => "/project/src/lib.rs",
+        "language" => "rust",
+        "span" => [10, 4, 20, 5],
+        "semantic_symbol" => "rust-analyzer cargo demo 0.1.0 tests/check()."
+      },
+      {
+        "id" => "test-lambda",
+        "path" => "/project/src/lib.rs",
+        "language" => "rust",
+        "kind" => "lambda",
+        "span" => [14, 20, 14, 32]
+      }
+    ]
+
+    assert_equal(
+      { "production" => "production", "test" => "test", "test-lambda" => "test" },
+      Espalier::StaticEvidence.method_source_roles(methods)
+    )
   end
 
   def test_project_modules_prefers_a_primary_owner_over_an_extension_and_never_gives_protocols_state
