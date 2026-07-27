@@ -386,6 +386,76 @@ fn java_enhanced_for_preserves_iterable_calls_in_the_normalized_cfg() -> Result<
 }
 
 #[test]
+fn rust_for_preserves_iterable_calls_in_the_normalized_cfg() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"fn values() -> Vec<String> { loop {} }
+fn run() {
+    for value in values() {
+        value.len();
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(messages.contains("values"), "calls={messages:?}");
+    assert!(messages.contains("len"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_discard_bindings_preserve_rhs_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"fn helper() {}
+fn run() {
+    let _ = helper();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    assert!(
+        output
+            .calls
+            .iter()
+            .any(|call| call.source == run.id && call.message == "helper")
+    );
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
 fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_csharp.cs"), Language::CSharp)?;
     let output = profile::extract(&document, Profile::NilKill);

@@ -62,6 +62,10 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         Vec::new()
     }
 
+    fn variable_declarator_node(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "variable_declarator"
+    }
+
     /// Pre-parse source transformation, fed to tree-sitter's `parse()` call
     /// only - never used for digests, snippets, or spans, which always read
     /// the untouched original source. Defaults to a no-op; override only
@@ -104,7 +108,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
                     | "assignment_statement"
                     | "annotated_assignment"
             ),
-            "variable_declarator" => kind == "variable_declarator",
+            "variable_declarator" => self.variable_declarator_node(node),
             "super" => kind == "super",
             "return_or_break" => matches!(
                 kind,
