@@ -222,3 +222,29 @@ gems/espalier/script/report_big_o_proof_metrics.rb \
 The reporter and this document use the same language-neutral proof classifier.
 New confidence states belong in that classifier and its tests, not in
 language-specific adapters.
+
+To measure the compiler index itself, generate the same FactMine profile once
+without and once with `--scip-index`, then run:
+
+```bash
+gems/espalier/script/compare_scip_big_o.rb \
+  --source-root /path/to/corpus \
+  --repository project \
+  source-only.json indexed.json
+```
+
+The comparison uses production files only, reports exact proof buckets and call
+resolution counts, and preserves executable raw-call normalization gaps. Use
+`check_big_o_coverage.rb` for the enforcing 85% gate.
+
+Current indexed smoke corpora are pinned by source commit and indexer version:
+
+| Language | Corpus commit | Indexer | Production complete, source → SCIP | Exact project targets, source → SCIP |
+| --- | --- | --- | ---: | ---: |
+| Java | Apache Commons CLI `afb0fd148517b1bf8316ebbc44ec9ec8b201452a` | scip-java 0.12.3 | 271/524 (51.72%) → 330/524 (62.98%) | 557 → 784 |
+| C | cJSON `fb16e5cf358798aabb049655975cde8427101056` | scip-clang 0.4.0 | 29/116 (25.00%) → 29/116 (25.00%) | 188 → 188 |
+
+The cJSON index still contributes 323 compiler-proven call symbols. Its flat
+function coverage is therefore a useful regression: identity ingestion works,
+while the remaining C header, macro, builtin, and external-cost layer is
+measured separately instead of being credited as complete.
