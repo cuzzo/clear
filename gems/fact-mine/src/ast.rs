@@ -216,6 +216,15 @@ pub(crate) fn preprocessor_callable_names(
     adapters::normalization_adapter(language).preprocessor_callable_names(root, source)
 }
 
+pub(crate) fn preprocessor_callable_definitions(
+    root: TreeSitterNode<'_>,
+    source: &str,
+    language: Language,
+) -> Vec<(String, String)> {
+    adapters::normalization_adapter(language)
+        .preprocessor_callable_definitions(root, source)
+}
+
 pub fn node(child: &Child) -> Option<&Node> {
     match child {
         Child::Node(node) => Some(node),

@@ -1917,6 +1917,77 @@ fn cpp_inactive_runtime_spelling_emits_modeled_world_evidence() -> Result<()> {
 }
 
 #[test]
+fn cpp_source_macro_definitions_price_unindexed_calls_only_when_converged() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#define IDENTITY(value) value
+#if MODE
+#define MAYBE(value) value
+#else
+#define MAYBE(value) unknown(value)
+#endif
+int bounded() { return IDENTITY(1); }
+int unknown() { return MAYBE(1); }
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let identity = output
+        .calls
+        .iter()
+        .find(|call| call.function == "bounded" && call.message == "IDENTITY")
+        .context("missing bounded macro call")?;
+    assert_eq!(identity.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        identity.complexity_provenance.as_deref(),
+        Some("source_preprocessor_definition")
+    );
+    let maybe = output
+        .calls
+        .iter()
+        .find(|call| call.function == "unknown" && call.message == "MAYBE")
+        .context("missing divergent macro call")?;
+    assert_eq!(maybe.known_time_complexity, None);
+    Ok(())
+}
+
+#[test]
+fn cpp_source_macro_costs_cross_file_shard_boundaries() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let definition = directory.path().join("macros.h");
+    let caller = directory.path().join("caller.cpp");
+    fs::write(&definition, "#define IDENTITY(value) value\n")?;
+    fs::write(&caller, "int bounded() { return IDENTITY(1); }\n")?;
+    let definition = syntax::parse_file(definition, Language::Cpp)?;
+    let caller = syntax::parse_file(caller, Language::Cpp)?;
+    let definition = profile::extract(&definition, Profile::Espalier);
+    assert_eq!(definition.preprocessor_definition_costs.len(), 1);
+    let mut caller = profile::extract(&caller, Profile::Espalier);
+    let call = caller
+        .calls
+        .iter_mut()
+        .find(|call| call.message == "IDENTITY")
+        .context("missing macro-shaped call")?;
+    // SCIP marks macro occurrences with the compiler's `!` symbol. This test
+    // supplies that compiler-owned classification without constructing a
+    // protobuf index; the source shard supplies the independently priced body.
+    call.preprocessor_callable = true;
+    let output = profile::merge(vec![definition, caller], Profile::Espalier);
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "IDENTITY")
+        .context("missing merged macro call")?;
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        call.complexity_provenance.as_deref(),
+        Some("merged_source_preprocessor_definition")
+    );
+    Ok(())
+}
+
+#[test]
 fn cpp_closed_overload_return_types_flow_into_chained_calls() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(

@@ -1205,9 +1205,15 @@ fn c_function_like_macros_are_not_reported_as_missing_declarations() -> Result<(
         .find(|call| call.message == "project_value")
         .context("missing macro invocation")?;
     assert!(call.preprocessor_callable);
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        call.complexity_provenance.as_deref(),
+        Some("source_preprocessor_definition")
+    );
     assert_eq!(
         call.empty_domain_cause.as_deref(),
-        Some("macro_or_preprocessor_surface")
+        None,
+        "a bounded source definition is modeled, not a missing declaration"
     );
     Ok(())
 }

@@ -9,6 +9,14 @@ impl AstNormalizationAdapter for CppAstAdapter {
         super::c::preprocessor_callable_names(root, source)
     }
 
+    fn preprocessor_callable_definitions(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+    ) -> Vec<(String, String)> {
+        super::c::preprocessor_callable_definitions(root, source)
+    }
+
     fn source_preprocessing(&self, source: &str) -> Option<String> {
         Some(super::c::strip_linkage_macros_before_type_name(source))
     }

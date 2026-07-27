@@ -10,6 +10,14 @@ impl AstNormalizationAdapter for CAstAdapter {
         preprocessor_callable_names(root, source)
     }
 
+    fn preprocessor_callable_definitions(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+    ) -> Vec<(String, String)> {
+        preprocessor_callable_definitions(root, source)
+    }
+
     fn source_preprocessing(&self, source: &str) -> Option<String> {
         let source = strip_linkage_macros_before_type_name(source);
         let source = strip_calling_convention_macros_before_function_name(&source);
@@ -232,6 +240,35 @@ pub(super) fn preprocessor_callable_names(root: TreeSitterNode<'_>, source: &str
     names.sort();
     names.dedup();
     names
+}
+
+pub(super) fn preprocessor_callable_definitions(
+    root: TreeSitterNode<'_>,
+    source: &str,
+) -> Vec<(String, String)> {
+    fn visit(
+        node: TreeSitterNode<'_>,
+        source: &str,
+        definitions: &mut Vec<(String, String)>,
+    ) {
+        if node.kind() == "preproc_function_def" {
+            if let Some(name) = node.child_by_field_name("name") {
+                let name = super::super::node_text(name, source).trim();
+                let definition = super::super::node_text(node, source).trim();
+                if !name.is_empty() && !definition.is_empty() {
+                    definitions.push((name.to_string(), definition.to_string()));
+                }
+            }
+        }
+        for child in named_children(node) {
+            visit(child, source, definitions);
+        }
+    }
+    let mut definitions = Vec::new();
+    visit(root, source, &mut definitions);
+    definitions.sort();
+    definitions.dedup();
+    definitions
 }
 
 #[cfg(test)]

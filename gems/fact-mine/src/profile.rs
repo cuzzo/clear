@@ -179,6 +179,11 @@ pub struct ProfileOutput {
     /// after all files have been merged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<CallRecord>,
+    /// Function-like preprocessor definitions retained across file shards.
+    /// An absent cost means the language adapter could not bound that body;
+    /// project propagation requires every same-name definition to converge.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preprocessor_definition_costs: Vec<PreprocessorDefinitionCost>,
     /// Denominator-aware coverage of exact project call targets. This is a
     /// pure reduction over the final merged call records; it never resolves or
     /// reconstructs a target itself.
@@ -248,6 +253,18 @@ pub struct ProfileOutput {
     pub hazard_sites: Vec<syntax::HazardSite>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imports: Vec<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PreprocessorDefinitionCost {
+    pub id: String,
+    pub language: String,
+    pub name: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
@@ -1018,6 +1035,8 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
         );
     }
     let state_type_edges = extract_state_type_edges(document, &language, &path);
+    let preprocessor_definition_costs =
+        extract_preprocessor_definition_costs(document, &language, &path, behavior);
     let calls = extract_calls(document, &language, &path);
     let state_accesses = extract_state_accesses(document, &language, &path);
     let complexity_facts = syntax::complexity_facts::facts(document);
@@ -1345,6 +1364,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             state_type_edges,
             call_graph_edges: Vec::new(),
             calls,
+            preprocessor_definition_costs,
             call_resolution_coverage,
             state_accesses,
             complexity_facts,
@@ -1427,6 +1447,11 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         &output.type_definitions,
         &mut output.calls,
     );
+    apply_merged_preprocessor_definition_costs(
+        &output.preprocessor_definition_costs,
+        &output.methods,
+        &mut output.calls,
+    );
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
     output.call_graph_edges = extract_call_graph_edges(&output.calls);
     output.dispatch_impls = compute_dispatch_impls(&output.owners, &output.methods);
@@ -1462,6 +1487,7 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut array_shapes = Vec::new();
     let mut state_type_edges = Vec::new();
     let mut calls = Vec::new();
+    let mut preprocessor_definition_costs = Vec::new();
     let mut state_accesses = Vec::new();
     let mut complexity_facts = Vec::new();
     let mut flow_local_types = Vec::new();
@@ -1549,6 +1575,7 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         array_shapes.extend(output.array_shapes);
         state_type_edges.extend(output.state_type_edges);
         calls.extend(output.calls);
+        preprocessor_definition_costs.extend(output.preprocessor_definition_costs);
         state_accesses.extend(output.state_accesses);
         complexity_facts.extend(output.complexity_facts);
         if nil_kill || trace_plan {
@@ -1617,6 +1644,7 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         state_type_edges,
         call_graph_edges: Vec::new(),
         calls,
+        preprocessor_definition_costs,
         call_resolution_coverage: CallResolutionCoverage {
             raw_parser_call_sites,
             raw_calls_not_normalized,
@@ -1660,11 +1688,72 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     }
 }
 
+fn apply_merged_preprocessor_definition_costs(
+    definitions: &[PreprocessorDefinitionCost],
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+) {
+    let source_languages = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut grouped = BTreeMap::<(&str, &str), Vec<&PreprocessorDefinitionCost>>::new();
+    for definition in definitions {
+        grouped
+            .entry((&definition.language, &definition.name))
+            .or_default()
+            .push(definition);
+    }
+    let converged = grouped
+        .into_iter()
+        .filter_map(|(key, definitions)| {
+            let first = definitions.first()?;
+            let time = first.time.as_deref()?;
+            let space = first.space.as_deref()?;
+            definitions
+                .iter()
+                .all(|definition| {
+                    definition.time.as_deref() == Some(time)
+                        && definition.space.as_deref() == Some(space)
+                })
+                .then(|| (key, (time.to_string(), space.to_string())))
+        })
+        .collect::<BTreeMap<_, _>>();
+    for call in calls.iter_mut().filter(|call| {
+        call.preprocessor_callable
+            && call.known_time_complexity.is_none()
+            && call.known_space_complexity.is_none()
+    }) {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some((time, space)) = converged.get(&(language, call.message.as_str())) else {
+            continue;
+        };
+        call.known_time_complexity = Some(time.clone());
+        call.known_space_complexity = Some(space.clone());
+        call.complexity_provenance = Some("merged_source_preprocessor_definition".to_string());
+        call.complexity_bound_quality =
+            Some("upper_bound_merged_source_preprocessor_definition".to_string());
+        call.complexity_candidates = vec![call.message.clone()];
+        call.complexity_assumptions = vec![format!(
+            "all analyzed source definitions of `{}` converge on this bounded cost",
+            call.message
+        )];
+        call.complexity_missing_kind = None;
+    }
+}
+
 fn finalize_project_output(output: &mut ProfileOutput) {
     resolve_project_calls(
         &output.owners,
         &output.methods,
         &output.type_definitions,
+        &mut output.calls,
+    );
+    apply_merged_preprocessor_definition_costs(
+        &output.preprocessor_definition_costs,
+        &output.methods,
         &mut output.calls,
     );
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
@@ -1679,6 +1768,12 @@ fn finalize_project_output(output: &mut ProfileOutput) {
     });
     output.calls.sort_by(|a, b| a.id.cmp(&b.id));
     output.calls.dedup_by(|a, b| a.id == b.id);
+    output
+        .preprocessor_definition_costs
+        .sort_by(|a, b| a.id.cmp(&b.id));
+    output
+        .preprocessor_definition_costs
+        .dedup_by(|a, b| a.id == b.id);
     annotate_call_resolution_proofs(&output.owners, &output.methods, &mut output.calls);
     let raw_coverage = std::mem::take(&mut output.call_resolution_coverage);
     let mut coverage = summarize_call_resolution(&output.owners, &output.methods, &output.calls);
@@ -6840,6 +6935,57 @@ fn declared_field_callback_cost(
         .flatten()
 }
 
+fn source_preprocessor_call_complexity(
+    document: &Document,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    message: &str,
+) -> Option<crate::syntax::ExternalCallComplexity> {
+    let definitions = document
+        .symbol_scope
+        .preprocessor_definitions
+        .get(message)?;
+    let costs = definitions
+        .iter()
+        .filter_map(|definition| behavior.preprocessor_definition_call_complexity(definition))
+        .collect::<Vec<_>>();
+    (costs.len() == definitions.len()
+        && costs.first().is_some()
+        && costs.windows(2).all(|pair| {
+            pair[0].time == pair[1].time && pair[0].space == pair[1].space
+        }))
+    .then(|| costs.into_iter().next())
+    .flatten()
+}
+
+fn extract_preprocessor_definition_costs(
+    document: &Document,
+    language: &str,
+    path: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) -> Vec<PreprocessorDefinitionCost> {
+    document
+        .symbol_scope
+        .preprocessor_definitions
+        .iter()
+        .flat_map(|(name, definitions)| {
+            definitions.iter().map(move |definition| {
+                let cost = behavior.preprocessor_definition_call_complexity(definition);
+                PreprocessorDefinitionCost {
+                    id: stable_id(
+                        "preprocessor",
+                        &[language, path, name, definition],
+                    ),
+                    language: language.to_string(),
+                    name: name.clone(),
+                    path: path.to_string(),
+                    time: cost.as_ref().map(|cost| cost.time.to_string()),
+                    space: cost.as_ref().map(|cost| cost.space.to_string()),
+                }
+            })
+        })
+        .collect()
+}
+
 fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRecord> {
     let behavior = crate::syntax::normalized_behavior::behavior(document.language);
     let receiver_call_spans = document
@@ -7101,6 +7247,12 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 && implicit)
                 .then(|| behavior.modeled_runtime_call_complexity(&call.message))
                 .flatten();
+            let source_preprocessor = (known_complexity.is_none()
+                && parametric_complexity.is_none()
+                && modeled_runtime.is_none()
+                && implicit)
+                .then(|| source_preprocessor_call_complexity(document, behavior, &call.message))
+                .flatten();
             // A self/this call dispatches on the enclosing definition's owner:
             // that owner IS the receiver type. There is no receiver variable to
             // type, so resolve the owner to the same canonical symbol the
@@ -7113,7 +7265,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 && instance_receiver_type.is_none()
                 && known_complexity.is_none()
                 && parametric_complexity.is_none()
-                && modeled_runtime.is_none())
+                && modeled_runtime.is_none()
+                && source_preprocessor.is_none())
             .then(|| canonical_receiver_symbol(document, &call.owner))
             .flatten();
             let instance_receiver_owner = instance_receiver_type
@@ -7353,12 +7506,22 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         modeled_runtime
                             .as_ref()
                             .map(|cost| cost.time.to_string())
+                    })
+                    .or_else(|| {
+                        source_preprocessor
+                            .as_ref()
+                            .map(|cost| cost.time.to_string())
                     }),
                 known_space_complexity: known_complexity
                     .map(|cost| cost.space.to_string())
                     .or_else(|| parametric_complexity.map(|cost| cost.1.to_string()))
                     .or_else(|| {
                         modeled_runtime
+                            .as_ref()
+                            .map(|cost| cost.space.to_string())
+                    })
+                    .or_else(|| {
+                        source_preprocessor
                             .as_ref()
                             .map(|cost| cost.space.to_string())
                     }),
@@ -7372,6 +7535,11 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         modeled_runtime
                             .as_ref()
                             .map(|cost| cost.provenance.to_string())
+                    })
+                    .or_else(|| {
+                        source_preprocessor
+                            .as_ref()
+                            .map(|_| "source_preprocessor_definition".to_string())
                     }),
                 complexity_bound_quality: known_complexity
                     .map(|_| "upper_bound_declared_receiver".to_string())
@@ -7384,14 +7552,32 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         modeled_runtime
                             .as_ref()
                             .map(|cost| cost.bound_quality.to_string())
+                    })
+                    .or_else(|| {
+                        source_preprocessor
+                            .as_ref()
+                            .map(|_| "upper_bound_source_preprocessor_definition".to_string())
                     }),
                 complexity_candidates: modeled_runtime
                     .as_ref()
                     .map(|cost| cost.candidates.clone())
+                    .or_else(|| {
+                        source_preprocessor
+                            .as_ref()
+                            .map(|_| vec![call.message.clone()])
+                    })
                     .unwrap_or_default(),
                 complexity_assumptions: modeled_runtime
                     .as_ref()
                     .and_then(|cost| cost.assumption.clone())
+                    .or_else(|| {
+                        source_preprocessor.as_ref().map(|_| {
+                            format!(
+                                "all source definitions of `{}` converge on this bounded cost",
+                                call.message
+                            )
+                        })
+                    })
                     .into_iter()
                     .collect(),
                 message: call.message.clone(),

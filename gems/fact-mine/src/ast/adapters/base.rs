@@ -62,6 +62,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         Vec::new()
     }
 
+    fn preprocessor_callable_definitions(
+        &self,
+        _root: TreeSitterNode<'_>,
+        _source: &str,
+    ) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
     fn variable_declarator_node(&self, node: TreeSitterNode<'_>) -> bool {
         node.kind() == "variable_declarator"
     }
