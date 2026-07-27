@@ -306,6 +306,9 @@ impl<'a> Extractor<'a> {
             self.record_semantic_effect(node, &effect.kind, &effect.detail);
         }
         let params = function_params(node, self.behavior);
+        let implicit_exit_calls =
+            self.behavior
+                .implicit_function_exit_calls(node, &name, &params);
         let visibility = self.behavior.function_visibility(&name, node, &self.lines);
         self.facts.function_defs.push(FunctionDef {
             file: self.file.clone(),
@@ -362,6 +365,9 @@ impl<'a> Extractor<'a> {
         self.record_initializer_field_reads(node, &owner_name, &function_name);
         self.receiver_aliases
             .push(self.behavior.receiver_aliases_for_function(node));
+        for call in implicit_exit_calls {
+            self.append_call_site(call, node, false, false);
+        }
         let body_context = self.current_owner();
         let body_owner = self.behavior.body_owner_for_function(
             self.current_function().as_str(),

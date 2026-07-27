@@ -1583,6 +1583,19 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         Vec::new()
     }
 
+    /// Calls imposed by function-exit semantics rather than an explicit call
+    /// expression in the source body (for example, destruction of an owned
+    /// parameter). The extractor attributes these after entering the function
+    /// scope so they participate in the same CFG/DFG completeness proof.
+    fn implicit_function_exit_calls(
+        &self,
+        _node: &Node,
+        _function_name: &str,
+        _params: &[String],
+    ) -> Vec<NormalizedCallProjection> {
+        Vec::new()
+    }
+
     fn suppress_call_site(&self, _node: &Node, _call: &NormalizedCallProjection) -> bool {
         false
     }

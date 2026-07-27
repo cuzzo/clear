@@ -438,6 +438,35 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         call
     }
 
+    fn implicit_function_exit_calls(
+        &self,
+        node: &Node,
+        function_name: &str,
+        params: &[String],
+    ) -> Vec<NormalizedCallProjection> {
+        if function_name != "drop" || !params.iter().any(|param| param == "_x") {
+            return Vec::new();
+        }
+
+        // `core::mem::drop<T>(_x: T) {}` has no explicit call expression, but
+        // Rust drops the owned parameter before returning. Keep the exit call
+        // unresolved unless a concrete destructor is proven; an empty body is
+        // therefore not misreported as complete O(1).
+        let exit = [
+            node.last_lineno,
+            node.last_column,
+            node.last_lineno,
+            node.last_column,
+        ];
+        vec![NormalizedCallProjection {
+            receiver: "_x".to_string(),
+            message: "drop".to_string(),
+            arguments: Vec::new(),
+            access_span: exit,
+            span: exit,
+        }]
+    }
+
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
         node.r#type != "VCALL" && parts.arguments.is_empty() && !node.text.contains('(')
     }
@@ -778,6 +807,15 @@ mod tests {
 
         assert_eq!(projected.receiver, "callback");
         assert_eq!(projected.message, "call");
+        let drop_node = node("DEFN", "pub const fn drop<T>(_x: T) {}");
+        let exit_calls =
+            behavior.implicit_function_exit_calls(&drop_node, "drop", &["_x".to_string()]);
+        assert_eq!(exit_calls.len(), 1);
+        assert_eq!(exit_calls[0].receiver, "_x");
+        assert_eq!(exit_calls[0].message, "drop");
+        assert!(behavior
+            .implicit_function_exit_calls(&drop_node, "drop", &["value".to_string()])
+            .is_empty());
         assert!(behavior.terminating_call_message("panic"));
         assert!(!behavior.terminating_call_message("recover"));
         assert_eq!(owner_after_keyword("enum Widget {}", "struct"), None);
@@ -981,6 +1019,7 @@ mod tests {
             (format!("{alloc}collections/btree/set/impl#[`BTreeSet<T, A>`]is_subset()."), "is_subset", "O(N log N)"),
             (format!("{core}convert/num/ptr_try_from_impls/impl#[usize][`TryFrom<i32>`]try_from()."), "try_from", "O(1)"),
             (format!("{core}iter/sources/once/once()."), "once", "O(1)"),
+            (format!("{std}thread/builder/impl#[Builder]name()."), "name", "O(1)"),
         ] {
             let complexity = external_symbol_call_complexity(&symbol, message)
                 .unwrap_or_else(|| panic!("no cost model for {symbol}"));
@@ -1019,9 +1058,11 @@ mod tests {
         for (symbol, cost) in [
             (format!("{core}convert/impl#[T][`Into<U>`]into()."), "reflective_once"),
             (format!("{core}clone/Clone#clone()."), "reflective_once"),
+            (format!("{std}path/impl#[Path]new()."), "reflective_once"),
             (format!("{std}sync/once_lock/impl#[`OnceLock<T>`]get_or_init()."), "callback_once"),
             (format!("{core}iter/traits/iterator/Iterator#fold()."), "callback_linear"),
             (format!("{core}iter/traits/iterator/Iterator#partition()."), "callback_linear"),
+            (format!("{core}iter/adapters/map/impl#[`Map<I, F>`][Iterator]next()."), "callback_once"),
             (format!("{core}mem/drop()."), "reflective_once"),
         ] {
             assert_eq!(

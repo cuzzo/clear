@@ -377,7 +377,8 @@ SemanticSymbol:
   'io/stdio/impl#[Stdout]lock().': constant
   'process/impl#[Command]new().': constant
   'thread/builder/impl#[Builder]new().': constant
-  'thread/builder/impl#[Builder]name().': linear_materialize
+  # Takes ownership of String and stores it in Option; it does not clone bytes.
+  'thread/builder/impl#[Builder]name().': constant
   'thread/builder/impl#[Builder]stack_size().': constant
   'io/buffered/bufwriter/impl#[`BufWriter<W>`]new().': constant
   # tree-sitter cursor and node accessors are pointer arithmetic on the parse
@@ -436,6 +437,7 @@ SemanticSymbolParametricCost:
   'borrow/impl#[`Cow<''_, B>`]into_owned().': reflective_once
   'cmp/min().': reflective_once
   'convert/AsRef#as_ref().': reflective_once
+  'path/impl#[Path]new().': reflective_once
   'iter/traits/collect/impl#[I][IntoIterator]into_iter().': reflective_once
   'mem/drop().': reflective_once
   'option/impl#[`Option<T>`][Ord]cmp().': reflective_once
@@ -445,6 +447,7 @@ SemanticSymbolParametricCost:
   'slice/impl#[`[T]`]starts_with().': callback_linear
   'vec/impl#[`Vec<T, A>`]retain_mut().': callback_linear
   'iter/traits/iterator/Iterator#partition().': callback_linear
+  'iter/adapters/map/impl#[`Map<I, F>`][Iterator]next().': callback_once
   'iter/adapters/map/impl#[`Map<I, F>`][Iterator]fold().': callback_linear
   'iter/adapters/rev/impl#[`Rev<I>`][Iterator]fold().': callback_linear
   'option/impl#[`Option<T>`]ok_or_else().': callback_once

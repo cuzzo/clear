@@ -5,7 +5,9 @@
 //! occurrence to the innermost emitted project method. Language-owned external
 //! symbol parsing is delegated back to the source adapter.
 
-use crate::profile::{summarize_call_resolution, CallRecord, MethodRecord, ProfileOutput};
+use crate::profile::{
+    summarize_call_resolution, CallRecord, MethodRecord, ProfileOutput, SemanticIndex,
+};
 use crate::syntax;
 use crate::type_inference::TypeExpr;
 use anyhow::{Context, Result};
@@ -33,10 +35,20 @@ struct Index {
     documents: Vec<Document>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct Metadata {
+    #[serde(default, alias = "toolInfo")]
+    tool_info: Option<ToolInfo>,
     #[serde(default, alias = "textDocumentEncoding")]
     text_document_encoding: TextDocumentEncoding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ToolInfo {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    version: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -266,6 +278,19 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
             output.methods.len(),
             index.documents.len()
         );
+    }
+    if let Some(tool_info) = index
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.tool_info.as_ref())
+        .filter(|tool_info| !tool_info.name.is_empty() && !tool_info.version.is_empty())
+    {
+        output.semantic_indexes.push(SemanticIndex {
+            tool: tool_info.name.clone(),
+            version: tool_info.version.clone(),
+        });
+        output.semantic_indexes.sort();
+        output.semantic_indexes.dedup();
     }
     let definitions = definitions_by_symbol(&index.documents, &methods_by_path);
     let indexed_roots = indexed_source_roots(&methods_by_path);
@@ -680,6 +705,10 @@ fn apply_resolved_call_costs_to_contexts(output: &mut ProfileOutput) -> usize {
 
 fn index_from_protobuf(index: scip::types::Index) -> Result<Index> {
     let metadata = index.metadata.as_ref().map(|metadata| Metadata {
+        tool_info: metadata.tool_info.as_ref().map(|tool_info| ToolInfo {
+            name: tool_info.name.clone(),
+            version: tool_info.version.clone(),
+        }),
         text_document_encoding: TextDocumentEncoding::Number(
             u32::try_from(metadata.text_document_encoding.value()).unwrap_or(u32::MAX),
         ),
@@ -4373,7 +4402,10 @@ void run_dependent() {
     fn accepts_protobuf_json_camel_case_fields_and_utf8_name() {
         let mut output = ProfileOutput::default();
         let index = json!({
-            "metadata": {"textDocumentEncoding": "UTF-8"},
+            "metadata": {
+                "textDocumentEncoding": "UTF-8",
+                "toolInfo": {"name": "scip-java", "version": "0.12.3"}
+            },
             "documents": [{
                 "relativePath": "Demo.swift",
                 "occurrences": [],
@@ -4387,6 +4419,13 @@ void run_dependent() {
             }]
         });
         assert!(apply_json(&mut output, &index.to_string()).is_ok());
+        assert_eq!(
+            output.semantic_indexes,
+            vec![SemanticIndex {
+                tool: "scip-java".into(),
+                version: "0.12.3".into(),
+            }]
+        );
     }
 
     #[test]

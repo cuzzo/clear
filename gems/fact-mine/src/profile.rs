@@ -132,6 +132,15 @@ pub struct IncrementalMetrics {
     pub peak_resident_bytes: Option<u64>,
 }
 
+/// Producer identity copied from SCIP metadata. Bundled external facts can
+/// require an exact indexer build when the symbol scheme itself does not carry
+/// a dependency or toolchain version.
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SemanticIndex {
+    pub tool: String,
+    pub version: String,
+}
+
 /// The enriched output matching what Ruby's EspalierProfile::Builder.build returns.
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct ProfileOutput {
@@ -146,6 +155,8 @@ pub struct ProfileOutput {
     /// availability only; semantic certainty remains in per-fact evidence.
     #[serde(default, skip_serializing_if = "InputCoverage::is_empty")]
     pub input_coverage: InputCoverage,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub semantic_indexes: Vec<SemanticIndex>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<OwnerRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1342,6 +1353,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             artifact_scope: None,
             incremental_metrics: None,
             input_coverage: InputCoverage::default(),
+            semantic_indexes: Vec::new(),
             owners,
             dispatch_impls: Vec::new(),
             methods,
@@ -1622,6 +1634,7 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         artifact_scope: None,
         incremental_metrics: None,
         input_coverage: InputCoverage::default(),
+        semantic_indexes: Vec::new(),
         owners,
         dispatch_impls: Vec::new(),
         methods,
