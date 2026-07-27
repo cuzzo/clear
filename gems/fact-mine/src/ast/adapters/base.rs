@@ -1554,6 +1554,16 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         }
     }
 
+    /// Supplies executable statements when a grammar keeps lambda bodies
+    /// directly under the lambda node instead of inside a body wrapper.
+    fn lambda_body_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
+    }
+
     fn interpolation_node(&self, node: TreeSitterNode<'_>) -> bool {
         node.kind() == "interpolation"
     }
