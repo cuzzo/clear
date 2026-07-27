@@ -1734,6 +1734,43 @@ struct Queue {
 }
 
 #[test]
+fn cpp_ordered_map_and_set_use_conservative_collection_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#include <map>
+#include <set>
+void update(std::map<int, int>& values, std::set<int>& keys) {
+    values.find(1);
+    values.begin();
+    keys.insert(1);
+    keys.empty();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for (message, expected) in [
+        ("find", "O(N)"),
+        ("begin", "O(1)"),
+        ("insert", "O(N)"),
+        ("empty", "O(1)"),
+    ] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "update" && call.message == message)
+            .with_context(|| format!("missing ordered collection call {message}"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some(expected),
+            "{message}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn cpp_initializer_calls_do_not_hide_local_receiver_types() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(

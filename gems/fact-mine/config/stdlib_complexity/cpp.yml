@@ -15,17 +15,39 @@ Array:
   # linear for a range from another list. Use the conservative common bound.
   splice: linear_scan
   emplace_back: constant
+  clear: linear_scan
+  erase: linear_scan
+  insert: linear_materialize
+  resize: linear_materialize
+  reserve: linear_materialize
+  swap: constant
 Hash:
   at: constant
   find: linear_scan
   contains: linear_scan
   size: constant
   empty: constant
+  begin: constant
+  end: constant
+  clear: linear_scan
+  erase: linear_scan
+  insert: linear_scan
+  lower_bound: linear_scan
+  upper_bound: linear_scan
+  swap: constant
 Set:
   find: linear_scan
   contains: linear_scan
   size: constant
   empty: constant
+  begin: constant
+  end: constant
+  clear: linear_scan
+  erase: linear_scan
+  insert: linear_scan
+  lower_bound: linear_scan
+  upper_bound: linear_scan
+  swap: constant
 String:
   c_str: constant
   compare: linear_scan
