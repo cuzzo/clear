@@ -84,6 +84,12 @@ time.Time:
   Sub: constant
   Nanosecond: constant
 time.Duration:
+  Hours: constant
+  Minutes: constant
+  Seconds: constant
+  Milliseconds: constant
+  Microseconds: constant
+  Nanoseconds: constant
   Truncate: constant
 crypto.Hash:
   Available: constant
@@ -134,6 +140,9 @@ list.Element:
 time.Ticker:
   Stop: constant
 regexp.Regexp:
+  FindStringSubmatch: linear_materialize
+  Match: linear_scan
+  MatchString: linear_scan
   ReplaceAll: linear_materialize
 http.Header:
   Get: linear_scan
@@ -264,7 +273,9 @@ Intrinsic:
   "errors.Join": linear_materialize
   "hmac.Equal": linear_scan
   "math.Log10": constant
+  "math.Max": constant
   "math.Modf": constant
+  "math.Round": constant
   "reflect.Append": linear_materialize
   "reflect.ArrayOf": constant
   "reflect.MakeSlice": linear_materialize
@@ -280,6 +291,7 @@ Intrinsic:
   "runtime.Goexit": constant
   "runtime.Stack": linear_materialize
   "strconv.Itoa": linear_materialize
+  "strconv.Atoi": linear_scan
   "strconv.FormatFloat": linear_materialize
   "strconv.FormatInt": linear_materialize
   "strconv.FormatUint": linear_materialize
@@ -288,6 +300,7 @@ Intrinsic:
   "strconv.ParseInt": linear_scan
   "strconv.ParseUint": linear_scan
   "strings.SplitN": linear_materialize
+  "strings.NewReplacer": linear_materialize
   "time.NewTicker": constant
   "time.Until": constant
   "time.Parse": linear_scan
@@ -509,6 +522,7 @@ Intrinsic:
   filepath.ToSlash: linear_materialize
   filepath.FromSlash: linear_materialize
   filepath.Split: linear_scan
+  filepath.SplitList: linear_materialize
   filepath.Ext: linear_scan
   filepath.IsAbs: linear_scan
   filepath.Match: linear_scan
@@ -524,6 +538,9 @@ Intrinsic:
   os.IsPermission: constant
   os.Getpid: constant
   os.NewFile: constant
+  flag.Bool: constant
+  flag.String: constant
+  regexp.Compile: linear_materialize
   exec.Command: linear_materialize
   exec.CommandContext: linear_materialize
   bytes.NewReader: constant
@@ -547,6 +564,9 @@ ParametricCall:
 CallableType:
   "context.CancelFunc": callback_once
 ExternalLatency:
+  # Reader methods scan/materialize bytes supplied by an external stream. The
+  # byte-processing bound is complete while stream latency remains excluded.
+  "bufio.Reader.ReadString": linear_materialize
   "io.ReadAll": linear_materialize
   "os.ReadFile": linear_materialize
   "os.Open": linear_scan
@@ -598,6 +618,10 @@ ExternalLatency:
   "os.File.Sync": constant
   "os.File.Stat": constant
   "os.File.Seek": constant
+  "os.Getuid": constant
+  "os.Executable": linear_materialize
+  "syscall.Flock": constant
+  "syscall.Statfs": constant
   "fs.DirEntry.Info": constant
   "filepath.Abs": linear_materialize
   "filepath.EvalSymlinks": linear_materialize
@@ -620,6 +644,7 @@ SemanticSymbolParametricCost:
   'flag/Usage.': callback_once
   'fmt/Errorf().': reflective_once
   'fmt/Fprintf().': reflective_once
+  'fmt/Print().': reflective_once
   'fmt/Printf().': reflective_once
   'fmt/Println().': reflective_once
   'fmt/Sprintf().': reflective_once
@@ -627,6 +652,7 @@ SemanticSymbolParametricCost:
   'reflect/Value#Call().': reflective_once
   '`encoding/json`/Marshal().': reflective_once
   '`encoding/json`/Unmarshal().': reflective_once
+  '`encoding/xml`/Unmarshal().': reflective_once
   '`encoding/json`/Decoder#Decode().': reflective_once
   '`encoding/json`/Encoder#Encode().': reflective_once
   '`encoding/json`/MarshalIndent().': reflective_once

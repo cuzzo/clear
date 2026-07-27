@@ -320,9 +320,13 @@ Summary joins require the exact compiler symbol already attached by SCIP. They
 never guess from an owner or method name. Unknown schema versions, malformed
 metadata, empty bounds, and contradictory files fail closed. The v1 reader
 remains available for previously generated artifacts, but new exports are v2.
-FactMine also bundles the reviewed Go 1.22.2 core-surface summary (1,868 exact
-symbols); it is applied automatically and contributes only when scip-go emits
-the identical versioned symbol.
+FactMine also bundles the Go 1.22.2 core-surface summary (371 exact symbols).
+The exporter rejects apparently complete functions whose proof depends on a
+manual receiver registry, modeled-world/external-latency contract, unknown
+cardinality relation, or unresolved call-evidence gap. It is applied
+automatically and contributes only when scip-go emits the identical versioned
+symbol. A complete generated/manual disagreement is a hard error; generated
+complete data replaces incomplete fallback data.
 
 The remaining incomplete Rust functions are dominated by conservative proof
 obligations rather than parser loss: 483 have missing semantic identity as
