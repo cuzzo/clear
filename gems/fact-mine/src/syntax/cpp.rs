@@ -237,8 +237,23 @@ fn cpp_owner_template_type_names(owner: &str) -> BTreeSet<String> {
         .collect()
 }
 
-fn cpp_declared_owner_template_types(source: &str) -> BTreeMap<String, BTreeSet<String>> {
+fn cpp_declared_owner_template_types(
+    source: &str,
+    functions: &[FunctionDef],
+) -> BTreeMap<String, BTreeSet<String>> {
     let lines = source.lines().collect::<Vec<_>>();
+    let function_owners = functions
+        .iter()
+        .filter_map(|function| {
+            let owner = function
+                .owner
+                .split(['<', '@'])
+                .next()
+                .unwrap_or(&function.owner)
+                .trim();
+            (!owner.is_empty()).then_some(owner)
+        })
+        .collect::<BTreeSet<_>>();
     let mut owners = BTreeMap::new();
     for (index, line) in lines.iter().enumerate() {
         let Some(template_offset) = line.find("template") else {
@@ -274,7 +289,16 @@ fn cpp_declared_owner_template_types(source: &str) -> BTreeMap<String, BTreeSet<
         let suffix = declaration[close + 1..].trim_start();
         let owner = ["class ", "struct "].into_iter().find_map(|keyword| {
             let rest = suffix.strip_prefix(keyword)?;
-            cpp_identifier_tokens(rest).next().map(str::to_string)
+            let header = rest
+                .split(['{', ':', ';'])
+                .next()
+                .unwrap_or(rest);
+            let candidates = cpp_identifier_tokens(header)
+                .filter(|token| function_owners.contains(token))
+                .collect::<BTreeSet<_>>();
+            (candidates.len() == 1)
+                .then(|| candidates.into_iter().next().map(str::to_string))
+                .flatten()
         });
         if let Some(owner) = owner {
             owners.insert(owner, parameters);
@@ -289,7 +313,7 @@ fn cpp_method_template_types(
     dependent_aliases: &BTreeSet<String>,
 ) -> BTreeMap<String, BTreeSet<String>> {
     let lines = source.lines().collect::<Vec<_>>();
-    let declared_owners = cpp_declared_owner_template_types(source);
+    let declared_owners = cpp_declared_owner_template_types(source, functions);
     functions
         .iter()
         .filter_map(|function| {
