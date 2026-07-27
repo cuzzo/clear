@@ -2551,6 +2551,32 @@ fn exact_native_stdlib_calls_emit_normalized_complexity_facts() -> Result<()> {
 }
 
 #[test]
+fn cpp_qualified_std_algorithm_keeps_predicate_cost_parametric() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template <class Items, class Predicate>
+auto locate(Items & items, Predicate predicate) {
+    return std::find_if(items.begin(), items.end(), predicate);
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "locate" && call.message == "std::find_if")
+        .context("missing std::find_if")?;
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(N*C)"));
+    assert_eq!(
+        call.complexity_bound_quality.as_deref(),
+        Some("upper_bound_parametric_callback_linear")
+    );
+    Ok(())
+}
+
+#[test]
 fn typed_atomics_reflect_and_builder_methods_are_constant_time() -> Result<()> {
     use std::io::Write;
 

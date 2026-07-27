@@ -719,6 +719,20 @@ pub(crate) fn configured_intrinsic_call_complexity(
         .map(NormalizedCollectionOperation::complexity)
 }
 
+pub(crate) fn configured_intrinsic_parametric_call_cost(
+    language: &str,
+    receiver: Option<&str>,
+    message: &str,
+) -> Option<String> {
+    let operations = stdlib_operations(language)?;
+    let intrinsics = operations.get("IntrinsicParametricCall")?;
+    let key = receiver
+        .filter(|receiver| !receiver.trim().is_empty())
+        .map(|receiver| format!("{}.{}", receiver.trim(), message))
+        .unwrap_or_else(|| message.to_string());
+    intrinsics.get(&key).cloned()
+}
+
 /// Resolve an opaque compiler symbol discriminator when the registry has been
 /// reviewed against that exact semantic scheme. This is preferable to
 /// guessing an overload from argument text, and deliberately has no fallback
@@ -1455,6 +1469,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     ) -> Option<NormalizedCallComplexity> {
         self.stdlib_language()
             .and_then(|language| configured_intrinsic_call_complexity(language, receiver, message))
+    }
+
+    fn intrinsic_parametric_call_cost(
+        &self,
+        receiver: Option<&str>,
+        message: &str,
+    ) -> Option<String> {
+        self.stdlib_language().and_then(|language| {
+            configured_intrinsic_parametric_call_cost(language, receiver, message)
+        })
     }
 
     /// Whether an unqualified call inside an instance method may dispatch to

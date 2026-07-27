@@ -141,6 +141,11 @@ Intrinsic:
   free: declaration
   puts: declaration
   strlen: linear_scan
+IntrinsicParametricCall:
+  # Standard algorithms invoke a caller-supplied predicate once per visited
+  # element. Their qualified `std::` identity is source-proven even when clang
+  # omits a dependent-template occurrence.
+  'std::find_if': callback_linear
 SemanticSymbol:
   # Exact scip-clang descriptors whose overload discriminator has been
   # reviewed. These cover operations which cannot be classified from a
