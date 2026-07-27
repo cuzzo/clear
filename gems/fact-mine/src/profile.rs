@@ -6879,18 +6879,39 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .owner_defs
                     .iter()
                     .any(|owner| owner.name == call.receiver);
-            let declared_receiver_type = (!receiver_is_type)
-                .then(|| declared_receiver_type(document, source_definition, &call.receiver))
+            let receiver_local_binding = behavior
+                .receiver_local_binding(&call.receiver)
+                .unwrap_or_else(|| call.receiver.clone());
+            let explicit_receiver_type = (!receiver_is_type)
+                .then(|| behavior.explicit_receiver_type(&call.receiver))
                 .flatten();
-            let flow_receiver_type = (!receiver_is_type && declared_receiver_type.is_none())
-                .then(|| flow_receiver_type(document, &call.function, &call.receiver, call.span))
+            let declared_receiver_type = (!receiver_is_type && explicit_receiver_type.is_none())
+                .then(|| {
+                    declared_receiver_type(document, source_definition, &receiver_local_binding)
+                })
+                .flatten();
+            let flow_receiver_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
+                && declared_receiver_type.is_none())
+            .then(|| {
+                flow_receiver_type(
+                    document,
+                    &call.function,
+                    &receiver_local_binding,
+                    call.span,
+                )
+            })
                 .flatten();
             let state_receiver_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
                 && declared_receiver_type.is_none()
                 && flow_receiver_type.is_none())
-            .then(|| declared_state_receiver_type(document, &call.owner, &call.receiver))
+            .then(|| {
+                declared_state_receiver_type(document, &call.owner, &receiver_local_binding)
+            })
             .flatten();
             let field_access_receiver_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
                 && declared_receiver_type.is_none()
                 && flow_receiver_type.is_none()
                 && state_receiver_type.is_none())
@@ -6900,13 +6921,15 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     source_definition,
                     &call.function,
                     &call.owner,
-                    &call.receiver,
+                    &receiver_local_binding,
                     call.span,
                     language,
                 )
             })
             .flatten();
-            let receiver_type_origin = if declared_receiver_type.is_some() {
+            let receiver_type_origin = if explicit_receiver_type.is_some() {
+                Some("explicit_native_cast".to_string())
+            } else if declared_receiver_type.is_some() {
                 Some("declared_parameter".to_string())
             } else if flow_receiver_type.is_some() {
                 Some("flow".to_string())
@@ -6918,7 +6941,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 None
             };
             let receiver_has_flow_type = flow_receiver_type.is_some();
-            let instance_receiver_type = declared_receiver_type
+            let instance_receiver_type = explicit_receiver_type
+                .or(declared_receiver_type)
                 .or(flow_receiver_type)
                 .or(state_receiver_type)
                 .or(field_access_receiver_type);
@@ -7196,7 +7220,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 definition
                     .params
                     .iter()
-                    .any(|parameter| parameter == &call.receiver)
+                    .any(|parameter| parameter == &receiver_local_binding)
             });
             let receiver_is_local = receiver_has_flow_type;
             let receiver_binding_kind = if implicit {

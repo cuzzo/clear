@@ -651,6 +651,55 @@ const CPP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 
 pub(crate) struct CppNormalizedBehavior;
 
+fn cpp_receiver_local_binding(receiver: &str) -> Option<String> {
+    let mut expression = receiver.trim();
+    while expression.starts_with('(') && expression.ends_with(')') {
+        let inner = expression[1..expression.len() - 1].trim();
+        if inner.is_empty() {
+            return None;
+        }
+        expression = inner;
+    }
+    expression = expression.strip_prefix('*')?.trim();
+    while expression.starts_with('(') && expression.ends_with(')') {
+        let inner = expression[1..expression.len() - 1].trim();
+        if inner.is_empty() {
+            return None;
+        }
+        expression = inner;
+    }
+    (!expression.is_empty()
+        && expression
+            .chars()
+            .all(|character| character == '_' || character.is_ascii_alphanumeric())
+        && expression
+            .chars()
+            .next()
+            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic()))
+    .then(|| expression.to_string())
+}
+
+fn cpp_c_style_receiver_type(receiver: &str) -> Option<String> {
+    let receiver = receiver.trim();
+    let cast = receiver.strip_prefix('(')?;
+    let close = cast.find(')')?;
+    let declared = cast[..close].trim();
+    let expression = cast[close + 1..].trim();
+    if declared.is_empty()
+        || expression.is_empty()
+        || !declared.contains(['*', '&'])
+        || declared.contains(['(', ')', '=', '!', '?', ';'])
+        || !declared.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || character.is_ascii_whitespace()
+                || matches!(character, '_' | ':' | '<' | '>' | ',' | '*' | '&')
+        })
+    {
+        return None;
+    }
+    Some(declared.to_string())
+}
+
 /// C++ normalizes `static_cast<T>(call())` as an FCALL. The cast only changes
 /// the static view of the result, so a reviewed nullable result contract still
 /// belongs to the exact inner call.
@@ -828,6 +877,14 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                 "if" | "while" | "switch" | "return"
             ))
         .then_some(declared)
+    }
+
+    fn receiver_local_binding(&self, receiver: &str) -> Option<String> {
+        cpp_receiver_local_binding(receiver)
+    }
+
+    fn explicit_receiver_type(&self, receiver: &str) -> Option<String> {
+        cpp_c_style_receiver_type(receiver)
     }
 
     fn template_dependent_call_type(&self, message: &str) -> Option<String> {
@@ -1468,6 +1525,26 @@ struct Second { using super = BaseTwo; };
         );
         assert_eq!(behavior.declared_local_type("if(! value.empty())", "value"), None);
         assert_eq!(behavior.declared_local_type("value.resize(2)", "value"), None);
+    }
+
+    #[test]
+    fn recovers_only_proven_receiver_bindings_and_c_style_types() {
+        let behavior = CppNormalizedBehavior;
+        assert_eq!(
+            behavior.receiver_local_binding("*callableList"),
+            Some("callableList".to_string())
+        );
+        assert_eq!(
+            behavior.receiver_local_binding("(*callableList)"),
+            Some("callableList".to_string())
+        );
+        assert_eq!(behavior.receiver_local_binding("*items[0]"), None);
+        assert_eq!(
+            behavior.explicit_receiver_type("(const LargeData *)buffer.data()"),
+            Some("const LargeData *".to_string())
+        );
+        assert_eq!(behavior.explicit_receiver_type("(left + right)"), None);
+        assert_eq!(behavior.explicit_receiver_type("(Widget)value"), None);
     }
 
     #[test]
