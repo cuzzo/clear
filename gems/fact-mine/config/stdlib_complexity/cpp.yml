@@ -11,6 +11,10 @@ Array:
   begin: constant
   end: constant
   sort: sort
+  # Node transfer is constant for whole-list/single-element overloads and
+  # linear for a range from another list. Use the conservative common bound.
+  splice: linear_scan
+  emplace_back: constant
 Hash:
   at: constant
   find: linear_scan
@@ -33,6 +37,10 @@ String:
   find: linear_scan
   starts_with: linear_scan
   substr: linear_materialize
+  assign: linear_materialize
+  append: linear_materialize
+  clear: linear_scan
+  resize: linear_materialize
 Namespace:
   std: declaration
 Intrinsic:
@@ -51,6 +59,38 @@ Intrinsic:
   free: declaration
   puts: declaration
   strlen: linear_scan
+SemanticSymbol:
+  # Exact scip-clang descriptors whose overload discriminator has been
+  # reviewed. These cover operations which cannot be classified from a
+  # nominal receiver alone.
+  'std/__cxx11/basic_ostringstream#str(d33e1a6fd36255f7).': linear_materialize
+  'std/setfill(ade351e831a1374a).': constant
+  'std/setw(f06ce2e9220601fb).': constant
+  'std/string#': linear_materialize
+  'std/getline(30074676001a27e3).': linear_materialize
+  'std/isprint(a1851578aea3f541).': constant
+  'std/toupper(a1851578aea3f541).': constant
+  'std/static_pointer_cast(d1ff2bba4f627176).': constant
+  'std/weak_ptr#lock(a1b13de252cffcea).': constant
+  'std/__weak_ptr#expired(3482b152b9333168).': constant
+  'std/atomic_flag#clear(455a4f0c5c7bd751).': constant
+  'std/atomic_flag#test_and_set(2adbe26b81e7d7f).': constant
+  'std/has_single_bit(ee8962c63b365797).': constant
+  'std/optional#has_value(3482b152b9333168).': constant
+  'std/unique_ptr#get(ea7391e9eeeaf20e).': constant
+  'std/unique_ptr#release(aad4c3669c5e940c).': constant
+SemanticSymbolParametricCost:
+  # These operations execute a user-defined constructor, destructor, move, or
+  # element operation. Preserve that work symbolically rather than pricing it
+  # as a scalar library call.
+  'std/swap(c75b8fd57d7c2e06).': reflective_once
+  'std/make_shared(ffca0f3977536948).': reflective_once
+  'std/__shared_ptr#reset(ced63f7c635d850d).': reflective_once
+  'std/construct_at(984c90861d021fca).': reflective_once
+  'std/destroy_at(ebd0a1552f8ce24f).': reflective_once
+  'std/optional#emplace(8cc437dbb5d7266f).': reflective_once
+  'std/ranges/uninitialized_copy.': callback_linear
+  'std/uninitialized_copy_n(31908fd9f87493f7).': callback_linear
 NonCallPrefix:
   "static_cast<": declaration
   "reinterpret_cast<": declaration
