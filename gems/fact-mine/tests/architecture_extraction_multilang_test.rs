@@ -460,6 +460,45 @@ fn cpp_struct_with_methods_is_recognized_as_an_owner() {
     );
 }
 
+#[test]
+fn cpp_template_specialization_methods_reach_cfg_and_complexity_facts() {
+    let document = parse_source(
+        ".hpp",
+        Language::Cpp,
+        "template <typename T>\n\
+         class Queue;\n\
+         template <typename Event, typename... Args>\n\
+         class Queue<Event(Args...)> {\n\
+         private:\n\
+         template <std::size_t... Indexes>\n\
+         void dispatch(Event & event, Args &... args) {\n\
+         this->directDispatch(event, std::get<Indexes>(args)...);\n\
+         }\n\
+         };\n",
+    );
+
+    let method = document
+        .local_methods
+        .iter()
+        .find(|method| method.name == "dispatch")
+        .expect("expected a normalized local-flow method for the partial specialization");
+    assert_eq!(method.owner, "Queue<Event(Args...)>");
+
+    let output = profile::extract(&document, Profile::Espalier);
+    let fact = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "dispatch")
+        .expect("expected complexity facts for the partial-specialization method");
+    assert!(
+        fact.call_contexts
+            .iter()
+            .any(|context| context.message == "directDispatch"),
+        "expected the inherited call to retain its containment context, got {:?}",
+        fact.call_contexts
+    );
+}
+
 // Real bug, found auditing plog's Logger.h: a linkage/visibility macro
 // between `class`/`struct` and the real type name (`class PLOG_LINKAGE
 // Logger : ...`) is invisible to tree-sitter (macros are never expanded),

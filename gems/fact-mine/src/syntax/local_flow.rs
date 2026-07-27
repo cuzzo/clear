@@ -66,7 +66,6 @@ const STATEMENT_CONTAINER_TYPES: &[&str] = &[
     "HASH",
     "STATEMENTS",
 ];
-
 fn empty_node() -> Node {
     Node {
         r#type: "ROOT".to_string(),
@@ -479,25 +478,43 @@ impl<'a> LocalFlow<'a> {
         let Some(body) = self.owner_body(owner_node) else {
             return Vec::new();
         };
-        let stmts = if statement_container(body) {
-            body.children
-                .iter()
-                .filter_map(ast::node)
-                .collect::<Vec<_>>()
+        let mut methods = Vec::new();
+        if statement_container(body) {
+            for child in body.children.iter().filter_map(ast::node) {
+                self.collect_owner_method(child, &mut methods);
+            }
         } else {
-            vec![body]
-        };
+            self.collect_owner_method(body, &mut methods);
+        }
+        methods
+    }
 
-        stmts
-            .into_iter()
-            .flat_map(|stmt| {
-                if METHOD_TYPES.contains(&stmt.r#type.as_str()) {
-                    vec![stmt]
-                } else {
-                    Vec::new()
-                }
-            })
-            .collect()
+    fn collect_owner_method<'node>(
+        &self,
+        node: &'node Node,
+        methods: &mut Vec<&'node Node>,
+    ) {
+        if METHOD_TYPES.contains(&node.r#type.as_str()) {
+            let span = [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ];
+            if self.methods_by_span.contains_key(&span) {
+                methods.push(node);
+            }
+            return;
+        }
+        // A C++ template declaration structurally wraps its inline method.
+        // It is a declaration envelope, unlike an arbitrary call or method
+        // body; descending only through this normalized wrapper avoids
+        // promoting lambdas/local functions into owner methods.
+        if node.r#type == "TEMPLATE_DECLARATION" {
+            for child in node.children.iter().filter_map(ast::node) {
+                self.collect_owner_method(child, methods);
+            }
+        }
     }
 
     fn owner_body<'node>(&self, owner_node: &'node Node) -> Option<&'node Node> {
