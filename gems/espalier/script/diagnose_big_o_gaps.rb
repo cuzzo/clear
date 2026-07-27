@@ -35,7 +35,11 @@ end
 prefixes = repositories.map { |repository| File.join(source_root, repository, "") }
 in_scope = ->(row) { prefixes.any? { |prefix| row.fetch("path", "").start_with?(prefix) } }
 
-methods = Array(profile["methods"]).select(&in_scope)
+scoped_methods = Array(profile["methods"]).select(&in_scope)
+method_roles = Espalier::StaticEvidence.method_source_roles(scoped_methods)
+methods = scoped_methods.select do |method|
+  method_roles.fetch(method.fetch("id").to_s) == "production"
+end
 method_ids = methods.to_h { |method| [method.fetch("id"), method] }
 calls = Array(profile["calls"]).select { |call| method_ids.key?(call["source"]) }
 facts = Array(profile["complexity_facts"]).select(&in_scope)
@@ -43,7 +47,9 @@ paths = methods.map { |method| method.fetch("path") }.uniq
 select_path = ->(rows) { Array(rows).select(&in_scope) }
 evidence = {
   "root" => source_root,
-  "files" => paths.map { |path| { "path" => path, "source_role" => "production" } },
+  "files" => paths.map do |path|
+    { "path" => path, "source_role" => Espalier::StaticEvidence.source_role(path) }
+  end,
   "owners" => select_path.call(profile["owners"]),
   "methods" => methods,
   "fields" => select_path.call(profile["fields"]),
@@ -284,7 +290,11 @@ end
 
 report = {
   schema: "espalier.big-o-gap-diagnostics.v1",
-  scope: { source_root: source_root, repositories: repositories },
+  scope: {
+    source_root: source_root,
+    repositories: repositories,
+    source_roles: ["production"]
+  },
   summary: {
     functions: results.length,
     complete_time_bounds: results.count { |_, result| result[:complete] },
