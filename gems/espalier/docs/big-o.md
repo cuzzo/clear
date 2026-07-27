@@ -259,6 +259,7 @@ gems/fact-mine/target/release/fact-mine-rust \
   profile espalier \
   --language go \
   --scip-index go-stdlib.scip \
+  --no-bundled-complexity-summaries \
   --output go-stdlib.profile.json \
   GO_STDLIB_SOURCE_FILES...
 
@@ -286,3 +287,6 @@ Summary joins require the exact compiler symbol already attached by SCIP. They
 never guess from an owner or method name. Unknown schema versions, malformed
 metadata, empty bounds, and contradictory files fail closed. The v1 reader
 remains available for previously generated artifacts, but new exports are v2.
+FactMine also bundles the reviewed Go 1.22.2 core-surface summary (1,868 exact
+symbols); it is applied automatically and contributes only when scip-go emits
+the identical versioned symbol.

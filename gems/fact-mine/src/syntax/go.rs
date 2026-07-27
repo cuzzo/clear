@@ -1814,6 +1814,17 @@ mod tests {
         assert_eq!(time_of("`io/fs`/FileInfo#ModTime().", "ModTime"), Some("O(1)"));
         assert_eq!(time_of("flag/FlagSet#Bool().", "Bool"), Some("O(1)"));
         assert_eq!(time_of("bufio/Scanner#Text().", "Text"), Some("O(N)"));
+        assert_eq!(time_of("time/Time#Format().", "Format"), Some("O(N)"));
+        assert_eq!(time_of("bytes/TrimSpace().", "TrimSpace"), Some("O(N)"));
+        assert_eq!(time_of("strings/IndexByte().", "IndexByte"), Some("O(N)"));
+        assert_eq!(time_of("flag/NewFlagSet().", "NewFlagSet"), Some("O(1)"));
+        assert_eq!(
+            GoNormalizedBehavior
+                .call_complexity(&TypeExpr::Primitive("os.FileInfo".to_string()), "Sys")
+                .map(|complexity| complexity.time),
+            Some("O(1)"),
+            "os.FileInfo is an alias of io/fs.FileInfo even without a platform SCIP document"
+        );
 
         // External latency: priced, and flagged as excluding device time.
         let write = external_symbol_call_complexity(&go("os/WriteFile()."), "WriteFile").unwrap();
@@ -1823,6 +1834,10 @@ mod tests {
         assert_eq!(time_of("os/Stat().", "Stat"), Some("O(1)"));
         assert_eq!(time_of("`os/exec`/Cmd#Output().", "Output"), Some("O(N)"));
         assert_eq!(time_of("`os/exec`/Command().", "Command"), Some("O(N)"));
+        assert_eq!(
+            time_of("`os/exec`/Cmd#StdoutPipe().", "StdoutPipe"),
+            Some("O(1)")
+        );
 
         // Parametric contracts must NOT return a closed cost here - they are
         // reported through metadata so espalier keeps the open parameter.
@@ -1830,6 +1845,13 @@ mod tests {
             ("testing/T#Run().", "Run", "callback_once"),
             ("testing/common#Errorf().", "Errorf", "reflective_once"),
             ("`path/filepath`/WalkDir().", "WalkDir", "callback_linear"),
+            ("sort/Slice().", "Slice", "callback_sort"),
+            ("flag/FlagSet#Visit().", "Visit", "callback_linear"),
+            (
+                "`encoding/json`/Encoder#Encode().",
+                "Encode",
+                "reflective_once",
+            ),
         ] {
             assert_eq!(time_of(descriptor, message), None, "{descriptor}");
             assert_eq!(

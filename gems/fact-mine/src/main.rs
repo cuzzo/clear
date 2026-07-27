@@ -81,6 +81,7 @@ fn run() -> Result<()> {
             language_override,
             scip_indexes,
             complexity_summaries,
+            bundled_complexity_summaries,
             portable,
             incremental_cache,
             changed_files_only,
@@ -128,6 +129,9 @@ fn run() -> Result<()> {
             for index in scip_indexes {
                 fact_mine_rust::scip::apply_json_file(&mut merged, &index)?;
             }
+            if bundled_complexity_summaries {
+                fact_mine_rust::external_summary::apply_bundled(&mut merged)?;
+            }
             fact_mine_rust::external_summary::apply_files(
                 &mut merged,
                 complexity_summaries.as_slice(),
@@ -164,6 +168,7 @@ fn run() -> Result<()> {
             format,
             scip_indexes,
             complexity_summaries,
+            bundled_complexity_summaries,
         } => {
             let language_override = language_override
                 .as_deref()
@@ -172,6 +177,9 @@ fn run() -> Result<()> {
             let mut merged = build_profile(&files, language_override, Profile::Espalier)?;
             for index in scip_indexes {
                 fact_mine_rust::scip::apply_json_file(&mut merged, &index)?;
+            }
+            if bundled_complexity_summaries {
+                fact_mine_rust::external_summary::apply_bundled(&mut merged)?;
             }
             fact_mine_rust::external_summary::apply_files(
                 &mut merged,
@@ -504,6 +512,7 @@ enum Command {
         language_override: Option<String>,
         scip_indexes: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
+        bundled_complexity_summaries: bool,
         portable: bool,
         incremental_cache: Option<PathBuf>,
         changed_files_only: bool,
@@ -515,6 +524,7 @@ enum Command {
         format: String,
         scip_indexes: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
+        bundled_complexity_summaries: bool,
     },
     LuaScip {
         files: Vec<PathBuf>,
@@ -607,6 +617,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut files = Vec::new();
             let mut scip_indexes = Vec::new();
             let mut complexity_summaries = Vec::new();
+            let mut bundled_complexity_summaries = true;
             let mut portable = false;
             let mut incremental_cache = None;
             let mut changed_files_only = false;
@@ -649,6 +660,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                             other.strip_prefix("--complexity-summary=").unwrap(),
                         ));
                     }
+                    "--no-bundled-complexity-summaries" => {
+                        bundled_complexity_summaries = false;
+                    }
                     "--portable" => {
                         portable = true;
                     }
@@ -686,6 +700,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 language_override,
                 scip_indexes,
                 complexity_summaries,
+                bundled_complexity_summaries,
                 portable,
                 incremental_cache,
                 changed_files_only,
@@ -698,6 +713,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut files = Vec::new();
             let mut scip_indexes = Vec::new();
             let mut complexity_summaries = Vec::new();
+            let mut bundled_complexity_summaries = true;
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
                     "--output" => {
@@ -737,6 +753,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                             other.strip_prefix("--complexity-summary=").unwrap(),
                         ));
                     }
+                    "--no-bundled-complexity-summaries" => {
+                        bundled_complexity_summaries = false;
+                    }
                     "--format" => {
                         format = iter.next().with_context(|| "--format requires a value")?;
                     }
@@ -757,6 +776,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 format,
                 scip_indexes,
                 complexity_summaries,
+                bundled_complexity_summaries,
             })
         }
         other => bail!(
@@ -819,6 +839,24 @@ mod tests {
             "example.rb".to_string(),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn stdlib_producer_can_disable_bundled_summaries() {
+        let parsed = parse_args(vec![
+            "profile".to_string(),
+            "espalier".to_string(),
+            "--no-bundled-complexity-summaries".to_string(),
+            "stdlib.go".to_string(),
+        ])
+        .expect("parse stdlib producer profile");
+        match parsed {
+            Command::Profile {
+                bundled_complexity_summaries,
+                ..
+            } => assert!(!bundled_complexity_summaries),
+            _ => panic!("expected profile command"),
+        }
     }
 
     #[test]
