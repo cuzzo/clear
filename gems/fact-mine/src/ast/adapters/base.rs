@@ -1394,6 +1394,28 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         Vec::new()
     }
 
+    /// Identifies a source-declared constructor that a grammar represents as
+    /// part of the class header instead of as an ordinary function node.
+    /// The normalizer emits it as a first-class project function so compiler
+    /// indexes can join constructor calls to their definition.
+    fn class_constructor_node<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
+    /// Executable regions charged to a header-declared constructor, such as
+    /// delegation, property initializers, and explicit initializer blocks.
+    fn class_constructor_body_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        Vec::new()
+    }
+
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         match kind {
             "while" | "while_statement" | "while_modifier" => Some("WHILE"),

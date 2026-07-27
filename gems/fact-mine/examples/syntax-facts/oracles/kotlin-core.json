@@ -284,6 +284,22 @@
       "file": "gems/fact-mine/examples/syntax-facts/kotlin/core.kt",
       "functions": [
         {
+          "line": 3,
+          "name": "KotlinSyntaxFactsCore",
+          "owner": "KotlinSyntaxFactsCore",
+          "params": [
+            "status",
+            "sink"
+          ],
+          "span": [
+            3,
+            6,
+            4,
+            25
+          ],
+          "visibility": "public"
+        },
+        {
           "line": 31,
           "name": "audit",
           "owner": "KotlinSyntaxFactsCore",
@@ -308,6 +324,19 @@
             4,
             39,
             5
+          ],
+          "visibility": "public"
+        },
+        {
+          "line": 42,
+          "name": "Status",
+          "owner": "Status",
+          "params": [],
+          "span": [
+            42,
+            11,
+            45,
+            1
           ],
           "visibility": "public"
         },
