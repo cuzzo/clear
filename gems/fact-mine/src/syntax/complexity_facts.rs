@@ -1734,6 +1734,7 @@ fn visit_loops(
                 argument_cardinality_relation: argument_cardinality_relation.to_string(),
                 argument_progress: call_argument_progress(
                     node,
+                    params,
                     assignments,
                     (node.first_lineno, node.first_column),
                 ),
@@ -2300,8 +2301,38 @@ fn call_has_arguments(node: &Node) -> bool {
     })
 }
 
+/// Whether some argument is a proper projection out of a parameter rather than
+/// the parameter itself - `walk(node.left)`, `visit(entry.children)`,
+/// `descend(items[index])`.
+///
+/// This is the progress measure structural recursion actually uses. No operand
+/// shrinks arithmetically, so the token-level test below reports `unknown` and
+/// the caller is left with no bound at all; but each step moves strictly one
+/// level down a finite structure, so the same argument cannot recur. Passing
+/// the parameter back unchanged is deliberately excluded - that is the shape
+/// that does not terminate.
+fn structural_descent_argument(
+    node: &Node,
+    params: &BTreeSet<String>,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+    before: (usize, usize),
+) -> bool {
+    call_argument_nodes(node).into_iter().any(|argument| {
+        if matches!(
+            argument.r#type.as_str(),
+            "LVAR" | "DVAR" | "IVAR" | "GVAR" | "SELF" | "CONST"
+        ) {
+            return false;
+        }
+        let names = local_names(argument);
+        !names.is_empty()
+            && !parameter_domains(&names, params, assignments, before).is_empty()
+    })
+}
+
 fn call_argument_progress(
     node: &Node,
+    params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
     before: (usize, usize),
 ) -> String {
@@ -2331,6 +2362,8 @@ fn call_argument_progress(
         "halving".to_string()
     } else if symbols.iter().any(|symbol| symbol == "-") || assigned_shape.0 {
         "shrinking".to_string()
+    } else if structural_descent_argument(node, params, assignments, before) {
+        "structural".to_string()
     } else {
         "unknown".to_string()
     }
@@ -3238,6 +3271,14 @@ class Parser
   def opaque_step(node)
     even_step(node.child)
   end
+
+  def passthrough_step(node)
+    even_step(node)
+  end
+
+  def opaque_source_step(node)
+    even_step(fetch_next)
+  end
 end
 "#,
         );
@@ -3259,11 +3300,35 @@ end
                 .argument_progress,
             "halving"
         );
+        // Descending into a projection of the parameter is progress even
+        // though nothing shrinks arithmetically: `node.child` cannot be
+        // `node`, so the argument cannot recur.
         let opaque = rows
             .iter()
             .find(|row| row.function == "opaque_step")
             .unwrap();
-        assert_eq!(opaque.call_contexts[0].argument_progress, "unknown");
+        assert_eq!(opaque.call_contexts[0].argument_progress, "structural");
+        // Handing the parameter straight back is the shape that does not
+        // terminate, so it must stay unproven.
+        let passthrough = rows
+            .iter()
+            .find(|row| row.function == "passthrough_step")
+            .unwrap();
+        assert_eq!(passthrough.call_contexts[0].argument_progress, "unknown");
+        // An argument with no parameter root proves nothing about progress.
+        let opaque_source = rows
+            .iter()
+            .find(|row| row.function == "opaque_source_step")
+            .unwrap();
+        assert_eq!(
+            opaque_source
+                .call_contexts
+                .iter()
+                .find(|call| call.message == "even_step")
+                .unwrap()
+                .argument_progress,
+            "unknown"
+        );
     }
 
     #[test]

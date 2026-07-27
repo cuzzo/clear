@@ -558,7 +558,7 @@
         },
         {
           "argument_cardinality_relation": "same",
-          "argument_progress": "unknown",
+          "argument_progress": "structural",
           "argument_size_domains": [
             [
               "param:MIRLoweringControlFlow#union_match_default_body:facts"

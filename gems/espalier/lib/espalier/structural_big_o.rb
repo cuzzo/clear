@@ -893,6 +893,25 @@ module Espalier
       if multiplicity == "O(1)" && progress == "shrinking"
         return { time: "O(N)", space: "O(N)", reason: "exact recursive edge with normalized shrinking progress" }
       end
+      # Descending into a projection of the input - `walk(node.left)` - moves
+      # strictly one level down a finite structure, so every node is reached
+      # once and the work is linear in the structure. This holds however many
+      # continuations the body has: two children still visit N nodes total.
+      # The bound is conditional on the traversed graph being acyclic, which is
+      # recorded rather than assumed silently.
+      # Flat in the structure, exactly as `partition_of` below: the enclosing
+      # loop is what enumerates the children, and the descent visits each
+      # child's subtree once, so multiplying by the loop multiplicity would
+      # count the same N nodes twice. It also keeps the bound out of the middle
+      # of the lattice, where it would widen again on every fixpoint round.
+      if progress == "structural"
+        return {
+          time: "O(N)", space: "O(N)",
+          reason: "recursive descent into a projection of the input reaches each element once",
+          quality: "upper_bound_structural_descent",
+          assumption: "the traversed input structure is finite and acyclic, so descent terminates"
+        }
+      end
       # A recursive edge whose argument is a partition of the receiver - the
       # loop's own iteration binding over a decomposition, i.e. a tree/graph
       # traversal - reaches every element exactly once, so the work is linear

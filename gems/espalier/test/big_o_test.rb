@@ -540,6 +540,37 @@ class BigOTest < Minitest::Test
     assert hint[:space_complete]
   end
 
+  # Structural descent is the shape most recursive visitors have: no operand
+  # shrinks arithmetically, so it used to have no bound at all. Descending one
+  # level into a finite structure reaches each node once.
+  def test_structural_descent_recursion_is_linear_in_the_structure
+    facts = {
+      ["Walker", "visit"] => [{
+        "line" => 1, "parameters" => ["node"], "iterations" => [],
+        "recursion" => { "calls" => 0 },
+        "call_contexts" => [{
+          "line" => 2, "message" => "visit", "execution_multiplicity" => "O(1)",
+          "argument_progress" => "structural",
+          "argument_cardinality_relation" => "same"
+        }]
+      }]
+    }
+    hint = Espalier::StructuralBigO.new(
+      facts_by_method: facts,
+      method_complexities: { "Walker" => { "visit" => "O(N)" } },
+      resolved_calls: { ["Walker", "visit", "visit", 2] => ["Walker", "visit"] },
+      resolved_recursive_edges: { ["Walker", "visit", "Walker", "visit"] => true }
+    ).hints_for(nil, { name: "visit", line: 1 }, "Walker")
+      .find { |row| row[:operation] == "visit" }
+
+    assert_equal "O(N)", hint[:complexity]
+    assert hint[:time_complete]
+    assert_equal "upper_bound_structural_descent", hint[:complexity_bound_quality]
+    assert_includes hint[:complexity_assumptions].first, "acyclic"
+    # The conditional bound must not masquerade as an unconditional proof.
+    assert_equal "partial", hint[:confidence]
+  end
+
   # Unresolved mutual recursion already degrades to unknown, but published no
   # evidence gap, so the diagnostics could not attribute the incompleteness.
   def test_unproven_mutual_recursion_publishes_a_recursive_progress_gap
