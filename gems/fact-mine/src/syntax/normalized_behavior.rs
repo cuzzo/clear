@@ -1039,6 +1039,19 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Recover the local binding named by a receiver expression when native
+    /// syntax proves that the expression is only a dereference/parenthesized
+    /// view of that binding.
+    fn receiver_local_binding(&self, _receiver: &str) -> Option<String> {
+        None
+    }
+
+    /// Recover a receiver type explicitly written in native cast syntax.
+    /// Adapters must accept only casts whose grammar proves a type.
+    fn explicit_receiver_type(&self, _receiver: &str) -> Option<String> {
+        None
+    }
+
     /// Recover the template parameter that owns or names a call. C++ uses
     /// this for `Formatter::format()` and callable non-type parameters such as
     /// `Compare(...)`; other languages keep the conservative default.

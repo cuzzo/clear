@@ -2351,6 +2351,56 @@ fn c_operators_and_subscript_are_constant_time_intrinsics() -> Result<()> {
 }
 
 #[test]
+fn cpp_dereferenced_and_cast_receivers_keep_proven_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct LargeData {
+    const void * getAddress() const { return this; }
+};
+template <typename CallbackList>
+void dispatch(const CallbackList * callableList) {
+    (*callableList)(1);
+}
+const void * address(char * buffer) {
+    return ((const LargeData *)buffer)->getAddress();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let callback = output
+        .calls
+        .iter()
+        .find(|call| call.function == "dispatch" && call.message == "call")
+        .context("missing dereferenced callback call")?;
+    assert_eq!(
+        callback.receiver_type.as_deref(),
+        Some("const CallbackList *")
+    );
+    assert_eq!(
+        callback.receiver_type_origin.as_deref(),
+        Some("declared_parameter")
+    );
+    assert_eq!(
+        callback.known_time_complexity.as_deref(),
+        Some("O(R)")
+    );
+    let address = output
+        .calls
+        .iter()
+        .find(|call| call.function == "address" && call.message == "getAddress")
+        .context("missing cast receiver call")?;
+    assert_eq!(address.receiver_type.as_deref(), Some("const LargeData *"));
+    assert_eq!(
+        address.receiver_type_origin.as_deref(),
+        Some("explicit_native_cast")
+    );
+    assert!(address.target.is_some(), "cast receiver should resolve LargeData");
+    Ok(())
+}
+
+#[test]
 fn cpp_operators_are_constant_only_for_proven_scalar_operands() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(
