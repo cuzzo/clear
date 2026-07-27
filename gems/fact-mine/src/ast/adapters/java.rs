@@ -84,6 +84,21 @@ impl AstNormalizationAdapter for JavaAstAdapter {
         matches!(kind, "enhanced_for_statement").then_some("FOR")
     }
 
+    fn loop_condition_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        // In `for (T item : source.items())`, tree-sitter puts the binding
+        // before the iterable. The generic first-child fallback therefore
+        // discarded every call in the iterable expression. Preserve `value`
+        // as the normalized loop condition so its calls and cardinality enter
+        // the CFG/DFG.
+        (node.kind() == "enhanced_for_statement")
+            .then(|| node.child_by_field_name("value"))
+            .flatten()
+    }
+
     fn case_arm_body_nodes<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
