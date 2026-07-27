@@ -50,7 +50,11 @@ in_scope = lambda do |row|
 end
 select_path = ->(rows) { Array(rows).select(&in_scope) }
 methods = select_path.call(profile["methods"])
-method_ids = methods.to_h { |method| [method.fetch("id"), true] }
+method_roles = Espalier::StaticEvidence.method_source_roles(methods)
+production_methods = methods.select do |method|
+  method_roles.fetch(method.fetch("id").to_s) == "production"
+end
+method_ids = production_methods.to_h { |method| [method.fetch("id"), true] }
 paths = methods.map { |method| method.fetch("path") }.uniq
 evidence = {
   "root" => source_root,
@@ -59,7 +63,7 @@ evidence = {
     { "path" => path, "source_role" => Espalier::StaticEvidence.source_role(path) }
   end,
   "owners" => select_path.call(profile["owners"]),
-  "methods" => methods,
+  "methods" => production_methods,
   "fields" => select_path.call(profile["fields"]),
   "facts" => {
     "calls" => Array(profile["calls"]).select { |call| method_ids[call["source"]] },
@@ -80,7 +84,7 @@ rows = manifest.flat_map do |mod|
     next unless method
 
     {
-      source_role: Espalier::StaticEvidence.source_role(method.fetch("path")),
+      source_role: method_roles.fetch(method.fetch("id").to_s),
       language: method["language"] || mod[:language],
       kind: method["kind"],
       quality: function.fetch(:quality_metrics, {})
