@@ -218,6 +218,8 @@ SemanticSymbol:
   'System/Enum#ToString().': linear_materialize
   'System/Enum#TryParse().': linear_scan
   'System/Exception#GetType().': constant
+  'System/Exception#ToString().': linear_materialize
+  'System/AppContext#TryGetSwitch().': linear_scan
   'System/Int32#TryParse(+6).': linear_scan
   'System/DateOnly#ToString(+2).': linear_materialize
   'System/DateOnly#TryFormat(+1).': linear_materialize
@@ -324,6 +326,10 @@ SemanticSymbol:
   'RegularExpressions/Regex#IsMatch(+5).': linear_scan
   'RegularExpressions/Regex#IsMatch(+7).': linear_scan
   'RegularExpressions/Regex#Match().': linear_materialize
+ExternalLatency:
+  'Assembly.Load': linear_materialize
+  'Task.Delay': constant
+  'Task.Wait': constant
 
 # These contracts include user-supplied predicate/selector work. Treating
 # them as plain O(N) would silently erase a non-constant callback body.

@@ -4,7 +4,8 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_collection_operation, configured_intrinsic_call_complexity,
+    configured_collection_operation, configured_external_latency_bound,
+    configured_intrinsic_call_complexity,
     configured_semantic_symbol_call_complexity, configured_semantic_symbol_kind,
     configured_semantic_symbol_parametric_cost, eliminable_guard_from_call,
     nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
@@ -92,7 +93,7 @@ pub(crate) fn external_symbol_call_complexity(
         return None;
     }
     let owner = descriptor_owner(descriptor);
-    let complexity = configured_semantic_symbol_call_complexity("csharp", descriptor)
+    if let Some(complexity) = configured_semantic_symbol_call_complexity("csharp", descriptor)
         .or_else(|| {
             owner.as_deref().and_then(|owner| {
                 configured_intrinsic_call_complexity("csharp", Some(owner), message)
@@ -103,14 +104,29 @@ pub(crate) fn external_symbol_call_complexity(
                 CSharpNormalizedBehavior
                     .call_complexity(&TypeExpr::Primitive(owner.to_string()), message)
             })
-        })?;
+        })
+    {
+        return Some(ExternalCallComplexity {
+            time: complexity.time,
+            space: complexity.space,
+            provenance: "csharp_scip_symbol_registry",
+            bound_quality: "upper_bound_exact_target",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
+    let complexity =
+        configured_external_latency_bound("csharp", owner.as_deref()?, message)?;
     Some(ExternalCallComplexity {
         time: complexity.time,
         space: complexity.space,
-        provenance: "csharp_scip_symbol_registry",
-        bound_quality: "upper_bound_exact_target",
+        provenance: "csharp_external_effect_registry",
+        bound_quality: "upper_bound_external_latency_excluded",
         candidates: Vec::new(),
-        assumption: None,
+        assumption: Some(
+            "computational Big-O only; assembly loading, scheduling, and wait latency is excluded"
+                .to_string(),
+        ),
     })
 }
 
@@ -1095,6 +1111,8 @@ mod tests {
             ("System/Array#GetLength().", "GetLength", "O(1)"),
             ("System/Array#GetValue(+3).", "GetValue", "O(1)"),
             ("Linq/Enumerable#Any().", "Any", "O(N)"),
+            ("System/AppContext#TryGetSwitch().", "TryGetSwitch", "O(N)"),
+            ("System/Exception#ToString().", "ToString", "O(N)"),
             (
                 "RegularExpressions/Regex#IsMatch(+5).",
                 "IsMatch",
@@ -1147,5 +1165,19 @@ mod tests {
                 .map(|cost| cost.time),
             Some("O(1)")
         );
+        for (descriptor, message, expected) in [
+            ("Reflection/Assembly#Load(+2).", "Load", "O(N)"),
+            ("Tasks/Task#Delay(+2).", "Delay", "O(1)"),
+            ("Tasks/Task#Wait().", "Wait", "O(1)"),
+        ] {
+            let cost = external_symbol_call_complexity(&symbol(descriptor), message)
+                .unwrap_or_else(|| panic!("missing external-latency cost for {descriptor}"));
+            assert_eq!(cost.time, expected);
+            assert_eq!(
+                cost.bound_quality,
+                "upper_bound_external_latency_excluded"
+            );
+            assert!(cost.assumption.is_some());
+        }
     }
 }
