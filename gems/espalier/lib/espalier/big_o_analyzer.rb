@@ -29,6 +29,7 @@ module Espalier
       time_complete = true
       space_complete = true
       symbolic_time = nil
+      symbolic_terms = []
       is_dynamic = false
       trigger = nil
       unknown_operations = []
@@ -61,8 +62,9 @@ module Espalier
             complexity_assumptions.concat(Array(node[:complexity_assumptions]))
             known_complexity = node[:known_time_complexity].to_s
             if node[:symbolic_time]
-              symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
-              known_complexity = Espalier::SymbolicComplexity.render(symbolic_time)&.first || known_complexity
+              symbolic_terms << node[:symbolic_time]
+              known_complexity =
+                Espalier::SymbolicComplexity.render(node[:symbolic_time])&.first || known_complexity
             elsif node[:execution_complexity]
               known_complexity = multiply_complexity(known_complexity, node[:execution_complexity])
             end
@@ -107,8 +109,8 @@ module Espalier
           complexity_assumptions.concat(Array(node[:complexity_assumptions]))
           structural_complexity = node[:complexity].to_s
           if node[:symbolic_time]
-            symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_time, node[:symbolic_time])
-            rendered_symbolic = Espalier::SymbolicComplexity.render(symbolic_time)&.first
+            symbolic_terms << node[:symbolic_time]
+            rendered_symbolic = Espalier::SymbolicComplexity.render(node[:symbolic_time])&.first
             if rendered_symbolic && complexity_rank(rendered_symbolic) >= complexity_rank(structural_complexity)
               structural_complexity = rendered_symbolic
             end
@@ -140,6 +142,14 @@ module Espalier
           warnings << "Function pointer / callback executed at line #{node[:line]}. This could execute arbitrary O(N^x) code, meaning our calculation is strictly a LOWER BOUND."
         end
       end
+
+      # Normalize the symbolic sum once. Incrementally normalizing after every
+      # node repeatedly performs the quadratic dominance comparison over an
+      # ever-growing term set; methods with hundreds of normalized call facts
+      # turn that into cubic work without changing the resulting expression.
+      symbolic_time = Espalier::SymbolicComplexity.sum(symbolic_terms)
+      rendered_symbolic = Espalier::SymbolicComplexity.render(symbolic_time)&.first
+      complexity = max_complexity(complexity, rendered_symbolic) if rendered_symbolic
 
       {
         method: method_name,

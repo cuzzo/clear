@@ -426,7 +426,7 @@ module Espalier
           "line" => context["line"]
         }.compact
       end
-      Espalier::SymbolicComplexity.normalize(expression.merge(domains: domains))
+      Espalier::SymbolicComplexity.with_domains(expression, domains)
     end
 
     def mutual_recursion_summary(owner, member)
@@ -719,6 +719,9 @@ module Espalier
       state_replay = owner && state_replay_recursion_summary(owner, method[:name].to_s)
       state_rescan = owner && state_rescan_recursion_summary(owner, method[:name].to_s)
       state_recursion = state_replay || state_rescan
+      structural_recursion = !state_recursion &&
+        recursion.fetch("structural_calls", 0).to_i.positive? &&
+        recursion.fetch("unknown_progress_calls", 0).to_i.zero?
       recursion_time, recursion_space, recursion_reason = if state_recursion
                                                             state_recursion.values_at(:time, :space, :reason)
                                                           else
@@ -741,14 +744,23 @@ module Espalier
         is_dynamic: complexity != "O(1)",
         operation: "normalized_complexity_facts",
         reason: recursion_reason || iteration_reason(iterations),
-        confidence: complexity == "unknown" ? "unknown" : "high",
+        confidence: if complexity == "unknown"
+                      "unknown"
+                    elsif structural_recursion
+                      "partial"
+                    else
+                      "high"
+                    end,
         time_complete: complexity != "unknown" && (!symbolic_time || symbolic_time.fetch(:complete, true)),
         space_complete: max_space_complexity(allocation_space, recursion_space) != "unknown",
         evidence_gaps: evidence_gaps.uniq.sort,
         symbolic_time: symbolic_time,
         symbolic_space: symbolic_space,
+        complexity_bound_quality: structural_recursion ? "upper_bound_structural_descent" : nil,
+        complexity_assumptions: structural_recursion ?
+          ["the traversed input structure is finite and acyclic, so descent terminates"] : nil,
         fact_source: "fact_mine"
-      }
+      }.compact
     end
 
     def allocation_complexity(allocations, domains)
@@ -783,6 +795,9 @@ module Espalier
       visited = recursion.fetch("visited_guarded_calls", 0).to_i
       if visited.positive?
         return ["O(N)", "O(N)", "visited-set guarded structural recursion"]
+      end
+      if recursion.fetch("structural_calls", 0).to_i.positive?
+        return ["O(N)", "O(N)", "recursive descent into a projection of the input"]
       end
 
       shrinking = recursion.fetch("shrinking_calls", 0).to_i

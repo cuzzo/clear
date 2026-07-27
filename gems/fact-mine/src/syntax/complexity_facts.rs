@@ -209,6 +209,8 @@ pub struct RecursionFacts {
     pub shrinking_calls: usize,
     pub halving_calls: usize,
     #[serde(default)]
+    pub structural_calls: usize,
+    #[serde(default)]
     pub visited_guarded_calls: usize,
     pub loop_contained_shrinking_calls: usize,
     pub unknown_progress_calls: usize,
@@ -222,6 +224,7 @@ struct Assignment {
     cardinality_dependencies: BTreeSet<String>,
     shrinking: bool,
     halving: bool,
+    structural_descent: bool,
     empty_collection: bool,
     fixed_collection: bool,
 }
@@ -647,6 +650,7 @@ fn fact_for_method(
         node,
         function,
         false,
+        params,
         &assignments,
         &visited_guards,
         &mut recursion,
@@ -654,7 +658,10 @@ fn fact_for_method(
         bare_self_calls_are_recursive,
     );
     recursion.unknown_progress_calls = recursion.calls.saturating_sub(
-        recursion.shrinking_calls + recursion.halving_calls + recursion.visited_guarded_calls,
+        recursion.shrinking_calls
+            + recursion.halving_calls
+            + recursion.structural_calls
+            + recursion.visited_guarded_calls,
     );
     let mut allocations = Vec::new();
     collect_allocations(
@@ -1746,6 +1753,7 @@ fn visit_loops(
                     params,
                     assignments,
                     (node.first_lineno, node.first_column),
+                    behavior,
                 ),
                 argument_size_domains,
                 receiver_size_domains,
@@ -1994,6 +2002,8 @@ fn collect_assignments(
                     halving: symbols
                         .iter()
                         .any(|symbol| matches!(symbol.as_str(), "/" | ">>")),
+                    structural_descent: rhs
+                        .is_some_and(|value| structural_projection_expression(value, behavior)),
                     empty_collection: rhs
                         .is_some_and(|value| empty_collection_expression(value, behavior)),
                     fixed_collection: rhs.is_some_and(fixed_collection_expression),
@@ -2382,18 +2392,44 @@ fn structural_descent_argument(
     params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
     before: (usize, usize),
+    behavior: &dyn NormalizedLanguageBehavior,
 ) -> bool {
     call_argument_nodes(node).into_iter().any(|argument| {
+        let names = local_names(argument);
+        let rooted_in_parameter = names.iter().any(|name| {
+            params.contains(name)
+                || params
+                    .iter()
+                    .any(|parameter| derived_from(name, parameter, before, assignments))
+        });
+        if !rooted_in_parameter {
+            return false;
+        }
         if matches!(
             argument.r#type.as_str(),
             "LVAR" | "DVAR" | "IVAR" | "GVAR" | "SELF" | "CONST"
         ) {
-            return false;
+            return names.iter().any(|name| {
+                assignments.get(name).is_some_and(|rows| {
+                    rows.iter()
+                        .rev()
+                        .find(|row| (row.line, row.column) < before)
+                        .is_some_and(|row| row.structural_descent)
+                })
+            });
         }
-        let names = local_names(argument);
-        !names.is_empty()
-            && !parameter_domains(&names, params, assignments, before).is_empty()
+        structural_projection_expression(argument, behavior)
     })
+}
+
+fn structural_projection_expression(
+    node: &Node,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> bool {
+    contains_index_access(node)
+        || behavior.complexity_member_read_complexity(node).is_some()
+        || (matches!(node.r#type.as_str(), "PREFIX_UNARY_EXPRESSION" | "UNARY")
+            && node.text.trim_start().starts_with('*'))
 }
 
 fn call_argument_progress(
@@ -2401,6 +2437,7 @@ fn call_argument_progress(
     params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
     before: (usize, usize),
+    behavior: &dyn NormalizedLanguageBehavior,
 ) -> String {
     let arguments = call_argument_nodes(node);
     let symbols = arguments
@@ -2428,7 +2465,7 @@ fn call_argument_progress(
         "halving".to_string()
     } else if symbols.iter().any(|symbol| symbol == "-") || assigned_shape.0 {
         "shrinking".to_string()
-    } else if structural_descent_argument(node, params, assignments, before) {
+    } else if structural_descent_argument(node, params, assignments, before, behavior) {
         "structural".to_string()
     } else {
         "unknown".to_string()
@@ -2440,6 +2477,7 @@ fn collect_recursion(
     node: &Node,
     function: &str,
     inside_loop: bool,
+    params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
     visited_guards: &BTreeSet<String>,
     out: &mut RecursionFacts,
@@ -2477,6 +2515,14 @@ fn collect_recursion(
             if now_inside {
                 out.loop_contained_shrinking_calls += 1;
             }
+        } else if structural_descent_argument(
+            node,
+            params,
+            assignments,
+            (node.first_lineno, node.first_column),
+            behavior,
+        ) {
+            out.structural_calls += 1;
         }
     }
     for child in child_nodes(node) {
@@ -2484,6 +2530,7 @@ fn collect_recursion(
             child,
             function,
             now_inside,
+            params,
             assignments,
             visited_guards,
             out,
@@ -3049,6 +3096,9 @@ class Example {
         {
             return Some("unknown".to_string());
         }
+        if recursion.structural_calls > 0 {
+            return Some("O(N)".to_string());
+        }
         if row.parameters.len() == 1 && recursion.loop_contained_shrinking_calls > 0 {
             return Some("O(N!)".to_string());
         }
@@ -3297,8 +3347,15 @@ def permute(items)
   items.each { |item| permute(items - [item]) }
 end
 def tree(node, seen)
-  tree(node.left, seen)
-  tree(node.right, seen)
+  tree(node[0], seen)
+  tree(node[1], seen)
+end
+def tree_via_local(node)
+  child = node[0]
+  tree_via_local(child)
+end
+def opaque_wrapper(node)
+  opaque_wrapper(identity(node))
 end
 def guarded_tree(node, seen)
   return if seen.include?(node)
@@ -3345,7 +3402,17 @@ end
         assert_eq!(complexity(&rows, "split"), Some("O(N)".into()));
         assert_eq!(complexity(&rows, "fib"), Some("O(2^N)".into()));
         assert_eq!(complexity(&rows, "permute"), Some("O(N!)".into()));
-        assert_eq!(complexity(&rows, "tree"), Some("unknown".into()));
+        assert_eq!(complexity(&rows, "tree"), Some("O(N)".into()));
+        assert_eq!(complexity(&rows, "tree_via_local"), Some("O(N)".into()));
+        assert_eq!(complexity(&rows, "opaque_wrapper"), Some("unknown".into()));
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.function == "tree_via_local")
+                .unwrap()
+                .recursion
+                .structural_calls,
+            1
+        );
         let guarded = rows
             .iter()
             .find(|row| row.function == "guarded_tree")
@@ -3384,7 +3451,7 @@ class Parser
   end
 
   def opaque_step(node)
-    even_step(node.child)
+    even_step(node[0])
   end
 
   def passthrough_step(node)
@@ -3415,8 +3482,8 @@ end
                 .argument_progress,
             "halving"
         );
-        // Descending into a projection of the parameter is progress even
-        // though nothing shrinks arithmetically: `node.child` cannot be
+        // Descending into an indexed projection of the parameter is progress
+        // even though nothing shrinks arithmetically: `node[0]` cannot be
         // `node`, so the argument cannot recur.
         let opaque = rows
             .iter()
@@ -3444,6 +3511,19 @@ end
                 .argument_progress,
             "unknown"
         );
+
+        let java = java_facts(
+            r#"
+class Node {
+  Node left;
+  void walk(Node node) {
+    walk(node.left);
+  }
+}
+"#,
+        );
+        let walk = java.iter().find(|row| row.function == "walk").unwrap();
+        assert_eq!(walk.recursion.structural_calls, 1);
     }
 
     #[test]
@@ -3787,6 +3867,7 @@ end
                 cardinality_dependencies: BTreeSet::from(["b".into()]),
                 shrinking: false,
                 halving: false,
+                structural_descent: false,
                 empty_collection: false,
                 fixed_collection: false,
             }],
@@ -3800,6 +3881,7 @@ end
                 cardinality_dependencies: BTreeSet::from(["a".into()]),
                 shrinking: false,
                 halving: false,
+                structural_descent: false,
                 empty_collection: false,
                 fixed_collection: false,
             }],
