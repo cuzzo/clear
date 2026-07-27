@@ -2314,6 +2314,56 @@ fn c_operators_and_subscript_are_constant_time_intrinsics() -> Result<()> {
 }
 
 #[test]
+fn cpp_operators_are_constant_only_for_proven_scalar_operands() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Number {};
+Number operator+(Number left, Number right);
+int scalar(int n, int k) {
+    int sum = n + k;
+    return sum < k ? -sum : sum;
+}
+Number overloaded(Number left, Number right) {
+    return left + right;
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let scalar = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "scalar")
+        .context("missing scalar complexity facts")?;
+    for operator in ["+", "<"] {
+        let context = scalar
+            .call_contexts
+            .iter()
+            .find(|context| context.message == operator)
+            .with_context(|| format!("missing scalar {operator} context"))?;
+        assert_eq!(
+            context.known_time_complexity.as_deref(),
+            Some("O(1)"),
+            "primitive {operator} must be constant-time"
+        );
+    }
+
+    let overloaded = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "overloaded")
+        .context("missing overloaded complexity facts")?;
+    let addition = overloaded
+        .call_contexts
+        .iter()
+        .find(|context| context.message == "+")
+        .context("missing overloaded addition context")?;
+    assert_ne!(addition.known_time_complexity.as_deref(), Some("O(1)"));
+    Ok(())
+}
+
+#[test]
 fn go_top_level_calls_retain_declared_parameter_receiver_types() -> Result<()> {
     use std::io::Write;
 

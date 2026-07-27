@@ -432,6 +432,52 @@ fn cpp_method_local_types(
         .collect()
 }
 
+fn cpp_scalar_primitive(name: &str) -> bool {
+    let bare = name
+        .trim()
+        .trim_start_matches("const ")
+        .trim_start_matches("volatile ")
+        .trim_end_matches(['&', '*'])
+        .trim();
+    let bare = bare.strip_prefix("std::").unwrap_or(bare);
+    let words = bare.split_whitespace().collect::<Vec<_>>();
+    matches!(
+        bare,
+        "bool"
+            | "char"
+            | "char8_t"
+            | "char16_t"
+            | "char32_t"
+            | "wchar_t"
+            | "float"
+            | "double"
+            | "size_t"
+            | "ptrdiff_t"
+            | "nullptr_t"
+            | "int8_t"
+            | "int16_t"
+            | "int32_t"
+            | "int64_t"
+            | "uint8_t"
+            | "uint16_t"
+            | "uint32_t"
+            | "uint64_t"
+            | "intmax_t"
+            | "uintmax_t"
+            | "intptr_t"
+            | "uintptr_t"
+    ) || (!words.is_empty()
+        && words.iter().all(|word| {
+            matches!(
+                *word,
+                "signed" | "unsigned" | "short" | "int" | "long" | "double"
+            )
+        })
+        && words
+            .iter()
+            .any(|word| matches!(*word, "short" | "int" | "long")))
+}
+
 fn scip_clang_parts(symbol: &str) -> Option<(&str, &str)> {
     let (package, _version, descriptor) = scip_global_parts(symbol, "cxx", ".")?;
     Some((package, descriptor))
@@ -770,6 +816,22 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("cpp")
+    }
+
+    fn scalar_operator_complexity(
+        &self,
+        message: &str,
+        operand_type: Option<&TypeExpr>,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if !super::normalized_behavior::PRIMITIVE_OPERATORS.contains(&operator) {
+            return None;
+        }
+        matches!(operand_type, Some(TypeExpr::Primitive(name)) if cpp_scalar_primitive(name))
+            .then_some(super::normalized_behavior::NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            })
     }
 
     // CFG-SPECIFIC START: expose the C++ CFG profile.
