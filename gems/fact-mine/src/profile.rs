@@ -6030,6 +6030,28 @@ fn declared_receiver_type(
         .cloned()
 }
 
+fn declared_type_is_template_dependent(
+    document: &Document,
+    definition: Option<&syntax::FunctionDef>,
+    declared_type: &str,
+) -> bool {
+    let Some(definition) = definition else {
+        return false;
+    };
+    let key = format!(
+        "{}\0{}\0{}",
+        definition.owner, definition.name, definition.line
+    );
+    let Some(parameters) = document.method_template_types.get(&key) else {
+        return false;
+    };
+    let normalized = normalized_declared_alias(document, declared_type);
+    normalized
+        .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .any(|token| parameters.contains(token))
+}
+
 fn declared_state_receiver_type(
     document: &Document,
     owner: &str,
@@ -6551,6 +6573,18 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                             instance_receiver_type.as_deref().and_then(|receiver_type| {
                                 abstract_dispatch_callback_cost(document, behavior, receiver_type)
                             })
+                        })
+                        .or_else(|| {
+                            instance_receiver_type
+                                .as_deref()
+                                .filter(|receiver_type| {
+                                    declared_type_is_template_dependent(
+                                        document,
+                                        source_definition,
+                                        receiver_type,
+                                    )
+                                })
+                                .map(|_| "reflective_once".to_string())
                         })
                 })
                 .flatten();
@@ -7186,6 +7220,7 @@ pub(crate) mod tests {
             type_alias_lines: Default::default(),
             method_param_types: Default::default(),
             method_local_types: Default::default(),
+            method_template_types: Default::default(),
             hazard_sites: vec![],
             imports: vec![],
         }

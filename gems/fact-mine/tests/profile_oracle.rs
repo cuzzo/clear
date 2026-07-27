@@ -1721,6 +1721,59 @@ struct Queue {
 }
 
 #[test]
+fn cpp_template_receiver_calls_keep_symbolic_dispatch_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template <typename Policy>
+struct Runner {
+    using Queue = typename Policy::Queue;
+    Queue queue;
+    void run(Policy& policy) {
+        policy.execute();
+        queue.flush();
+    }
+};
+struct Concrete {
+    void execute() {}
+};
+void invoke(Concrete& concrete) {
+    concrete.execute();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for message in ["execute", "flush"] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == message)
+            .with_context(|| format!("missing dependent {message} call"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(R)"),
+            "call={call:?}, template_types={:?}",
+            document.method_template_types
+        );
+        assert_eq!(
+            call.complexity_provenance.as_deref(),
+            Some("parametric_declared_receiver_contract")
+        );
+    }
+    let concrete = output
+        .calls
+        .iter()
+        .find(|call| call.function == "invoke" && call.message == "execute")
+        .context("missing concrete execute call")?;
+    assert_ne!(
+        concrete.complexity_provenance.as_deref(),
+        Some("parametric_declared_receiver_contract")
+    );
+    Ok(())
+}
+
+#[test]
 fn c_export_and_calling_convention_macros_preserve_parameters_and_recursion() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".c").tempfile()?;
     fs::write(

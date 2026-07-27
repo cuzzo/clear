@@ -528,6 +528,7 @@ mod tests {
             type_alias_lines: BTreeMap::new(),
             method_param_types: BTreeMap::new(),
             method_local_types: BTreeMap::new(),
+            method_template_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
             hazard_sites: Vec::new(),
             imports: Vec::new(),
@@ -615,6 +616,7 @@ mod tests {
             .into_iter()
             .collect(),
             method_local_types: BTreeMap::new(),
+            method_template_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
             hazard_sites: Vec::new(),
             imports: Vec::new(),
