@@ -1060,6 +1060,27 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Recover the collection binding that supplies an inferred element local
+    /// (`for (auto item : items)`, `auto item = items[i]`, or an iterator from
+    /// `items.begin()`). The adapter proves only the native syntax relation;
+    /// shared profile logic resolves the collection and element types.
+    fn collection_element_binding(&self, _source: &str, _local: &str) -> Option<String> {
+        None
+    }
+
+    /// Project a pointer-like declared type through native `receiver->member`
+    /// syntax. Adapters return the pointee type only when both the access
+    /// operator and a recognized pointer representation are proven.
+    fn pointer_member_receiver_type(
+        &self,
+        _source: &str,
+        _receiver: &str,
+        _message: &str,
+        _declared_type: &str,
+    ) -> Option<String> {
+        None
+    }
+
     /// Recover the local binding named by a receiver expression when native
     /// syntax proves that the expression is only a dereference/parenthesized
     /// view of that binding.

@@ -6897,6 +6897,40 @@ fn collection_element_type(type_name: &str, language: &str) -> Option<String> {
     }
 }
 
+fn inferred_collection_element_receiver_type(
+    document: &Document,
+    definition: Option<&syntax::FunctionDef>,
+    function: &str,
+    owner: &str,
+    receiver: &str,
+    message: &str,
+    call_span: [usize; 4],
+    language: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) -> Option<String> {
+    let definition = definition?;
+    let collection = behavior.collection_element_binding(&definition.body.text, receiver)?;
+    let collection_type = declared_receiver_type(document, Some(definition), &collection)
+        .or_else(|| flow_receiver_type(document, function, &collection, call_span))
+        .or_else(|| declared_state_receiver_type(document, owner, &collection))
+        .or_else(|| {
+            field_access_receiver_type(
+                document,
+                Some(definition),
+                function,
+                owner,
+                &collection,
+                call_span,
+                language,
+            )
+        })?;
+    let normalized_collection = normalized_declared_alias(document, &collection_type);
+    let element_type = collection_element_type(&normalized_collection, language)?;
+    behavior
+        .pointer_member_receiver_type(&definition.body.text, receiver, message, &element_type)
+        .or(Some(element_type))
+}
+
 fn reaching_call_result_spans(
     document: &Document,
     function: &str,
@@ -7252,6 +7286,26 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 )
             })
             .flatten();
+            let inferred_collection_element_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
+                && declared_receiver_type.is_none()
+                && flow_receiver_type.is_none()
+                && state_receiver_type.is_none()
+                && field_access_receiver_type.is_none())
+            .then(|| {
+                inferred_collection_element_receiver_type(
+                    document,
+                    source_definition,
+                    &call.function,
+                    &call.owner,
+                    &receiver_local_binding,
+                    &call.message,
+                    call.span,
+                    language,
+                    behavior,
+                )
+            })
+            .flatten();
             let receiver_type_origin = if explicit_receiver_type.is_some() {
                 Some("explicit_native_cast".to_string())
             } else if declared_receiver_type.is_some() {
@@ -7262,6 +7316,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 Some("declared_state".to_string())
             } else if field_access_receiver_type.is_some() {
                 Some("field_access".to_string())
+            } else if inferred_collection_element_type.is_some() {
+                Some("inferred_collection_element".to_string())
             } else {
                 None
             };
@@ -7270,7 +7326,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 .or(declared_receiver_type)
                 .or(flow_receiver_type)
                 .or(state_receiver_type)
-                .or(field_access_receiver_type);
+                .or(field_access_receiver_type)
+                .or(inferred_collection_element_type);
             let known_complexity = instance_receiver_type
                 .as_deref()
                 .map(|type_name| TypeExpr::parse(type_name, language))

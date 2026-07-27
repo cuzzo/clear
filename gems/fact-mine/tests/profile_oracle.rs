@@ -2311,6 +2311,51 @@ struct Wrapper {
 }
 
 #[test]
+fn cpp_inferred_collection_elements_recover_receiver_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Item {
+    void work() {}
+};
+struct Store {
+    std::vector<std::shared_ptr<Item>> pointers;
+    std::list<Item> values;
+    void range() {
+        for(const auto & item : pointers) {
+            item->work();
+        }
+    }
+    void index() {
+        auto item = pointers[0];
+        item->work();
+    }
+    void iterator() {
+        auto it = values.begin();
+        it->work();
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for function in ["range", "index", "iterator"] {
+        let work = output
+            .calls
+            .iter()
+            .find(|call| call.function == function && call.message == "work")
+            .with_context(|| format!("missing {function} element call"))?;
+        assert_eq!(work.receiver_type.as_deref(), Some("Item"), "{work:?}");
+        assert_eq!(
+            work.receiver_type_origin.as_deref(),
+            Some("inferred_collection_element")
+        );
+        assert!(work.target.is_some(), "{work:?}");
+    }
+    Ok(())
+}
+
+#[test]
 fn c_export_and_calling_convention_macros_preserve_parameters_and_recursion() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".c").tempfile()?;
     fs::write(
