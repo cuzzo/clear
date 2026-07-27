@@ -6398,7 +6398,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
         .iter()
         .map(|projection| (projection.outer_span, projection.receiver_call_span))
         .collect::<BTreeMap<_, _>>();
-    document
+    let mut calls = document
         .call_sites
         .iter()
         .map(|call| {
@@ -6796,7 +6796,77 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 empty_domain_cause: None,
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    propagate_direct_call_result_receiver_types(&mut calls, language, behavior);
+    calls
+}
+
+fn propagate_direct_call_result_receiver_types(
+    calls: &mut [CallRecord],
+    language: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) {
+    loop {
+        let producers = calls
+            .iter()
+            .filter_map(|call| {
+                Some((
+                    (call.source.clone(), call.path.clone(), call.span),
+                    (call.message.clone(), call.receiver_type.clone()?),
+                ))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut changed = false;
+        for call in calls.iter_mut().filter(|call| call.receiver_type.is_none()) {
+            let Some(receiver_span) = call.receiver_call_span else {
+                continue;
+            };
+            let Some((producer_message, producer_receiver_type)) =
+                producers.get(&(call.source.clone(), call.path.clone(), receiver_span))
+            else {
+                continue;
+            };
+            let Some(receiver_type) = behavior
+                .propagated_collection_return_type(producer_message, Some(producer_receiver_type))
+            else {
+                continue;
+            };
+            let parsed = TypeExpr::parse(&receiver_type, language);
+            let known = behavior.call_complexity(&parsed, &call.message);
+            let parametric = known
+                .is_none()
+                .then(|| behavior.parametric_call_cost(&parsed, &call.message))
+                .flatten();
+            let parametric_complexity = parametric
+                .as_deref()
+                .and_then(crate::syntax::parametric_call_complexity);
+            call.receiver_type = Some(receiver_type);
+            call.receiver_type_origin = Some("declared_collection_call_result".to_string());
+            call.known_time_complexity = known
+                .map(|cost| cost.time.to_string())
+                .or_else(|| parametric_complexity.map(|cost| cost.0.to_string()));
+            call.known_space_complexity = known
+                .map(|cost| cost.space.to_string())
+                .or_else(|| parametric_complexity.map(|cost| cost.1.to_string()));
+            call.complexity_provenance = known
+                .map(|_| "language_stdlib_registry".to_string())
+                .or_else(|| {
+                    parametric_complexity
+                        .map(|_| "parametric_declared_receiver_contract".to_string())
+                });
+            call.complexity_bound_quality = known
+                .map(|_| "upper_bound_declared_receiver".to_string())
+                .or_else(|| {
+                    parametric
+                        .as_ref()
+                        .map(|kind| format!("upper_bound_parametric_{kind}"))
+                });
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
 }
 
 fn extract_state_accesses(
