@@ -15,6 +15,10 @@ use std::path::Path;
 
 const SCHEMA_V1: &str = "fact-mine.external-complexity-summary.v1";
 const SCHEMA_V2: &str = "fact-mine.external-complexity-summary.v2";
+const BUNDLED_SUMMARIES: &[(&str, &[u8])] = &[(
+    "go-stdlib.go1.22.2.json.gz",
+    include_bytes!("../config/complexity_summaries/go-stdlib.go1.22.2.json.gz"),
+)];
 
 #[derive(Debug, Deserialize)]
 struct SummaryFile {
@@ -100,6 +104,23 @@ pub fn apply_files(output: &mut ProfileOutput, paths: &[impl AsRef<Path>]) -> Re
     let mut applied = 0;
     for summary in &summaries {
         applied += apply_summary(output, summary)?;
+    }
+    Ok(applied)
+}
+
+/// Apply reviewed, version-pinned summaries shipped with FactMine. Symbols
+/// include the package version, so a bundle cannot match another toolchain or
+/// dependency release accidentally.
+pub fn apply_bundled(output: &mut ProfileOutput) -> Result<usize> {
+    let mut applied = 0;
+    for (name, bytes) in BUNDLED_SUMMARIES {
+        let source =
+            decode(Path::new(name), bytes).with_context(|| format!("failed to decode {name}"))?;
+        let summary: SummaryFile = serde_json::from_str(&source)
+            .with_context(|| format!("failed to parse bundled complexity summary {name}"))?;
+        validate(&summary)
+            .with_context(|| format!("failed to validate bundled complexity summary {name}"))?;
+        applied += apply_summary(output, &summary)?;
     }
     Ok(applied)
 }
@@ -484,5 +505,22 @@ mod tests {
             .to_string()
             .contains("conflicting complexity summaries"));
         assert_eq!(output.calls[0].known_time_complexity, None);
+    }
+
+    #[test]
+    fn bundled_summary_matches_only_its_exact_toolchain_symbol() {
+        let exact = "scip-go gomod github.com/golang/go/src go1.22 strings/IndexByte().";
+        let other_version = "scip-go gomod github.com/golang/go/src go1.23 strings/IndexByte().";
+        let mut output = ProfileOutput {
+            calls: vec![call(Some(exact)), call(Some(other_version))],
+            ..ProfileOutput::default()
+        };
+
+        assert!(apply_bundled(&mut output).unwrap() > 0);
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(N)")
+        );
+        assert_eq!(output.calls[1].known_time_complexity, None);
     }
 }

@@ -76,6 +76,8 @@ time.Time:
   Add: constant
   After: constant
   Before: constant
+  Format: linear_materialize
+  IsZero: constant
   Truncate: constant
   UnixNano: constant
   Unix: constant
@@ -178,13 +180,17 @@ bytes.Buffer:
   Read: linear_scan
   ReadString: linear_scan
   Next: linear_scan
-fs.FileInfo:
+# os.FileInfo is a public type alias for io/fs.FileInfo. Keep both canonical
+# spellings because build-tagged files may be parsed without a platform SCIP
+# document while their declared parameter type remains compiler syntax.
+fs.FileInfo: &file_info_methods
   Name: constant
   Size: constant
   Mode: constant
   ModTime: constant
   IsDir: constant
   Sys: constant
+os.FileInfo: *file_info_methods
 fs.DirEntry:
   Name: constant
   IsDir: constant
@@ -523,10 +529,16 @@ Intrinsic:
   bytes.NewReader: constant
   bytes.NewBuffer: constant
   bytes.NewBufferString: linear_materialize
+  bytes.TrimSpace: linear_scan
   bufio.NewScanner: constant
+  bufio.NewReader: constant
   bufio.ScanLines: linear_scan
   bufio.ScanWords: linear_scan
+  flag.NewFlagSet: constant
+  strings.IndexByte: linear_scan
+  strings.TrimLeft: linear_scan
   time.Since: constant
+  time.Date: constant
   errors.New: linear_materialize
 ParametricCall:
   # `error` is a predeclared open interface. The declared receiver proves one
@@ -597,10 +609,12 @@ ExternalLatency:
   "exec.Cmd.Output": linear_materialize
   "exec.Cmd.CombinedOutput": linear_materialize
   "exec.Cmd.String": linear_materialize
+  "exec.Cmd.StdoutPipe": constant
   # Creating the harness temp dir registers a cleanup and makes one directory.
   "testing.common.TempDir": constant
 SemanticSymbolParametricCost:
   'sort/Sort().': callback_sort
+  'sort/Slice().': callback_sort
   '`crypto/elliptic`/Curve#Params().': callback_once
   'crypto/Signer#Sign().': callback_once
   'flag/Usage.': callback_once
@@ -614,9 +628,12 @@ SemanticSymbolParametricCost:
   '`encoding/json`/Marshal().': reflective_once
   '`encoding/json`/Unmarshal().': reflective_once
   '`encoding/json`/Decoder#Decode().': reflective_once
+  '`encoding/json`/Encoder#Encode().': reflective_once
   '`encoding/json`/MarshalIndent().': reflective_once
   'errors/Is().': reflective_once
   'flag/Parse().': reflective_once
+  'flag/FlagSet#Visit().': callback_linear
+  'flag/FlagSet#VisitAll().': callback_linear
   # A subtest runs an arbitrary body, so its cost is the callback's.
   'testing/T#Run().': callback_once
   'testing/B#Run().': callback_once
