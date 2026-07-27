@@ -51,6 +51,27 @@ impl AstNormalizationAdapter for CppAstAdapter {
         cpp_function_declarator(declarator)
     }
 
+    fn block_node_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "field_declaration_list"
+                | "block"
+                | "body_statement"
+                | "statement_block"
+                | "statement_list"
+                | "class_body"
+                | "switch_body"
+                | "match_block"
+                | "then"
+                | "block_body"
+                | "control_structure_body"
+                | "compound_statement"
+                | "declaration_list"
+                | "function_body"
+                | "statements"
+        )
+    }
+
     fn assignment_target_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
         if node.kind() != "pointer_declarator" {
             return None;
