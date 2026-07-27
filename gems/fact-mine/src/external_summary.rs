@@ -6,21 +6,41 @@
 
 use crate::profile::{summarize_call_resolution, ProfileOutput};
 use anyhow::{bail, Context, Result};
+use flate2::read::GzDecoder;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
-const SCHEMA: &str = "fact-mine.external-complexity-summary.v1";
+const SCHEMA_V1: &str = "fact-mine.external-complexity-summary.v1";
+const SCHEMA_V2: &str = "fact-mine.external-complexity-summary.v2";
 
 #[derive(Debug, Deserialize)]
 struct SummaryFile {
     schema: String,
     #[serde(default)]
+    producer: Option<SummaryProducer>,
+    #[serde(default)]
+    source: Option<SummarySource>,
+    #[serde(default)]
     symbols: BTreeMap<String, ComplexitySummary>,
 }
 
 #[derive(Debug, Deserialize)]
+struct SummaryProducer {
+    name: String,
+    version: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SummarySource {
+    profile_sha256: String,
+    method_count: usize,
+    complete_symbol_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct ComplexitySummary {
     time: String,
     space: String,
@@ -43,20 +63,78 @@ fn default_bound_quality() -> String {
 }
 
 pub fn apply_file(output: &mut ProfileOutput, path: &Path) -> Result<usize> {
-    let source = fs::read_to_string(path)
+    let summary = read_file(path)?;
+    apply_summary(output, &summary)
+}
+
+pub fn apply_files(output: &mut ProfileOutput, paths: &[impl AsRef<Path>]) -> Result<usize> {
+    let mut summaries = Vec::with_capacity(paths.len());
+    let mut costs_by_symbol: BTreeMap<String, (String, String, String)> = BTreeMap::new();
+    for path in paths {
+        let path = path.as_ref();
+        let summary = read_file(path)?;
+        for (symbol, cost) in &summary.symbols {
+            if let Some((time, space, first_path)) = costs_by_symbol.get(symbol) {
+                if time != &cost.time || space != &cost.space {
+                    bail!(
+                        "conflicting complexity summaries for {symbol}: {} has {time}/{space}, {} has {}/{}",
+                        first_path,
+                        path.display(),
+                        cost.time,
+                        cost.space
+                    );
+                }
+            } else {
+                costs_by_symbol.insert(
+                    symbol.clone(),
+                    (
+                        cost.time.clone(),
+                        cost.space.clone(),
+                        path.display().to_string(),
+                    ),
+                );
+            }
+        }
+        summaries.push(summary);
+    }
+    let mut applied = 0;
+    for summary in &summaries {
+        applied += apply_summary(output, summary)?;
+    }
+    Ok(applied)
+}
+
+fn read_file(path: &Path) -> Result<SummaryFile> {
+    let bytes = fs::read(path)
         .with_context(|| format!("failed to read complexity summary {}", path.display()))?;
-    apply_json(output, &source)
-        .with_context(|| format!("failed to apply complexity summary {}", path.display()))
+    let source = decode(path, &bytes)
+        .with_context(|| format!("failed to decode complexity summary {}", path.display()))?;
+    let summary: SummaryFile = serde_json::from_str(&source)
+        .with_context(|| format!("failed to parse complexity summary {}", path.display()))?;
+    validate(&summary)
+        .with_context(|| format!("failed to validate complexity summary {}", path.display()))?;
+    Ok(summary)
+}
+
+fn decode(path: &Path, bytes: &[u8]) -> Result<String> {
+    let compressed = bytes.starts_with(&[0x1f, 0x8b])
+        || path.extension().and_then(|extension| extension.to_str()) == Some("gz");
+    let mut decoded = Vec::new();
+    if compressed {
+        GzDecoder::new(bytes).read_to_end(&mut decoded)?;
+    } else {
+        decoded.extend_from_slice(bytes);
+    }
+    String::from_utf8(decoded).context("complexity summary is not UTF-8 JSON")
 }
 
 pub fn apply_json(output: &mut ProfileOutput, source: &str) -> Result<usize> {
     let summary: SummaryFile = serde_json::from_str(source)?;
-    if summary.schema != SCHEMA {
-        bail!(
-            "unsupported complexity summary schema {}; expected {SCHEMA}",
-            summary.schema
-        );
-    }
+    validate(&summary)?;
+    apply_summary(output, &summary)
+}
+
+fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<usize> {
     let mut applied = 0;
     for call in &mut output.calls {
         if call.target.is_some()
@@ -126,10 +204,68 @@ pub fn apply_json(output: &mut ProfileOutput, source: &str) -> Result<usize> {
     Ok(applied)
 }
 
+fn validate(summary: &SummaryFile) -> Result<()> {
+    match summary.schema.as_str() {
+        SCHEMA_V1 => {}
+        SCHEMA_V2 => {
+            let producer = summary
+                .producer
+                .as_ref()
+                .context("v2 complexity summary is missing producer metadata")?;
+            if producer.name.trim().is_empty() || producer.version.trim().is_empty() {
+                bail!("v2 complexity summary producer name and version must be non-empty");
+            }
+            let source = summary
+                .source
+                .as_ref()
+                .context("v2 complexity summary is missing source metadata")?;
+            let digest = source
+                .profile_sha256
+                .strip_prefix("sha256:")
+                .unwrap_or_default();
+            if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                bail!("v2 complexity summary source.profile_sha256 must be a SHA-256 digest");
+            }
+            if source.complete_symbol_count != summary.symbols.len() {
+                bail!(
+                    "v2 complexity summary declares {} complete symbols but contains {}",
+                    source.complete_symbol_count,
+                    summary.symbols.len()
+                );
+            }
+            if source.complete_symbol_count > 0 && source.method_count == 0 {
+                bail!(
+                    "v2 complexity summary with exported symbols must analyze at least one method"
+                );
+            }
+        }
+        other => bail!(
+            "unsupported complexity summary schema {other}; expected {SCHEMA_V1} or {SCHEMA_V2}"
+        ),
+    }
+    for (symbol, cost) in &summary.symbols {
+        if symbol.trim().is_empty() {
+            bail!("complexity summary contains an empty compiler symbol");
+        }
+        if cost.time.trim().is_empty() || cost.space.trim().is_empty() {
+            bail!("complexity summary for {symbol} must contain non-empty time and space bounds");
+        }
+        if cost.provenance.trim().is_empty() || cost.bound_quality.trim().is_empty() {
+            bail!(
+                "complexity summary for {symbol} must contain non-empty provenance and bound quality"
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::profile::{CallRecord, ProfileOutput};
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
 
     fn call(symbol: Option<&str>) -> CallRecord {
         CallRecord {
@@ -193,7 +329,7 @@ mod tests {
             ..ProfileOutput::default()
         };
         let json = serde_json::json!({
-            "schema": SCHEMA,
+            "schema": SCHEMA_V1,
             "symbols": {
                 symbol: {"time": "O(N)", "space": "O(1)"}
             }
@@ -241,7 +377,7 @@ mod tests {
         output.calls = vec![call(Some(symbol))];
         output.call_resolution_coverage.unresolved_call_sites = 1;
         let json = serde_json::json!({
-            "schema": SCHEMA,
+            "schema": SCHEMA_V1,
             "symbols": {
                 symbol: {"time": "O(N)", "space": "O(1)"}
             }
@@ -261,5 +397,92 @@ mod tests {
             output.call_resolution_coverage.accounted_call_percent,
             100.0
         );
+    }
+
+    #[test]
+    fn validates_v2_provenance_envelope() {
+        let symbol = "scip-go gomod stdlib v1 strings#IndexByte().";
+        let mut output = ProfileOutput {
+            calls: vec![call(Some(symbol))],
+            ..ProfileOutput::default()
+        };
+        let valid = serde_json::json!({
+            "schema": SCHEMA_V2,
+            "producer": {"name": "espalier", "version": "0.1.0"},
+            "source": {
+                "profile_sha256": format!("sha256:{}", "a".repeat(64)),
+                "method_count": 1,
+                "complete_symbol_count": 1
+            },
+            "symbols": {
+                symbol: {"time": "O(N)", "space": "O(1)"}
+            }
+        });
+        assert_eq!(apply_json(&mut output, &valid.to_string()).unwrap(), 1);
+
+        let mut invalid = valid;
+        invalid["source"]["complete_symbol_count"] = serde_json::json!(2);
+        assert!(
+            apply_json(&mut ProfileOutput::default(), &invalid.to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("declares 2 complete symbols but contains 1")
+        );
+    }
+
+    #[test]
+    fn reads_gzip_summary_by_content() {
+        let symbol = "scip-go gomod stdlib v1 strings#IndexByte().";
+        let json = serde_json::json!({
+            "schema": SCHEMA_V1,
+            "symbols": {
+                symbol: {"time": "O(N)", "space": "O(1)"}
+            }
+        });
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(json.to_string().as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(file.path(), compressed).unwrap();
+        let mut output = ProfileOutput {
+            calls: vec![call(Some(symbol))],
+            ..ProfileOutput::default()
+        };
+
+        assert_eq!(apply_file(&mut output, file.path()).unwrap(), 1);
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(N)")
+        );
+    }
+
+    #[test]
+    fn rejects_conflicting_files_before_applying_either() {
+        let symbol = "scip-go gomod stdlib v1 strings#IndexByte().";
+        let file_a = tempfile::NamedTempFile::new().unwrap();
+        let file_b = tempfile::NamedTempFile::new().unwrap();
+        for (file, time) in [(&file_a, "O(N)"), (&file_b, "O(1)")] {
+            fs::write(
+                file.path(),
+                serde_json::json!({
+                    "schema": SCHEMA_V1,
+                    "symbols": {
+                        symbol: {"time": time, "space": "O(1)"}
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+        let mut output = ProfileOutput {
+            calls: vec![call(Some(symbol))],
+            ..ProfileOutput::default()
+        };
+
+        let error = apply_files(&mut output, &[file_a.path(), file_b.path()]).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("conflicting complexity summaries"));
+        assert_eq!(output.calls[0].known_time_complexity, None);
     }
 }

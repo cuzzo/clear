@@ -15,6 +15,7 @@ options = {
   exclude: [],
   fact_mine: nil,
   scip_indexes: [],
+  complexity_summaries: [],
   vcs: nil
 }
 
@@ -64,6 +65,10 @@ OptionParser.new do |opts|
 
   opts.on("--scip-index FILE", "Import a .scip or SCIP JSON index (repeatable)") do |f|
     options[:scip_indexes] << f
+  end
+
+  opts.on("--complexity-summary FILE", "Apply an exact-SCIP-symbol complexity summary (repeatable)") do |f|
+    options[:complexity_summaries] << f
   end
 end.parse!
 
@@ -149,6 +154,7 @@ evidence = Espalier::StaticEvidence.build(
   root: Dir.pwd,
   vcs: options[:vcs],
   scip_indexes: options[:scip_indexes],
+  complexity_summaries: options[:complexity_summaries],
   include_annotations: options[:format] != :architecture
 )
 

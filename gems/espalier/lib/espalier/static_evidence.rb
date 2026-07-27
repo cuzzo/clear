@@ -24,8 +24,8 @@ module Espalier
       File.join(Espalier::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
     ).freeze
 
-    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [])
-      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations, scip_indexes: scip_indexes).build
+    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [], complexity_summaries: [])
+      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations, scip_indexes: scip_indexes, complexity_summaries: complexity_summaries).build
     end
 
     def self.project_modules(evidence, source_roles: ["production"])
@@ -367,13 +367,14 @@ module Espalier
     end
 
 
-    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [])
+    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [], complexity_summaries: [])
       @targets = Array(targets).compact
       @root = root
       @language = normalize_language(language)
       @vcs = normalize_vcs(vcs)
       @include_annotations = include_annotations
       @scip_indexes = Array(scip_indexes).compact
+      @complexity_summaries = Array(complexity_summaries).compact
     end
 
     def build
@@ -392,6 +393,7 @@ module Espalier
       args = [FACT_MINE_RUST_BINARY, "profile", profile, "--output", tmp.path]
       args.concat(["--language", @language.to_s]) if @language
       @scip_indexes.each { |index| args.concat(["--scip-index", index.to_s]) }
+      @complexity_summaries.each { |summary| args.concat(["--complexity-summary", summary.to_s]) }
       args.concat(files)
       ok = system(*args)
       raise "fact-mine-rust failed with exit status #{$?.exitstatus}" unless ok

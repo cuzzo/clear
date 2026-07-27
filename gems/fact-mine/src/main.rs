@@ -128,9 +128,10 @@ fn run() -> Result<()> {
             for index in scip_indexes {
                 fact_mine_rust::scip::apply_json_file(&mut merged, &index)?;
             }
-            for summary in complexity_summaries {
-                fact_mine_rust::external_summary::apply_file(&mut merged, &summary)?;
-            }
+            fact_mine_rust::external_summary::apply_files(
+                &mut merged,
+                complexity_summaries.as_slice(),
+            )?;
             if let Some(metrics) = merged.incremental_metrics.as_mut() {
                 metrics.external_enrichment_millis =
                     external_enrichment_started.elapsed().as_millis();
@@ -172,9 +173,10 @@ fn run() -> Result<()> {
             for index in scip_indexes {
                 fact_mine_rust::scip::apply_json_file(&mut merged, &index)?;
             }
-            for summary in complexity_summaries {
-                fact_mine_rust::external_summary::apply_file(&mut merged, &summary)?;
-            }
+            fact_mine_rust::external_summary::apply_files(
+                &mut merged,
+                complexity_summaries.as_slice(),
+            )?;
             let rendered = match format.as_str() {
                 "json" => serde_json::to_string_pretty(&merged.call_resolution_coverage)?,
                 "text" => render_call_resolution(&merged.call_resolution_coverage),

@@ -134,6 +134,7 @@ combining structural facts with sibling-gem evidence:
 - `--manifest FILE`: a previously generated Espalier YAML manifest.
 - `--fact-mine FILE`: a previously generated `fact-mine.json` static facts file (also honors `ENV["FACT_MINE_FACTS_FILE"]` environment variable to bypass fact extraction runs).
 - `--scip-index FILE`: import compiler-proven call identity directly from a binary `.scip` file or from a protobuf-JSON export; repeat for multiple build roots. Binary decoding is built in and does not require the `scip` CLI at analysis time.
+- `--complexity-summary FILE`: apply a reviewed Espalier complexity summary keyed by exact compiler symbols; JSON and reproducible `.json.gz` files are supported and the option may be repeated. Contradictory summaries fail before either one is applied.
 
 Nil-kill evidence is the most important external input today because it
 helps Espalier distinguish broad untyped surfaces from intentional typed
