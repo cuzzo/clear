@@ -920,6 +920,11 @@ mod tests {
             (format!("{alloc}vec/impl#[`Vec<T, A>`]as_slice()."), "as_slice", "O(1)"),
             (format!("{alloc}collections/btree/set/impl#[`BTreeSet<T>`][`From<[T; N]>`]from()."), "from", "O(N log N)"),
             (format!("{alloc}collections/btree/map/impl#[`BTreeMap<K, V, A>`]get_mut()."), "get_mut", "O(log N)"),
+            (format!("{core}slice/impl#[`[T]`]iter_mut()."), "iter_mut", "O(1)"),
+            (format!("{alloc}collections/btree/map/impl#[`BTreeMap<K, V, A>`]values_mut()."), "values_mut", "O(1)"),
+            (format!("{alloc}collections/btree/set/impl#[`BTreeSet<T, A>`]is_subset()."), "is_subset", "O(N log N)"),
+            (format!("{core}convert/num/ptr_try_from_impls/impl#[usize][`TryFrom<i32>`]try_from()."), "try_from", "O(1)"),
+            (format!("{core}iter/sources/once/once()."), "once", "O(1)"),
         ] {
             let complexity = external_symbol_call_complexity(&symbol, message)
                 .unwrap_or_else(|| panic!("no cost model for {symbol}"));
@@ -960,6 +965,8 @@ mod tests {
             (format!("{core}clone/Clone#clone()."), "reflective_once"),
             (format!("{std}sync/once_lock/impl#[`OnceLock<T>`]get_or_init()."), "callback_once"),
             (format!("{core}iter/traits/iterator/Iterator#fold()."), "callback_linear"),
+            (format!("{core}iter/traits/iterator/Iterator#partition()."), "callback_linear"),
+            (format!("{core}mem/drop()."), "reflective_once"),
         ] {
             assert_eq!(
                 external_symbol_metadata(&symbol).parametric_cost.as_deref(),
@@ -975,6 +982,10 @@ mod tests {
         // Filesystem entry points keep their excluded-latency assumption.
         let read = format!("{std}fs/read().");
         let complexity = external_symbol_call_complexity(&read, "read").unwrap();
+        assert_eq!(complexity.bound_quality, "upper_bound_external_latency_excluded");
+        assert!(complexity.assumption.is_some());
+        let create = format!("{std}fs/impl#[File]create().");
+        let complexity = external_symbol_call_complexity(&create, "create").unwrap();
         assert_eq!(complexity.bound_quality, "upper_bound_external_latency_excluded");
         assert!(complexity.assumption.is_some());
     }

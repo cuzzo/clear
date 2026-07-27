@@ -19,8 +19,11 @@ Array:
   sort_by: sort
   sort_by_key: sort
   iter: constant
+  iter_mut: constant
   into_iter: constant
   extend: linear_materialize
+  extend_from_slice: linear_materialize
+  append: linear_materialize
   join: linear_materialize
   to_vec: linear_materialize
   dedup: linear_scan
@@ -28,10 +31,13 @@ Array:
   retain: linear_scan
   as_slice: constant
   last_mut: constant
+  first_mut: constant
   # Lazy adapter over the existing buffer; no element is touched.
   windows: constant
+  chunks: constant
   # Drops every element it holds.
   clear: linear_scan
+  truncate: linear_scan
   with_capacity: linear_materialize
   sort_unstable: sort
 Hash:
@@ -41,6 +47,8 @@ Hash:
   contains_key: constant
   insert: constant
   remove: constant
+  get_mut: constant
+  iter: constant
   new: constant
   entry: constant
   clone: linear_materialize
@@ -72,6 +80,7 @@ String:
   as_str: constant
   clone: linear_materialize
   to_ascii_lowercase: linear_materialize
+  to_ascii_uppercase: linear_materialize
   iter: constant
   split_once: linear_scan
   rsplit_once: linear_scan
@@ -97,6 +106,11 @@ String:
   truncate: constant
   to_lowercase: linear_materialize
   push_str: linear_materialize
+  clear: constant
+  with_capacity: linear_materialize
+  encode_utf16: constant
+  rsplitn: constant
+  split_inclusive: constant
 BTreeMap:
   len: constant
   is_empty: constant
@@ -113,6 +127,7 @@ BTreeMap:
   extend: sort
   get_mut: logarithmic
   values: constant
+  values_mut: constant
   into_values: constant
   # `From<[(K, V); N]>` builds the tree from an unsorted array.
   from: sort
@@ -127,8 +142,12 @@ BTreeSet:
   into_iter: constant
   extend: sort
   is_disjoint: linear_scan
+  is_subset: sort
   intersection: constant
   difference: constant
+  first: logarithmic
+  pop_first: logarithmic
+  clear: linear_scan
   new: constant
   # `From<[T; N]>` builds the tree from an unsorted array.
   from: sort
@@ -151,6 +170,7 @@ Option:
   transpose: constant
   take: constant
   as_mut: constant
+  get_or_insert: constant
 Result:
   unwrap: constant
   expect: constant
@@ -192,6 +212,8 @@ Iterator:
   sum: linear_scan
   max: linear_scan
   min: linear_scan
+  skip_while: constant
+  zip: constant
 Box:
   new: constant
   as_ref: constant
@@ -210,11 +232,13 @@ Path:
   extension: linear_scan
   strip_prefix: linear_scan
   starts_with: linear_scan
+  ends_with: linear_scan
   components: constant
   is_absolute: constant
 PathBuf:
   from: linear_materialize
   clone: linear_materialize
+  pop: linear_scan
 OsStr:
   # Unix `to_str` validates the bytes as UTF-8.
   to_str: linear_scan
@@ -233,11 +257,17 @@ char:
   is_uppercase: constant
   is_lowercase: constant
   is_ascii_lowercase: constant
+  is_alphabetic: constant
+  is_control: constant
+  len_utf16: constant
+  to_ascii_uppercase: constant
 u8:
   is_ascii_alphanumeric: constant
   is_ascii_alphabetic: constant
   is_ascii_digit: constant
   is_ascii_whitespace: constant
+  is_ascii_hexdigit: constant
+  from_str_radix: linear_scan
 bool:
   then_some: constant
 usize:
@@ -245,8 +275,15 @@ usize:
   cmp: constant
   from: constant
   checked_sub: constant
+  abs_diff: constant
+  saturating_mul: constant
+  try_from: constant
 u32:
   saturating_sub: constant
+  try_from: constant
+u64:
+  from: constant
+  wrapping_mul: constant
 f64:
   round: constant
   abs: constant
@@ -267,8 +304,14 @@ Duration:
 Peekable:
   peek: constant
 RefCell:
+  new: constant
   borrow: constant
   borrow_mut: constant
+Atomic:
+  new: constant
+  load: constant
+  store: constant
+  fetch_add: constant
 mem:
   take: constant
   replace: constant
@@ -280,12 +323,27 @@ env:
   set_var: constant
   remove_var: constant
   temp_dir: constant
+  args: linear_materialize
 Ord:
   min: constant
   max: constant
 ToString:
   to_string: linear_materialize
 SemanticSymbol:
+  'iter/sources/once/once().': constant
+  'str/converts/from_utf8().': linear_scan
+  'panic/resume_unwind().': linear_scan
+  'sync/mpsc/channel().': constant
+  'sync/mpsc/impl#[`Sender<T>`][Clone]clone().': constant
+  'sync/mpsc/impl#[`Sender<T>`]send().': constant
+  'sync/once_lock/impl#[`OnceLock<T>`]new().': constant
+  'process/impl#[Command]stdin().': constant
+  'process/impl#[Command]stdout().': constant
+  'process/impl#[Command]stderr().': constant
+  'io/buffered/bufreader/impl#[`BufReader<R>`]new().': constant
+  'io/error/impl#[Error]kind().': constant
+  'path/impl#[Path]display().': constant
+  'path/impl#[Path]ancestors().': constant
   'impl#[`Node<''tree>`]kind().': constant
   'impl#[`Node<''tree>`]walk().': constant
   'impl#[Tree]root_node().': constant
@@ -375,6 +433,26 @@ SemanticSymbol:
   # a digest absorbs every input byte.
   'digest/impl#[D][Digest]update().': linear_materialize
 SemanticSymbolParametricCost:
+  'borrow/impl#[`Cow<''_, B>`]into_owned().': reflective_once
+  'cmp/min().': reflective_once
+  'convert/AsRef#as_ref().': reflective_once
+  'iter/traits/collect/impl#[I][IntoIterator]into_iter().': reflective_once
+  'mem/drop().': reflective_once
+  'option/impl#[`Option<T>`][Ord]cmp().': reflective_once
+  'tuple/impl#[`(U, T)`][Ord]cmp().': reflective_once
+  'tuple/impl#[`(V, U, T)`][Ord]cmp().': reflective_once
+  'vec/impl#[`Vec<T, A>`][Ord]cmp().': callback_linear
+  'slice/impl#[`[T]`]starts_with().': callback_linear
+  'vec/impl#[`Vec<T, A>`]retain_mut().': callback_linear
+  'iter/traits/iterator/Iterator#partition().': callback_linear
+  'iter/adapters/map/impl#[`Map<I, F>`][Iterator]fold().': callback_linear
+  'iter/adapters/rev/impl#[`Rev<I>`][Iterator]fold().': callback_linear
+  'option/impl#[`Option<T>`]ok_or_else().': callback_once
+  'result/impl#[`Result<T, E>`]is_ok_and().': callback_once
+  'result/impl#[`Result<T, E>`]map_err().': callback_once
+  'thread/scoped/scope().': callback_once
+  'thread/builder/impl#[Builder]spawn().': callback_once
+  'thread/scoped/impl#[Builder]spawn_scoped().': callback_once
   'string/impl#[T][ToString]to_string().': reflective_once
   'iter/traits/iterator/Iterator#collect().': callback_linear
   'iter/traits/iterator/Iterator#any().': callback_linear
@@ -444,6 +522,16 @@ ExternalLatency:
   Read.read_to_end: linear_materialize
   BufWriter.write_all: linear_materialize
   BufWriter.flush: constant
+  File.create: constant
+  File.open: constant
+  BufRead.read_line: linear_materialize
+  BufReader.read_exact: linear_materialize
+  copy.copy: linear_materialize
+  Command.spawn: constant
+  Child.kill: constant
+  Child.wait: constant
+  ChildStdin.flush: constant
+  JoinHandle.join: constant
   Builder.tempfile: constant
   dir.tempdir: constant
   NamedTempFile.new: constant
