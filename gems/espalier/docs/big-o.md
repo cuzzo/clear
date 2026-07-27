@@ -90,6 +90,23 @@ use emitted executable functions as the denominator and are rounded to one
 decimal place. The categories are mutually exclusive and each row sums to its
 function count.
 
+For an enforceable production-only measurement, run:
+
+```sh
+gems/espalier/script/check_big_o_coverage.rb \
+  --source-root /path/to/corpus \
+  --repository project \
+  --minimum 85 \
+  profile.json
+```
+
+The JSON result records the source-role and lambda policies, keeps analyzer,
+declared, modeled-world, closed-candidate, parametric, and recursive proof
+buckets separate, and exits unsuccessfully below the requested threshold. It
+also fails closed when FactMine reports an executable raw call that did not
+reach normalized call facts; otherwise an omitted call could make a function
+look complete.
+
 Measured 2026-07-17 at `18a2d4cbd`. These are quality samples, not language
 benchmarks: repository structure, dependency surface, callback density, and the
 share of trivial accessors all affect the result.
