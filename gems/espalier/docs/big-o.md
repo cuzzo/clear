@@ -241,8 +241,18 @@ Current indexed smoke corpora are pinned by source commit and indexer version:
 
 | Language | Corpus commit | Indexer | Production complete, source → SCIP | Exact project targets, source → SCIP |
 | --- | --- | --- | ---: | ---: |
-| Java | Apache Commons CLI `afb0fd148517b1bf8316ebbc44ec9ec8b201452a` | scip-java 0.12.3 | 271/524 (51.72%) → 330/524 (62.98%) | 557 → 784 |
+| Java | Apache Commons CLI `afb0fd148517b1bf8316ebbc44ec9ec8b201452a` | scip-java 0.12.3 | 279/524 (53.24%) → 524/524 (100.00%) | 559 → 767 |
 | C | cJSON `fb16e5cf358798aabb049655975cde8427101056` | scip-clang 0.4.0 | 41/116 (35.34%) → 102/116 (87.93%) | 185 → 188 |
+
+The Java path recognizes the `semanticdb` scheme emitted by real scip-java
+0.12.x indexes while retaining compatibility with older `scip-java`-scheme
+fixtures. This activates the reviewed generic collection, stream, and
+lambda/function-interface contracts for compiler-proven JDK symbols. Abstract
+project interface declarations are modeled as one parametric implementation
+invocation rather than as executable bodies, and enhanced-for iterable
+expressions remain in the normalized CFG. On Commons CLI all 1,435 executable
+calls are semantically accounted for and all 524 production functions have
+complete time and space bounds.
 
 The C path resolves macro definitions from compiler-indexed source/header
 locations, prices bounded expansion bodies, treats compiler-proven
