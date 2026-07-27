@@ -2635,6 +2635,11 @@ fn resolve_project_calls(
                 .push(method);
         }
     }
+    resolve_cpp_relative_scoped_calls(
+        calls,
+        &by_lexical,
+        &source_languages,
+    );
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
         let Some(symbol) = call.lexical_symbol.as_deref() else {
             continue;
@@ -2738,6 +2743,84 @@ fn resolve_project_calls(
         call.candidate_reason = None;
     }
     annotate_project_candidate_sets(owners, methods, calls, &by_lexical, &by_dispatch);
+}
+
+/// Resolve a relative qualified-id using C++ namespace lookup. Inside
+/// `plog::detail`, `util::work()` searches `plog::detail::util::work`, then
+/// `plog::util::work`, then `util::work`. The first scope containing project
+/// declarations wins. Multiple declarations remain a closed overload set for
+/// the complexity aggregator; this pass never selects an overload by source
+/// order.
+fn resolve_cpp_relative_scoped_calls(
+    calls: &mut [CallRecord],
+    by_lexical: &BTreeMap<&str, Vec<&MethodRecord>>,
+    source_languages: &BTreeMap<&str, &str>,
+) {
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        if source_languages.get(call.source.as_str()).copied() != Some("cpp") {
+            continue;
+        }
+        let Some(symbol) = call.lexical_symbol.as_deref() else {
+            continue;
+        };
+        if !symbol.contains("::") || symbol.starts_with("std::") {
+            continue;
+        }
+        let symbol = symbol.trim_start_matches("::");
+        let namespace = call.symbol_namespace.as_deref().unwrap_or_default();
+        let mut scopes = namespace
+            .split("::")
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let mut qualified = Vec::new();
+        loop {
+            qualified.push(if scopes.is_empty() {
+                symbol.to_string()
+            } else {
+                format!("{}::{symbol}", scopes.join("::"))
+            });
+            if scopes.pop().is_none() {
+                break;
+            }
+        }
+        let Some((resolved_symbol, candidates)) = qualified.into_iter().find_map(|candidate| {
+            let declarations = by_lexical
+                .get(candidate.as_str())
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|method| method.language == "cpp")
+                .collect::<Vec<_>>();
+            (!declarations.is_empty()).then_some((candidate, declarations))
+        }) else {
+            continue;
+        };
+        call.lexical_symbol = Some(resolved_symbol);
+        call.lexical_symbol_origin = Some("cpp_enclosing_namespace_lookup".to_string());
+        if let Some(candidate) = unique_call_candidate(&candidates, call, Some("cpp")) {
+            call.target = Some(candidate.id.clone());
+            call.kind = if call.owner == candidate.owner {
+                "internal_call".to_string()
+            } else {
+                "resolved_call".to_string()
+            };
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+        } else {
+            call.candidate_targets = candidates
+                .iter()
+                .map(|candidate| candidate.id.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            call.candidate_reason = Some("cpp_enclosing_namespace_overload_set".to_string());
+            call.unresolved_reason =
+                Some("cpp_closed_project_overload_set_requires_summary".to_string());
+            call.resolution_missing_proof =
+                Some("closed_candidate_cost_join_required".to_string());
+        }
+    }
+
 }
 
 
