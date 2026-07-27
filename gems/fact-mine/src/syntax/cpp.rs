@@ -2067,6 +2067,19 @@ struct Second { using super = BaseTwo; };
     }
 
     #[test]
+    fn declared_smart_pointer_reset_keeps_destructor_cost_parametric() {
+        let behavior = CppNormalizedBehavior;
+        for declared in ["std::shared_ptr<Node>", "std::unique_ptr<Node>"] {
+            let parsed = parse_declared_type(declared);
+            assert_eq!(
+                behavior.parametric_call_cost(&parsed, "reset"),
+                Some("reflective_once".to_string()),
+                "{declared}: {parsed:?}"
+            );
+        }
+    }
+
+    #[test]
     fn recovers_only_proven_receiver_bindings_and_c_style_types() {
         let behavior = CppNormalizedBehavior;
         assert_eq!(

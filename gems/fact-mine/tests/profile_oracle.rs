@@ -1818,8 +1818,18 @@ struct strong_weak_compact_ptr_storage : strong_weak_compact_ptr_storage_base {
 };
 struct Holder {
     strong_weak_compact_ptr_storage* ptr_;
+    struct Node;
+    using NodePtr = std::shared_ptr<Node>;
+    struct Node {
+        NodePtr previous;
+    };
+    NodePtr head;
     void increment() {
         ptr_->weak_count.fetch_add(1);
+    }
+    void clear() {
+        NodePtr node = head;
+        node->previous.reset();
     }
 };
 "#,
@@ -1842,6 +1852,19 @@ struct Holder {
         .context("missing atomic fetch_add")?;
     assert_eq!(call.receiver_type.as_deref(), Some("std::atomic_long"));
     assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+    let reset = output
+        .calls
+        .iter()
+        .find(|call| call.function == "clear" && call.message == "reset")
+        .context("missing projected shared-pointer reset")?;
+    assert_eq!(reset.receiver_type.as_deref(), Some("NodePtr"));
+    assert_eq!(
+        reset.known_time_complexity.as_deref(),
+        Some("O(R)"),
+        "reset={reset:?}; aliases={:?}",
+        document.type_aliases
+    );
+    assert_eq!(reset.receiver_call_span, None);
     Ok(())
 }
 
