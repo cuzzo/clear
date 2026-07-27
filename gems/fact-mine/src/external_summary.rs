@@ -15,10 +15,16 @@ use std::path::Path;
 
 const SCHEMA_V1: &str = "fact-mine.external-complexity-summary.v1";
 const SCHEMA_V2: &str = "fact-mine.external-complexity-summary.v2";
-const BUNDLED_SUMMARIES: &[(&str, &[u8])] = &[(
-    "go-stdlib.go1.22.2.json.gz",
-    include_bytes!("../config/complexity_summaries/go-stdlib.go1.22.2.json.gz"),
-)];
+const BUNDLED_SUMMARIES: &[(&str, &[u8])] = &[
+    (
+        "go-stdlib.go1.22.2.json.gz",
+        include_bytes!("../config/complexity_summaries/go-stdlib.go1.22.2.json.gz"),
+    ),
+    (
+        "rust-stdlib.rustc1.96.0.json.gz",
+        include_bytes!("../config/complexity_summaries/rust-stdlib.rustc1.96.0.json.gz"),
+    ),
+];
 
 #[derive(Debug, Deserialize)]
 struct SummaryFile {
@@ -42,6 +48,8 @@ struct SummarySource {
     profile_sha256: String,
     method_count: usize,
     complete_symbol_count: usize,
+    #[serde(default)]
+    indexer: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -120,6 +128,22 @@ pub fn apply_bundled(output: &mut ProfileOutput) -> Result<usize> {
             .with_context(|| format!("failed to parse bundled complexity summary {name}"))?;
         validate(&summary)
             .with_context(|| format!("failed to validate bundled complexity summary {name}"))?;
+        let required_indexer = summary
+            .source
+            .as_ref()
+            .and_then(|source| source.indexer.as_deref())
+            .with_context(|| {
+                format!(
+                    "bundled complexity summary {name} must declare its exact compatible indexer"
+                )
+            })?;
+        if !output
+            .semantic_indexes
+            .iter()
+            .any(|index| format!("{}@{}", index.tool, index.version) == required_indexer)
+        {
+            continue;
+        }
         applied += apply_summary(output, &summary)?;
     }
     Ok(applied)
@@ -312,7 +336,7 @@ fn validate(summary: &SummaryFile) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile::{CallRecord, ProfileOutput};
+    use crate::profile::{CallRecord, ProfileOutput, SemanticIndex};
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use std::io::Write;
@@ -648,6 +672,10 @@ mod tests {
         let other_version = "scip-go gomod github.com/golang/go/src go1.23 strings/IndexByte().";
         let mut output = ProfileOutput {
             calls: vec![call(Some(exact)), call(Some(other_version))],
+            semantic_indexes: vec![SemanticIndex {
+                tool: "scip-go".into(),
+                version: "0.2.7".into(),
+            }],
             ..ProfileOutput::default()
         };
 
@@ -657,5 +685,44 @@ mod tests {
             Some("O(N)")
         );
         assert_eq!(output.calls[1].known_time_complexity, None);
+    }
+
+    #[test]
+    fn bundled_summary_requires_its_exact_indexer_build() {
+        let exact = "scip-go gomod github.com/golang/go/src go1.22 strings/IndexByte().";
+        let mut output = ProfileOutput {
+            calls: vec![call(Some(exact))],
+            semantic_indexes: vec![SemanticIndex {
+                tool: "scip-go".into(),
+                version: "0.2.6".into(),
+            }],
+            ..ProfileOutput::default()
+        };
+
+        assert_eq!(apply_bundled(&mut output).unwrap(), 0);
+        assert_eq!(output.calls[0].known_time_complexity, None);
+    }
+
+    #[test]
+    fn bundled_rust_summary_requires_the_source_toolchain_build() {
+        let symbol = "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core char/methods/impl#[char]is_ascii_whitespace().";
+        let mut output = ProfileOutput {
+            calls: vec![call(Some(symbol))],
+            semantic_indexes: vec![SemanticIndex {
+                tool: "rust-analyzer".into(),
+                version: "1.96.0 (ac68faa 2026-05-25)".into(),
+            }],
+            ..ProfileOutput::default()
+        };
+
+        assert!(apply_bundled(&mut output).unwrap() > 0);
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(1)")
+        );
+        assert_eq!(
+            output.calls[0].complexity_provenance.as_deref(),
+            Some("analyzed_source_summary")
+        );
     }
 }
