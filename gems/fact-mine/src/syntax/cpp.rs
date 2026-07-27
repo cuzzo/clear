@@ -311,6 +311,7 @@ fn cpp_method_template_types(
     source: &str,
     functions: &[FunctionDef],
     dependent_aliases: &BTreeSet<String>,
+    method_local_types: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> BTreeMap<String, BTreeSet<String>> {
     let lines = source.lines().collect::<Vec<_>>();
     let declared_owners = cpp_declared_owner_template_types(source, functions);
@@ -349,6 +350,40 @@ fn cpp_method_template_types(
             }
             if !parameters.is_empty() {
                 parameters.extend(dependent_aliases.iter().cloned());
+                let key = format!(
+                    "{}\0{}\0{}",
+                    function.owner, function.name, function.line
+                );
+                let dependent_locals = method_local_types
+                    .get(&key)
+                    .into_iter()
+                    .flat_map(|locals| locals.iter())
+                    .filter(|(_, declared_type)| {
+                        cpp_identifier_tokens(declared_type)
+                            .any(|token| parameters.contains(token))
+                    })
+                    .map(|(name, _)| name.clone())
+                    .collect::<BTreeSet<_>>();
+                parameters.extend(dependent_locals);
+                let body = lines
+                    .get(
+                        function.line.saturating_sub(1)
+                            ..lines.len().min(function.span[2]),
+                    )
+                    .unwrap_or_default()
+                    .join(" ");
+                let statements = body.split(';').collect::<Vec<_>>();
+                loop {
+                    let inferred = statements
+                        .iter()
+                        .filter_map(|statement| cpp_dependent_auto_binding(statement, &parameters))
+                        .filter(|name| !parameters.contains(name))
+                        .collect::<BTreeSet<_>>();
+                    if inferred.is_empty() {
+                        break;
+                    }
+                    parameters.extend(inferred);
+                }
             }
             (!parameters.is_empty()).then(|| {
                 (
@@ -361,6 +396,43 @@ fn cpp_method_template_types(
             })
         })
         .collect()
+}
+
+fn cpp_dependent_auto_binding(
+    statement: &str,
+    dependencies: &BTreeSet<String>,
+) -> Option<String> {
+    let auto = statement.find("auto")?;
+    let boundary_before = statement[..auto]
+        .chars()
+        .next_back()
+        .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_');
+    let after_auto = statement.get(auto + "auto".len()..)?;
+    let boundary_after = after_auto
+        .chars()
+        .next()
+        .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_');
+    if !boundary_before || !boundary_after {
+        return None;
+    }
+    let after_auto = after_auto
+        .trim_start()
+        .trim_start_matches(['&', '*'])
+        .trim_start();
+    let name = cpp_identifier_tokens(after_auto).next()?;
+    let after_name = after_auto.get(after_auto.find(name)? + name.len()..)?.trim_start();
+    let initializer = after_name
+        .strip_prefix('=')
+        .or_else(|| after_name.strip_prefix(':'))?
+        .trim();
+    let dependency = cpp_identifier_tokens(initializer)
+        .find(|token| dependencies.contains(*token))?;
+    let type_dependent_syntax = initializer.contains("typename ")
+        || initializer.contains(".template ")
+        || initializer.contains("::template ")
+        || initializer.contains(&format!("{dependency}."))
+        || initializer.contains(&format!("{dependency}->"));
+    type_dependent_syntax.then(|| name.to_string())
 }
 
 fn cpp_method_local_types(
@@ -990,6 +1062,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
     fn syntax_metadata(&self, source: &str, functions: &[FunctionDef]) -> SyntaxMetadata {
         let (type_aliases, type_alias_lines, dependent_aliases) = cpp_type_aliases(source);
+        let method_local_types = cpp_method_local_types(source, functions);
         SyntaxMetadata {
             type_aliases,
             type_alias_lines,
@@ -997,11 +1070,12 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                 super::normalized_behavior::method_param_types_from_signatures(
                     self, source, functions,
                 ),
-            method_local_types: cpp_method_local_types(source, functions),
+            method_local_types: method_local_types.clone(),
             method_template_types: cpp_method_template_types(
                 source,
                 functions,
                 &dependent_aliases,
+                &method_local_types,
             ),
             ..SyntaxMetadata::default()
         }
