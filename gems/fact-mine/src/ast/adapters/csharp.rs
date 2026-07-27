@@ -81,8 +81,43 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
             .map(|field| format!("@{field}"))
     }
 
-    fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
-        matches!(node.kind(), "invocation_expression")
+    fn call_node(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        matches!(
+            node.kind(),
+            "invocation_expression" | "constructor_initializer"
+        ) && !csharp_attribute_invocation(node, source)
+    }
+
+    fn intrinsic_call_name(
+        &self,
+        node: TreeSitterNode<'_>,
+        source: &str,
+    ) -> Option<&'static str> {
+        if node.kind() != "constructor_initializer" {
+            return None;
+        }
+        let text = node_text(node, source).trim_start();
+        if text.starts_with(": this") {
+            Some("this")
+        } else if text.starts_with(": base") {
+            Some("base")
+        } else {
+            None
+        }
+    }
+
+    fn function_body_prefix_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        if node.kind() != "constructor_declaration" {
+            return Vec::new();
+        }
+        named_children(node)
+            .into_iter()
+            .filter(|child| child.kind() == "constructor_initializer")
+            .collect()
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
@@ -91,6 +126,28 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
             "while_statement" | "do_statement" => Some("WHILE"),
             _ => None,
         }
+    }
+
+    fn loop_condition_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "foreach_statement")
+            .then(|| node.child_by_field_name("right"))
+            .flatten()
+    }
+
+    fn lambda_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        matches!(
+            node.kind(),
+            "lambda_expression" | "anonymous_method_expression"
+        )
+        .then_some(node)
     }
 
     fn function_kind(&self, kind: &str) -> bool {
@@ -135,25 +192,93 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<Vec<TreeSitterNode<'tree>>> {
-        if node.kind() != "switch_section" {
+        match node.kind() {
+            "switch_section" => {
+                let body = named_children(node)
+                    .into_iter()
+                    .filter(|child| {
+                        !matches!(
+                            child.kind(),
+                            "case_switch_label"
+                                | "switch_label"
+                                | "case_pattern_switch_label"
+                                | "constant_pattern"
+                                | "default_switch_label"
+                                | "break_statement"
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                (!body.is_empty()).then_some(body)
+            }
+            "switch_expression_arm" => named_children(node)
+                .into_iter()
+                .rev()
+                .find(|child| child.kind() != "when_clause")
+                .map(|body| vec![body]),
+            _ => None,
+        }
+    }
+
+    fn case_arm(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        matches!(node.kind(), "switch_section" | "switch_expression_arm")
+            && !self.case_else_arm(node, source)
+    }
+
+    fn case_arm_pattern_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() != "switch_expression_arm" {
             return None;
         }
-        let body = named_children(node)
+        named_children(node)
             .into_iter()
-            .filter(|child| {
-                !matches!(
-                    child.kind(),
-                    "case_switch_label"
-                        | "switch_label"
-                        | "case_pattern_switch_label"
-                        | "constant_pattern"
-                        | "default_switch_label"
-                        | "break_statement"
-                )
-            })
-            .collect::<Vec<_>>();
-        (!body.is_empty()).then_some(body)
+            .find(|child| child.kind() != "when_clause")
+            .map(|pattern| vec![pattern])
     }
+
+    fn case_arm_guard<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "when_clause")
+            .and_then(|clause| named_children(clause).into_iter().next())
+    }
+
+    fn case_else_arm(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        node.kind() == "switch_expression_arm"
+            && named_children(node)
+                .first()
+                .is_some_and(|pattern| node_text(*pattern, source).trim() == "_")
+    }
+}
+
+fn csharp_has_any_ancestor(mut node: TreeSitterNode<'_>, kinds: &[&str]) -> bool {
+    while let Some(parent) = node.parent() {
+        if kinds.contains(&parent.kind()) {
+            return true;
+        }
+        node = parent;
+    }
+    false
+}
+
+fn csharp_attribute_invocation(node: TreeSitterNode<'_>, source: &str) -> bool {
+    if csharp_has_any_ancestor(node, &["attribute", "attribute_list"]) {
+        return true;
+    }
+    // Conditional-compilation recovery can detach an attribute's invocation
+    // node from its normal `attribute_list` ancestor. The source line remains
+    // definitive: C# attributes begin with `[` before the invocation.
+    let line_start = source[..node.start_byte()]
+        .rfind('\n')
+        .map_or(0, |offset| offset + 1);
+    source[line_start..node.start_byte()]
+        .trim_start()
+        .starts_with('[')
 }
 
 fn csharp_local_declaration(node: TreeSitterNode<'_>) -> bool {
@@ -213,6 +338,9 @@ fn collect_csharp_scope_locals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{profile, syntax, syntax::Language};
+    use anyhow::Result;
+    use std::fs;
     use tree_sitter::Parser;
 
     #[test]
@@ -231,5 +359,63 @@ mod tests {
             assert_eq!(namespace, "Demo.Core");
             assert!(imports.is_empty());
         }
+    }
+
+    #[test]
+    fn preserves_constructor_switch_foreach_and_lambda_calls() -> Result<()> {
+        let tmp = tempfile::Builder::new().suffix(".cs").tempfile()?;
+        fs::write(
+            tmp.path(),
+            r#"
+class Parent { public Parent(string value) {} }
+class Widget : Parent {
+  [System.Obsolete("metadata")]
+  public Widget(string value) : base(Normalize(value)) {}
+  static string Normalize(string value) => value;
+  string Render(string value, string[] items) {
+    foreach (var item in items.Where(candidate => Accept(candidate)))
+      Use(item);
+    return value switch {
+      "upper" => value.ToUpperInvariant(),
+      _ => value.ToLowerInvariant()
+    };
+  }
+  static bool Accept(string value) => true;
+  static void Use(string value) {}
+}
+"#,
+        )?;
+        let document = syntax::parse_file(tmp.path().to_path_buf(), Language::CSharp)?;
+        let output = profile::extract(&document, profile::Profile::Espalier);
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            0
+        );
+        assert!(
+            output
+                .methods
+                .iter()
+                .any(|method| method.name.starts_with("<lambda@")),
+            "C# lambdas must be first-class project functions"
+        );
+        let messages = output
+            .calls
+            .iter()
+            .map(|call| call.message.as_str())
+            .collect::<BTreeSet<_>>();
+        for expected in [
+            "base",
+            "Normalize",
+            "Where",
+            "Accept",
+            "Use",
+            "ToUpperInvariant",
+            "ToLowerInvariant",
+        ] {
+            assert!(messages.contains(expected), "calls={messages:?}");
+        }
+        Ok(())
     }
 }
