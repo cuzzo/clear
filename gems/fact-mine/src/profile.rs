@@ -2965,11 +2965,26 @@ fn apply_merged_cpp_alias_costs(
         call.known_time_complexity.is_none()
             && source_languages.get(call.source.as_str()).copied() == Some("cpp")
     }) {
-        let Some(receiver_type) = call.receiver_type.as_deref() else {
+        let receiver_alias = call
+            .receiver_type
+            .as_deref()
+            .map(owner_type_name)
+            .map(str::to_string);
+        let constructor_alias = call.implicit_receiver && call.target.is_none();
+        let constructor_alias_name = constructor_alias
+            .then(|| {
+                cpp_symbol_without_template_arguments(&call.message)
+                    .rsplit("::")
+                    .next()
+                    .map(str::trim)
+                    .map(str::to_string)
+            })
+            .flatten()
+            .filter(|name| !name.is_empty());
+        let Some(alias_name) = constructor_alias_name.or(receiver_alias) else {
             continue;
         };
-        let alias_name = owner_type_name(receiver_type);
-        let Some(targets) = aliases.get(alias_name) else {
+        let Some(targets) = aliases.get(alias_name.as_str()) else {
             continue;
         };
         let normalized = targets
@@ -2980,7 +2995,12 @@ fn apply_merged_cpp_alias_costs(
             continue;
         }
         let receiver = normalized.into_iter().next().expect("one alias target");
-        let known = behavior.call_complexity(&receiver, &call.message);
+        let constructor_target = constructor_alias
+            .then(|| targets.iter().next().copied())
+            .flatten();
+        let known = constructor_target
+            .and_then(|target| behavior.intrinsic_call_complexity(None, target))
+            .or_else(|| behavior.call_complexity(&receiver, &call.message));
         let parametric = known
             .is_none()
             .then(|| behavior.parametric_call_cost(&receiver, &call.message))

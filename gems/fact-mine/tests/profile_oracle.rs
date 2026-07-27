@@ -1894,6 +1894,38 @@ typedef std::ostringstream native_stream;
 }
 
 #[test]
+fn cpp_merged_aliases_price_scoped_stdlib_constructors() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let alias = directory.path().join("alias.cpp");
+    let caller = directory.path().join("caller.cpp");
+    fs::write(&alias, "namespace util { using Text = std::string; }\n")?;
+    fs::write(
+        &caller,
+        "std::string make_text() { return util::Text(); }\n",
+    )?;
+    let alias = syntax::parse_file(alias, Language::Cpp)?;
+    let caller = syntax::parse_file(caller, Language::Cpp)?;
+    let output = profile::merge(
+        vec![
+            profile::extract(&alias, Profile::Espalier),
+            profile::extract(&caller, Profile::Espalier),
+        ],
+        Profile::Espalier,
+    );
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "make_text" && call.message == "util::Text")
+        .context("missing scoped alias constructor")?;
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(
+        call.complexity_provenance.as_deref(),
+        Some("merged_project_type_alias_registry")
+    );
+    Ok(())
+}
+
+#[test]
 fn cpp_inactive_runtime_spelling_emits_modeled_world_evidence() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(
