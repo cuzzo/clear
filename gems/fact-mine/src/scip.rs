@@ -7,6 +7,7 @@
 
 use crate::profile::{summarize_call_resolution, CallRecord, MethodRecord, ProfileOutput};
 use crate::syntax;
+use crate::type_inference::TypeExpr;
 use anyhow::{Context, Result};
 use protobuf::Message;
 use serde::Deserialize;
@@ -236,6 +237,7 @@ fn apply_index(output: &mut ProfileOutput, index: Index) -> Result<ImportStats> 
     assign_method_symbols(&mut output.methods, &index.documents);
     apply_signature_types(output, &index);
     apply_local_variable_types(output, &index);
+    apply_scalar_operator_types(output, &index);
     let methods_by_path = methods_by_document(&output.methods, &index.documents);
     // An index that joins to no analyzed method contributes no identity, yet
     // every downstream metric would still be stamped with the SCIP resolution
@@ -711,23 +713,18 @@ fn apply_signature_types(output: &mut ProfileOutput, index: &Index) -> usize {
 /// `NormalizedLanguageBehavior::parse_variable_declaration`; a receiver that
 /// already carries a type is never overwritten.
 fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usize {
-    let mut local_types: BTreeMap<&str, &str> = BTreeMap::new();
-    for information in index
+    let has_local_types = index
         .documents
         .iter()
         .flat_map(|document| &document.symbols)
-    {
-        if !information.symbol.starts_with("local ") {
-            continue;
-        }
-        if let Some(text) = information.signature_documentation.as_ref() {
-            let text = text.text.trim();
-            if !text.is_empty() {
-                local_types.insert(information.symbol.as_str(), text);
-            }
-        }
-    }
-    if local_types.is_empty() {
+        .any(|information| {
+            information.symbol.starts_with("local ")
+                && information
+                    .signature_documentation
+                    .as_ref()
+                    .is_some_and(|documentation| !documentation.text.trim().is_empty())
+        });
+    if !has_local_types {
         return 0;
     }
     let languages = output
@@ -766,7 +763,15 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
                         .span()
                         .is_some_and(|span| occurrence_text(&source, span) == call.receiver)
             })
-            .and_then(|occurrence| local_types.get(occurrence.symbol.as_str()).copied());
+            .and_then(|occurrence| {
+                document
+                    .symbols
+                    .iter()
+                    .find(|information| information.symbol == occurrence.symbol)
+            })
+            .and_then(|information| information.signature_documentation.as_ref())
+            .map(|documentation| documentation.text.trim())
+            .filter(|text| !text.is_empty());
         let Some(declaration) = declaration else {
             continue;
         };
@@ -780,6 +785,106 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
         typed += 1;
     }
     typed
+}
+
+/// Reconcile operator facts that are not emitted as ordinary call records.
+/// The first local occurrence in an operator span is its left operand; its SCIP
+/// declaration is authoritative. The language adapter still decides whether
+/// that exact type/operator pair is scalar and constant-time.
+fn apply_scalar_operator_types(output: &mut ProfileOutput, index: &Index) -> usize {
+    let has_local_types = index
+        .documents
+        .iter()
+        .flat_map(|document| &document.symbols)
+        .any(|information| {
+            information.symbol.starts_with("local ")
+                && information
+                    .signature_documentation
+                    .as_ref()
+                    .is_some_and(|documentation| !documentation.text.trim().is_empty())
+        });
+    if !has_local_types {
+        return 0;
+    }
+    let method_languages = output
+        .methods
+        .iter()
+        .map(|method| {
+            (
+                (
+                    method.path.as_str(),
+                    method.owner.as_str(),
+                    method.name.as_str(),
+                    method.line,
+                ),
+                method.language.as_str(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut applied = 0;
+    for fact in &mut output.complexity_facts {
+        let Some(language) = method_languages.get(&(
+            fact.path.as_str(),
+            fact.owner.as_str(),
+            fact.function.as_str(),
+            fact.line,
+        )) else {
+            continue;
+        };
+        let Ok(language_kind) = crate::syntax::Language::parse(language) else {
+            continue;
+        };
+        let behavior = crate::syntax::normalized_behavior::behavior(language_kind);
+        let Some(document) = select_document_for_path(&fact.path, &index.documents) else {
+            continue;
+        };
+        for context in &mut fact.call_contexts {
+            if context.known_time_complexity.is_some() || context.known_space_complexity.is_some() {
+                continue;
+            }
+            let span = [
+                context.span[0].saturating_sub(1),
+                context.span[1],
+                context.span[2].saturating_sub(1),
+                context.span[3],
+            ];
+            let declaration = document
+                .occurrences
+                .iter()
+                .filter(|occurrence| occurrence.symbol.starts_with("local "))
+                .filter(|occurrence| {
+                    occurrence
+                        .span()
+                        .is_some_and(|occurrence_span| contains(span, occurrence_span))
+                })
+                .min_by_key(|occurrence| occurrence.span())
+                .and_then(|occurrence| {
+                    document
+                        .symbols
+                        .iter()
+                        .find(|information| information.symbol == occurrence.symbol)
+                })
+                .and_then(|information| information.signature_documentation.as_ref())
+                .map(|documentation| documentation.text.trim())
+                .filter(|text| !text.is_empty());
+            let Some(declared) =
+                declaration.and_then(|text| behavior.parse_variable_declaration(text))
+            else {
+                continue;
+            };
+            let operand_type = TypeExpr::parse(&declared, language);
+            let Some(complexity) =
+                behavior.scalar_operator_complexity(&context.message, Some(&operand_type))
+            else {
+                continue;
+            };
+            context.known_time_complexity = Some(complexity.time.to_string());
+            context.known_space_complexity = Some(complexity.space.to_string());
+            context.evidence_gap = None;
+            applied += 1;
+        }
+    }
+    applied
 }
 
 /// Whether this language's indexer emits several overlapping occurrences per
@@ -2355,6 +2460,111 @@ mod tests {
         assert_eq!(
             output.calls[0].semantic_symbol.as_deref(),
             Some(format_symbol)
+        );
+    }
+
+    #[test]
+    fn scip_local_type_prices_only_scalar_operator_facts() {
+        let dir = tempdir().unwrap();
+        let scalar_path = dir.path().join("scalar.rs");
+        let vector_path = dir.path().join("vector.rs");
+        let scalar = "fn scalar(other: usize) -> bool { let opaque = factory(); opaque < other }\n";
+        let vector =
+            "fn vector(right: Vec<i32>) -> bool { let opaque = factory(); opaque == right }\n";
+        fs::write(
+            &scalar_path,
+            format!("fn factory() -> usize {{ 0 }}\n{scalar}"),
+        )
+        .unwrap();
+        fs::write(
+            &vector_path,
+            format!("fn factory() -> Vec<i32> {{ vec![] }}\n{vector}"),
+        )
+        .unwrap();
+        let scalar_document =
+            crate::syntax::parse_file(scalar_path, crate::syntax::Language::Rust).unwrap();
+        let vector_document =
+            crate::syntax::parse_file(vector_path, crate::syntax::Language::Rust).unwrap();
+        let mut output = crate::profile::merge(
+            vec![
+                crate::profile::extract(&scalar_document, crate::profile::Profile::Espalier),
+                crate::profile::extract(&vector_document, crate::profile::Profile::Espalier),
+            ],
+            crate::profile::Profile::Espalier,
+        );
+        let fact = output
+            .complexity_facts
+            .iter()
+            .find(|fact| fact.function == "scalar")
+            .unwrap();
+        assert_eq!(
+            fact.call_contexts
+                .iter()
+                .find(|context| context.message == "<")
+                .unwrap()
+                .known_time_complexity,
+            None,
+            "source DFG deliberately does not infer an arbitrary call result"
+        );
+        let scalar_column = scalar.rfind("opaque").unwrap();
+        let vector_column = vector.rfind("opaque").unwrap();
+        let index = json!({"documents": [
+            {
+                "relative_path": "scalar.rs",
+                "occurrences": [
+                    occurrence(
+                        [1, scalar_column, scalar_column + "opaque".len()],
+                        "local 0",
+                        0
+                    )
+                ],
+                "symbols": [{
+                    "symbol": "local 0",
+                    "signature_documentation": {"text": "let opaque: usize"}
+                }]
+            },
+            {
+                "relative_path": "vector.rs",
+                "occurrences": [
+                    occurrence(
+                        [1, vector_column, vector_column + "opaque".len()],
+                        "local 0",
+                        0
+                    )
+                ],
+                "symbols": [{
+                    "symbol": "local 0",
+                    "signature_documentation": {"text": "let opaque: Vec<i32>"}
+                }]
+            }
+        ]});
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let context = output
+            .complexity_facts
+            .iter()
+            .find(|fact| fact.function == "scalar")
+            .unwrap()
+            .call_contexts
+            .iter()
+            .find(|context| context.message == "<")
+            .unwrap();
+        assert_eq!(context.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(context.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(context.evidence_gap, None);
+        let vector_context = output
+            .complexity_facts
+            .iter()
+            .find(|fact| fact.function == "vector")
+            .unwrap()
+            .call_contexts
+            .iter()
+            .find(|context| context.message == "==")
+            .unwrap();
+        assert_eq!(
+            vector_context.known_time_complexity, None,
+            "the document-local Vec declaration must not inherit scalar pricing"
         );
     }
 

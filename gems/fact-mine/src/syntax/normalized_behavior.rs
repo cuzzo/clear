@@ -936,6 +936,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Price an operator only when the language adapter recognizes both the
+    /// operator and a compiler/DFG-proven scalar operand type.
+    fn scalar_operator_complexity(
+        &self,
+        _message: &str,
+        _operand_type: Option<&TypeExpr>,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
     /// Interpret a compiler symbol only at the owning language boundary. The
     /// shared SCIP importer asks through this normalized interface and never
     /// contains a language-specific symbol grammar.

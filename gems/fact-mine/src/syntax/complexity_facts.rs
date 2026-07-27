@@ -605,6 +605,11 @@ fn fact_for_method(
     // reports which locals alias the receiver; other languages use `self`/`this`
     // and need no binding here.
     let mut augmented_parameter_types = parameter_types.clone();
+    if language == "rust" {
+        augmented_parameter_types.extend(invariant_flow_local_types(
+            document, owner, function, language,
+        ));
+    }
     for (receiver_var, target) in behavior.receiver_aliases_for_function(node) {
         if target == "self" {
             augmented_parameter_types
@@ -1703,6 +1708,10 @@ fn visit_loops(
                     // A paren-less member access is a constant-time field/
                     // property read, not an unresolved method call.
                     behavior.complexity_member_read_complexity(node)
+                })
+                .or_else(|| {
+                    let operand_type = operator_operand_type(node, parameter_types);
+                    behavior.scalar_operator_complexity(message, operand_type.as_ref())
                 });
             let evidence_gap = known_call_complexity.is_none().then(|| {
                 if behavior.callback_invocation_message(message) {
@@ -2285,6 +2294,63 @@ fn call_receiver(node: &Node) -> Option<&Node> {
     node.children.first().and_then(ast::node)
 }
 
+fn operator_operand_type(
+    node: &Node,
+    local_types: &BTreeMap<String, TypeExpr>,
+) -> Option<TypeExpr> {
+    let operand = node.children.iter().find_map(ast::node)?;
+    local_names(operand)
+        .into_iter()
+        .find_map(|name| local_types.get(&name).cloned())
+}
+
+/// Rust bindings have invariant types. A complete singleton DFG type for a
+/// local therefore remains usable throughout that binding; shadowed bindings
+/// with conflicting types are deliberately omitted.
+fn invariant_flow_local_types(
+    document: &Document,
+    owner: &str,
+    function: &str,
+    language: &str,
+) -> BTreeMap<String, TypeExpr> {
+    let places = document
+        .places
+        .iter()
+        .filter(|place| {
+            place.function == function
+                && (place.owner == owner || place.owner == "(top-level)" || owner == "(top-level)")
+        })
+        .map(|place| (place.id.as_str(), place.name.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut candidates = BTreeMap::<String, BTreeSet<TypeExpr>>::new();
+    for fact in document.flow_types.iter().filter(|fact| {
+        fact.function == function
+            && fact.complete
+            && (fact.owner == owner || fact.owner == "(top-level)" || owner == "(top-level)")
+    }) {
+        let Some(name) = places.get(fact.place_id.as_str()) else {
+            continue;
+        };
+        let types = fact
+            .types
+            .iter()
+            .filter_map(|hint| TypeExpr::from_flow_hint(hint, language))
+            .collect::<BTreeSet<_>>();
+        if types.len() == 1 {
+            candidates
+                .entry((*name).to_string())
+                .or_default()
+                .extend(types);
+        }
+    }
+    candidates
+        .into_iter()
+        .filter_map(|(name, mut types)| {
+            (types.len() == 1).then(|| (name, types.pop_first().expect("one type")))
+        })
+        .collect()
+}
+
 fn contains_index_access(node: &Node) -> bool {
     direct_call_message(node) == Some("[]")
         || child_nodes(node).into_iter().any(contains_index_access)
@@ -2742,6 +2808,55 @@ mod tests {
         file.write_all(source.as_bytes()).unwrap();
         let document = syntax::parse_file(file.path().to_path_buf(), language).unwrap();
         facts(&document)
+    }
+
+    #[test]
+    fn rust_scalar_operators_require_declared_or_dfg_operand_types() {
+        let rows = language_facts(
+            r#"
+fn scalar_parameter(left: usize, right: usize) -> bool {
+    left < right
+}
+
+fn scalar_local(input: usize) -> bool {
+    let local: usize = input;
+    local == 4
+}
+
+fn overloaded(left: Vec<i32>, right: Vec<i32>) -> bool {
+    left == right
+}
+"#,
+            Language::Rust,
+            ".rs",
+        );
+        let context = |function: &str, message: &str| {
+            rows.iter()
+                .find(|row| row.function == function)
+                .unwrap()
+                .call_contexts
+                .iter()
+                .find(|call| call.message == message)
+                .unwrap()
+        };
+
+        assert_eq!(
+            context("scalar_parameter", "<")
+                .known_time_complexity
+                .as_deref(),
+            Some("O(1)")
+        );
+        assert_eq!(
+            context("scalar_local", "==")
+                .known_time_complexity
+                .as_deref(),
+            Some("O(1)")
+        );
+        assert_eq!(
+            context("overloaded", "==").known_time_complexity,
+            None,
+            "Vec equality dispatches through PartialEq and is not scalar"
+        );
     }
 
     #[test]

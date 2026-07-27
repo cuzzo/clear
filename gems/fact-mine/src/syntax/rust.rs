@@ -202,6 +202,32 @@ pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     nominal::parse(source, &RUST_NOMINAL_TYPE_SYNTAX)
 }
 
+fn rust_scalar_primitive(name: &str) -> bool {
+    let bare = name
+        .trim()
+        .trim_start_matches("&mut ")
+        .trim_start_matches('&')
+        .trim();
+    matches!(
+        bare,
+        "i8" | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "f32"
+            | "f64"
+            | "bool"
+            | "char"
+    )
+}
+
 const RUST_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("SystemTime", &["now"]), ("Instant", &["now"])];
 
 const RUST_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
@@ -318,6 +344,22 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
 
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("rust")
+    }
+
+    fn scalar_operator_complexity(
+        &self,
+        message: &str,
+        operand_type: Option<&TypeExpr>,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if !super::normalized_behavior::PRIMITIVE_OPERATORS.contains(&operator) {
+            return None;
+        }
+        matches!(operand_type, Some(TypeExpr::Primitive(name)) if rust_scalar_primitive(name))
+            .then_some(super::normalized_behavior::NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            })
     }
 
     // CFG-SPECIFIC START: expose the Rust CFG profile.
