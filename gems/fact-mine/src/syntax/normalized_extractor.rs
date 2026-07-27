@@ -2815,7 +2815,20 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
         }
     }
     let text = node.text.trim().trim_end_matches(';').trim();
-    if let Some(idx) = text.find(field_name) {
+    let field_offset = text
+        .match_indices(field_name)
+        .filter(|(index, _)| {
+            let before = text[..*index].chars().next_back();
+            let after = text[*index + field_name.len()..].chars().next();
+            before.is_none_or(|character| {
+                character != '_' && !character.is_ascii_alphanumeric()
+            }) && after.is_none_or(|character| {
+                character != '_' && !character.is_ascii_alphanumeric()
+            })
+        })
+        .map(|(index, _)| index)
+        .last();
+    if let Some(idx) = field_offset {
         let after_name = text[idx + field_name.len()..].trim_start();
         let after_name = after_name
             .strip_prefix(':')
@@ -2828,6 +2841,22 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
             }
         }
         let before_name = text[..idx].trim_end();
+        if before_name.contains(',') {
+            let first_declarator = before_name.split(',').next().unwrap_or(before_name);
+            let declaration = first_declarator
+                .split('=')
+                .next()
+                .unwrap_or(first_declarator)
+                .trim();
+            if let Some(name_start) = declaration.rfind(|character: char| {
+                !character.is_ascii_alphanumeric() && character != '_'
+            }) {
+                let shared_type = declaration[..=name_start].trim();
+                if is_valid_type_text(shared_type) {
+                    return Some(shared_type.to_string());
+                }
+            }
+        }
         if let Some(last_part) = before_name.split(['=', ':']).next_back() {
             let last_part = last_part.trim();
             let mut parts = last_part.split_whitespace().collect::<Vec<_>>();

@@ -95,6 +95,17 @@ Json:
   find: linear_scan
   dump: linear_materialize
   parse: linear_materialize
+StdAtomic:
+  load: constant
+  store: constant
+  exchange: constant
+  compare_exchange_weak: constant
+  compare_exchange_strong: constant
+  fetch_add: constant
+  fetch_sub: constant
+  fetch_and: constant
+  fetch_or: constant
+  fetch_xor: constant
 Namespace:
   std: declaration
 Intrinsic:
