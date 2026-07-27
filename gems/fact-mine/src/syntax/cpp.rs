@@ -45,8 +45,19 @@ fn cpp_std_descriptor(descriptor: &str) -> bool {
 }
 
 fn cpp_std_owner_type(owner: &str) -> TypeExpr {
-    match owner.trim_matches('`') {
-        "array" | "span" | "vector" => TypeExpr::Array(Box::new(TypeExpr::Untyped)),
+    // libstdc++ exposes ABI namespaces in SCIP descriptors (for example
+    // `std/__cxx11/list#empty`).  They are implementation details, not
+    // different complexity contracts, so classify the terminal owner.
+    let owner = owner
+        .trim_matches('`')
+        .rsplit('/')
+        .next()
+        .unwrap_or(owner)
+        .trim_matches('`');
+    match owner {
+        "array" | "deque" | "forward_list" | "list" | "span" | "vector" => {
+            TypeExpr::Array(Box::new(TypeExpr::Untyped))
+        }
         "map" | "unordered_map" => TypeExpr::Hash {
             key: Box::new(TypeExpr::Untyped),
             value: Box::new(TypeExpr::Untyped),
@@ -699,6 +710,44 @@ mod tests {
             last_column: 20,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn libstdcxx_abi_collection_owners_use_standard_contracts() {
+        let empty = external_symbol_call_complexity(
+            "cxx . . $ std/__cxx11/list#empty(3482b152b9333168).",
+            "empty",
+        )
+        .expect("libstdc++ list is a reviewed standard collection");
+        assert_eq!(empty.time, "O(1)");
+
+        let splice = external_symbol_call_complexity(
+            "cxx . . $ std/__cxx11/list#splice(40b6f1fd15459e25).",
+            "splice",
+        )
+        .expect("list splice has a conservative common upper bound");
+        assert_eq!(splice.time, "O(N)");
+    }
+
+    #[test]
+    fn exact_cpp_stdlib_descriptors_preserve_parametric_work() {
+        let string = external_symbol_call_complexity(
+            "cxx . . $ std/__cxx11/basic_ostringstream#str(d33e1a6fd36255f7).",
+            "str",
+        )
+        .expect("stream materialization descriptor is reviewed");
+        assert_eq!(string.time, "O(N)");
+
+        let swap = external_symbol_metadata(
+            "cxx . . $ std/swap(c75b8fd57d7c2e06).",
+        );
+        assert_eq!(swap.scope, "stdlib");
+        assert_eq!(swap.parametric_cost.as_deref(), Some("reflective_once"));
+        assert!(external_symbol_call_complexity(
+            "cxx . . $ std/swap(c75b8fd57d7c2e06).",
+            "swap"
+        )
+        .is_none());
     }
 
     #[test]
