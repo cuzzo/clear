@@ -54,7 +54,11 @@ impl AstNormalizationAdapter for RustAstAdapter {
         node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        node.child_by_field_name("body").or(Some(node))
+        node.child_by_field_name("body").or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "declaration_list")
+        })
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
@@ -157,5 +161,15 @@ mod tests {
             .class_like_owner_body(impl_node, "impl Widget { }")
             .unwrap();
         assert_eq!(body_node.kind(), "declaration_list");
+
+        // Error recovery can still classify an incomplete `impl` as an
+        // impl_item without producing a declaration_list. Returning the
+        // owner node as its own body makes normalization recurse forever.
+        let incomplete_tree = parser.parse("impl Widget", None).unwrap();
+        let incomplete_impl = incomplete_tree.root_node().child(0).unwrap();
+        assert_eq!(incomplete_impl.kind(), "impl_item");
+        assert!(adapter
+            .class_like_owner_body(incomplete_impl, "impl Widget")
+            .is_none());
     }
 }
