@@ -456,6 +456,126 @@ fn run() {
 }
 
 #[test]
+fn rust_bindings_preserve_initializer_and_let_else_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"fn helper() -> Option<String> { loop {} }
+fn fallback() {}
+fn run() {
+    let Some(value) = helper() else {
+        fallback();
+        return;
+    };
+    let length: usize = value.len();
+    println!("{length}");
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(messages.contains("helper"), "calls={messages:?}");
+    assert!(messages.contains("fallback"), "calls={messages:?}");
+    assert!(messages.contains("len"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_match_guards_and_local_statics_preserve_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"use std::sync::OnceLock;
+fn guard(value: usize) -> bool { value > 0 }
+fn run(value: usize) {
+    static CACHE: OnceLock<String> = OnceLock::new();
+    match value {
+        current if guard(current) => CACHE.get_or_init(String::new),
+        _ => CACHE.get_or_init(String::new),
+    };
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(messages.contains(&"guard"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_dereferenced_assignment_targets_preserve_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"use std::collections::BTreeMap;
+use std::sync::Mutex;
+fn run(counts: &mut BTreeMap<&str, usize>, slot: &Mutex<usize>) {
+    *counts.entry("key").or_default() += 1;
+    *slot.lock().unwrap() = 2;
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(messages.contains(&"entry"), "calls={messages:?}");
+    assert!(messages.contains(&"or_default"), "calls={messages:?}");
+    assert!(messages.contains(&"lock"), "calls={messages:?}");
+    assert!(messages.contains(&"unwrap"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
 fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_csharp.cs"), Language::CSharp)?;
     let output = profile::extract(&document, Profile::NilKill);

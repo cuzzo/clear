@@ -6,14 +6,32 @@ pub(crate) struct RustAstAdapter;
 
 impl AstNormalizationAdapter for RustAstAdapter {
     fn variable_declarator_node(&self, node: TreeSitterNode<'_>) -> bool {
-        node.kind() == "let_declaration"
-            && node
-                .child_by_field_name("pattern")
-                .is_some_and(|pattern| pattern.kind() == "_")
+        matches!(node.kind(), "let_declaration" | "static_item")
+    }
+
+    fn variable_declarator_alternative<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "let_declaration")
+            .then(|| node.child_by_field_name("alternative"))
+            .flatten()
     }
 
     fn class_like_owner_kind(&self, kind: &str) -> bool {
         kind == "impl_item"
+    }
+
+    fn case_arm_guard<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "match_arm")
+            .then(|| {
+                node.child_by_field_name("pattern")
+                    .and_then(|pattern| pattern.child_by_field_name("condition"))
+            })
+            .flatten()
     }
 
     fn class_like_owner_name<'tree>(
