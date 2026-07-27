@@ -959,9 +959,17 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
         .collect::<BTreeMap<_, _>>();
     let mut typed = 0;
     for call in output.calls.iter_mut() {
-        if call.receiver_type.is_some() || call.receiver.is_empty() {
+        let local_callable = call.implicit_receiver
+            && call.target.is_none()
+            && call.semantic_symbol.is_none();
+        if (!local_callable && call.receiver_type.is_some()) || call.receiver.is_empty() {
             continue;
         }
+        let local_name = if local_callable {
+            call.message.as_str()
+        } else {
+            call.receiver.as_str()
+        };
         let Some((language, method_span)) = methods
             .get(&call.source)
         else {
@@ -998,7 +1006,7 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
                 occurrence.symbol.starts_with("local ")
                     && occurrence
                         .span()
-                        .is_some_and(|span| occurrence_text(&source, span) == call.receiver)
+                        .is_some_and(|span| occurrence_text(&source, span) == local_name)
             })
             .map(|occurrence| occurrence.symbol.as_str());
         // An inactive C# preprocessor branch has no occurrence at the call
@@ -1028,11 +1036,11 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
             .filter(|occurrence| {
                 occurrence
                     .span()
-                    .is_some_and(|span| occurrence_text(&source, span) == call.receiver)
+                    .is_some_and(|span| occurrence_text(&source, span) == local_name)
             })
             .map(|occurrence| occurrence.symbol.as_str())
             .collect::<BTreeSet<_>>();
-        let fallback_symbol = (enclosing_symbols.len() == 1)
+        let fallback_symbol = (!local_callable && enclosing_symbols.len() == 1)
             .then(|| enclosing_symbols.into_iter().next())
             .flatten();
         let declaration = direct_symbol
@@ -1054,6 +1062,26 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
         else {
             continue;
         };
+        if local_callable {
+            let Some(kind) = behavior.declared_callable_cost(&declared) else {
+                continue;
+            };
+            let Some((time, space)) = crate::syntax::parametric_call_complexity(&kind) else {
+                continue;
+            };
+            call.callback_receiver = true;
+            call.known_time_complexity = Some(time.to_string());
+            call.known_space_complexity = Some(space.to_string());
+            call.complexity_provenance =
+                Some("scip_local_declared_callable_contract".to_string());
+            call.complexity_bound_quality = Some(format!("upper_bound_parametric_{kind}"));
+            call.complexity_missing_kind = None;
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            call.empty_domain_cause = None;
+            typed += 1;
+            continue;
+        }
         let receiver_type = TypeExpr::parse(&declared, language.as_str());
         if call.known_time_complexity.is_none() && call.known_space_complexity.is_none() {
             if let Some(complexity) = behavior.call_complexity(&receiver_type, &call.message) {
@@ -3372,6 +3400,52 @@ mod tests {
         assert_eq!(
             output.calls[1].candidate_reason.as_deref(),
             Some("compiler_indexed_preprocessor_overload_set")
+        );
+    }
+
+    #[test]
+    fn scip_local_callable_invocations_are_parametric() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Conversions.cs");
+        let source = "class Conversions {\n  object Run(string value) {\n    Func<string, object>? convertor = Find();\n    return convertor(value);\n  }\n}\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let call_column = source.lines().nth(3).unwrap().find("convertor").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "Conversions.cs",
+            "occurrences": [
+                occurrence(
+                    [3, call_column, call_column + "convertor".len()],
+                    "local 0",
+                    0
+                )
+            ],
+            "symbols": [{
+                "symbol": "local 0",
+                "documentation": ["```cs\nFunc<string, object>? convertor\n```"]
+            }]
+        }]});
+        let mut output = ProfileOutput::default();
+        let mut caller = method("caller", &path, "Run", [2, 2, 5, 3]);
+        caller.language = "csharp".into();
+        output.methods.push(caller);
+        let mut invocation = call(
+            "caller",
+            &path,
+            "convertor",
+            [4, call_column, 4, call_column + "convertor(value)".len()],
+        );
+        invocation.receiver = "self".into();
+        invocation.implicit_receiver = true;
+        output.calls.push(invocation);
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert!(output.calls[0].callback_receiver);
+        assert_eq!(output.calls[0].known_time_complexity.as_deref(), Some("O(C)"));
+        assert_eq!(
+            output.calls[0].complexity_provenance.as_deref(),
+            Some("scip_local_declared_callable_contract")
         );
     }
 
