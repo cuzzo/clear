@@ -6359,8 +6359,24 @@ fn collection_element_type(type_name: &str, language: &str) -> Option<String> {
             TypeExpr::Primitive(name) => Some(name),
             _ => None,
         },
+        TypeExpr::Hash { value, .. } => match *value {
+            TypeExpr::Primitive(name) => Some(name),
+            _ => None,
+        },
         _ => None,
     }
+}
+
+fn indexed_receiver_type(
+    document: &Document,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    declared_type: String,
+    language: &str,
+) -> Option<String> {
+    let normalized = normalized_declared_alias(document, &declared_type);
+    let result = collection_element_type(&normalized, language)
+        .or_else(|| behavior.indexed_collection_result_type(&normalized))?;
+    Some(normalized_declared_alias(document, &result))
 }
 
 fn inferred_collection_element_receiver_type(
@@ -6718,8 +6734,12 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .iter()
                     .any(|owner| owner.name == call.receiver);
             let receiver_local_binding = behavior
-                .receiver_local_binding(&call.receiver)
+                .indexed_receiver_collection_binding(&call.receiver)
+                .or_else(|| behavior.receiver_local_binding(&call.receiver))
                 .unwrap_or_else(|| call.receiver.clone());
+            let indexed_receiver = behavior
+                .indexed_receiver_collection_binding(&call.receiver)
+                .is_some();
             let explicit_receiver_type = (!receiver_is_type)
                 .then(|| behavior.explicit_receiver_type(&call.receiver))
                 .flatten();
@@ -6727,7 +6747,14 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 .then(|| {
                     declared_receiver_type(document, source_definition, &receiver_local_binding)
                 })
-                .flatten();
+                .flatten()
+                .and_then(|declared_type| {
+                    if indexed_receiver {
+                        indexed_receiver_type(document, behavior, declared_type, language)
+                    } else {
+                        Some(declared_type)
+                    }
+                });
             let flow_receiver_type = (!receiver_is_type
                 && explicit_receiver_type.is_none()
                 && declared_receiver_type.is_none())
@@ -6739,7 +6766,14 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     call.span,
                 )
             })
-                .flatten();
+                .flatten()
+                .and_then(|flow_type| {
+                    if indexed_receiver {
+                        indexed_receiver_type(document, behavior, flow_type, language)
+                    } else {
+                        Some(flow_type)
+                    }
+                });
             let state_receiver_type = (!receiver_is_type
                 && explicit_receiver_type.is_none()
                 && declared_receiver_type.is_none()
@@ -6747,7 +6781,14 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             .then(|| {
                 declared_state_receiver_type(document, &call.owner, &receiver_local_binding)
             })
-            .flatten();
+            .flatten()
+            .and_then(|state_type| {
+                if indexed_receiver {
+                    indexed_receiver_type(document, behavior, state_type, language)
+                } else {
+                    Some(state_type)
+                }
+            });
             let field_access_receiver_type = (!receiver_is_type
                 && explicit_receiver_type.is_none()
                 && declared_receiver_type.is_none()

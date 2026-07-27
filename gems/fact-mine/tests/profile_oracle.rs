@@ -2999,6 +2999,57 @@ struct Item : Base {
 }
 
 #[test]
+fn cpp_indexed_dependent_map_receivers_keep_the_mapped_project_type() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template <class Key, class Value, class Policies, bool Enabled>
+struct SelectMap {
+    using Type = std::map<Key, Value>;
+};
+struct CallbackList {
+    void append(int callback) {}
+    void prepend(int callback) {}
+    void insert(int callback, int before) {}
+};
+struct Dispatcher {
+    using CallbackList_ = CallbackList;
+    using Map = typename SelectMap<int, CallbackList_, void, false>::Type;
+    Map listeners;
+    void add(int event, int callback) {
+        listeners[event].append(callback);
+        listeners[event].prepend(callback);
+        listeners[event].insert(callback, 0);
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    for message in ["append", "prepend", "insert"] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "add" && call.message == message)
+            .with_context(|| format!("missing indexed {message} call"))?;
+        assert_eq!(call.receiver_type.as_deref(), Some("CallbackList"));
+        assert_eq!(
+            call.receiver_type_origin.as_deref(),
+            Some("declared_state")
+        );
+        let target = call
+            .target
+            .as_deref()
+            .with_context(|| format!("missing {message} target"))?;
+        assert!(output.methods.iter().any(|method| {
+            method.id == target && method.owner == "CallbackList" && method.name == message
+        }));
+    }
+    Ok(())
+}
+
+#[test]
 fn cpp_operators_are_constant_only_for_proven_scalar_operands() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(
