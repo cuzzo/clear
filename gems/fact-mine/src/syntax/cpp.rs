@@ -1017,6 +1017,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
             || !declared.contains(['(', ')', '!', '=', '?']))
             && !declared.contains("->")
             && !declared.ends_with('.')
+            && !declared.ends_with(',')
             && declared.chars().any(|character| character.is_ascii_alphanumeric())
             && !matches!(
                 declared.split_whitespace().next().unwrap_or_default(),
@@ -1673,6 +1674,13 @@ struct Second { using super = BaseTwo; };
         );
         assert_eq!(behavior.declared_local_type("if(! value.empty())", "value"), None);
         assert_eq!(behavior.declared_local_type("value.resize(2)", "value"), None);
+        assert_eq!(
+            behavior.declared_local_type(
+                "auto data = make_data(Data { condition, callbackList, listener });",
+                "callbackList"
+            ),
+            None
+        );
     }
 
     #[test]
