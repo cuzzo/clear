@@ -1090,6 +1090,36 @@ fn cpp_collection_element_binding(source: &str, local: &str) -> Option<String> {
     None
 }
 
+fn cpp_indexed_receiver_collection_binding(receiver: &str) -> Option<String> {
+    let receiver = receiver.trim();
+    let bracket = receiver.find('[')?;
+    let collection = receiver[..bracket].trim();
+    let index = receiver[bracket..].trim();
+    let balanced_index = index.starts_with("[[") && index.ends_with("]]")
+        || index.starts_with('[') && index.ends_with(']');
+    (balanced_index
+        && !collection.is_empty()
+        && collection
+            .chars()
+            .all(|character| character == '_' || character.is_ascii_alphanumeric()))
+    .then(|| collection.to_string())
+}
+
+fn cpp_indexed_collection_result_type(declared_type: &str) -> Option<String> {
+    let declared_type = declared_type.trim().strip_prefix("typename ")?.trim();
+    let select_map = declared_type.strip_prefix("SelectMap")?.trim_start();
+    if !select_map.starts_with('<') || !select_map.ends_with("::Type") {
+        return None;
+    }
+    let close = select_map.rfind('>')?;
+    let arguments = split_top_level_commas(&select_map[1..close]);
+    arguments
+        .get(1)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 fn cpp_pointer_member_receiver_type(
     source: &str,
     receiver: &str,
@@ -1531,6 +1561,14 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
 
     fn collection_element_binding(&self, source: &str, local: &str) -> Option<String> {
         cpp_collection_element_binding(source, local)
+    }
+
+    fn indexed_receiver_collection_binding(&self, receiver: &str) -> Option<String> {
+        cpp_indexed_receiver_collection_binding(receiver)
+    }
+
+    fn indexed_collection_result_type(&self, declared_type: &str) -> Option<String> {
+        cpp_indexed_collection_result_type(declared_type)
     }
 
     fn pointer_member_receiver_type(
@@ -2042,6 +2080,32 @@ mod tests {
             "void swap(Item & other) {\n  // using std::swap;\n  swap(value, other.value);\n}",
             "std::swap"
         ));
+    }
+
+    #[test]
+    fn indexed_dependent_maps_project_their_declared_value_type() {
+        assert_eq!(
+            cpp_indexed_receiver_collection_binding("eventCallbackListMap[[event]]"),
+            Some("eventCallbackListMap".to_string())
+        );
+        assert_eq!(
+            cpp_indexed_receiver_collection_binding("items[index]"),
+            Some("items".to_string())
+        );
+        assert_eq!(
+            cpp_indexed_receiver_collection_binding("factory().items[index]"),
+            None
+        );
+        assert_eq!(
+            cpp_indexed_collection_result_type(
+                "typename SelectMap< Event, CallbackList_, Policies, Enabled >::Type"
+            ),
+            Some("CallbackList_".to_string())
+        );
+        assert_eq!(
+            cpp_indexed_collection_result_type("std::map<Event, CallbackList_>"),
+            None
+        );
     }
 
     #[test]

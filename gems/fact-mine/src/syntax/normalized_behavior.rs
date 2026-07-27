@@ -1317,6 +1317,20 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Recover the collection binding from a native indexed receiver
+    /// expression. The shared profile resolves the binding's declared type;
+    /// adapters own the source/projection spelling.
+    fn indexed_receiver_collection_binding(&self, _receiver: &str) -> Option<String> {
+        None
+    }
+
+    /// Project a native dependent collection type to the value produced by
+    /// indexing it. Ordinary arrays/maps are handled through `TypeExpr`; this
+    /// hook is for language-specific wrapper/metafunction grammar.
+    fn indexed_collection_result_type(&self, _declared_type: &str) -> Option<String> {
+        None
+    }
+
     /// Project a pointer-like declared type through native `receiver->member`
     /// syntax. Adapters return the pointee type only when both the access
     /// operator and a recognized pointer representation are proven.
