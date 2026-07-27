@@ -300,7 +300,8 @@ impl<'a> LocalFlow<'a> {
                 // constructor or initializer. Preserve only declarations the
                 // language adapter positively identifies as owner methods;
                 // ordinary nested/inline declarations stay out of this pass.
-                if (self.behavior.nested_function_is_owner_method(child)
+                if (child.r#type == "LAMBDA"
+                    || self.behavior.nested_function_is_owner_method(child)
                     || (self.behavior.nested_function_is_local_callable(child)
                         && self.methods_by_span.contains_key(&span)))
                     && !out.iter().any(|method| method.span == span)

@@ -616,6 +616,45 @@ fn run(flag: bool) -> usize {
 }
 
 #[test]
+fn rust_impl_method_lambdas_receive_complexity_facts() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Widget;
+impl Widget {
+    fn any_empty(&self, values: &[String]) -> bool {
+        values.iter().any(|value| value.is_empty())
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let lambda = output
+        .methods
+        .iter()
+        .find(|method| method.name.starts_with("<lambda@"))
+        .context("impl-method lambda")?;
+    let fact = output
+        .complexity_facts
+        .iter()
+        .find(|fact| {
+            fact.function == lambda.name
+                && fact.line == lambda.line
+                && fact.path == lambda.path
+        })
+        .context("lambda complexity fact")?;
+    assert!(
+        fact.call_contexts
+            .iter()
+            .any(|context| context.message == "is_empty"),
+        "contexts={:?}",
+        fact.call_contexts
+    );
+    Ok(())
+}
+
+#[test]
 fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_csharp.cs"), Language::CSharp)?;
     let output = profile::extract(&document, Profile::NilKill);
