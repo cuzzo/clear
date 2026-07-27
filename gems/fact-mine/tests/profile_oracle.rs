@@ -2536,6 +2536,41 @@ const void * address(char * buffer) {
 }
 
 #[test]
+fn cpp_dependent_auto_locals_keep_symbolic_dispatch_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template <class F, class P>
+void invoke(P& proxy) {
+    auto dispatcher = proxy.template meta<F>::dispatcher;
+    dispatcher(proxy);
+}
+template <class Alloc, class T>
+void release(const Alloc& alloc, T * pointer) {
+    auto rebound =
+        typename std::allocator_traits<Alloc>::template rebind_alloc<T>(alloc);
+    rebound.deallocate(pointer, 1);
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for (function, message) in [("invoke", "dispatcher"), ("release", "deallocate")] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == function && call.message == message)
+            .with_context(|| format!("missing {function} {message}"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(R)"),
+            "{function} {message}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn cpp_operators_are_constant_only_for_proven_scalar_operands() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(
