@@ -325,6 +325,45 @@ const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "go-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    fn canonical_symbol_scope(&self) -> bool {
+        true
+    }
+
+    fn canonical_project_namespace(&self, file: &std::path::Path, namespace: &str) -> String {
+        if namespace.is_empty() {
+            return String::new();
+        }
+        let directory = file
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_string_lossy();
+        format!("{directory}::{namespace}")
+    }
+
+    fn project_function_reconciliation_key(&self, symbol: &str) -> Option<(String, String)> {
+        let mut parts = symbol.rsplit("::");
+        let (name, package) = (parts.next()?, parts.next()?);
+        let package_leaf = package.rsplit('/').next().unwrap_or(package);
+        (!name.is_empty() && !package_leaf.is_empty())
+            .then(|| (package_leaf.to_string(), name.to_string()))
+    }
+
+    fn resolves_inherited_project_calls(&self) -> bool {
+        true
+    }
+
     // The Go indexer renders a local as `var name Type` - the type trails.
     fn parse_variable_declaration(&self, text: &str) -> Option<String> {
         let text = text.trim().trim_start_matches("var ").trim();

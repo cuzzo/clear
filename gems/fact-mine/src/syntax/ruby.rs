@@ -406,6 +406,142 @@ const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn parse_signature(
+        &self,
+        signature: &str,
+    ) -> super::normalized_behavior::NormalizedSignature {
+        let signature = signature.trim();
+        if !signature.starts_with("sig") {
+            return super::normalized_behavior::NormalizedSignature::default();
+        }
+        let return_type =
+            signature_component(signature, ".returns(")
+                .or_else(|| signature_component(signature, "returns("));
+        let params = signature_component(signature, ".params(")
+            .or_else(|| signature_component(signature, "params("))
+            .map(|params| {
+                split_top_level_params_local(&params)
+                    .into_iter()
+                    .filter_map(|entry| {
+                        let (name, declared) = entry.split_once(':')?;
+                        Some((name.trim().to_string(), declared.trim().to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        super::normalized_behavior::NormalizedSignature {
+            return_type,
+            params,
+        }
+    }
+
+    fn source_profile_signature(
+        &self,
+        lines: &[String],
+        function: &FunctionDef,
+    ) -> Option<String> {
+        let mut cursor = function.line.saturating_sub(2);
+        if cursor >= lines.len() {
+            return Some(String::new());
+        }
+        while cursor > 0 && lines[cursor].trim().is_empty() {
+            cursor = cursor.saturating_sub(1);
+        }
+        let mut start = cursor;
+        loop {
+            let text = lines[start].trim();
+            if text.starts_with("sig ") {
+                return Some(
+                    lines[start..=cursor]
+                        .iter()
+                        .map(|line| line.trim())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
+            }
+            if text.starts_with("def ")
+                || text.starts_with("class ")
+                || text.starts_with("module ")
+                || start == 0
+            {
+                return Some(String::new());
+            }
+            start -= 1;
+        }
+    }
+
+    fn untraceable_profile_parameters(
+        &self,
+        signature: &str,
+        parameters: &[String],
+    ) -> Vec<String> {
+        parameters
+            .iter()
+            .filter(|parameter| {
+                let bytes = signature.as_bytes();
+                let mut position = 0;
+                while let Some(index) = signature[position..].find(parameter.as_str()) {
+                    let absolute = position + index;
+                    position = absolute + parameter.len();
+                    let identifier_after = bytes
+                        .get(absolute + parameter.len())
+                        .is_some_and(|byte| {
+                            let character = *byte as char;
+                            character.is_alphanumeric() || character == '_'
+                        });
+                    if identifier_after {
+                        continue;
+                    }
+                    let sigil = bytes.get(absolute.wrapping_sub(1)).copied();
+                    let prefix_is_boundary = |offset: usize| {
+                        bytes.get(offset).is_none_or(|byte| {
+                            let character = *byte as char;
+                            !character.is_alphanumeric() && character != '_'
+                        })
+                    };
+                    if sigil == Some(b'*')
+                        && (bytes.get(absolute.wrapping_sub(2)) == Some(&b'*')
+                            && prefix_is_boundary(absolute.wrapping_sub(3))
+                            || prefix_is_boundary(absolute.wrapping_sub(2)))
+                        || sigil == Some(b'&')
+                            && prefix_is_boundary(absolute.wrapping_sub(2))
+                    {
+                        return true;
+                    }
+                }
+                false
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "sorbet"
+    }
+
+    fn profile_signature_is_annotation(&self, signature: &str) -> bool {
+        signature.starts_with("sig ")
+    }
+
+    fn native_profile_literal_type(&self, value: &str) -> Option<String> {
+        if value.starts_with(':') || value.starts_with("%s") {
+            Some("Symbol".to_string())
+        } else if value.starts_with("%q") || value.starts_with("%Q") {
+            Some("String".to_string())
+        } else if value.starts_with("%i")
+            || value.starts_with("%I")
+            || value.starts_with("%w")
+            || value.starts_with("%W")
+        {
+            Some(self.untyped_array_type())
+        } else {
+            None
+        }
+    }
+
     // In Ruby `obj.foo` (no parens) is a real method call, not a field read, so
     // it must not be assumed constant-time.
     fn complexity_member_read_complexity(
@@ -1432,6 +1568,25 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             Vec::new()
         }
     }
+}
+
+fn signature_component(signature: &str, marker: &str) -> Option<String> {
+    let start = signature.find(marker)?;
+    let inner = &signature[start + marker.len()..];
+    let mut depth = 1u32;
+    for (index, character) in inner.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(inner[..index].trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 static RUBY_BEHAVIOR: RubyNormalizedBehavior = RubyNormalizedBehavior;

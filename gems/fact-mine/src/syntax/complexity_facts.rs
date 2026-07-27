@@ -603,17 +603,15 @@ fn fact_for_method(
             TypeExpr::parse(declared, language),
         );
     }
-    // Bind the method receiver variable (Go's `c`, etc.) to the owner type so
-    // `c.field.method()` resolves the same as `self.field.method()`. The adapter
-    // reports which locals alias the receiver; other languages use `self`/`this`
-    // and need no binding here.
+    // Bind explicit method receiver variables to the owner type and augment
+    // types only through language-owned, proven flow/declaration contracts.
     let mut augmented_parameter_types = parameter_types.clone();
-    if language == "rust" || language == "cpp" {
+    if behavior.complexity_uses_invariant_flow_types() {
         augmented_parameter_types.extend(invariant_flow_local_types(
             document, owner, function, language,
         ));
     }
-    if language == "cpp" {
+    if behavior.complexity_uses_syntax_local_types() {
         let type_key = method_parameter_type_key(owner, function, line);
         augmented_parameter_types.extend(
             document

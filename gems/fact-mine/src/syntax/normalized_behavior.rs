@@ -6,6 +6,7 @@ use crate::ast::{Child, Node, Span};
 use crate::syntax::cfg::ControlFlowProfile;
 use crate::type_inference::TypeExpr;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Default)]
@@ -288,10 +289,10 @@ pub(crate) fn parse_arrow_or_colon_signature(signature: &str) -> NormalizedSigna
     }
 }
 
-/// C-family declarator grammar: `[modifiers] Ret name(T a, U b)`, where the
-/// return type precedes the name and each parameter is `Type name`. Shared by the
-/// C/C++/C#/Java adapters, which select it from their own `parse_signature`.
-pub(crate) fn parse_c_family_declarator(signature: &str) -> NormalizedSignature {
+/// Prefix-return declarator grammar: `[modifiers] Ret name(T a, U b)`, where
+/// the return type precedes the name and each parameter is `Type name`.
+/// Adapters opt into this reusable grammar primitive explicitly.
+pub(crate) fn parse_prefix_return_declarator(signature: &str) -> NormalizedSignature {
     let signature = signature.trim();
     let Some(open) = signature.find('(') else {
         return NormalizedSignature::default();
@@ -383,16 +384,6 @@ pub(crate) fn split_top_level_commas(source: &str) -> Vec<String> {
     parts.push(source[start..].to_string());
     parts
 }
-
-/// Lexical operator tokens that are primitive, constant-time operations in
-/// languages WITHOUT operator overloading (comparison, arithmetic, bitwise,
-/// shift, logical, unary). Adapters for such languages price these O(1); without
-/// it the call extractor records them as unresolved targets and wrongly marks
-/// O(1) functions incomplete. Overloading languages must NOT blanket-apply this.
-pub(crate) const PRIMITIVE_OPERATORS: &[&str] = &[
-    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "&^",
-    "~", "&&", "||", "!",
-];
 
 const RUBY_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/ruby.yml");
 const PYTHON_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/python.yml");
@@ -940,6 +931,222 @@ pub(crate) fn native_pointer_nullability_contract(type_name: &str) -> Option<&'s
 }
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    /// Whether declarations in this language carry a canonical namespace that
+    /// can safely participate in corpus-wide lexical resolution.
+    fn canonical_symbol_scope(&self) -> bool {
+        false
+    }
+
+    /// Project a parser-owned namespace into its corpus identity. Adapters may
+    /// incorporate the source path when the native package/module identity
+    /// requires it.
+    fn canonical_project_namespace(&self, _file: &Path, namespace: &str) -> String {
+        namespace.to_string()
+    }
+
+    /// Project one parser-owned import target into the same corpus identity as
+    /// a declaration namespace.
+    fn canonical_project_import(
+        &self,
+        _file: &Path,
+        _namespace: &str,
+        target: &str,
+    ) -> String {
+        target.to_string()
+    }
+
+    /// A language-owned fallback key for reconciling a declaration lexical
+    /// symbol with a call lexical symbol when their canonical namespaces use
+    /// different external coordinates. The shared resolver binds only a
+    /// unique `(scope, callable)` key.
+    fn project_function_reconciliation_key(&self, _symbol: &str) -> Option<(String, String)> {
+        None
+    }
+
+    /// Alternative lexical symbols searched before the exact call symbol.
+    /// This models native relative qualified-name lookup without teaching the
+    /// shared project resolver a namespace grammar.
+    fn relative_lexical_candidates(&self, _symbol: &str, _namespace: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Lexical symbols searched after implicit owner and inheritance lookup
+    /// failed. This models languages where unqualified lookup continues into
+    /// enclosing lexical scopes.
+    fn fallback_lexical_candidates(
+        &self,
+        _message: &str,
+        _namespace: &str,
+        _implicit_receiver: bool,
+    ) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Whether the project resolver may traverse normalized supertype edges.
+    fn resolves_inherited_project_calls(&self) -> bool {
+        false
+    }
+
+    /// Some native specialization models attach the authoritative inheritance
+    /// clause to the source declaration rather than its compiler-erased owner.
+    fn inherited_lookup_uses_source_owner(&self, _implicit_receiver: bool) -> bool {
+        false
+    }
+
+    /// Match an inherited owner identity after exact symbol/name lookup fails.
+    /// The adapter owns any template, package, or descriptor normalization.
+    fn inherited_owner_identity_matches(
+        &self,
+        _identity: &str,
+        _owner_name: &str,
+        _owner_symbol: Option<&str>,
+    ) -> bool {
+        false
+    }
+
+    /// Whether a specialized declaration should win over its unspecialized
+    /// sibling when an inherited identity explicitly carries specialization.
+    fn inherited_identity_prefers_specialization(&self, _identity: &str) -> bool {
+        false
+    }
+
+    /// Whether overload compatibility can be proven from argument count alone.
+    /// The conservative default accepts all declarations and therefore leaves
+    /// a multi-candidate set unresolved.
+    fn project_call_candidate_compatible(
+        &self,
+        _argument_count: usize,
+        _parameter_count: usize,
+    ) -> bool {
+        true
+    }
+
+    /// Whether an unbound receiver token may name a type declared in the
+    /// current canonical namespace.
+    fn unbound_receiver_may_name_project_type(&self, _receiver: &str) -> bool {
+        false
+    }
+
+    /// Whether a declared flow type remains authoritative when the exact CFG
+    /// join at a call site has no single type.
+    fn declared_flow_type_fallback(&self, _declared_type: &str) -> bool {
+        false
+    }
+
+    /// Whether complete invariant CFG types should augment declared parameter
+    /// types during local complexity analysis.
+    fn complexity_uses_invariant_flow_types(&self) -> bool {
+        false
+    }
+
+    /// Whether adapter-extracted method-local declarations should augment
+    /// parameter types during local complexity analysis.
+    fn complexity_uses_syntax_local_types(&self) -> bool {
+        false
+    }
+
+    /// Preserve a native supertype spelling instead of replacing it with an
+    /// index-erased canonical declaration identity.
+    fn preserve_supertype_identity(&self, _supertype: &str) -> bool {
+        false
+    }
+
+    /// Collect a declaration header whose native grammar extends beyond the
+    /// balanced parameter list. Returning `None` uses the shared ordinary
+    /// declaration collector.
+    fn complete_declaration_header(
+        &self,
+        _lines: &[String],
+        _start_line_1indexed: usize,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Whether an empty normalized function signature should be recovered from
+    /// the ordinary balanced source declaration header.
+    fn uses_source_declaration_header(&self) -> bool {
+        false
+    }
+
+    /// Recover an empty profile signature from native source context.
+    fn source_profile_signature(
+        &self,
+        _lines: &[String],
+        _function: &FunctionDef,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Parameters whose native declaration shape cannot be traced safely by
+    /// the profile's ordinary value-flow contract.
+    fn untraceable_profile_parameters(
+        &self,
+        _signature: &str,
+        _parameters: &[String],
+    ) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Stable public name of the native type system represented by profile
+    /// signatures.
+    fn profile_type_system(&self) -> &'static str {
+        "native"
+    }
+
+    /// Whether this signature is a standalone type annotation rather than the
+    /// function declaration itself.
+    fn profile_signature_is_annotation(&self, _signature: &str) -> bool {
+        false
+    }
+
+    /// Whether undeclared state writes must be constrained to an explicitly
+    /// declared owner in this language.
+    fn state_writes_require_declared_owner(&self) -> bool {
+        false
+    }
+
+    /// Classify native literal spellings whose normalized type differs from
+    /// the shared string/boolean/number/collection fallback.
+    fn native_profile_literal_type(&self, _value: &str) -> Option<String> {
+        None
+    }
+
+    /// A parametric cost implied by a declared call-result type. The shared
+    /// resolver owns propagation; adapters own dependent-type grammar.
+    fn call_result_parametric_cost(&self, _type_expr: &TypeExpr) -> Option<String> {
+        None
+    }
+
+    /// Prefer the current declaration's canonical owner for a receiver type
+    /// that denotes its native specialization/injected owner.
+    fn receiver_denotes_current_owner(&self, _receiver_type: &str, _owner: &str) -> bool {
+        false
+    }
+
+    /// Normalize a native qualified call spelling before constructing a
+    /// project lexical symbol. Returning `None` keeps ordinary package lookup.
+    fn explicit_lexical_call_symbol(
+        &self,
+        _message: &str,
+        _namespace: Option<&str>,
+        _top_level: bool,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Recover the alias named by a call so merged project type aliases can be
+    /// priced through the ordinary normalized call-cost interface. The boolean
+    /// marks a constructor-shaped alias call.
+    fn merged_alias_call_name(
+        &self,
+        _message: &str,
+        _receiver_type: Option<&str>,
+        _implicit_receiver: bool,
+        _target_missing: bool,
+    ) -> Option<(String, bool)> {
+        None
+    }
+
     fn nullable_operation(&self, _node: &Node) -> Option<NormalizedNullableOperation> {
         None
     }
@@ -2063,6 +2270,12 @@ pub(crate) fn behavior(language: Language) -> &'static dyn NormalizedLanguageBeh
         Language::Swift => swift::behavior(),
         Language::Zig => zig::behavior(),
     }
+}
+
+pub(crate) fn behavior_for_name(
+    language: &str,
+) -> Option<&'static dyn NormalizedLanguageBehavior> {
+    Language::parse(language).ok().map(behavior)
 }
 
 pub(crate) fn matching_paren_index(source: &str, open_index: usize) -> Option<usize> {

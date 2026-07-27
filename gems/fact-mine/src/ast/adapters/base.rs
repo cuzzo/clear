@@ -12,6 +12,7 @@ use super::super::{
     OWNER_STATEMENT_NESTED_KINDS, QUESTION_COLON_TERNARY_KINDS,
 };
 use tree_sitter::Node as TreeSitterNode;
+use crate::syntax::nullable::PresenceCorrelationSeed;
 
 pub(crate) const COMMON_ASSIGNMENT_OPERATORS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%="];
 
@@ -30,6 +31,16 @@ pub(crate) struct ConditionalBranchParts<'tree> {
 
 use super::super::TreeSitterNormalizer;
 pub(crate) trait AstNormalizationAdapter: Sync {
+    /// Reconcile normalized presence correlations with exact raw parser spans
+    /// when the native grammar exposes stronger source ownership.
+    fn reconcile_presence_correlation_spans(
+        &self,
+        _root: TreeSitterNode<'_>,
+        _source: &str,
+        _seeds: &mut Vec<PresenceCorrelationSeed>,
+    ) {
+    }
+
     /// Language-native namespace and explicit-import facts used to form
     /// canonical symbol identities. The empty default deliberately means
     /// "not proven", rather than treating a filename or short owner as a

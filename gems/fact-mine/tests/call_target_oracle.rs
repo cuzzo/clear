@@ -205,7 +205,7 @@ fn cpp_relative_scoped_call_searches_enclosing_namespaces_across_files() -> Resu
     assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
     assert_eq!(
         call.lexical_symbol_origin.as_deref(),
-        Some("cpp_enclosing_namespace_lookup")
+        Some("adapter_relative_lexical_lookup")
     );
     Ok(())
 }
