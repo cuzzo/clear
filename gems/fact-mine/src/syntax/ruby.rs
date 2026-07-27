@@ -2443,6 +2443,7 @@ mod tests {
             visibility: None,
             params: Vec::new(),
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: String::new(),
         };
         let reader_sets = immutable_struct_reader_sets("class Parent; end", &[mock_fn]);
@@ -2856,6 +2857,7 @@ mod tests {
             visibility: None,
             params: Vec::new(),
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: String::new(),
         };
 

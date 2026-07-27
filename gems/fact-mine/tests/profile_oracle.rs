@@ -386,6 +386,112 @@ fn java_enhanced_for_preserves_iterable_calls_in_the_normalized_cfg() -> Result<
 }
 
 #[test]
+fn java_constructor_calls_and_declaration_only_methods_keep_export_proof_honest() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".java").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"interface Sized {
+    int size();
+    default int fallback() { return 0; }
+}
+class Demo {
+    StringBuilder copy(String value) {
+        return new StringBuilder(value);
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Java)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let copy = output
+        .methods
+        .iter()
+        .find(|method| method.name == "copy")
+        .context("copy method")?;
+    assert!(copy.source_export_eligible);
+    let copy_calls = output
+        .calls
+        .iter()
+        .filter(|call| call.source == copy.id)
+        .map(|call| (call.receiver.as_str(), call.message.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        copy_calls
+            .iter()
+            .any(|(receiver, message)| *receiver == "StringBuilder" && *message == "call"),
+        "calls={copy_calls:?}"
+    );
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    assert!(!output
+        .methods
+        .iter()
+        .find(|method| method.name == "size")
+        .context("declaration-only method")?
+        .source_export_eligible);
+    assert!(output
+        .methods
+        .iter()
+        .find(|method| method.name == "fallback")
+        .context("default method")?
+        .source_export_eligible);
+    Ok(())
+}
+
+#[test]
+fn go_switch_initializers_and_interface_declarations_keep_export_proof_honest() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"package demo
+
+type Sized interface {
+    Size() int
+}
+
+func next() int { return 1 }
+
+func classify() int {
+    switch value := next(); value {
+    case 1:
+        return value
+    default:
+        return 0
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let classify = output
+        .methods
+        .iter()
+        .find(|method| method.name == "classify")
+        .context("classify function")?;
+    assert!(classify.source_export_eligible);
+    assert!(output
+        .calls
+        .iter()
+        .any(|call| call.source == classify.id && call.message == "next"));
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    assert!(output
+        .methods
+        .iter()
+        .filter(|method| method.name == "Size")
+        .all(|method| !method.source_export_eligible));
+    Ok(())
+}
+
+#[test]
 fn rust_for_preserves_iterable_calls_in_the_normalized_cfg() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
     fs::write(
@@ -413,6 +519,54 @@ fn run() {
         .collect::<BTreeSet<_>>();
     assert!(messages.contains("values"), "calls={messages:?}");
     assert!(messages.contains("len"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_transparent_unary_calls_and_const_generics_keep_runtime_call_coverage_honest() -> Result<()>
+{
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Buffer<const N: usize>;
+
+const fn width() -> usize { 1 }
+fn make() -> Option<&'static usize> { Some(&1) }
+fn callback() -> Option<fn() -> usize> { Some(width) }
+
+fn run() -> usize {
+    let value = *make().unwrap();
+    let invoked = callback().unwrap()();
+    unsafe { make().unwrap(); }
+    let _buffer = Buffer::<{ width() }>;
+    value + invoked
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run function")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(messages.contains("make"), "calls={messages:?}");
+    assert!(messages.contains("unwrap"), "calls={messages:?}");
+    assert!(messages.contains("callback"), "calls={messages:?}");
+    assert!(messages.contains("call"), "calls={messages:?}");
+    assert!(!messages.contains("width"), "compile-time call leaked: {messages:?}");
     assert_eq!(
         output
             .call_resolution_coverage

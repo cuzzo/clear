@@ -1,0 +1,63 @@
+schema: fact-mine.stdlib-map.v1
+language: go
+
+source:
+  root_command: ["go", "env", "GOROOT"]
+  root_suffix: src
+  revision: go1.22.2
+  revision_check:
+    command: ["go", "version"]
+    includes: ["go1.22.2"]
+  include:
+    - "{syscall,os,time,flag,bytes,bufio,sort,strings,strconv,math,regexp,fmt}/**/*.go"
+    - "encoding/{json,xml}/**/*.go"
+    - "io/fs/**/*.go"
+  exclude:
+    - "**/*_test.go"
+
+index:
+  command:
+    - scip-go
+    - index
+    - syscall/...
+    - os/...
+    - time/...
+    - flag/...
+    - bytes/...
+    - bufio/...
+    - encoding/json/...
+    - encoding/xml/...
+    - sort/...
+    - strings/...
+    - io/fs/...
+    - strconv/...
+    - math/...
+    - regexp/...
+    - fmt/...
+    - --module-root
+    - "{source_root}"
+    - --repository-remote
+    - github.com/golang/go
+    - --module-path
+    - github.com/golang/go/src
+    - --module-version
+    - go1.22
+    - --go-version
+    - go1.22.2
+    - --output
+    - "{index}"
+    - --skip-tests
+  working_directory: "{source_root}"
+  output: go-stdlib.scip
+  expected:
+    tool: scip-go
+    version: 0.2.7
+
+soundness:
+  minimum_export_eligible_methods: 3000
+
+summary:
+  corpus: go-stdlib-core-surface
+  output: ../complexity_summaries/go-stdlib.go1.22.2.json.gz
+  minimum_symbols: 310
+  expected_symbol_prefix: "scip-go gomod github.com/golang/go/src go1.22 "

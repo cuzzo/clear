@@ -1,0 +1,36 @@
+schema: fact-mine.stdlib-map.v1
+language: rust
+
+source:
+  root_command: ["rustc", "--print", "sysroot"]
+  root_suffix: lib/rustlib/src/rust
+  revision: rustc-1.96.0-ac68faa20c58
+  revision_check:
+    command: ["rustc", "--version", "--verbose"]
+    includes:
+      - "release: 1.96.0"
+      - "commit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96"
+  include:
+    - "library/{core,alloc,std}/**/*.rs"
+
+index:
+  command:
+    - rust-analyzer
+    - scip
+    - "{source_root}/library"
+    - --output
+    - "{index}"
+  working_directory: "{source_root}/library"
+  output: rust-stdlib.scip
+  expected:
+    tool: rust-analyzer
+    version: "1.96.0 (ac68faa 2026-05-25)"
+
+soundness:
+  minimum_export_eligible_methods: 15000
+
+summary:
+  corpus: rust-stdlib-core-alloc-std
+  output: ../complexity_summaries/rust-stdlib.rustc1.96.0.json.gz
+  minimum_symbols: 1500
+  expected_symbol_prefix: "rust-analyzer cargo "

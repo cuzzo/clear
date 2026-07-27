@@ -461,6 +461,9 @@ pub struct FunctionDef {
     pub params: Vec<String>,
     #[serde(default)]
     pub callback_params: Vec<String>,
+    /// Language-owned proof that this declaration contains an executable body.
+    #[serde(default)]
+    pub source_export_eligible: bool,
     #[serde(default)]
     pub signature: String,
 }
@@ -494,6 +497,7 @@ impl FunctionDef {
             visibility: Some("public".to_string()),
             params,
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: String::new(),
         }
     }

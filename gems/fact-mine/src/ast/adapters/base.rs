@@ -362,6 +362,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    /// Some languages allow a statement before a switch/case value (for
+    /// example Go's `switch value := next(); value.Kind()`). Preserve it as
+    /// executable work instead of treating only the trailing case value as
+    /// the condition.
+    fn case_initializer<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     fn conditional_keyword_node_type(&self, keyword: &str) -> Option<&'static str> {
         match keyword {
             "if" => Some("IF"),
@@ -1181,6 +1193,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
+    /// Calls in compile-time-only syntax can look like ordinary call
+    /// expressions to tree-sitter without contributing runtime work.
+    fn nonruntime_call_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
     fn call_argument_nodes<'tree>(
         &self,
         _node: TreeSitterNode<'tree>,
@@ -1200,6 +1218,17 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
         None
+    }
+
+    /// Source declarations nested inside a call expression but not part of
+    /// its runtime argument list. The generic normalizer keeps these beside
+    /// the normalized call so declaration extraction remains lossless.
+    fn supplementary_call_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        Vec::new()
     }
 
     fn intrinsic_call_name(
@@ -1592,6 +1621,17 @@ pub(crate) trait AstNormalizationAdapter: Sync {
                 | "match_pattern"
                 | "pattern"
         ) && named_child_count == 1
+    }
+
+    /// Language-owned expression wrappers whose only named child carries all
+    /// runtime behavior (for example Rust borrow/dereference expressions).
+    fn transparent_expression(
+        &self,
+        _node: TreeSitterNode<'_>,
+        _source: &str,
+        _named_child_count: usize,
+    ) -> bool {
+        false
     }
 
     fn interpolated_string(

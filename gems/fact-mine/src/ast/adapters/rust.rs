@@ -5,6 +5,33 @@ use tree_sitter::Node as TreeSitterNode;
 pub(crate) struct RustAstAdapter;
 
 impl AstNormalizationAdapter for RustAstAdapter {
+    fn nonruntime_call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        let mut ancestor = node.parent();
+        while let Some(parent) = ancestor {
+            if matches!(
+                parent.kind(),
+                "type_arguments" | "type_parameters" | "const_item" | "macro_definition"
+            ) {
+                return true;
+            }
+            ancestor = parent.parent();
+        }
+        false
+    }
+
+    fn transparent_expression(
+        &self,
+        node: TreeSitterNode<'_>,
+        source: &str,
+        named_child_count: usize,
+    ) -> bool {
+        let source = node_text(node, source).trim_start();
+        (node.kind() == "unsafe_block" && named_child_count == 1)
+            || (node.kind() == "unary_expression"
+                && named_child_count == 1
+                && (source.starts_with('*') || source.starts_with('&')))
+    }
+
     fn variable_declarator_node(&self, node: TreeSitterNode<'_>) -> bool {
         matches!(node.kind(), "let_declaration" | "static_item")
     }
@@ -62,7 +89,11 @@ impl AstNormalizationAdapter for RustAstAdapter {
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
-        matches!(kind, "for_expression").then_some("FOR")
+        match kind {
+            "for_expression" => Some("FOR"),
+            "while_expression" | "loop_expression" => Some("WHILE"),
+            _ => None,
+        }
     }
 
     fn loop_condition_node<'tree>(

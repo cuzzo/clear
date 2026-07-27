@@ -325,6 +325,10 @@ const RUST_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RustNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RustNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
     fn uses_source_declaration_header(&self) -> bool {
         true
     }
@@ -923,6 +927,14 @@ mod tests {
     #[test]
     fn test_rust_behavior_uncovered_methods() {
         let behavior = RustNormalizedBehavior;
+        assert!(behavior.function_has_executable_body(&node(
+            "DEFN",
+            "fn size() -> usize { 0 }"
+        )));
+        assert!(!behavior.function_has_executable_body(&node(
+            "DEFN",
+            "fn size() -> usize;"
+        )));
         assert_eq!(behavior.format_array_type("i32"), "Vec<i32>");
         assert_eq!(
             behavior.format_hash_type("String", "i32"),

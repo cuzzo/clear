@@ -420,6 +420,10 @@ pub struct CallRecord {
     pub candidate_targets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub candidate_reason: Option<String>,
+    /// True only when compiler/language semantics prove that downstream
+    /// consumers cannot add another implementation to this candidate set.
+    #[serde(default)]
+    pub consumer_closed_candidate_set: bool,
     pub kind: String,
     pub owner: String,
     pub function: String,
@@ -709,6 +713,10 @@ pub struct MethodRecord {
     /// callable's cost.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub callback_params: Vec<String>,
+    /// True only when this declaration has an executable source body and every
+    /// parser call inside that body reached normalized call evidence.
+    #[serde(default)]
+    pub source_export_eligible: bool,
     /// Exact source covered by the parser's function span. Consumers that need
     /// function bodies must use this projection rather than re-parsing files.
     pub raw_source: String,
@@ -950,7 +958,16 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
         .collect::<Vec<_>>();
 
     let owners = extract_owners(document, &language, &path);
-    let methods = extract_methods(&lines, document, &language, &path);
+    let mut methods = extract_methods(&lines, document, &language, &path);
+    for recovery in &document.parse_recovery_spans {
+        for method in methods.iter_mut().filter(|method| {
+            method
+                .span
+                .is_some_and(|method_span| spans_overlap(method_span, *recovery))
+        }) {
+            method.source_export_eligible = false;
+        }
+    }
     let fields = extract_fields(document, &language, &path);
     let (state_types, mut state_type_records) = extract_state_types(document, &language, &path);
     let (state_protocols, state_protocol_records) =
@@ -1335,6 +1352,21 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
                 .any(|function| span_contains(function.span, *span)),
         })
         .collect();
+    for gap in &raw_calls_not_normalized {
+        if let Some(method) = methods
+            .iter_mut()
+            .filter(|method| method.span.is_some_and(|span| span_contains(span, *gap)))
+            .min_by_key(|method| {
+                let span = method.span.unwrap_or([0, 0, usize::MAX, usize::MAX]);
+                (
+                    span[2].saturating_sub(span[0]),
+                    span[3].abs_diff(span[1]),
+                )
+            })
+        {
+            method.source_export_eligible = false;
+        }
+    }
     let call_resolution_coverage = CallResolutionCoverage {
         raw_parser_call_sites: raw_call_spans.len(),
         raw_calls_not_normalized: raw_calls_not_normalized.len(),
@@ -1802,7 +1834,7 @@ fn finalize_project_output(output: &mut ProfileOutput) {
             .then_with(|| left.kind.cmp(&right.kind))
     });
     samples.dedup();
-    samples.truncate(64);
+    samples.truncate(1024);
     coverage.raw_call_normalization_gap_samples = samples;
     coverage.normalized_calls_without_raw_span = raw_coverage.normalized_calls_without_raw_span;
     output.call_resolution_coverage = coverage;
@@ -2645,6 +2677,11 @@ fn percentage(numerator: usize, denominator: usize) -> f64 {
 
 fn span_contains(outer: [usize; 4], inner: [usize; 4]) -> bool {
     (outer[0], outer[1]) <= (inner[0], inner[1]) && (inner[2], inner[3]) <= (outer[2], outer[3])
+}
+
+fn spans_overlap(left: [usize; 4], right: [usize; 4]) -> bool {
+    (left[0], left[1]) <= (right[2], right[3])
+        && (right[0], right[1]) <= (left[2], left[3])
 }
 
 /// Match calls only through an origin recorded during normalization. A
@@ -4376,6 +4413,7 @@ fn extract_methods(
                     .unwrap_or_default(),
                 params: fn_def.params.clone(),
                 callback_params: fn_def.callback_params.clone(),
+                source_export_eligible: fn_def.source_export_eligible,
                 raw_source,
                 normalized_source,
                 untraceable_params: behavior
@@ -7287,6 +7325,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 target_provenance: None,
                 candidate_targets: Vec::new(),
                 candidate_reason: None,
+                consumer_closed_candidate_set: false,
                 kind: kind.to_string(),
                 owner: call.owner.clone(),
                 function: call.function.clone(),
@@ -7713,6 +7752,7 @@ pub(crate) mod tests {
                 visibility: Some("public".to_string()),
                 params: vec!["name".to_string()],
                 callback_params: Vec::new(),
+                source_export_eligible: true,
                 signature: "def hello(name)".to_string(),
             }],
             owner_defs: vec![syntax::OwnerDef {
@@ -7886,6 +7926,36 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn raw_call_loss_revokes_only_the_innermost_source_export_body() {
+        let mut document = test_document();
+        document.raw_call_sites = vec![crate::ast::RawCallSite {
+            span: [1, 2, 1, 8],
+            kind: "call_expression".to_string(),
+        }];
+
+        let output = extract(&document, Profile::Espalier);
+        assert_eq!(output.methods.len(), 1);
+        assert!(!output.methods[0].source_export_eligible);
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            1
+        );
+    }
+
+    #[test]
+    fn parser_recovery_revokes_every_overlapping_source_export_body() {
+        let mut document = test_document();
+        document.parse_recovered = true;
+        document.parse_recovery_spans = vec![[1, 1, 1, 5]];
+
+        let output = extract(&document, Profile::Espalier);
+        assert_eq!(output.methods.len(), 1);
+        assert!(!output.methods[0].source_export_eligible);
+    }
+
+    #[test]
     fn call_coverage_matches_access_spans_without_hiding_missing_outer_calls() {
         let raw = BTreeSet::from([
             [1, 0, 1, 20],  // outer_call(inner())
@@ -8038,6 +8108,7 @@ end
             visibility: Some("public".to_string()),
             params: Vec::new(),
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "def helper".to_string(),
         });
         let output = extract(&doc, Profile::Espalier);
@@ -8209,6 +8280,7 @@ def py_fn(a: int) -> str:
             visibility: Some("public".to_string()),
             params: vec!["x".to_string()],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "".to_string(),
         });
 
@@ -8231,6 +8303,7 @@ def py_fn(a: int) -> str:
             visibility: Some("public".to_string()),
             params: vec!["x".to_string()],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "sig { .params(x: Integer).returns(String) }".to_string(),
         });
 
@@ -8253,6 +8326,7 @@ def py_fn(a: int) -> str:
             visibility: Some("public".to_string()),
             params: vec![],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "def top_level_fn".to_string(),
         });
 
@@ -8631,6 +8705,7 @@ def py_fn(a: int) -> str:
             visibility: None,
             params: vec!["a".to_string()],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "".to_string(),
         });
         extract(&doc_py, Profile::Espalier);
@@ -8733,6 +8808,7 @@ def py_fn(a: int) -> str:
             visibility: None,
             params: vec!["a".to_string(), "b".to_string()],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "".to_string(),
         };
         let sig = method_signature(&lines, &fn_def, "unknown");
@@ -8968,6 +9044,7 @@ def py_fn(a: int) -> str:
             target_provenance: None,
             candidate_targets: Vec::new(),
             candidate_reason: None,
+            consumer_closed_candidate_set: false,
             kind: "internal_call".into(),
             owner: "Demo".into(),
             function: "a".into(),

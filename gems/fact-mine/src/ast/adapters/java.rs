@@ -55,7 +55,10 @@ impl AstNormalizationAdapter for JavaAstAdapter {
     }
 
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
-        matches!(node.kind(), "method_invocation")
+        matches!(
+            node.kind(),
+            "method_invocation" | "object_creation_expression"
+        )
     }
 
     fn call_block_argument<'tree>(
@@ -78,6 +81,21 @@ impl AstNormalizationAdapter for JavaAstAdapter {
         named_children(arguments)
             .into_iter()
             .find(|argument| argument.kind() == "lambda_expression")
+    }
+
+    fn supplementary_call_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        if node.kind() != "object_creation_expression" {
+            return Vec::new();
+        }
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "class_body")
+            .map(named_children)
+            .unwrap_or_default()
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {

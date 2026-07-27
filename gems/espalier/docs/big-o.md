@@ -244,23 +244,24 @@ Current indexed smoke corpora are pinned by source commit and indexer version:
 | Java | Apache Commons CLI `afb0fd148517b1bf8316ebbc44ec9ec8b201452a` | scip-java 0.12.3 | 279/524 (53.24%) → 524/524 (100.00%) | 559 → 767 |
 | C | cJSON `fb16e5cf358798aabb049655975cde8427101056` | scip-clang 0.4.0 | 41/116 (35.34%) → 102/116 (87.93%) | 185 → 188 |
 
-The 85% production acceptance gate was re-run on 2026-07-27 after the
-SCIP/CFG/DFG burn-down. Each row uses fresh FactMine output from the named
-compiler index, counts owner-nested lambdas, and requires zero unnormalized raw
-calls inside executable functions:
+The production acceptance measurements below were run on 2026-07-27. Each row
+uses FactMine output from the named compiler index, counts owner-nested lambdas,
+and requires zero unnormalized raw calls inside executable functions. Rows
+below 85% remain active burn-down targets:
 
 | Language | Production corpus | Indexer | Complete bounds | Semantic calls accounted | Executable raw-call gaps |
 | --- | --- | --- | ---: | ---: | ---: |
 | Java | Apache Commons CLI `afb0fd148517b1bf8316ebbc44ec9ec8b201452a` | scip-java 0.12.3 | 524/524 (100.00%) | 1,435/1,435 (100.00%) | 0 |
 | C | cJSON `fb16e5cf358798aabb049655975cde8427101056` | scip-clang 0.4.0 | 102/116 (87.93%) | 326/326 (100.00%) | 0 |
 | Go | unslop `6b39e58b5128eb22cd8f8394dd4a64987e2b8a17` | scip-go 0.2.7 | 140/150 (93.33%) | 1,104/1,125 (98.13%) | 0 |
-| Rust | FactMine production sources in this tree | rust-analyzer 0.3.2989-standalone | 4,939/5,802 (85.13%) | 30,710/32,791 (93.65%) | 0 |
+| Rust | FactMine production sources in this tree | rust-analyzer 1.96.0 (ac68faa 2026-05-25) | 2,837/6,664 (42.57%) | see generated profile | 0 |
 
 These are production-scope gate results, not replacements for the older
-cross-language snapshot above. In particular, the Rust corpus excludes inline
-test modules and test-only files while retaining production lambdas. The 13
-remaining Rust raw-parser gaps are outside executable functions and therefore
-cannot hide function cost.
+cross-language snapshot above. The stricter current Rust measurement supersedes
+the earlier 4,939/5,802 figure: the current tree and coverage policy count
+6,664 production functions, and the safe generated stdlib bundle does not
+change its 2,837 complete functions. That shortfall is visible rather than
+being hidden by unsafe generated claims.
 
 The Java path recognizes the `semanticdb` scheme emitted by real scip-java
 0.12.x indexes while retaining compatibility with older `scip-java`-scheme
@@ -284,29 +285,36 @@ than missing call identity or cost.
 
 ### Reusing analyzed dependency and standard-library bodies
 
-Analyze a pinned source release with its SCIP index, then export only complete
-time-and-space results under the exact declaration symbols:
+Standard-library production is manifest-driven. A manifest pins and verifies
+the source release, selects source files, declares the language-owned build and
+SCIP indexing recipe, and names the exact expected indexer build. The shared
+pipeline then profiles CFG/DFG facts, applies soundness gates, exports exact
+symbols, verifies that the bundle joins back to its producer index, checks any
+declared consumers, and atomically publishes the result:
 
 ```bash
-gems/fact-mine/target/release/fact-mine-rust \
-  profile espalier \
-  --language go \
-  --scip-index go-stdlib.scip \
-  --no-bundled-complexity-summaries \
-  --output go-stdlib.profile.json \
-  GO_STDLIB_SOURCE_FILES...
-
-gems/espalier/script/export_complexity_summary.rb \
-  --corpus go-stdlib \
-  --source-revision go1.25.0 \
-  --indexer scip-go@0.1.18 \
-  go-stdlib.profile.json go-stdlib.go1.25.0.json.gz
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/go-1.22.2.yml
 ```
 
-The v2 summary records the SHA-256 of the complete input profile, producer
-version, source release, indexer version, language set, and exported symbol
-count. Gzip output has a zero timestamp, so rebuilding identical inputs is
-byte-for-byte reproducible. Apply it to user code alongside that code's index:
+Adding another SCIP standard library should therefore normally be a manifest,
+not shared Ruby or Rust code. Language-specific behavior is confined to the
+language's syntax/normalization module and the manifest's source/index recipe.
+Everything after SCIP production is language-neutral.
+
+The shared soundness gate requires an executable source body, complete parser
+call evidence for every export-eligible method, no overlapping parser recovery,
+an exact compatible SCIP producer, and source-proven time and space bounds.
+Open implementation candidate sets are not exported. Parametric callback bounds
+are exported only when the callback is an actual declared parameter. Generated
+complete data replaces incomplete fallback data; a generated/manual complete
+disagreement is a hard failure.
+
+The v2 bundle records the SHA-256 of the complete input profile, producer
+version, verified source release, indexer version, language set, and exported
+symbol count. Gzip output has a zero timestamp, so rebuilding identical inputs
+is byte-for-byte reproducible. Apply it to user code alongside that code's
+index:
 
 ```bash
 gems/espalier/exe/espalier \
@@ -320,20 +328,18 @@ Summary joins require the exact compiler symbol already attached by SCIP. They
 never guess from an owner or method name. Unknown schema versions, malformed
 metadata, empty bounds, and contradictory files fail closed. The v1 reader
 remains available for previously generated artifacts, but new exports are v2.
-FactMine bundles the Go 1.22.2 core-surface summary (371 exact symbols) and
-Rust 1.96.0 `core`/`alloc`/`std` summary (1,697 exact symbols).
+FactMine bundles the safely regenerated Go 1.22.2 core-surface summary (322
+exact symbols from 655 source-proven methods) and Rust 1.96.0
+`core`/`alloc`/`std` summary (1,543 exact symbols from 3,002 source-proven
+methods).
 The exporter rejects apparently complete functions whose proof depends on a
 manual receiver registry, modeled-world/external-latency contract, unknown
 cardinality relation, or unresolved call-evidence gap. Bundled data is applied
 automatically only when SCIP metadata reports the exact compatible indexer
 build; this is required even when a symbol already contains a package version.
-A complete generated/manual disagreement is a hard error; generated complete
-data replaces incomplete fallback data.
 
-The remaining incomplete Rust functions are dominated by conservative proof
-obligations rather than parser loss: 483 have missing semantic identity as
-their primary root cause and 324 lack a recursive progress proof. Dependency
-cost models account for 31 more, project-call context for 13, external models
-for 6, excluded/project summaries for 4, and reviewed stdlib coverage for only
-2. These gaps remain visible in diagnostics and are not needed to satisfy the
-85% acceptance threshold.
+The smaller regenerated bundles are intentional. The previous artifacts
+included declaration-only Go functions, open-interface candidate assumptions,
+parser-recovered Rust methods, and internal callback bounds that were not safe
+to reuse in arbitrary consumers. Those are now rejected generically rather than
+worked around per language.

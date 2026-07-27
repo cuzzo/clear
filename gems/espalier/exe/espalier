@@ -5,6 +5,12 @@ require "optparse"
 require_relative "../lib/espalier"
 require_relative "../lib/espalier/type_profile"
 
+if ARGV.first == "stdlib-map"
+  ARGV.shift
+  require_relative "../lib/espalier/stdlib_map"
+  exit Espalier::StdlibMap.run_cli(ARGV)
+end
+
 options = {
   format: :markdown,
   output: nil,

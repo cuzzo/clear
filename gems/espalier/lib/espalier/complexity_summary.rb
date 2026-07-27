@@ -17,6 +17,29 @@ module Espalier
 
     module_function
 
+    def relocate_symbol(symbol, from: nil, to: nil)
+      return symbol if from.nil? && to.nil?
+      raise ArgumentError, "symbol relocation requires both source and destination prefixes" if from.nil? || to.nil?
+      raise ArgumentError, "symbol does not start with the declared source prefix: #{symbol}" unless symbol.start_with?(from)
+
+      "#{to}#{symbol.delete_prefix(from)}"
+    end
+
+    def source_method_proven?(method, quality, complexity_facts)
+      return false unless method["source_export_eligible"] == true
+      return false unless source_proven?(quality, complexity_facts)
+
+      qualities = Array(quality[:big_o_bound_qualities]).map(&:to_s)
+      return false if qualities.any? { |bound| bound.include?("parametric_callback") } &&
+        Array(method["callback_params"]).empty?
+
+      true
+    end
+
+    def consumer_closed_candidate_set?(call)
+      call["consumer_closed_candidate_set"] == true
+    end
+
     def source_proven?(quality, complexity_facts)
       return false unless quality
       return false unless quality[:big_o_complete] == true

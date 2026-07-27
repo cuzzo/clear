@@ -64,6 +64,19 @@ bundle exec gems/espalier/exe/espalier \
   --output=/tmp/espalier-report.md
 ```
 
+Generate a source-proven standard-library complexity bundle from one manifest:
+
+```bash
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/go-1.22.2.yml
+```
+
+The manifest owns source revision verification, source selection, and the
+language indexer's build recipe. The shared pipeline owns profiling, generic
+soundness checks, exact-symbol export, producer/consumer validation, and atomic
+publication. A new SCIP stdlib should normally require only a manifest; parser
+or runtime semantics belong in that language's FactMine module.
+
 ## Outputs
 
 Espalier can output a compact architecture manifest for tools and LLMs,
