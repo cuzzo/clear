@@ -66,6 +66,13 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         node.kind() == "variable_declarator"
     }
 
+    fn variable_declarator_alternative<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     /// Pre-parse source transformation, fed to tree-sitter's `parse()` call
     /// only - never used for digests, snippets, or spans, which always read
     /// the untouched original source. Defaults to a no-op; override only
@@ -387,6 +394,13 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         _node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
+    }
+
+    fn case_arm_guard<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
         None
     }
 

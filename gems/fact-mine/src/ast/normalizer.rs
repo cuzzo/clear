@@ -340,9 +340,21 @@ impl<'source> TreeSitterNormalizer<'source> {
                 return Some(self.wrap(&kind_type(node.kind()), Vec::new(), node));
             }
             let assignment = self.normalize_assignment(node)?;
+            let mut children = vec![Child::Node(Box::new(assignment))];
+            if let Some(alternative) = self
+                .normalization_adapter
+                .variable_declarator_alternative(node)
+                .and_then(|alternative| self.normalize_node(alternative))
+            {
+                // The alternative executes only when a refutable pattern does
+                // not match. Keeping it after the assignment is a conservative
+                // upper-bound representation and, critically, retains its
+                // executable calls for CFG/DFG and call-soundness accounting.
+                children.push(Child::Node(Box::new(alternative)));
+            }
             return Some(self.wrap(
                 &kind_type(node.kind()),
-                vec![Child::Node(Box::new(assignment))],
+                children,
                 node,
             ));
         }
@@ -1115,7 +1127,7 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     pub(in crate::ast) fn normalize_when(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
         let patterns = self.normalize_patterns(node);
-        let body = if let Some(body_nodes) = self
+        let mut body = if let Some(body_nodes) = self
             .normalization_adapter
             .case_arm_body_nodes(node, self.source)
         {
@@ -1127,6 +1139,21 @@ impl<'source> TreeSitterNormalizer<'source> {
             self.when_body(node)
                 .and_then(|body| self.normalize_body(body))
         };
+        if let Some(guard) = self
+            .normalization_adapter
+            .case_arm_guard(node)
+            .and_then(|guard| self.normalize_node(guard))
+        {
+            body = Some(self.wrap(
+                "IF",
+                vec![
+                    Child::Node(Box::new(guard)),
+                    optional_node(body),
+                    Child::Nil,
+                ],
+                node,
+            ));
+        }
         Some(self.wrap(
             "WHEN",
             vec![
@@ -1765,11 +1792,25 @@ impl<'source> TreeSitterNormalizer<'source> {
         if let Some(target) = self.assignment_target(left, right.clone(), node) {
             return Some(target);
         }
-        Some(self.wrap(
+        let assignment = self.wrap(
             "LASGN",
             vec![Child::String(self.target_name(left)), optional_node(right)],
             node,
-        ))
+        );
+        let left_span = span(left);
+        let left_executes_call = self.parser_call_spans.iter().any(|call_span| {
+            (call_span[0], call_span[1]) >= (left_span[0], left_span[1])
+                && (call_span[2], call_span[3]) <= (left_span[2], left_span[3])
+        });
+        if !left_executes_call {
+            return Some(assignment);
+        }
+        let mut target_effects = self.normalize_children(left);
+        if target_effects.is_empty() {
+            return Some(assignment);
+        }
+        target_effects.push(Child::Node(Box::new(assignment)));
+        Some(self.wrap("BLOCK", target_effects, node))
     }
 
     pub(in crate::ast) fn normalize_operator_assignment(
@@ -5617,6 +5658,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
         self.named_field(node, "left")
             .or_else(|| self.named_field(node, "pattern"))
+            .or_else(|| self.named_field(node, "name"))
             .or_else(|| self.named_children(node).into_iter().next())
     }
 
@@ -5841,14 +5883,32 @@ impl<'source> TreeSitterNormalizer<'source> {
         let right_node = right_node.filter(|r| !self.same_ts_node(*r, node));
         let right = right_node.and_then(|sibling| self.normalize_node(sibling));
         let source = node.parent().unwrap_or(node);
-        self.assignment_target(node, right.clone(), source)
-            .or_else(|| {
-                Some(self.wrap(
-                    "LASGN",
-                    vec![Child::String(self.target_name(node)), optional_node(right)],
-                    source,
-                ))
-            })
+        if let Some(target) = self.assignment_target(node, right.clone(), source) {
+            return Some(target);
+        }
+        let assignment = self.wrap(
+            "LASGN",
+            vec![Child::String(self.target_name(node)), optional_node(right)],
+            source,
+        );
+        let target_span = span(node);
+        let target_executes_call = self.parser_call_spans.iter().any(|call_span| {
+            (call_span[0], call_span[1]) >= (target_span[0], target_span[1])
+                && (call_span[2], call_span[3]) <= (target_span[2], target_span[3])
+        });
+        if !target_executes_call {
+            return Some(assignment);
+        }
+        let mut target_effects = self.normalize_children(node);
+        if target_effects.is_empty() {
+            return Some(assignment);
+        }
+        // A complex lvalue can execute calls before it is written, as in
+        // Rust's `*counts.entry(key).or_default() += 1`. The fallback LASGN
+        // retains the write conservatively; the leading children retain the
+        // executable receiver/index calculation for call and cost analysis.
+        target_effects.push(Child::Node(Box::new(assignment)));
+        Some(self.wrap("BLOCK", target_effects, source))
     }
 
     pub(in crate::ast) fn target_name(&self, node: TreeSitterNode<'_>) -> String {
