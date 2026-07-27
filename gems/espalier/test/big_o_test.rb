@@ -317,6 +317,19 @@ class BigOTest < Minitest::Test
       consumer.send(:recursion_complexity, {
         "calls" => 2, "visited_guarded_calls" => 2, "unknown_progress_calls" => 0
       }, 2)
+    assert_equal ["O(N)", "O(N)", "recursive descent into a projection of the input"],
+      consumer.send(:recursion_complexity, {
+        "calls" => 2, "structural_calls" => 2, "unknown_progress_calls" => 0
+      }, 2)
+    structural = consumer.send(:summary_hint, {
+      "line" => 8, "parameters" => ["node"], "iterations" => [], "allocations" => [],
+      "size_domains" => [], "recursion" => {
+        "calls" => 2, "structural_calls" => 2, "unknown_progress_calls" => 0
+      }
+    }, { line: 8, name: "walk" })
+    assert_equal "O(N)", structural[:complexity]
+    assert_equal "upper_bound_structural_descent", structural[:complexity_bound_quality]
+    assert_includes structural[:complexity_assumptions].first, "finite and acyclic"
     unknown = consumer.send(:summary_hint, {
       "line" => 9, "parameters" => ["items"], "recursion" => { "calls" => 0 },
       "iterations" => [{ "power" => 1, "cardinality_relation" => "unknown", "execution_multiplicity" => "unknown" }]

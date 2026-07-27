@@ -31,6 +31,7 @@ module Espalier
     RECURSIVE_QUALITIES = %w[
       upper_bound_acyclic_project_scc
       upper_bound_recursive_multiplicity
+      upper_bound_structural_descent
     ].freeze
     MODELED_QUALITY = "upper_bound_modeled_world"
     CLOSED_CANDIDATE_MAX_QUALITY = "upper_bound_closed_candidate_max"

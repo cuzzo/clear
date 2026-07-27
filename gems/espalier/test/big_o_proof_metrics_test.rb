@@ -40,13 +40,15 @@ class BigOProofMetricsTest < Minitest::Test
   end
 
   def test_complete_scc_bound_is_likely_while_progress_proof_remains_visible
-    row = quality(
-      qualities: ["upper_bound_acyclic_project_scc"],
-      assumptions: ["finite acyclic input"]
-    )
+    %w[upper_bound_acyclic_project_scc upper_bound_structural_descent].each do |proof_quality|
+      row = quality(
+        qualities: [proof_quality],
+        assumptions: ["finite acyclic input"]
+      )
 
-    assert_equal :known_likely, Metrics.classify(row)
-    assert_equal :recursive_progress, Metrics.bucket(row)
+      assert_equal :known_likely, Metrics.classify(row)
+      assert_equal :recursive_progress, Metrics.bucket(row)
+    end
   end
 
   def test_external_latency_scope_outranks_exact_target_in_underlying_bucket

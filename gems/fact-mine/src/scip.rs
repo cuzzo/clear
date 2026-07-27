@@ -943,6 +943,10 @@ fn assign_method_symbols(methods: &mut [MethodRecord], documents: &[Document]) {
             .occurrences
             .iter()
             .filter(|occurrence| occurrence.symbol_roles & 1 == 1)
+            // SCIP local symbols identify bindings, not callable project
+            // definitions. Joining a local declaration to its enclosing
+            // method makes a later variable read look like a self-call.
+            .filter(|occurrence| semantic_symbol(&occurrence.symbol))
         {
             let Some(span) = occurrence.span() else {
                 continue;
@@ -1143,6 +1147,11 @@ fn select_call_occurrences<'a>(
         .occurrences
         .iter()
         .filter(|occurrence| occurrence.symbol_roles & 1 == 0)
+        // Local occurrences remain available to the dedicated type-enrichment
+        // passes, but they cannot establish call identity. A closure/function
+        // value needs an explicit callable contract instead of borrowing the
+        // identity of the method that contains its binding.
+        .filter(|occurrence| semantic_symbol(&occurrence.symbol))
         .filter(|occurrence| {
             occurrence
                 .span()
@@ -1229,9 +1238,7 @@ fn select_call_occurrences<'a>(
     let callable = exact
         .iter()
         .copied()
-        .filter(|occurrence| {
-            callable_symbol(&occurrence.symbol) || occurrence.symbol.starts_with("local ")
-        })
+        .filter(|occurrence| callable_symbol(&occurrence.symbol))
         .collect::<Vec<_>>();
     if prefers_first_semantic_occurrence(language) {
         if let Some(selected) = first_semantic_occurrence(&callable) {
@@ -2839,6 +2846,44 @@ mod tests {
         let stats = apply_json(&mut output, &index.to_string()).unwrap();
         assert_eq!(stats.unmatched_calls, 1);
         assert_eq!(output.calls[0].semantic_symbol, None);
+    }
+
+    #[test]
+    fn local_binding_read_cannot_resolve_to_its_enclosing_method() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("visit.rs");
+        let source = "fn visit() -> bool { let found = true; found }\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let declaration = source.find("found").unwrap();
+        let read = source.rfind("found").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "visit.rs",
+            "occurrences": [
+                occurrence([0, declaration, declaration + "found".len()], "local 0", 1),
+                occurrence([0, read, read + "found".len()], "local 0", 0)
+            ]
+        }]});
+        let mut output = ProfileOutput::default();
+        output.methods = vec![method(
+            "visit",
+            &path,
+            "visit",
+            [1, 0, 1, source.trim_end().len()],
+        )];
+        output.calls = vec![call(
+            "visit",
+            &path,
+            "found",
+            [1, read, 1, read + "found".len()],
+        )];
+
+        let stats = apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(stats.unmatched_calls, 1);
+        assert_eq!(output.calls[0].semantic_symbol, None);
+        assert_eq!(output.calls[0].target, None);
+        assert_ne!(output.calls[0].kind, "resolved_call");
     }
 
     #[test]

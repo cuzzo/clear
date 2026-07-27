@@ -668,6 +668,93 @@ class AggregatorTest < Minitest::Test
     assert_equal :parametric, caller[:big_o_status]
   end
 
+  def test_recursive_callback_component_stays_parametric_instead_of_expanding_forever
+    modules = [{
+      type: :class, name: "walker", file: "walker.rs", states: Set.new, language: :rust,
+      methods: [{
+        id: "visit", name: "visit", line: 1, span: [1, 0, 3, 1], parameters: ["children"],
+        visibility: :private, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "walk", receiver: "children", message: "any", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N*C)",
+          complexity_bound_quality: "upper_bound_parametric_callback_linear"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["children"], "collection_parameters" => ["children"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{
+            "id" => "param:children", "name" => "children", "source_kind" => "parameter"
+          }],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "any",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "argument_size_domains" => [["param:children"]]
+          }]
+        }]
+      }, {
+        id: "lambda", name: "<lambda@2:20>", line: 2, span: [2, 20, 2, 39],
+        dispatch_kind: "lambda", parameters: ["child"], visibility: :private,
+        effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "recur", receiver: "self", message: "visit", line: 2,
+          span: [2, 22, 2, 38], candidate_target_ids: ["visit"],
+          candidate_reason: "scip_project_candidate_set"
+        }],
+        complexity_facts: [{
+          "line" => 2, "parameters" => ["child"], "collection_parameters" => [],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [], "call_contexts" => [{
+            "line" => 2, "span" => [2, 22, 2, 38], "message" => "visit",
+            "execution_multiplicity" => "O(1)", "power" => 0
+          }]
+        }]
+      }]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    visit = functions.find { |function| function[:id] == "visit" }.fetch(:quality_metrics)
+
+    assert_equal "O(N*C)", visit[:big_o]
+    assert_equal :parametric, visit[:big_o_status]
+  end
+
+  def test_divergent_recursive_candidate_cycle_widens_to_unknown
+    method = lambda do |id, name, target, line|
+      {
+        id: id, name: name, line: line, span: [line, 0, line + 2, 1],
+        parameters: ["items"], effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "self", message: target, line: line + 1,
+          span: [line + 1, 2, line + 1, 12],
+          candidate_target_ids: [target], candidate_reason: "closed_candidate_set"
+        }],
+        complexity_facts: [{
+          "line" => line, "parameters" => ["items"], "collection_parameters" => ["items"],
+          "iterations" => [], "allocations" => [], "size_domains" => [],
+          "recursion" => { "calls" => 0 }, "call_contexts" => [{
+            "line" => line + 1, "span" => [line + 1, 2, line + 1, 12],
+            "message" => target, "execution_multiplicity" => "O(N)", "power" => 1
+          }]
+        }]
+      }
+    end
+    modules = [{
+      type: :class, name: "Cycle", file: "cycle.rs", states: Set.new, language: :rust,
+      methods: [
+        method.call("left", "left", "right", 1),
+        method.call("right", "right", "left", 5)
+      ]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+
+    functions.each do |function|
+      quality = function.fetch(:quality_metrics)
+      refute quality[:big_o_complete]
+      assert_includes quality[:big_o_evidence_gaps], "unresolved_recursive_progress"
+    end
+  end
+
   def test_worst_callable_rule
     worst = ->(rows) { Espalier::SymbolicComplexity.worst_callable(rows) }
     linear = Espalier::SymbolicComplexity.from_fact(
@@ -1450,6 +1537,49 @@ class AggregatorTest < Minitest::Test
     caller = Espalier::Aggregator.new.aggregate(modules).find { |mod| mod[:module] == "Caller" }[:functions].first
     assert_equal "O(N)", caller[:quality_metrics][:big_o]
     assert caller[:quality_metrics][:big_o_complete]
+  end
+
+  def test_unresolved_duplicate_short_name_is_not_an_internal_summary_edge
+    constant_fact = {
+      "parameters" => [], "collection_parameters" => [], "iterations" => [],
+      "allocations" => [], "size_domains" => [], "recursion" => { "calls" => 0 },
+      "call_contexts" => []
+    }
+    modules = [{
+      type: :class, name: "Duplicate", file: "duplicate.rs", states: Set.new,
+      methods: [{
+        id: "work-a", name: "work", line: 1, span: [1, 0, 2, 1],
+        effects: { reads: Set.new, writes: Set.new }, delegations: [],
+        complexity_facts: [constant_fact.merge("line" => 1)]
+      }, {
+        id: "work-b", name: "work", line: 4, span: [4, 0, 6, 1],
+        effects: { reads: Set.new, writes: Set.new }, delegations: [],
+        complexity_facts: [constant_fact.merge(
+          "line" => 4,
+          "iterations" => [{ "line" => 5, "power" => 1, "execution_multiplicity" => "O(N)" }]
+        )]
+      }, {
+        id: "caller", name: "run", line: 8, span: [8, 0, 10, 1],
+        effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "self", message: "work", line: 9, span: [9, 2, 9, 8]
+        }],
+        complexity_facts: [constant_fact.merge(
+          "line" => 8,
+          "call_contexts" => [{
+            "line" => 9, "span" => [9, 2, 9, 8], "message" => "work",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "evidence_gap" => "ambiguous_project_call"
+          }]
+        )]
+      }]
+    }]
+
+    caller = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+      .find { |function| function[:id] == "caller" }.fetch(:quality_metrics)
+
+    refute caller[:big_o_complete]
+    assert_includes caller[:big_o_evidence_gaps], "ambiguous_project_call"
   end
 
   def test_scip_complete_call_graph_rejects_false_overload_recursion

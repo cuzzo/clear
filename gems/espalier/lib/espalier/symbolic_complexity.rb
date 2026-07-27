@@ -7,6 +7,7 @@ module Espalier
     module_function
 
     LETTERS = %w[N M K L P Q R S T U V W X Y Z].freeze
+    RENDER_DOMAIN_LIMIT = 128
 
     def reset_intern_pool!
       @term_pool = {}
@@ -110,6 +111,23 @@ module Espalier
       )
     end
 
+    # Replace only domain metadata on an already-normalized expression. Terms
+    # are immutable and interned, so rerunning pairwise dominance elimination
+    # here is both redundant and quadratic in the number of monomials.
+    def with_domains(expression, domains)
+      return nil unless expression
+
+      canonical_domains = intern_domains(domains || {})
+      canonical = expression.merge(domains: canonical_domains).freeze
+      @expression_pool ||= {}
+      key = [
+        canonical.fetch(:terms),
+        canonical_domains,
+        canonical.fetch(:complete, true)
+      ]
+      @expression_pool[key] ||= canonical
+    end
+
     def substitute(expression, mapping, caller_domains: {})
       return nil unless expression
 
@@ -210,7 +228,13 @@ module Espalier
     def render(expression)
       return nil unless expression
 
-      ids = Array(expression[:terms]).flat_map { |term| term[:factors].keys + term[:logs].keys }.uniq
+      terms = Array(expression[:terms])
+      factor_entries = terms.sum { |term| term[:factors].length + term[:logs].length }
+      if terms.length > RENDER_DOMAIN_LIMIT || factor_entries > RENDER_DOMAIN_LIMIT
+        return render_collapsed_upper_bound(expression, terms)
+      end
+
+      ids = terms.flat_map { |term| term[:factors].keys + term[:logs].keys }.uniq
       ids.sort_by! do |id|
         containing_terms = Array(expression[:terms]).select { |term| term[:factors].key?(id) || term[:logs].key?(id) }
         exponents = containing_terms.map { |term| term[:factors].fetch(id, 0) }
@@ -264,6 +288,68 @@ module Espalier
       ["O(#{bodies.join(' + ')})", variables(expression, symbols)]
     end
 
+    # A function has a fixed number of input domains, so a sum over many
+    # independent domains is bounded by the largest domain raised to the
+    # greatest observed degree (constant coefficients disappear in Big-O).
+    # Preserve callback/reflection parameters as C/R so proof-tier
+    # classification remains parametric rather than silently closing them.
+    def render_collapsed_upper_bound(expression, terms)
+      maxima = { size: 0, size_logs: 0, callback: 0, reflection: 0 }
+      ids = { size: {}, callback: {}, reflection: {} }
+      domains = expression[:domains] || {}
+      terms.each do |term|
+        row = { size: 0, size_logs: 0, callback: 0, reflection: 0 }
+        term[:factors].each do |id, exponent|
+          domain = domains.fetch(id, {})
+          kind = (domain["source_kind"] || domain[:source_kind]).to_s
+          bucket = if kind == "reflective_target_cost"
+                     :reflection
+                   elsif kind.end_with?("_cost")
+                     :callback
+                   else
+                     :size
+                   end
+          row[bucket] += exponent
+          ids[bucket][id] = true
+        end
+        term[:logs].each do |id, exponent|
+          row[:size_logs] += exponent
+          ids[:size][id] = true
+        end
+        maxima.each_key { |key| maxima[key] = [maxima[key], row[key]].max }
+      end
+
+      parts = []
+      parts << power_text("N", maxima[:size]) if maxima[:size].positive?
+      parts << power_text("log N", maxima[:size_logs], grouped: true) if maxima[:size_logs].positive?
+      parts << power_text("C", maxima[:callback]) if maxima[:callback].positive?
+      parts << power_text("R", maxima[:reflection]) if maxima[:reflection].positive?
+      parts << "1" if parts.empty?
+      variables = []
+      [
+        [:size, "N", "size"],
+        [:callback, "C", "callback cost"],
+        [:reflection, "R", "reflective target cost"]
+      ].each do |bucket, symbol, label|
+        next if ids[bucket].empty?
+
+        variables << {
+          symbol: symbol,
+          domain_id: "collapsed:#{bucket}",
+          name: "maximum of #{ids[bucket].length} #{label} domains",
+          source_kind: "collapsed_upper_bound",
+          domain_count: ids[bucket].length
+        }
+      end
+      ["O(#{parts.join('*')})", variables]
+    end
+
+    def power_text(symbol, exponent, grouped: false)
+      return symbol if exponent == 1
+
+      grouped ? "(#{symbol})^#{exponent}" : "#{symbol}^#{exponent}"
+    end
+
     def variables(expression, symbols = nil)
       symbols ||= begin
         ids = Array(expression[:terms]).flat_map { |term| term[:factors].keys + term[:logs].keys }.uniq.sort
@@ -280,7 +366,8 @@ module Espalier
           span: domain["span"] || domain[:span],
           origin_owner: domain["origin_owner"] || domain[:origin_owner],
           origin_function: domain["origin_function"] || domain[:origin_function],
-          propagated_via: domain["propagated_via"] || domain[:propagated_via]
+          propagated_via: domain["propagated_via"] || domain[:propagated_via],
+          domain_count: domain["domain_count"] || domain[:domain_count]
         }.compact
       end
     end
@@ -312,17 +399,78 @@ module Espalier
     end
 
     def normalize(expression)
-      terms = Array(expression[:terms]).map do |term|
+      raw_terms = Array(expression[:terms])
+      factor_entries = raw_terms.sum { |term| term[:factors].length + (term[:logs] || {}).length }
+      if raw_terms.length > RENDER_DOMAIN_LIMIT || factor_entries > RENDER_DOMAIN_LIMIT
+        return collapse_expression(expression, raw_terms)
+      end
+
+      terms = raw_terms.map do |term|
         intern_term(
           term[:factors].select { |_, exponent| exponent.to_i.positive? }.transform_values(&:to_i),
           (term[:logs] || {}).select { |_, exponent| exponent.to_i.positive? }.transform_values(&:to_i)
         )
       end.uniq
       terms.reject! do |candidate|
-        terms.any? { |other| other != candidate && dominates?(other, candidate) }
+        terms.any? { |other| !other.equal?(candidate) && dominates?(other, candidate) }
       end
       canonical_terms = terms.sort_by { |term| [term[:factors].to_a, term[:logs].to_a] }.freeze
       canonical_domains = intern_domains(expression[:domains] || {})
+      canonical = expression.merge(terms: canonical_terms, domains: canonical_domains).freeze
+      @expression_pool ||= {}
+      key = [canonical_terms, canonical_domains, canonical.fetch(:complete, true)]
+      @expression_pool[key] ||= canonical
+    end
+
+    def collapse_expression(expression, terms)
+      source_domains = expression[:domains] || {}
+      maxima = { size: 0, size_logs: 0, callback: 0, reflection: 0 }
+      ids = { size: {}, callback: {}, reflection: {} }
+      terms.each do |term|
+        row = { size: 0, size_logs: 0, callback: 0, reflection: 0 }
+        term[:factors].each do |id, exponent|
+          domain = source_domains.fetch(id, {})
+          kind = (domain["source_kind"] || domain[:source_kind]).to_s
+          bucket = if kind == "reflective_target_cost"
+                     :reflection
+                   elsif kind.end_with?("_cost")
+                     :callback
+                   else
+                     :size
+                   end
+          row[bucket] += exponent.to_i
+          ids[bucket][id] = true
+        end
+        (term[:logs] || {}).each do |id, exponent|
+          row[:size_logs] += exponent.to_i
+          ids[:size][id] = true
+        end
+        maxima.each_key { |key| maxima[key] = [maxima[key], row[key]].max }
+      end
+
+      factors = {}
+      factors["collapsed:size"] = maxima[:size] if maxima[:size].positive?
+      factors["collapsed:callback"] = maxima[:callback] if maxima[:callback].positive?
+      factors["collapsed:reflection"] = maxima[:reflection] if maxima[:reflection].positive?
+      logs = {}
+      logs["collapsed:size"] = maxima[:size_logs] if maxima[:size_logs].positive?
+      canonical_terms = [intern_term(factors, logs)].freeze
+      domains = {}
+      [
+        [:size, "size", "collapsed_upper_bound"],
+        [:callback, "callback cost", "callback_cost"],
+        [:reflection, "reflective target cost", "reflective_target_cost"]
+      ].each do |bucket, label, source_kind|
+        next if ids[bucket].empty?
+
+        domains["collapsed:#{bucket}"] = {
+          "id" => "collapsed:#{bucket}",
+          "name" => "maximum of #{ids[bucket].length} #{label} domains",
+          "source_kind" => source_kind,
+          "domain_count" => ids[bucket].length
+        }
+      end
+      canonical_domains = intern_domains(domains)
       canonical = expression.merge(terms: canonical_terms, domains: canonical_domains).freeze
       @expression_pool ||= {}
       key = [canonical_terms, canonical_domains, canonical.fetch(:complete, true)]

@@ -9,6 +9,8 @@ module Espalier
   # Coalescing agent that imports the static skeleton maps and merges secondary
   # metadata from: decomplex (decisions/clones), nil-kill (types), and boobytrap/slopcop (risk/coverage).
   class Aggregator
+    MAX_RECURSIVE_SUMMARY_STATES = 64
+
     def initialize(
       decomplex_data: {},
       nil_kill_data: {},
@@ -248,13 +250,15 @@ module Espalier
     end
 
     def legacy_internal_edges_for(mod)
-      method_names = mod[:methods].map { |m| m[:name].to_s }
+      method_names = mod[:methods].map { |m| m[:name].to_s }.tally
       mod[:methods].flat_map do |method|
         caller = method[:name].to_s
+        next [] unless method_names[caller] == 1
+
         Array(method[:delegations]).filter_map do |delegation|
           callee = delegation[:message].to_s
           next unless delegation[:receiver] == "self"
-          next unless method_names.include?(callee)
+          next unless method_names[callee] == 1
           next if caller == callee
 
           {
@@ -338,7 +342,10 @@ module Espalier
       @big_o_nodes_cache = {}
       modules.each do |mod|
         methods = Array(mod[:methods])
-        @module_method_names[mod.object_id] = methods.map { |method| method[:name].to_s }.to_set
+        method_name_counts = methods.map { |method| method[:name].to_s }.tally
+        @module_method_names[mod.object_id] = method_name_counts.filter_map do |name, count|
+          name if count == 1
+        end.to_set
         methods.each_with_index do |method, index|
           start_line = method[:line] || 0
           span = method[:span]
@@ -359,11 +366,7 @@ module Espalier
       end_inclusive ? line <= end_line : line < end_line
     end
 
-    def preliminary_method_complexities(modules)
-      analyzer = Espalier::BigOAnalyzer.new(
-        nil_kill: @nil_kill_evidence,
-        declared_fields: declared_fields_for(modules)
-      )
+    def initial_method_complexities(modules)
       complexities = Hash.new { |h, k| h[k] = {} }
       spaces = Hash.new { |h, k| h[k] = {} }
       time_complete = Hash.new { |h, k| h[k] = {} }
@@ -373,31 +376,22 @@ module Espalier
       assumptions = Hash.new { |h, k| h[k] = {} }
       modules.each do |mod|
         Array(mod[:methods]).each do |method|
-          analyzer.instance_variable_set(:@class_name, mod[:name])
-          analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
-          key = "#{mod[:name]}##{method[:name]}"
-          sig = @nil_kill_data[key] || method[:signature]
-          result = analyzer.analyze_method(
-            key,
-            big_o_nodes_for(mod, method),
-            local_types: local_types_for_signature(sig)
-          )
           method_name = method[:name].to_s
-          complexities[mod[:name]][method_name] = result[:known_time_component]
-          spaces[mod[:name]][method_name] = result[:known_space_component]
-          time_complete[mod[:name]][method_name] = result[:time_complete]
-          space_complete[mod[:name]][method_name] = result[:space_complete]
-          symbolic_time[mod[:name]][method_name] = result[:symbolic_time]
-          bound_qualities[mod[:name]][method_name] = result[:bound_qualities]
-          assumptions[mod[:name]][method_name] = result[:complexity_assumptions]
+          complexities[mod[:name]][method_name] = "O(1)"
+          spaces[mod[:name]][method_name] = "O(1)"
+          time_complete[mod[:name]][method_name] = true
+          space_complete[mod[:name]][method_name] = true
+          symbolic_time[mod[:name]][method_name] = nil
+          bound_qualities[mod[:name]][method_name] = []
+          assumptions[mod[:name]][method_name] = []
           unless method[:id].to_s.empty?
-            complexities[method[:id].to_s] = result[:known_time_component]
-            spaces[method[:id].to_s] = result[:known_space_component]
-            time_complete[method[:id].to_s] = result[:time_complete]
-            space_complete[method[:id].to_s] = result[:space_complete]
-            symbolic_time[method[:id].to_s] = result[:symbolic_time]
-            bound_qualities[method[:id].to_s] = result[:bound_qualities]
-            assumptions[method[:id].to_s] = result[:complexity_assumptions]
+            complexities[method[:id].to_s] = "O(1)"
+            spaces[method[:id].to_s] = "O(1)"
+            time_complete[method[:id].to_s] = true
+            space_complete[method[:id].to_s] = true
+            symbolic_time[method[:id].to_s] = nil
+            bound_qualities[method[:id].to_s] = []
+            assumptions[method[:id].to_s] = []
           end
         end
       end
@@ -406,9 +400,9 @@ module Espalier
 
     def structural_method_complexities(modules)
       @structural_big_o_results = {}
-      return preliminary_method_complexities(modules) if modules.empty?
+      return initial_method_complexities(modules) if modules.empty?
 
-      complexities, spaces, time_complete, space_complete, symbolic_time, bound_qualities, assumptions = preliminary_method_complexities(modules)
+      complexities, spaces, time_complete, space_complete, symbolic_time, bound_qualities, assumptions = initial_method_complexities(modules)
       internal_calls = internal_calls_by_method(modules)
       resolved_calls = resolved_calls_by_site(modules)
       candidate_calls = candidate_calls_by_site(modules)
@@ -442,15 +436,18 @@ module Espalier
       # or a named function reference (resolved by argument spelling) - so a
       # caller can substitute that callable's cost for the callee's callback C.
       methods_by_id = {}
-      methods_by_owner_name = {}
+      method_candidates_by_owner_name = Hash.new { |hash, key| hash[key] = [] }
       lambdas_by_file = Hash.new { |hash, key| hash[key] = [] }
       modules.each do |mod|
         Array(mod[:methods]).each do |m|
           methods_by_id[m[:id]] = m if m[:id]
-          methods_by_owner_name[[m[:raw_owner].to_s, m[:name].to_s]] = m
+          method_candidates_by_owner_name[[m[:raw_owner].to_s, m[:name].to_s]] << m
           lambdas_by_file[mod[:file]] << m if m[:dispatch_kind].to_s == "lambda" && m[:span]
         end
       end
+      methods_by_owner_name = method_candidates_by_owner_name.filter_map do |key, candidates|
+        [key, candidates.first] if candidates.one?
+      end.to_h
       callback_arg_by_call = callback_arguments_by_call_site(modules, methods_by_id, methods_by_owner_name, lambdas_by_file)
       @callback_arg_by_call = callback_arg_by_call
       structural_big_o.instance_variable_set(:@callback_arg_by_call, callback_arg_by_call)
@@ -466,6 +463,7 @@ module Espalier
       summary_dependency_components(modules, callback_arg_by_call).each do |component|
         entries = component.fetch(:entries)
         by_identity = entries.to_h { |identity, mod, method| [identity, [mod, method]] }
+        recursive_members = component.fetch(:recursive) ? by_identity.keys.to_set : Set.new
         base_nodes = entries.to_h do |identity, mod, method|
           [identity, big_o_nodes_for(mod, method).freeze]
         end
@@ -473,17 +471,21 @@ module Espalier
         queued = queue.to_set
         queue_index = 0
         observed_states = Hash.new { |hash, identity| hash[identity] = Set.new }
+        widened_summaries = Set.new
         while queue_index < queue.length
           graph_identity = queue[queue_index]
           queue_index += 1
           queued.delete(graph_identity)
+          next if widened_summaries.include?(graph_identity)
+
           mod, method = by_identity.fetch(graph_identity)
           local_analyzer.instance_variable_set(:@class_name, mod[:name])
           local_analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
           key = "#{mod[:name]}##{method[:name]}"
           sig = @nil_kill_data[key] || method[:signature]
           nodes = substitute_callback_arguments(
-            base_nodes.fetch(graph_identity), mod, symbolic_time, complexities, time_complete
+            base_nodes.fetch(graph_identity), mod, symbolic_time, complexities, time_complete,
+            excluded_callable_ids: recursive_members
           ) +
             structural_big_o.hints_for(mod[:file], method, mod[:name])
           result = local_analyzer.analyze_method(key, nodes, local_types: local_types_for_signature(sig))
@@ -508,6 +510,29 @@ module Espalier
             result[:bound_qualities] != current_bound_qualities ||
             result[:complexity_assumptions] != current_assumptions
           next unless result_changed
+
+          if component.fetch(:recursive) &&
+              observed_states[graph_identity].length >= MAX_RECURSIVE_SUMMARY_STATES
+            result = widen_recursive_summary(result)
+            @structural_big_o_results[graph_identity] = result
+            structural_big_o.apply_summary_delta!(method_identity, mod[:name], method_name, {
+              time: result.fetch(:known_time_component),
+              space: result.fetch(:known_space_component),
+              time_complete: false,
+              space_complete: false,
+              symbolic_time: nil,
+              bound_qualities: result.fetch(:bound_qualities),
+              assumptions: result.fetch(:complexity_assumptions)
+            })
+            widened_summaries << graph_identity
+            component.fetch(:callers).fetch(graph_identity, Set.new).each do |caller|
+              next if queued.include?(caller)
+
+              queue << caller
+              queued << caller
+            end
+            next
+          end
 
           complexity = (time_changed || symbolic_changed) ? result[:known_time_component] : current
           space = space_changed ? result[:known_space_component] : current_space
@@ -541,18 +566,41 @@ module Espalier
       [complexities, spaces, time_complete, space_complete, symbolic_time, bound_qualities, assumptions]
     end
 
+    def widen_recursive_summary(result)
+      result.merge(
+        lower_bound_complexity: "unknown",
+        space_complexity: "unknown",
+        known_time_component: "O(1)",
+        known_space_component: "O(1)",
+        symbolic_time: nil,
+        complexity_variables: [],
+        time_complete: false,
+        space_complete: false,
+        evidence_gaps: (Array(result[:evidence_gaps]) + ["unresolved_recursive_progress"]).uniq.sort,
+        warnings: (Array(result[:warnings]) +
+          ["Recursive summary did not converge within the finite complexity lattice."]).uniq
+      )
+    end
+
     def summary_dependency_components(modules, callback_arg_by_call = {})
       entries = {}
-      aliases = {}
+      alias_candidates = Hash.new { |hash, key| hash[key] = Set.new }
       modules.each do |mod|
         Array(mod[:methods]).each do |method|
           fallback = [mod[:name].to_s, method[:name].to_s]
           identity = method[:id].to_s.empty? ? fallback : method[:id].to_s
           entries[identity] = [mod, method]
-          aliases[fallback] = identity
-          aliases[method[:id].to_s] = identity unless method[:id].to_s.empty?
+          alias_candidates[fallback] << identity
+          alias_candidates[method[:id].to_s] << identity unless method[:id].to_s.empty?
         end
       end
+      # A lexical `(owner, short-name)` is usable only when it denotes exactly
+      # one method. Nested functions and overloads routinely share that pair;
+      # choosing the last one creates false dependency cycles and can make the
+      # symbolic fixed point grow without bound. Exact method ids remain unique.
+      aliases = alias_candidates.filter_map do |key, candidates|
+        [key, candidates.first] if candidates.one?
+      end.to_h
 
       graph = entries.each_key.to_h { |identity| [identity, Set.new] }
       entries.each do |source, (mod, method)|
@@ -615,6 +663,8 @@ module Espalier
             [identity, mod, method]
           end,
           callers: callers,
+          recursive: component_members.length > 1 ||
+            component_members.any? { |identity| graph.fetch(identity).include?(identity) },
         }
         reverse[component].sort.each do |caller|
           remaining_dependencies[caller] -= 1
@@ -688,8 +738,11 @@ module Espalier
 
     def internal_calls_by_method(modules)
       modules.each_with_object({}) do |mod, owners|
-        method_names = Array(mod[:methods]).map { |method| method[:name].to_s }.to_set
+        method_name_counts = Array(mod[:methods]).map { |method| method[:name].to_s }.tally
+        method_names = method_name_counts.filter_map { |name, count| name if count == 1 }.to_set
         owners[mod[:name].to_s] = Array(mod[:methods]).each_with_object({}) do |method, callers|
+          next unless method_name_counts[method[:name].to_s] == 1
+
           callers[method[:name].to_s] = Array(method[:delegations]).filter_map do |delegation|
             next unless delegation[:receiver].to_s == "self"
 
@@ -734,7 +787,9 @@ module Espalier
     # When the callables passed at that site are analyzed, C is not open, so
     # substitute the costliest of them. Runs per fixpoint iteration, on the
     # current summaries, rather than on the cached base nodes.
-    def substitute_callback_arguments(nodes, mod, symbolic_time, complexities, time_complete)
+    def substitute_callback_arguments(
+      nodes, mod, symbolic_time, complexities, time_complete, excluded_callable_ids: Set.new
+    )
       return nodes if @callback_arg_by_call.nil? || @callback_arg_by_call.empty?
 
       nodes.map do |node|
@@ -742,9 +797,10 @@ module Espalier
         next node if expression.nil? ||
           Espalier::SymbolicComplexity.callback_domain_ids(expression).empty?
 
-        callable = worst_callable(
-          @callback_arg_by_call[[mod[:file], node[:span]]], symbolic_time, complexities, time_complete
-        )
+        callable_ids = Array(@callback_arg_by_call[[mod[:file], node[:span]]]).reject do |id|
+          excluded_callable_ids.include?(id)
+        end
+        callable = worst_callable(callable_ids, symbolic_time, complexities, time_complete)
         next node unless callable
 
         substituted = Espalier::SymbolicComplexity.substitute_callback_cost(
