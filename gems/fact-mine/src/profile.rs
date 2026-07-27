@@ -6217,11 +6217,31 @@ fn declared_type_is_template_dependent(
     let Some(parameters) = document.method_template_types.get(&key) else {
         return false;
     };
-    let normalized = normalized_declared_alias(document, declared_type);
-    normalized
+    let mut pending = declared_type
         .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
         .filter(|token| !token.is_empty())
-        .any(|token| parameters.contains(token))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut visited = BTreeSet::new();
+    while let Some(token) = pending.pop() {
+        if parameters.contains(&token) {
+            return true;
+        }
+        if !visited.insert(token.clone()) {
+            continue;
+        }
+        if let Some(target) = document.type_aliases.get(&token) {
+            pending.extend(
+                target
+                    .split(|character: char| {
+                        character != '_' && !character.is_ascii_alphanumeric()
+                    })
+                    .filter(|token| !token.is_empty())
+                    .map(str::to_string),
+            );
+        }
+    }
+    false
 }
 
 fn declared_state_receiver_type(
@@ -6780,6 +6800,19 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                                         document,
                                         source_definition,
                                         declared_type,
+                                    )
+                                })
+                                .map(|_| "reflective_once".to_string())
+                        })
+                        .or_else(|| {
+                            (implicit && !call.message.is_empty())
+                                .then(|| behavior.template_dependent_call_type(&call.message))
+                                .flatten()
+                                .filter(|template_type| {
+                                    declared_type_is_template_dependent(
+                                        document,
+                                        source_definition,
+                                        template_type,
                                     )
                                 })
                                 .map(|_| "reflective_once".to_string())

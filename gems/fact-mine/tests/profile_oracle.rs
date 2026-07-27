@@ -1821,18 +1821,23 @@ fn cpp_template_receiver_calls_keep_symbolic_dispatch_costs() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(
         tmp.path(),
-        r#"template <typename Policy>
+        r#"template <typename Policy, typename Formatter, typename Compare>
 struct Runner {
     using Queue = typename Policy::Queue;
+    using Threading = Policy;
     using Hook = void (*)(int);
     Queue queue;
+    typename Threading::Atomic atomic;
     Hook hook;
     template <typename Callback>
     void run(Policy& policy, Callback callback) {
         policy.execute();
         queue.flush();
+        atomic.load();
         callback();
         hook(1);
+        Formatter::format(1);
+        Compare(1, 2);
     }
 };
 struct Concrete {
@@ -1845,7 +1850,14 @@ void invoke(Concrete& concrete) {
     )?;
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
     let output = profile::extract(&document, Profile::Espalier);
-    for message in ["execute", "flush", "callback"] {
+    for message in [
+        "execute",
+        "flush",
+        "load",
+        "callback",
+        "Formatter::format",
+        "Compare",
+    ] {
         let call = output
             .calls
             .iter()

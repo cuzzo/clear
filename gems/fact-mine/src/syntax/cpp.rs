@@ -731,6 +731,19 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         super::normalized_behavior::type_before_local_name(source, name)
     }
 
+    fn template_dependent_call_type(&self, message: &str) -> Option<String> {
+        let message = message.trim();
+        let candidate = message
+            .split("::")
+            .next()
+            .unwrap_or(message)
+            .trim()
+            .trim_start_matches("typename ")
+            .trim();
+        let candidate = candidate.split('<').next().unwrap_or(candidate).trim();
+        simple_identifier(candidate).then(|| candidate.to_string())
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("cpp")
     }

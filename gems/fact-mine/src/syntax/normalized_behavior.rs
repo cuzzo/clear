@@ -1039,6 +1039,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Recover the template parameter that owns or names a call. C++ uses
+    /// this for `Formatter::format()` and callable non-type parameters such as
+    /// `Compare(...)`; other languages keep the conservative default.
+    fn template_dependent_call_type(&self, _message: &str) -> Option<String> {
+        None
+    }
+
     fn collection_allocation_semantics(&self, _message: &str) -> CollectionAllocationSemantics {
         CollectionAllocationSemantics::None
     }
