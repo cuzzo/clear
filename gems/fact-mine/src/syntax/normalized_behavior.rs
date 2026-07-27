@@ -1551,8 +1551,17 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
-    fn constructor_dispatch_name(&self, _receiver: &str, _message: &str) -> Option<String> {
+    fn constructor_dispatch_name(
+        &self,
+        _receiver: &str,
+        _message: &str,
+        _owner: &str,
+    ) -> Option<String> {
         None
+    }
+
+    fn constructor_delegation_excludes_self(&self) -> bool {
+        false
     }
 
     fn declarative_owner_constant_operations(&self, _node: &Node) -> Vec<String> {

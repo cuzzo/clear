@@ -476,7 +476,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             })
     }
 
-    fn constructor_dispatch_name(&self, receiver: &str, message: &str) -> Option<String> {
+    fn constructor_dispatch_name(
+        &self,
+        receiver: &str,
+        message: &str,
+        _owner: &str,
+    ) -> Option<String> {
         (message == "new" && self.receiver_is_type_reference(receiver))
             .then(|| "initialize".to_string())
     }
