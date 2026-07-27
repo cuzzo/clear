@@ -806,7 +806,28 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
     }
 
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
-        super::normalized_behavior::type_before_local_name(source, name)
+        let declared = super::normalized_behavior::type_before_local_name(source, name)?;
+        // CFG asks about every read as well as every write. A use inside
+        // `if (!value)` or `value.method()` is not a declaration; the shared
+        // type-before-name fallback would otherwise turn punctuation such as
+        // `if(`, `(!`, or `auto item =` into a complete C++ type.
+        let function_pointer = source.contains(&format!("(*{name}"))
+            || source.contains(&format!("(&{name}"));
+        // Taking a local's address establishes a possible indirect write.
+        // Keeping this conservative complete hint makes the nullable lattice
+        // forget an earlier value proof until pointer-alias mutation is
+        // represented explicitly.
+        let address_alias = declared.contains('=') && declared.trim_end().ends_with('&');
+        ((function_pointer || address_alias
+            || !declared.contains(['(', ')', '!', '=', '?']))
+            && !declared.contains("->")
+            && !declared.ends_with('.')
+            && declared.chars().any(|character| character.is_ascii_alphanumeric())
+            && !matches!(
+                declared.split_whitespace().next().unwrap_or_default(),
+                "if" | "while" | "switch" | "return"
+            ))
+        .then_some(declared)
     }
 
     fn template_dependent_call_type(&self, message: &str) -> Option<String> {
@@ -1445,6 +1466,8 @@ struct Second { using super = BaseTwo; };
             behavior.declared_local_type("gsl::not_null<Widget *> value = load_widget()", "value"),
             Some("gsl::not_null<Widget *>".to_string())
         );
+        assert_eq!(behavior.declared_local_type("if(! value.empty())", "value"), None);
+        assert_eq!(behavior.declared_local_type("value.resize(2)", "value"), None);
     }
 
     #[test]
