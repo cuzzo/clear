@@ -1908,6 +1908,25 @@ pub(crate) fn reapply_declared_callback_costs(output: &mut ProfileOutput) {
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
 }
 
+pub(crate) fn reapply_direct_call_result_costs(output: &mut ProfileOutput) {
+    let mut by_dispatch: BTreeMap<(&str, &str, &str), Vec<&MethodRecord>> = BTreeMap::new();
+    for method in &output.methods {
+        let Some(owner) = method.symbol_owner.as_deref() else {
+            continue;
+        };
+        by_dispatch
+            .entry((owner, method.dispatch_name.as_str(), method.kind.as_str()))
+            .or_default()
+            .push(method);
+    }
+    resolve_direct_call_result_calls(
+        &output.methods,
+        &output.type_definitions,
+        &mut output.calls,
+        &by_dispatch,
+    );
+}
+
 /// Immutable lookup tables shared by proof annotation and coverage. The
 /// previous implementation rebuilt and rescanned corpus-wide method/call
 /// vectors for every unresolved call.
@@ -3726,6 +3745,23 @@ fn resolve_direct_call_result_calls(
                     costed.push((index, receiver_type, complexity));
                     continue;
                 }
+                if producer_facts.iter().all(|(method, fact)| {
+                    method.language == "cpp"
+                        && fact
+                            .return_type
+                            .as_ref()
+                            .is_some_and(cpp_type_expr_is_dependent)
+                }) {
+                    costed.push((
+                        index,
+                        receiver_type,
+                        crate::syntax::normalized_behavior::NormalizedCallComplexity {
+                            time: "O(R)",
+                            space: "O(S)",
+                        },
+                    ));
+                    continue;
+                }
             }
             let symbols = producer_facts
                 .iter()
@@ -3809,6 +3845,13 @@ fn resolve_direct_call_result_calls(
             call.unresolved_reason = None;
         }
     }
+}
+
+fn cpp_type_expr_is_dependent(type_expr: &TypeExpr) -> bool {
+    type_expr
+        .to_string()
+        .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
+        .any(|token| token == "typename")
 }
 
 fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
