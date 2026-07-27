@@ -104,3 +104,98 @@ NonCallConstruct:
   nameof: declaration
   sizeof: declaration
   typeof: declaration
+
+# Exact descriptors emitted by scip-dotnet. Keep these overload-specific:
+# scip-dotnet's owner spelling (for example `IO/TextWriter`) is intentionally
+# not guessed from a short receiver name.
+SemanticSymbol:
+  'Generic/Dictionary#Add().': linear_materialize
+  'Generic/Dictionary#ContainsKey().': linear_scan
+  'Generic/Dictionary#Remove().': linear_scan
+  'Generic/Dictionary#TryAdd().': linear_materialize
+  'Generic/Dictionary#TryGetValue().': linear_scan
+  'Generic/HashSet#Add().': linear_materialize
+  'Generic/HashSet#Clear().': linear_scan
+  'Generic/HashSet#Contains().': linear_scan
+  'Generic/IReadOnlyDictionary#ContainsKey().': linear_scan
+  'Generic/IReadOnlyDictionary#TryGetValue().': linear_scan
+  'Generic/List#Add().': linear_materialize
+  'Generic/List#AddRange().': linear_materialize
+  'Generic/List#Clear().': linear_scan
+  'Generic/List#Insert().': linear_materialize
+  'Generic/List#ToArray().': linear_materialize
+  'Generic/Queue#Clear().': linear_scan
+  'Generic/Queue#Enqueue().': linear_materialize
+  'IO/StringWriter#Dispose().': constant
+  'IO/StringWriter#GetStringBuilder().': constant
+  'IO/StringWriter#ToString().': linear_materialize
+  'IO/TextWriter#Dispose().': constant
+  'IO/TextWriter#Write(+1).': constant
+  'IO/TextWriter#Write(+3).': linear_scan
+  'IO/TextWriter#Write(+9).': linear_scan
+  'IO/TextWriter#Write(+11).': linear_scan
+  'IO/TextWriter#Write(+17).': linear_scan
+  'IO/TextWriter#WriteLine(+12).': linear_scan
+  'Linq/Enumerable#Concat().': constant
+  'Linq/Enumerable#Distinct().': linear_materialize
+  'Linq/Enumerable#First().': linear_scan
+  'Linq/Enumerable#Single().': linear_scan
+  'Linq/Enumerable#Skip().': constant
+  'Linq/Enumerable#ToArray().': linear_materialize
+  'Linq/Enumerable#ToList().': linear_materialize
+  'Metrics/Counter#Add().': constant
+  'Metrics/Counter#Add(+6).': constant
+  'Reflection/MemberInfo#Name.': constant
+  'Reflection/MethodBase#GetParameters().': linear_materialize
+  'Reflection/ParameterInfo#ParameterType.': constant
+  'System/Array#CreateInstance().': linear_materialize
+  'System/Array#Length.': constant
+  'System/Array#Resize().': linear_materialize
+  'System/Byte#TryFormat(+1).': linear_materialize
+  'System/Char#IsDigit().': constant
+  'System/Enum#Parse(+2).': linear_scan
+  'System/Enum#ToString().': linear_materialize
+  'System/Enum#TryParse().': linear_scan
+  'System/Exception#GetType().': constant
+  'System/Int32#TryParse(+6).': linear_scan
+  'System/Math#Max(+5).': constant
+  'System/Math#Min(+4).': constant
+  'System/MemoryExtensions#AsSpan().': constant
+  'System/MemoryExtensions#Contains().': linear_scan
+  'System/MemoryExtensions#Reverse().': linear_scan
+  'System/MemoryExtensions#StartsWith().': linear_scan
+  'System/Nullable#ToString().': linear_materialize
+  'System/Object#GetType().': constant
+  'System/Object#ReferenceEquals().': constant
+  'System/Span#Slice(+1).': constant
+  'System/String#Format(+11).': linear_materialize
+  'System/String#IndexOf().': linear_scan
+  'System/String#IsNullOrWhiteSpace().': linear_scan
+  'System/String#StartsWith(+1).': linear_scan
+  'System/String#Substring().': linear_materialize
+  'System/String#Substring(+1).': linear_materialize
+  'System/String#Trim().': linear_materialize
+  'System/Type#FullName.': linear_materialize
+  'System/Type#GetGenericTypeDefinition().': constant
+  'System/Type#GetProperties(+1).': linear_materialize
+  'System/Type#GetType(+2).': linear_scan
+  'Tasks/Task#ConfigureAwait().': constant
+  'Tasks/Task#WhenAny(+1).': linear_materialize
+  'Tasks/ValueTask#ConfigureAwait().': constant
+  'Text/StringBuilder#Append(+2).': linear_materialize
+  'Text/StringBuilder#Append(+15).': linear_materialize
+  'Text/StringBuilder#ToString().': linear_materialize
+  'Threading/Interlocked#Exchange().': constant
+  'Channels/ChannelReader#TryRead().': constant
+
+# These contracts include user-supplied predicate/selector work. Treating
+# them as plain O(N) would silently erase a non-constant callback body.
+SemanticSymbolParametricCost:
+  'Linq/Enumerable#All().': callback_linear
+  'Linq/Enumerable#Count().': callback_linear
+  'Linq/Enumerable#GroupBy().': callback_linear
+  'Linq/Enumerable#OrderByDescending().': callback_sort
+  'Linq/Enumerable#Select().': callback_linear
+  'Linq/Enumerable#SelectMany().': callback_linear
+  'Linq/Enumerable#ToDictionary().': callback_linear
+  'Linq/Enumerable#Where().': callback_linear
