@@ -601,6 +601,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .or_else(|| self.block_child(node))
             .and_then(|body| self.normalize_body(body));
         let body = self.with_supplementary_class_body(node, body);
+        let body = self.with_class_constructor(node, body);
         Some(self.wrap(
             "CLASS",
             vec![
@@ -610,6 +611,52 @@ impl<'source> TreeSitterNormalizer<'source> {
             ],
             node,
         ))
+    }
+
+    fn with_class_constructor(
+        &mut self,
+        node: TreeSitterNode<'_>,
+        body: Option<Node>,
+    ) -> Option<Node> {
+        let Some(constructor) = self
+            .normalization_adapter
+            .class_constructor_node(node, self.source)
+        else {
+            return body;
+        };
+        let name_node = self
+            .named_field(node, "name")
+            .or_else(|| self.first_named(node))?;
+        let name = node_text(name_node, self.source).to_string();
+        let args = self.normalize_function_parameters(constructor);
+        let constructor_body_nodes = self
+            .normalization_adapter
+            .class_constructor_body_nodes(node, self.source);
+        let definition_end = constructor_body_nodes
+            .last()
+            .copied()
+            .unwrap_or(constructor);
+        let constructor_body = self.with_dynamic_scope(constructor, true, |normalizer| {
+            let source = constructor_body_nodes
+                .first()
+                .copied()
+                .unwrap_or(constructor);
+            normalizer.normalize_body_nodes(constructor_body_nodes, source)
+        });
+        let definition = self.wrap_from_nodes(
+            "DEFN",
+            vec![
+                Child::Symbol(name),
+                Child::Node(Box::new(self.scope(constructor_body, args, constructor))),
+            ],
+            name_node,
+            definition_end,
+        );
+        let mut children = vec![Child::Node(Box::new(definition))];
+        if let Some(existing) = body {
+            append_flattened_block(existing, &mut children);
+        }
+        Some(self.wrap("BLOCK", children, node))
     }
 
     /// Splices `supplementary_class_body_nodes` (normalized individually)
@@ -6687,6 +6734,21 @@ impl<'source> TreeSitterNormalizer<'source> {
 
     pub(in crate::ast) fn dynamic_syntax_enabled(&self) -> bool {
         self.normalization_adapter.tracks_dynamic_local_scope()
+    }
+}
+
+fn append_flattened_block(node: Node, output: &mut Vec<Child>) {
+    if node.r#type != "BLOCK" {
+        output.push(Child::Node(Box::new(node)));
+        return;
+    }
+    for child in node.children {
+        match child {
+            Child::Node(node) if node.r#type == "BLOCK" => {
+                append_flattened_block(*node, output);
+            }
+            other => output.push(other),
+        }
     }
 }
 
