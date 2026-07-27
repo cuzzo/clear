@@ -6890,6 +6890,24 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                             })
                         })
                         .or_else(|| {
+                            if implicit {
+                                behavior
+                                    .intrinsic_parametric_call_cost(None, &call.message)
+                                    .or_else(|| {
+                                        behavior.intrinsic_parametric_call_cost(
+                                            (!call.receiver.is_empty())
+                                                .then_some(call.receiver.as_str()),
+                                            &call.message,
+                                        )
+                                    })
+                            } else {
+                                behavior.intrinsic_parametric_call_cost(
+                                    (!call.receiver.is_empty()).then_some(call.receiver.as_str()),
+                                    &call.message,
+                                )
+                            }
+                        })
+                        .or_else(|| {
                             declared_field_callback_cost(
                                 document,
                                 behavior,
