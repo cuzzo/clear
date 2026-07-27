@@ -48,7 +48,7 @@ pub(crate) fn external_symbol_call_complexity(
     symbol: &str,
     message: &str,
 ) -> Option<ExternalCallComplexity> {
-    if !symbol.starts_with("scip-java maven jdk ") {
+    if !is_jdk_symbol(symbol) {
         return None;
     }
 
@@ -128,7 +128,7 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
             parametric_cost: None,
         };
     };
-    if symbol.starts_with("scip-java maven jdk ") {
+    if is_jdk_symbol(symbol) {
         super::ExternalSymbolMetadata {
             scope: "stdlib",
             missing_cost_kind: configured_semantic_symbol_kind("java", descriptor)
@@ -142,6 +142,16 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
             parametric_cost: None,
         }
     }
+}
+
+fn is_jdk_symbol(symbol: &str) -> bool {
+    // scip-java 0.12.x writes SemanticDB-compatible symbols using the
+    // `semanticdb` scheme. Older fixtures and indexes used `scip-java`.
+    // Package manager/name/version still prove that the declaration is JDK
+    // owned; accept both producer spellings without weakening that check.
+    ["semanticdb maven jdk ", "scip-java maven jdk "]
+        .iter()
+        .any(|prefix| symbol.starts_with(prefix))
 }
 
 const JAVA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
