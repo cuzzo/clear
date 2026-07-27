@@ -38,8 +38,42 @@ impl AstNormalizationAdapter for KotlinAstAdapter {
         _function: Option<TreeSitterNode<'tree>>,
         _source: &str,
     ) -> Option<Vec<TreeSitterNode<'tree>>> {
-        let args = descendant(node, &["value_arguments"])?;
-        Some(named_children(args))
+        let mut args = Vec::new();
+        for child in named_children(node).into_iter().skip(1) {
+            match child.kind() {
+                "value_arguments" => args.extend(named_children(child)),
+                "annotated_lambda" | "lambda_literal" => args.push(child),
+                _ => {}
+            }
+        }
+        Some(args)
+    }
+
+    fn lambda_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        match node.kind() {
+            "lambda_literal" => Some(node),
+            "annotated_lambda" => named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "lambda_literal"),
+            _ => None,
+        }
+    }
+
+    fn lambda_body_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        (node.kind() == "lambda_literal").then(|| {
+            named_children(node)
+                .into_iter()
+                .filter(|child| child.kind() != "lambda_parameters")
+                .collect()
+        })
     }
 
     fn case_arm_pattern_nodes<'tree>(
@@ -96,5 +130,52 @@ impl AstNormalizationAdapter for KotlinAstAdapter {
                     .any(|token| token == "var" || token == "val")
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::profile::{self, Profile};
+    use crate::syntax::{self, Language};
+    use anyhow::{Context, Result};
+    use std::collections::BTreeSet;
+    use std::fs;
+
+    #[test]
+    fn trailing_lambdas_preserve_all_nested_calls() -> Result<()> {
+        let tmp = tempfile::Builder::new().suffix(".kt").tempfile()?;
+        fs::write(
+            tmp.path(),
+            r#"fun render(values: List<String>) = buildString {
+  append("[")
+  values.forEach { value ->
+    append(value.trim())
+  }
+  append("]")
+}
+"#,
+        )?;
+        let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Kotlin)?;
+        let output = profile::extract(&document, Profile::Espalier);
+        output
+            .methods
+            .iter()
+            .find(|method| method.name == "render")
+            .context("render method")?;
+        let messages = output
+            .calls
+            .iter()
+            .map(|call| call.message.as_str())
+            .collect::<BTreeSet<_>>();
+        for expected in ["buildString", "append", "forEach", "trim"] {
+            assert!(messages.contains(expected), "calls={messages:?}");
+        }
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            0
+        );
+        Ok(())
     }
 }
