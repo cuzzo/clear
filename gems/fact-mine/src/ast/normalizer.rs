@@ -4004,11 +4004,17 @@ impl<'source> TreeSitterNormalizer<'source> {
             return false;
         }
 
-        if self
-            .normalization_adapter
-            .check_node_role(parent, "block_wrapper")
-            || self.normalization_adapter.check_node_role(parent, "then")
-                && self.parent_named_child(parent, node)
+        // Only Ruby-like dynamic syntax permits a bare identifier in
+        // statement/tail position to dispatch as a zero-argument call.
+        // In Rust (and the other lexical languages) `{ value }` is a local
+        // read; treating it as VCALL manufactured unresolved calls such as
+        // `self.out()` for ordinary tail expressions.
+        if self.dynamic_syntax_enabled()
+            && (self
+                .normalization_adapter
+                .check_node_role(parent, "block_wrapper")
+                || self.normalization_adapter.check_node_role(parent, "then")
+                    && self.parent_named_child(parent, node))
         {
             return true;
         }
