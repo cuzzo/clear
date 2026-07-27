@@ -1734,6 +1734,66 @@ struct Queue {
 }
 
 #[test]
+fn cpp_project_aliases_converge_across_configuration_branches_and_files() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let aliases = directory.path().join("aliases.hpp");
+    let caller = directory.path().join("caller.cpp");
+    fs::write(
+        &aliases,
+        r#"#if USE_WIDE
+typedef std::wstring native_string;
+typedef std::wostringstream native_stream;
+#else
+typedef std::string native_string;
+typedef std::ostringstream native_stream;
+#endif
+"#,
+    )?;
+    fs::write(
+        &caller,
+        "void run(native_string& text, native_stream& stream) { text.size(); text.push_back('x'); stream.str(); }\n",
+    )?;
+    let documents = syntax::parse_files(&[aliases, caller], Language::Cpp)?;
+    let outputs = documents
+        .iter()
+        .map(|document| profile::extract(document, Profile::Espalier))
+        .collect();
+    let output = profile::merge(outputs, Profile::Espalier);
+    let size = output
+        .calls
+        .iter()
+        .find(|call| call.message == "size")
+        .context("missing cross-file aliased string call")?;
+    assert_eq!(
+        size.known_time_complexity.as_deref(),
+        Some("O(1)"),
+        "call={size:#?}; aliases={:#?}",
+        output
+            .type_definitions
+            .iter()
+            .filter(|definition| definition.kind == "type_alias")
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        size.complexity_provenance.as_deref(),
+        Some("merged_project_type_alias_registry")
+    );
+    let push = output
+        .calls
+        .iter()
+        .find(|call| call.message == "push_back")
+        .context("missing cross-file aliased string mutation")?;
+    assert_eq!(push.known_time_complexity.as_deref(), Some("O(N)"));
+    let str_call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "str")
+        .context("missing cross-file aliased stream call")?;
+    assert_eq!(str_call.known_time_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
 fn cpp_template_receiver_calls_keep_symbolic_dispatch_costs() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(

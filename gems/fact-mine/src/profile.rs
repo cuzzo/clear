@@ -2587,6 +2587,7 @@ fn resolve_project_calls(
     type_definitions: &[TypeDefinition],
     calls: &mut [CallRecord],
 ) {
+    apply_merged_cpp_alias_costs(methods, type_definitions, calls);
     let source_languages = methods
         .iter()
         .map(|method| (method.id.as_str(), method.language.as_str()))
@@ -2743,6 +2744,94 @@ fn resolve_project_calls(
         call.candidate_reason = None;
     }
     annotate_project_candidate_sets(owners, methods, calls, &by_lexical, &by_dispatch);
+}
+
+fn apply_merged_cpp_alias_costs(
+    methods: &[MethodRecord],
+    type_definitions: &[TypeDefinition],
+    calls: &mut [CallRecord],
+) {
+    let source_languages = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let aliases = type_definitions
+        .iter()
+        .filter(|definition| definition.language == "cpp" && definition.kind == "type_alias")
+        .filter_map(|definition| {
+            Some((
+                definition.name.as_str(),
+                definition.target.as_deref()?,
+            ))
+        })
+        .fold(
+            BTreeMap::<&str, BTreeSet<&str>>::new(),
+            |mut aliases, (name, target)| {
+                aliases.entry(name).or_default().insert(target);
+                aliases
+            },
+        );
+    let behavior =
+        crate::syntax::normalized_behavior::behavior(crate::syntax::Language::Cpp);
+    for call in calls.iter_mut().filter(|call| {
+        call.known_time_complexity.is_none()
+            && source_languages.get(call.source.as_str()).copied() == Some("cpp")
+    }) {
+        let Some(receiver_type) = call.receiver_type.as_deref() else {
+            continue;
+        };
+        let alias_name = owner_type_name(receiver_type);
+        let Some(targets) = aliases.get(alias_name) else {
+            continue;
+        };
+        let normalized = targets
+            .iter()
+            .map(|target| TypeExpr::parse(target, "cpp"))
+            .collect::<BTreeSet<_>>();
+        if normalized.len() != 1 {
+            continue;
+        }
+        let receiver = normalized.into_iter().next().expect("one alias target");
+        let known = behavior.call_complexity(&receiver, &call.message);
+        let parametric = known
+            .is_none()
+            .then(|| behavior.parametric_call_cost(&receiver, &call.message))
+            .flatten();
+        let parametric_complexity = parametric
+            .as_deref()
+            .and_then(crate::syntax::parametric_call_complexity);
+        let Some(time) = known
+            .map(|cost| cost.time)
+            .or_else(|| parametric_complexity.map(|cost| cost.0))
+        else {
+            continue;
+        };
+        let space = known
+            .map(|cost| cost.space)
+            .or_else(|| parametric_complexity.map(|cost| cost.1))
+            .expect("time and space contracts are paired");
+        call.known_time_complexity = Some(time.to_string());
+        call.known_space_complexity = Some(space.to_string());
+        call.complexity_provenance = Some(if known.is_some() {
+            "merged_project_type_alias_registry".to_string()
+        } else {
+            "parametric_merged_project_type_alias_contract".to_string()
+        });
+        call.complexity_bound_quality = Some(
+            known
+                .map(|_| "upper_bound_declared_receiver".to_string())
+                .or_else(|| {
+                    parametric
+                        .as_ref()
+                        .map(|kind| format!("upper_bound_parametric_{kind}"))
+                })
+                .expect("known or parametric cost"),
+        );
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
 }
 
 /// Resolve a relative qualified-id using C++ namespace lookup. Inside
@@ -6425,7 +6514,14 @@ fn source_function<'a>(
 }
 
 fn owner_type_name(value: &str) -> &str {
-    let value = value.trim().trim_start_matches('*');
+    let value = value
+        .trim()
+        .strip_prefix("const ")
+        .unwrap_or(value.trim())
+        .trim_start_matches('*')
+        .trim_end_matches(|character: char| {
+            character.is_whitespace() || matches!(character, '&' | '*')
+        });
     let value = value.split(['[', '<']).next().unwrap_or(value);
     value
         .rsplit([':', '.'])

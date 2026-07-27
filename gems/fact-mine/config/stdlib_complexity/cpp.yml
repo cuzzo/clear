@@ -41,6 +41,19 @@ String:
   append: linear_materialize
   clear: linear_scan
   resize: linear_materialize
+  reserve: linear_materialize
+  push_back: linear_materialize
+  pop_back: constant
+  insert: linear_materialize
+  erase: linear_scan
+  replace: linear_materialize
+  swap: constant
+  operator+=: linear_materialize
+StringStream:
+  str: linear_materialize
+  eof: constant
+OutputStream:
+  eof: constant
 Namespace:
   std: declaration
 Intrinsic:

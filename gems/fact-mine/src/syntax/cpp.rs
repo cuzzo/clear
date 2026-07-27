@@ -26,14 +26,40 @@ const CPP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     array_names: &["vector", "array", "deque", "forward_list", "list", "span"],
     hash_names: &["unordered_map"],
     set_names: &["unordered_set"],
-    string_names: &["string", "basic_string"],
+    string_names: &[
+        "string",
+        "wstring",
+        "basic_string",
+        "string_view",
+        "wstring_view",
+    ],
     bare_array_names: &[],
     suffix_array: false,
     bracket_array: false,
 };
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
-    nominal::parse(source, &CPP_NOMINAL_TYPE_SYNTAX)
+    let parsed = nominal::parse(source, &CPP_NOMINAL_TYPE_SYNTAX);
+    let terminal = source
+        .split('<')
+        .next()
+        .unwrap_or(source)
+        .trim()
+        .trim_end_matches(['&', '*'])
+        .rsplit("::")
+        .next()
+        .unwrap_or_default()
+        .trim();
+    match terminal {
+        "ostringstream"
+        | "wostringstream"
+        | "istringstream"
+        | "wistringstream"
+        | "stringstream"
+        | "wstringstream" => TypeExpr::Primitive("StringStream".to_string()),
+        "ostream" | "wostream" => TypeExpr::Primitive("OutputStream".to_string()),
+        _ => parsed,
+    }
 }
 
 fn cpp_type_aliases(source: &str) -> (BTreeMap<String, String>, BTreeMap<String, usize>) {
@@ -115,7 +141,14 @@ fn cpp_type_aliases(source: &str) -> (BTreeMap<String, String>, BTreeMap<String,
         // An unqualified alias is usable only when this translation unit gives
         // it one meaning. Repeated `super`/`Type` aliases in unrelated owners
         // intentionally remain unresolved rather than cross-contaminating.
-        if targets.len() != 1 {
+        let normalized_targets = targets
+            .iter()
+            .map(|target| parse_declared_type(target))
+            .collect::<Vec<_>>();
+        let converged = normalized_targets
+            .first()
+            .is_some_and(|first| normalized_targets.iter().all(|target| target == first));
+        if targets.len() != 1 && !converged {
             continue;
         }
         let (target, line) = definitions.into_iter().next().expect("one alias target");
@@ -1144,13 +1177,17 @@ mod tests {
     }
 
     #[test]
-    fn cpp_aliases_keep_only_unambiguous_translation_unit_bindings() {
+    fn cpp_aliases_keep_unambiguous_or_semantically_converged_bindings() {
         let (aliases, lines) = cpp_type_aliases(
             r#"
 using Items = std::list<
     Widget
 >;
 typedef std::wstring WideName;
+typedef std::string NativeName;
+typedef std::wstring NativeName;
+typedef std::ostringstream NativeStream;
+typedef std::wostringstream NativeStream;
 struct First { using super = BaseOne; };
 struct Second { using super = BaseTwo; };
 "#,
@@ -1162,6 +1199,18 @@ struct Second { using super = BaseTwo; };
         assert_eq!(
             aliases.get("WideName").map(String::as_str),
             Some("std::wstring")
+        );
+        assert_eq!(
+            parse_declared_type(aliases.get("NativeName").expect("converged string alias")),
+            TypeExpr::Primitive("String".to_string())
+        );
+        assert_eq!(
+            parse_declared_type(
+                aliases
+                    .get("NativeStream")
+                    .expect("converged string-stream alias")
+            ),
+            TypeExpr::Primitive("StringStream".to_string())
         );
         assert_eq!(lines.get("Items"), Some(&2));
         assert!(!aliases.contains_key("super"));
