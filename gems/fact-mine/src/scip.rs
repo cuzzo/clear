@@ -585,6 +585,11 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
     // contract after that replacement so cross-file callable declarations are
     // not lost merely because the compiler correctly rejected the heuristic.
     crate::profile::reapply_declared_callback_costs(output);
+    // SCIP may be the first proof of the producer call's exact project target.
+    // Re-run direct-result propagation after importing those identities so an
+    // `auto value = factory(); value.method()` chain can consume the declared
+    // return contract without guessing the local's type.
+    crate::profile::reapply_direct_call_result_costs(output);
     apply_resolved_call_costs_to_contexts(output);
     Ok(stats)
 }
@@ -2714,6 +2719,71 @@ mod tests {
         assert_eq!(output.calls[0].target.as_deref(), Some("pick-int"));
         assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(int_symbol));
         assert_eq!(output.calls[0].target_provenance.as_deref(), Some("scip"));
+    }
+
+    #[test]
+    fn scip_project_targets_unlock_dependent_call_result_costs() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.cpp");
+        let source = r#"template<typename T>
+auto make_dependent() -> std::shared_ptr<Box<typename T::Value>> { return {}; }
+template<typename T>
+void run_dependent() {
+    auto box = make_dependent<T>();
+    box->work();
+}
+"#;
+        fs::write(&path, source).unwrap();
+        let document =
+            crate::syntax::parse_file(path.clone(), crate::syntax::Language::Cpp).unwrap();
+        let mut output =
+            crate::profile::extract(&document, crate::profile::Profile::Espalier);
+        let work = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run_dependent" && call.message == "work")
+            .unwrap();
+        assert_eq!(work.known_time_complexity, None);
+
+        let definition_line = source.lines().nth(1).unwrap();
+        let call_line = source.lines().nth(4).unwrap();
+        let definition_column = definition_line.find("make_dependent").unwrap();
+        let call_column = call_line.find("make_dependent").unwrap();
+        let symbol = "cxx . demo v1$ make_dependent(abc).";
+        let index = json!({"documents": [{
+            "relative_path": "demo.cpp",
+            "occurrences": [
+                canonical_occurrence(
+                    [1, definition_column, definition_column + "make_dependent".len()],
+                    symbol,
+                    1,
+                ),
+                canonical_occurrence(
+                    [4, call_column, call_column + "make_dependent".len()],
+                    symbol,
+                    8,
+                ),
+            ]
+        }]});
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let producer = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run_dependent" && call.message == "make_dependent<T>")
+            .unwrap();
+        assert!(producer.target.is_some());
+        let work = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run_dependent" && call.message == "work")
+            .unwrap();
+        assert_eq!(work.known_time_complexity.as_deref(), Some("O(R)"));
+        assert_eq!(
+            work.complexity_provenance.as_deref(),
+            Some("declared_call_result_candidate_join")
+        );
     }
 
     #[test]

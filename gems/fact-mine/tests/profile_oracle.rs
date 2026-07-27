@@ -2144,6 +2144,17 @@ void run() {
     auto box = make_box();
     box->work();
 }
+template<typename T>
+auto make_dependent()
+    -> std::shared_ptr<Box<typename T::Value>>
+{
+    return {};
+}
+template<typename T>
+void run_dependent() {
+    auto box = make_dependent();
+    box->work();
+}
 "#,
     )?;
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
@@ -2167,6 +2178,19 @@ void run() {
     assert_eq!(
         work.receiver_symbol_origin.as_deref(),
         Some("declared_call_result")
+    );
+    let dependent_work = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run_dependent" && call.message == "work")
+        .context("missing dependent auto-local receiver call")?;
+    assert_eq!(
+        dependent_work.known_time_complexity.as_deref(),
+        Some("O(R)")
+    );
+    assert_eq!(
+        dependent_work.complexity_provenance.as_deref(),
+        Some("declared_call_result_candidate_join")
     );
     Ok(())
 }
