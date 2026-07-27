@@ -244,6 +244,24 @@ Current indexed smoke corpora are pinned by source commit and indexer version:
 | Java | Apache Commons CLI `afb0fd148517b1bf8316ebbc44ec9ec8b201452a` | scip-java 0.12.3 | 279/524 (53.24%) → 524/524 (100.00%) | 559 → 767 |
 | C | cJSON `fb16e5cf358798aabb049655975cde8427101056` | scip-clang 0.4.0 | 41/116 (35.34%) → 102/116 (87.93%) | 185 → 188 |
 
+The 85% production acceptance gate was re-run on 2026-07-27 after the
+SCIP/CFG/DFG burn-down. Each row uses fresh FactMine output from the named
+compiler index, counts owner-nested lambdas, and requires zero unnormalized raw
+calls inside executable functions:
+
+| Language | Production corpus | Indexer | Complete bounds | Semantic calls accounted | Executable raw-call gaps |
+| --- | --- | --- | ---: | ---: | ---: |
+| Java | Apache Commons CLI `afb0fd148517b1bf8316ebbc44ec9ec8b201452a` | scip-java 0.12.3 | 524/524 (100.00%) | 1,435/1,435 (100.00%) | 0 |
+| C | cJSON `fb16e5cf358798aabb049655975cde8427101056` | scip-clang 0.4.0 | 102/116 (87.93%) | 326/326 (100.00%) | 0 |
+| Go | unslop `6b39e58b5128eb22cd8f8394dd4a64987e2b8a17` | scip-go 0.2.7 | 140/150 (93.33%) | 1,104/1,125 (98.13%) | 0 |
+| Rust | FactMine production sources in this tree | rust-analyzer 0.3.2989-standalone | 4,939/5,802 (85.13%) | 30,710/32,791 (93.65%) | 0 |
+
+These are production-scope gate results, not replacements for the older
+cross-language snapshot above. In particular, the Rust corpus excludes inline
+test modules and test-only files while retaining production lambdas. The 13
+remaining Rust raw-parser gaps are outside executable functions and therefore
+cannot hide function cost.
+
 The Java path recognizes the `semanticdb` scheme emitted by real scip-java
 0.12.x indexes while retaining compatibility with older `scip-java`-scheme
 fixtures. This activates the reviewed generic collection, stream, and
@@ -305,3 +323,11 @@ remains available for previously generated artifacts, but new exports are v2.
 FactMine also bundles the reviewed Go 1.22.2 core-surface summary (1,868 exact
 symbols); it is applied automatically and contributes only when scip-go emits
 the identical versioned symbol.
+
+The remaining incomplete Rust functions are dominated by conservative proof
+obligations rather than parser loss: 483 have missing semantic identity as
+their primary root cause and 324 lack a recursive progress proof. Dependency
+cost models account for 31 more, project-call context for 13, external models
+for 6, excluded/project summaries for 4, and reviewed stdlib coverage for only
+2. These gaps remain visible in diagnostics and are not needed to satisfy the
+85% acceptance threshold.
