@@ -2351,6 +2351,38 @@ fn c_operators_and_subscript_are_constant_time_intrinsics() -> Result<()> {
 }
 
 #[test]
+fn cpp_linkage_macros_preserve_owner_template_dispatch_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#define LIB_HIDDEN
+template <class Formatter, class Converter>
+class LIB_HIDDEN Appender {
+public:
+    void write() {
+        Converter::convert(Formatter::format());
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for message in ["Formatter::format", "Converter::convert"] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "write" && call.message == message)
+            .with_context(|| format!("missing {message}"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(R)"),
+            "{message}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn cpp_dereferenced_and_cast_receivers_keep_proven_types() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(
