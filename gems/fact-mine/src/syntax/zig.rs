@@ -98,6 +98,14 @@ const ZIG_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct ZigNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
         super::normalized_behavior::type_after_local_colon(source, name)
     }

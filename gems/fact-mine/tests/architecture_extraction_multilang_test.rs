@@ -342,6 +342,27 @@ fn csharp_field_with_braceless_initializer_keeps_its_own_name() {
     );
 }
 
+#[test]
+fn csharp_generic_field_type_keeps_nested_commas() {
+    let document = parse_source(
+        ".cs",
+        Language::CSharp,
+        "class LogEvent {\n\
+         readonly Dictionary<string, LogEventPropertyValue> _properties;\n\
+         }\n",
+    );
+
+    let declaration = document
+        .state_declarations
+        .iter()
+        .find(|state| state.field == "_properties")
+        .expect("expected _properties state declaration");
+    assert_eq!(
+        declaration.r#type.as_deref(),
+        Some("readonly Dictionary<string, LogEventPropertyValue>")
+    );
+}
+
 // Real bug, found auditing rich/rich/color.py: Python's state-declaration
 // heuristic required a `:` type annotation unconditionally, so a plain,
 // unannotated class-body assignment produced zero state declarations -

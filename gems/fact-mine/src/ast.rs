@@ -232,6 +232,16 @@ pub fn node(child: &Child) -> Option<&Node> {
     }
 }
 
+pub(crate) fn reconcile_presence_correlation_spans(
+    root: tree_sitter::Node<'_>,
+    source: &str,
+    language: Language,
+    seeds: &mut Vec<crate::syntax::nullable::PresenceCorrelationSeed>,
+) {
+    adapters::normalization_adapter(language)
+        .reconcile_presence_correlation_spans(root, source, seeds);
+}
+
 pub fn slice(node: &Node, _lines: &[String]) -> String {
     normalize_text(&node.text)
 }

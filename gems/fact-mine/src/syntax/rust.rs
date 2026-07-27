@@ -17,6 +17,11 @@ use crate::ast::{Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
 use crate::type_inference::TypeExpr;
 
+const RUST_PRIMITIVE_OPERATORS: &[&str] = &[
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "&&",
+    "||", "!",
+];
+
 fn scip_rust_parts(symbol: &str) -> Option<(&str, &str)> {
     let rest = symbol.strip_prefix("rust-analyzer cargo ")?;
     let mut fields = rest.splitn(3, ' ');
@@ -320,6 +325,22 @@ const RUST_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RustNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RustNormalizedBehavior {
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "rust-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    fn complexity_uses_invariant_flow_types(&self) -> bool {
+        true
+    }
+
     fn intrinsic_call_complexity(
         &self,
         receiver: Option<&str>,
@@ -374,7 +395,7 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         operand_type: Option<&TypeExpr>,
     ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
         let operator = message.strip_suffix('@').unwrap_or(message);
-        if !super::normalized_behavior::PRIMITIVE_OPERATORS.contains(&operator) {
+        if !RUST_PRIMITIVE_OPERATORS.contains(&operator) {
             return None;
         }
         matches!(operand_type, Some(TypeExpr::Primitive(name)) if rust_scalar_primitive(name))

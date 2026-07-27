@@ -38,6 +38,10 @@ const CPP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     suffix_array: false,
     bracket_array: false,
 };
+const CPP_PRIMITIVE_OPERATORS: &[&str] = &[
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "~",
+    "&&", "||", "!",
+];
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     let parsed = nominal::parse(source, &CPP_NOMINAL_TYPE_SYNTAX);
@@ -218,6 +222,41 @@ fn cpp_identifier_tokens(source: &str) -> impl DoubleEndedIterator<Item = &str> 
                     .next()
                     .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
         })
+}
+
+fn symbol_without_template_arguments(name: &str) -> String {
+    let mut output = String::with_capacity(name.len());
+    let mut depth = 0usize;
+    for character in name.chars() {
+        match character {
+            '<' => depth += 1,
+            '>' if depth > 0 => depth -= 1,
+            _ if depth == 0 => output.push(character),
+            _ => {}
+        }
+    }
+    if depth == 0 {
+        output
+    } else {
+        name.to_string()
+    }
+}
+
+fn owner_identity_name(value: &str) -> String {
+    let value = value
+        .trim()
+        .strip_prefix("const ")
+        .unwrap_or(value.trim())
+        .trim_start_matches('*')
+        .trim_end_matches(|character: char| {
+            character.is_whitespace() || matches!(character, '&' | '*')
+        });
+    let value = value.split(['[', '<']).next().unwrap_or(value).trim();
+    value
+        .rsplit([':', '.'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(value)
+        .to_string()
 }
 
 fn cpp_declared_template_type_names(declaration: &str) -> BTreeSet<String> {
@@ -975,14 +1014,223 @@ fn cpp_pointer_member_receiver_type(
     None
 }
 
+fn cpp_owner_has_direct_pure_virtual(source: &str) -> bool {
+    let mut brace_depth = 0usize;
+    let mut statement = String::new();
+    for character in source.chars() {
+        match character {
+            '{' => {
+                brace_depth += 1;
+                statement.clear();
+            }
+            '}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                statement.clear();
+            }
+            ';' => {
+                if brace_depth == 1
+                    && statement.contains("virtual")
+                    && statement.contains("= 0")
+                {
+                    return true;
+                }
+                statement.clear();
+            }
+            _ if brace_depth == 1 => statement.push(character),
+            _ => {}
+        }
+    }
+    false
+}
+
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    fn complexity_uses_invariant_flow_types(&self) -> bool {
+        true
+    }
+
+    fn complexity_uses_syntax_local_types(&self) -> bool {
+        true
+    }
+
+    fn canonical_symbol_scope(&self) -> bool {
+        true
+    }
+
+    fn relative_lexical_candidates(&self, symbol: &str, namespace: &str) -> Vec<String> {
+        if !symbol.contains("::") || symbol.starts_with("std::") {
+            return Vec::new();
+        }
+        let symbol = symbol.trim_start_matches("::");
+        let mut scopes = namespace
+            .split("::")
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let mut candidates = Vec::new();
+        loop {
+            candidates.push(if scopes.is_empty() {
+                symbol.to_string()
+            } else {
+                format!("{}::{symbol}", scopes.join("::"))
+            });
+            if scopes.pop().is_none() {
+                break;
+            }
+        }
+        candidates
+    }
+
+    fn fallback_lexical_candidates(
+        &self,
+        message: &str,
+        namespace: &str,
+        implicit_receiver: bool,
+    ) -> Vec<String> {
+        if !implicit_receiver || message.contains("::") || namespace.is_empty() {
+            return Vec::new();
+        }
+        let mut scopes = namespace
+            .split("::")
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let mut candidates = Vec::new();
+        loop {
+            candidates.push(if scopes.is_empty() {
+                message.to_string()
+            } else {
+                format!("{}::{message}", scopes.join("::"))
+            });
+            if scopes.pop().is_none() {
+                break;
+            }
+        }
+        candidates
+    }
+
+    fn resolves_inherited_project_calls(&self) -> bool {
+        true
+    }
+
+    fn inherited_lookup_uses_source_owner(&self, implicit_receiver: bool) -> bool {
+        implicit_receiver
+    }
+
+    fn inherited_owner_identity_matches(
+        &self,
+        identity: &str,
+        owner_name: &str,
+        owner_symbol: Option<&str>,
+    ) -> bool {
+        let nominal = owner_identity_name(identity);
+        owner_identity_name(owner_name) == nominal
+            || owner_symbol.is_some_and(|symbol| owner_identity_name(symbol) == nominal)
+    }
+
+    fn inherited_identity_prefers_specialization(&self, identity: &str) -> bool {
+        identity.contains('<')
+    }
+
+    fn preserve_supertype_identity(&self, supertype: &str) -> bool {
+        supertype.contains('<')
+    }
+
+    fn complete_declaration_header(
+        &self,
+        lines: &[String],
+        start_line_1indexed: usize,
+    ) -> Option<String> {
+        let start_index = start_line_1indexed.saturating_sub(1);
+        if start_index >= lines.len() {
+            return Some(String::new());
+        }
+        let mut header = String::new();
+        let mut paren_depth = 0i32;
+        let mut bracket_depth = 0i32;
+        let mut saw_parameters = false;
+        for line in lines
+            .iter()
+            .take(std::cmp::min(lines.len(), start_index + 20))
+            .skip(start_index)
+        {
+            header.push_str(line);
+            header.push('\n');
+            for character in line.chars() {
+                match character {
+                    '(' => {
+                        paren_depth += 1;
+                        saw_parameters = true;
+                    }
+                    ')' => paren_depth -= 1,
+                    '[' => bracket_depth += 1,
+                    ']' => bracket_depth -= 1,
+                    '{' | ';'
+                        if saw_parameters && paren_depth <= 0 && bracket_depth <= 0 =>
+                    {
+                        return Some(header);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Some(header)
+    }
+
+    fn call_result_parametric_cost(&self, type_expr: &TypeExpr) -> Option<String> {
+        type_expr
+            .to_string()
+            .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
+            .any(|token| token == "typename")
+            .then(|| "reflective_once".to_string())
+    }
+
+    fn receiver_denotes_current_owner(&self, receiver_type: &str, owner: &str) -> bool {
+        owner_identity_name(receiver_type) == owner_identity_name(owner)
+    }
+
+    fn explicit_lexical_call_symbol(
+        &self,
+        message: &str,
+        namespace: Option<&str>,
+        top_level: bool,
+    ) -> Option<String> {
+        let symbol = symbol_without_template_arguments(message);
+        if symbol.contains("::") {
+            Some(symbol)
+        } else if top_level {
+            namespace.map(|namespace| format!("{namespace}::{symbol}"))
+        } else {
+            None
+        }
+    }
+
+    fn merged_alias_call_name(
+        &self,
+        message: &str,
+        receiver_type: Option<&str>,
+        implicit_receiver: bool,
+        target_missing: bool,
+    ) -> Option<(String, bool)> {
+        let constructor = implicit_receiver && target_missing;
+        if constructor {
+            return symbol_without_template_arguments(message)
+                .rsplit("::")
+                .next()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(|name| (name.to_string(), true));
+        }
+        receiver_type
+            .map(owner_identity_name)
+            .filter(|name| !name.is_empty())
+            .map(|name| (name, false))
+    }
+
     fn owner_kind(&self, node: &Node, default_kind: &str) -> String {
         let abstract_class = matches!(default_kind, "class" | "struct")
-            && node.text.contains("virtual")
-            && node
-                .text
-                .split(';')
-                .any(|declaration| declaration.contains("= 0"));
+            && cpp_owner_has_direct_pure_virtual(&node.text);
         if abstract_class {
             "abstract_class".to_string()
         } else {
@@ -1007,7 +1255,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         &self,
         signature: &str,
     ) -> super::normalized_behavior::NormalizedSignature {
-        super::normalized_behavior::parse_c_family_declarator(signature)
+        super::normalized_behavior::parse_prefix_return_declarator(signature)
     }
 
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
@@ -1175,7 +1423,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         operand_type: Option<&TypeExpr>,
     ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
         let operator = message.strip_suffix('@').unwrap_or(message);
-        if !super::normalized_behavior::PRIMITIVE_OPERATORS.contains(&operator) {
+        if !CPP_PRIMITIVE_OPERATORS.contains(&operator) {
             return None;
         }
         matches!(operand_type, Some(TypeExpr::Primitive(name)) if cpp_scalar_primitive(name))

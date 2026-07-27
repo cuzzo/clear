@@ -20,7 +20,7 @@ pub(crate) fn parse_file_for_report(file: PathBuf, language: Language) -> Result
 }
 
 fn parse_file_with_options(file: PathBuf, language: Language) -> Result<Document> {
-    let profile = rust_profile_enabled();
+    let profile = parser_profile_enabled();
     let total_started = Instant::now();
     let file_label = file.to_string_lossy().to_string();
     let parsed_started = Instant::now();
@@ -67,30 +67,10 @@ fn parse_normalized_file(
             definitions
         },
     );
-    if language == Language::Go && !namespace.is_empty() {
-        let directory = parsed
-            .file
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .to_string_lossy();
-        namespace = format!("{directory}::{namespace}");
-    }
-    if language == Language::Python {
-        namespace = python_module_namespace(&parsed.file);
-        for (_, target) in &mut explicit_imports {
-            *target = canonical_python_import(&parsed.file, &namespace, target);
-        }
-    }
-    if language == Language::TypeScript {
-        // A module's identity is its extension-stripped path; a relative import
-        // resolves against the importing file's directory to the same identity,
-        // so a definition's namespace and a caller's import target reconcile.
-        // TypeScript only: JavaScript stays non-canonical because its bare calls
-        // are frequently runtime-injected globals, not missing module symbols.
-        namespace = ts_module_namespace(&parsed.file);
-        for (_, target) in &mut explicit_imports {
-            *target = canonical_ts_import(&parsed.file, target);
-        }
+    let behavior = normalized_behavior::behavior(language);
+    namespace = behavior.canonical_project_namespace(&parsed.file, &namespace);
+    for (_, target) in &mut explicit_imports {
+        *target = behavior.canonical_project_import(&parsed.file, &namespace, target);
     }
     profile_parse_phase(profile, file_label, "normalized_root", started.elapsed());
 
@@ -99,23 +79,16 @@ fn parse_normalized_file(
         .lines()
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    let behavior = normalized_behavior::behavior(language);
-
     let started = Instant::now();
     let mut facts =
         passes::StatelessSyntaxPass::normalized(&parsed.file, &lines, &normalized_root, behavior)
             .run();
-    if language == Language::Go {
-        // Go function literals can normalize to a synthetic wrapper with the
-        // span of `return func`, rather than the comma-ok declaration. Keep
-        // source ownership in the Go adapter, which has the unmodified parser
-        // tree and can provide an exact node span without text recovery.
-        super::go::attach_raw_presence_correlation_spans(
-            parsed.tree.root_node(),
-            &parsed.source,
-            &mut facts.presence_correlation_seeds,
-        );
-    }
+    crate::ast::reconcile_presence_correlation_spans(
+        parsed.tree.root_node(),
+        &parsed.source,
+        language,
+        &mut facts.presence_correlation_seeds,
+    );
     let normalization_call_origins = parser_call_origins
         .into_iter()
         .map(
@@ -168,15 +141,7 @@ fn parse_normalized_file(
         parse_recovery_spans,
         raw_call_sites,
         symbol_scope: SymbolScope {
-            canonical: matches!(
-                language,
-                Language::Java
-                    | Language::Go
-                    | Language::CSharp
-                    | Language::Cpp
-                    | Language::Python
-                    | Language::TypeScript
-            ),
+            canonical: behavior.canonical_symbol_scope(),
             unqualified_types_use_current_namespace:
                 crate::ast::unqualified_types_use_current_namespace(language),
             namespace,
@@ -281,123 +246,7 @@ fn parse_recovery_spans(root: tree_sitter::Node<'_>) -> Vec<[usize; 4]> {
     spans
 }
 
-fn python_module_namespace(file: &std::path::Path) -> String {
-    let mut package = Vec::new();
-    let mut directory = file.parent();
-    while let Some(current) = directory {
-        if !current.join("__init__.py").is_file() {
-            break;
-        }
-        let Some(name) = current.file_name().and_then(|name| name.to_str()) else {
-            break;
-        };
-        package.push(name.to_string());
-        directory = current.parent();
-    }
-    package.reverse();
-    let stem = file
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or_default();
-    if stem != "__init__" && !stem.is_empty() {
-        package.push(stem.to_string());
-    }
-    package.join(".")
-}
-
-fn canonical_python_import(file: &std::path::Path, namespace: &str, target: &str) -> String {
-    let dots = target
-        .chars()
-        .take_while(|character| *character == '.')
-        .count();
-    if dots == 0 {
-        return target.to_string();
-    }
-    let mut package = namespace.split('.').map(str::to_string).collect::<Vec<_>>();
-    if file.file_stem().and_then(|stem| stem.to_str()) != Some("__init__") {
-        package.pop();
-    }
-    for _ in 1..dots {
-        package.pop();
-    }
-    package.extend(
-        target[dots..]
-            .split('.')
-            .filter(|part| !part.is_empty())
-            .map(str::to_string),
-    );
-    package.join(".")
-}
-
-/// Strip a JS/TS module extension from a path string.
-fn strip_ts_extension(path: &str) -> &str {
-    for ext in [".d.ts", ".tsx", ".ts", ".jsx", ".mjs", ".cjs", ".js"] {
-        if let Some(stem) = path.strip_suffix(ext) {
-            return stem;
-        }
-    }
-    path
-}
-
-/// A JS/TS module's canonical identity: its lexically-normalized,
-/// extension-stripped path. Both a definition (this file) and a relative import
-/// that resolves to it produce the same string.
-fn ts_module_namespace(file: &std::path::Path) -> String {
-    let normalized = normalize_path_lexically(&file.to_string_lossy());
-    strip_ts_extension(&normalized).to_string()
-}
-
-/// Lexically normalize a `/`-path: collapse `.` and `..` segments without
-/// touching the filesystem.
-fn normalize_path_lexically(path: &str) -> String {
-    let mut out: Vec<&str> = Vec::new();
-    for segment in path.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                if matches!(out.last(), Some(&last) if last != "..") {
-                    out.pop();
-                } else if !path.starts_with('/') {
-                    out.push("..");
-                }
-            }
-            other => out.push(other),
-        }
-    }
-    let joined = out.join("/");
-    if path.starts_with('/') {
-        format!("/{joined}")
-    } else {
-        joined
-    }
-}
-
-/// Canonicalize a JS/TS import target `module\0name` (or `module`). A relative
-/// module (`./x`, `../x`) resolves against the importing file's directory to
-/// the module's canonical identity; a bare specifier (`lodash`) is external and
-/// left as-is. The exported name, if present, is re-joined with `.` so the
-/// resolver's `namespace.name` splitting applies.
-fn canonical_ts_import(file: &std::path::Path, target: &str) -> String {
-    let (module, name) = match target.split_once('\u{0}') {
-        Some((module, name)) => (module, Some(name)),
-        None => (target, None),
-    };
-    let resolved = if module.starts_with("./") || module.starts_with("../") {
-        let dir = file
-            .parent()
-            .map(|dir| dir.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        strip_ts_extension(&normalize_path_lexically(&format!("{dir}/{module}"))).to_string()
-    } else {
-        module.to_string()
-    };
-    match name {
-        Some(name) => format!("{resolved}.{name}"),
-        None => resolved,
-    }
-}
-
-fn rust_profile_enabled() -> bool {
+fn parser_profile_enabled() -> bool {
     std::env::var_os("DECOMPLEX_RUST_PROFILE").is_some()
 }
 
@@ -430,34 +279,5 @@ impl ParsedDocument {
             .parse(crate::ast::parse_buffer(&source, language), None)
             .with_context(|| format!("tree-sitter produced no tree for {}", file.display()))?;
         Ok(Self { file, source, tree })
-    }
-}
-
-#[cfg(test)]
-mod ts_module_tests {
-    use super::*;
-    use std::path::Path;
-
-    #[test]
-    fn relative_import_resolves_to_the_target_module_namespace() {
-        // The invariant that makes cross-module resolution work: a definition's
-        // namespace equals a relative import that resolves to it.
-        let helper = Path::new("/proj/src/util/helper.ts");
-        let main = Path::new("/proj/src/app/main.ts");
-        assert_eq!(ts_module_namespace(helper), "/proj/src/util/helper");
-        // `import { simple } from "../util/helper"` from main.ts.
-        assert_eq!(
-            canonical_ts_import(main, "../util/helper\u{0}simple"),
-            "/proj/src/util/helper.simple"
-        );
-        // same directory, extension already stripped by the caller's spelling
-        assert_eq!(
-            canonical_ts_import(Path::new("/proj/a.ts"), "./b\u{0}f"),
-            "/proj/b.f"
-        );
-        // namespace import (no exported name) keeps just the module identity
-        assert_eq!(canonical_ts_import(main, "../util/helper"), "/proj/src/util/helper");
-        // a bare specifier is an external package, left untouched
-        assert_eq!(canonical_ts_import(main, "lodash\u{0}map"), "lodash.map");
     }
 }

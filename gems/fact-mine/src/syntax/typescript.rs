@@ -30,7 +30,147 @@ const TYPESCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 
 pub(crate) struct TypeScriptNormalizedBehavior;
 
+fn strip_module_extension(path: &str) -> &str {
+    for extension in [".d.ts", ".tsx", ".ts", ".jsx", ".mjs", ".cjs", ".js"] {
+        if let Some(stem) = path.strip_suffix(extension) {
+            return stem;
+        }
+    }
+    path
+}
+
+fn normalize_module_path(path: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for segment in path.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                if matches!(out.last(), Some(&last) if last != "..") {
+                    out.pop();
+                } else if !path.starts_with('/') {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    let joined = out.join("/");
+    if path.starts_with('/') {
+        format!("/{joined}")
+    } else {
+        joined
+    }
+}
+
+fn module_namespace(file: &std::path::Path) -> String {
+    strip_module_extension(&normalize_module_path(&file.to_string_lossy())).to_string()
+}
+
+fn canonical_import(file: &std::path::Path, target: &str) -> String {
+    let (module, name) = match target.split_once('\u{0}') {
+        Some((module, name)) => (module, Some(name)),
+        None => (target, None),
+    };
+    let resolved = if module.starts_with("./") || module.starts_with("../") {
+        let directory = file
+            .parent()
+            .map(|directory| directory.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        strip_module_extension(&normalize_module_path(&format!("{directory}/{module}"))).to_string()
+    } else {
+        module.to_string()
+    };
+    match name {
+        Some(name) => format!("{resolved}.{name}"),
+        None => resolved,
+    }
+}
+
+pub(crate) fn parse_profile_signature(
+    signature: &str,
+) -> super::normalized_behavior::NormalizedSignature {
+    let signature = signature.trim();
+    let (Some(open), Some(close)) = (signature.find('('), signature.rfind(')')) else {
+        return super::normalized_behavior::NormalizedSignature::default();
+    };
+    let return_type = signature[close + 1..]
+        .trim()
+        .strip_prefix(':')
+        .map(|declared| {
+            declared
+                .trim()
+                .trim_end_matches(';')
+                .trim_end_matches('{')
+                .trim()
+                .to_string()
+        });
+    let params = signature[open + 1..close]
+        .split(',')
+        .filter_map(|entry| {
+            let entry = entry.trim().trim_start_matches("...");
+            if entry.is_empty() {
+                return None;
+            }
+            let (name, declared) = entry.split_once(':')?;
+            let declared = declared.trim();
+            (!declared.is_empty()).then(|| {
+                (
+                    name.trim().trim_end_matches('?').to_string(),
+                    declared.to_string(),
+                )
+            })
+        })
+        .collect();
+    super::normalized_behavior::NormalizedSignature {
+        return_type,
+        params,
+    }
+}
+
 impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
+    fn parse_signature(
+        &self,
+        signature: &str,
+    ) -> super::normalized_behavior::NormalizedSignature {
+        parse_profile_signature(signature)
+    }
+
+    fn source_profile_signature(
+        &self,
+        lines: &[String],
+        function: &super::FunctionDef,
+    ) -> Option<String> {
+        lines
+            .get(function.line.saturating_sub(1))
+            .map(|line| line.trim().to_string())
+            .or_else(|| Some(String::new()))
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "typescript"
+    }
+
+    fn native_profile_literal_type(&self, value: &str) -> Option<String> {
+        super::javascript::behavior().native_profile_literal_type(value)
+    }
+
+    fn canonical_symbol_scope(&self) -> bool {
+        true
+    }
+
+    fn canonical_project_namespace(&self, file: &std::path::Path, _namespace: &str) -> String {
+        module_namespace(file)
+    }
+
+    fn canonical_project_import(
+        &self,
+        file: &std::path::Path,
+        _namespace: &str,
+        target: &str,
+    ) -> String {
+        canonical_import(file, target)
+    }
+
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         (node.r#type == "CALL")
             .then(|| node.children.first().and_then(crate::ast::node))
@@ -493,6 +633,32 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
 
     fn untyped_hash_type(&self) -> String {
         "Record<any, any>".to_string()
+    }
+}
+
+#[cfg(test)]
+mod module_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn relative_import_resolves_to_the_target_module_namespace() {
+        let helper = Path::new("/proj/src/util/helper.ts");
+        let main = Path::new("/proj/src/app/main.ts");
+        assert_eq!(module_namespace(helper), "/proj/src/util/helper");
+        assert_eq!(
+            canonical_import(main, "../util/helper\u{0}simple"),
+            "/proj/src/util/helper.simple"
+        );
+        assert_eq!(
+            canonical_import(Path::new("/proj/a.ts"), "./b\u{0}f"),
+            "/proj/b.f"
+        );
+        assert_eq!(
+            canonical_import(main, "../util/helper"),
+            "/proj/src/util/helper"
+        );
+        assert_eq!(canonical_import(main, "lodash\u{0}map"), "lodash.map");
     }
 }
 

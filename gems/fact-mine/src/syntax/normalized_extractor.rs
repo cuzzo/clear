@@ -2841,8 +2841,12 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
             }
         }
         let before_name = text[..idx].trim_end();
-        if before_name.contains(',') {
-            let first_declarator = before_name.split(',').next().unwrap_or(before_name);
+        let declarator_parts = super::normalized_behavior::split_top_level_commas(before_name);
+        if declarator_parts.len() > 1 {
+            let first_declarator = declarator_parts
+                .first()
+                .map(String::as_str)
+                .unwrap_or(before_name);
             let declaration = first_declarator
                 .split('=')
                 .next()

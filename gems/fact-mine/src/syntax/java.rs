@@ -224,6 +224,50 @@ const JAVA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "java-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    fn canonical_symbol_scope(&self) -> bool {
+        true
+    }
+
+    fn resolves_inherited_project_calls(&self) -> bool {
+        true
+    }
+
+    fn project_call_candidate_compatible(
+        &self,
+        argument_count: usize,
+        parameter_count: usize,
+    ) -> bool {
+        argument_count == parameter_count
+    }
+
+    fn unbound_receiver_may_name_project_type(&self, receiver: &str) -> bool {
+        !receiver.is_empty()
+            && !receiver.contains(['.', ':', '(', ')', '[', ']'])
+    }
+
+    fn declared_flow_type_fallback(&self, declared_type: &str) -> bool {
+        !declared_type.is_empty()
+            && declared_type
+                .chars()
+                .next()
+                .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+            && !declared_type.contains(['=', '(', ')', ';', '\n'])
+            && !declared_type.contains("//")
+            && !declared_type.contains("&&")
+    }
+
     // C-family indexers render a local as `Type name` - the type leads.
     fn parse_variable_declaration(&self, text: &str) -> Option<String> {
         let text = text.trim().trim_end_matches(';').trim();
@@ -237,7 +281,7 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
         &self,
         signature: &str,
     ) -> super::normalized_behavior::NormalizedSignature {
-        super::normalized_behavior::parse_c_family_declarator(signature)
+        super::normalized_behavior::parse_prefix_return_declarator(signature)
     }
 
     // The Java indexer emits several overlapping occurrences per call site; the

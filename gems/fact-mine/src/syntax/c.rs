@@ -43,6 +43,10 @@ const C_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
 };
 
 const C_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
+const C_PRIMITIVE_OPERATORS: &[&str] = &[
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "~",
+    "&&", "||", "!",
+];
 const C_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const C_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
@@ -123,6 +127,14 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
     // C-family indexers render a local as `Type name` - the type leads.
     fn parse_variable_declaration(&self, text: &str) -> Option<String> {
         let text = text.trim().trim_end_matches(';').trim();
@@ -134,7 +146,7 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     // C declares `Ret name(T a)`, not `name(a: T) -> Ret`.
     fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
         let signature = unwrap_return_type_macro(signature);
-        super::normalized_behavior::parse_c_family_declarator(&signature)
+        super::normalized_behavior::parse_prefix_return_declarator(&signature)
     }
 
     fn parameter_list_source(&self, source: &str) -> String {
@@ -266,7 +278,7 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         // trailing `@` (e.g. `-@`). Without this they are recorded as
         // unresolved call targets, wrongly marking O(1) functions incomplete.
         let operator = message.strip_suffix('@').unwrap_or(message);
-        if operator == "[]" || super::normalized_behavior::PRIMITIVE_OPERATORS.contains(&operator) {
+        if operator == "[]" || C_PRIMITIVE_OPERATORS.contains(&operator) {
             return Some(NormalizedCallComplexity {
                 time: "O(1)",
                 space: "O(1)",

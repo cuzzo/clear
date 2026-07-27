@@ -1,10 +1,20 @@
 use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
 use tree_sitter::Node as TreeSitterNode;
+use crate::syntax::nullable::PresenceCorrelationSeed;
 
 pub(crate) struct GoAstAdapter;
 
 impl AstNormalizationAdapter for GoAstAdapter {
+    fn reconcile_presence_correlation_spans(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+        seeds: &mut Vec<PresenceCorrelationSeed>,
+    ) {
+        crate::syntax::go::attach_raw_presence_correlation_spans(root, source, seeds);
+    }
+
     fn symbol_scope(
         &self,
         root: TreeSitterNode<'_>,

@@ -224,6 +224,26 @@ const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "csharp-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    fn canonical_symbol_scope(&self) -> bool {
+        true
+    }
+
+    fn resolves_inherited_project_calls(&self) -> bool {
+        true
+    }
+
     fn nested_function_is_local_callable(&self, _function: &Node) -> bool {
         true
     }
@@ -259,7 +279,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         &self,
         signature: &str,
     ) -> super::normalized_behavior::NormalizedSignature {
-        super::normalized_behavior::parse_c_family_declarator(signature)
+        super::normalized_behavior::parse_prefix_return_declarator(signature)
     }
 
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {

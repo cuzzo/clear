@@ -1021,10 +1021,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
     }
 
     let mut struct_declarations = extract_struct_declarations(document, &language, &path);
-    let behavior = crate::syntax::normalized_behavior::behavior(
-        crate::syntax::Language::parse(document.language.as_str())
-            .unwrap_or(crate::syntax::Language::Ruby),
-    );
+    let behavior = crate::syntax::normalized_behavior::behavior(document.language);
     if let Some(ref root) = root_node {
         collect_struct_declarations(
             root,
@@ -2529,7 +2526,11 @@ fn inherited_target_ids(
     if call.constructor_target.is_some() {
         return BTreeSet::new();
     }
-    let start = if source.language == "cpp" && call.implicit_receiver {
+    let behavior =
+        crate::syntax::normalized_behavior::behavior_for_name(&source.language);
+    let start = if behavior.is_some_and(|behavior| {
+        behavior.inherited_lookup_uses_source_owner(call.implicit_receiver)
+    }) {
         Some(source.owner.clone())
     } else if let Some(symbol) = call.receiver_symbol.as_deref() {
         Some(symbol.to_string())
@@ -2703,7 +2704,7 @@ fn resolve_project_calls(
     type_definitions: &[TypeDefinition],
     calls: &mut [CallRecord],
 ) {
-    apply_merged_cpp_alias_costs(methods, type_definitions, calls);
+    apply_merged_alias_costs(methods, type_definitions, calls);
     let source_languages = methods
         .iter()
         .map(|method| (method.id.as_str(), method.language.as_str()))
@@ -2724,39 +2725,29 @@ fn resolve_project_calls(
             .or_default()
             .push(method);
     }
-    // Go package-leaf reconciliation. A Go definition's `lexical_symbol` is
-    // `{directory}::{package}::{name}` (the namespace is filesystem-directory
-    // mangled), while a cross-package call's is `{import_path}::{name}`. Go
-    // guarantees an import path's last segment equals the package clause name,
-    // so both collapse to `(package_leaf, name)`. Index top-level Go functions
-    // by that pair; the resolution pass below only binds a *unique* candidate,
-    // so a package-name collision falls through to `unresolved` rather than a
-    // wrong target.
-    let mut by_go_package: BTreeMap<(&str, &str), Vec<&MethodRecord>> = BTreeMap::new();
+    // Some adapters can prove a fallback reconciliation key when declaration
+    // and call namespaces use different external coordinates. Bind only a
+    // unique key; collisions remain unresolved.
+    let mut by_reconciliation_key =
+        BTreeMap::<(String, String, String), Vec<&MethodRecord>>::new();
     for method in methods {
-        if method.language != "go" {
+        let Some(behavior) =
+            crate::syntax::normalized_behavior::behavior_for_name(&method.language)
+        else {
             continue;
-        }
+        };
         let Some(symbol) = method.lexical_symbol.as_deref() else {
             continue;
         };
-        let mut parts = symbol.rsplit("::");
-        let (Some(name), Some(package)) = (parts.next(), parts.next()) else {
+        let Some((scope, name)) = behavior.project_function_reconciliation_key(symbol) else {
             continue;
         };
-        let package_leaf = package.rsplit('/').next().unwrap_or(package);
-        if !name.is_empty() && !package_leaf.is_empty() {
-            by_go_package
-                .entry((package_leaf, name))
-                .or_default()
-                .push(method);
-        }
+        by_reconciliation_key
+            .entry((method.language.clone(), scope, name))
+            .or_default()
+            .push(method);
     }
-    resolve_cpp_relative_scoped_calls(
-        calls,
-        &by_lexical,
-        &source_languages,
-    );
+    resolve_relative_scoped_calls(calls, &by_lexical, &source_languages);
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
         let Some(symbol) = call.lexical_symbol.as_deref() else {
             continue;
@@ -2782,29 +2773,27 @@ fn resolve_project_calls(
         call.unresolved_reason = None;
     }
 
-    // Go cross-package free calls whose `{import_path}::{name}` symbol did not
-    // hit `by_lexical` (directory vs import-path namespace mismatch): reconcile
-    // through the package leaf. Bind only a unique candidate.
+    // Reconcile calls whose exact lexical coordinate did not match.
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
-        if source_languages.get(call.source.as_str()).copied() != Some("go") {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
             continue;
-        }
+        };
+        let Some(behavior) =
+            crate::syntax::normalized_behavior::behavior_for_name(language)
+        else {
+            continue;
+        };
         let Some(symbol) = call.lexical_symbol.as_deref() else {
             continue;
         };
-        let mut parts = symbol.rsplit("::");
-        let (Some(name), Some(import_path)) = (parts.next(), parts.next()) else {
+        let Some((scope, name)) = behavior.project_function_reconciliation_key(symbol) else {
             continue;
         };
-        let package_leaf = import_path.rsplit('/').next().unwrap_or(import_path);
-        if name.is_empty() || package_leaf.is_empty() {
-            continue;
-        }
-        let candidates = by_go_package
-            .get(&(package_leaf, name))
+        let candidates = by_reconciliation_key
+            .get(&(language.to_string(), scope, name))
             .map(Vec::as_slice)
             .unwrap_or_default();
-        if let Some(candidate) = unique_call_candidate(candidates, call, Some("go")) {
+        if let Some(candidate) = unique_call_candidate(candidates, call, Some(language)) {
             call.target = Some(candidate.id.clone());
             call.kind = if call.owner == candidate.owner {
                 "internal_call".to_string()
@@ -2853,7 +2842,7 @@ fn resolve_project_calls(
     }
 
     resolve_inherited_calls(owners, methods, calls);
-    resolve_cpp_unqualified_namespace_calls(
+    resolve_fallback_lexical_calls(
         owners,
         methods,
         calls,
@@ -2869,12 +2858,10 @@ fn resolve_project_calls(
     }
 }
 
-/// C++ unqualified lookup does not stop at a class when no member or inherited
-/// declaration matches: it continues through the enclosing namespaces. The
-/// document extractor initially preserves an implicit receiver because member
-/// lookup must win. Once project member/hierarchy resolution has failed, bind
-/// the exact namespace declaration or retain its closed overload set.
-fn resolve_cpp_unqualified_namespace_calls(
+/// Continue adapter-owned unqualified lookup only after member and inheritance
+/// resolution failed. The shared resolver binds an exact declaration or keeps
+/// a closed candidate set; adapters supply only ordered lexical identities.
+fn resolve_fallback_lexical_calls(
     owners: &[OwnerRecord],
     methods: &[MethodRecord],
     calls: &mut [CallRecord],
@@ -2886,13 +2873,14 @@ fn resolve_cpp_unqualified_namespace_calls(
         .map(|method| (method.id.as_str(), method))
         .collect::<BTreeMap<_, _>>();
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
-        if source_languages.get(call.source.as_str()).copied() != Some("cpp")
-            || !call.implicit_receiver
-            || call.message.contains("::")
-            || call.symbol_namespace.as_deref().unwrap_or_default().is_empty()
-        {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
             continue;
-        }
+        };
+        let Some(behavior) =
+            crate::syntax::normalized_behavior::behavior_for_name(language)
+        else {
+            continue;
+        };
         let Some(source) = sources.get(call.source.as_str()).copied() else {
             continue;
         };
@@ -2901,29 +2889,21 @@ fn resolve_cpp_unqualified_namespace_calls(
             continue;
         }
         let namespace = call.symbol_namespace.as_deref().unwrap_or_default();
-        let mut scopes = namespace
-            .split("::")
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>();
         let mut resolved = None;
-        loop {
-            let symbol = if scopes.is_empty() {
-                call.message.clone()
-            } else {
-                format!("{}::{}", scopes.join("::"), call.message)
-            };
+        for symbol in behavior.fallback_lexical_candidates(
+            &call.message,
+            namespace,
+            call.implicit_receiver,
+        ) {
             let candidates = by_lexical
                 .get(symbol.as_str())
                 .into_iter()
                 .flatten()
                 .copied()
-                .filter(|method| method.language == "cpp")
+                .filter(|method| method.language == language)
                 .collect::<Vec<_>>();
             if !candidates.is_empty() {
                 resolved = Some((symbol, candidates));
-                break;
-            }
-            if scopes.pop().is_none() {
                 break;
             }
         }
@@ -2931,8 +2911,8 @@ fn resolve_cpp_unqualified_namespace_calls(
             continue;
         };
         call.lexical_symbol = Some(symbol);
-        call.lexical_symbol_origin = Some("cpp_unqualified_namespace_lookup".to_string());
-        if let Some(candidate) = unique_call_candidate(&candidates, call, Some("cpp")) {
+        call.lexical_symbol_origin = Some("adapter_fallback_lexical_lookup".to_string());
+        if let Some(candidate) = unique_call_candidate(&candidates, call, Some(language)) {
             call.target = Some(candidate.id.clone());
             call.kind = "resolved_call".to_string();
             call.confidence = "high".to_string();
@@ -2944,16 +2924,16 @@ fn resolve_cpp_unqualified_namespace_calls(
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect();
-            call.candidate_reason = Some("cpp_unqualified_namespace_overload_set".to_string());
+            call.candidate_reason = Some("fallback_lexical_candidate_set".to_string());
             call.unresolved_reason =
-                Some("cpp_closed_project_overload_set_requires_summary".to_string());
+                Some("closed_project_candidate_set_requires_summary".to_string());
             call.resolution_missing_proof =
                 Some("closed_candidate_cost_join_required".to_string());
         }
     }
 }
 
-fn apply_merged_cpp_alias_costs(
+fn apply_merged_alias_costs(
     methods: &[MethodRecord],
     type_definitions: &[TypeDefinition],
     calls: &mut [CallRecord],
@@ -2964,51 +2944,46 @@ fn apply_merged_cpp_alias_costs(
         .collect::<BTreeMap<_, _>>();
     let aliases = type_definitions
         .iter()
-        .filter(|definition| definition.language == "cpp" && definition.kind == "type_alias")
+        .filter(|definition| definition.kind == "type_alias")
         .filter_map(|definition| {
             Some((
-                definition.name.as_str(),
+                (definition.language.as_str(), definition.name.as_str()),
                 definition.target.as_deref()?,
             ))
         })
         .fold(
-            BTreeMap::<&str, BTreeSet<&str>>::new(),
+            BTreeMap::<(&str, &str), BTreeSet<&str>>::new(),
             |mut aliases, (name, target)| {
                 aliases.entry(name).or_default().insert(target);
                 aliases
             },
         );
-    let behavior =
-        crate::syntax::normalized_behavior::behavior(crate::syntax::Language::Cpp);
-    for call in calls.iter_mut().filter(|call| {
-        call.known_time_complexity.is_none()
-            && source_languages.get(call.source.as_str()).copied() == Some("cpp")
-    }) {
-        let receiver_alias = call
-            .receiver_type
-            .as_deref()
-            .map(owner_type_name)
-            .map(str::to_string);
-        let constructor_alias = call.implicit_receiver && call.target.is_none();
-        let constructor_alias_name = constructor_alias
-            .then(|| {
-                cpp_symbol_without_template_arguments(&call.message)
-                    .rsplit("::")
-                    .next()
-                    .map(str::trim)
-                    .map(str::to_string)
-            })
-            .flatten()
-            .filter(|name| !name.is_empty());
-        let Some(alias_name) = constructor_alias_name.or(receiver_alias) else {
+    for call in calls
+        .iter_mut()
+        .filter(|call| call.known_time_complexity.is_none())
+    {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
             continue;
         };
-        let Some(targets) = aliases.get(alias_name.as_str()) else {
+        let Some(behavior) =
+            crate::syntax::normalized_behavior::behavior_for_name(language)
+        else {
+            continue;
+        };
+        let Some((alias_name, constructor_alias)) = behavior.merged_alias_call_name(
+            &call.message,
+            call.receiver_type.as_deref(),
+            call.implicit_receiver,
+            call.target.is_none(),
+        ) else {
+            continue;
+        };
+        let Some(targets) = aliases.get(&(language, alias_name.as_str())) else {
             continue;
         };
         let normalized = targets
             .iter()
-            .map(|target| TypeExpr::parse(target, "cpp"))
+            .map(|target| TypeExpr::parse(target, language))
             .collect::<BTreeSet<_>>();
         if normalized.len() != 1 {
             continue;
@@ -3061,59 +3036,46 @@ fn apply_merged_cpp_alias_costs(
     }
 }
 
-/// Resolve a relative qualified-id using C++ namespace lookup. Inside
-/// `plog::detail`, `util::work()` searches `plog::detail::util::work`, then
-/// `plog::util::work`, then `util::work`. The first scope containing project
-/// declarations wins. Multiple declarations remain a closed overload set for
-/// the complexity aggregator; this pass never selects an overload by source
-/// order.
-fn resolve_cpp_relative_scoped_calls(
+/// Resolve adapter-provided relative qualified identities. The first scope
+/// containing project declarations wins; multiple declarations remain a
+/// closed candidate set for the complexity aggregator.
+fn resolve_relative_scoped_calls(
     calls: &mut [CallRecord],
     by_lexical: &BTreeMap<&str, Vec<&MethodRecord>>,
     source_languages: &BTreeMap<&str, &str>,
 ) {
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
-        if source_languages.get(call.source.as_str()).copied() != Some("cpp") {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
             continue;
-        }
+        };
+        let Some(behavior) =
+            crate::syntax::normalized_behavior::behavior_for_name(language)
+        else {
+            continue;
+        };
         let Some(symbol) = call.lexical_symbol.as_deref() else {
             continue;
         };
-        if !symbol.contains("::") || symbol.starts_with("std::") {
-            continue;
-        }
-        let symbol = symbol.trim_start_matches("::");
         let namespace = call.symbol_namespace.as_deref().unwrap_or_default();
-        let mut scopes = namespace
-            .split("::")
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>();
-        let mut qualified = Vec::new();
-        loop {
-            qualified.push(if scopes.is_empty() {
-                symbol.to_string()
-            } else {
-                format!("{}::{symbol}", scopes.join("::"))
-            });
-            if scopes.pop().is_none() {
-                break;
-            }
-        }
-        let Some((resolved_symbol, candidates)) = qualified.into_iter().find_map(|candidate| {
+        let Some((resolved_symbol, candidates)) = behavior
+            .relative_lexical_candidates(symbol, namespace)
+            .into_iter()
+            .find_map(|candidate| {
             let declarations = by_lexical
                 .get(candidate.as_str())
                 .into_iter()
                 .flatten()
                 .copied()
-                .filter(|method| method.language == "cpp")
+                .filter(|method| method.language == language)
                 .collect::<Vec<_>>();
             (!declarations.is_empty()).then_some((candidate, declarations))
-        }) else {
+        })
+        else {
             continue;
         };
         call.lexical_symbol = Some(resolved_symbol);
-        call.lexical_symbol_origin = Some("cpp_enclosing_namespace_lookup".to_string());
-        if let Some(candidate) = unique_call_candidate(&candidates, call, Some("cpp")) {
+        call.lexical_symbol_origin = Some("adapter_relative_lexical_lookup".to_string());
+        if let Some(candidate) = unique_call_candidate(&candidates, call, Some(language)) {
             call.target = Some(candidate.id.clone());
             call.kind = if call.owner == candidate.owner {
                 "internal_call".to_string()
@@ -3129,9 +3091,9 @@ fn resolve_cpp_relative_scoped_calls(
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .collect();
-            call.candidate_reason = Some("cpp_enclosing_namespace_overload_set".to_string());
+            call.candidate_reason = Some("relative_lexical_candidate_set".to_string());
             call.unresolved_reason =
-                Some("cpp_closed_project_overload_set_requires_summary".to_string());
+                Some("closed_project_candidate_set_requires_summary".to_string());
             call.resolution_missing_proof =
                 Some("closed_candidate_cost_join_required".to_string());
         }
@@ -3223,6 +3185,11 @@ fn annotate_project_candidate_sets(
         let Some(source) = sources.get(call.source.as_str()).copied() else {
             continue;
         };
+        let Some(behavior) =
+            crate::syntax::normalized_behavior::behavior_for_name(&source.language)
+        else {
+            continue;
+        };
         let mut reason = None;
         let mut candidates = BTreeSet::new();
         if let Some(symbol) = call.lexical_symbol.as_deref() {
@@ -3233,7 +3200,10 @@ fn annotate_project_candidate_sets(
                     .flatten()
                     .filter(|method| method.language == source.language)
                     .filter(|method| {
-                        source.language != "java" || method.params.len() == call.argument_count
+                        behavior.project_call_candidate_compatible(
+                            call.argument_count,
+                            method.params.len(),
+                        )
                     })
                     .map(|method| method.id.clone()),
             );
@@ -3266,7 +3236,10 @@ fn annotate_project_candidate_sets(
                         .filter(|method| method.language == source.language)
                         .filter(|method| !excludes_self || method.id != call.source)
                         .filter(|method| {
-                            source.language != "java" || method.params.len() == call.argument_count
+                            behavior.project_call_candidate_compatible(
+                                call.argument_count,
+                                method.params.len(),
+                            )
                         })
                         .map(|method| method.id.clone()),
                 );
@@ -3304,16 +3277,22 @@ fn unique_call_candidate<'a>(
     if candidates.len() == 1 {
         return candidates.first().copied();
     }
-    if source_language != Some("java") {
-        return None;
-    }
-    let arity = call.argument_count;
-    let matches = candidates
+    let behavior = source_language
+        .and_then(crate::syntax::normalized_behavior::behavior_for_name)?;
+    let compatible = candidates
         .iter()
         .copied()
-        .filter(|candidate| candidate.params.len() == arity)
+        .filter(|candidate| {
+            behavior.project_call_candidate_compatible(
+                call.argument_count,
+                candidate.params.len(),
+            )
+        })
         .collect::<Vec<_>>();
-    (matches.len() == 1).then(|| matches[0])
+    if compatible.len() == candidates.len() {
+        return None;
+    }
+    (compatible.len() == 1).then(|| compatible[0])
 }
 
 fn resolve_inherited_calls(
@@ -3332,13 +3311,9 @@ fn resolve_inherited_calls(
                 return None;
             }
             let source = sources.get(call.source.as_str()).copied()?;
-            // These adapters expose nominal inheritance or language-defined
-            // method promotion. Other languages keep the normalized edge facts
-            // for measurement until their dispatch rules have exact oracles.
-            if !matches!(
-                source.language.as_str(),
-                "java" | "csharp" | "python" | "go" | "cpp"
-            ) {
+            let behavior =
+                crate::syntax::normalized_behavior::behavior_for_name(&source.language)?;
+            if !behavior.resolves_inherited_project_calls() {
                 return None;
             }
             let targets = conservative_inherited_target_ids(owners, methods, call, source);
@@ -3368,10 +3343,12 @@ fn conservative_inherited_target_ids(
     if call.constructor_target.is_some() {
         return BTreeSet::new();
     }
-    let start = if source.language == "cpp" && call.implicit_receiver {
-        // A C++ partial specialization carries its inheritance clause on the
-        // source owner (`Child<T>`), while its compiler symbol owner may be
-        // erased to `Child`. Start from the declaration that owns the clause.
+    let Some(behavior) =
+        crate::syntax::normalized_behavior::behavior_for_name(&source.language)
+    else {
+        return BTreeSet::new();
+    };
+    let start = if behavior.inherited_lookup_uses_source_owner(call.implicit_receiver) {
         Some(source.owner.clone())
     } else if let Some(symbol) = call.receiver_symbol.as_deref() {
         Some(symbol.to_string())
@@ -3412,42 +3389,35 @@ fn conservative_inherited_target_ids(
         if by_name.len() > 1 {
             return None;
         }
-        if source.language == "cpp" {
-            if let Some(nominal) = declared_dispatch_owner_name_from_type(identity, "cpp") {
-                let normalized = owners
-                    .iter()
-                    .filter(|owner| owner.language == source.language)
-                    .filter(|owner| {
-                        declared_dispatch_owner_name_from_type(&owner.name, "cpp").as_deref()
-                            == Some(nominal.as_str())
-                            || owner.symbol.as_deref().is_some_and(|symbol| {
-                                declared_dispatch_owner_name_from_type(symbol, "cpp").as_deref()
-                                    == Some(nominal.as_str())
-                            })
-                    })
-                    .collect::<Vec<_>>();
-                if identity.contains('<') {
-                    let specializations = normalized
-                        .iter()
-                        .copied()
-                        .filter(|owner| {
-                            owner.name.contains('<') && owner.name.trim_end().ends_with('>')
-                        })
-                        .collect::<Vec<_>>();
-                    if specializations.len() == 1 {
-                        return specializations.into_iter().next();
-                    }
-                    if specializations.len() > 1 {
-                        return None;
-                    }
-                }
-                if normalized.len() == 1 {
-                    return normalized.into_iter().next();
-                }
-                if normalized.len() > 1 {
-                    return None;
-                }
+        let normalized = owners
+            .iter()
+            .filter(|owner| owner.language == source.language)
+            .filter(|owner| {
+                behavior.inherited_owner_identity_matches(
+                    identity,
+                    &owner.name,
+                    owner.symbol.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if behavior.inherited_identity_prefers_specialization(identity) {
+            let specializations = normalized
+                .iter()
+                .copied()
+                .filter(|owner| owner.name != identity && owner.name.contains(['<', '[']))
+                .collect::<Vec<_>>();
+            if specializations.len() == 1 {
+                return specializations.into_iter().next();
             }
+            if specializations.len() > 1 {
+                return None;
+            }
+        }
+        if normalized.len() == 1 {
+            return normalized.into_iter().next();
+        }
+        if normalized.len() > 1 {
+            return None;
         }
         if identity.contains(['.', ':']) {
             // A package-qualified supertype (e.g. a Go embed `bytes.Buffer`)
@@ -3537,7 +3507,10 @@ fn conservative_inherited_target_ids(
             })
             .filter(|method| method.dispatch_name == call.message && method.kind == dispatch)
             .filter(|method| {
-                source.language != "java" || method.params.len() == call.argument_count
+                behavior.project_call_candidate_compatible(
+                    call.argument_count,
+                    method.params.len(),
+                )
             })
             .map(|method| method.id.clone())
             .collect::<BTreeSet<_>>();
@@ -3561,45 +3534,38 @@ fn resolve_same_namespace_static_calls(methods: &[MethodRecord], calls: &mut [Ca
         .iter()
         .map(|method| (method.id.as_str(), method.language.as_str()))
         .collect::<BTreeMap<_, _>>();
-    let mut candidates = BTreeMap::<(String, String, String), Vec<&MethodRecord>>::new();
-    for method in methods
-        .iter()
-        .filter(|method| method.language == "java" && method.kind == "class")
-    {
-        let Some(symbol_owner) = method.symbol_owner.as_deref() else {
-            continue;
-        };
-        let Some((namespace, owner)) = symbol_owner.rsplit_once('.') else {
-            continue;
-        };
-        candidates
-            .entry((
-                namespace.to_string(),
-                owner.to_string(),
-                method.dispatch_name.clone(),
-            ))
-            .or_default()
-            .push(method);
-    }
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
-        if source_languages.get(call.source.as_str()).copied() != Some("java")
-            || call.receiver_binding_kind != "unbound"
-            || call.receiver.contains(['.', ':', '(', ')', '[', ']'])
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(behavior) =
+            crate::syntax::normalized_behavior::behavior_for_name(language)
+        else {
+            continue;
+        };
+        if call.receiver_binding_kind != "unbound"
+            || !behavior.unbound_receiver_may_name_project_type(&call.receiver)
         {
             continue;
         }
         let Some(namespace) = call.symbol_namespace.as_deref() else {
             continue;
         };
-        let matches = candidates
-            .get(&(
-                namespace.to_string(),
-                call.receiver.clone(),
-                call.message.clone(),
-            ))
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let Some(candidate) = unique_call_candidate(matches, call, Some("java")) else {
+        let matches = methods
+            .iter()
+            .filter(|method| method.language == language && method.kind == "class")
+            .filter(|method| method.dispatch_name == call.message)
+            .filter(|method| {
+                method.symbol_owner.as_deref().is_some_and(|symbol_owner| {
+                    symbol_owner.rsplit_once('.').is_some_and(
+                        |(owner_namespace, owner)| {
+                            owner_namespace == namespace && owner == call.receiver
+                        },
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let Some(candidate) = unique_call_candidate(&matches, call, Some(language)) else {
             continue;
         };
         call.target = Some(candidate.id.clone());
@@ -3745,22 +3711,36 @@ fn resolve_direct_call_result_calls(
                     costed.push((index, receiver_type, complexity));
                     continue;
                 }
-                if producer_facts.iter().all(|(method, fact)| {
-                    method.language == "cpp"
-                        && fact
-                            .return_type
-                            .as_ref()
-                            .is_some_and(cpp_type_expr_is_dependent)
-                }) {
-                    costed.push((
-                        index,
-                        receiver_type,
-                        crate::syntax::normalized_behavior::NormalizedCallComplexity {
-                            time: "O(R)",
-                            space: "O(S)",
-                        },
-                    ));
-                    continue;
+                let parametric_costs = producer_facts
+                    .iter()
+                    .filter_map(|(method, fact)| {
+                        let behavior =
+                            crate::syntax::normalized_behavior::behavior_for_name(
+                                &method.language,
+                            )?;
+                        behavior.call_result_parametric_cost(fact.return_type.as_ref()?)
+                    })
+                    .collect::<Vec<_>>();
+                let unique_parametric_costs =
+                    parametric_costs.iter().cloned().collect::<BTreeSet<_>>();
+                if parametric_costs.len() == producer_facts.len()
+                    && unique_parametric_costs.len() == 1
+                {
+                    let kind = unique_parametric_costs
+                        .into_iter()
+                        .next()
+                        .expect("one parametric result cost");
+                    if let Some((time, space)) = crate::syntax::parametric_call_complexity(&kind) {
+                        costed.push((
+                            index,
+                            receiver_type,
+                            crate::syntax::normalized_behavior::NormalizedCallComplexity {
+                                time,
+                                space,
+                            },
+                        ));
+                        continue;
+                    }
                 }
             }
             let symbols = producer_facts
@@ -3845,13 +3825,6 @@ fn resolve_direct_call_result_calls(
             call.unresolved_reason = None;
         }
     }
-}
-
-fn cpp_type_expr_is_dependent(type_expr: &TypeExpr) -> bool {
-    type_expr
-        .to_string()
-        .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
-        .any(|token| token == "typename")
 }
 
 fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
@@ -4282,51 +4255,6 @@ fn get_def_header(lines: &[String], start_line_1indexed: usize) -> String {
     header
 }
 
-/// Collects a complete C++ declaration header, including a trailing return
-/// type that may begin on the line after the parameter list.
-///
-/// The generic header collector stops as soon as the outer parameter
-/// parentheses balance. That loses declarations such as:
-///
-/// `auto make() const`
-/// `    -> std::shared_ptr<Value>`
-/// `{`
-fn get_cpp_def_header(lines: &[String], start_line_1indexed: usize) -> String {
-    let start_idx = skip_annotation_lines(lines, start_line_1indexed.saturating_sub(1));
-    if start_idx >= lines.len() {
-        return String::new();
-    }
-
-    let mut header = String::new();
-    let mut paren_depth = 0i32;
-    let mut bracket_depth = 0i32;
-    let mut saw_parameters = false;
-    for line in lines
-        .iter()
-        .take(std::cmp::min(lines.len(), start_idx + 20))
-        .skip(start_idx)
-    {
-        header.push_str(line);
-        header.push('\n');
-        for character in line.chars() {
-            match character {
-                '(' => {
-                    paren_depth += 1;
-                    saw_parameters = true;
-                }
-                ')' => paren_depth -= 1,
-                '[' => bracket_depth += 1,
-                ']' => bracket_depth -= 1,
-                '{' | ';' if saw_parameters && paren_depth <= 0 && bracket_depth <= 0 => {
-                    return header;
-                }
-                _ => {}
-            }
-        }
-    }
-    header
-}
-
 /// Truncates a declaration header at its own body-opening `{`, tracking
 /// paren AND bracket depth so a parameter type's own braces (Go's
 /// `interface{}`, a C# anonymous-object-adjacent `{}`, etc.) - whether
@@ -4349,79 +4277,6 @@ fn header_before_body_brace(header: &str) -> &str {
         }
     }
     header
-}
-
-fn is_param_untraceable(sig_text: &str, param: &str) -> bool {
-    let bytes = sig_text.as_bytes();
-    let p_bytes = param.as_bytes();
-    if p_bytes.is_empty() {
-        return false;
-    }
-    let mut pos = 0;
-    while let Some(idx) = sig_text[pos..].find(param) {
-        let abs_idx = pos + idx;
-        pos = abs_idx + param.len();
-
-        if abs_idx + param.len() < bytes.len() {
-            let next_char = bytes[abs_idx + param.len()] as char;
-            if next_char.is_alphanumeric() || next_char == '_' {
-                continue;
-            }
-        }
-
-        if abs_idx > 0 {
-            let prev1 = bytes[abs_idx - 1] as char;
-            if prev1 == '*' {
-                if abs_idx > 1 && bytes[abs_idx - 2] as char == '*' {
-                    if abs_idx > 2 {
-                        let prev3 = bytes[abs_idx - 3] as char;
-                        if !prev3.is_alphanumeric() && prev3 != '_' {
-                            return true;
-                        }
-                    } else {
-                        return true;
-                    }
-                } else {
-                    if abs_idx > 1 {
-                        let prev2 = bytes[abs_idx - 2] as char;
-                        if !prev2.is_alphanumeric() && prev2 != '_' {
-                            return true;
-                        }
-                    } else {
-                        return true;
-                    }
-                }
-            } else if prev1 == '&' {
-                if abs_idx > 1 {
-                    let prev2 = bytes[abs_idx - 2] as char;
-                    if !prev2.is_alphanumeric() && prev2 != '_' {
-                        return true;
-                    }
-                } else {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-fn extract_untraceable_params(
-    lines: &[String],
-    fn_def: &syntax::FunctionDef,
-    language: &str,
-) -> Vec<String> {
-    if language != "ruby" {
-        return Vec::new();
-    }
-    let sig_text = get_def_header(lines, fn_def.line);
-    let mut untraceable = Vec::new();
-    for param in &fn_def.params {
-        if is_param_untraceable(&sig_text, param) {
-            untraceable.push(param.clone());
-        }
-    }
-    untraceable
 }
 
 fn extract_methods(
@@ -4498,7 +4353,8 @@ fn extract_methods(
                 callback_params: fn_def.callback_params.clone(),
                 raw_source,
                 normalized_source,
-                untraceable_params: extract_untraceable_params(lines, fn_def, language),
+                untraceable_params: behavior
+                    .untraceable_profile_parameters(&get_def_header(lines, fn_def.line), &fn_def.params),
                 source,
             }
         })
@@ -4527,10 +4383,9 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
                 .supertypes
                 .iter()
                 .map(|supertype| {
-                    if language == "cpp" && supertype.contains('<') {
-                        // Template arguments select a C++ base specialization.
-                        // Erasing them to the forward-declaration symbol loses
-                        // the declaration that owns inherited methods.
+                    if behavior
+                        .is_some_and(|behavior| behavior.preserve_supertype_identity(supertype))
+                    {
                         supertype.clone()
                     } else {
                         canonical_declared_type(document, supertype)
@@ -4656,85 +4511,33 @@ fn method_signature(lines: &[String], fn_def: &syntax::FunctionDef, language: &s
     if !sig.is_empty() {
         return sig;
     }
-
-    match language {
-        "ruby" => {
-            let sig = ruby_signature_before_line(lines, fn_def.line);
-            if sig.starts_with("sig ") {
-                return sig;
-            }
-            String::new()
-        }
-        "python" | "typescript" | "javascript" => source_signature_for(lines, fn_def),
-        // Typed adapters may keep FunctionDef.signature as display text
-        // (`name (arg)`), which loses return annotations required by CFG/DFG.
-        // Their declaration header is the source of truth for static facts.
-        "cpp" => header_before_body_brace(&get_cpp_def_header(lines, fn_def.line))
+    let behavior = crate::syntax::normalized_behavior::behavior_for_name(language);
+    if let Some(header) =
+        behavior.and_then(|behavior| behavior.complete_declaration_header(lines, fn_def.line))
+    {
+        return header_before_body_brace(&header)
             .split_whitespace()
             .collect::<Vec<_>>()
-            .join(" "),
-        "c" | "csharp" | "go" | "java" | "kotlin" | "php" | "rust" | "swift" | "zig" => {
-            header_before_body_brace(&get_def_header(lines, fn_def.line))
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-        }
-        _ => {
-            let params = fn_def.params.join(", ");
-            if params.is_empty() {
-                fn_def.name.clone()
-            } else {
-                format!("{} ({})", fn_def.name, params)
-            }
-        }
+            .join(" ");
     }
-}
+    if behavior.is_some_and(|behavior| behavior.uses_source_declaration_header()) {
+        return header_before_body_brace(&get_def_header(lines, fn_def.line))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
 
-/// Ruby: scan backwards from the def line to find a `sig { ... }` block.
-fn ruby_signature_before_line(lines: &[String], line: usize) -> String {
-    let mut idx = line.saturating_sub(2);
-    if idx >= lines.len() {
-        return String::new();
+    if let Some(signature) =
+        behavior.and_then(|behavior| behavior.source_profile_signature(lines, fn_def))
+    {
+        return signature;
     }
-    // Skip blank lines going backward
-    while idx > 0 && lines[idx].trim().is_empty() {
-        idx = idx.saturating_sub(1);
+    let params = fn_def.params.join(", ");
+    if params.is_empty() {
+        fn_def.name.clone()
+    } else {
+        format!("{} ({})", fn_def.name, params)
     }
-    if lines[idx].trim().starts_with("sig ") {
-        return lines[idx].trim().to_string();
-    }
-    let mut start = idx;
-    loop {
-        if start == 0 {
-            break;
-        }
-        let text = lines[start].trim();
-        if text.starts_with("sig ") {
-            // Join lines from start to idx
-            let joined: String = lines[start..=idx]
-                .iter()
-                .map(|l| l.trim())
-                .collect::<Vec<_>>()
-                .join(" ");
-            // Normalize whitespace
-            let normalized: String = joined.split_whitespace().collect::<Vec<_>>().join(" ");
-            return normalized;
-        }
-        if text.starts_with("def ") || text.starts_with("class ") || text.starts_with("module ") {
-            return String::new();
-        }
-        start = start.saturating_sub(1);
-    }
-    String::new()
-}
-
-/// Python/TypeScript: the raw def line IS the signature.
-fn source_signature_for(lines: &[String], fn_def: &syntax::FunctionDef) -> String {
-    let idx = fn_def.line.saturating_sub(1);
-    if idx >= lines.len() {
-        return String::new();
-    }
-    lines[idx].trim().to_string()
 }
 
 fn method_source(signature: &str, language: &str) -> serde_json::Value {
@@ -4742,7 +4545,8 @@ fn method_source(signature: &str, language: &str) -> serde_json::Value {
         return serde_json::Value::Object(Default::default());
     }
     let mut source = serde_json::Map::new();
-    if language == "ruby" && signature.starts_with("sig ") {
+    let behavior = crate::syntax::normalized_behavior::behavior_for_name(language);
+    if behavior.is_some_and(|behavior| behavior.profile_signature_is_annotation(signature)) {
         source.insert(
             "sig".to_string(),
             serde_json::Value::String(signature.to_string()),
@@ -4753,7 +4557,12 @@ fn method_source(signature: &str, language: &str) -> serde_json::Value {
         );
         source.insert(
             "type_system".to_string(),
-            serde_json::Value::String("sorbet".to_string()),
+            serde_json::Value::String(
+                behavior
+                    .map(|behavior| behavior.profile_type_system())
+                    .unwrap_or("native")
+                    .to_string(),
+            ),
         );
         source.insert(
             "source".to_string(),
@@ -4766,26 +4575,21 @@ fn method_source(signature: &str, language: &str) -> serde_json::Value {
         );
         source.insert(
             "type_system".to_string(),
-            serde_json::Value::String(language_type_system(language).to_string()),
+            serde_json::Value::String(
+                behavior
+                    .map(|behavior| behavior.profile_type_system())
+                    .unwrap_or("native")
+                    .to_string(),
+            ),
         );
     }
     serde_json::Value::Object(source)
 }
 
-fn language_type_system(language: &str) -> &str {
-    match language {
-        "ruby" => "sorbet",
-        "python" => "python-typing",
-        "typescript" => "typescript",
-        "javascript" => "typescript",
-        "go" => "go-types",
-        "rust" => "rust-types",
-        "java" => "java-types",
-        "kotlin" => "kotlin-types",
-        "swift" => "swift-types",
-        "csharp" => "csharp-types",
-        _ => "native",
-    }
+fn profile_type_system(language: &str) -> &'static str {
+    crate::syntax::normalized_behavior::behavior_for_name(language)
+        .map(|behavior| behavior.profile_type_system())
+        .unwrap_or("native")
 }
 
 // ---------------------------------------------------------------------------
@@ -4829,11 +4633,9 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
     }
 
     // Add state_writes not already covered by declarations
-    let is_static = matches!(
-        language,
-        "rust" | "go" | "zig" | "c" | "cpp" | "csharp" | "java" | "swift" | "kotlin"
-    );
-    let valid_owners: BTreeSet<String> = if is_static {
+    let requires_declared_owner = crate::syntax::normalized_behavior::behavior_for_name(language)
+        .is_some_and(|behavior| behavior.state_writes_require_declared_owner());
+    let valid_owners: BTreeSet<String> = if requires_declared_owner {
         document.owner_defs.iter().map(|o| o.name.clone()).collect()
     } else {
         document
@@ -5153,7 +4955,7 @@ fn extract_type_definitions(
         if clean_name.starts_with("self.") {
             clean_name = clean_name.strip_prefix("self.").unwrap().to_string();
         }
-        let ts = language_type_system(language);
+        let ts = profile_type_system(language);
         out.push(TypeDefinition {
             id: [
                 language,
@@ -5185,7 +4987,7 @@ fn extract_type_definitions(
 
     // Type aliases from Document type_aliases map
     for (name, target) in &document.type_aliases {
-        let ts = language_type_system(language);
+        let ts = profile_type_system(language);
         let (owner, short_name) = AliasResolver::resolve(name);
         let line = document.type_alias_lines.get(name).copied().unwrap_or(0);
         out.push(TypeDefinition {
@@ -5223,7 +5025,7 @@ fn extract_type_definitions(
             Some(t) if !t.is_empty() => t.clone(),
             _ => continue,
         };
-        let ts = language_type_system(language);
+        let ts = profile_type_system(language);
         out.push(TypeDefinition {
             id: [
                 language,
@@ -5269,7 +5071,7 @@ fn extract_type_definitions(
                 .map(|fd| fd.line)
                 .unwrap_or(0)
         });
-        let ts = language_type_system(language);
+        let ts = profile_type_system(language);
         let params: Vec<serde_json::Value> = param_types
             .iter()
             .map(|(pname, ptype)| {
@@ -5457,13 +5259,21 @@ struct SignatureParser;
 
 impl SignatureParser {
     fn parse(sig: &str, language: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-        match language {
-            "ruby" => parse_sorbet_signature(sig),
-            "python" => parse_python_signature(sig),
-            "typescript" | "javascript" => parse_typescript_signature(sig),
-            "c" | "cpp" | "csharp" | "java" => parse_c_family_signature(sig),
-            _ => parse_generic_signature(sig),
-        }
+        let signature = crate::syntax::normalized_behavior::behavior_for_name(language)
+            .map(|behavior| behavior.parse_signature(sig))
+            .unwrap_or_default();
+        let params = signature
+            .params
+            .into_iter()
+            .filter(|(name, declared)| !name.is_empty() && !declared.is_empty())
+            .map(|(name, declared)| {
+                BTreeMap::from([
+                    ("name".to_string(), name),
+                    ("type".to_string(), declared),
+                ])
+            })
+            .collect();
+        (signature.return_type, params)
     }
 }
 
@@ -5477,61 +5287,6 @@ impl AliasResolver {
             (String::new(), name.to_string())
         }
     }
-}
-
-/// Sorbet sig: sig { params(name: Type).returns(ReturnType) }
-fn parse_sorbet_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let sig = sig.trim();
-    if !sig.starts_with("sig") {
-        return (None, Vec::new());
-    }
-
-    let return_type = sorbet_extract(sig, ".returns(").or_else(|| sorbet_extract(sig, "returns("));
-    let params = sorbet_extract_params(sig);
-    (return_type, params)
-}
-
-fn sorbet_extract(sig: &str, marker: &str) -> Option<String> {
-    let start = sig.find(marker)?;
-    let inner = &sig[start + marker.len()..];
-    let mut depth = 1u32;
-    let mut end = 0usize;
-    for (i, c) in inner.char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = i;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    if end > 0 {
-        Some(inner[..end].trim().to_string())
-    } else {
-        None
-    }
-}
-
-fn sorbet_extract_params(sig: &str) -> Vec<BTreeMap<String, String>> {
-    let params_str =
-        match sorbet_extract(sig, ".params(").or_else(|| sorbet_extract(sig, "params(")) {
-            Some(p) => p,
-            None => return Vec::new(),
-        };
-    let mut out = Vec::new();
-    for entry in split_top_level_params(&params_str) {
-        if let Some((name, type_part)) = entry.split_once(':') {
-            let mut map = BTreeMap::new();
-            map.insert("name".to_string(), name.trim().to_string());
-            map.insert("type".to_string(), type_part.trim().to_string());
-            out.push(map);
-        }
-    }
-    out
 }
 
 pub(crate) fn split_top_level_params(params: &str) -> Vec<String> {
@@ -5554,253 +5309,6 @@ pub(crate) fn split_top_level_params(params: &str) -> Vec<String> {
         out.push(remainder);
     }
     out
-}
-
-fn parse_python_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let sig = sig.trim();
-    let paren_open = match sig.find('(') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let paren_close = match sig.rfind(')') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let params_str = &sig[paren_open + 1..paren_close];
-    let return_type = sig[paren_close + 1..].trim().strip_prefix("->").map(|s| {
-        let mut cleaned = s.trim();
-        if cleaned.ends_with(": ...") {
-            cleaned = cleaned[..cleaned.len() - 5].trim();
-        }
-        if cleaned.ends_with(':') {
-            cleaned = cleaned[..cleaned.len() - 1].trim();
-        }
-        cleaned.to_string()
-    });
-
-    let params: Vec<BTreeMap<String, String>> = params_str
-        .split(',')
-        .filter_map(|entry| {
-            let entry = entry.trim();
-            if entry.is_empty() || entry == "self" || entry == "cls" {
-                return None;
-            }
-            let (name, type_part) = if let Some((name, rest)) = entry.split_once(':') {
-                let name = name.trim().trim_end_matches('=');
-                (name.to_string(), rest.trim().to_string())
-            } else {
-                return None;
-            };
-            if type_part.is_empty() {
-                return None;
-            }
-            let mut map = BTreeMap::new();
-            map.insert("name".to_string(), name);
-            map.insert("type".to_string(), type_part);
-            Some(map)
-        })
-        .collect();
-
-    (return_type, params)
-}
-
-fn parse_typescript_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let sig = sig.trim();
-    let paren_open = match sig.find('(') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let paren_close = match sig.rfind(')') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let params_str = &sig[paren_open + 1..paren_close];
-    let return_type = sig[paren_close + 1..].trim().strip_prefix(':').map(|s| {
-        s.trim()
-            .trim_end_matches(';')
-            .trim_end_matches('{')
-            .trim()
-            .to_string()
-    });
-
-    let params: Vec<BTreeMap<String, String>> = params_str
-        .split(',')
-        .filter_map(|entry| {
-            let entry = entry.trim();
-            if entry.is_empty() {
-                return None;
-            }
-            let entry = entry.trim_start_matches("...");
-            let (name, type_part) = if let Some((name, rest)) = entry.split_once(':') {
-                let name = name.trim().trim_end_matches('?');
-                (name.to_string(), rest.trim().to_string())
-            } else {
-                return None;
-            };
-            if type_part.is_empty() {
-                return None;
-            }
-            let mut map = BTreeMap::new();
-            map.insert("name".to_string(), name);
-            map.insert("type".to_string(), type_part);
-            Some(map)
-        })
-        .collect();
-
-    (return_type, params)
-}
-
-fn parse_generic_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let sig = sig.trim();
-    let paren_open = match sig.find('(') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let paren_close = match sig.rfind(')') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let params_str = &sig[paren_open + 1..paren_close];
-    let after_paren = sig[paren_close + 1..].trim();
-
-    let mut return_type = None;
-    if let Some(ret) = after_paren.strip_prefix("->") {
-        return_type = Some(
-            ret.trim()
-                .trim_end_matches('{')
-                .trim_end_matches(';')
-                .trim()
-                .to_string(),
-        );
-    } else if let Some(ret) = after_paren.strip_prefix(':') {
-        return_type = Some(
-            ret.trim()
-                .trim_end_matches('{')
-                .trim_end_matches(';')
-                .trim()
-                .to_string(),
-        );
-    } else if !after_paren.is_empty() && after_paren != "{" && after_paren != ";" {
-        return_type = Some(
-            after_paren
-                .trim()
-                .trim_end_matches('{')
-                .trim_end_matches(';')
-                .trim()
-                .to_string(),
-        );
-    }
-
-    let params: Vec<BTreeMap<String, String>> = params_str
-        .split(',')
-        .filter_map(|entry| {
-            let entry = entry.trim();
-            if entry.is_empty() || entry == "self" || entry == "this" {
-                return None;
-            }
-            let mut name = String::new();
-            let mut ty = String::new();
-            if let Some((n, t)) = entry.split_once(':') {
-                name = n.trim().to_string();
-                ty = t.trim().to_string();
-            } else {
-                let parts: Vec<&str> = entry.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    // Go style "name Type" or Java style "Type name"
-                    // If the first looks like a standard type or has uppercase, it's Java style, but simpler to check the last word
-                    let last = parts.last().unwrap();
-                    if last.chars().next().unwrap_or(' ').is_ascii_lowercase() {
-                        // Java/C: "Type name"
-                        name = last.to_string();
-                        ty = parts[0..parts.len() - 1].join(" ");
-                    } else {
-                        // Go: "name Type"
-                        name = parts[0].to_string();
-                        ty = parts[1..].join(" ");
-                    }
-                }
-            }
-            if !name.is_empty() && !ty.is_empty() {
-                let mut map = BTreeMap::new();
-                map.insert("name".to_string(), name);
-                map.insert("type".to_string(), ty);
-                Some(map)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    (return_type, params)
-}
-
-fn parse_c_family_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    // A trailing C++ cv/ref qualifier or source comment is not a return type.
-    // C-family return types are declared before the function name; parse that
-    // prefix authoritatively and use the generic helper only for parameters.
-    let sig = sig.split("//").next().unwrap_or(sig).trim();
-    let (_, params) = parse_generic_signature(sig);
-    let Some(paren_open) = sig.find('(') else {
-        return (None, params);
-    };
-    let mut paren_depth = 0usize;
-    let mut paren_close = None;
-    for (offset, character) in sig[paren_open..].char_indices() {
-        match character {
-            '(' => paren_depth += 1,
-            ')' => {
-                paren_depth = paren_depth.saturating_sub(1);
-                if paren_depth == 0 {
-                    paren_close = Some(paren_open + offset);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let trailing_return_type = paren_close
-        .and_then(|close| sig[close + 1..].split_once("->"))
-        .map(|(_, declared)| declared.trim().trim_end_matches(['{', ';']).trim())
-        .filter(|declared| !declared.is_empty())
-        .map(str::to_string);
-
-    let prefix = sig[..paren_open].trim();
-    let return_prefix = if let Some(operator) = prefix.rfind(" operator") {
-        &prefix[..operator]
-    } else if prefix.starts_with("operator ") {
-        ""
-    } else {
-        prefix
-            .rsplit_once(char::is_whitespace)
-            .map(|(before, _name)| before)
-            .unwrap_or_default()
-    };
-    let mut words = return_prefix.split_whitespace().collect::<Vec<_>>();
-    while words.first().is_some_and(|word| {
-        matches!(
-            *word,
-            "public"
-                | "private"
-                | "protected"
-                | "internal"
-                | "static"
-                | "virtual"
-                | "override"
-                | "abstract"
-                | "sealed"
-                | "partial"
-                | "async"
-                | "extern"
-                | "unsafe"
-                | "readonly"
-                | "inline"
-                | "const"
-        )
-    }) {
-        words.remove(0);
-    }
-    let return_type = trailing_return_type.or_else(|| (!words.is_empty()).then(|| words.join(" ")));
-    (return_type, params)
 }
 
 // ---------------------------------------------------------------------------
@@ -6293,86 +5801,49 @@ fn count_lines(_lines: &[String], _start_line: usize, code: &str) -> usize {
 
 fn infer_literal_type(value: &str, language: &str) -> String {
     let value = value.trim();
-    let lang = language.to_lowercase();
+    let behavior = crate::syntax::normalized_behavior::behavior_for_name(language);
     if value.is_empty() {
-        return if lang == "javascript" || lang == "typescript" {
-            "any".to_string()
-        } else if lang == "python" {
-            "Any".to_string()
-        } else {
-            "T.untyped".to_string()
-        };
+        return behavior
+            .map(|behavior| behavior.untyped_type())
+            .unwrap_or_else(|| "T.untyped".to_string());
+    }
+    if let Some(native) =
+        behavior.and_then(|behavior| behavior.native_profile_literal_type(value))
+    {
+        return native;
     }
     if value.starts_with('"') || value.starts_with('\'') {
         return "String".to_string();
     }
-    if value.starts_with(':') {
-        return "Symbol".to_string();
-    }
     if value == "true" || value == "false" {
-        return if lang == "javascript" || lang == "typescript" {
-            "boolean".to_string()
-        } else {
-            "T::Boolean".to_string()
-        };
+        return "T::Boolean".to_string();
     }
     if value == "nil" || value == "null" || value == "None" {
-        return if lang == "javascript" || lang == "typescript" {
-            "null".to_string()
-        } else {
-            "NilClass".to_string()
-        };
+        return "NilClass".to_string();
     }
     if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
-        return if lang == "javascript" || lang == "typescript" || lang == "lua" {
-            "number".to_string()
-        } else if value.parse::<i64>().is_ok() {
+        return if value.parse::<i64>().is_ok() {
             "Integer".to_string()
         } else {
             "Float".to_string()
         };
     }
-    if value.starts_with('[')
-        || value.starts_with("%i")
-        || value.starts_with("%I")
-        || value.starts_with("%w")
-        || value.starts_with("%W")
-    {
-        return match lang.as_str() {
-            "python" => "List[Any]".to_string(),
-            "typescript" | "javascript" => "any[]".to_string(),
-            "go" => "[]any".to_string(),
-            "rust" => "Vec<Value>".to_string(),
-            "java" | "kotlin" => "List<Object>".to_string(),
-            _ => "T::Array[T.untyped]".to_string(),
-        };
+    if value.starts_with('[') {
+        return behavior
+            .map(|behavior| behavior.untyped_array_type())
+            .unwrap_or_else(|| "T::Array[T.untyped]".to_string());
     }
     if value.starts_with('{') {
-        return match lang.as_str() {
-            "python" => "Dict[Any, Any]".to_string(),
-            "typescript" | "javascript" => "Record<any, any>".to_string(),
-            "go" => "map[string]any".to_string(),
-            "rust" => "HashMap<String, Value>".to_string(),
-            "java" | "kotlin" => "Map<String, Object>".to_string(),
-            _ => "T::Hash[T.untyped, T.untyped]".to_string(),
-        };
-    }
-    if value.starts_with("%q") || value.starts_with("%Q") {
-        return "String".to_string();
-    }
-    if value.starts_with("%s") {
-        return "Symbol".to_string();
+        return behavior
+            .map(|behavior| behavior.untyped_hash_type())
+            .unwrap_or_else(|| "T::Hash[T.untyped, T.untyped]".to_string());
     }
     if value.chars().next().is_some_and(|c| c.is_uppercase()) {
         return value.to_string();
     }
-    if lang == "javascript" || lang == "typescript" {
-        "any".to_string()
-    } else if lang == "python" {
-        "Any".to_string()
-    } else {
-        "T.untyped".to_string()
-    }
+    behavior
+        .map(|behavior| behavior.untyped_type())
+        .unwrap_or_else(|| "T.untyped".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -6471,24 +5942,6 @@ fn declaration_namespace(document: &Document, span: [usize; 4]) -> Option<&str> 
             (!document.symbol_scope.namespace.is_empty())
                 .then_some(document.symbol_scope.namespace.as_str())
         })
-}
-
-fn cpp_symbol_without_template_arguments(name: &str) -> String {
-    let mut output = String::with_capacity(name.len());
-    let mut depth = 0usize;
-    for character in name.chars() {
-        match character {
-            '<' => depth += 1,
-            '>' if depth > 0 => depth -= 1,
-            _ if depth == 0 => output.push(character),
-            _ => {}
-        }
-    }
-    if depth == 0 {
-        output
-    } else {
-        name.to_string()
-    }
 }
 
 fn canonical_symbol_owner(
@@ -6749,13 +6202,13 @@ fn flow_receiver_type(
     let exact = (types.len() == 1)
         .then(|| types.into_iter().next())
         .flatten();
-    if exact.is_some() || document.language.as_str() != "java" {
+    if exact.is_some() {
         return exact;
     }
 
-    // Java locals retain their declared type across assignments. CFG flow
-    // may be incomplete at a branch node even though the declaration fact is
-    // present on the same normalized place.
+    let behavior = crate::syntax::normalized_behavior::behavior(document.language);
+    // Adapters may prove that a declaration remains authoritative even when
+    // the exact CFG join at this call site is incomplete.
     let declared = document
         .flow_types
         .iter()
@@ -6763,23 +6216,12 @@ fn flow_receiver_type(
         .flat_map(|fact| fact.types.iter())
         .filter_map(|name| name.strip_prefix("declared:"))
         .map(str::trim)
-        .filter(|name| valid_java_declared_local_type(name))
+        .filter(|name| behavior.declared_flow_type_fallback(name))
         .map(str::to_string)
         .collect::<BTreeSet<_>>();
     (declared.len() == 1)
         .then(|| declared.into_iter().next())
         .flatten()
-}
-
-fn valid_java_declared_local_type(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .next()
-            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
-        && !name.contains(['=', '(', ')', ';', '\n'])
-        && !name.contains("//")
-        && !name.contains("&&")
 }
 
 /// Resolve the type of a `base.field` (or `base.field[i]`) receiver expression:
@@ -7511,25 +6953,18 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             let instance_receiver_owner = instance_receiver_type
                 .as_deref()
                 .and_then(|type_name| exact_document_owner(document, type_name));
+            let receiver_denotes_current_owner = instance_receiver_type
+                .as_deref()
+                .is_some_and(|type_name| {
+                    behavior.receiver_denotes_current_owner(type_name, &call.owner)
+                });
             let instance_receiver_symbol = instance_receiver_type
                 .as_deref()
                 .and_then(|type_name| {
-                    (language == "cpp"
-                        && call.owner.contains('<')
-                        && owner_name_matches(type_name, &call.owner))
+                    receiver_denotes_current_owner
                     .then(|| canonical_receiver_symbol(document, &call.owner))
                     .flatten()
                     .or_else(|| canonical_declared_type(document, type_name))
-                })
-                .or_else(|| {
-                    (language == "cpp")
-                        .then(|| {
-                            instance_receiver_type
-                                .as_deref()
-                                .filter(|type_name| owner_name_matches(type_name, &call.owner))
-                                .and_then(|_| canonical_receiver_symbol(document, &call.owner))
-                        })
-                        .flatten()
                 });
             let receiver_symbol_origin = if static_receiver_symbol.is_some() {
                 canonical_receiver_symbol_origin(document, &call.receiver).or_else(|| {
@@ -7538,12 +6973,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         .flatten()
                 })
             } else {
-                (language == "cpp"
-                    && call.owner.contains('<')
-                    && instance_receiver_type
-                        .as_deref()
-                        .is_some_and(|type_name| owner_name_matches(type_name, &call.owner)))
-                .then(|| "current_template_specialization".to_string())
+                receiver_denotes_current_owner
+                .then(|| "current_owner_declaration".to_string())
                 .or_else(|| {
                     instance_receiver_type
                         .as_deref()
@@ -7722,22 +7153,20 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 lexical_symbol: imported_lexical_symbol.or_else(|| {
                     (implicit && document.symbol_scope.canonical)
                         .then(|| {
-                            if language == "cpp" {
-                                let symbol = cpp_symbol_without_template_arguments(&call.message);
-                                if symbol.contains("::") {
-                                    Some(symbol)
-                                } else if source_dispatch == Some("top") {
-                                    source_namespace
-                                        .map(|namespace| format!("{namespace}::{symbol}"))
+                            behavior
+                                .explicit_lexical_call_symbol(
+                                    &call.message,
+                                    source_namespace,
+                                    source_dispatch == Some("top"),
+                                )
+                                .or_else(|| {
+                                if bare_names_package_function {
+                                source_namespace
+                                    .map(|namespace| format!("{namespace}::{}", call.message))
                                 } else {
                                     None
                                 }
-                            } else if bare_names_package_function {
-                                source_namespace
-                                    .map(|namespace| format!("{namespace}::{}", call.message))
-                            } else {
-                                None
-                            }
+                            })
                         })
                         .flatten()
                 }),
@@ -8507,7 +7936,7 @@ end
 
     pub(crate) fn test_python_signature_parsing_impl() {
         let sig = "def my_func(a: int, b: str = 'hello') -> str:";
-        let (return_type, params) = parse_python_signature(sig);
+        let (return_type, params) = SignatureParser::parse(sig, "python");
         assert_eq!(return_type, Some("str".to_string()));
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].get("name").unwrap(), "a");
@@ -8515,20 +7944,21 @@ end
         assert_eq!(params[1].get("name").unwrap(), "b");
         assert_eq!(params[1].get("type").unwrap(), "str = 'hello'");
 
-        let (r, p) = parse_python_signature("def no_paren");
+        let (r, p) = SignatureParser::parse("def no_paren", "python");
         assert!(r.is_none());
         assert!(p.is_empty());
 
-        let (r, _p) = parse_python_signature("def my_func(a: int");
+        let (r, _p) = SignatureParser::parse("def my_func(a: int", "python");
         assert!(r.is_none());
 
-        let (_r, p) = parse_python_signature("def my_func(self, cls, , a, b: ) -> str:");
+        let (_r, p) =
+            SignatureParser::parse("def my_func(self, cls, , a, b: ) -> str:", "python");
         assert_eq!(p.len(), 0);
     }
 
     pub(crate) fn test_typescript_signature_parsing_impl() {
         let sig = "(a: number, b?: string, ...c: any[]): void;";
-        let (return_type, params) = parse_typescript_signature(sig);
+        let (return_type, params) = SignatureParser::parse(sig, "typescript");
         assert_eq!(return_type, Some("void".to_string()));
         assert_eq!(params.len(), 3);
         assert_eq!(params[0].get("name").unwrap(), "a");
@@ -8538,14 +7968,14 @@ end
         assert_eq!(params[2].get("name").unwrap(), "c");
         assert_eq!(params[2].get("type").unwrap(), "any[]");
 
-        let (r, p) = parse_typescript_signature("no_paren");
+        let (r, p) = SignatureParser::parse("no_paren", "typescript");
         assert!(r.is_none());
         assert!(p.is_empty());
 
-        let (r, _p) = parse_typescript_signature("(a: number");
+        let (r, _p) = SignatureParser::parse("(a: number", "typescript");
         assert!(r.is_none());
 
-        let (_r, p) = parse_typescript_signature("( , a, b: ): void");
+        let (_r, p) = SignatureParser::parse("( , a, b: ): void", "typescript");
         assert_eq!(p.len(), 0);
     }
 
@@ -9049,22 +8479,24 @@ def py_fn(a: int) -> str:
     }
 
     pub(crate) fn test_sorbet_signature_parsing_impl() {
-        let (r, _p) = parse_sorbet_signature("def foo");
+        let (r, _p) = SignatureParser::parse("def foo", "ruby");
         assert!(r.is_none());
 
-        let (r, p) = parse_sorbet_signature("sig { .params(x: Integer).returns(String) }");
+        let (r, p) =
+            SignatureParser::parse("sig { .params(x: Integer).returns(String) }", "ruby");
         assert_eq!(r, Some("String".to_string()));
         assert_eq!(p.len(), 1);
         assert_eq!(p[0].get("name").unwrap(), "x");
         assert_eq!(p[0].get("type").unwrap(), "Integer");
 
-        let (r, p) = parse_sorbet_signature(
+        let (r, p) = SignatureParser::parse(
             "sig { .params(x: T::Array[Integer], y: T::Hash[Symbol, String]).returns(String) }",
+            "ruby",
         );
         assert_eq!(r, Some("String".to_string()));
         assert_eq!(p.len(), 2);
 
-        let (r, _p) = parse_sorbet_signature("sig { .params(x: Integer");
+        let (r, _p) = SignatureParser::parse("sig { .params(x: Integer", "ruby");
         assert!(r.is_none());
     }
 
@@ -9093,17 +8525,17 @@ def py_fn(a: int) -> str:
     }
 
     pub(crate) fn test_language_type_system_impl() {
-        assert_eq!(language_type_system("ruby"), "sorbet");
-        assert_eq!(language_type_system("python"), "python-typing");
-        assert_eq!(language_type_system("typescript"), "typescript");
-        assert_eq!(language_type_system("javascript"), "typescript");
-        assert_eq!(language_type_system("go"), "go-types");
-        assert_eq!(language_type_system("rust"), "rust-types");
-        assert_eq!(language_type_system("java"), "java-types");
-        assert_eq!(language_type_system("kotlin"), "kotlin-types");
-        assert_eq!(language_type_system("swift"), "swift-types");
-        assert_eq!(language_type_system("csharp"), "csharp-types");
-        assert_eq!(language_type_system("unknown"), "native");
+        assert_eq!(profile_type_system("ruby"), "sorbet");
+        assert_eq!(profile_type_system("python"), "python-typing");
+        assert_eq!(profile_type_system("typescript"), "typescript");
+        assert_eq!(profile_type_system("javascript"), "typescript");
+        assert_eq!(profile_type_system("go"), "go-types");
+        assert_eq!(profile_type_system("rust"), "rust-types");
+        assert_eq!(profile_type_system("java"), "java-types");
+        assert_eq!(profile_type_system("kotlin"), "kotlin-types");
+        assert_eq!(profile_type_system("swift"), "swift-types");
+        assert_eq!(profile_type_system("csharp"), "csharp-types");
+        assert_eq!(profile_type_system("unknown"), "native");
     }
 
     pub(crate) fn test_profile_extra_coverage_impl() {
@@ -9118,7 +8550,8 @@ def py_fn(a: int) -> str:
         assert_eq!(s_name, "SimpleName");
 
         // 3. sorbet_extract nested parentheses
-        let (res_type, params) = parse_sorbet_signature("sig { .returns(Nested(Type)) }");
+        let (res_type, params) =
+            SignatureParser::parse("sig { .returns(Nested(Type)) }", "ruby");
         assert_eq!(res_type, Some("Nested(Type)".to_string()));
         assert!(params.is_empty());
 

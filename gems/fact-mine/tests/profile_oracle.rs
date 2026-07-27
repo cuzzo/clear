@@ -2322,6 +2322,13 @@ class Interface {
 public:
     virtual void dispatch() = 0;
 };
+class Outer {
+    class Nested {
+        virtual void nested() = 0;
+    };
+public:
+    void concrete() {}
+};
 struct Store {
     std::vector<std::shared_ptr<Item>> pointers;
     std::vector<std::shared_ptr<Interface>> interfaces;
@@ -2348,6 +2355,22 @@ struct Store {
 "#,
     )?;
     let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    assert_eq!(
+        document
+            .owner_defs
+            .iter()
+            .find(|owner| owner.name == "Outer")
+            .map(|owner| owner.kind.as_str()),
+        Some("class")
+    );
+    assert_eq!(
+        document
+            .owner_defs
+            .iter()
+            .find(|owner| owner.name.ends_with("Nested"))
+            .map(|owner| owner.kind.as_str()),
+        Some("abstract_class")
+    );
     let output = profile::extract(&document, Profile::Espalier);
     for function in ["range", "index", "iterator"] {
         let work = output
@@ -2403,7 +2426,7 @@ struct Box<T, typename Gate<T>::type> {
     assert!(reset.target.is_some(), "{reset:?}");
     assert_eq!(
         reset.receiver_symbol_origin.as_deref(),
-        Some("current_template_specialization")
+        Some("current_owner_declaration")
     );
     Ok(())
 }
