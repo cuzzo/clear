@@ -6770,6 +6770,27 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 )
             })
             .flatten();
+            let inherited_receiver_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
+                && declared_receiver_type.is_none()
+                && flow_receiver_type.is_none()
+                && state_receiver_type.is_none()
+                && field_access_receiver_type.is_none()
+                && inferred_collection_element_type.is_none()
+                && implicit)
+                .then(|| {
+                    document
+                        .owner_defs
+                        .iter()
+                        .find(|owner| owner.name == call.owner)
+                        .and_then(|owner| {
+                            behavior.inherited_call_receiver_type(
+                                &owner.supertypes,
+                                &call.message,
+                            )
+                        })
+                })
+                .flatten();
             let receiver_type_origin = if explicit_receiver_type.is_some() {
                 Some("explicit_native_cast".to_string())
             } else if declared_receiver_type.is_some() {
@@ -6782,6 +6803,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 Some("field_access".to_string())
             } else if inferred_collection_element_type.is_some() {
                 Some("inferred_collection_element".to_string())
+            } else if inherited_receiver_type.is_some() {
+                Some("declared_supertype".to_string())
             } else {
                 None
             };
@@ -6791,7 +6814,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 .or(flow_receiver_type)
                 .or(state_receiver_type)
                 .or(field_access_receiver_type)
-                .or(inferred_collection_element_type);
+                .or(inferred_collection_element_type)
+                .or(inherited_receiver_type);
             let known_complexity = instance_receiver_type
                 .as_deref()
                 .map(|type_name| TypeExpr::parse(type_name, language))
