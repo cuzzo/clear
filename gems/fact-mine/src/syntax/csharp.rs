@@ -206,6 +206,10 @@ const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    fn nested_function_is_local_callable(&self, _function: &Node) -> bool {
+        true
+    }
+
     // C-family indexers render a local as `Type name` - the type leads.
     fn parse_variable_declaration(&self, text: &str) -> Option<String> {
         let text = text.trim().trim_end_matches(';').trim();

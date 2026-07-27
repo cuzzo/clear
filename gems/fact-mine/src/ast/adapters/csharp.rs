@@ -539,6 +539,13 @@ class Widget : Parent {
             "methods={:?}",
             output.methods
         );
+        assert!(
+            output
+                .complexity_facts
+                .iter()
+                .any(|fact| fact.function == "Local"),
+            "C# local functions must receive CFG/DFG complexity facts"
+        );
         Ok(())
     }
 
