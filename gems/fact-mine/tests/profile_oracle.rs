@@ -1771,6 +1771,42 @@ void update(std::map<int, int>& values, std::set<int>& keys) {
 }
 
 #[test]
+fn cpp_proven_file_stream_and_json_receivers_use_reviewed_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"void read(const char * path, nlohmann::json& value) {
+    std::ifstream input;
+    input.exceptions(1);
+    input.open(path);
+    value.at("key");
+    value.get_to(value);
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for (message, expected) in [
+        ("exceptions", "O(1)"),
+        ("open", "O(N)"),
+        ("at", "O(N)"),
+        ("get_to", "O(N)"),
+    ] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "read" && call.message == message)
+            .with_context(|| format!("missing {message}"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some(expected),
+            "{message}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn cpp_initializer_calls_do_not_hide_local_receiver_types() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(

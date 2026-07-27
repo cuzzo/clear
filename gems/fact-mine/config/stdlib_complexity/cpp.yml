@@ -32,6 +32,7 @@ Hash:
   clear: linear_scan
   erase: linear_scan
   insert: linear_scan
+  emplace: linear_scan
   lower_bound: linear_scan
   upper_bound: linear_scan
   swap: constant
@@ -76,12 +77,31 @@ StringStream:
   eof: constant
 OutputStream:
   eof: constant
+FileStream:
+  # CPU work is bounded by the path length; filesystem latency is excluded
+  # from the structural Big-O contract.
+  open: linear_scan
+  close: constant
+  is_open: constant
+  exceptions: constant
+  eof: constant
+Json:
+  # nlohmann::json object representation is configurable. Linear bounds are
+  # conservative across ordered objects, arrays, parsing, and conversion.
+  at: linear_scan
+  get: linear_materialize
+  get_to: linear_materialize
+  contains: linear_scan
+  find: linear_scan
+  dump: linear_materialize
+  parse: linear_materialize
 Namespace:
   std: declaration
 Intrinsic:
   # These selector-only spellings are consumed after a SCIP symbol proves
   # `std` ownership. Their standard semantics do not execute user callbacks.
   std.move: constant
+  'std::move': constant
   std.forward: constant
   std.addressof: constant
   std.get: constant

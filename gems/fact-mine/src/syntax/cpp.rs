@@ -51,6 +51,23 @@ pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
         .next()
         .unwrap_or_default()
         .trim();
+    let normalized = source.trim().trim_start_matches("const ").trim();
+    if normalized.starts_with("std::")
+        && matches!(
+            terminal,
+            "fstream"
+                | "ifstream"
+                | "ofstream"
+                | "wfstream"
+                | "wifstream"
+                | "wofstream"
+        )
+    {
+        return TypeExpr::Primitive("FileStream".to_string());
+    }
+    if normalized.starts_with("nlohmann::") && matches!(terminal, "json" | "basic_json") {
+        return TypeExpr::Primitive("Json".to_string());
+    }
     match terminal {
         "ostringstream"
         | "wostringstream"
