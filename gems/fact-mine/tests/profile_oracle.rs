@@ -2199,6 +2199,49 @@ func (w *wrapper) projected() { w.worker.fn(1) }
 }
 
 #[test]
+fn csharp_declared_delegate_fields_are_parametric_callbacks() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".cs").tempfile()?;
+    tmp.write_all(
+        br#"class Worker {
+  readonly System.Action<int> _send;
+  readonly System.Func<int, bool> _accept;
+
+  public Worker(System.Action<int> send, System.Func<int, bool> accept) {
+    _send = send;
+    _accept = accept;
+  }
+
+  public bool Run(int value) {
+    _send(value);
+    return _accept(value);
+  }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::CSharp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.message == "_send" || call.message == "_accept")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 2, "{calls:#?}");
+    assert!(
+        calls.iter().all(|call| {
+            call.callback_receiver
+                && call.known_time_complexity.as_deref() == Some("O(C)")
+                && call.complexity_bound_quality.as_deref()
+                    == Some("upper_bound_parametric_callback_once")
+        }),
+        "{calls:#?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn ruby_calculator_extracts_methods() -> Result<()> {
     let file = examples_dir().join("ruby_calculator.rb");
     let document = syntax::parse_file(file.clone(), Language::Ruby)

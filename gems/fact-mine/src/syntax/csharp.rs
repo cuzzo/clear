@@ -210,6 +210,24 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         true
     }
 
+    fn declared_callable_cost(&self, declared_type: &str) -> Option<String> {
+        let nominal = declared_type
+            .trim()
+            .trim_start_matches("readonly ")
+            .trim_start_matches("static ")
+            .trim_end_matches('?')
+            .rsplit('.')
+            .next()
+            .unwrap_or(declared_type);
+        (nominal == "Action"
+            || nominal.starts_with("Action<")
+            || nominal.starts_with("Func<"))
+        .then(|| "callback_once".to_string())
+        .or_else(|| {
+            super::normalized_behavior::configured_callable_type_cost("csharp", declared_type)
+        })
+    }
+
     // C-family indexers render a local as `Type name` - the type leads.
     fn parse_variable_declaration(&self, text: &str) -> Option<String> {
         let text = text.trim().trim_end_matches(';').trim();
