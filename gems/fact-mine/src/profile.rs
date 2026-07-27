@@ -6586,6 +6586,25 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                                 })
                                 .map(|_| "reflective_once".to_string())
                         })
+                        .or_else(|| {
+                            (implicit && !call.message.is_empty())
+                                .then(|| {
+                                    self::declared_receiver_type(
+                                        document,
+                                        source_definition,
+                                        &call.message,
+                                    )
+                                })
+                                .flatten()
+                                .filter(|declared_type| {
+                                    declared_type_is_template_dependent(
+                                        document,
+                                        source_definition,
+                                        declared_type,
+                                    )
+                                })
+                                .map(|_| "reflective_once".to_string())
+                        })
                 })
                 .flatten();
             let parametric_complexity = parametric_cost

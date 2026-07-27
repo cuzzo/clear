@@ -125,7 +125,7 @@ fn cpp_type_aliases(source: &str) -> (BTreeMap<String, String>, BTreeMap<String,
     (aliases, lines)
 }
 
-fn cpp_identifier_tokens(source: &str) -> impl Iterator<Item = &str> {
+fn cpp_identifier_tokens(source: &str) -> impl DoubleEndedIterator<Item = &str> {
     source
         .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
         .filter(|token| {
@@ -150,6 +150,12 @@ fn cpp_declared_template_type_names(declaration: &str) -> BTreeSet<String> {
                 .iter()
                 .position(|token| matches!(*token, "typename" | "class"))
                 .and_then(|position| tokens.get(position + 1))
+                // C++20 constrained parameters spell the concept instead of
+                // `typename` (`template <facade F>`). The final identifier is
+                // still the compiler-declared parameter. Non-type parameters
+                // are harmless here: only a declared receiver type containing
+                // that exact identifier can consume the symbolic contract.
+                .or_else(|| tokens.last())
                 .map(|name| (*name).to_string())
         })
         .collect()
@@ -273,6 +279,87 @@ fn cpp_method_template_types(
                         function.owner, function.name, function.line
                     ),
                     parameters,
+                )
+            })
+        })
+        .collect()
+}
+
+fn cpp_method_local_types(
+    source: &str,
+    functions: &[FunctionDef],
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let lines = source.lines().collect::<Vec<_>>();
+    functions
+        .iter()
+        .filter_map(|function| {
+            let start = function.span[0].saturating_sub(1);
+            let end = function.span[2].min(lines.len());
+            let body = lines.get(start..end)?.join("\n");
+            let body = body.split_once('{').map(|(_, body)| body)?;
+            let mut candidates = BTreeMap::<String, BTreeSet<String>>::new();
+            for statement in body.split(';') {
+                let declaration = statement
+                    .rsplit(['{', '}'])
+                    .next()
+                    .unwrap_or(statement)
+                    .trim();
+                if declaration.is_empty()
+                    || declaration.starts_with('#')
+                    || declaration.contains('(')
+                    || declaration.contains("->")
+                    || declaration.contains('.')
+                {
+                    continue;
+                }
+                let left = declaration.split('=').next().unwrap_or(declaration).trim();
+                let Some(name) = cpp_identifier_tokens(left).next_back() else {
+                    continue;
+                };
+                let Some(name_start) = left.rfind(name) else {
+                    continue;
+                };
+                let declared_type = left[..name_start].trim();
+                let first = cpp_identifier_tokens(declared_type).next().unwrap_or_default();
+                if declared_type.is_empty()
+                    || matches!(
+                        first,
+                        "break"
+                            | "case"
+                            | "continue"
+                            | "delete"
+                            | "else"
+                            | "goto"
+                            | "if"
+                            | "new"
+                            | "return"
+                            | "switch"
+                            | "throw"
+                            | "while"
+                    )
+                    || matches!(declared_type, "auto" | "const auto" | "decltype(auto)")
+                {
+                    continue;
+                }
+                candidates
+                    .entry(name.to_string())
+                    .or_default()
+                    .insert(declared_type.to_string());
+            }
+            let locals = candidates
+                .into_iter()
+                .filter_map(|(name, types)| {
+                    (types.len() == 1)
+                        .then(|| (name, types.into_iter().next().expect("one local type")))
+                })
+                .collect::<BTreeMap<_, _>>();
+            (!locals.is_empty()).then(|| {
+                (
+                    format!(
+                        "{}\0{}\0{}",
+                        function.owner, function.name, function.line
+                    ),
+                    locals,
                 )
             })
         })
@@ -626,6 +713,14 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         type_before_parameter_name(parameter)
     }
 
+    fn declared_callable_cost(&self, declared_type: &str) -> Option<String> {
+        let normalized = declared_type.split_whitespace().collect::<Vec<_>>().join(" ");
+        (normalized.contains("(*)")
+            || (normalized.contains("(*") && normalized.contains(")("))
+            || normalized.contains("std::function<"))
+        .then(|| "callback_once".to_string())
+    }
+
     fn syntax_metadata(&self, source: &str, functions: &[FunctionDef]) -> SyntaxMetadata {
         let (type_aliases, type_alias_lines) = cpp_type_aliases(source);
         SyntaxMetadata {
@@ -635,6 +730,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                 super::normalized_behavior::method_param_types_from_signatures(
                     self, source, functions,
                 ),
+            method_local_types: cpp_method_local_types(source, functions),
             method_template_types: cpp_method_template_types(source, functions),
             ..SyntaxMetadata::default()
         }
