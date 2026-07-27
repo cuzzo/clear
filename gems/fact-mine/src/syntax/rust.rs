@@ -33,6 +33,21 @@ fn rust_semantic_constructor(descriptor: &str, message: &str) -> bool {
     !message.is_empty() && descriptor.ends_with(&format!("#{message}#"))
 }
 
+fn rust_semantic_parametric_cost(descriptor: &str) -> Option<&'static str> {
+    match configured_semantic_symbol_parametric_cost("rust", descriptor).as_deref() {
+        Some("callback_once") => Some("callback_once"),
+        Some("callback_linear") => Some("callback_linear"),
+        Some("reflective_once") => Some("reflective_once"),
+        Some(_) => None,
+        None => None,
+    }
+        // rust-analyzer emits the selected derived/manual Clone impl as an
+        // exact crate-local symbol. The target is proven, but cloning the
+        // fields may be non-constant, so retain its cost as one parametric
+        // implementation invocation rather than pretending it is O(1).
+    .or_else(|| descriptor.ends_with("[Clone]clone().").then_some("reflective_once"))
+}
+
 fn rust_descriptor_owner(descriptor: &str) -> Option<String> {
     if descriptor.contains("][ToString]") {
         return Some("ToString".to_string());
@@ -111,7 +126,7 @@ pub(crate) fn external_symbol_call_complexity(
             assumption: None,
         });
     }
-    if configured_semantic_symbol_parametric_cost("rust", descriptor).is_some() {
+    if rust_semantic_parametric_cost(descriptor).is_some() {
         return None;
     }
     let exact = configured_semantic_symbol_call_complexity("rust", descriptor);
@@ -181,7 +196,7 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
                 }
             },
         ),
-        parametric_cost: configured_semantic_symbol_parametric_cost("rust", descriptor),
+        parametric_cost: rust_semantic_parametric_cost(descriptor).map(str::to_string),
     }
 }
 
@@ -998,6 +1013,15 @@ mod tests {
                 "{symbol} must not carry a closed bound"
             );
         }
+        let project_clone =
+            "rust-analyzer cargo fact-mine-rust 0.1.0 type_inference/impl#[TypeExpr][Clone]clone().";
+        assert_eq!(
+            external_symbol_metadata(project_clone)
+                .parametric_cost
+                .as_deref(),
+            Some("reflective_once")
+        );
+        assert!(external_symbol_call_complexity(project_clone, "clone").is_none());
 
         // Filesystem entry points keep their excluded-latency assumption.
         let read = format!("{std}fs/read().");
