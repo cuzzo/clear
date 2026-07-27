@@ -53,11 +53,22 @@ evidence = {
 results = Espalier::Aggregator.new.aggregate(Espalier::StaticEvidence.project_modules(evidence))
   .flat_map { |mod| Array(mod[:functions]) }
   .to_h { |function| [function[:id].to_s, function.fetch(:quality_metrics, {})] }
+facts_by_location = Array(profile["complexity_facts"]).group_by do |fact|
+  [fact["path"].to_s, fact["line"].to_i, fact["function"].to_s]
+end
+source_proven_ids = Array(profile["methods"]).filter_map do |method|
+  quality = results[method["id"].to_s]
+  facts = facts_by_location.fetch(
+    [method["path"].to_s, method["line"].to_i, method["name"].to_s],
+    []
+  )
+  method["id"].to_s if Espalier::ComplexitySummary.source_proven?(quality, facts)
+end.to_h { |id| [id, true] }
 
 symbols = Array(profile["methods"]).filter_map do |method|
   symbol = method["semantic_symbol"].to_s
   quality = results[method["id"].to_s]
-  next if symbol.empty? || !quality || quality[:big_o_complete] != true || quality[:big_o_space_complete] != true
+  next if symbol.empty? || !source_proven_ids[method["id"].to_s]
 
   source_qualities = Array(quality[:big_o_bound_qualities]).map(&:to_s).reject(&:empty?)
   source_assumptions = Array(quality[:big_o_assumptions]).map(&:to_s).reject(&:empty?)
@@ -89,9 +100,7 @@ candidate_symbols = Array(profile["calls"]).filter_map do |call|
   next if symbol.empty? || candidate_ids.empty?
 
   candidate_qualities = candidate_ids.map { |id| results[id] }
-  next if candidate_qualities.any? do |quality|
-    !quality || quality[:big_o_complete] != true || quality[:big_o_space_complete] != true
-  end
+  next unless candidate_ids.all? { |id| source_proven_ids[id] }
 
   worst_time = candidate_qualities.map { |quality| quality[:big_o] }
     .max_by { |value| Espalier::SymbolicComplexity.rank_string(value) }
@@ -134,6 +143,8 @@ output = {
     "profile_sha256" => "sha256:#{Digest::SHA256.hexdigest(profile_bytes)}",
     "method_count" => Array(profile["methods"]).length,
     "complete_symbol_count" => grouped.length,
+    "source_proven_method_count" => source_proven_ids.length,
+    "proof_policy" => "analyzed_bodies_exact_targets_cfg_dfg_v1",
     "corpus" => metadata[:corpus],
     "source_revision" => metadata[:source_revision],
     "indexer" => metadata[:indexer],

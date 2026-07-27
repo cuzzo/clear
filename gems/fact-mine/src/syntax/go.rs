@@ -1854,8 +1854,14 @@ mod tests {
         assert_eq!(time_of("flag/FlagSet#Bool().", "Bool"), Some("O(1)"));
         assert_eq!(time_of("bufio/Scanner#Text().", "Text"), Some("O(N)"));
         assert_eq!(time_of("time/Time#Format().", "Format"), Some("O(N)"));
+        assert_eq!(time_of("time/Duration#Hours().", "Hours"), Some("O(1)"));
         assert_eq!(time_of("bytes/TrimSpace().", "TrimSpace"), Some("O(N)"));
         assert_eq!(time_of("strings/IndexByte().", "IndexByte"), Some("O(N)"));
+        assert_eq!(time_of("strings/NewReplacer().", "NewReplacer"), Some("O(N)"));
+        assert_eq!(time_of("regexp/Regexp#MatchString().", "MatchString"), Some("O(N)"));
+        assert_eq!(time_of("strconv/Atoi().", "Atoi"), Some("O(N)"));
+        assert_eq!(time_of("math/Round().", "Round"), Some("O(1)"));
+        assert_eq!(time_of("flag/String().", "String"), Some("O(1)"));
         assert_eq!(time_of("flag/NewFlagSet().", "NewFlagSet"), Some("O(1)"));
         assert_eq!(
             GoNormalizedBehavior
@@ -1871,6 +1877,9 @@ mod tests {
         assert_eq!(write.bound_quality, "upper_bound_external_latency_excluded");
         assert!(write.assumption.is_some());
         assert_eq!(time_of("os/Stat().", "Stat"), Some("O(1)"));
+        assert_eq!(time_of("os/Getuid().", "Getuid"), Some("O(1)"));
+        assert_eq!(time_of("syscall/Flock().", "Flock"), Some("O(1)"));
+        assert_eq!(time_of("bufio/Reader#ReadString().", "ReadString"), Some("O(N)"));
         assert_eq!(time_of("`os/exec`/Cmd#Output().", "Output"), Some("O(N)"));
         assert_eq!(time_of("`os/exec`/Command().", "Command"), Some("O(N)"));
         assert_eq!(
@@ -1891,6 +1900,8 @@ mod tests {
                 "Encode",
                 "reflective_once",
             ),
+            ("`encoding/xml`/Unmarshal().", "Unmarshal", "reflective_once"),
+            ("fmt/Print().", "Print", "reflective_once"),
         ] {
             assert_eq!(time_of(descriptor, message), None, "{descriptor}");
             assert_eq!(

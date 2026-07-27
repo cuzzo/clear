@@ -13,6 +13,14 @@ syscall os time flag bytes bufio encoding/json encoding/xml sort strings
 io/fs strconv math regexp fmt
 ```
 
+The bundle contains 371 exact symbols whose time and space bounds are proven
+from analyzed bodies, exact analyzed targets, CFG/DFG structure, or
+compiler-provided closed candidate sets. A function is intentionally omitted
+when its apparent completeness depends on a reviewed/manual receiver registry,
+an external-latency or modeled-world contract, an unknown cardinality relation,
+or an unresolved call-evidence gap. Those omissions remain eligible for the
+manual incomplete-data fallback.
+
 Rebuild it by generating a SCIP index for those package patterns, profiling
 the non-test `.go` implementation files with FactMine using
 `--no-bundled-complexity-summaries`, and running:
@@ -27,6 +35,7 @@ gems/espalier/script/export_complexity_summary.rb \
 ```
 
 The gzip header is deterministic. The v2 envelope records the complete input
-profile SHA-256 and exported symbol count; FactMine validates both the envelope
-and every bound at startup. Add a focused exact-version join test whenever a
-new bundle is registered in `external_summary.rs`.
+profile SHA-256, proof policy, source-proven method count, and exported symbol
+count; FactMine validates the schema and every bound at startup. Add a focused
+exact-version join test whenever a new bundle is registered in
+`external_summary.rs`.
