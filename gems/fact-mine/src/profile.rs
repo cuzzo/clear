@@ -6640,6 +6640,7 @@ fn declared_field_callback_cost(
     document: &Document,
     behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
     call: &syntax::CallSite,
+    definition: Option<&syntax::FunctionDef>,
 ) -> Option<String> {
     let mut owner = call.owner.clone();
     let receiver_fields = call
@@ -6649,10 +6650,20 @@ fn declared_field_callback_cost(
         .filter(|part| !part.is_empty())
         .skip_while(|part| matches!(*part, "self" | "this"))
         .collect::<Vec<_>>();
-    for field in receiver_fields {
+    let mut start = 0;
+    if let Some(first) = receiver_fields.first() {
+        if let Some(declared) = declared_receiver_type(document, definition, first) {
+            // `item.callback()` selects a callable field on the parameter/local
+            // type. The first segment is a binding, not a field of the current
+            // method owner; begin projection from its declared type.
+            owner = declared;
+            start = 1;
+        }
+    }
+    for field in &receiver_fields[start..] {
         let declaration = document.state_declarations.iter().find(|declaration| {
             owner_name_matches(&declaration.owner, &owner)
-                && declaration.field.trim_start_matches('@') == field
+                && declaration.field.trim_start_matches('@') == *field
         })?;
         owner = declaration.r#type.clone()?;
     }
@@ -6829,7 +6840,14 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                                     })
                             })
                         })
-                        .or_else(|| declared_field_callback_cost(document, behavior, call))
+                        .or_else(|| {
+                            declared_field_callback_cost(
+                                document,
+                                behavior,
+                                call,
+                                source_definition,
+                            )
+                        })
                         .or_else(|| {
                             instance_receiver_type.as_deref().and_then(|receiver_type| {
                                 abstract_dispatch_callback_cost(document, behavior, receiver_type)
