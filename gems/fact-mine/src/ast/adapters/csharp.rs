@@ -174,7 +174,10 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
     fn function_kind(&self, kind: &str) -> bool {
         matches!(
             kind,
-            "method_declaration" | "constructor_declaration" | "property_declaration"
+            "method_declaration"
+                | "constructor_declaration"
+                | "property_declaration"
+                | "local_function_statement"
         )
     }
 
@@ -315,23 +318,49 @@ fn csharp_split_preprocessor_method<'tree>(
     if node.kind() != "method_declaration" {
         return None;
     }
-    let wrapper = match node.parent()?.kind() {
-        "preproc_if" => node.parent()?,
-        "preproc_else" => node.parent()?.parent()?,
-        _ => return None,
+    let parent = node.parent()?;
+    let structured = match parent.kind() {
+        "preproc_if" => Some(parent),
+        "preproc_else" => parent.parent().filter(|parent| parent.kind() == "preproc_if"),
+        _ => None,
     };
-    if wrapper.kind() != "preproc_if" {
+    let (declaration, implementation) = if let Some(wrapper) = structured {
+        let declaration = named_children(wrapper)
+            .into_iter()
+            .find(|child| child.kind() == "method_declaration")?;
+        let alternative = named_children(wrapper)
+            .into_iter()
+            .find(|child| child.kind() == "preproc_else")?;
+        let implementation = named_children(alternative)
+            .into_iter()
+            .find(|child| child.kind() == "method_declaration")?;
+        (declaration, implementation)
+    } else if parent.kind() == "ERROR" {
+        let methods = named_children(parent)
+            .into_iter()
+            .filter(|child| child.kind() == "method_declaration")
+            .collect::<Vec<_>>();
+        let name = node.child_by_field_name("name")?;
+        let name = node_text(name, source);
+        let declaration = methods.iter().copied().find(|candidate| {
+            candidate.child_by_field_name("body").is_none()
+                && candidate
+                    .child_by_field_name("name")
+                    .is_some_and(|candidate_name| node_text(candidate_name, source) == name)
+        })?;
+        let implementation = methods.iter().copied().find(|candidate| {
+            candidate.child_by_field_name("body").is_some()
+                && candidate.start_position().row >= declaration.end_position().row
+                && candidate.start_position().row <= declaration.end_position().row + 3
+                && candidate
+                    .child_by_field_name("name")
+                    .is_some_and(|candidate_name| node_text(candidate_name, source) == name)
+                && source[declaration.end_byte()..candidate.start_byte()].contains("#else")
+        })?;
+        (declaration, implementation)
+    } else {
         return None;
-    }
-    let declaration = named_children(wrapper)
-        .into_iter()
-        .find(|child| child.kind() == "method_declaration")?;
-    let alternative = named_children(wrapper)
-        .into_iter()
-        .find(|child| child.kind() == "preproc_else")?;
-    let implementation = named_children(alternative)
-        .into_iter()
-        .find(|child| child.kind() == "method_declaration")?;
+    };
     let declaration_name = declaration.child_by_field_name("name")?;
     let implementation_name = implementation.child_by_field_name("name")?;
     if node_text(declaration_name, source) != node_text(implementation_name, source)
@@ -465,6 +494,10 @@ class Widget : Parent {
   void Notify(System.Action<string>? callback) {
     callback?.Invoke("message");
   }
+  string Transform(string value) {
+    string Local(string item) { return Normalize(item); }
+    return Local(value);
+  }
 }
 "#,
         )?;
@@ -501,6 +534,11 @@ class Widget : Parent {
             assert!(messages.contains(expected), "calls={messages:?}");
         }
         assert!(!messages.contains("call"), "calls={messages:?}");
+        assert!(
+            output.methods.iter().any(|method| method.name == "Local"),
+            "methods={:?}",
+            output.methods
+        );
         Ok(())
     }
 
