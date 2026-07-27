@@ -1492,6 +1492,7 @@ struct Second { using super = BaseTwo; };
 
         // 12. terminating_call_message
         assert!(b.terminating_call_message("throw"));
+        assert!(configured_non_call_construct("cpp", "defined"));
 
         // 13. semantic_effect_for_call
         assert!(b
