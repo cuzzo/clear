@@ -179,6 +179,7 @@ SemanticSymbol:
   'Generic/List#ToArray().': linear_materialize
   'Generic/Queue#Clear().': linear_scan
   'Generic/Queue#Enqueue().': linear_materialize
+  'Collections/Hashtable#Clear().': linear_scan
   'IO/StringWriter#Dispose().': constant
   'IO/StringWriter#GetStringBuilder().': constant
   'IO/StringWriter#ToString().': linear_materialize
@@ -201,7 +202,10 @@ SemanticSymbol:
   'Reflection/MemberInfo#Name.': constant
   'Reflection/MethodBase#GetParameters().': linear_materialize
   'Reflection/ParameterInfo#ParameterType.': constant
+  'Reflection/PropertyInfo#GetIndexParameters().': linear_materialize
   'System/Array#CreateInstance().': linear_materialize
+  'System/Array#GetLength().': constant
+  'System/Array#GetValue(+3).': constant
   'System/Array#Length.': constant
   'System/Array#Resize().': linear_materialize
   'System/Byte#TryFormat(+1).': linear_materialize
@@ -295,3 +299,6 @@ SemanticSymbolParametricCost:
   'System/IFormatProvider#GetFormat().': callback_once
   'System/IFormattable#ToString().': callback_once
   'System/ISpanFormattable#TryFormat().': callback_once
+  'System/Object#Equals(+1).': callback_once
+  'System/Object#GetHashCode().': callback_once
+  'System/Object#ToString().': callback_once

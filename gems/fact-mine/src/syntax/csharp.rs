@@ -857,6 +857,9 @@ mod tests {
                 "GetParameters",
                 "O(N)",
             ),
+            ("Collections/Hashtable#Clear().", "Clear", "O(N)"),
+            ("System/Array#GetLength().", "GetLength", "O(1)"),
+            ("System/Array#GetValue(+3).", "GetValue", "O(1)"),
         ] {
             let cost = external_symbol_call_complexity(&symbol(descriptor), message)
                 .unwrap_or_else(|| panic!("missing exact cost for {descriptor}"));
@@ -878,6 +881,13 @@ mod tests {
             "scip-dotnet nuget System.Runtime 10.0.0.0 System/Action#Invoke().",
         );
         assert_eq!(action.parametric_cost.as_deref(), Some("callback_once"));
+        let virtual_object = external_symbol_metadata(
+            "scip-dotnet nuget System.Runtime 10.0.0.0 System/Object#Equals(+1).",
+        );
+        assert_eq!(
+            virtual_object.parametric_cost.as_deref(),
+            Some("callback_once")
+        );
         assert_eq!(
             CSharpNormalizedBehavior
                 .intrinsic_call_complexity(None, "nameof")
