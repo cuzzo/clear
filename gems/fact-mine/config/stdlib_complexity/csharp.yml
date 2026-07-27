@@ -64,6 +64,56 @@ Object:
   GetType: constant
 Int32:
   Parse: linear_scan
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+Int16:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+Int64:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+UInt16:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+UInt32:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+UInt64:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+Byte:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+SByte:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+Single:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+Double:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+Decimal:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+DateOnly:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+DateTime:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+DateTimeOffset:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+TimeOnly:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+TimeSpan:
+  ToString: linear_materialize
+  TryFormat: linear_materialize
+TextWriter:
+  Write: linear_scan
+  WriteLine: linear_scan
 Intrinsic:
   "Array.BinarySearch": logarithmic
   "Array.Clear": linear_scan
@@ -98,6 +148,9 @@ Intrinsic:
   "String.IsNullOrEmpty": constant
   "String.IsNullOrWhiteSpace": linear_scan
   "String.Join": linear_materialize
+  nameof: constant
+  sizeof: constant
+  typeof: constant
 Namespace:
   System: declaration
 NonCallConstruct:
@@ -152,12 +205,30 @@ SemanticSymbol:
   'System/Array#Length.': constant
   'System/Array#Resize().': linear_materialize
   'System/Byte#TryFormat(+1).': linear_materialize
+  'System/Byte#ToString(+3).': linear_materialize
   'System/Char#IsDigit().': constant
   'System/Enum#Parse(+2).': linear_scan
   'System/Enum#ToString().': linear_materialize
   'System/Enum#TryParse().': linear_scan
   'System/Exception#GetType().': constant
   'System/Int32#TryParse(+6).': linear_scan
+  'System/DateOnly#ToString(+2).': linear_materialize
+  'System/DateOnly#TryFormat(+1).': linear_materialize
+  'System/DateTime#ToString(+3).': linear_materialize
+  'System/DateTime#TryFormat(+1).': linear_materialize
+  'System/DateTimeOffset#ToString(+3).': linear_materialize
+  'System/DateTimeOffset#TryFormat(+1).': linear_materialize
+  'System/Decimal#ToString(+3).': linear_materialize
+  'System/Decimal#TryFormat(+1).': linear_materialize
+  'System/Double#ToString(+1).': linear_materialize
+  'System/Double#ToString(+3).': linear_materialize
+  'System/Double#TryFormat(+1).': linear_materialize
+  'System/Int16#ToString(+3).': linear_materialize
+  'System/Int16#TryFormat(+1).': linear_materialize
+  'System/Int32#ToString(+3).': linear_materialize
+  'System/Int32#TryFormat(+1).': linear_materialize
+  'System/Int64#ToString(+3).': linear_materialize
+  'System/Int64#TryFormat(+1).': linear_materialize
   'System/Math#Max(+5).': constant
   'System/Math#Min(+4).': constant
   'System/MemoryExtensions#AsSpan().': constant
@@ -175,6 +246,15 @@ SemanticSymbol:
   'System/String#Substring().': linear_materialize
   'System/String#Substring(+1).': linear_materialize
   'System/String#Trim().': linear_materialize
+  'System/SByte#ToString(+3).': linear_materialize
+  'System/SByte#TryFormat(+1).': linear_materialize
+  'System/Single#ToString(+1).': linear_materialize
+  'System/Single#ToString(+3).': linear_materialize
+  'System/Single#TryFormat(+1).': linear_materialize
+  'System/TimeOnly#ToString(+2).': linear_materialize
+  'System/TimeOnly#TryFormat(+1).': linear_materialize
+  'System/TimeSpan#ToString().': linear_materialize
+  'System/TimeSpan#TryFormat(+1).': linear_materialize
   'System/Type#FullName.': linear_materialize
   'System/Type#GetGenericTypeDefinition().': constant
   'System/Type#GetProperties(+1).': linear_materialize
@@ -187,10 +267,17 @@ SemanticSymbol:
   'Text/StringBuilder#ToString().': linear_materialize
   'Threading/Interlocked#Exchange().': constant
   'Channels/ChannelReader#TryRead().': constant
+  'System/UInt16#ToString(+3).': linear_materialize
+  'System/UInt16#TryFormat(+1).': linear_materialize
+  'System/UInt32#ToString(+3).': linear_materialize
+  'System/UInt32#TryFormat(+1).': linear_materialize
+  'System/UInt64#ToString(+3).': linear_materialize
+  'System/UInt64#TryFormat(+1).': linear_materialize
 
 # These contracts include user-supplied predicate/selector work. Treating
 # them as plain O(N) would silently erase a non-constant callback body.
 SemanticSymbolParametricCost:
+  'IO/TextWriter#Write(+8).': callback_once
   'Linq/Enumerable#All().': callback_linear
   'Linq/Enumerable#Count().': callback_linear
   'Linq/Enumerable#GroupBy().': callback_linear
@@ -199,3 +286,12 @@ SemanticSymbolParametricCost:
   'Linq/Enumerable#SelectMany().': callback_linear
   'Linq/Enumerable#ToDictionary().': callback_linear
   'Linq/Enumerable#Where().': callback_linear
+  'Reflection/ConstructorInfo#Invoke().': reflective_once
+  'Reflection/PropertyInfo#GetValue().': reflective_once
+  'System/Action#Invoke().': callback_once
+  'System/IAsyncDisposable#DisposeAsync().': callback_once
+  'System/ICustomFormatter#Format().': callback_once
+  'System/IDisposable#Dispose().': callback_once
+  'System/IFormatProvider#GetFormat().': callback_once
+  'System/IFormattable#ToString().': callback_once
+  'System/ISpanFormattable#TryFormat().': callback_once
