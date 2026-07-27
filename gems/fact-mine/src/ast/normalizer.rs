@@ -3829,6 +3829,12 @@ impl<'source> TreeSitterNormalizer<'source> {
             return None;
         }
         let block = block?;
+        if let Some(parameters) = self
+            .normalization_adapter
+            .block_parameter_nodes(block, self.source)
+        {
+            return self.normalize_parameter_nodes(parameters, block);
+        }
         let params = self.named_children(block).into_iter().find(|child| {
             self.normalization_adapter
                 .check_node_role(*child, "block_parameters")

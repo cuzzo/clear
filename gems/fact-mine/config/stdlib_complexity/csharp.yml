@@ -25,6 +25,7 @@ Set:
   ToArray: linear_materialize
 String:
   Length: constant
+  ToString: constant
   Contains: linear_scan
   IndexOf: linear_scan
   Split: linear_materialize

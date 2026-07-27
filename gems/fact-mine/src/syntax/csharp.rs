@@ -535,6 +535,20 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
             .flatten()
     }
 
+    fn collection_callback_parameter(&self, message: &str) -> bool {
+        matches!(
+            message,
+            "Aggregate"
+                | "All"
+                | "Any"
+                | "Count"
+                | "First"
+                | "FirstOrDefault"
+                | "Select"
+                | "Where"
+        )
+    }
+
     fn mutating_receiver_message(&self, message: &str) -> bool {
         matches!(message, "Add" | "Clear" | "Remove" | "Reverse" | "Sort")
     }
@@ -815,6 +829,8 @@ fn csharp_declared_local_type(source: &str, name: &str) -> Option<String> {
     let declared = super::normalized_behavior::type_before_local_name(source, name)?;
     (!declared.contains(['(', ')', '=', '!'])
         && !declared.contains(" is ")
+        && !declared.contains(" in")
+        && !declared.starts_with("var ")
         && !declared.ends_with(" var"))
     .then_some(declared)
 }

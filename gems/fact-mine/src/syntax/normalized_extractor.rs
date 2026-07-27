@@ -2166,7 +2166,14 @@ fn function_name_with_behavior(
 }
 
 fn function_scope(node: &Node) -> Option<&Node> {
-    child_node(node, if node.r#type == "DEFS" { 2 } else { 1 })
+    child_node(
+        node,
+        match node.r#type.as_str() {
+            "LAMBDA" => 0,
+            "DEFS" => 2,
+            _ => 1,
+        },
+    )
 }
 
 fn scope_child(node: &Node) -> Option<&Node> {

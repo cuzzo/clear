@@ -1275,6 +1275,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    fn collection_callback_parameter(&self, _message: &str) -> bool {
+        false
+    }
+
     fn is_noreturn_method(&self, _message: &str) -> bool {
         false
     }
@@ -1991,6 +1995,12 @@ pub(crate) fn method_param_types_from_signatures<B: NormalizedLanguageBehavior +
 ) -> BTreeMap<String, BTreeMap<String, String>> {
     functions
         .iter()
+        // A lambda's source line is its enclosing expression, not a callable
+        // declaration. Parsing the first parenthesized expression as a
+        // signature fabricates parameter types from surrounding syntax.
+        // Explicit/contextual lambda types are recovered from normalized
+        // parameters and their compiler/source-proven callback context.
+        .filter(|function| function.dispatch_kind != "lambda")
         .filter_map(|function| {
             let parse = |declaration: &str| {
                 let params = behavior.parameter_list_source(declaration);
