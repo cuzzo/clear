@@ -450,6 +450,14 @@ fn cpp_struct_with_methods_is_recognized_as_an_owner() {
         "expected Vec3.increment, got {:?}",
         document.function_defs
     );
+    assert!(
+        document
+            .local_methods
+            .iter()
+            .any(|method| method.name == "increment" && method.owner == "Vec3"),
+        "expected normalized CFG/DFG method Vec3.increment, got {:?}",
+        document.local_methods
+    );
 }
 
 // Real bug, found auditing plog's Logger.h: a linkage/visibility macro
@@ -500,6 +508,14 @@ fn cpp_linkage_macro_before_class_name_does_not_swallow_the_class_body() {
             .any(|f| f.name == "addAppender" && f.owner == "Logger"),
         "expected Logger.addAppender to survive the macro-corrupted parse, got {:?}",
         document.function_defs
+    );
+    assert!(
+        document
+            .local_methods
+            .iter()
+            .any(|method| method.name == "addAppender" && method.owner == "Logger"),
+        "expected Logger.addAppender to reach the normalized CFG/DFG, got {:?}",
+        document.local_methods
     );
 }
 
