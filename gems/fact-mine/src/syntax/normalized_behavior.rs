@@ -16,6 +16,7 @@ pub(crate) struct SyntaxMetadata {
     pub(crate) type_alias_lines: BTreeMap<String, usize>,
     pub(crate) method_param_types: BTreeMap<String, BTreeMap<String, String>>,
     pub(crate) method_local_types: BTreeMap<String, BTreeMap<String, String>>,
+    pub(crate) method_template_types: BTreeMap<String, std::collections::BTreeSet<String>>,
 }
 
 #[derive(Clone, Debug)]

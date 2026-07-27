@@ -216,6 +216,7 @@ fn parse_normalized_file(
         type_alias_lines: metadata.syntax.type_alias_lines,
         method_param_types: metadata.syntax.method_param_types,
         method_local_types: metadata.syntax.method_local_types,
+        method_template_types: metadata.syntax.method_template_types,
         state_param_origins: Vec::new(),
         hazard_sites: facts.hazard_sites,
         imports: Vec::new(),

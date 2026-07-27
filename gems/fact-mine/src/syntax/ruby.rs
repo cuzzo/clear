@@ -868,6 +868,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             type_alias_lines: metadata.type_alias_lines,
             method_param_types: metadata.method_param_types,
             method_local_types: BTreeMap::new(),
+            method_template_types: BTreeMap::new(),
         }
     }
 

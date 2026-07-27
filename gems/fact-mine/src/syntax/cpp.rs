@@ -125,6 +125,160 @@ fn cpp_type_aliases(source: &str) -> (BTreeMap<String, String>, BTreeMap<String,
     (aliases, lines)
 }
 
+fn cpp_identifier_tokens(source: &str) -> impl Iterator<Item = &str> {
+    source
+        .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
+        .filter(|token| {
+            !token.is_empty()
+                && token
+                    .chars()
+                    .next()
+                    .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        })
+}
+
+fn cpp_declared_template_type_names(declaration: &str) -> BTreeSet<String> {
+    let body = declaration
+        .split_once('<')
+        .and_then(|(_, rest)| rest.rsplit_once('>'))
+        .map(|(body, _)| body)
+        .unwrap_or(declaration);
+    body.split(',')
+        .filter_map(|parameter| {
+            let tokens = cpp_identifier_tokens(parameter).collect::<Vec<_>>();
+            tokens
+                .iter()
+                .position(|token| matches!(*token, "typename" | "class"))
+                .and_then(|position| tokens.get(position + 1))
+                .map(|name| (*name).to_string())
+        })
+        .collect()
+}
+
+fn cpp_owner_template_type_names(owner: &str) -> BTreeSet<String> {
+    let Some((_, arguments)) = owner.split_once('<') else {
+        return BTreeSet::new();
+    };
+    let arguments = arguments
+        .rsplit_once('>')
+        .map(|(body, _)| body)
+        .unwrap_or(arguments);
+    cpp_identifier_tokens(arguments)
+        .filter(|token| {
+            !matches!(
+                *token,
+                "const"
+                    | "false"
+                    | "std"
+                    | "template"
+                    | "true"
+                    | "type"
+                    | "typename"
+                    | "void"
+            )
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+fn cpp_declared_owner_template_types(source: &str) -> BTreeMap<String, BTreeSet<String>> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut owners = BTreeMap::new();
+    for (index, line) in lines.iter().enumerate() {
+        let Some(template_offset) = line.find("template") else {
+            continue;
+        };
+        let declaration = lines[index..lines.len().min(index + 20)].join(" ");
+        let declaration = &declaration[template_offset..];
+        let Some(open) = declaration.find('<') else {
+            continue;
+        };
+        let mut depth = 0usize;
+        let mut close = None;
+        for (offset, character) in declaration[open..].char_indices() {
+            match character {
+                '<' => depth += 1,
+                '>' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        close = Some(open + offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(close) = close else {
+            continue;
+        };
+        let parameters = cpp_declared_template_type_names(&declaration[..=close]);
+        if parameters.is_empty() {
+            continue;
+        }
+        let suffix = declaration[close + 1..].trim_start();
+        let owner = ["class ", "struct "].into_iter().find_map(|keyword| {
+            let rest = suffix.strip_prefix(keyword)?;
+            cpp_identifier_tokens(rest).next().map(str::to_string)
+        });
+        if let Some(owner) = owner {
+            owners.insert(owner, parameters);
+        }
+    }
+    owners
+}
+
+fn cpp_method_template_types(
+    source: &str,
+    functions: &[FunctionDef],
+) -> BTreeMap<String, BTreeSet<String>> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let declared_owners = cpp_declared_owner_template_types(source);
+    functions
+        .iter()
+        .filter_map(|function| {
+            let mut parameters = cpp_owner_template_type_names(&function.owner);
+            let owner_base = function
+                .owner
+                .split('<')
+                .next()
+                .unwrap_or(&function.owner)
+                .trim();
+            parameters.extend(
+                declared_owners
+                    .get(owner_base)
+                    .into_iter()
+                    .flat_map(|parameters| parameters.iter().cloned()),
+            );
+            let start = function.line.saturating_sub(1);
+            let lower = start.saturating_sub(16);
+            let prefix = lines
+                .get(lower..start)
+                .unwrap_or_default()
+                .iter()
+                .rev()
+                .take_while(|line| {
+                    let trimmed = line.trim();
+                    !trimmed.ends_with([';', '}'])
+                })
+                .copied()
+                .collect::<Vec<_>>();
+            let prefix = prefix.into_iter().rev().collect::<Vec<_>>().join(" ");
+            if let Some(template_start) = prefix.rfind("template") {
+                parameters.extend(cpp_declared_template_type_names(&prefix[template_start..]));
+            }
+            (!parameters.is_empty()).then(|| {
+                (
+                    format!(
+                        "{}\0{}\0{}",
+                        function.owner, function.name, function.line
+                    ),
+                    parameters,
+                )
+            })
+        })
+        .collect()
+}
+
 fn scip_clang_parts(symbol: &str) -> Option<(&str, &str)> {
     let (package, _version, descriptor) = scip_global_parts(symbol, "cxx", ".")?;
     Some((package, descriptor))
@@ -481,6 +635,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                 super::normalized_behavior::method_param_types_from_signatures(
                     self, source, functions,
                 ),
+            method_template_types: cpp_method_template_types(source, functions),
             ..SyntaxMetadata::default()
         }
     }

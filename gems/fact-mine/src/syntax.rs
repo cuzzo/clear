@@ -378,6 +378,10 @@ pub struct Document {
     pub method_param_types: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default)]
     pub method_local_types: BTreeMap<String, BTreeMap<String, String>>,
+    /// Source-proven C++ type template parameters, scoped to one normalized
+    /// callable identity. Empty for languages without type templates.
+    #[serde(default)]
+    pub method_template_types: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     pub state_param_origins: Vec<StateParamOrigin>,
     #[serde(default)]
