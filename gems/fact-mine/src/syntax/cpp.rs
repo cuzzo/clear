@@ -1116,6 +1116,18 @@ mod tests {
     }
 
     #[test]
+    fn reserved_std_qualified_calls_survive_inactive_scip_branches() {
+        let strrchr = CppNormalizedBehavior
+            .intrinsic_call_complexity(None, "std::strrchr")
+            .expect("the reserved std namespace proves runtime identity");
+        assert_eq!((strrchr.time, strrchr.space), ("O(N)", "O(1)"));
+
+        assert!(CppNormalizedBehavior
+            .intrinsic_call_complexity(None, "vendor::strrchr")
+            .is_none());
+    }
+
+    #[test]
     fn cpp_consumes_scip_indexed_macro_definitions() {
         let literal_wrapper = CppNormalizedBehavior
             .preprocessor_definition_call_complexity("#define PLOG_NSTR(x) x")

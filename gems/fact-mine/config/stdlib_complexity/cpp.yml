@@ -44,14 +44,31 @@ String:
 Namespace:
   std: declaration
 Intrinsic:
-  # These free functions are modeled only after a SCIP symbol proves `std`
-  # ownership. Their standard semantics do not execute user callbacks.
+  # These selector-only spellings are consumed after a SCIP symbol proves
+  # `std` ownership. Their standard semantics do not execute user callbacks.
   std.move: constant
   std.forward: constant
   std.addressof: constant
   std.get: constant
   std.as_const: constant
   std.launder: constant
+  # Qualified-id calls preserve their full `std::` spelling before SCIP
+  # enrichment. `std` is a reserved namespace, so this source identity remains
+  # sufficient in compiler-inactive preprocessor branches that have no
+  # occurrence in the selected SCIP configuration.
+  'std::string': linear_materialize
+  'std::wstring': linear_materialize
+  'std::strlen': linear_scan
+  'std::wcslen': linear_scan
+  'std::strchr': linear_scan
+  'std::strrchr': linear_scan
+  'std::wcsrchr': linear_scan
+  'std::strcmp': linear_scan
+  'std::wcscmp': linear_scan
+  'std::operator<<': linear_scan
+  'std::setfill': constant
+  'std::setw': constant
+  'std::setprecision': constant
   assert: declaration
   malloc: declaration
   calloc: declaration
