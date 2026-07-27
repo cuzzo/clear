@@ -2415,7 +2415,9 @@ fn inherited_target_ids(
     if call.constructor_target.is_some() {
         return BTreeSet::new();
     }
-    let start = if let Some(symbol) = call.receiver_symbol.as_deref() {
+    let start = if source.language == "cpp" && call.implicit_receiver {
+        Some(source.owner.clone())
+    } else if let Some(symbol) = call.receiver_symbol.as_deref() {
         Some(symbol.to_string())
     } else if let Some(receiver_type) = call.receiver_type.as_deref() {
         declared_dispatch_owner_name_from_type(receiver_type, source.language.as_str())
@@ -3110,7 +3112,7 @@ fn resolve_inherited_calls(
             // for measurement until their dispatch rules have exact oracles.
             if !matches!(
                 source.language.as_str(),
-                "java" | "csharp" | "python" | "go"
+                "java" | "csharp" | "python" | "go" | "cpp"
             ) {
                 return None;
             }
@@ -3141,7 +3143,12 @@ fn conservative_inherited_target_ids(
     if call.constructor_target.is_some() {
         return BTreeSet::new();
     }
-    let start = if let Some(symbol) = call.receiver_symbol.as_deref() {
+    let start = if source.language == "cpp" && call.implicit_receiver {
+        // A C++ partial specialization carries its inheritance clause on the
+        // source owner (`Child<T>`), while its compiler symbol owner may be
+        // erased to `Child`. Start from the declaration that owns the clause.
+        Some(source.owner.clone())
+    } else if let Some(symbol) = call.receiver_symbol.as_deref() {
         Some(symbol.to_string())
     } else if let Some(receiver_type) = call.receiver_type.as_deref() {
         declared_dispatch_owner_name_from_type(receiver_type, source.language.as_str())
@@ -3169,6 +3176,53 @@ fn conservative_inherited_target_ids(
         }
         if exact.len() > 1 {
             return None;
+        }
+        let by_name = owners
+            .iter()
+            .filter(|owner| owner.language == source.language && owner.name == identity)
+            .collect::<Vec<_>>();
+        if by_name.len() == 1 {
+            return by_name.into_iter().next();
+        }
+        if by_name.len() > 1 {
+            return None;
+        }
+        if source.language == "cpp" {
+            if let Some(nominal) = declared_dispatch_owner_name_from_type(identity, "cpp") {
+                let normalized = owners
+                    .iter()
+                    .filter(|owner| owner.language == source.language)
+                    .filter(|owner| {
+                        declared_dispatch_owner_name_from_type(&owner.name, "cpp").as_deref()
+                            == Some(nominal.as_str())
+                            || owner.symbol.as_deref().is_some_and(|symbol| {
+                                declared_dispatch_owner_name_from_type(symbol, "cpp").as_deref()
+                                    == Some(nominal.as_str())
+                            })
+                    })
+                    .collect::<Vec<_>>();
+                if identity.contains('<') {
+                    let specializations = normalized
+                        .iter()
+                        .copied()
+                        .filter(|owner| {
+                            owner.name.contains('<') && owner.name.trim_end().ends_with('>')
+                        })
+                        .collect::<Vec<_>>();
+                    if specializations.len() == 1 {
+                        return specializations.into_iter().next();
+                    }
+                    if specializations.len() > 1 {
+                        return None;
+                    }
+                }
+                if normalized.len() == 1 {
+                    return normalized.into_iter().next();
+                }
+                if normalized.len() > 1 {
+                    return None;
+                }
+            }
         }
         if identity.contains(['.', ':']) {
             // A package-qualified supertype (e.g. a Go embed `bytes.Buffer`)
@@ -3215,11 +3269,7 @@ fn conservative_inherited_target_ids(
                 return None;
             }
         }
-        let by_name = owners
-            .iter()
-            .filter(|owner| owner.language == source.language && owner.name == identity)
-            .collect::<Vec<_>>();
-        (by_name.len() == 1).then(|| by_name[0])
+        None
     };
 
     let Some(start_owner) = resolve_owner(&start, None) else {
@@ -4183,8 +4233,15 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
                 .supertypes
                 .iter()
                 .map(|supertype| {
-                    canonical_declared_type(document, supertype)
-                        .unwrap_or_else(|| supertype.clone())
+                    if language == "cpp" && supertype.contains('<') {
+                        // Template arguments select a C++ base specialization.
+                        // Erasing them to the forward-declaration symbol loses
+                        // the declaration that owns inherited methods.
+                        supertype.clone()
+                    } else {
+                        canonical_declared_type(document, supertype)
+                            .unwrap_or_else(|| supertype.clone())
+                    }
                 })
                 .collect(),
             requirements: owner.requirements.clone(),
