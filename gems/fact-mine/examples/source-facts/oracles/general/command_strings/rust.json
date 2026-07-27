@@ -22,14 +22,80 @@
   "syntax": {
     "branch_arms": [],
     "branch_decisions": [],
-    "calls": [],
+    "calls": [
+      {
+        "arguments": [
+          "\"ls\""
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_four",
+        "line": 2,
+        "message": "new",
+        "receiver": "std::process::Command",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_four",
+        "line": 2,
+        "message": "output",
+        "receiver": "std::process::Command.new(\"ls\")",
+        "safe_navigation": false
+      }
+    ],
     "clone_candidates": [
+      {
+        "child_fingerprints": [
+          "call<new>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))"
+        ],
+        "child_masses": [
+          8
+        ],
+        "fingerprint": "call(id call<new>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit)))",
+        "line": 2,
+        "mass": 9,
+        "method_name": "method_four",
+        "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "lit"
+        ],
+        "child_masses": [
+          1
+        ],
+        "fingerprint": "argument_list(lit)",
+        "line": 2,
+        "mass": 2,
+        "method_name": "method_four",
+        "node_name": "argument_list"
+      },
+      {
+        "child_fingerprints": [
+          "scoped_identifier(scoped_identifier(id id) id)",
+          "argument_list(lit)"
+        ],
+        "child_masses": [
+          5,
+          2
+        ],
+        "fingerprint": "call<new>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit))",
+        "line": 2,
+        "mass": 8,
+        "method_name": "method_four",
+        "node_name": "call"
+      },
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id)",
+        "fingerprint": "method(id body(let_declaration(assignment(id call(id call<new>(id scoped_identifier(scoped_identifier(id id) id) argument_list(lit)))))))",
         "line": 1,
-        "mass": 1,
+        "mass": 13,
         "method_name": "method_four",
         "node_name": "defn"
       }
@@ -71,7 +137,11 @@
       {},
       {}
     ],
-    "flow_types": [],
+    "flow_types": [
+      {},
+      {},
+      {}
+    ],
     "functions": [
       {
         "line": 1,
@@ -133,13 +203,43 @@
         "writes": []
       },
       {
-        "reads": [],
-        "writes": []
+        "reads": [
+          "place:(top-level)#method_four:local:Command",
+          "place:(top-level)#method_four:local:process",
+          "place:(top-level)#method_four:local:std"
+        ],
+        "writes": [
+          "place:(top-level)#method_four:local:Command",
+          "place:(top-level)#method_four:local:_",
+          "place:(top-level)#method_four:local:process",
+          "place:(top-level)#method_four:local:std"
+        ]
       }
     ],
     "owners": [],
     "path_conditions": [],
-    "places": [],
+    "places": [
+      {
+        "id": "place:(top-level)#method_four:local:Command",
+        "kind": "local",
+        "name": "Command"
+      },
+      {
+        "id": "place:(top-level)#method_four:local:_",
+        "kind": "local",
+        "name": "_"
+      },
+      {
+        "id": "place:(top-level)#method_four:local:process",
+        "kind": "local",
+        "name": "process"
+      },
+      {
+        "id": "place:(top-level)#method_four:local:std",
+        "kind": "local",
+        "name": "std"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -163,9 +263,26 @@
       {},
       {}
     ],
-    "reaching_definitions": [],
+    "reaching_definitions": [
+      {},
+      {},
+      {}
+    ],
     "redundant_nil_guards": [],
-    "semantic_effects": [],
+    "semantic_effects": [
+      {
+        "detail": "std::process::Command.new",
+        "function": "method_four",
+        "kind": "hidden_io",
+        "line": 2
+      },
+      {
+        "detail": "std::process::Command.new(\"ls\").output",
+        "function": "method_four",
+        "kind": "hidden_io",
+        "line": 2
+      }
+    ],
     "state_declarations": [],
     "state_param_origins": [],
     "state_reads": [],

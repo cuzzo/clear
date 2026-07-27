@@ -5616,6 +5616,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             return self.named_field(node, "name");
         }
         self.named_field(node, "left")
+            .or_else(|| self.named_field(node, "pattern"))
             .or_else(|| self.named_children(node).into_iter().next())
     }
 
@@ -5627,6 +5628,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             return self.named_field(node, "value");
         }
         self.named_field(node, "right")
+            .or_else(|| self.named_field(node, "value"))
             .or_else(|| self.named_children(node).into_iter().nth(1))
     }
 

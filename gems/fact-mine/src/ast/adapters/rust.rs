@@ -5,6 +5,13 @@ use tree_sitter::Node as TreeSitterNode;
 pub(crate) struct RustAstAdapter;
 
 impl AstNormalizationAdapter for RustAstAdapter {
+    fn variable_declarator_node(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "let_declaration"
+            && node
+                .child_by_field_name("pattern")
+                .is_some_and(|pattern| pattern.kind() == "_")
+    }
+
     fn class_like_owner_kind(&self, kind: &str) -> bool {
         kind == "impl_item"
     }
@@ -34,6 +41,19 @@ impl AstNormalizationAdapter for RustAstAdapter {
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         matches!(kind, "for_expression").then_some("FOR")
+    }
+
+    fn loop_condition_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        // A Rust `for binding in iterable` stores the binding before `value`.
+        // Selecting the generic first named child drops calls and size domains
+        // from the iterable expression.
+        (node.kind() == "for_expression")
+            .then(|| node.child_by_field_name("value"))
+            .flatten()
     }
 
     fn scoped_call_parts<'tree>(
