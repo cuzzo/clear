@@ -648,15 +648,49 @@
                                                 "Node": {
                                                   "children": [
                                                     {
-                                                      "Symbol": "String"
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "Symbol": "String"
+                                                          }
+                                                        ],
+                                                        "first_column": 28,
+                                                        "first_lineno": 16,
+                                                        "last_column": 34,
+                                                        "last_lineno": 16,
+                                                        "text": "String",
+                                                        "type": "CONST"
+                                                      }
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 34,
+                                                        "first_lineno": 16,
+                                                        "last_column": 36,
+                                                        "last_lineno": 16,
+                                                        "text": "[]",
+                                                        "type": "DIMENSIONS"
+                                                      }
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [],
+                                                        "first_column": 36,
+                                                        "first_lineno": 16,
+                                                        "last_column": 38,
+                                                        "last_lineno": 16,
+                                                        "text": "{}",
+                                                        "type": "ARRAY_INITIALIZER"
+                                                      }
                                                     }
                                                   ],
-                                                  "first_column": 13,
+                                                  "first_column": 24,
                                                   "first_lineno": 16,
-                                                  "last_column": 19,
+                                                  "last_column": 38,
                                                   "last_lineno": 16,
-                                                  "text": "String",
-                                                  "type": "CONST"
+                                                  "text": "new String[]{}",
+                                                  "type": "ARRAY_CREATION_EXPRESSION"
                                                 }
                                               },
                                               "Nil"
