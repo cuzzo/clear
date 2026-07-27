@@ -152,6 +152,43 @@ fn cpp_scoped_free_call_never_joins_a_same_name_wrong_namespace() -> Result<()> 
 }
 
 #[test]
+fn cpp_relative_scoped_call_searches_enclosing_namespaces_across_files() -> Result<()> {
+    let output = extract_project(
+        &[
+            (
+                "util.cpp",
+                "namespace plog { namespace util { int work(int value) { return value; } } }\n",
+            ),
+            (
+                "caller.cpp",
+                "namespace plog { namespace detail { int run() { return util::work(1); } } }\n",
+            ),
+        ],
+        Language::Cpp,
+    )?;
+    let target = output
+        .methods
+        .iter()
+        .find(|method| method.lexical_symbol.as_deref() == Some("plog::util::work"))
+        .context("missing nested C++ namespace target")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "util::work")
+        .context("missing relative scoped call")?;
+    assert_eq!(
+        call.lexical_symbol.as_deref(),
+        Some("plog::util::work")
+    );
+    assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
+    assert_eq!(
+        call.lexical_symbol_origin.as_deref(),
+        Some("cpp_enclosing_namespace_lookup")
+    );
+    Ok(())
+}
+
+#[test]
 fn python_explicit_import_resolves_an_exact_project_lexical_target() -> Result<()> {
     let output = extract_project(
         &[
