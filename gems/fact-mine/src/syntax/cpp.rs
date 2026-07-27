@@ -881,6 +881,100 @@ fn nullable_contract_call(node: &Node) -> &Node {
     node
 }
 
+fn cpp_collection_element_binding(source: &str, local: &str) -> Option<String> {
+    let compact = source.split_whitespace().collect::<Vec<_>>().join(" ");
+    for (index, _) in compact.match_indices(local) {
+        let before = compact[..index].chars().next_back();
+        let after = compact[index + local.len()..].chars().next();
+        let boundary = |character: Option<char>| {
+            character.is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_')
+        };
+        if !boundary(before) || !boundary(after) {
+            continue;
+        }
+
+        let prefix = compact[..index]
+            .rsplit([';', '{', '}'])
+            .next()
+            .unwrap_or_default()
+            .trim();
+        let suffix = compact[index + local.len()..].trim_start();
+
+        if prefix.contains("for")
+            && prefix
+                .rsplit("for")
+                .next()
+                .is_some_and(|header| header.contains("auto") && header.contains('('))
+        {
+            let collection = suffix
+                .strip_prefix(':')?
+                .trim_start()
+                .split(|character: char| {
+                    !character.is_ascii_alphanumeric() && character != '_'
+                })
+                .next()
+                .unwrap_or_default();
+            if !collection.is_empty() {
+                return Some(collection.to_string());
+            }
+        }
+
+        let declares_auto = prefix
+            .split_whitespace()
+            .any(|token| token.trim_matches(['&', '*']) == "auto");
+        if !declares_auto {
+            continue;
+        }
+        let initializer = suffix.strip_prefix('=')?.trim_start();
+        let collection = initializer
+            .split(|character: char| {
+                !character.is_ascii_alphanumeric() && character != '_'
+            })
+            .next()
+            .unwrap_or_default();
+        if collection.is_empty() {
+            continue;
+        }
+        let remainder = &initializer[collection.len()..];
+        if remainder.starts_with('[')
+            || remainder.starts_with(".begin(")
+            || remainder.starts_with(".cbegin(")
+        {
+            return Some(collection.to_string());
+        }
+    }
+    None
+}
+
+fn cpp_pointer_member_receiver_type(
+    source: &str,
+    receiver: &str,
+    message: &str,
+    declared_type: &str,
+) -> Option<String> {
+    let tight_source = source.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    let tight_message = message.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    if !tight_source.contains(&format!("{receiver}->{tight_message}")) {
+        return None;
+    }
+
+    let declared_type = declared_type.trim().trim_end_matches(['&', '*']).trim();
+    for pointer in ["std::shared_ptr", "shared_ptr", "std::unique_ptr", "unique_ptr"] {
+        let Some(arguments) = declared_type.strip_prefix(pointer) else {
+            continue;
+        };
+        let arguments = arguments.trim();
+        if !arguments.starts_with('<') || !arguments.ends_with('>') {
+            continue;
+        }
+        let pointee = arguments[1..arguments.len() - 1].trim();
+        if !pointee.is_empty() {
+            return Some(pointee.to_string());
+        }
+    }
+    None
+}
+
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
     // C-family indexers render a local as `Type name` - the type leads.
     fn parse_variable_declaration(&self, text: &str) -> Option<String> {
@@ -1024,6 +1118,20 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                 "if" | "while" | "switch" | "return"
             ))
         .then_some(declared)
+    }
+
+    fn collection_element_binding(&self, source: &str, local: &str) -> Option<String> {
+        cpp_collection_element_binding(source, local)
+    }
+
+    fn pointer_member_receiver_type(
+        &self,
+        source: &str,
+        receiver: &str,
+        message: &str,
+        declared_type: &str,
+    ) -> Option<String> {
+        cpp_pointer_member_receiver_type(source, receiver, message, declared_type)
     }
 
     fn receiver_local_binding(&self, receiver: &str) -> Option<String> {
