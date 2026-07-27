@@ -135,6 +135,28 @@ fn cpp_scoped_free_call_resolves_by_exact_namespace_identity() -> Result<()> {
 }
 
 #[test]
+fn cpp_unqualified_call_in_class_falls_back_to_enclosing_namespace() -> Result<()> {
+    let output = extract_source(
+        "namespace demo {\nint helper(int value) { return value; }\nclass Runner { int run() { return helper(1); } };\n}\n",
+        ".cpp",
+        Language::Cpp,
+    )?;
+    let target = output
+        .methods
+        .iter()
+        .find(|method| method.name == "helper")
+        .context("missing namespace helper")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "helper")
+        .context("missing unqualified helper call")?;
+    assert_eq!(call.lexical_symbol.as_deref(), Some("demo::helper"));
+    assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
+    Ok(())
+}
+
+#[test]
 fn cpp_scoped_free_call_never_joins_a_same_name_wrong_namespace() -> Result<()> {
     let output = extract_source(
         "namespace other { int helper(int value) { return value; } }\nint run() { return demo::helper(1); }\n",

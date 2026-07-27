@@ -1923,7 +1923,7 @@ fn cpp_closed_overload_return_types_flow_into_chained_calls() -> Result<()> {
         tmp.path(),
         r#"namespace demo {
 std::string make(int value) { return std::string(); }
-std::string make(double value) { return std::string(); }
+const std::string& make(double value) { static std::string result; return result; } // stable view
 bool run() { return make(1).size() > 0; }
 }
 "#,
