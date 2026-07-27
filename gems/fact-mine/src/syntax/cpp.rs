@@ -1179,6 +1179,10 @@ fn cpp_owner_has_direct_pure_virtual(source: &str) -> bool {
 }
 
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
     fn state_writes_require_declared_owner(&self) -> bool {
         true
     }

@@ -141,6 +141,27 @@
         },
         {
           "arguments": [
+            "name",
+            "user.active()"
+          ],
+          "block": false,
+          "conditional": false,
+          "control": "always",
+          "function": "process",
+          "line": 14,
+          "message": "call",
+          "owner": "JavaSyntaxFactsCore",
+          "receiver": "Account",
+          "safe_navigation": false,
+          "span": [
+            14,
+            22,
+            14,
+            54
+          ]
+        },
+        {
+          "arguments": [
             "name"
           ],
           "block": false,

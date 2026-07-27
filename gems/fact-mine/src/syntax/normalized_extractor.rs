@@ -336,6 +336,7 @@ impl<'a> Extractor<'a> {
             visibility: Some(visibility),
             params: params.clone(),
             callback_params: self.behavior.callback_parameter_names(node),
+            source_export_eligible: self.behavior.function_has_executable_body(node),
             signature: String::new(),
         });
         if let Some(mut declaration) = self.behavior.state_declaration_from_function(node, &owner) {
@@ -428,6 +429,7 @@ impl<'a> Extractor<'a> {
             visibility: Some("private".to_string()),
             params: params.clone(),
             callback_params: self.behavior.callback_parameter_names(node),
+            source_export_eligible: true,
             signature: String::new(),
         });
         self.functions.push(name);

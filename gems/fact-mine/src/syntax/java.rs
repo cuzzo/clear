@@ -294,6 +294,10 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
         kind == "interface"
     }
 
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         (node.r#type == "CALL")
             .then(|| node.children.first().and_then(crate::ast::node))
@@ -873,6 +877,12 @@ mod tests {
     #[test]
     fn test_java_behavior_comprehensive() {
         let b = JavaNormalizedBehavior;
+
+        assert!(b.function_has_executable_body(&node(
+            "DEFN",
+            "default int size() { return 0; }"
+        )));
+        assert!(!b.function_has_executable_body(&node("DEFN", "int size();")));
 
         assert_eq!(
             b.collection_operation(&TypeExpr::Primitive("Set".to_string()), "add"),

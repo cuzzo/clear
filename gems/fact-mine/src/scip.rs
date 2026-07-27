@@ -887,6 +887,13 @@ fn compiler_proven_abstract_project_target(
     let Ok(language) = syntax::Language::parse(&method.language) else {
         return false;
     };
+    // An abstract dispatch contract must denote a declaration without an
+    // executable implementation. The language adapter owns that syntax fact;
+    // a same-named interface elsewhere in the project must never turn a
+    // concrete method into a callback contract.
+    if method.source_export_eligible {
+        return false;
+    }
     let behavior = syntax::normalized_behavior::behavior(language);
     // Recovery around conditional default-interface bodies can preserve the
     // exact compiler symbol while losing the normalized method's instance
@@ -2255,6 +2262,7 @@ mod tests {
             complexity_signals: BTreeMap::new(),
             params: Vec::new(),
             callback_params: Vec::new(),
+            source_export_eligible: true,
             raw_source: String::new(),
             normalized_source: String::new(),
             untraceable_params: Vec::new(),
@@ -2273,6 +2281,7 @@ mod tests {
             target_provenance: None,
             candidate_targets: Vec::new(),
             candidate_reason: None,
+            consumer_closed_candidate_set: false,
             kind: "unresolved_call".into(),
             owner: "Demo".into(),
             function: "caller".into(),
@@ -2371,6 +2380,7 @@ mod tests {
         abstract_method.owner = "Demo".into();
         abstract_method.kind = "instance".into();
         abstract_method.raw_source = "String value();".into();
+        abstract_method.source_export_eligible = false;
         let mut caller_method = method("caller", &path, "run", [2, 0, 2, caller.len()]);
         caller_method.owner_id = "owner:Caller".into();
         caller_method.owner = "Caller".into();
@@ -3781,6 +3791,7 @@ void run_dependent() {
         recovered.language = "csharp".into();
         recovered.kind = "top".into();
         recovered.owner_id = "recovery-owner".into();
+        recovered.source_export_eligible = false;
         recovered.semantic_symbol =
             Some("scip-dotnet nuget . . Serilog/ILogger#Verbose(+4).".into());
         assert_eq!(
@@ -3793,6 +3804,12 @@ void run_dependent() {
 
         assert!(compiler_proven_abstract_project_target(
             &[owner],
+            &[recovered.clone()],
+            "verbose"
+        ));
+        recovered.source_export_eligible = true;
+        assert!(!compiler_proven_abstract_project_target(
+            &[],
             &[recovered],
             "verbose"
         ));

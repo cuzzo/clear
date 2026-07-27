@@ -189,6 +189,14 @@ const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct KotlinNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        let source = node.text.trim_end();
+        source.ends_with('}')
+            || source
+                .rfind(')')
+                .is_some_and(|parameters_end| source[parameters_end + 1..].contains('='))
+    }
+
     fn uses_source_declaration_header(&self) -> bool {
         true
     }

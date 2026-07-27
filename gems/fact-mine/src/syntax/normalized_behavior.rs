@@ -1596,6 +1596,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         Vec::new()
     }
 
+    /// Whether a normalized declaration contains an executable source body.
+    /// Adapters override this when abstract signatures share a function node
+    /// with concrete methods.
+    fn function_has_executable_body(&self, _node: &Node) -> bool {
+        true
+    }
+
     fn suppress_call_site(&self, _node: &Node, _call: &NormalizedCallProjection) -> bool {
         false
     }

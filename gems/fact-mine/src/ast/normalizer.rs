@@ -1198,6 +1198,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn normalize_case(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        let initializer = self
+            .normalization_adapter
+            .case_initializer(node, self.source)
+            .and_then(|initializer| self.normalize_node(initializer));
         let value_raw = self.case_value(node);
         let value = value_raw.and_then(|value| self.normalize_node(value));
         let whens = self
@@ -1207,14 +1211,26 @@ impl<'source> TreeSitterNormalizer<'source> {
             .collect::<Vec<_>>();
         let fallback = self.case_else_body(node);
         let chain = self.link_when_chain(whens, fallback);
-        if value_raw.is_none() {
-            Some(self.wrap("CASE2", vec![optional_node(chain)], node))
+        let case = if value_raw.is_none() {
+            self.wrap("CASE2", vec![optional_node(chain)], node)
         } else {
-            Some(self.wrap(
+            self.wrap(
                 "CASE",
                 vec![optional_node(value), optional_node(chain)],
                 node,
+            )
+        };
+        if let Some(initializer) = initializer {
+            Some(self.wrap(
+                "BEGIN",
+                vec![
+                    Child::Node(Box::new(initializer)),
+                    Child::Node(Box::new(case)),
+                ],
+                node,
             ))
+        } else {
+            Some(case)
         }
     }
 
@@ -2228,7 +2244,21 @@ impl<'source> TreeSitterNormalizer<'source> {
         if let Some(normalized) = normalized.as_ref() {
             self.record_call_origin(span(node), normalized);
         }
-        normalized
+        let normalized = normalized?;
+        let supplementary = self
+            .normalization_adapter
+            .supplementary_call_nodes(node, self.source);
+        if supplementary.is_empty() {
+            return Some(normalized);
+        }
+        let mut children = vec![Child::Node(Box::new(normalized))];
+        children.extend(
+            supplementary
+                .into_iter()
+                .filter_map(|child| self.normalize_node(child))
+                .map(|child| Child::Node(Box::new(child))),
+        );
+        Some(self.wrap("BEGIN", children, node))
     }
 
     pub(in crate::ast) fn normalize_zero_child_call(&self, node: TreeSitterNode<'_>) -> Node {
@@ -5341,6 +5371,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         // its own, so checking only its direct children silently degrades a
         // zero-argument method invocation into a property read.
         if raw_named.len() >= 2
+            && !self.call_node(raw_named[0])
             && self.dotted_call(raw_named[0])
             && raw_named[1..].iter().all(|child| {
                 self.normalization_adapter
@@ -5396,6 +5427,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         }
 
         if raw_named.len() >= 2
+            && !self.call_node(raw_named[0])
             && self.dotted_call(raw_named[0])
             && raw_named[1..].iter().all(|child| {
                 self.normalization_adapter
@@ -6484,7 +6516,10 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn call_node(&self, node: TreeSitterNode<'_>) -> bool {
-        self.call_kind(node.kind()) || self.normalization_adapter.call_node(node, self.source)
+        (self.call_kind(node.kind()) || self.normalization_adapter.call_node(node, self.source))
+            && !self
+                .normalization_adapter
+                .nonruntime_call_node(node, self.source)
     }
 
     pub(in crate::ast) fn function_kind(&self, kind: &str) -> bool {
@@ -6554,8 +6589,14 @@ impl<'source> TreeSitterNormalizer<'source> {
     }
 
     pub(in crate::ast) fn unwrap_node(&self, node: TreeSitterNode<'_>) -> bool {
+        let named_child_count = self.named_children(node).len();
         self.normalization_adapter
-            .unwrap_node(node, self.source, self.named_children(node).len())
+            .unwrap_node(node, self.source, named_child_count)
+            || self.normalization_adapter.transparent_expression(
+                node,
+                self.source,
+                named_child_count,
+            )
     }
 
     pub(in crate::ast) fn single_dotted_else_body<'tree>(

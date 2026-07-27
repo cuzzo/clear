@@ -17,7 +17,9 @@ metadata = {
   producer_version: Espalier.const_defined?(:VERSION) ? Espalier::VERSION : "unknown",
   corpus: nil,
   source_revision: nil,
-  indexer: nil
+  indexer: nil,
+  symbol_prefix_from: nil,
+  symbol_prefix_to: nil
 }
 OptionParser.new do |opts|
   opts.banner = "usage: export_complexity_summary.rb [options] PROFILE.json [OUTPUT.json[.gz]]"
@@ -25,8 +27,17 @@ OptionParser.new do |opts|
   opts.on("--source-revision REV", "Source commit or release") { |value| metadata[:source_revision] = value }
   opts.on("--indexer ID", "SCIP indexer and version") { |value| metadata[:indexer] = value }
   opts.on("--producer-version VERSION", "Override the Espalier producer version") { |value| metadata[:producer_version] = value }
+  opts.on("--symbol-prefix-from PREFIX", "Relocate producer symbols from this exact prefix") do |value|
+    metadata[:symbol_prefix_from] = value
+  end
+  opts.on("--symbol-prefix-to PREFIX", "Relocate producer symbols to this exact prefix") do |value|
+    metadata[:symbol_prefix_to] = value
+  end
 end.parse!
 abort "usage: export_complexity_summary.rb [options] PROFILE.json [OUTPUT.json[.gz]]" unless (1..2).cover?(ARGV.length)
+if metadata[:symbol_prefix_from].nil? != metadata[:symbol_prefix_to].nil?
+  abort "--symbol-prefix-from and --symbol-prefix-to must be supplied together"
+end
 
 profile_bytes = File.binread(ARGV.fetch(0))
 profile = JSON.parse(profile_bytes)
@@ -62,7 +73,7 @@ source_proven_ids = Array(profile["methods"]).filter_map do |method|
     [method["path"].to_s, method["line"].to_i, method["name"].to_s],
     []
   )
-  method["id"].to_s if Espalier::ComplexitySummary.source_proven?(quality, facts)
+  method["id"].to_s if Espalier::ComplexitySummary.source_method_proven?(method, quality, facts)
 end.to_h { |id| [id, true] }
 
 symbols = Array(profile["methods"]).filter_map do |method|
@@ -89,15 +100,16 @@ symbols = Array(profile["methods"]).filter_map do |method|
   }]
 end
 
-# A compiler can attach an interface/trait declaration symbol to a call while
-# separately providing the closed implementation set visible in this index.
-# When every candidate has a complete analyzed bound, publish the conservative
-# maximum under that declaration symbol. This is language-neutral and retains
-# the closed-world assumption explicitly.
+# A compiler can attach a declaration symbol to a call while separately
+# providing candidate implementations visible in this index. Visibility in a
+# producer index is not proof that downstream consumers cannot add another
+# implementation. Publish a conservative candidate maximum only when the
+# profile carries a separate, explicit consumer-closure proof.
 candidate_symbols = Array(profile["calls"]).filter_map do |call|
   symbol = call["semantic_symbol"].to_s
   candidate_ids = Array(call["candidate_targets"]).map(&:to_s).reject(&:empty?).uniq.sort
   next if symbol.empty? || candidate_ids.empty?
+  next unless Espalier::ComplexitySummary.consumer_closed_candidate_set?(call)
 
   candidate_qualities = candidate_ids.map { |id| results[id] }
   next unless candidate_ids.all? { |id| source_proven_ids[id] }
@@ -119,6 +131,16 @@ candidate_symbols = Array(profile["calls"]).filter_map do |call|
   }]
 end
 symbols.concat(candidate_symbols)
+symbols.map! do |symbol, row|
+  [
+    Espalier::ComplexitySummary.relocate_symbol(
+      symbol,
+      from: metadata[:symbol_prefix_from],
+      to: metadata[:symbol_prefix_to]
+    ),
+    row
+  ]
+end
 
 # A compiler symbol should identify one declaration. Omit conflicting symbols
 # instead of selecting by order if an index violates that contract; one
@@ -148,6 +170,12 @@ output = {
     "corpus" => metadata[:corpus],
     "source_revision" => metadata[:source_revision],
     "indexer" => metadata[:indexer],
+    "symbol_relocation" => if metadata[:symbol_prefix_from] || metadata[:symbol_prefix_to]
+      {
+        "from" => metadata[:symbol_prefix_from],
+        "to" => metadata[:symbol_prefix_to]
+      }
+    end,
     "languages" => Array(profile["methods"]).map { |method| method["language"].to_s }.reject(&:empty?).uniq.sort
   }.compact,
   "symbols" => grouped.to_h do |symbol, rows|

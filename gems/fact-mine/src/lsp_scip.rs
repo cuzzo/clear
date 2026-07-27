@@ -784,6 +784,7 @@ mod tests {
             target_provenance: None,
             candidate_targets: Vec::new(),
             candidate_reason: None,
+            consumer_closed_candidate_set: false,
             kind: String::new(),
             owner: String::new(),
             function: String::new(),

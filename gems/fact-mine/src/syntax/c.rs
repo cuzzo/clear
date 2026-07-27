@@ -127,6 +127,10 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
     fn uses_source_declaration_header(&self) -> bool {
         true
     }

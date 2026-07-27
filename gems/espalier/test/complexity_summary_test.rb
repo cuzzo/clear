@@ -20,6 +20,51 @@ class ComplexitySummaryTest < Minitest::Test
     )
   end
 
+  def test_source_method_requires_an_executable_normalization_complete_body
+    assert Espalier::ComplexitySummary.source_method_proven?(
+      {"source_export_eligible" => true},
+      quality,
+      []
+    )
+    refute Espalier::ComplexitySummary.source_method_proven?({}, quality, [])
+    refute Espalier::ComplexitySummary.source_method_proven?(
+      {"source_export_eligible" => false},
+      quality,
+      []
+    )
+    refute Espalier::ComplexitySummary.source_method_proven?(
+      {"source_export_eligible" => true, "callback_params" => []},
+      quality(bound_qualities: ["upper_bound_parametric_callback_once"]),
+      []
+    )
+    assert Espalier::ComplexitySummary.source_method_proven?(
+      {"source_export_eligible" => true, "callback_params" => ["callback"]},
+      quality(bound_qualities: ["upper_bound_parametric_callback_once"]),
+      []
+    )
+  end
+
+  def test_symbol_relocation_is_explicit_and_fail_closed
+    assert_equal(
+      "semanticdb maven jdk 21 java/lang/String#length().",
+      Espalier::ComplexitySummary.relocate_symbol(
+        "semanticdb maven temporary/java.base 21 java/lang/String#length().",
+        from: "semanticdb maven temporary/java.base 21 ",
+        to: "semanticdb maven jdk 21 "
+      )
+    )
+    assert_raises(ArgumentError) do
+      Espalier::ComplexitySummary.relocate_symbol(
+        "semanticdb maven other 21 java/lang/String#length().",
+        from: "semanticdb maven temporary/java.base 21 ",
+        to: "semanticdb maven jdk 21 "
+      )
+    end
+    assert_raises(ArgumentError) do
+      Espalier::ComplexitySummary.relocate_symbol("symbol", from: "symbol")
+    end
+  end
+
   def test_rejects_incomplete_or_manual_model_derived_bounds
     refute Espalier::ComplexitySummary.source_proven?(quality(complete: false), [])
     refute Espalier::ComplexitySummary.source_proven?(quality(space_complete: false), [])
@@ -48,5 +93,15 @@ class ComplexitySummaryTest < Minitest::Test
     ]
 
     refute Espalier::ComplexitySummary.source_proven?(quality, facts)
+  end
+
+  def test_candidate_export_requires_explicit_downstream_closure
+    refute Espalier::ComplexitySummary.consumer_closed_candidate_set?({
+      "candidate_targets" => ["implementation"]
+    })
+    assert Espalier::ComplexitySummary.consumer_closed_candidate_set?({
+      "candidate_targets" => ["implementation"],
+      "consumer_closed_candidate_set" => true
+    })
   end
 end

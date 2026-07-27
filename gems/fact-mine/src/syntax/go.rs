@@ -325,6 +325,10 @@ const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
     fn uses_source_declaration_header(&self) -> bool {
         true
     }
@@ -1668,6 +1672,12 @@ mod tests {
     #[test]
     fn test_go_behavior_uncovered_methods() {
         let behavior = GoNormalizedBehavior;
+
+        assert!(behavior.function_has_executable_body(&node(
+            "DEFN",
+            "func size() int { return 0 }"
+        )));
+        assert!(!behavior.function_has_executable_body(&node("DEFN", "Size() int")));
 
         // format_array_type etc
         assert_eq!(behavior.format_array_type("int"), "[]int");

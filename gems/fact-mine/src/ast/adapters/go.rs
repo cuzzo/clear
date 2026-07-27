@@ -81,6 +81,16 @@ impl AstNormalizationAdapter for GoAstAdapter {
             .flatten()
     }
 
+    fn case_initializer<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "expression_switch_statement")
+            .then(|| node.child_by_field_name("initializer"))
+            .flatten()
+    }
+
     fn intrinsic_call_name(&self, node: TreeSitterNode<'_>, _source: &str) -> Option<&'static str> {
         go_statement_without_inner_call(node).then_some("go")
     }

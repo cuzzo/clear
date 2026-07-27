@@ -128,6 +128,10 @@ pub(crate) fn parse_profile_signature(
 }
 
 impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
     fn parse_signature(
         &self,
         signature: &str,

@@ -224,6 +224,11 @@ const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        let source = node.text.trim_end();
+        source.ends_with('}') || source.contains("=>")
+    }
+
     fn uses_source_declaration_header(&self) -> bool {
         true
     }
