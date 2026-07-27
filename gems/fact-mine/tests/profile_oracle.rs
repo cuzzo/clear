@@ -1687,6 +1687,40 @@ int analyze(Data* data, int input) {
 }
 
 #[test]
+fn cpp_using_aliases_reach_declared_collection_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#include <list>
+struct Queue {
+    using Items = std::list<int>;
+    Items items;
+    bool empty() const { return items.empty(); }
+    void transfer(Items& other) { items.splice(items.end(), other); }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let empty = output
+        .calls
+        .iter()
+        .find(|call| call.function == "empty" && call.message == "empty")
+        .context("missing aliased list empty call")?;
+    assert_eq!(empty.receiver_type.as_deref(), Some("Items"));
+    assert_eq!(empty.known_time_complexity.as_deref(), Some("O(1)"));
+
+    let splice = output
+        .calls
+        .iter()
+        .find(|call| call.function == "transfer" && call.message == "splice")
+        .context("missing aliased list splice call")?;
+    assert_eq!(splice.receiver_type.as_deref(), Some("Items"));
+    assert_eq!(splice.known_time_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
 fn c_export_and_calling_convention_macros_preserve_parameters_and_recursion() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".c").tempfile()?;
     fs::write(

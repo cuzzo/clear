@@ -6478,6 +6478,16 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 .map(|type_name| TypeExpr::parse(type_name, language))
                 .and_then(|receiver_type| behavior.call_complexity(&receiver_type, &call.message))
                 .or_else(|| {
+                    instance_receiver_type.as_deref().and_then(|type_name| {
+                        let normalized = normalized_declared_alias(document, type_name);
+                        (normalized.trim() != type_name.trim())
+                            .then(|| TypeExpr::parse(&normalized, language))
+                            .and_then(|receiver_type| {
+                                behavior.call_complexity(&receiver_type, &call.message)
+                            })
+                    })
+                })
+                .or_else(|| {
                     if implicit {
                         // Bare calls may be language intrinsics (`len`) or
                         // implicit-owner dispatch (`self.foo`). Prefer the
@@ -6524,6 +6534,17 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         .map(|type_name| TypeExpr::parse(type_name, language))
                         .and_then(|receiver_type| {
                             behavior.parametric_call_cost(&receiver_type, &call.message)
+                        })
+                        .or_else(|| {
+                            instance_receiver_type.as_deref().and_then(|type_name| {
+                                let normalized = normalized_declared_alias(document, type_name);
+                                (normalized.trim() != type_name.trim())
+                                    .then(|| TypeExpr::parse(&normalized, language))
+                                    .and_then(|receiver_type| {
+                                        behavior
+                                            .parametric_call_cost(&receiver_type, &call.message)
+                                    })
+                            })
                         })
                         .or_else(|| declared_field_callback_cost(document, behavior, call))
                         .or_else(|| {
