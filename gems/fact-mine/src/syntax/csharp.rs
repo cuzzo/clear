@@ -20,7 +20,9 @@ use crate::type_inference::TypeExpr;
 const CSHARP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     strip_prefixes: &["readonly "],
     trim_prefix_chars: &[],
-    trim_suffix_chars: &[],
+    // Nullable reference/value annotations do not change the nominal receiver
+    // that owns a member. Nullability is tracked separately by CFG facts.
+    trim_suffix_chars: &['?'],
     array_names: &["List", "ArrayList", "Vector"],
     hash_names: &["Dictionary", "HashMap"],
     set_names: &["HashSet"],

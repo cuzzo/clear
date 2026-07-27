@@ -74,6 +74,11 @@ struct Document {
 #[derive(Debug, Deserialize)]
 struct SymbolInformation {
     symbol: String,
+    /// Historical SCIP indexers, including current scip-dotnet releases,
+    /// render declaration signatures as fenced code in `documentation`
+    /// instead of populating `signature_documentation`.
+    #[serde(default)]
+    documentation: Vec<String>,
     #[serde(default)]
     relationships: Vec<Relationship>,
     /// The indexer's rendering of the declaration, e.g.
@@ -224,7 +229,17 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
     apply_index(output, index)
 }
 
-fn apply_index(output: &mut ProfileOutput, index: Index) -> Result<ImportStats> {
+fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportStats> {
+    for information in index
+        .documents
+        .iter_mut()
+        .flat_map(|document| &mut document.symbols)
+    {
+        if information.signature_documentation.is_none() {
+            information.signature_documentation =
+                legacy_signature_documentation(&information.documentation);
+        }
+    }
     if index
         .metadata
         .as_ref()
@@ -523,6 +538,7 @@ fn apply_index(output: &mut ProfileOutput, index: Index) -> Result<ImportStats> 
         }
     }
 
+    reconcile_inactive_preprocessor_project_calls(output);
     reconcile_non_recursive_overload_calls(output);
 
     let raw_parser_call_sites = output.call_resolution_coverage.raw_parser_call_sites;
@@ -662,21 +678,28 @@ fn index_from_protobuf(index: scip::types::Index) -> Result<Index> {
             let symbols = document
                 .symbols
                 .into_iter()
-                .map(|information| SymbolInformation {
-                    symbol: information.symbol,
-                    relationships: information
-                        .relationships
-                        .into_iter()
-                        .map(|relationship| Relationship {
-                            symbol: relationship.symbol,
-                            is_implementation: relationship.is_implementation,
-                        })
-                        .collect(),
-                    signature_documentation: information.signature_documentation.into_option().map(
-                        |signature| SignatureDocumentation {
+                .map(|information| {
+                    let documentation = information.documentation;
+                    let signature_documentation = information
+                        .signature_documentation
+                        .into_option()
+                        .map(|signature| SignatureDocumentation {
                             text: signature.text,
-                        },
-                    ),
+                        })
+                        .or_else(|| legacy_signature_documentation(&documentation));
+                    SymbolInformation {
+                        symbol: information.symbol,
+                        documentation,
+                        relationships: information
+                            .relationships
+                            .into_iter()
+                            .map(|relationship| Relationship {
+                                symbol: relationship.symbol,
+                                is_implementation: relationship.is_implementation,
+                            })
+                            .collect(),
+                        signature_documentation,
+                    }
                 })
                 .collect();
             Ok(Document {
@@ -689,6 +712,31 @@ fn index_from_protobuf(index: scip::types::Index) -> Result<Index> {
     Ok(Index {
         metadata,
         documents,
+    })
+}
+
+/// SCIP historically allowed signatures in markdown documentation. Recover
+/// only a fenced code block, never prose, so an indexer's narrative docs cannot
+/// be mistaken for a native declaration.
+fn legacy_signature_documentation(documentation: &[String]) -> Option<SignatureDocumentation> {
+    documentation.iter().find_map(|markdown| {
+        let mut lines = markdown.lines();
+        while let Some(line) = lines.next() {
+            if !line.trim_start().starts_with("```") {
+                continue;
+            }
+            let signature = lines
+                .by_ref()
+                .take_while(|line| !line.trim_start().starts_with("```"))
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !signature.is_empty() {
+                return Some(SignatureDocumentation { text: signature });
+            }
+        }
+        None
     })
 }
 
@@ -899,35 +947,52 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
     if !has_local_types {
         return 0;
     }
-    let languages = output
+    let methods = output
         .methods
         .iter()
-        .map(|method| (method.id.clone(), method.language.clone()))
+        .map(|method| {
+            (
+                method.id.clone(),
+                (method.language.clone(), method.span),
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     let mut typed = 0;
     for call in output.calls.iter_mut() {
         if call.receiver_type.is_some() || call.receiver.is_empty() {
             continue;
         }
-        let Some(language) = languages
+        let Some((language, method_span)) = methods
             .get(&call.source)
-            .and_then(|name| crate::syntax::Language::parse(name).ok())
         else {
+            continue;
+        };
+        let Ok(language) = crate::syntax::Language::parse(language) else {
             continue;
         };
         let Some(document) = select_document_for_path(&call.path, &index.documents) else {
             continue;
         };
         let source = fs::read_to_string(&call.path).unwrap_or_default();
+        // Normalized syntax spans are one-based while SCIP ranges are
+        // zero-based. Keep this conversion at the importer boundary; comparing
+        // the two coordinate systems directly silently prevented every local
+        // receiver occurrence after the first source line from matching.
+        let call_span = [
+            call.span[0].saturating_sub(1),
+            call.span[1],
+            call.span[2].saturating_sub(1),
+            call.span[3],
+        ];
         // The receiver's own occurrence: inside the call, spelled like the
         // receiver, and bound to a local symbol.
-        let declaration = document
+        let direct_symbol = document
             .occurrences
             .iter()
             .filter(|occurrence| {
                 occurrence
                     .span()
-                    .is_some_and(|span| contains(call.span, span))
+                    .is_some_and(|span| contains(call_span, span))
             })
             .find(|occurrence| {
                 occurrence.symbol.starts_with("local ")
@@ -935,11 +1000,48 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
                         .span()
                         .is_some_and(|span| occurrence_text(&source, span) == call.receiver)
             })
-            .and_then(|occurrence| {
+            .map(|occurrence| occurrence.symbol.as_str());
+        // An inactive C# preprocessor branch has no occurrence at the call
+        // itself. The binding still has indexed occurrences in the enclosing
+        // method (normally its declaration and active-branch uses). Adopt that
+        // compiler identity only when the method contains exactly one local
+        // symbol with this source name, preserving shadowing safety.
+        let enclosing_symbols = method_span
+            .map(|span| {
+                [
+                    span[0].saturating_sub(1),
+                    span[1],
+                    span[2].saturating_sub(1),
+                    span[3],
+                ]
+            })
+            .into_iter()
+            .flat_map(|span| {
+                document
+                    .occurrences
+                    .iter()
+                    .filter(move |occurrence| {
+                        occurrence.symbol.starts_with("local ")
+                            && occurrence.span().is_some_and(|inner| contains(span, inner))
+                    })
+            })
+            .filter(|occurrence| {
+                occurrence
+                    .span()
+                    .is_some_and(|span| occurrence_text(&source, span) == call.receiver)
+            })
+            .map(|occurrence| occurrence.symbol.as_str())
+            .collect::<BTreeSet<_>>();
+        let fallback_symbol = (enclosing_symbols.len() == 1)
+            .then(|| enclosing_symbols.into_iter().next())
+            .flatten();
+        let declaration = direct_symbol
+            .or(fallback_symbol)
+            .and_then(|symbol| {
                 document
                     .symbols
                     .iter()
-                    .find(|information| information.symbol == occurrence.symbol)
+                    .find(|information| information.symbol == symbol)
             })
             .and_then(|information| information.signature_documentation.as_ref())
             .map(|documentation| documentation.text.trim())
@@ -947,11 +1049,40 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
         let Some(declaration) = declaration else {
             continue;
         };
-        let Some(declared) = crate::syntax::normalized_behavior::behavior(language)
-            .parse_variable_declaration(declaration)
+        let behavior = crate::syntax::normalized_behavior::behavior(language);
+        let Some(declared) = behavior.parse_variable_declaration(declaration)
         else {
             continue;
         };
+        let receiver_type = TypeExpr::parse(&declared, language.as_str());
+        if call.known_time_complexity.is_none() && call.known_space_complexity.is_none() {
+            if let Some(complexity) = behavior.call_complexity(&receiver_type, &call.message) {
+                call.known_time_complexity = Some(complexity.time.to_string());
+                call.known_space_complexity = Some(complexity.space.to_string());
+                call.complexity_provenance =
+                    Some("scip_local_declared_receiver_registry".to_string());
+                call.complexity_bound_quality =
+                    Some("upper_bound_compiler_declared_receiver".to_string());
+                call.complexity_missing_kind = None;
+                call.unresolved_reason = None;
+                call.resolution_missing_proof = None;
+                call.empty_domain_cause = None;
+            } else if let Some(kind) = behavior.parametric_call_cost(&receiver_type, &call.message) {
+                if let Some((time, space)) = crate::syntax::parametric_call_complexity(&kind) {
+                    call.callback_receiver = true;
+                    call.known_time_complexity = Some(time.to_string());
+                    call.known_space_complexity = Some(space.to_string());
+                    call.complexity_provenance =
+                        Some("scip_local_declared_receiver_contract".to_string());
+                    call.complexity_bound_quality =
+                        Some(format!("upper_bound_parametric_{kind}"));
+                    call.complexity_missing_kind = None;
+                    call.unresolved_reason = None;
+                    call.resolution_missing_proof = None;
+                    call.empty_domain_cause = None;
+                }
+            }
+        }
         call.receiver_type = Some(declared);
         call.receiver_type_origin = Some("scip_local_declaration".to_string());
         typed += 1;
@@ -1158,6 +1289,132 @@ fn assign_method_symbols(methods: &mut [MethodRecord], documents: &[Document]) {
             .filter(|candidates| candidates.len() == 1)
             .and_then(|candidates| candidates.into_iter().next());
     }
+}
+
+/// A compiler indexes only the active arm of a preprocessor conditional. The
+/// source analyzer still (correctly) retains calls from every arm, so an
+/// inactive overload call has no SCIP occurrence of its own. When an active
+/// sibling proves the exact project owner, close the inactive call over every
+/// same-owner/same-arity project overload and let Espalier join their costs by
+/// maximum. This is deliberately a candidate set, never an overload guess.
+fn reconcile_inactive_preprocessor_project_calls(output: &mut ProfileOutput) -> usize {
+    let methods_by_id = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    let mut sources = BTreeMap::<String, String>::new();
+    let indexed_siblings = output
+        .calls
+        .iter()
+        .filter_map(|call| {
+            Some((
+                (
+                    call.source.clone(),
+                    call.receiver.clone(),
+                    call.message.clone(),
+                    call.argument_count,
+                ),
+                (call.line, call.target.clone()?),
+            ))
+        })
+        .fold(
+            BTreeMap::<(String, String, String, usize), Vec<(usize, String)>>::new(),
+            |mut rows, (key, sibling)| {
+                rows.entry(key).or_default().push(sibling);
+                rows
+            },
+        );
+    let mut reconciled = 0;
+    for call in output.calls.iter_mut().filter(|call| {
+        call.target.is_none()
+            && call.semantic_symbol.is_none()
+            && call.candidate_targets.is_empty()
+    }) {
+        let key = (
+            call.source.clone(),
+            call.receiver.clone(),
+            call.message.clone(),
+            call.argument_count,
+        );
+        let source = sources
+            .entry(call.path.clone())
+            .or_insert_with(|| fs::read_to_string(&call.path).unwrap_or_default());
+        let sibling_methods = indexed_siblings
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .filter(|(line, _)| preprocessor_alternate_lines(source, *line, call.line))
+            .filter_map(|(_, target)| methods_by_id.get(target.as_str()).copied())
+            .collect::<Vec<_>>();
+        if sibling_methods.is_empty() {
+            continue;
+        }
+        let owners = sibling_methods
+            .iter()
+            .map(|method| {
+                (
+                    method.language.as_str(),
+                    method.owner.as_str(),
+                    method.kind.as_str(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        if owners.len() != 1 {
+            continue;
+        }
+        let (language, owner, kind) = owners.into_iter().next().expect("one owner");
+        let candidates = output
+            .methods
+            .iter()
+            .filter(|method| {
+                method.language == language
+                    && method.owner == owner
+                    && method.kind == kind
+                    && method.dispatch_name == call.message
+                    && method.params.len() == call.argument_count
+            })
+            .map(|method| method.id.clone())
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            continue;
+        }
+        if candidates.len() == 1 {
+            call.target = candidates.into_iter().next();
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+        } else {
+            call.candidate_targets = candidates.into_iter().collect();
+            call.candidate_reason =
+                Some("compiler_indexed_preprocessor_overload_set".to_string());
+            call.external_symbol_scope = Some("project".to_string());
+            call.complexity_missing_kind = None;
+            call.unresolved_reason =
+                Some("closed_preprocessor_project_candidate_set_requires_summary".to_string());
+            call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+            call.empty_domain_cause = None;
+        }
+        reconciled += 1;
+    }
+    reconciled
+}
+
+fn preprocessor_alternate_lines(source: &str, left_line: usize, right_line: usize) -> bool {
+    let start = left_line.min(right_line).saturating_sub(1);
+    let end = left_line.max(right_line);
+    source
+        .lines()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .map(str::trim_start)
+        .any(|line| {
+            line.starts_with("#if")
+                || line.starts_with("#elif")
+                || line.starts_with("#else")
+                || line.starts_with("#endif")
+        })
 }
 
 /// Syntax-only recursion extraction deliberately runs before corpus call
@@ -2969,6 +3226,152 @@ mod tests {
         assert_eq!(
             vector_context.known_time_complexity, None,
             "the document-local Vec declaration must not inherit scalar pricing"
+        );
+    }
+
+    #[test]
+    fn scip_local_receiver_types_reconcile_one_based_syntax_spans() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Renderer.cs");
+        let source = "class Renderer {\n  string Render() {\n    StringBuilder sb = Factory();\n    return sb.ToString();\n  }\n}\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let receiver_column = source.lines().nth(3).unwrap().find("sb").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "Renderer.cs",
+            "occurrences": [
+                occurrence(
+                    [3, receiver_column, receiver_column + "sb".len()],
+                    "local 0",
+                    0
+                )
+            ],
+            "symbols": [{
+                "symbol": "local 0",
+                "signature_documentation": {"text": "StringBuilder? sb"}
+            }]
+        }]});
+        let mut output = ProfileOutput::default();
+        let mut caller = method("caller", &path, "Render", [2, 2, 5, 3]);
+        caller.language = "csharp".into();
+        output.methods.push(caller);
+        let mut to_string = call(
+            "caller",
+            &path,
+            "ToString",
+            [4, receiver_column, 4, receiver_column + "sb.ToString()".len()],
+        );
+        to_string.receiver = "sb".into();
+        output.calls.push(to_string);
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].receiver_type.as_deref(), Some("StringBuilder?"));
+        assert_eq!(
+            output.calls[0].receiver_type_origin.as_deref(),
+            Some("scip_local_declaration")
+        );
+        assert_eq!(output.calls[0].known_time_complexity.as_deref(), Some("O(N)"));
+    }
+
+    #[test]
+    fn scip_local_receiver_types_flow_into_unindexed_preprocessor_branches() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Renderer.cs");
+        let source = "class Renderer {\n  string Render() {\n    StringBuilder sb = Factory();\n    return sb.ToString();\n  }\n}\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let declaration_column = source.lines().nth(2).unwrap().find("sb").unwrap();
+        let receiver_column = source.lines().nth(3).unwrap().find("sb").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "Renderer.cs",
+            "occurrences": [
+                occurrence(
+                    [2, declaration_column, declaration_column + "sb".len()],
+                    "local 0",
+                    1
+                )
+            ],
+            "symbols": [{
+                "symbol": "local 0",
+                "documentation": ["```cs\nStringBuilder? sb\n```"]
+            }]
+        }]});
+        let mut output = ProfileOutput::default();
+        let mut caller = method("caller", &path, "Render", [2, 2, 5, 3]);
+        caller.language = "csharp".into();
+        output.methods.push(caller);
+        let mut to_string = call(
+            "caller",
+            &path,
+            "ToString",
+            [4, receiver_column, 4, receiver_column + "sb.ToString()".len()],
+        );
+        to_string.receiver = "sb".into();
+        output.calls.push(to_string);
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].receiver_type.as_deref(), Some("StringBuilder?"));
+        assert_eq!(
+            output.calls[0].receiver_type_origin.as_deref(),
+            Some("scip_local_declaration")
+        );
+        assert_eq!(output.calls[0].known_time_complexity.as_deref(), Some("O(N)"));
+    }
+
+    #[test]
+    fn legacy_fenced_scip_documentation_recovers_only_the_signature() {
+        assert_eq!(
+            legacy_signature_documentation(&[
+                "```cs\nStringBuilder? sb\n```\nA reusable buffer.".into()
+            ])
+            .map(|signature| signature.text),
+            Some("StringBuilder? sb".into())
+        );
+        assert!(
+            legacy_signature_documentation(&["Narrative documentation only.".into()]).is_none()
+        );
+    }
+
+    #[test]
+    fn inactive_preprocessor_calls_use_closed_project_overload_sets() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Renderer.cs");
+        fs::write(
+            &path,
+            "class Renderer {\n#if ACTIVE\n  Padding.Apply(output, builder, alignment);\n#else\n  Padding.Apply(output, builder.ToString(), alignment);\n#endif\n}\n",
+        )
+        .unwrap();
+        let path = path.to_string_lossy().to_string();
+        let mut string_overload = method("string", &path, "Apply", [10, 0, 10, 1]);
+        string_overload.language = "csharp".into();
+        string_overload.owner = "Padding".into();
+        string_overload.params = vec!["output".into(), "value".into(), "alignment".into()];
+        let mut builder_overload = method("builder", &path, "Apply", [20, 0, 20, 1]);
+        builder_overload.language = "csharp".into();
+        builder_overload.owner = "Padding".into();
+        builder_overload.params = vec!["output".into(), "value".into(), "alignment".into()];
+        let mut active = call("caller", &path, "Apply", [3, 2, 3, 45]);
+        active.receiver = "Padding".into();
+        active.argument_count = 3;
+        active.target = Some("builder".into());
+        active.semantic_symbol = Some("scip-dotnet nuget . . Padding#Apply(+1).".into());
+        let mut inactive = call("caller", &path, "Apply", [5, 2, 5, 56]);
+        inactive.receiver = "Padding".into();
+        inactive.argument_count = 3;
+        let mut output = ProfileOutput::default();
+        output.methods = vec![string_overload, builder_overload];
+        output.calls = vec![active, inactive];
+
+        assert_eq!(reconcile_inactive_preprocessor_project_calls(&mut output), 1);
+        assert_eq!(
+            output.calls[1].candidate_targets,
+            ["builder".to_string(), "string".to_string()]
+        );
+        assert_eq!(
+            output.calls[1].candidate_reason.as_deref(),
+            Some("compiler_indexed_preprocessor_overload_set")
         );
     }
 
