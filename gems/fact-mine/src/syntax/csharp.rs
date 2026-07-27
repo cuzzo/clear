@@ -394,7 +394,35 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         receiver_type: &crate::type_inference::TypeExpr,
         message: &str,
     ) -> Option<super::normalized_behavior::NormalizedCollectionOperation> {
-        configured_collection_operation("csharp", receiver_type, message)
+        configured_collection_operation("csharp", receiver_type, message).or_else(|| {
+            let crate::type_inference::TypeExpr::Primitive(name) = receiver_type.strip_nilable()
+            else {
+                return None;
+            };
+            let runtime_name = match name.as_str() {
+                "bool" => "Boolean",
+                "byte" => "Byte",
+                "sbyte" => "SByte",
+                "short" => "Int16",
+                "ushort" => "UInt16",
+                "int" => "Int32",
+                "uint" => "UInt32",
+                "long" => "Int64",
+                "ulong" => "UInt64",
+                "float" => "Single",
+                "double" => "Double",
+                "decimal" => "Decimal",
+                "char" => "Char",
+                "string" => "String",
+                "object" => "Object",
+                _ => return None,
+            };
+            configured_collection_operation(
+                "csharp",
+                &crate::type_inference::TypeExpr::Primitive(runtime_name.to_string()),
+                message,
+            )
+        })
     }
 
     fn mutating_receiver_message(&self, message: &str) -> bool {
@@ -863,6 +891,14 @@ mod tests {
         assert_eq!(b.untyped_type(), "object");
         assert_eq!(b.untyped_array_type(), "List<object>");
         assert_eq!(b.untyped_hash_type(), "Dictionary<string, object>");
+        assert_eq!(
+            b.call_complexity(
+                &crate::type_inference::TypeExpr::Primitive("uint".to_string()),
+                "ToString",
+            )
+            .map(|cost| cost.time),
+            Some("O(N)")
+        );
     }
 
     #[test]
