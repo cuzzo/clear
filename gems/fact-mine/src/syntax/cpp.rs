@@ -402,37 +402,54 @@ fn cpp_dependent_auto_binding(
     statement: &str,
     dependencies: &BTreeSet<String>,
 ) -> Option<String> {
-    let auto = statement.find("auto")?;
-    let boundary_before = statement[..auto]
-        .chars()
-        .next_back()
-        .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_');
-    let after_auto = statement.get(auto + "auto".len()..)?;
-    let boundary_after = after_auto
-        .chars()
-        .next()
-        .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_');
-    if !boundary_before || !boundary_after {
-        return None;
+    for (auto, _) in statement.match_indices("auto") {
+        let boundary_before = statement[..auto]
+            .chars()
+            .next_back()
+            .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_');
+        let Some(after_auto) = statement.get(auto + "auto".len()..) else {
+            continue;
+        };
+        let boundary_after = after_auto
+            .chars()
+            .next()
+            .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_');
+        if !boundary_before || !boundary_after {
+            continue;
+        }
+        let after_auto = after_auto
+            .trim_start()
+            .trim_start_matches(['&', '*'])
+            .trim_start();
+        let Some(name) = cpp_identifier_tokens(after_auto).next() else {
+            continue;
+        };
+        let Some(after_name) = after_auto.get(after_auto.find(name)? + name.len()..) else {
+            continue;
+        };
+        let after_name = after_name.trim_start();
+        let Some(initializer) = after_name
+            .strip_prefix('=')
+            .or_else(|| after_name.strip_prefix(':'))
+            .map(str::trim)
+        else {
+            continue;
+        };
+        let Some(dependency) =
+            cpp_identifier_tokens(initializer).find(|token| dependencies.contains(*token))
+        else {
+            continue;
+        };
+        let type_dependent_syntax = initializer.contains("typename ")
+            || initializer.contains(".template ")
+            || initializer.contains("::template ")
+            || initializer.contains(&format!("{dependency}."))
+            || initializer.contains(&format!("{dependency}->"));
+        if type_dependent_syntax {
+            return Some(name.to_string());
+        }
     }
-    let after_auto = after_auto
-        .trim_start()
-        .trim_start_matches(['&', '*'])
-        .trim_start();
-    let name = cpp_identifier_tokens(after_auto).next()?;
-    let after_name = after_auto.get(after_auto.find(name)? + name.len()..)?.trim_start();
-    let initializer = after_name
-        .strip_prefix('=')
-        .or_else(|| after_name.strip_prefix(':'))?
-        .trim();
-    let dependency = cpp_identifier_tokens(initializer)
-        .find(|token| dependencies.contains(*token))?;
-    let type_dependent_syntax = initializer.contains("typename ")
-        || initializer.contains(".template ")
-        || initializer.contains("::template ")
-        || initializer.contains(&format!("{dependency}."))
-        || initializer.contains(&format!("{dependency}->"));
-    type_dependent_syntax.then(|| name.to_string())
+    None
 }
 
 fn cpp_method_local_types(

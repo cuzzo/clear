@@ -2541,9 +2541,9 @@ fn cpp_dependent_auto_locals_keep_symbolic_dispatch_costs() -> Result<()> {
     fs::write(
         tmp.path(),
         r#"template <class F, class P>
-void invoke(P& proxy) {
+decltype(auto) invoke(P& proxy) {
     auto dispatcher = proxy.template meta<F>::dispatcher;
-    dispatcher(proxy);
+    return dispatcher(proxy);
 }
 template <class Alloc, class T>
 void release(const Alloc& alloc, T * pointer) {
