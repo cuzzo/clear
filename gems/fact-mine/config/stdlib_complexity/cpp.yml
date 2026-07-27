@@ -209,3 +209,5 @@ NonCallPrefix:
   "reinterpret_cast<": declaration
   "const_cast<": declaration
   "dynamic_cast<": declaration
+NonCallConstruct:
+  defined: declaration
