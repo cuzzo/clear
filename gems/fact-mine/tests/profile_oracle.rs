@@ -576,6 +576,46 @@ fn run(counts: &mut BTreeMap<&str, usize>, slot: &Mutex<usize>) {
 }
 
 #[test]
+fn rust_bare_tail_identifiers_are_local_reads_not_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"fn output() -> usize {
+    let out = 42;
+    out
+}
+fn run(flag: bool) -> usize {
+    let value = if flag { 1 } else { 2 };
+    value
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for function in ["output", "run"] {
+        let method = output
+            .methods
+            .iter()
+            .find(|method| method.name == function)
+            .with_context(|| format!("{function} method"))?;
+        let messages = output
+            .calls
+            .iter()
+            .filter(|call| call.source == method.id)
+            .map(|call| call.message.as_str())
+            .collect::<Vec<_>>();
+        assert!(messages.is_empty(), "{function} calls={messages:?}");
+    }
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
 fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_csharp.cs"), Language::CSharp)?;
     let output = profile::extract(&document, Profile::NilKill);
