@@ -313,7 +313,14 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         // Enum-variant constructors (`Some`/`None`/`Ok`/`Err`) wrap a value in
         // O(1); `transmute` is a reinterpret cast. These have no analyzable body
         // in source-only mode, so without this they read as unresolved calls.
-        if matches!(message, "Some" | "None" | "Ok" | "Err" | "transmute") {
+        if matches!(message, "Some" | "None" | "Ok" | "Err" | "transmute")
+            // Rust's `pair.0`/`triple.2` syntax is a tuple-field projection,
+            // never method dispatch. The normalized call shape retains it so
+            // DFG can follow the receiver, but its operation cost is O(1).
+            || (receiver.is_some_and(|receiver| !receiver.is_empty())
+                && !message.is_empty()
+                && message.bytes().all(|byte| byte.is_ascii_digit()))
+        {
             return Some(super::normalized_behavior::NormalizedCallComplexity {
                 time: "O(1)",
                 space: "O(1)",
@@ -887,6 +894,19 @@ mod tests {
             .and_then(|complexity| complexity.assumption)
             .is_some());
         assert!(external_symbol_call_complexity(unknown_dependency, "work").is_none());
+    }
+
+    #[test]
+    fn rust_tuple_field_projections_are_constant_time_intrinsics() {
+        let behavior = RustNormalizedBehavior;
+        let projection = behavior
+            .intrinsic_call_complexity(Some("value.split_once(':')?"), "0")
+            .unwrap();
+        assert_eq!(projection.time, "O(1)");
+        assert_eq!(projection.space, "O(1)");
+        assert!(behavior
+            .intrinsic_call_complexity(Some("value"), "field")
+            .is_none());
     }
 
     #[test]
