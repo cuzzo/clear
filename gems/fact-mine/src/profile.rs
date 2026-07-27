@@ -6497,6 +6497,24 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                             &call.message,
                         )
                     }
+                })
+                .or_else(|| {
+                    if call.message != "base" {
+                        return None;
+                    }
+                    let supertypes = document
+                        .owner_defs
+                        .iter()
+                        .filter(|owner| owner.name == call.owner)
+                        .flat_map(|owner| owner.supertypes.iter())
+                        .collect::<BTreeSet<_>>();
+                    (supertypes.len() == 1)
+                        .then(|| {
+                            behavior.super_constructor_call_complexity(
+                                supertypes.into_iter().next().expect("one supertype"),
+                            )
+                        })
+                        .flatten()
                 });
             let parametric_cost = known_complexity
                 .is_none()

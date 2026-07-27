@@ -1279,6 +1279,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    fn super_constructor_call_complexity(
+        &self,
+        _supertype: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
     fn is_noreturn_method(&self, _message: &str) -> bool {
         false
     }
