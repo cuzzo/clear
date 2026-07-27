@@ -310,6 +310,20 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         matches!(kind, "interface" | "abstract_class")
     }
 
+    fn constructor_dispatch_name(
+        &self,
+        receiver: &str,
+        message: &str,
+        owner: &str,
+    ) -> Option<String> {
+        (receiver == "self" && message == "this")
+            .then(|| owner.rsplit("::").next().unwrap_or(owner).to_string())
+    }
+
+    fn constructor_delegation_excludes_self(&self) -> bool {
+        true
+    }
+
     fn fallback_owner_kind(&self, owner: &str, source: &str) -> Option<String> {
         let owner = owner.rsplit("::").next().unwrap_or(owner);
         source.lines().find_map(|line| {

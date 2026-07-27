@@ -538,6 +538,7 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
         }
     }
 
+    reconcile_constructor_delegations(output);
     reconcile_inactive_preprocessor_project_calls(output);
     reconcile_non_recursive_overload_calls(output);
 
@@ -1347,6 +1348,90 @@ fn assign_method_symbols(methods: &mut [MethodRecord], documents: &[Document]) {
             .filter(|candidates| candidates.len() == 1)
             .and_then(|candidates| candidates.into_iter().next());
     }
+}
+
+/// Constructor-initializer keywords (`this(...)`) have no callable occurrence
+/// in scip-dotnet. The normalized call nevertheless carries an exact owner and
+/// constructor dispatch name. C# rejects cyclic initializer chains, so close
+/// the call over every other constructor on that exact owner and join their
+/// summaries rather than leaving the compiler-valid delegation unidentified.
+fn reconcile_constructor_delegations(output: &mut ProfileOutput) -> usize {
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| {
+            (
+                (
+                    method.language.as_str(),
+                    method.symbol_owner.as_deref(),
+                    method.dispatch_name.as_str(),
+                    method.kind.as_str(),
+                ),
+                (method.id.as_str(), method.id.clone()),
+            )
+        })
+        .fold(
+            BTreeMap::<(&str, Option<&str>, &str, &str), Vec<(&str, String)>>::new(),
+            |mut rows, (key, method)| {
+                rows.entry(key).or_default().push(method);
+                rows
+            },
+        );
+    let source_languages = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut reconciled = 0;
+    for call in output.calls.iter_mut().filter(|call| {
+        call.target.is_none()
+            && call.candidate_targets.is_empty()
+            && call.constructor_target.is_some()
+    }) {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Ok(language_kind) = crate::syntax::Language::parse(language) else {
+            continue;
+        };
+        if !crate::syntax::normalized_behavior::behavior(language_kind)
+            .constructor_delegation_excludes_self()
+        {
+            continue;
+        }
+        let Some(owner) = call.receiver_symbol.as_deref() else {
+            continue;
+        };
+        let constructor = call.constructor_target.as_deref().expect("filtered");
+        let candidates = methods
+            .get(&(language, Some(owner), constructor, "instance"))
+            .into_iter()
+            .flatten()
+            .filter(|(id, _)| *id != call.source)
+            .map(|(_, id)| id.clone())
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            continue;
+        }
+        if candidates.len() == 1 {
+            call.target = candidates.into_iter().next();
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+        } else {
+            call.candidate_targets = candidates.into_iter().collect();
+            call.candidate_reason = Some("compiler_valid_constructor_delegation_set".to_string());
+            call.external_symbol_scope = Some("project".to_string());
+            call.complexity_missing_kind = None;
+            call.unresolved_reason =
+                Some("closed_constructor_candidate_set_requires_summary".to_string());
+            call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+            call.empty_domain_cause = None;
+        }
+        reconciled += 1;
+    }
+    reconciled
 }
 
 /// A compiler indexes only the active arm of a preprocessor conditional. The
@@ -3431,6 +3516,28 @@ mod tests {
             output.calls[1].candidate_reason.as_deref(),
             Some("compiler_indexed_preprocessor_overload_set")
         );
+    }
+
+    #[test]
+    fn csharp_constructor_delegation_candidates_exclude_the_source() {
+        let mut first = method("first", "/project/Event.cs", "Event", [1, 0, 2, 1]);
+        first.language = "csharp".into();
+        first.kind = "instance".into();
+        first.symbol_owner = Some("Demo.Event".into());
+        let mut second = method("second", "/project/Event.cs", "Event", [3, 0, 4, 1]);
+        second.language = "csharp".into();
+        second.kind = "instance".into();
+        second.symbol_owner = Some("Demo.Event".into());
+        let mut delegation = call("first", "/project/Event.cs", "this", [1, 10, 1, 20]);
+        delegation.receiver_symbol = Some("Demo.Event".into());
+        delegation.constructor_target = Some("Event".into());
+        let mut output = ProfileOutput::default();
+        output.methods = vec![first, second];
+        output.calls = vec![delegation];
+
+        assert_eq!(reconcile_constructor_delegations(&mut output), 1);
+        assert_eq!(output.calls[0].target.as_deref(), Some("second"));
+        assert!(output.calls[0].candidate_targets.is_empty());
     }
 
     #[test]

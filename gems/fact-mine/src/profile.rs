@@ -2847,6 +2847,11 @@ fn annotate_project_candidate_sets(
                     .then_some(source.symbol_owner.as_deref())
                     .flatten()
             }) {
+                let excludes_self = call.constructor_target.is_some()
+                    && crate::syntax::Language::parse(&source.language).is_ok_and(|language| {
+                        crate::syntax::normalized_behavior::behavior(language)
+                            .constructor_delegation_excludes_self()
+                    });
                 let dispatch = if call.implicit_receiver {
                     source.kind.as_str()
                 } else if call.receiver_kind == "type" {
@@ -2860,6 +2865,7 @@ fn annotate_project_candidate_sets(
                         .into_iter()
                         .flatten()
                         .filter(|method| method.language == source.language)
+                        .filter(|method| !excludes_self || method.id != call.source)
                         .filter(|method| {
                             source.language != "java" || method.params.len() == call.argument_count
                         })
@@ -2884,8 +2890,20 @@ fn unique_call_candidate<'a>(
     call: &CallRecord,
     source_language: Option<&str>,
 ) -> Option<&'a MethodRecord> {
+    let excludes_self = call.constructor_target.is_some()
+        && source_language
+            .and_then(|language| crate::syntax::Language::parse(language).ok())
+            .is_some_and(|language| {
+                crate::syntax::normalized_behavior::behavior(language)
+                    .constructor_delegation_excludes_self()
+            });
+    let candidates = candidates
+        .iter()
+        .copied()
+        .filter(|candidate| !excludes_self || candidate.id != call.source)
+        .collect::<Vec<_>>();
     if candidates.len() == 1 {
-        return Some(candidates[0]);
+        return candidates.first().copied();
     }
     if source_language != Some("java") {
         return None;
@@ -6743,7 +6761,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .contains(call.message.as_str()),
                 dispatch_boundary,
                 constructor_target: behavior
-                    .constructor_dispatch_name(&call.receiver, &call.message),
+                    .constructor_dispatch_name(&call.receiver, &call.message, &call.owner),
                 known_time_complexity: known_complexity
                     .map(|cost| cost.time.to_string())
                     .or_else(|| parametric_complexity.map(|cost| cost.0.to_string())),
