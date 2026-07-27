@@ -1366,6 +1366,40 @@ fn conservative_inherited_dispatch_resolves_exact_native_declarations() -> Resul
 }
 
 #[test]
+fn cpp_template_specialization_resolves_implicit_inherited_calls() -> Result<()> {
+    let output = extract_source(
+        "template <class T, class U> class Base;\n\
+         template <class T> class Base<T, void(T)> {\n\
+         public: struct Nested {}; void work() {}\n\
+         };\n\
+         template <class T> class Child;\n\
+         template <class T> class Child<T> : public Base<T, void(T)> {\n\
+         public: void run() { work(); }\n\
+         };\n",
+        ".cpp",
+        Language::Cpp,
+    )?;
+    let target = output
+        .methods
+        .iter()
+        .find(|method| method.owner.starts_with("Base") && method.name == "work")
+        .context("missing C++ Base::work")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "work")
+        .context("missing inherited C++ work call")?;
+
+    assert!(output
+        .owners
+        .iter()
+        .find(|owner| owner.name.starts_with("Child<"))
+        .is_some_and(|owner| owner.supertypes.iter().any(|name| name.contains('<'))));
+    assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
+    Ok(())
+}
+
+#[test]
 fn language_adapters_extract_only_native_direct_supertype_clauses() -> Result<()> {
     for (source, suffix, language, owner_name, expected) in [
         (
