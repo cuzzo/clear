@@ -231,13 +231,7 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 
     fn preprocessor_definition_location(&self, symbol: &str) -> Option<(String, usize)> {
-        let (_package, descriptor) = scip_clang_parts(symbol)?;
-        let location = descriptor.strip_prefix('`')?.strip_suffix("`!")?;
-        let mut parts = location.rsplitn(3, ':');
-        let _column = parts.next()?.parse::<usize>().ok()?;
-        let line = parts.next()?.parse::<usize>().ok()?;
-        let path = parts.next()?.to_string();
-        (!path.is_empty() && line > 0).then_some((path, line))
+        preprocessor_definition_location(symbol)
     }
 
     fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
@@ -533,14 +527,20 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 }
 
-fn preprocessor_definition_call_complexity(
+pub(crate) fn preprocessor_definition_call_complexity(
     definition: &str,
 ) -> Option<super::ExternalCallComplexity> {
     let definition = definition.replace("\\\r\n", " ").replace("\\\n", " ");
-    let tail = definition
-        .trim_start()
-        .strip_prefix("#define")?
-        .trim_start();
+    let directive = definition.trim_start().strip_prefix('#')?.trim_start();
+    let tail = directive.strip_prefix("define")?;
+    if tail
+        .chars()
+        .next()
+        .is_some_and(|character| !character.is_whitespace())
+    {
+        return None;
+    }
+    let tail = tail.trim_start();
     let name_end = tail
         .find(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
         .unwrap_or(tail.len());
@@ -624,6 +624,16 @@ fn preprocessor_definition_call_complexity(
         candidates: calls.into_iter().map(str::to_string).collect(),
         assumption: None,
     })
+}
+
+pub(crate) fn preprocessor_definition_location(symbol: &str) -> Option<(String, usize)> {
+    let (_package, descriptor) = scip_clang_parts(symbol)?;
+    let location = descriptor.strip_prefix('`')?.strip_suffix("`!")?;
+    let mut parts = location.rsplitn(3, ':');
+    let _column = parts.next()?.parse::<usize>().ok()?;
+    let line = parts.next()?.parse::<usize>().ok()?;
+    let path = parts.next()?.to_string();
+    (!path.is_empty() && line > 0).then_some((path, line))
 }
 
 fn unwrap_return_type_macro(signature: &str) -> String {
@@ -909,7 +919,7 @@ mod tests {
     #[test]
     fn compiler_indexed_macro_bodies_are_priced_only_when_bounded() {
         let constant = preprocessor_definition_call_complexity(
-            "#define buffer_at_offset(buffer) ((buffer)->content + (buffer)->offset)",
+            "#  define buffer_at_offset(buffer) ((buffer)->content + (buffer)->offset)",
         )
         .unwrap();
         assert_eq!((constant.time, constant.space), ("O(1)", "O(1)"));
