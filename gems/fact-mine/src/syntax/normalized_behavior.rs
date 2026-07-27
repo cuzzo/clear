@@ -738,16 +738,23 @@ pub(crate) fn configured_parametric_call_cost(
     receiver_type: &TypeExpr,
     message: &str,
 ) -> Option<String> {
-    let TypeExpr::Primitive(name) = receiver_type.strip_nilable() else {
-        return None;
+    let receiver = receiver_type.strip_nilable();
+    let names = match &receiver {
+        TypeExpr::Array(_) => vec!["Array".to_string()],
+        TypeExpr::Hash { .. } => vec!["Hash".to_string()],
+        TypeExpr::Set(_) => vec!["Set".to_string()],
+        TypeExpr::Primitive(name) => {
+            let unqualified = name
+                .rsplit([':', '.'])
+                .find(|part| !part.is_empty())
+                .unwrap_or(name);
+            vec![name.clone(), unqualified.to_string()]
+        }
+        _ => return None,
     };
-    let unqualified = name
-        .rsplit([':', '.'])
-        .find(|part| !part.is_empty())
-        .unwrap_or(&name);
     let operations = stdlib_operations(language)?;
     let contracts = operations.get("ParametricCall")?;
-    let result = [name.as_str(), unqualified]
+    let result = names
         .into_iter()
         .find_map(|owner| contracts.get(&format!("{owner}.{message}")).cloned());
     result

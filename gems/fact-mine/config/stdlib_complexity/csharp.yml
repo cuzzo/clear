@@ -8,6 +8,7 @@ Array:
   ToArray: linear_materialize
   ToList: linear_materialize
   OrderBy: sort
+  Take: constant
 Hash:
   get_Item: constant
   TryGetValue: linear_scan
@@ -157,6 +158,8 @@ NonCallConstruct:
   nameof: declaration
   sizeof: declaration
   typeof: declaration
+ParametricCall:
+  'Array.Select': callback_linear
 
 # Exact descriptors emitted by scip-dotnet. Keep these overload-specific:
 # scip-dotnet's owner spelling (for example `IO/TextWriter`) is intentionally

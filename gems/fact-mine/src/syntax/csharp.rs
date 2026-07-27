@@ -347,7 +347,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     }
 
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
-        super::normalized_behavior::type_before_local_name(source, name)
+        csharp_declared_local_type(source, name)
     }
 
     fn stdlib_language(&self) -> Option<&'static str> {
@@ -481,6 +481,42 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
                 message,
             )
         })
+    }
+
+    fn intrinsic_call_complexity(
+        &self,
+        receiver: Option<&str>,
+        message: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        let runtime_receiver = match receiver {
+            Some("bool") => Some("Boolean"),
+            Some("byte") => Some("Byte"),
+            Some("sbyte") => Some("SByte"),
+            Some("short") => Some("Int16"),
+            Some("ushort") => Some("UInt16"),
+            Some("int") => Some("Int32"),
+            Some("uint") => Some("UInt32"),
+            Some("long") => Some("Int64"),
+            Some("ulong") => Some("UInt64"),
+            Some("float") => Some("Single"),
+            Some("double") => Some("Double"),
+            Some("decimal") => Some("Decimal"),
+            Some("char") => Some("Char"),
+            Some("string") => Some("String"),
+            Some("object") => Some("Object"),
+            receiver => receiver,
+        };
+        configured_intrinsic_call_complexity("csharp", runtime_receiver, message)
+    }
+
+    fn propagated_collection_return_type(
+        &self,
+        message: &str,
+        receiver_type: Option<&str>,
+    ) -> Option<String> {
+        matches!(message, "Take" | "Skip" | "Where")
+            .then(|| receiver_type.map(str::to_string))
+            .flatten()
     }
 
     fn mutating_receiver_message(&self, message: &str) -> bool {
@@ -736,6 +772,37 @@ pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
 }
 
+fn csharp_declared_local_type(source: &str, name: &str) -> Option<String> {
+    let name_start = source.match_indices(name).find_map(|(index, _)| {
+        let before = source[..index].chars().next_back();
+        let after = source[index + name.len()..].chars().next();
+        let boundary = |character: Option<char>| {
+            character.is_none_or(|character| !character.is_alphanumeric() && character != '_')
+        };
+        (boundary(before) && boundary(after)).then_some(index)
+    })?;
+    let prefix = source[..name_start].trim();
+    // C# type/declaration patterns bind the local after `is T` or `is not T`.
+    // Extract only the native type token; feeding the whole predicate into the
+    // shared leading-type parser produced fictional types such as
+    // `value is not byte[]`.
+    for marker in [" is not ", " is "] {
+        if let Some(pattern_type) = prefix.rsplit_once(marker).map(|(_, tail)| tail.trim()) {
+            if !pattern_type.is_empty()
+                && !pattern_type.contains(char::is_whitespace)
+                && !matches!(pattern_type, "var" | "dynamic")
+            {
+                return Some(pattern_type.to_string());
+            }
+        }
+    }
+    let declared = super::normalized_behavior::type_before_local_name(source, name)?;
+    (!declared.contains(['(', ')', '=', '!'])
+        && !declared.contains(" is ")
+        && !declared.ends_with(" var"))
+    .then_some(declared)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -773,6 +840,17 @@ mod tests {
                 "namespace Demo;\npublic interface ILogger\n{\n}\n"
             ),
             Some("interface".to_string())
+        );
+        assert_eq!(
+            b.declared_local_type("if (value is not byte[] bytes)", "bytes"),
+            Some("byte[]".to_string())
+        );
+        assert_eq!(
+            b.declared_local_type(
+                "if (!properties.TryGetValue(key, out var propertyValue))",
+                "propertyValue"
+            ),
+            None
         );
         assert_eq!(
             b.explicit_self_state_ref(&node("LVAR", "x"), "Foo"),
@@ -974,6 +1052,28 @@ mod tests {
             )
             .map(|cost| cost.time),
             Some("O(N)")
+        );
+        assert_eq!(
+            b.call_complexity(&parse_declared_type("byte[]"), "Take")
+                .map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            b.parametric_call_cost(&parse_declared_type("byte[]"), "Select"),
+            Some("callback_linear".to_string())
+        );
+        assert_eq!(
+            b.intrinsic_call_complexity(Some("string"), "Concat")
+                .map(|cost| cost.time),
+            Some("O(N)")
+        );
+        assert_eq!(
+            b.propagated_collection_return_type("Take", Some("byte[]")),
+            Some("byte[]".to_string())
+        );
+        assert_eq!(
+            b.propagated_collection_return_type("Select", Some("byte[]")),
+            None
         );
     }
 
