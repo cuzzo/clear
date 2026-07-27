@@ -1734,6 +1734,41 @@ struct Queue {
 }
 
 #[test]
+fn cpp_initializer_calls_do_not_hide_local_receiver_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"std::wstring convert(const std::wstring& input) { return input; }
+void run(const std::wstring& input) {
+    const std::wstring& wide = convert(input);
+    std::string output(4, 0);
+    wide.size();
+    output.resize(2);
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let size = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "size")
+        .context("missing wide.size call")?;
+    assert_eq!(size.receiver_type.as_deref(), Some("const std::wstring&"));
+    assert_eq!(size.known_time_complexity.as_deref(), Some("O(1)"));
+
+    let resize = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "resize")
+        .context("missing output.resize call")?;
+    assert_eq!(resize.receiver_type.as_deref(), Some("std::string"));
+    assert_eq!(resize.known_time_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
 fn cpp_project_aliases_converge_across_configuration_branches_and_files() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let aliases = directory.path().join("aliases.hpp");
