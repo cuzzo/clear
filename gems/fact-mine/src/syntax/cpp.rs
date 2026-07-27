@@ -976,6 +976,24 @@ fn cpp_pointer_member_receiver_type(
 }
 
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    fn owner_kind(&self, node: &Node, default_kind: &str) -> String {
+        let abstract_class = matches!(default_kind, "class" | "struct")
+            && node.text.contains("virtual")
+            && node
+                .text
+                .split(';')
+                .any(|declaration| declaration.contains("= 0"));
+        if abstract_class {
+            "abstract_class".to_string()
+        } else {
+            default_kind.to_string()
+        }
+    }
+
+    fn type_kind_is_abstract_dispatch(&self, kind: &str) -> bool {
+        kind == "abstract_class"
+    }
+
     // C-family indexers render a local as `Type name` - the type leads.
     fn parse_variable_declaration(&self, text: &str) -> Option<String> {
         let text = text.trim().trim_end_matches(';').trim();

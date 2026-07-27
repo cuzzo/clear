@@ -2318,8 +2318,13 @@ fn cpp_inferred_collection_elements_recover_receiver_types() -> Result<()> {
         r#"struct Item {
     void work() {}
 };
+class Interface {
+public:
+    virtual void dispatch() = 0;
+};
 struct Store {
     std::vector<std::shared_ptr<Item>> pointers;
+    std::vector<std::shared_ptr<Interface>> interfaces;
     std::list<Item> values;
     void range() {
         for(const auto & item : pointers) {
@@ -2333,6 +2338,11 @@ struct Store {
     void iterator() {
         auto it = values.begin();
         it->work();
+    }
+    void abstract_range() {
+        for(const auto & item : interfaces) {
+            item->dispatch();
+        }
     }
 };
 "#,
@@ -2352,6 +2362,17 @@ struct Store {
         );
         assert!(work.target.is_some(), "{work:?}");
     }
+    let dispatch = output
+        .calls
+        .iter()
+        .find(|call| call.function == "abstract_range" && call.message == "dispatch")
+        .context("missing abstract element call")?;
+    assert_eq!(dispatch.receiver_type.as_deref(), Some("Interface"));
+    assert_eq!(dispatch.known_time_complexity.as_deref(), Some("O(C)"));
+    assert_eq!(
+        dispatch.complexity_provenance.as_deref(),
+        Some("parametric_declared_receiver_contract")
+    );
     Ok(())
 }
 

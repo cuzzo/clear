@@ -7095,7 +7095,10 @@ fn abstract_dispatch_callback_cost(
     document
         .owner_defs
         .iter()
-        .any(|owner| owner.name == nominal && behavior.type_kind_is_abstract_dispatch(&owner.kind))
+        .any(|owner| {
+            owner_name_matches(&owner.name, &nominal)
+                && behavior.type_kind_is_abstract_dispatch(&owner.kind)
+        })
         .then(|| "callback_once".to_string())
 }
 
