@@ -549,6 +549,18 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         )
     }
 
+    fn super_constructor_call_complexity(
+        &self,
+        supertype: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        let owner = supertype
+            .trim()
+            .trim_start_matches("global::")
+            .rsplit(['.', ':'])
+            .find(|part| !part.is_empty())?;
+        configured_intrinsic_call_complexity("csharp", Some(owner), "ctor")
+    }
+
     fn mutating_receiver_message(&self, message: &str) -> bool {
         matches!(message, "Add" | "Clear" | "Remove" | "Reverse" | "Sort")
     }
@@ -1105,6 +1117,15 @@ mod tests {
         );
         assert_eq!(
             b.propagated_collection_return_type("Select", Some("byte[]")),
+            None
+        );
+        assert_eq!(
+            b.super_constructor_call_complexity("System.IO.StringWriter")
+                .map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            b.super_constructor_call_complexity("UserDefinedParent"),
             None
         );
     }

@@ -150,6 +150,8 @@ Intrinsic:
   "String.IsNullOrEmpty": constant
   "String.IsNullOrWhiteSpace": linear_scan
   "String.Join": linear_materialize
+  "StringWriter.ctor": constant
+  "Exception.ctor": constant
   nameof: constant
   sizeof: constant
   typeof: constant
