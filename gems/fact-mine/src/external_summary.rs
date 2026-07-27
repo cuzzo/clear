@@ -15,16 +15,10 @@ use std::path::Path;
 
 const SCHEMA_V1: &str = "fact-mine.external-complexity-summary.v1";
 const SCHEMA_V2: &str = "fact-mine.external-complexity-summary.v2";
-const BUNDLED_SUMMARIES: &[(&str, &[u8])] = &[
-    (
-        "go-stdlib.go1.22.2.json.gz",
-        include_bytes!("../config/complexity_summaries/go-stdlib.go1.22.2.json.gz"),
-    ),
-    (
-        "rust-stdlib.rustc1.96.0.json.gz",
-        include_bytes!("../config/complexity_summaries/rust-stdlib.rustc1.96.0.json.gz"),
-    ),
-];
+include!(concat!(
+    env!("OUT_DIR"),
+    "/bundled_complexity_summaries.rs"
+));
 
 #[derive(Debug, Deserialize)]
 struct SummaryFile {
@@ -241,6 +235,9 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
         let raw_calls_not_normalized_inside_function = output
             .call_resolution_coverage
             .raw_calls_not_normalized_inside_function;
+        let source_export_eligible_methods_overlapping_raw_call_loss = output
+            .call_resolution_coverage
+            .source_export_eligible_methods_overlapping_raw_call_loss;
         let raw_calls_not_normalized_outside_function = output
             .call_resolution_coverage
             .raw_calls_not_normalized_outside_function;
@@ -264,6 +261,10 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
             .raw_calls_not_normalized_inside_function = raw_calls_not_normalized_inside_function;
         output
             .call_resolution_coverage
+            .source_export_eligible_methods_overlapping_raw_call_loss =
+            source_export_eligible_methods_overlapping_raw_call_loss;
+        output
+            .call_resolution_coverage
             .raw_calls_not_normalized_outside_function = raw_calls_not_normalized_outside_function;
         output
             .call_resolution_coverage
@@ -274,6 +275,7 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
         output
             .call_resolution_coverage
             .normalized_calls_without_raw_span = normalized_calls_without_raw_span;
+        crate::scip::apply_resolved_call_costs_to_contexts(output);
     }
     Ok(applied)
 }
@@ -451,6 +453,37 @@ mod tests {
             source: serde_json::Value::Null,
         });
         output.calls = vec![call(Some(symbol))];
+        output.complexity_facts.push(
+            serde_json::from_value(serde_json::json!({
+                "path": "Demo.java",
+                "owner": "Demo",
+                "function": "run",
+                "line": 1,
+                "span": [1, 0, 1, 10],
+                "parameters": [],
+                "collection_parameters": [],
+                "iterations": [],
+                "recursion": {
+                    "calls": 0,
+                    "shrinking_calls": 0,
+                    "halving_calls": 0,
+                    "loop_contained_shrinking_calls": 0,
+                    "unknown_progress_calls": 0
+                },
+                "allocations": [],
+                "call_contexts": [{
+                    "line": 1,
+                    "span": [1, 0, 1, 10],
+                    "message": "read",
+                    "execution_multiplicity": "O(1)",
+                    "power": 0,
+                    "parameter_arguments": [],
+                    "argument_cardinality_relation": "same",
+                    "evidence_gap": "unmodeled_typed_operation"
+                }]
+            }))
+            .unwrap(),
+        );
         output.call_resolution_coverage.unresolved_call_sites = 1;
         let json = serde_json::json!({
             "schema": SCHEMA_V1,
@@ -472,6 +505,16 @@ mod tests {
         assert_eq!(
             output.call_resolution_coverage.accounted_call_percent,
             100.0
+        );
+        assert_eq!(
+            output.complexity_facts[0].call_contexts[0]
+                .known_time_complexity
+                .as_deref(),
+            Some("O(N)")
+        );
+        assert_eq!(
+            output.complexity_facts[0].call_contexts[0].evidence_gap,
+            None
         );
     }
 
@@ -669,62 +712,46 @@ mod tests {
     }
 
     #[test]
-    fn bundled_summary_matches_only_its_exact_toolchain_symbol() {
-        let exact = "scip-go gomod github.com/golang/go/src go1.22 strings/IndexByte().";
-        let other_version = "scip-go gomod github.com/golang/go/src go1.23 strings/IndexByte().";
-        let mut output = ProfileOutput {
-            calls: vec![call(Some(exact)), call(Some(other_version))],
-            semantic_indexes: vec![SemanticIndex {
-                tool: "scip-go".into(),
-                version: "0.2.7".into(),
-            }],
-            ..ProfileOutput::default()
-        };
+    fn every_bundled_summary_applies_only_with_its_declared_indexer() {
+        assert!(!BUNDLED_SUMMARIES.is_empty());
+        for (name, bytes) in BUNDLED_SUMMARIES {
+            let source = decode(Path::new(name), bytes).unwrap();
+            let summary: SummaryFile = serde_json::from_str(&source).unwrap();
+            validate(&summary).unwrap();
+            let symbol = summary.symbols.keys().next().unwrap();
+            let indexer = summary
+                .source
+                .as_ref()
+                .and_then(|source| source.indexer.as_deref())
+                .unwrap();
+            let (tool, version) = indexer.split_once('@').unwrap();
+            let mut exact = ProfileOutput {
+                calls: vec![call(Some(symbol))],
+                semantic_indexes: vec![SemanticIndex {
+                    tool: tool.into(),
+                    version: version.into(),
+                }],
+                ..ProfileOutput::default()
+            };
+            assert!(
+                apply_bundled(&mut exact).unwrap() > 0,
+                "{name} did not apply with {indexer}"
+            );
+            assert_eq!(
+                exact.calls[0].complexity_provenance.as_deref(),
+                Some("analyzed_source_summary")
+            );
 
-        assert!(apply_bundled(&mut output).unwrap() > 0);
-        assert_eq!(
-            output.calls[0].known_time_complexity.as_deref(),
-            Some("O(N)")
-        );
-        assert_eq!(output.calls[1].known_time_complexity, None);
-    }
-
-    #[test]
-    fn bundled_summary_requires_its_exact_indexer_build() {
-        let exact = "scip-go gomod github.com/golang/go/src go1.22 strings/IndexByte().";
-        let mut output = ProfileOutput {
-            calls: vec![call(Some(exact))],
-            semantic_indexes: vec![SemanticIndex {
-                tool: "scip-go".into(),
-                version: "0.2.6".into(),
-            }],
-            ..ProfileOutput::default()
-        };
-
-        assert_eq!(apply_bundled(&mut output).unwrap(), 0);
-        assert_eq!(output.calls[0].known_time_complexity, None);
-    }
-
-    #[test]
-    fn bundled_rust_summary_requires_the_source_toolchain_build() {
-        let symbol = "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core char/methods/impl#[char]is_ascii_whitespace().";
-        let mut output = ProfileOutput {
-            calls: vec![call(Some(symbol))],
-            semantic_indexes: vec![SemanticIndex {
-                tool: "rust-analyzer".into(),
-                version: "1.96.0 (ac68faa 2026-05-25)".into(),
-            }],
-            ..ProfileOutput::default()
-        };
-
-        assert!(apply_bundled(&mut output).unwrap() > 0);
-        assert_eq!(
-            output.calls[0].known_time_complexity.as_deref(),
-            Some("O(1)")
-        );
-        assert_eq!(
-            output.calls[0].complexity_provenance.as_deref(),
-            Some("analyzed_source_summary")
-        );
+            let mut wrong_indexer = ProfileOutput {
+                calls: vec![call(Some(symbol))],
+                semantic_indexes: vec![SemanticIndex {
+                    tool: tool.into(),
+                    version: format!("{version}-incompatible"),
+                }],
+                ..ProfileOutput::default()
+            };
+            assert_eq!(apply_bundled(&mut wrong_indexer).unwrap(), 0);
+            assert_eq!(wrong_indexer.calls[0].known_time_complexity, None);
+        }
     }
 }

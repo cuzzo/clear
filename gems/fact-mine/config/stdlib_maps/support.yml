@@ -1,0 +1,38 @@
+schema: fact-mine.stdlib-map-support.v1
+languages:
+  go:
+    status: bundled
+    manifest: go-1.22.2.yml
+  rust:
+    status: bundled
+    manifest: rust-1.96.0.yml
+  java:
+    status: bundled
+    manifest: java-21.0.12.yml
+  python:
+    status: bundled
+    manifest: python-3.11.9.yml
+  csharp:
+    status: blocked
+    blocker: unreproducible_indexer
+    required_fix: Publish and pin a non-snapshot scip-dotnet build that can index the matching dotnet/runtime implementation source.
+  kotlin:
+    status: blocked
+    blocker: unversioned_consumer_symbols
+    required_fix: scip-java must encode the Kotlin stdlib package and version in consumer symbols or equivalent SCIP metadata.
+  c:
+    status: blocked
+    blocker: unversioned_consumer_symbols
+    required_fix: scip-clang must expose the C runtime implementation and version used by the compilation database.
+  cpp:
+    status: blocked
+    blocker: unversioned_consumer_symbols
+    required_fix: scip-clang must expose the C++ standard-library implementation and version used by the compilation database.
+  typescript:
+    status: blocked
+    blocker: declaration_only_standard_library
+    required_fix: A runtime-specific producer must provide executable implementation bodies compatible with the versioned TypeScript declaration symbols.
+  javascript:
+    status: blocked
+    blocker: declaration_only_standard_library
+    required_fix: A runtime-specific producer must provide executable implementation bodies compatible with the versioned TypeScript declaration symbols.

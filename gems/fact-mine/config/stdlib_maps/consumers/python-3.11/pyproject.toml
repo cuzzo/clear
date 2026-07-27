@@ -1,0 +1,7 @@
+[project]
+name = "fact-mine-stdlib-consumer"
+version = "1.0.0"
+
+[tool.pyright]
+include = ["impact.py"]
+pythonVersion = "3.11"

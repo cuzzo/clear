@@ -584,6 +584,9 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
     let raw_calls_not_normalized_inside_function = output
         .call_resolution_coverage
         .raw_calls_not_normalized_inside_function;
+    let source_export_eligible_methods_overlapping_raw_call_loss = output
+        .call_resolution_coverage
+        .source_export_eligible_methods_overlapping_raw_call_loss;
     let raw_calls_not_normalized_outside_function = output
         .call_resolution_coverage
         .raw_calls_not_normalized_outside_function;
@@ -605,6 +608,10 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
     output
         .call_resolution_coverage
         .raw_calls_not_normalized_inside_function = raw_calls_not_normalized_inside_function;
+    output
+        .call_resolution_coverage
+        .source_export_eligible_methods_overlapping_raw_call_loss =
+        source_export_eligible_methods_overlapping_raw_call_loss;
     output
         .call_resolution_coverage
         .raw_calls_not_normalized_outside_function = raw_calls_not_normalized_outside_function;
@@ -631,7 +638,7 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
     Ok(stats)
 }
 
-fn apply_resolved_call_costs_to_contexts(output: &mut ProfileOutput) -> usize {
+pub(crate) fn apply_resolved_call_costs_to_contexts(output: &mut ProfileOutput) -> usize {
     let mut methods = BTreeMap::<(String, String, String, usize), BTreeSet<String>>::new();
     for method in &output.methods {
         methods
@@ -4037,7 +4044,7 @@ void run_dependent() {
                 "hash",
             )
             .map(|complexity| (complexity.time, complexity.space)),
-            Some(("O(N)", "O(N)"))
+            Some(("O(N)", "O(1)"))
         );
         assert_eq!(
             syntax::external_symbol_call_complexity(

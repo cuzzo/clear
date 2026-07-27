@@ -77,6 +77,12 @@ soundness checks, exact-symbol export, producer/consumer validation, and atomic
 publication. A new SCIP stdlib should normally require only a manifest; parser
 or runtime semantics belong in that language's FactMine module.
 
+FactMine discovers generated bundles automatically at build time. See
+`gems/fact-mine/config/stdlib_maps/support.yml` for the compatibility status of
+every maintained SCIP language. An entry remains blocked when the indexer
+cannot provide executable bodies or a source/consumer version identity; the
+pipeline does not substitute a manual override for either failure.
+
 ## Outputs
 
 Espalier can output a compact architecture manifest for tools and LLMs,

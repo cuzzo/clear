@@ -1,0 +1,56 @@
+schema: fact-mine.stdlib-map.v1
+language: python
+
+source:
+  revision: cpython-3.11.9
+  git:
+    repository: https://github.com/python/cpython.git
+    commit: de54cf5be371a6f5e2e9f208c38def5f81d3ef02
+    sparse_paths:
+      - Lib
+  root_suffix: Lib
+  include:
+    - "{bisect,copy,dataclasses,enum,fnmatch,functools,glob,heapq,operator,pathlib,random,shutil,statistics,string,textwrap,types,weakref}.py"
+    - "{collections,concurrent,json,logging,re,urllib}/**/*.py"
+  exclude:
+    - "**/test/**"
+    - "**/tests/**"
+  stage_selected_files: true
+
+index:
+  command:
+    - scip-python
+    - index
+    - "."
+    - --project-name=python-stdlib
+    - --project-version=3.11
+    - "--output={index}"
+  working_directory: "{source_root}"
+  output: python-stdlib.scip
+  expected:
+    tool: scip-python
+    version: 0.6.6
+
+soundness:
+  minimum_export_eligible_methods: 250
+
+summary:
+  corpus: python-stdlib-pure-python-core
+  output: ../complexity_summaries/python-stdlib.cpython3.11.9.json.gz
+  minimum_symbols: 1
+  expected_symbol_prefix: "scip-python python python-stdlib 3.11 "
+
+consumers:
+  - name: python-3.11-exact-symbol
+    source_root: consumers/python-3.11
+    include: ["impact.py"]
+    index:
+      command:
+        - scip-python
+        - index
+        - "."
+        - --project-name=fact-mine-stdlib-consumer
+        - --project-version=1.0.0
+        - "--output={index}"
+      output: python-consumer.scip
+    minimum_complete_percent: 100
