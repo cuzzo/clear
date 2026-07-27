@@ -2886,6 +2886,27 @@ mod tests {
         assert_eq!(
             syntax::external_symbol_call_complexity(
                 "java",
+                "semanticdb maven jdk 21 java/util/List#size().",
+                "size"
+            )
+            .map(|complexity| (complexity.time, complexity.space)),
+            Some(("O(1)", "O(1)")),
+            "real scip-java 0.12 indexes use the semanticdb symbol scheme"
+        );
+        assert_eq!(
+            syntax::external_symbol_metadata(
+                "java",
+                "semanticdb maven jdk 21 java/util/function/Function#apply().",
+            ),
+            syntax::ExternalSymbolMetadata {
+                scope: "stdlib",
+                missing_cost_kind: "callback_cost_missing".to_string(),
+                parametric_cost: Some("callback_once".to_string()),
+            }
+        );
+        assert_eq!(
+            syntax::external_symbol_call_complexity(
+                "java",
                 "scip-java maven jdk 21 java/lang/System#arraycopy().",
                 "arraycopy"
             )
