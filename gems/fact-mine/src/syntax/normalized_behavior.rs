@@ -293,16 +293,31 @@ pub(crate) fn parse_arrow_or_colon_signature(signature: &str) -> NormalizedSigna
 /// C/C++/C#/Java adapters, which select it from their own `parse_signature`.
 pub(crate) fn parse_c_family_declarator(signature: &str) -> NormalizedSignature {
     let signature = signature.trim();
-    let (Some(open), Some(close)) = (signature.find('('), signature.rfind(')')) else {
+    let Some(open) = signature.find('(') else {
         return NormalizedSignature::default();
     };
-    if close < open {
-        return NormalizedSignature::default();
+    let mut depth = 0usize;
+    let mut close = None;
+    for (offset, character) in signature[open..].char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    close = Some(open + offset);
+                    break;
+                }
+            }
+            _ => {}
+        }
     }
+    let Some(close) = close else {
+        return NormalizedSignature::default();
+    };
     // Everything before the name is the return type; the name is the last token
     // before `(`. Modifiers (`public`, `static`, …) are dropped with it.
     let head = signature[..open].trim();
-    let return_type = head
+    let leading_return_type = head
         .rsplit_once(char::is_whitespace)
         .map(|(before, _name)| before.trim())
         .and_then(|before| {
@@ -313,6 +328,12 @@ pub(crate) fn parse_c_family_declarator(signature: &str) -> NormalizedSignature 
         })
         .map(str::to_string)
         .filter(|value| !value.is_empty() && value != "return");
+    let trailing_return_type = signature[close + 1..]
+        .split_once("->")
+        .map(|(_, declared)| declared.trim().trim_end_matches(['{', ';']).trim())
+        .filter(|declared| !declared.is_empty())
+        .map(str::to_string);
+    let return_type = trailing_return_type.or(leading_return_type);
     let params = split_top_level_commas(&signature[open + 1..close])
         .into_iter()
         .filter_map(|part| {
