@@ -2739,12 +2739,103 @@ fn resolve_project_calls(
     }
 
     resolve_inherited_calls(owners, methods, calls);
+    resolve_cpp_unqualified_namespace_calls(
+        owners,
+        methods,
+        calls,
+        &by_lexical,
+        &source_languages,
+    );
 
     annotate_project_candidate_sets(owners, methods, calls, &by_lexical, &by_dispatch);
     resolve_direct_call_result_calls(methods, type_definitions, calls, &by_dispatch);
     for call in calls.iter_mut().filter(|call| call.target.is_some()) {
         call.candidate_targets.clear();
         call.candidate_reason = None;
+    }
+}
+
+/// C++ unqualified lookup does not stop at a class when no member or inherited
+/// declaration matches: it continues through the enclosing namespaces. The
+/// document extractor initially preserves an implicit receiver because member
+/// lookup must win. Once project member/hierarchy resolution has failed, bind
+/// the exact namespace declaration or retain its closed overload set.
+fn resolve_cpp_unqualified_namespace_calls(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+    by_lexical: &BTreeMap<&str, Vec<&MethodRecord>>,
+    source_languages: &BTreeMap<&str, &str>,
+) {
+    let sources = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        if source_languages.get(call.source.as_str()).copied() != Some("cpp")
+            || !call.implicit_receiver
+            || call.message.contains("::")
+            || call.symbol_namespace.as_deref().unwrap_or_default().is_empty()
+        {
+            continue;
+        }
+        let Some(source) = sources.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        // An ambiguous inherited member still hides namespace functions.
+        if !conservative_inherited_target_ids(owners, methods, call, source).is_empty() {
+            continue;
+        }
+        let namespace = call.symbol_namespace.as_deref().unwrap_or_default();
+        let mut scopes = namespace
+            .split("::")
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let mut resolved = None;
+        loop {
+            let symbol = if scopes.is_empty() {
+                call.message.clone()
+            } else {
+                format!("{}::{}", scopes.join("::"), call.message)
+            };
+            let candidates = by_lexical
+                .get(symbol.as_str())
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|method| method.language == "cpp")
+                .collect::<Vec<_>>();
+            if !candidates.is_empty() {
+                resolved = Some((symbol, candidates));
+                break;
+            }
+            if scopes.pop().is_none() {
+                break;
+            }
+        }
+        let Some((symbol, candidates)) = resolved else {
+            continue;
+        };
+        call.lexical_symbol = Some(symbol);
+        call.lexical_symbol_origin = Some("cpp_unqualified_namespace_lookup".to_string());
+        if let Some(candidate) = unique_call_candidate(&candidates, call, Some("cpp")) {
+            call.target = Some(candidate.id.clone());
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+        } else {
+            call.candidate_targets = candidates
+                .iter()
+                .map(|candidate| candidate.id.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            call.candidate_reason = Some("cpp_unqualified_namespace_overload_set".to_string());
+            call.unresolved_reason =
+                Some("cpp_closed_project_overload_set_requires_summary".to_string());
+            call.resolution_missing_proof =
+                Some("closed_candidate_cost_join_required".to_string());
+        }
     }
 }
 
@@ -5437,17 +5528,26 @@ fn parse_generic_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, S
 }
 
 fn parse_c_family_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let (mut return_type, params) = parse_generic_signature(sig);
-    if return_type.is_some() {
-        return (return_type, params);
-    }
-
+    // A trailing C++ cv/ref qualifier or source comment is not a return type.
+    // C-family return types are declared before the function name; parse that
+    // prefix authoritatively and use the generic helper only for parameters.
+    let sig = sig.split("//").next().unwrap_or(sig).trim();
+    let (_, params) = parse_generic_signature(sig);
     let Some(paren_open) = sig.find('(') else {
         return (None, params);
     };
     let prefix = sig[..paren_open].trim();
-    let mut words = prefix.split_whitespace().collect::<Vec<_>>();
-    let _method_name = words.pop();
+    let return_prefix = if let Some(operator) = prefix.rfind(" operator") {
+        &prefix[..operator]
+    } else if prefix.starts_with("operator ") {
+        ""
+    } else {
+        prefix
+            .rsplit_once(char::is_whitespace)
+            .map(|(before, _name)| before)
+            .unwrap_or_default()
+    };
+    let mut words = return_prefix.split_whitespace().collect::<Vec<_>>();
     while words.first().is_some_and(|word| {
         matches!(
             *word,
@@ -5471,9 +5571,7 @@ fn parse_c_family_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, 
     }) {
         words.remove(0);
     }
-    if !words.is_empty() {
-        return_type = Some(words.join(" "));
-    }
+    let return_type = (!words.is_empty()).then(|| words.join(" "));
     (return_type, params)
 }
 
