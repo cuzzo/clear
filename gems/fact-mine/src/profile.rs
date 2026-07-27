@@ -2738,12 +2738,12 @@ fn resolve_project_calls(
 
     resolve_inherited_calls(owners, methods, calls);
 
+    annotate_project_candidate_sets(owners, methods, calls, &by_lexical, &by_dispatch);
     resolve_direct_call_result_calls(methods, type_definitions, calls, &by_dispatch);
     for call in calls.iter_mut().filter(|call| call.target.is_some()) {
         call.candidate_targets.clear();
         call.candidate_reason = None;
     }
-    annotate_project_candidate_sets(owners, methods, calls, &by_lexical, &by_dispatch);
 }
 
 fn apply_merged_cpp_alias_costs(
@@ -3383,17 +3383,26 @@ fn resolve_direct_call_result_calls(
         let inner_targets = calls
             .iter()
             .filter_map(|call| {
-                Some((
+                let targets = call
+                    .target
+                    .as_deref()
+                    .into_iter()
+                    .chain(call.candidate_targets.iter().map(String::as_str))
+                    .collect::<BTreeSet<_>>();
+                (!targets.is_empty()).then_some((
                     (call.source.as_str(), call.path.as_str(), call.span),
-                    call.target.as_deref()?,
+                    targets,
                 ))
             })
             .collect::<BTreeMap<_, _>>();
         let mut resolved = Vec::new();
+        let mut costed = Vec::new();
         for (index, call) in calls
             .iter()
             .enumerate()
-            .filter(|(_, call)| call.target.is_none())
+            .filter(|(_, call)| {
+                call.target.is_none() && call.known_time_complexity.is_none()
+            })
         {
             let receiver_spans = call
                 .receiver_call_span
@@ -3403,27 +3412,64 @@ fn resolve_direct_call_result_calls(
             if receiver_spans.is_empty() {
                 continue;
             }
-            let producer_facts = receiver_spans
-                .iter()
-                .filter_map(|receiver_span| {
-                    let inner_target = inner_targets.get(&(
+            let mut producer_facts = Vec::new();
+            let mut producer_set_complete = true;
+            for receiver_span in &receiver_spans {
+                let Some(candidate_targets) = inner_targets.get(&(
                         call.source.as_str(),
                         call.path.as_str(),
                         *receiver_span,
-                    ))?;
-                    let inner_method = methods_by_id.get(inner_target).copied()?;
-                    let return_fact = return_facts.get(&(
+                    )) else {
+                        producer_set_complete = false;
+                        break;
+                    };
+                for inner_target in candidate_targets {
+                    let Some(inner_method) = methods_by_id.get(inner_target).copied() else {
+                        producer_set_complete = false;
+                        break;
+                    };
+                    let Some(return_fact) = return_facts.get(&(
                         inner_method.language.as_str(),
                         inner_method.path.as_str(),
                         inner_method.owner.as_str(),
                         inner_method.name.as_str(),
                         inner_method.line,
-                    ))?;
-                    Some((inner_method, *return_fact))
-                })
-                .collect::<Vec<_>>();
-            if producer_facts.len() != receiver_spans.len() {
+                    )) else {
+                        producer_set_complete = false;
+                        break;
+                    };
+                    producer_facts.push((inner_method, *return_fact));
+                }
+                if !producer_set_complete {
+                    break;
+                }
+            }
+            if !producer_set_complete || producer_facts.is_empty() {
                 continue;
+            }
+            let return_types = producer_facts
+                .iter()
+                .filter_map(|(_, fact)| fact.return_type.clone())
+                .collect::<BTreeSet<_>>();
+            if return_types.len() == 1
+                && producer_facts
+                    .iter()
+                    .all(|(_, fact)| fact.return_type.is_some())
+            {
+                let receiver_type = return_types.into_iter().next().expect("one return type");
+                let Some(source) = methods_by_id.get(call.source.as_str()).copied() else {
+                    continue;
+                };
+                let Ok(language) = crate::syntax::Language::parse(&source.language) else {
+                    continue;
+                };
+                let behavior = crate::syntax::normalized_behavior::behavior(language);
+                if let Some(complexity) =
+                    behavior.call_complexity(&receiver_type, &call.message)
+                {
+                    costed.push((index, receiver_type, complexity));
+                    continue;
+                }
             }
             let symbols = producer_facts
                 .iter()
@@ -3473,8 +3519,24 @@ fn resolve_direct_call_result_calls(
                 resolved.push((index, candidate.id.clone(), receiver_symbol));
             }
         }
-        if resolved.is_empty() {
+        if resolved.is_empty() && costed.is_empty() {
             break;
+        }
+        for (index, receiver_type, complexity) in costed {
+            let call = &mut calls[index];
+            call.receiver_type = Some(receiver_type.to_string());
+            call.receiver_type_origin =
+                Some("declared_call_result_candidate_join".to_string());
+            call.known_time_complexity = Some(complexity.time.to_string());
+            call.known_space_complexity = Some(complexity.space.to_string());
+            call.complexity_provenance =
+                Some("declared_call_result_candidate_join".to_string());
+            call.complexity_bound_quality =
+                Some("upper_bound_closed_return_type_join".to_string());
+            call.complexity_missing_kind = None;
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            call.empty_domain_cause = None;
         }
         for (index, target, receiver_symbol) in resolved {
             let call = &mut calls[index];
