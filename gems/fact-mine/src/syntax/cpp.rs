@@ -360,13 +360,23 @@ fn cpp_method_local_types(
                     .trim();
                 if declaration.is_empty()
                     || declaration.starts_with('#')
-                    || declaration.contains('(')
-                    || declaration.contains("->")
-                    || declaration.contains('.')
                 {
                     continue;
                 }
-                let left = declaration.split('=').next().unwrap_or(declaration).trim();
+                let before_assignment = declaration
+                    .split('=')
+                    .next()
+                    .unwrap_or(declaration)
+                    .trim();
+                // Constructor-style locals (`std::string out(n, 0)`) put the
+                // initializer beside the binding rather than after `=`.
+                // Keep the declaration prefix. A plain call (`out.resize(n)`)
+                // then has a member-access suffix and is rejected below.
+                let left = before_assignment
+                    .split('(')
+                    .next()
+                    .unwrap_or(before_assignment)
+                    .trim();
                 let Some(name) = cpp_identifier_tokens(left).next_back() else {
                     continue;
                 };
@@ -376,6 +386,8 @@ fn cpp_method_local_types(
                 let declared_type = left[..name_start].trim();
                 let first = cpp_identifier_tokens(declared_type).next().unwrap_or_default();
                 if declared_type.is_empty()
+                    || declared_type.ends_with(['.', ':'])
+                    || declared_type.contains("->")
                     || matches!(
                         first,
                         "break"
