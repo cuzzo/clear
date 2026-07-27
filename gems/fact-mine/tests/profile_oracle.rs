@@ -1817,6 +1817,39 @@ fn cpp_inactive_runtime_spelling_emits_modeled_world_evidence() -> Result<()> {
 }
 
 #[test]
+fn cpp_closed_overload_return_types_flow_into_chained_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"namespace demo {
+std::string make(int value) { return std::string(); }
+std::string make(double value) { return std::string(); }
+bool run() { return make(1).size() > 0; }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let make = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "make")
+        .context("missing overloaded producer call")?;
+    assert_eq!(make.candidate_targets.len(), 2);
+    let size = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "size")
+        .context("missing chained string call")?;
+    assert_eq!(size.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        size.receiver_type_origin.as_deref(),
+        Some("declared_call_result_candidate_join")
+    );
+    Ok(())
+}
+
+#[test]
 fn cpp_template_receiver_calls_keep_symbolic_dispatch_costs() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
     fs::write(
