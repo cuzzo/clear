@@ -248,3 +248,41 @@ The cJSON index still contributes 323 compiler-proven call symbols. Its flat
 function coverage is therefore a useful regression: identity ingestion works,
 while the remaining C header, macro, builtin, and external-cost layer is
 measured separately instead of being credited as complete.
+
+### Reusing analyzed dependency and standard-library bodies
+
+Analyze a pinned source release with its SCIP index, then export only complete
+time-and-space results under the exact declaration symbols:
+
+```bash
+gems/fact-mine/target/release/fact-mine-rust \
+  profile espalier \
+  --language go \
+  --scip-index go-stdlib.scip \
+  --output go-stdlib.profile.json \
+  GO_STDLIB_SOURCE_FILES...
+
+gems/espalier/script/export_complexity_summary.rb \
+  --corpus go-stdlib \
+  --source-revision go1.25.0 \
+  --indexer scip-go@0.1.18 \
+  go-stdlib.profile.json go-stdlib.go1.25.0.json.gz
+```
+
+The v2 summary records the SHA-256 of the complete input profile, producer
+version, source release, indexer version, language set, and exported symbol
+count. Gzip output has a zero timestamp, so rebuilding identical inputs is
+byte-for-byte reproducible. Apply it to user code alongside that code's index:
+
+```bash
+gems/espalier/exe/espalier \
+  --scip-index user-code.scip \
+  --complexity-summary go-stdlib.go1.25.0.json.gz \
+  --format json \
+  USER_SOURCE_FILES...
+```
+
+Summary joins require the exact compiler symbol already attached by SCIP. They
+never guess from an owner or method name. Unknown schema versions, malformed
+metadata, empty bounds, and contradictory files fail closed. The v1 reader
+remains available for previously generated artifacts, but new exports are v2.

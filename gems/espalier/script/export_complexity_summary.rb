@@ -6,13 +6,30 @@
 # excluded/generated/dependency methods into the product's reported corpus.
 
 require "json"
+require "digest"
+require "optparse"
+require "zlib"
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "espalier"
 
-abort "usage: export_complexity_summary.rb PROFILE.json [OUTPUT.json]" unless (1..2).cover?(ARGV.length)
+metadata = {
+  producer_version: Espalier.const_defined?(:VERSION) ? Espalier::VERSION : "unknown",
+  corpus: nil,
+  source_revision: nil,
+  indexer: nil
+}
+OptionParser.new do |opts|
+  opts.banner = "usage: export_complexity_summary.rb [options] PROFILE.json [OUTPUT.json[.gz]]"
+  opts.on("--corpus ID", "Stable corpus identity (for example go-stdlib)") { |value| metadata[:corpus] = value }
+  opts.on("--source-revision REV", "Source commit or release") { |value| metadata[:source_revision] = value }
+  opts.on("--indexer ID", "SCIP indexer and version") { |value| metadata[:indexer] = value }
+  opts.on("--producer-version VERSION", "Override the Espalier producer version") { |value| metadata[:producer_version] = value }
+end.parse!
+abort "usage: export_complexity_summary.rb [options] PROFILE.json [OUTPUT.json[.gz]]" unless (1..2).cover?(ARGV.length)
 
-profile = JSON.parse(File.read(ARGV.fetch(0)))
+profile_bytes = File.binread(ARGV.fetch(0))
+profile = JSON.parse(profile_bytes)
 paths = Array(profile["methods"]).map { |method| method.fetch("path") }.uniq
 evidence = {
   "root" => "/",
@@ -108,7 +125,20 @@ unless conflicts.empty?
 end
 
 output = {
-  "schema" => "fact-mine.external-complexity-summary.v1",
+  "schema" => "fact-mine.external-complexity-summary.v2",
+  "producer" => {
+    "name" => "espalier",
+    "version" => metadata[:producer_version].to_s
+  },
+  "source" => {
+    "profile_sha256" => "sha256:#{Digest::SHA256.hexdigest(profile_bytes)}",
+    "method_count" => Array(profile["methods"]).length,
+    "complete_symbol_count" => grouped.length,
+    "corpus" => metadata[:corpus],
+    "source_revision" => metadata[:source_revision],
+    "indexer" => metadata[:indexer],
+    "languages" => Array(profile["methods"]).map { |method| method["language"].to_s }.reject(&:empty?).uniq.sort
+  }.compact,
   "symbols" => grouped.to_h do |symbol, rows|
     merged = rows.first.last.dup
     merged["candidates"] = rows.flat_map { |row| Array(row.last["candidates"]) }.uniq.sort
@@ -118,7 +148,15 @@ output = {
 }
 rendered = JSON.pretty_generate(output)
 if ARGV[1]
-  File.write(ARGV[1], rendered)
+  if File.extname(ARGV[1]) == ".gz"
+    Zlib::GzipWriter.open(ARGV[1]) do |gzip|
+      gzip.mtime = 0
+      gzip.orig_name = ""
+      gzip.write(rendered)
+    end
+  else
+    File.write(ARGV[1], rendered)
+  end
 else
   puts rendered
 end
