@@ -517,6 +517,15 @@ impl<'a> Extractor<'a> {
         self.decision_spans.push(span(node));
         self.with_control("conditional", |this| this.scan(condition));
         self.decision_spans.pop();
+        if let Some(mut truth) = self.behavior.constant_condition_truth(condition) {
+            if node.r#type == "UNLESS" {
+                truth = !truth;
+            }
+            if let Some(reachable) = child_node(node, if truth { 1 } else { 2 }) {
+                self.scan(reachable);
+            }
+            return;
+        }
         self.record_branch_decision(node, condition);
         self.record_if_arms(node, condition);
 
@@ -2967,9 +2976,14 @@ mod tests {
         state_read_uses_access_span_impl: Option<fn(&NormalizedCallProjection) -> bool>,
         case_predicate_text_impl: Option<fn(&str) -> String>,
         suppress_call_site_impl: Option<fn(&Node, &NormalizedCallProjection) -> bool>,
+        constant_condition_truth_impl: Option<fn(&Node) -> Option<bool>>,
     }
 
     impl NormalizedLanguageBehavior for CustomBehavior {
+        fn constant_condition_truth(&self, node: &Node) -> Option<bool> {
+            self.constant_condition_truth_impl.and_then(|f| f(node))
+        }
+
         fn mutating_receiver_message(&self, message: &str) -> bool {
             self.mutating_receiver_message_impl
                 .map(|f| f(message))
@@ -3027,6 +3041,40 @@ mod tests {
             last_column: 0,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn compile_time_false_branch_does_not_emit_calls() {
+        let mut behavior = CustomBehavior::default();
+        behavior.constant_condition_truth_impl =
+            Some(|node| (node.text.trim() == "0").then_some(false));
+        let branch = mock_node(
+            "IF",
+            vec![
+                Child::Node(Box::new(mock_node("LIT", vec![], "0"))),
+                Child::Node(Box::new(mock_node(
+                    "VCALL",
+                    vec![Child::Symbol("dead".to_string())],
+                    "dead",
+                ))),
+                Child::Node(Box::new(mock_node(
+                    "VCALL",
+                    vec![Child::Symbol("live".to_string())],
+                    "live",
+                ))),
+            ],
+            "if (0) dead(); else live();",
+        );
+        let facts = extract(Path::new("test.c"), &[], &branch, &behavior);
+        assert_eq!(
+            facts
+                .call_sites
+                .iter()
+                .map(|call| call.message.as_str())
+                .collect::<Vec<_>>(),
+            ["live"]
+        );
+        assert!(!facts.call_sites[0].conditional);
     }
 
     #[test]

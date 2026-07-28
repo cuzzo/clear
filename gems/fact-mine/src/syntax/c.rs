@@ -104,6 +104,27 @@ pub(crate) fn external_symbol_call_complexity(
     if indexed_name != message {
         return None;
     }
+    if matches!(
+        message,
+        "__builtin_assume"
+            | "__builtin_choose_expr"
+            | "__builtin_constant_p"
+            | "__builtin_dynamic_object_size"
+            | "__builtin_expect"
+            | "__builtin_object_size"
+            | "__builtin_offsetof"
+            | "__builtin_types_compatible_p"
+            | "__builtin_unreachable"
+    ) {
+        return Some(super::ExternalCallComplexity {
+            time: "O(1)",
+            space: "O(1)",
+            provenance: "compiler_intrinsic_exact_contract",
+            bound_quality: "upper_bound_exact_target",
+            candidates: vec![symbol.to_string()],
+            assumption: None,
+        });
+    }
     let complexity = configured_intrinsic_call_complexity("c", None, message)?;
     Some(super::ExternalCallComplexity {
         time: complexity.time,
@@ -127,6 +148,14 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn constant_condition_truth(&self, node: &Node) -> Option<bool> {
+        match node.text.trim().trim_matches(['(', ')']).trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        }
+    }
+
     fn function_has_executable_body(&self, node: &Node) -> bool {
         node.text.trim_end().ends_with('}')
     }
@@ -332,7 +361,8 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
-        node.r#type != "VCALL" && parts.arguments.is_empty() && !node.text.contains('(')
+        parts.arguments.is_empty()
+            && c_member_selector_is_invoked(&node.text, &parts.message) == Some(false)
     }
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
@@ -725,6 +755,22 @@ fn call_like_identifiers(source: &str) -> impl Iterator<Item = &str> {
     })
 }
 
+fn c_member_selector_is_invoked(source: &str, message: &str) -> Option<bool> {
+    let selector = message.trim();
+    if selector.is_empty() {
+        return None;
+    }
+    ["->", "."]
+        .into_iter()
+        .filter_map(|separator| {
+            source
+                .rfind(&format!("{separator}{selector}"))
+                .map(|offset| offset + separator.len() + selector.len())
+        })
+        .max()
+        .map(|offset| source[offset..].trim_start().starts_with('('))
+}
+
 fn local_call_subject(node: &Node) -> Option<String> {
     match node.children.first()? {
         Child::Symbol(subject) | Child::String(subject) => {
@@ -974,6 +1020,13 @@ mod tests {
                 .unwrap();
         assert_eq!((strlen.time, strlen.space), ("O(N)", "O(1)"));
         assert_eq!(strlen.bound_quality, "upper_bound_modeled_world");
+        let offsetof = external_symbol_call_complexity(
+            "cxx . . $ __builtin_offsetof(751346f8406fd082).",
+            "__builtin_offsetof",
+        )
+        .unwrap();
+        assert_eq!((offsetof.time, offsetof.space), ("O(1)", "O(1)"));
+        assert_eq!(offsetof.bound_quality, "upper_bound_exact_target");
         assert!(external_symbol_call_complexity(
             "cxx . . $ project_strlen(751346f8406fd082).",
             "strlen"
@@ -1058,6 +1111,22 @@ mod tests {
             &NormalizedCallParts {
                 receiver: "x".to_string(),
                 message: "y".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
+        assert!(b.property_read_call(
+            &node("VCALL", "(*execute_data).This.u2.num_args"),
+            &NormalizedCallParts {
+                receiver: "execute_data".to_string(),
+                message: "This".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
+        assert!(!b.property_read_call(
+            &node("CALL", "callbacks.run()"),
+            &NormalizedCallParts {
+                receiver: "callbacks".to_string(),
+                message: "run".to_string(),
                 arguments: Vec::new(),
             }
         ));
