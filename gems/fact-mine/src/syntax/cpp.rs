@@ -1179,6 +1179,68 @@ fn cpp_owner_has_direct_pure_virtual(source: &str) -> bool {
 }
 
 impl NormalizedLanguageBehavior for CppNormalizedBehavior {
+    fn source_body_implicit_work_is_modeled(
+        &self,
+        source: &str,
+        template_types: &BTreeSet<String>,
+    ) -> bool {
+        if template_types.is_empty() {
+            return true;
+        }
+
+        let body = source.split_once('{').map(|(_, body)| body).unwrap_or("");
+        let has_dependent_value_local = body.lines().any(|line| {
+            let line = line.trim();
+            template_types.iter().any(|template_type| {
+                let Some(suffix) = line.strip_prefix(template_type) else {
+                    return false;
+                };
+                let suffix = suffix.trim_start();
+                !suffix.starts_with(['*', '&'])
+                    && suffix
+                        .chars()
+                        .next()
+                        .is_some_and(|character| {
+                            character == '_' || character.is_ascii_alphabetic()
+                        })
+                    && (suffix.contains('=') || suffix.contains('(') || suffix.contains('{'))
+            })
+        });
+        if has_dependent_value_local {
+            return false;
+        }
+
+        let dependent_parameters = source
+            .split_once('{')
+            .map(|(header, _)| header)
+            .unwrap_or(source)
+            .split(',')
+            .filter_map(|parameter| {
+                template_types
+                    .iter()
+                    .find(|template_type| parameter.contains(template_type.as_str()))?;
+                let name = parameter
+                    .split(|character: char| {
+                        character != '_' && !character.is_ascii_alphanumeric()
+                    })
+                    .filter(|token| !token.is_empty())
+                    .next_back()?;
+                Some(name.to_string())
+            })
+            .collect::<BTreeSet<_>>();
+
+        !dependent_parameters.iter().any(|parameter| {
+            body.lines().any(|line| {
+                let line = line.trim_start();
+                line.strip_prefix(parameter).is_some_and(|suffix| {
+                    let suffix = suffix.trim_start();
+                    suffix.starts_with('=')
+                        && !suffix.starts_with("==")
+                })
+            })
+        })
+    }
+
     fn function_has_executable_body(&self, node: &Node) -> bool {
         node.text.trim_end().ends_with('}')
     }
@@ -2057,6 +2119,29 @@ mod tests {
             "swap"
         )
         .is_none());
+    }
+
+    #[test]
+    fn dependent_value_operations_fail_closed_for_source_export() {
+        let template_types = BTreeSet::from(["_Tp".to_string()]);
+        assert!(!CppNormalizedBehavior.source_body_implicit_work_is_modeled(
+            "void swap(_Tp& left, _Tp& right) {\n\
+               _Tp temporary = std::move(left);\n\
+               left = std::move(right);\n\
+               right = std::move(temporary);\n\
+             }",
+            &template_types,
+        ));
+        assert!(!CppNormalizedBehavior.source_body_implicit_work_is_modeled(
+            "void replace(_Tp& left, _Tp& right) {\n\
+               left = std::move(right);\n\
+             }",
+            &template_types,
+        ));
+        assert!(CppNormalizedBehavior.source_body_implicit_work_is_modeled(
+            "bool empty(const _Tp& value) { return value.size() == 0; }",
+            &template_types,
+        ));
     }
 
     #[test]

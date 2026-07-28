@@ -434,14 +434,18 @@ class StdlibMapTest < Minitest::Test
     support.fetch("languages").each do |language, entry|
       case entry.fetch("status")
       when "bundled"
-        manifest_path = File.join(directory, entry.fetch("manifest"))
-        assert File.file?(manifest_path), "#{language} manifest is missing"
-        manifest = YAML.safe_load(File.read(manifest_path), permitted_classes: [], aliases: false)
-        output = File.expand_path(
-          manifest.fetch("summary").fetch("output"),
-          File.dirname(manifest_path)
-        )
-        assert File.size?(output), "#{language} generated summary is missing"
+        manifests = Array(entry["manifests"] || entry.fetch("manifest"))
+        refute_empty manifests, "#{language} manifests are missing"
+        manifests.each do |filename|
+          manifest_path = File.join(directory, filename)
+          assert File.file?(manifest_path), "#{language} manifest is missing: #{filename}"
+          manifest = YAML.safe_load(File.read(manifest_path), permitted_classes: [], aliases: false)
+          output = File.expand_path(
+            manifest.fetch("summary").fetch("output"),
+            File.dirname(manifest_path)
+          )
+          assert File.size?(output), "#{language} generated summary is missing: #{filename}"
+        end
       when "blocked"
         refute_empty entry.fetch("blocker"), "#{language} blocker is missing"
         refute_empty entry.fetch("required_fix"), "#{language} required fix is missing"

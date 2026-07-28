@@ -5,7 +5,7 @@ use super::{
 use crate::ast::{Child, Node, Span};
 use crate::syntax::cfg::ControlFlowProfile;
 use crate::type_inference::TypeExpr;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -951,6 +951,21 @@ pub(crate) fn native_pointer_nullability_contract(type_name: &str) -> Option<&'s
 }
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    /// Whether language-owned implicit runtime work in an otherwise executable
+    /// body is fully represented by the normalized calls and complexity facts.
+    ///
+    /// The shared exporter cannot infer constructor, assignment, destruction,
+    /// or other implicit semantics from source spelling. Adapters must fail
+    /// closed when their runtime can perform unmodeled work whose cost depends
+    /// on a generic type.
+    fn source_body_implicit_work_is_modeled(
+        &self,
+        _source: &str,
+        _template_types: &BTreeSet<String>,
+    ) -> bool {
+        true
+    }
+
     /// Whether declarations in this language carry a canonical namespace that
     /// can safely participate in corpus-wide lexical resolution.
     fn canonical_symbol_scope(&self) -> bool {

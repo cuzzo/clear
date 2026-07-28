@@ -4409,6 +4409,11 @@ fn extract_methods(
             let complexity = document
                 .local_complexity_scores
                 .get(&format!("{}#{}", owner, name));
+            let template_types = document
+                .method_template_types
+                .get(&format!("{}\0{}\0{}", fn_def.owner, fn_def.name, fn_def.line))
+                .cloned()
+                .unwrap_or_default();
 
             // dispatch_kind "top" means owner is only the file-stem
             // fallback, not a real enclosing type - resolving it by name
@@ -4455,7 +4460,11 @@ fn extract_methods(
                     .unwrap_or_default(),
                 params: fn_def.params.clone(),
                 callback_params: fn_def.callback_params.clone(),
-                source_export_eligible: fn_def.source_export_eligible,
+                source_export_eligible: fn_def.source_export_eligible
+                    && behavior.source_body_implicit_work_is_modeled(
+                        &raw_source,
+                        &template_types,
+                    ),
                 raw_source,
                 normalized_source,
                 untraceable_params: behavior

@@ -23,9 +23,11 @@ languages:
     blocker: unversioned_consumer_symbols
     required_fix: scip-clang must expose the C runtime implementation and version used by the compilation database.
   cpp:
-    status: blocked
-    blocker: unversioned_consumer_symbols
-    required_fix: scip-clang must expose the C++ standard-library implementation and version used by the compilation database.
+    status: bundled
+    manifests:
+      - cpp-libstdcxx-13.3.0-cxx17-containers.yml
+      - cpp-libstdcxx-13.3.0-cxx17-strings.yml
+      - cpp-libstdcxx-13.3.0-cxx20-memory.yml
   typescript:
     status: blocked
     blocker: declaration_only_standard_library
