@@ -19,7 +19,9 @@ metadata = {
   source_revision: nil,
   indexer: nil,
   symbol_prefix_from: nil,
-  symbol_prefix_to: nil
+  symbol_prefix_to: nil,
+  compatibility: nil,
+  symbol_map: nil
 }
 OptionParser.new do |opts|
   opts.banner = "usage: export_complexity_summary.rb [options] PROFILE.json [OUTPUT.json[.gz]]"
@@ -33,10 +35,46 @@ OptionParser.new do |opts|
   opts.on("--symbol-prefix-to PREFIX", "Relocate producer symbols to this exact prefix") do |value|
     metadata[:symbol_prefix_to] = value
   end
+  opts.on("--compatibility FILE", "Semantic-environment sidecar required by consumers") do |value|
+    metadata[:compatibility] = value
+  end
+  opts.on("--symbol-map FILE", "Exact producer-to-consumer symbol bridge") do |value|
+    metadata[:symbol_map] = value
+  end
 end.parse!
 abort "usage: export_complexity_summary.rb [options] PROFILE.json [OUTPUT.json[.gz]]" unless (1..2).cover?(ARGV.length)
 if metadata[:symbol_prefix_from].nil? != metadata[:symbol_prefix_to].nil?
   abort "--symbol-prefix-from and --symbol-prefix-to must be supplied together"
+end
+abort "--symbol-map cannot be combined with prefix relocation" if metadata[:symbol_map] && metadata[:symbol_prefix_from]
+
+compatibility_claims = {}
+if metadata[:compatibility]
+  environment = JSON.parse(File.read(metadata[:compatibility]))
+  unless environment["schema"] == "fact-mine.semantic-environment.v1"
+    abort "unsupported semantic environment schema: #{environment['schema'].inspect}"
+  end
+  compatibility_claims = environment.fetch("claims")
+  unless compatibility_claims.is_a?(Hash) &&
+      compatibility_claims.all? { |key, value| !key.to_s.empty? && !value.to_s.empty? }
+    abort "semantic environment claims must be a mapping of non-empty strings"
+  end
+end
+
+symbol_map = nil
+symbol_map_sha256 = nil
+if metadata[:symbol_map]
+  symbol_map_bytes = File.binread(metadata[:symbol_map])
+  bridge = JSON.parse(symbol_map_bytes)
+  unless bridge["schema"] == "fact-mine.symbol-bridge.v1"
+    abort "unsupported symbol bridge schema: #{bridge['schema'].inspect}"
+  end
+  symbol_map = bridge.fetch("symbols")
+  unless symbol_map.is_a?(Hash) &&
+      symbol_map.all? { |key, value| !key.to_s.empty? && !value.to_s.empty? }
+    abort "symbol bridge symbols must map non-empty producer symbols to non-empty consumer symbols"
+  end
+  symbol_map_sha256 = "sha256:#{Digest::SHA256.hexdigest(symbol_map_bytes)}"
 end
 
 profile_bytes = File.binread(ARGV.fetch(0))
@@ -131,15 +169,17 @@ candidate_symbols = Array(profile["calls"]).filter_map do |call|
   }]
 end
 symbols.concat(candidate_symbols)
-symbols.map! do |symbol, row|
-  [
-    Espalier::ComplexitySummary.relocate_symbol(
-      symbol,
-      from: metadata[:symbol_prefix_from],
-      to: metadata[:symbol_prefix_to]
-    ),
-    row
-  ]
+symbols = symbols.filter_map do |symbol, row|
+  relocated = if symbol_map
+                symbol_map[symbol]
+              else
+                Espalier::ComplexitySummary.relocate_symbol(
+                  symbol,
+                  from: metadata[:symbol_prefix_from],
+                  to: metadata[:symbol_prefix_to]
+                )
+              end
+  relocated && [relocated, row]
 end
 
 # A compiler symbol should identify one declaration. Omit conflicting symbols
@@ -156,7 +196,7 @@ unless conflicts.empty?
 end
 
 output = {
-  "schema" => "fact-mine.external-complexity-summary.v2",
+  "schema" => "fact-mine.external-complexity-summary.v3",
   "producer" => {
     "name" => "espalier",
     "version" => metadata[:producer_version].to_s
@@ -176,8 +216,12 @@ output = {
         "to" => metadata[:symbol_prefix_to]
       }
     end,
+    "symbol_bridge_sha256" => symbol_map_sha256,
     "languages" => Array(profile["methods"]).map { |method| method["language"].to_s }.reject(&:empty?).uniq.sort
   }.compact,
+  "compatibility" => {
+    "claims" => compatibility_claims
+  },
   "symbols" => grouped.to_h do |symbol, rows|
     merged = rows.first.last.dup
     merged["candidates"] = rows.flat_map { |row| Array(row.last["candidates"]) }.uniq.sort

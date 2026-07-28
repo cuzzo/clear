@@ -311,15 +311,19 @@ are exported only when the callback is an actual declared parameter. Generated
 complete data replaces incomplete fallback data; a generated/manual complete
 disagreement is a hard failure.
 
-The v2 bundle records the SHA-256 of the complete input profile, producer
+The v3 bundle records the SHA-256 of the complete input profile, producer
 version, verified source release, indexer version, language set, and exported
-symbol count. Gzip output has a zero timestamp, so rebuilding identical inputs
-is byte-for-byte reproducible. Apply it to user code alongside that code's
-index:
+symbol count. It may additionally require exact opaque semantic-environment
+claims and record the digest of a generated producer-to-consumer symbol bridge.
+This permits versionless or cross-language runtime symbols without adding
+language branches to the shared join. Gzip output has a zero timestamp, so
+rebuilding identical inputs is byte-for-byte reproducible. Apply it to user
+code alongside that code's index and, when required, its environment sidecar:
 
 ```bash
 gems/espalier/exe/espalier \
   --scip-index user-code.scip \
+  --semantic-environment runtime-environment.json \
   --complexity-summary go-stdlib.go1.25.0.json.gz \
   --format json \
   USER_SOURCE_FILES...
