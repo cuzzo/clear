@@ -33,6 +33,7 @@ Current publishable mappings:
 | Rust | Rust 1.96.0 `core`/`alloc`/`std` | rust-analyzer 1.96.0 | 1,543 |
 | Java | JDK 21.0.12 `java.lang`/`java.util` | scip-java 0.12.3 | 2,598 |
 | Python | CPython 3.11.9 selected pure-Python core | scip-python 0.6.6 | 200 |
+| C# | .NET 10.0.10 CoreLib collections/string/array | scip-dotnet 0.2.14 | 316 |
 
 The checked-in exact-symbol consumers prove that the generated data changes
 the final function result, not merely call metadata:
@@ -49,9 +50,6 @@ still useful canonicalization, but it is not reported as completeness impact.
 
 The remaining SCIP languages are deliberately fail-closed:
 
-- C# consumer symbols are versioned, but the validated corpus was produced by
-  an unreproducible `scip-dotnet 0.1.0-SNAPSHOT`; there is no exact producer
-  build to pin.
 - Kotlin standard-library symbols from scip-java use `maven . .`, so a bundle
   cannot distinguish Kotlin releases.
 - C and C++ standard-library symbols from scip-clang use `cxx . .`; neither
@@ -66,3 +64,14 @@ manifest passes the same producer and consumer checks. Missing version text in
 a SCIP symbol is no longer itself a blocker: a reproducible environment
 attestation may supply the missing compatibility identity without weakening the
 exact-symbol join.
+
+The C# manifest works around scip-dotnet 0.2.14's stale
+`0.1.0-SNAPSHOT` SCIP metadata without trusting that text: its language-owned
+index recipe checks the released CLI version, and its compatibility sidecar
+pins both the installed indexer binary and .NET reference-assembly digests.
+The generated runtime bundle maps only exact, assembly-qualified consumer
+symbols. On the current Serilog production corpus the released indexer itself
+raises completion from 755/888 (85.02%) to 765/888 (86.15%); the generated
+bundle has zero additional count impact because all overlapping calls already
+had complete fallback models, and it produces no complete/complete
+disagreements.

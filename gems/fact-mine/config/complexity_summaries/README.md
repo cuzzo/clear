@@ -35,7 +35,7 @@ bundle exec ruby gems/espalier/exe/espalier stdlib-map \
   --manifest gems/fact-mine/config/stdlib_maps/go-1.22.2.yml
 ```
 
-The gzip header is deterministic. The v2 envelope records the complete input
+The gzip header is deterministic. The versioned envelope records the complete input
 profile SHA-256, proof policy, source-proven method count, and exported symbol
 count; FactMine validates the schema and every bound at startup. Add a focused
 exact-version join test whenever a new bundle is registered in
@@ -85,6 +85,19 @@ not Python behavior in the shared producer.
 ```bash
 bundle exec ruby gems/espalier/exe/espalier stdlib-map \
   --manifest gems/fact-mine/config/stdlib_maps/python-3.11.9.yml
+```
+
+`csharp-corelib.dotnet10.0.10.json.gz` contains 316 exact consumer symbols
+generated from .NET runtime 10.0.10 collection, string, and array
+implementations. The manifest requires the released scip-dotnet 0.2.14 even
+though that release still writes `0.1.0-SNAPSHOT` into SCIP metadata. V3
+compatibility claims therefore pin the actual indexer DLL and .NET reference
+assembly digests, and an exact bridge assigns each implementation symbol to its
+runtime assembly identity.
+
+```bash
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/csharp-10.0.10.yml
 ```
 
 FactMine discovers all `.json.gz` files in this directory at build time.

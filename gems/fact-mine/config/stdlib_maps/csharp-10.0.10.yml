@@ -1,0 +1,53 @@
+schema: fact-mine.stdlib-map.v1
+language: csharp
+
+source:
+  revision: dotnet-runtime-10.0.10
+  git:
+    repository: https://github.com/dotnet/runtime.git
+    commit: 8f030f80c0dd2722eb2f618984e9db6784765963
+    sparse_paths:
+      - src/libraries/System.Private.CoreLib/src/System
+  include:
+    - "src/libraries/System.Private.CoreLib/src/System/Collections/**/*.cs"
+    - "src/libraries/System.Private.CoreLib/src/System/String.cs"
+    - "src/libraries/System.Private.CoreLib/src/System/Array.cs"
+
+index:
+  command:
+    - ruby
+    - "{manifest_dir}/csharp/index_corelib.rb"
+    - "{source_root}"
+    - "{index}"
+  working_directory: "{source_root}"
+  output: csharp-corelib.scip
+  expected:
+    # scip-dotnet 0.2.14 still writes its historical development version into
+    # SCIP metadata. The language-owned index command separately verifies the
+    # released package and the compatibility attestation pins its binary hash.
+    tool: scip-dotnet
+    version: 0.1.0-SNAPSHOT
+
+compatibility:
+  command:
+    - ruby
+    - "{manifest_dir}/csharp/semantic_environment.rb"
+    - "{source_root}"
+    - "{environment}"
+  working_directory: "{source_root}"
+
+soundness:
+  minimum_export_eligible_methods: 1300
+
+summary:
+  corpus: dotnet-runtime-corelib-collections-string-array
+  output: ../complexity_summaries/csharp-corelib.dotnet10.0.10.json.gz
+  minimum_symbols: 250
+  symbol_bridge:
+    command:
+      - ruby
+      - "{manifest_dir}/csharp/build_symbol_bridge.rb"
+      - "{producer_summary}"
+      - "{symbol_bridge}"
+      - 10.0.0.0
+    working_directory: "{source_root}"
