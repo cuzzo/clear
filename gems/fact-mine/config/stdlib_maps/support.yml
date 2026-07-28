@@ -13,9 +13,8 @@ languages:
     status: bundled
     manifest: python-3.11.9.yml
   csharp:
-    status: blocked
-    blocker: unreproducible_indexer
-    required_fix: Publish and pin a non-snapshot scip-dotnet build that can index the matching dotnet/runtime implementation source.
+    status: bundled
+    manifest: csharp-10.0.10.yml
   kotlin:
     status: blocked
     blocker: unversioned_consumer_symbols
