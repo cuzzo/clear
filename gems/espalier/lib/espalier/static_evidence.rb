@@ -24,8 +24,8 @@ module Espalier
       File.join(Espalier::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
     ).freeze
 
-    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [], complexity_summaries: [])
-      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations, scip_indexes: scip_indexes, complexity_summaries: complexity_summaries).build
+    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [], semantic_environments: [], complexity_summaries: [])
+      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations, scip_indexes: scip_indexes, semantic_environments: semantic_environments, complexity_summaries: complexity_summaries).build
     end
 
     def self.project_modules(evidence, source_roles: ["production"])
@@ -412,13 +412,14 @@ module Espalier
     end
 
 
-    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [], complexity_summaries: [])
+    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [], semantic_environments: [], complexity_summaries: [])
       @targets = Array(targets).compact
       @root = root
       @language = normalize_language(language)
       @vcs = normalize_vcs(vcs)
       @include_annotations = include_annotations
       @scip_indexes = Array(scip_indexes).compact
+      @semantic_environments = Array(semantic_environments).compact
       @complexity_summaries = Array(complexity_summaries).compact
     end
 
@@ -438,6 +439,9 @@ module Espalier
       args = [FACT_MINE_RUST_BINARY, "profile", profile, "--output", tmp.path]
       args.concat(["--language", @language.to_s]) if @language
       @scip_indexes.each { |index| args.concat(["--scip-index", index.to_s]) }
+      @semantic_environments.each do |environment|
+        args.concat(["--semantic-environment", environment.to_s])
+      end
       @complexity_summaries.each { |summary| args.concat(["--complexity-summary", summary.to_s]) }
       args.concat(files)
       ok = system(*args)

@@ -80,6 +80,7 @@ fn run() -> Result<()> {
             output,
             language_override,
             scip_indexes,
+            semantic_environments,
             complexity_summaries,
             bundled_complexity_summaries,
             portable,
@@ -102,6 +103,7 @@ fn run() -> Result<()> {
                 && !changed_files_only
                 && !portable
                 && scip_indexes.is_empty()
+                && semantic_environments.is_empty()
                 && complexity_summaries.is_empty()
                 && !output.as_ref().is_some_and(|path| {
                     path.extension().and_then(|value| value.to_str()) == Some("gz")
@@ -129,6 +131,10 @@ fn run() -> Result<()> {
             for index in scip_indexes {
                 fact_mine_rust::scip::apply_json_file(&mut merged, &index)?;
             }
+            fact_mine_rust::external_summary::apply_environment_files(
+                &mut merged,
+                semantic_environments.as_slice(),
+            )?;
             if bundled_complexity_summaries {
                 fact_mine_rust::external_summary::apply_bundled(&mut merged)?;
             }
@@ -167,6 +173,7 @@ fn run() -> Result<()> {
             language_override,
             format,
             scip_indexes,
+            semantic_environments,
             complexity_summaries,
             bundled_complexity_summaries,
         } => {
@@ -178,6 +185,10 @@ fn run() -> Result<()> {
             for index in scip_indexes {
                 fact_mine_rust::scip::apply_json_file(&mut merged, &index)?;
             }
+            fact_mine_rust::external_summary::apply_environment_files(
+                &mut merged,
+                semantic_environments.as_slice(),
+            )?;
             if bundled_complexity_summaries {
                 fact_mine_rust::external_summary::apply_bundled(&mut merged)?;
             }
@@ -511,6 +522,7 @@ enum Command {
         output: Option<PathBuf>,
         language_override: Option<String>,
         scip_indexes: Vec<PathBuf>,
+        semantic_environments: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
         bundled_complexity_summaries: bool,
         portable: bool,
@@ -523,6 +535,7 @@ enum Command {
         language_override: Option<String>,
         format: String,
         scip_indexes: Vec<PathBuf>,
+        semantic_environments: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
         bundled_complexity_summaries: bool,
     },
@@ -616,6 +629,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut language_override = None;
             let mut files = Vec::new();
             let mut scip_indexes = Vec::new();
+            let mut semantic_environments = Vec::new();
             let mut complexity_summaries = Vec::new();
             let mut bundled_complexity_summaries = true;
             let mut portable = false;
@@ -648,6 +662,17 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                     other if other.starts_with("--scip-index=") => {
                         scip_indexes
                             .push(PathBuf::from(other.strip_prefix("--scip-index=").unwrap()));
+                    }
+                    "--semantic-environment" => {
+                        semantic_environments.push(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--semantic-environment requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--semantic-environment=") => {
+                        semantic_environments.push(PathBuf::from(
+                            other.strip_prefix("--semantic-environment=").unwrap(),
+                        ));
                     }
                     "--complexity-summary" => {
                         complexity_summaries.push(PathBuf::from(
@@ -699,6 +724,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 output,
                 language_override,
                 scip_indexes,
+                semantic_environments,
                 complexity_summaries,
                 bundled_complexity_summaries,
                 portable,
@@ -712,6 +738,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut format = "text".to_string();
             let mut files = Vec::new();
             let mut scip_indexes = Vec::new();
+            let mut semantic_environments = Vec::new();
             let mut complexity_summaries = Vec::new();
             let mut bundled_complexity_summaries = true;
             while let Some(arg) = iter.next() {
@@ -741,6 +768,17 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                     other if other.starts_with("--scip-index=") => {
                         scip_indexes
                             .push(PathBuf::from(other.strip_prefix("--scip-index=").unwrap()));
+                    }
+                    "--semantic-environment" => {
+                        semantic_environments.push(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--semantic-environment requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--semantic-environment=") => {
+                        semantic_environments.push(PathBuf::from(
+                            other.strip_prefix("--semantic-environment=").unwrap(),
+                        ));
                     }
                     "--complexity-summary" => {
                         complexity_summaries.push(PathBuf::from(
@@ -775,6 +813,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 language_override,
                 format,
                 scip_indexes,
+                semantic_environments,
                 complexity_summaries,
                 bundled_complexity_summaries,
             })
@@ -855,6 +894,33 @@ mod tests {
                 bundled_complexity_summaries,
                 ..
             } => assert!(!bundled_complexity_summaries),
+            _ => panic!("expected profile command"),
+        }
+    }
+
+    #[test]
+    fn profile_accepts_semantic_environment_sidecars() {
+        let parsed = parse_args(vec![
+            "profile".to_string(),
+            "espalier".to_string(),
+            "--semantic-environment=runtime.json".to_string(),
+            "--semantic-environment".to_string(),
+            "target.json".to_string(),
+            "example.cpp".to_string(),
+        ])
+        .expect("parse semantic environment profile");
+        match parsed {
+            Command::Profile {
+                semantic_environments,
+                files,
+                ..
+            } => {
+                assert_eq!(
+                    semantic_environments,
+                    vec![PathBuf::from("runtime.json"), PathBuf::from("target.json")]
+                );
+                assert_eq!(files, vec![PathBuf::from("example.cpp")]);
+            }
             _ => panic!("expected profile command"),
         }
     }

@@ -26,12 +26,19 @@ class StdlibMapTest < Minitest::Test
         if (summary_index = sources.index("--complexity-summary"))
           sources.slice!(summary_index, 2)
         end
+        semantic_environment = {}
+        if (environment_index = sources.index("--semantic-environment"))
+          environment = JSON.parse(File.read(sources.fetch(environment_index + 1)))
+          semantic_environment = environment.fetch("claims")
+          sources.slice!(environment_index, 2)
+        end
         File.write(output, JSON.generate({
           "input_coverage" => {
             "selected_files" => sources.length,
             "parsed_files" => sources.length
           },
           "semantic_indexes" => [{"tool" => "fake-scip", "version" => "1.2.3"}],
+          "semantic_environment" => semantic_environment,
           "methods" => [{"source_export_eligible" => true}],
           "calls" => [],
           "call_resolution_coverage" => {
@@ -41,6 +48,11 @@ class StdlibMapTest < Minitest::Test
         }))
       elsif command.length > 1 && File.basename(command.fetch(1)) == "export_complexity_summary.rb"
         output = command.last
+        claims = if command.include?("--compatibility")
+                   JSON.parse(File.read(command.fetch(command.index("--compatibility") + 1))).fetch("claims")
+                 else
+                   {}
+                 end
         prefix = if command.include?("--symbol-prefix-from")
                    command.fetch(command.index("--symbol-prefix-to") + 1)
                  else
@@ -55,6 +67,7 @@ class StdlibMapTest < Minitest::Test
               "profile_sha256" => "sha256:test",
               "indexer" => "fake-scip@1.2.3"
             },
+            "compatibility" => {"claims" => claims},
             "symbols" => {
               "#{prefix}demo/run()." => {
                 "time" => "O(1)",
@@ -127,6 +140,10 @@ class StdlibMapTest < Minitest::Test
             version: 1.2.3
         soundness:
           minimum_export_eligible_methods: 1
+        compatibility:
+          claims:
+            runtime.name: fake-runtime
+            runtime.version: fake-1
         summary:
           corpus: fake-stdlib
           output: #{output}
@@ -139,6 +156,10 @@ class StdlibMapTest < Minitest::Test
           - name: fake-consumer
             source_root: consumer
             include: ["*.go"]
+            compatibility:
+              claims:
+                runtime.name: fake-runtime
+                runtime.version: fake-1
             index:
               command: ["fake-index", "{index}"]
               output: consumer.scip

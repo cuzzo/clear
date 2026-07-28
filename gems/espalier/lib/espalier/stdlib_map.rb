@@ -18,7 +18,7 @@ module Espalier
   # and publication flow are shared.
   class StdlibMap
     SCHEMA = "fact-mine.stdlib-map.v1"
-    SUMMARY_SCHEMA = "fact-mine.external-complexity-summary.v2"
+    SUMMARY_SCHEMA = "fact-mine.external-complexity-summary.v3"
 
     class CommandRunner
       def run!(command, chdir:, env: {})
@@ -116,27 +116,62 @@ module Espalier
       files = source_files(source_root)
       analysis_root, files = stage_selected_source(source_root, files)
       index = produce_index(analysis_root)
+      substitutions = {
+        "source_root" => analysis_root,
+        "work_dir" => @work_dir,
+        "index" => index,
+        "manifest_dir" => @manifest_dir,
+        "workspace_root" => @workspace_root
+      }
+      producer_environment = materialize_environment(
+        manifest["compatibility"],
+        "producer",
+        substitutions
+      )
       profile = File.join(@work_dir, "stdlib.profile.json")
-      run_profile(files, index, profile)
+      run_profile(files, index, profile, environment: producer_environment)
       profile_data = JSON.parse(File.read(profile))
-      profile_validation = validate_profile!(profile_data, files)
+      profile_validation = validate_profile!(profile_data, files, producer_environment)
 
       producer_summary = File.join(@work_dir, "stdlib.producer-summary.json.gz")
-      export_summary(profile, producer_summary, relocate: false)
+      export_summary(
+        profile,
+        producer_summary,
+        relocate: false,
+        bridge: nil,
+        compatibility: producer_environment
+      )
       producer_summary_data = read_json(producer_summary)
       producer_validation = validate_summary!(producer_summary_data, relocated: false)
       producer_join_validation = verify_summary_join(profile_data, producer_summary_data)
+      symbol_bridge = materialize_symbol_bridge(
+        fetch_hash(manifest, "summary")["symbol_bridge"],
+        substitutions.merge(
+          "profile" => profile,
+          "producer_summary" => producer_summary
+        )
+      )
 
       relocation = fetch_hash(manifest, "summary")["symbol_relocation"]
-      staged_summary = if relocation
+      staged_summary = if relocation || symbol_bridge
                          path = File.join(@work_dir, "stdlib.summary.json.gz")
-                         export_summary(profile, path, relocate: true)
+                         export_summary(
+                           profile,
+                           path,
+                           relocate: !relocation.nil?,
+                           bridge: symbol_bridge,
+                           compatibility: producer_environment
+                         )
                          path
                        else
                          producer_summary
                        end
-      summary_validation = validate_summary!(read_json(staged_summary), relocated: !relocation.nil?)
-      consumer_results = run_consumer_checks(staged_summary)
+      summary_validation = validate_summary!(
+        read_json(staged_summary),
+        relocated: !relocation.nil?,
+        bridged: !symbol_bridge.nil?
+      )
+      consumer_results = run_consumer_checks(staged_summary, producer_environment)
 
       output = summary_output
       publish_summary(staged_summary, output)
@@ -221,6 +256,24 @@ module Espalier
         if relocation["from"].to_s.empty? || relocation["to"].to_s.empty?
           raise ArgumentError, "summary.symbol_relocation requires from and to"
         end
+      end
+      if summary["symbol_bridge"] && relocation
+        raise ArgumentError, "summary.symbol_bridge cannot be combined with symbol_relocation"
+      end
+      if summary["symbol_bridge"]
+        bridge = fetch_hash(summary, "symbol_bridge")
+        unless bridge["path"] || Array(bridge["command"]).any?
+          raise ArgumentError, "summary.symbol_bridge requires path or command"
+        end
+      end
+      if manifest["compatibility"]
+        compatibility = fetch_hash(manifest, "compatibility")
+        modes = [
+          compatibility.key?("claims"),
+          compatibility.key?("path"),
+          Array(compatibility["command"]).any?
+        ].count(true)
+        raise ArgumentError, "compatibility requires exactly one of claims, path, or command" unless modes == 1
       end
     end
 
@@ -409,7 +462,8 @@ module Espalier
       checked_file(output, "generated SCIP index")
     end
 
-    def run_profile(files, index, output, summary: nil, language: manifest.fetch("language"))
+    def run_profile(files, index, output, summary: nil, environment: nil,
+                    language: manifest.fetch("language"))
       command = [
         fact_mine_binary, "profile", "espalier",
         "--language", language,
@@ -417,12 +471,13 @@ module Espalier
         "--no-bundled-complexity-summaries",
         "--output", output
       ]
+      command.concat(["--semantic-environment", environment]) if environment
       command.concat(["--complexity-summary", summary]) if summary
       command.concat(files)
       @runner.run!(command, chdir: @workspace_root)
     end
 
-    def export_summary(profile, output, relocate:)
+    def export_summary(profile, output, relocate:, bridge:, compatibility:)
       summary = fetch_hash(manifest, "summary")
       indexer = fetch_hash(fetch_hash(manifest, "index"), "expected")
       command = [
@@ -432,15 +487,17 @@ module Espalier
         "--source-revision", fetch_hash(manifest, "source").fetch("revision"),
         "--indexer", "#{indexer.fetch('tool')}@#{indexer.fetch('version')}"
       ]
+      command.concat(["--compatibility", compatibility]) if compatibility
       if relocate && (relocation = summary["symbol_relocation"])
         command.concat(["--symbol-prefix-from", relocation.fetch("from")])
         command.concat(["--symbol-prefix-to", relocation.fetch("to")])
       end
+      command.concat(["--symbol-map", bridge]) if bridge
       command.concat([profile, output])
       @runner.run!(command, chdir: @workspace_root)
     end
 
-    def validate_profile!(profile, files)
+    def validate_profile!(profile, files, environment = nil)
       coverage = fetch_hash(profile, "input_coverage")
       selected = coverage.fetch("selected_files", 0).to_i
       parsed = coverage.fetch("parsed_files", 0).to_i
@@ -469,6 +526,14 @@ module Espalier
       unless indexes.any? { |row| row["tool"] == expected["tool"] && row["version"] == expected["version"] }
         raise "SCIP metadata did not contain #{expected['tool']}@#{expected['version']}"
       end
+      if environment
+        required_claims = fetch_hash(read_json(environment), "claims")
+        actual_claims = fetch_hash(profile, "semantic_environment")
+        missing = required_claims.reject { |key, value| actual_claims[key] == value }
+        unless missing.empty?
+          raise "profile semantic environment did not preserve claims: #{missing.keys.sort.join(', ')}"
+        end
+      end
       methods = Array(profile["methods"])
       eligible = methods.count { |method| method["source_export_eligible"] == true }
       minimum = fetch_hash(manifest, "soundness", required: false).fetch("minimum_export_eligible_methods", 1).to_i
@@ -491,11 +556,16 @@ module Espalier
         "parse_recovery_files" => recovery_files.length,
         "parse_recovery_spans" => recoveries.sum { |recovery| Array(recovery["spans"]).length },
         "eligible_methods_overlapping_parse_recovery" => recovery_overlaps,
-        "semantic_index" => "#{expected['tool']}@#{expected['version']}"
+        "semantic_index" => "#{expected['tool']}@#{expected['version']}",
+        "semantic_environment_claims" => fetch_hash(
+          profile,
+          "semantic_environment",
+          required: false
+        ).length
       }
     end
 
-    def validate_summary!(summary, relocated: true)
+    def validate_summary!(summary, relocated: true, bridged: false)
       raise "unexpected summary schema: #{summary['schema'].inspect}" unless summary["schema"] == SUMMARY_SCHEMA
       symbols = fetch_hash(summary, "symbols")
       source = fetch_hash(summary, "source")
@@ -505,7 +575,9 @@ module Espalier
       config = fetch_hash(manifest, "summary")
       minimum = config.fetch("minimum_symbols", 1).to_i
       raise "summary exported #{symbols.length} symbols; expected at least #{minimum}" if symbols.length < minimum
-      prefix = if !relocated && config["symbol_relocation"]
+      prefix = if bridged
+                 nil
+               elsif !relocated && config["symbol_relocation"]
                  fetch_hash(config, "symbol_relocation").fetch("from")
                else
                  config["expected_symbol_prefix"]
@@ -530,16 +602,36 @@ module Espalier
       {"verified_join_call_sites" => joined}
     end
 
-    def run_consumer_checks(summary)
+    def run_consumer_checks(summary, producer_environment)
       Array(manifest["consumers"]).map do |consumer|
         name = consumer.fetch("name")
         root = expanded_path(consumer.fetch("source_root"))
         files = source_files(root, consumer)
         index = produce_consumer_index(consumer, name, root)
+        substitutions = {
+          "source_root" => root,
+          "work_dir" => @work_dir,
+          "index" => index,
+          "manifest_dir" => @manifest_dir,
+          "workspace_root" => @workspace_root
+        }
+        environment = if consumer.key?("compatibility")
+                        materialize_environment(
+                          consumer["compatibility"],
+                          "consumer-#{safe_name(name)}",
+                          substitutions
+                        )
+                      elsif producer_environment
+                        raise ArgumentError,
+                              "#{name} must produce its own compatibility claims"
+                      else
+                        nil
+                      end
         baseline = File.join(@work_dir, "consumer-#{safe_name(name)}-baseline.json")
         generated = File.join(@work_dir, "consumer-#{safe_name(name)}-generated.json")
-        run_profile(files, index, baseline, language: consumer.fetch("language", manifest.fetch("language")))
-        run_profile(files, index, generated, summary: summary,
+        run_profile(files, index, baseline, environment: environment,
+                    language: consumer.fetch("language", manifest.fetch("language")))
+        run_profile(files, index, generated, summary: summary, environment: environment,
                     language: consumer.fetch("language", manifest.fetch("language")))
         before = coverage_report(baseline, root, consumer)
         after = coverage_report(generated, root, consumer)
@@ -584,6 +676,87 @@ module Espalier
         .transform_values { |value| expand_string(value.to_s, substitutions) }
       @runner.run!(command, chdir: cwd, env: env)
       checked_file(output, "generated #{name} SCIP index")
+    end
+
+    def materialize_environment(config, label, substitutions)
+      return nil unless config
+
+      config = fetch_hash({"environment" => config}, "environment")
+      if config["path"]
+        return checked_file(
+          expanded_path(config.fetch("path"), substitutions),
+          "#{label} semantic environment"
+        )
+      end
+
+      output = File.join(@work_dir, "#{safe_name(label)}.semantic-environment.json")
+      if config["claims"]
+        claims = fetch_hash(config, "claims").to_h do |key, value|
+          [key.to_s, expand_string(value.to_s, substitutions)]
+        end
+        raise ArgumentError, "#{label} semantic environment claims cannot be empty" if claims.empty?
+        File.write(
+          output,
+          JSON.pretty_generate({
+            "schema" => "fact-mine.semantic-environment.v1",
+            "claims" => claims
+          })
+        )
+      else
+        generated_substitutions = substitutions.merge("environment" => output)
+        command = expand_command(config.fetch("command"), generated_substitutions)
+        cwd = expanded_path(
+          config.fetch("working_directory", substitutions.fetch("source_root")),
+          generated_substitutions
+        )
+        env = fetch_hash(config, "environment", required: false)
+          .transform_values { |value| expand_string(value.to_s, generated_substitutions) }
+        @runner.run!(command, chdir: cwd, env: env)
+      end
+      validate_sidecar!(
+        checked_file(output, "#{label} semantic environment"),
+        "fact-mine.semantic-environment.v1",
+        "claims"
+      )
+    end
+
+    def materialize_symbol_bridge(config, substitutions)
+      return nil unless config
+
+      config = fetch_hash({"bridge" => config}, "bridge")
+      if config["path"]
+        path = expanded_path(config.fetch("path"), substitutions)
+      else
+        path = File.join(@work_dir, "stdlib.symbol-bridge.json")
+        generated_substitutions = substitutions.merge("symbol_bridge" => path)
+        command = expand_command(config.fetch("command"), generated_substitutions)
+        cwd = expanded_path(
+          config.fetch("working_directory", substitutions.fetch("source_root")),
+          generated_substitutions
+        )
+        env = fetch_hash(config, "environment", required: false)
+          .transform_values { |value| expand_string(value.to_s, generated_substitutions) }
+        @runner.run!(command, chdir: cwd, env: env)
+      end
+      validate_sidecar!(
+        checked_file(path, "stdlib symbol bridge"),
+        "fact-mine.symbol-bridge.v1",
+        "symbols"
+      )
+    end
+
+    def validate_sidecar!(path, schema, mapping_key)
+      document = JSON.parse(File.read(path))
+      raise ArgumentError, "unexpected sidecar schema in #{path}: #{document['schema'].inspect}" unless document["schema"] == schema
+
+      mapping = document[mapping_key]
+      unless mapping.is_a?(Hash) && !mapping.empty? &&
+          mapping.all? { |key, value| !key.to_s.empty? && !value.to_s.empty? }
+        raise ArgumentError, "#{path} must contain a non-empty #{mapping_key} string mapping"
+      end
+      path
+    rescue JSON::ParserError => error
+      raise ArgumentError, "invalid JSON sidecar #{path}: #{error.message}"
     end
 
     def coverage_report(profile, root, consumer)

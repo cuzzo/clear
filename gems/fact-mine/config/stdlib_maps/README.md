@@ -10,8 +10,20 @@ capability is recorded instead of silently shipping an unsafe approximation.
 The shared producer supports pinned local or Git sources, sparse checkouts,
 selected-file staging for indexers that scan an entire workspace, language-owned
 build commands, exact indexer validation, parser/recovery soundness gates,
-optional exact-prefix relocation, producer joins, consumer comparisons, and
+opaque semantic-environment attestations, optional exact-prefix relocation or
+generated exact symbol bridges, producer joins, consumer comparisons, and
 atomic publication. None of those stages branches on a language.
+
+`compatibility` claims are exact string key/value pairs produced by a manifest
+or a language-owned probe. The shared join does not interpret keys such as
+runtime artifact digest, target triple, sysroot, or ABI; it merely requires the
+consumer profile to carry every claim required by the bundle. A
+`fact-mine.symbol-bridge.v1` sidecar maps analyzed implementation symbols to
+consumer declaration symbols. This is the common mechanism for declaration-only
+or cross-language runtimes, and the bridge digest is retained in the generated
+summary. Bridge commands run after the producer profile and unrelocated summary
+exist, and may use `{profile}` and `{producer_summary}` in addition to the
+standard manifest substitutions.
 
 Current publishable mappings:
 
@@ -50,4 +62,7 @@ The remaining SCIP languages are deliberately fail-closed:
 
 These are compatibility failures, not requests for manual overrides. Move an
 entry to `bundled` only after its required identity/body capability exists and a
-manifest passes the same producer and consumer checks.
+manifest passes the same producer and consumer checks. Missing version text in
+a SCIP symbol is no longer itself a blocker: a reproducible environment
+attestation may supply the missing compatibility identity without weakening the
+exact-symbol join.

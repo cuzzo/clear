@@ -157,6 +157,13 @@ pub struct ProfileOutput {
     pub input_coverage: InputCoverage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub semantic_indexes: Vec<SemanticIndex>,
+    /// Opaque compatibility claims supplied by the build/index environment.
+    ///
+    /// The shared external-summary join compares these exactly. Language-owned
+    /// manifests decide how runtime digests, targets, sysroots, and ABI choices
+    /// are represented; shared analysis never interprets their keys.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub semantic_environment: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<OwnerRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1412,6 +1419,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             incremental_metrics: None,
             input_coverage: InputCoverage::default(),
             semantic_indexes: Vec::new(),
+            semantic_environment: BTreeMap::new(),
             owners,
             dispatch_impls: Vec::new(),
             methods,
@@ -1697,6 +1705,7 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         incremental_metrics: None,
         input_coverage: InputCoverage::default(),
         semantic_indexes: Vec::new(),
+        semantic_environment: BTreeMap::new(),
         owners,
         dispatch_impls: Vec::new(),
         methods,

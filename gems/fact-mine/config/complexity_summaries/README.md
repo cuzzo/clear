@@ -6,6 +6,12 @@ SCIP ingestion. Bundled artifacts additionally require the exact SCIP indexer
 name and version recorded by the consumer index. This protects symbol schemes
 that do not put the toolchain revision directly in every symbol.
 
+The current producer writes the v3 envelope. V3 retains all v2 provenance and
+adds exact semantic-environment claims plus an optional generated symbol-bridge
+digest. FactMine still reads existing v1/v2 artifacts. Explicitly supplied v3
+summaries fail on a missing or mismatched claim; bundled summaries remain
+inactive until both their indexer and environment match.
+
 `go-stdlib.go1.22.2.json.gz` was built from the installed Go 1.22.2
 implementation sources with scip-go 0.2.7. Its source surface is:
 

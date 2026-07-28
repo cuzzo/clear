@@ -15,6 +15,8 @@ use std::path::Path;
 
 const SCHEMA_V1: &str = "fact-mine.external-complexity-summary.v1";
 const SCHEMA_V2: &str = "fact-mine.external-complexity-summary.v2";
+const SCHEMA_V3: &str = "fact-mine.external-complexity-summary.v3";
+const ENVIRONMENT_SCHEMA_V1: &str = "fact-mine.semantic-environment.v1";
 include!(concat!(
     env!("OUT_DIR"),
     "/bundled_complexity_summaries.rs"
@@ -28,7 +30,22 @@ struct SummaryFile {
     #[serde(default)]
     source: Option<SummarySource>,
     #[serde(default)]
+    compatibility: Option<SummaryCompatibility>,
+    #[serde(default)]
     symbols: BTreeMap<String, ComplexitySummary>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SummaryCompatibility {
+    #[serde(default)]
+    claims: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SemanticEnvironmentFile {
+    schema: String,
+    #[serde(default)]
+    claims: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,6 +87,8 @@ fn default_bound_quality() -> String {
 
 pub fn apply_file(output: &mut ProfileOutput, path: &Path) -> Result<usize> {
     let summary = read_file(path)?;
+    require_compatible(output, &summary)
+        .with_context(|| format!("incompatible complexity summary {}", path.display()))?;
     apply_summary(output, &summary)
 }
 
@@ -79,6 +98,8 @@ pub fn apply_files(output: &mut ProfileOutput, paths: &[impl AsRef<Path>]) -> Re
     for path in paths {
         let path = path.as_ref();
         let summary = read_file(path)?;
+        require_compatible(output, &summary)
+            .with_context(|| format!("incompatible complexity summary {}", path.display()))?;
         for (symbol, cost) in &summary.symbols {
             if let Some((time, space, first_path)) = costs_by_symbol.get(symbol) {
                 if time != &cost.time || space != &cost.space {
@@ -138,6 +159,9 @@ pub fn apply_bundled(output: &mut ProfileOutput) -> Result<usize> {
         {
             continue;
         }
+        if !is_compatible(output, &summary) {
+            continue;
+        }
         applied += apply_summary(output, &summary)?;
     }
     Ok(applied)
@@ -170,7 +194,97 @@ fn decode(path: &Path, bytes: &[u8]) -> Result<String> {
 pub fn apply_json(output: &mut ProfileOutput, source: &str) -> Result<usize> {
     let summary: SummaryFile = serde_json::from_str(source)?;
     validate(&summary)?;
+    require_compatible(output, &summary)?;
     apply_summary(output, &summary)
+}
+
+/// Attach semantic-environment sidecars to a profile. Claims are opaque to the
+/// shared analyzer and merge only when identical.
+pub fn apply_environment_files(
+    output: &mut ProfileOutput,
+    paths: &[impl AsRef<Path>],
+) -> Result<usize> {
+    let mut applied = 0;
+    for path in paths {
+        let path = path.as_ref();
+        let source = fs::read_to_string(path)
+            .with_context(|| format!("failed to read semantic environment {}", path.display()))?;
+        let environment: SemanticEnvironmentFile = serde_json::from_str(&source)
+            .with_context(|| format!("failed to parse semantic environment {}", path.display()))?;
+        validate_environment(&environment)
+            .with_context(|| format!("invalid semantic environment {}", path.display()))?;
+        for (key, value) in environment.claims {
+            if let Some(existing) = output.semantic_environment.get(&key) {
+                if existing != &value {
+                    bail!(
+                        "conflicting semantic environment claim {key}: {existing:?} versus {value:?} from {}",
+                        path.display()
+                    );
+                }
+                continue;
+            }
+            output.semantic_environment.insert(key, value);
+            applied += 1;
+        }
+    }
+    Ok(applied)
+}
+
+fn validate_environment(environment: &SemanticEnvironmentFile) -> Result<()> {
+    if environment.schema != ENVIRONMENT_SCHEMA_V1 {
+        bail!(
+            "unsupported semantic environment schema {}; expected {ENVIRONMENT_SCHEMA_V1}",
+            environment.schema
+        );
+    }
+    if environment.claims.is_empty() {
+        bail!("semantic environment must contain at least one claim");
+    }
+    for (key, value) in &environment.claims {
+        if key.trim().is_empty() || value.trim().is_empty() {
+            bail!("semantic environment claim keys and values must be non-empty");
+        }
+    }
+    Ok(())
+}
+
+fn is_compatible(output: &ProfileOutput, summary: &SummaryFile) -> bool {
+    summary
+        .compatibility
+        .as_ref()
+        .map(|compatibility| {
+            compatibility
+                .claims
+                .iter()
+                .all(|(key, value)| output.semantic_environment.get(key) == Some(value))
+        })
+        .unwrap_or(true)
+}
+
+fn require_compatible(output: &ProfileOutput, summary: &SummaryFile) -> Result<()> {
+    let Some(compatibility) = summary.compatibility.as_ref() else {
+        return Ok(());
+    };
+    let mismatches = compatibility
+        .claims
+        .iter()
+        .filter_map(|(key, required)| {
+            let actual = output.semantic_environment.get(key);
+            (actual != Some(required)).then(|| {
+                format!(
+                    "{key} requires {required:?}, profile has {}",
+                    actual.map_or("<missing>".to_string(), |value| format!("{value:?}"))
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    if !mismatches.is_empty() {
+        bail!(
+            "semantic environment does not satisfy summary compatibility: {}",
+            mismatches.join("; ")
+        );
+    }
+    Ok(())
 }
 
 fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<usize> {
@@ -283,40 +397,51 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
 fn validate(summary: &SummaryFile) -> Result<()> {
     match summary.schema.as_str() {
         SCHEMA_V1 => {}
-        SCHEMA_V2 => {
+        SCHEMA_V2 | SCHEMA_V3 => {
             let producer = summary
                 .producer
                 .as_ref()
-                .context("v2 complexity summary is missing producer metadata")?;
+                .context("versioned complexity summary is missing producer metadata")?;
             if producer.name.trim().is_empty() || producer.version.trim().is_empty() {
-                bail!("v2 complexity summary producer name and version must be non-empty");
+                bail!("versioned complexity summary producer name and version must be non-empty");
             }
             let source = summary
                 .source
                 .as_ref()
-                .context("v2 complexity summary is missing source metadata")?;
+                .context("versioned complexity summary is missing source metadata")?;
             let digest = source
                 .profile_sha256
                 .strip_prefix("sha256:")
                 .unwrap_or_default();
             if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                bail!("v2 complexity summary source.profile_sha256 must be a SHA-256 digest");
+                bail!("versioned complexity summary source.profile_sha256 must be a SHA-256 digest");
             }
             if source.complete_symbol_count != summary.symbols.len() {
                 bail!(
-                    "v2 complexity summary declares {} complete symbols but contains {}",
+                    "versioned complexity summary declares {} complete symbols but contains {}",
                     source.complete_symbol_count,
                     summary.symbols.len()
                 );
             }
             if source.complete_symbol_count > 0 && source.method_count == 0 {
                 bail!(
-                    "v2 complexity summary with exported symbols must analyze at least one method"
+                    "versioned complexity summary with exported symbols must analyze at least one method"
                 );
+            }
+            if summary.schema == SCHEMA_V3 {
+                let compatibility = summary
+                    .compatibility
+                    .as_ref()
+                    .context("v3 complexity summary is missing compatibility metadata")?;
+                for (key, value) in &compatibility.claims {
+                    if key.trim().is_empty() || value.trim().is_empty() {
+                        bail!("v3 compatibility claim keys and values must be non-empty");
+                    }
+                }
             }
         }
         other => bail!(
-            "unsupported complexity summary schema {other}; expected {SCHEMA_V1} or {SCHEMA_V2}"
+            "unsupported complexity summary schema {other}; expected {SCHEMA_V1}, {SCHEMA_V2}, or {SCHEMA_V3}"
         ),
     }
     for (symbol, cost) in &summary.symbols {
@@ -550,6 +675,86 @@ mod tests {
     }
 
     #[test]
+    fn v3_summary_requires_exact_semantic_environment_claims() {
+        let symbol = "cxx . . std/vector#size().";
+        let summary = serde_json::json!({
+            "schema": SCHEMA_V3,
+            "producer": {"name": "espalier", "version": "0.1.0"},
+            "source": {
+                "profile_sha256": format!("sha256:{}", "a".repeat(64)),
+                "method_count": 1,
+                "complete_symbol_count": 1
+            },
+            "compatibility": {
+                "claims": {
+                    "cpp.stdlib": "libstdc++",
+                    "cpp.stdlib.sha256": "sha256:toolchain"
+                }
+            },
+            "symbols": {
+                symbol: {"time": "O(1)", "space": "O(1)"}
+            }
+        });
+        let mut exact = ProfileOutput {
+            calls: vec![call(Some(symbol))],
+            semantic_environment: BTreeMap::from([
+                ("cpp.stdlib".into(), "libstdc++".into()),
+                ("cpp.stdlib.sha256".into(), "sha256:toolchain".into()),
+            ]),
+            ..ProfileOutput::default()
+        };
+        assert_eq!(apply_json(&mut exact, &summary.to_string()).unwrap(), 1);
+
+        let error = apply_json(&mut ProfileOutput::default(), &summary.to_string()).unwrap_err();
+        assert!(error.to_string().contains("cpp.stdlib"));
+        assert!(error.to_string().contains("<missing>"));
+    }
+
+    #[test]
+    fn semantic_environment_sidecars_merge_identical_claims_and_reject_conflicts() {
+        let first = tempfile::NamedTempFile::new().unwrap();
+        let second = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            first.path(),
+            serde_json::json!({
+                "schema": ENVIRONMENT_SCHEMA_V1,
+                "claims": {"runtime": "ruby-3.2.3", "target": "x86_64-linux"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            second.path(),
+            serde_json::json!({
+                "schema": ENVIRONMENT_SCHEMA_V1,
+                "claims": {"runtime": "ruby-3.2.3", "abi": "gnu"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut output = ProfileOutput::default();
+        assert_eq!(
+            apply_environment_files(&mut output, &[first.path(), second.path()]).unwrap(),
+            3
+        );
+        assert_eq!(output.semantic_environment["abi"], "gnu");
+
+        fs::write(
+            second.path(),
+            serde_json::json!({
+                "schema": ENVIRONMENT_SCHEMA_V1,
+                "claims": {"runtime": "ruby-3.3.0"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(apply_environment_files(&mut output, &[second.path()])
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting semantic environment claim runtime"));
+    }
+
+    #[test]
     fn reads_gzip_summary_by_content() {
         let symbol = "scip-go gomod stdlib v1 strings#IndexByte().";
         let json = serde_json::json!({
@@ -725,12 +930,18 @@ mod tests {
                 .and_then(|source| source.indexer.as_deref())
                 .unwrap();
             let (tool, version) = indexer.split_once('@').unwrap();
+            let semantic_environment = summary
+                .compatibility
+                .as_ref()
+                .map(|compatibility| compatibility.claims.clone())
+                .unwrap_or_default();
             let mut exact = ProfileOutput {
                 calls: vec![call(Some(symbol))],
                 semantic_indexes: vec![SemanticIndex {
                     tool: tool.into(),
                     version: version.into(),
                 }],
+                semantic_environment: semantic_environment.clone(),
                 ..ProfileOutput::default()
             };
             assert!(
@@ -748,6 +959,7 @@ mod tests {
                     tool: tool.into(),
                     version: format!("{version}-incompatible"),
                 }],
+                semantic_environment,
                 ..ProfileOutput::default()
             };
             assert_eq!(apply_bundled(&mut wrong_indexer).unwrap(), 0);
