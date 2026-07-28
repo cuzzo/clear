@@ -119,6 +119,18 @@ pub(crate) fn scip_noncall_access_is_callable(language: &str, symbol: &str) -> b
         .unwrap_or(false)
 }
 
+pub(crate) fn scip_occurrence_matches_call(
+    language: &str,
+    symbol: &str,
+    source_text: &str,
+    message: &str,
+) -> bool {
+    Language::parse(language)
+        .ok()
+        .map(normalized_behavior::behavior)
+        .is_some_and(|behavior| behavior.scip_occurrence_matches_call(symbol, source_text, message))
+}
+
 /// Shared algebra for calls whose target identity is proven but whose cost is
 /// parameterized by callback/implementation work.
 pub(crate) fn parametric_call_complexity(kind: &str) -> Option<(&'static str, &'static str)> {

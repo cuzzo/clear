@@ -3,7 +3,7 @@
 require_relative "spec_helper"
 
 RSpec.describe NilKill::Runtime::ScipEmitter do
-  it "encodes observed calls as open-authority SCIP with exact source ranges" do
+  it "encodes observed calls as modeled-world SCIP with exact source ranges" do
     Dir.mktmpdir("nil-kill-runtime-scip", NilKill::ROOT) do |root|
       runtime_dir = File.join(root, "runtime")
       source = File.join(root, "worker.rb")
@@ -89,7 +89,7 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
       expect(index.dig("metadata", "toolInfo")).to include(
         "name" => "nil-kill-runtime",
         "version" => "1",
-        "arguments" => ["--fact-mine-index-authority=observed-open"]
+        "arguments" => ["--fact-mine-index-authority=runtime-modeled-world"]
       )
       expect(index.dig("metadata", "projectRoot")).to eq(
         URI::Generic.build(
@@ -107,14 +107,21 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
         a_hash_including("range" => [2, 11, 15], "symbolRoles" => 0),
         a_hash_including("range" => [7, 6, 10], "symbolRoles" => 1)
       )
-      # Two identical selector spellings on one line cannot be assigned to an
-      # exact invocation from line-only runtime data, so the encoder fails shut.
-      expect(document.fetch("occurrences").none? { |row| row.fetch("range").first == 4 }).to be(true)
+      # Modeled-world data conservatively assigns the observed target set to
+      # every identical selector on the traced source line.
+      expect(document.fetch("occurrences")).to include(
+        a_hash_including("range" => [4, 11, 15], "symbolRoles" => 0),
+        a_hash_including("range" => [4, 24, 28], "symbolRoles" => 0)
+      )
 
       attestation = JSON.parse(File.read(result.fetch("attestation")))
       expect(attestation).to include("schema" => "fact-mine.semantic-environment.v1")
       expect(attestation.fetch("claims")).to include(
-        "runtime_scip.authority" => "observed-open",
+        "runtime_scip.authority" => "runtime-modeled-world",
+        "runtime_scip.closure_assumption" =>
+          "observed call targets exhaust the attested workload and runtime environment",
+        "runtime_scip.inference" =>
+          "language-owned source callsites joined to observed modeled dispatch domains",
         "runtime_scip.event_count" => "3",
         "runtime.version" => RUBY_VERSION
       )
@@ -127,7 +134,9 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
       File.write(source, <<~RUBY)
         class Helper
           def value
-            "hello"
+            ["hello"].map do |item|
+              item.upcase
+            end.first
           end
         end
         class Worker
@@ -166,7 +175,7 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
         "event" => "runtime_call",
         "run_id" => "ruby-runtime-scip-test",
         "caller" => a_hash_including("class" => "Worker", "method" => "run"),
-        "callsite" => a_hash_including("path" => source, "line" => 8),
+        "callsite" => a_hash_including("path" => source, "line" => 10),
         "callee" => a_hash_including(
           "owner" => "Helper",
           "name" => "value",
@@ -180,6 +189,16 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
         "callee" => a_hash_including(
           "owner" => "String", "name" => "upcase", "native" => true
         )
+      ))
+      expect(calls).to include(a_hash_including(
+        "caller" => a_hash_including("class" => "Helper", "method" => "value"),
+        "callsite" => a_hash_including("path" => source, "line" => 3),
+        "callee" => a_hash_including("owner" => "Array", "name" => "map")
+      ))
+      expect(calls).to include(a_hash_including(
+        "caller" => a_hash_including("class" => "Helper", "method" => "value"),
+        "callsite" => a_hash_including("path" => source, "line" => 4),
+        "callee" => a_hash_including("owner" => "String", "name" => "upcase")
       ))
 
       result = described_class.emit(root: root, runtime_dir: runtime_dir)

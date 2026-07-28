@@ -89,6 +89,29 @@ module Espalier
           message = context["message"].to_s
           line = context.fetch("line", method[:line]).to_i
           span = normalized_call_span(context["span"])
+          resolved_target = resolved_call(method_id, owner.to_s, caller, message, span, line)
+          candidate_call = candidate_call(method_id, owner.to_s, caller, message, span, line)
+          if !resolved_target && candidate_call &&
+              (candidate_bound = candidate_upper_bound(candidate_call, context))
+            hints << {
+              type: :structural,
+              line: line,
+              complexity: candidate_bound.fetch(:time),
+              space: candidate_bound.fetch(:space),
+              is_dynamic: true,
+              operation: message,
+              reason: "conservative upper bound over closed implementation candidates",
+              confidence: "partial",
+              time_complete: true,
+              space_complete: true,
+              complexity_bound_qualities: ([CLOSED_CANDIDATE_MAX_QUALITY] +
+                candidate_bound.fetch(:qualities)).uniq,
+              complexity_candidates: candidate_bound.fetch(:ids),
+              complexity_assumptions: candidate_bound.fetch(:assumptions),
+              fact_source: "fact_mine"
+            }
+            next
+          end
           # FactMine already priced this call site (a builtin operator, a
           # language intrinsic, or a stdlib-registry hit). Use that proven bound
           # directly instead of demanding a resolved project target - otherwise
@@ -105,29 +128,6 @@ module Espalier
               confidence: "high",
               time_complete: true,
               space_complete: true,
-              fact_source: "fact_mine"
-            }
-            next
-          end
-          resolved_target = resolved_call(method_id, owner.to_s, caller, message, span, line)
-          candidate_call = candidate_call(method_id, owner.to_s, caller, message, span, line)
-          if !resolved_target && candidate_call &&
-              (candidate_bound = candidate_upper_bound(candidate_call, context))
-            hints << {
-              type: :structural,
-              line: line,
-              complexity: candidate_bound.fetch(:time),
-              space: candidate_bound.fetch(:space),
-              is_dynamic: true,
-              operation: message,
-              reason: "conservative upper bound over compiler-provided implementation candidates",
-              confidence: "partial",
-              time_complete: true,
-              space_complete: true,
-              complexity_bound_qualities: ([CLOSED_CANDIDATE_MAX_QUALITY] +
-                candidate_bound.fetch(:qualities)).uniq,
-              complexity_candidates: candidate_bound.fetch(:ids),
-              complexity_assumptions: candidate_bound.fetch(:assumptions),
               fact_source: "fact_mine"
             }
             next
@@ -300,8 +300,16 @@ module Espalier
 
         [propagated_call_complexity(context, time), space]
       end
-      source_qualities = ids.flat_map { |id| Array(@method_bound_qualities[id]) }
-      source_assumptions = ids.flat_map { |id| Array(@method_assumptions[id]) }
+      if candidate_call[:external_time] && candidate_call[:external_space]
+        rows << [
+          propagated_call_complexity(context, candidate_call[:external_time]),
+          candidate_call[:external_space]
+        ]
+      end
+      source_qualities = ids.flat_map { |id| Array(@method_bound_qualities[id]) } +
+        Array(candidate_call[:qualities])
+      source_assumptions = ids.flat_map { |id| Array(@method_assumptions[id]) } +
+        Array(candidate_call[:assumptions])
       closed_set_assumption = "#{candidate_call[:reason]} implementation set is closed for this analysis"
       {
         ids: ids.sort,

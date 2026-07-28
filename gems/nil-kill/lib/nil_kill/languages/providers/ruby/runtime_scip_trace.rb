@@ -6,28 +6,39 @@
 module NilKillRuntimeTrace
   @runtime_calls = {}
   @runtime_package_by_path = {}
+  @runtime_scip_frames = Hash.new { |hash, thread_id| hash[thread_id] = [] }
 
   def self.record_runtime_scip_line(tp)
     path = abs_path(tp.path)
     return unless target_path?(path)
 
-    Thread.current[:__nil_kill_runtime_scip_callsite] = {
+    frame = @runtime_scip_frames[Thread.current.object_id].last
+    return unless frame
+
+    frame[:callsite] = {
       path: path,
       line: src_line(path, tp.lineno),
     }
   end
 
   def self.enter_runtime_scip_ruby_call(tp)
-    stack = (Thread.current[:__nil_kill_runtime_scip_callsite_stack] ||= [])
-    caller = Thread.current[:__nil_kill_runtime_scip_callsite]
     record_runtime_scip_call(tp)
-    stack << caller
-    Thread.current[:__nil_kill_runtime_scip_callsite] = nil
+    owner = method_owner(tp.defined_class)
+    path = abs_path(tp.path)
+    @runtime_scip_frames[Thread.current.object_id] << {
+      caller: owner && {
+        class: owner[0],
+        method: tp.method_id.to_s,
+        kind: owner[1],
+        path: path,
+        line: src_line(path, tp.lineno),
+      },
+      callsite: nil,
+    }
   end
 
   def self.leave_runtime_scip_ruby_call
-    stack = Thread.current[:__nil_kill_runtime_scip_callsite_stack]
-    Thread.current[:__nil_kill_runtime_scip_callsite] = stack&.pop
+    @runtime_scip_frames[Thread.current.object_id].pop
   end
 
   def self.runtime_package(path, native:)
@@ -90,8 +101,11 @@ module NilKillRuntimeTrace
     return if owner[0] == "NilKillRuntimeTrace"
 
     native = tp.event == :c_call
-    callsite = Thread.current[:__nil_kill_runtime_scip_callsite]
-    return unless callsite
+    frame = @runtime_scip_frames[Thread.current.object_id].last
+    return unless frame
+    caller = frame[:caller]
+    callsite = frame[:callsite]
+    return unless caller && callsite
 
     callee_path = native ? nil : abs_path(tp.path)
     package = runtime_package(callee_path, native: native)
@@ -112,17 +126,6 @@ module NilKillRuntimeTrace
     }.merge(package)
 
     @lock.synchronize do
-      stack = @frames[Thread.current.object_id]
-      frame = stack.last
-      if frame && !native && frame[:method_key] &&
-          frame[:method_key][0] == owner[0] &&
-          frame[:method_key][1] == tp.method_id.to_s &&
-          frame[:method_key][3] == callee_path
-        frame = stack[-2]
-      end
-      return unless frame && frame[:method_key]
-
-      caller = method_key_payload(frame[:method_key])
       key = [
         caller[:class], caller[:method], caller[:kind], caller[:path], caller[:line],
         callsite[:path], callsite[:line],

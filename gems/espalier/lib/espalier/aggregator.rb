@@ -921,7 +921,14 @@ module Espalier
               keys.unshift([method[:id].to_s, delegation[:message].to_s, line])
               keys.unshift([method[:id].to_s, delegation[:message].to_s, span]) if span
             end
-            value = { ids: candidates, reason: delegation[:candidate_reason].to_s }
+            value = {
+              ids: candidates,
+              reason: delegation[:candidate_reason].to_s,
+              qualities: Array(delegation[:complexity_bound_quality]).map(&:to_s),
+              assumptions: Array(delegation[:complexity_assumptions]).map(&:to_s),
+              external_time: delegation[:known_time_complexity],
+              external_space: delegation[:known_space_complexity]
+            }
             keys.each do |key|
               if index.key?(key) && index[key] != value
                 index[key] = nil

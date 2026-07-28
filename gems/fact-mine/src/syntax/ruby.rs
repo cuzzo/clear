@@ -38,15 +38,26 @@ use crate::type_inference::TypeExpr;
 use std::collections::{BTreeMap, BTreeSet};
 
 fn scip_ruby_descriptor(symbol: &str) -> Option<&str> {
-    let rest = symbol.strip_prefix("scip-ruby gem ")?;
-    let mut fields = rest.splitn(3, ' ');
-    fields.next()?; // gem name
-    fields.next()?; // gem version
-    fields.next()
+    if let Some(rest) = symbol.strip_prefix("scip-ruby gem ") {
+        let mut fields = rest.splitn(3, ' ');
+        fields.next()?; // gem name
+        fields.next()?; // gem version
+        return fields.next();
+    }
+
+    let rest = symbol.strip_prefix("nil-kill-runtime ")?;
+    let mut fields = rest.splitn(4, ' ');
+    let manager = fields.next()?;
+    let package = fields.next()?;
+    fields.next()?; // runtime version
+    let descriptor = fields.next()?;
+    // Native Ruby frames are deliberately distinct from project and gem
+    // frames. Only the former may consume the Ruby stdlib registry.
+    (manager == "ruby" && package == "ruby").then_some(descriptor)
 }
 
 fn ruby_descriptor_owner(descriptor: &str) -> Option<String> {
-    let owner = descriptor.split_once('#')?.0.trim_matches('`');
+    let owner = ruby_descriptor_parts(descriptor)?.0.trim_matches('`');
     let owner = owner
         .strip_prefix("<Class:")
         .and_then(|owner| owner.strip_suffix('>'))
@@ -62,9 +73,45 @@ fn ruby_descriptor_owner(descriptor: &str) -> Option<String> {
     }
 }
 
+fn ruby_descriptor_parts(descriptor: &str) -> Option<(&str, &str)> {
+    let callable = descriptor.strip_suffix("().")?;
+    let separator = callable.rfind(['#', '.'])?;
+    Some((&callable[..separator], &callable[separator + 1..]))
+}
+
 fn ruby_stdlib_descriptor(descriptor: &str, message: &str) -> bool {
-    ruby_descriptor_owner(descriptor)
-        .is_some_and(|owner| configured_stdlib_call_identity("ruby", Some(&owner), None, message))
+    ruby_descriptor_owner(descriptor).is_some_and(|owner| {
+        let namespace_owner = owner.replace('/', "::");
+        configured_stdlib_call_identity("ruby", Some(&namespace_owner), None, message)
+            || ruby_stdlib_fallback_owners(&owner).iter().any(|fallback| {
+                let descriptor = format!("{fallback}#{message}().");
+                let quoted = format!("{fallback}#`{message}`().");
+                RubyNormalizedBehavior
+                    .call_complexity(&TypeExpr::Primitive((*fallback).to_string()), message)
+                    .is_some()
+                    || configured_semantic_symbol_parametric_cost("ruby", &descriptor).is_some()
+                    || configured_semantic_symbol_parametric_cost("ruby", &quoted).is_some()
+            })
+    })
+}
+
+fn ruby_stdlib_fallback_owners(owner: &str) -> &'static [&'static str] {
+    match owner {
+        "Array" | "Hash" | "Set" | "Enumerator" | "Range" => &["Enumerable", "Kernel"],
+        "Integer" | "Float" | "Numeric" => &["Numeric", "Kernel"],
+        _ => &["Kernel"],
+    }
+}
+
+fn ruby_family_parametric_cost(owner: &str, message: &str) -> Option<String> {
+    ruby_stdlib_fallback_owners(owner)
+        .iter()
+        .find_map(|fallback| {
+            let plain = format!("{fallback}#{message}().");
+            let quoted = format!("{fallback}#`{message}`().");
+            configured_semantic_symbol_parametric_cost("ruby", &plain)
+                .or_else(|| configured_semantic_symbol_parametric_cost("ruby", &quoted))
+        })
 }
 
 pub(crate) fn external_symbol_call_complexity(
@@ -72,15 +119,23 @@ pub(crate) fn external_symbol_call_complexity(
     message: &str,
 ) -> Option<ExternalCallComplexity> {
     let descriptor = scip_ruby_descriptor(symbol)?;
+    let owner = ruby_descriptor_owner(descriptor)?;
     if !ruby_stdlib_descriptor(descriptor, message)
         || configured_semantic_symbol_parametric_cost("ruby", descriptor).is_some()
+        || ruby_family_parametric_cost(&owner, message).is_some()
     {
         return None;
     }
-    let owner = ruby_descriptor_owner(descriptor)?;
     let behavior = RubyNormalizedBehavior;
     let complexity = configured_semantic_symbol_call_complexity("ruby", descriptor)
         .or_else(|| behavior.call_complexity(&TypeExpr::Primitive(owner.clone()), message))
+        .or_else(|| {
+            ruby_stdlib_fallback_owners(&owner)
+                .iter()
+                .find_map(|fallback| {
+                    behavior.call_complexity(&TypeExpr::Primitive((*fallback).to_string()), message)
+                })
+        })
         .or_else(|| behavior.intrinsic_call_complexity(Some(&owner), message));
     if let Some(complexity) = complexity {
         return Some(ExternalCallComplexity {
@@ -114,20 +169,19 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
             parametric_cost: None,
         };
     };
-    let message = descriptor
-        .rsplit_once('#')
+    let message = ruby_descriptor_parts(descriptor)
         .map(|(_, member)| member)
         .unwrap_or_default()
         .trim_matches('`')
-        .split('(')
-        .next()
-        .unwrap_or_default();
-    if ruby_stdlib_descriptor(descriptor, message) {
+        .to_string();
+    if ruby_stdlib_descriptor(descriptor, &message) {
+        let owner = ruby_descriptor_owner(descriptor).unwrap_or_default();
         super::ExternalSymbolMetadata {
             scope: "stdlib",
             missing_cost_kind: configured_semantic_symbol_kind("ruby", descriptor)
                 .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
-            parametric_cost: configured_semantic_symbol_parametric_cost("ruby", descriptor),
+            parametric_cost: configured_semantic_symbol_parametric_cost("ruby", descriptor)
+                .or_else(|| ruby_family_parametric_cost(&owner, &message)),
         }
     } else {
         super::ExternalSymbolMetadata {
@@ -561,6 +615,25 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
 
     fn external_symbol_metadata(&self, symbol: &str) -> super::ExternalSymbolMetadata {
         external_symbol_metadata(symbol)
+    }
+
+    fn scip_occurrence_matches_call(&self, symbol: &str, source_text: &str, message: &str) -> bool {
+        if source_text == message {
+            return true;
+        }
+        if !matches!(message, "[]" | "[]=") {
+            return false;
+        }
+        scip_ruby_descriptor(symbol)
+            .and_then(ruby_descriptor_parts)
+            .map(|(_, member)| {
+                member
+                    .trim_matches('`')
+                    .split('(')
+                    .next()
+                    .unwrap_or_default()
+            })
+            == Some(message)
     }
 
     fn owner_supertypes(&self, node: &Node) -> Vec<String> {
@@ -2881,6 +2954,8 @@ mod tests {
     #[test]
     fn scip_ruby_symbols_use_proven_core_identity() {
         let length = "scip-ruby gem clear-compiler workspace Array#length().";
+        let runtime_length = "nil-kill-runtime ruby ruby 3.2.3 Array#length().";
+        let runtime_index = "nil-kill-runtime ruby ruby 3.2.3 Hash#`[]`().";
         let file = "scip-ruby gem clear-compiler workspace `<Class:File>`#join().";
         let generated = "scip-ruby gem clear-compiler workspace AST#BinaryOp#left().";
 
@@ -2889,10 +2964,71 @@ mod tests {
             Some("O(1)")
         );
         assert_eq!(
+            external_symbol_call_complexity(runtime_length, "length")
+                .map(|complexity| complexity.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(runtime_index, "[]").map(|complexity| complexity.time),
+            Some("O(1)")
+        );
+        for symbol in [
+            "nil-kill-runtime ruby ruby 3.2.3 Array#`[]`().",
+            "nil-kill-runtime ruby ruby 3.2.3 Hash#`[]`().",
+            "nil-kill-runtime ruby ruby 3.2.3 Hash.`[]`().",
+            "nil-kill-runtime ruby ruby 3.2.3 MatchData#`[]`().",
+            "nil-kill-runtime ruby ruby 3.2.3 String#`[]`().",
+        ] {
+            assert!(
+                external_symbol_call_complexity(symbol, "[]").is_some(),
+                "missing runtime core cost for {symbol}"
+            );
+        }
+        for symbol in [
+            "nil-kill-runtime ruby ruby 3.2.3 Integer#to_i().",
+            "nil-kill-runtime ruby ruby 3.2.3 NilClass#to_i().",
+            "nil-kill-runtime ruby ruby 3.2.3 String#to_i().",
+            "nil-kill-runtime ruby ruby 3.2.3 Float#to_f().",
+            "nil-kill-runtime ruby ruby 3.2.3 Integer#to_f().",
+            "nil-kill-runtime ruby ruby 3.2.3 NilClass#to_f().",
+        ] {
+            assert!(
+                external_symbol_call_complexity(
+                    symbol,
+                    ruby_descriptor_parts(scip_ruby_descriptor(symbol).unwrap())
+                        .unwrap()
+                        .1,
+                )
+                .is_some(),
+                "missing runtime conversion cost for {symbol}"
+            );
+        }
+        assert_eq!(
+            external_symbol_call_complexity(
+                "nil-kill-runtime ruby ruby 3.2.3 Zlib/GzipReader#read().",
+                "read",
+            )
+            .map(|cost| cost.time),
+            Some("O(N)")
+        );
+        assert_eq!(
+            external_symbol_metadata("nil-kill-runtime ruby ruby 3.2.3 Method#call().")
+                .parametric_cost
+                .as_deref(),
+            Some("callback_once")
+        );
+        assert_eq!(
+            external_symbol_metadata("nil-kill-runtime ruby ruby 3.2.3 Enumerator#with_index().")
+                .parametric_cost
+                .as_deref(),
+            Some("callback_linear")
+        );
+        assert_eq!(
             external_symbol_call_complexity(file, "join").map(|complexity| complexity.time),
             Some("O(N)")
         );
         assert_eq!(external_symbol_metadata(length).scope, "stdlib");
+        assert_eq!(external_symbol_metadata(runtime_length).scope, "stdlib");
         assert_eq!(
             external_symbol_metadata(generated).scope,
             "project_declaration"

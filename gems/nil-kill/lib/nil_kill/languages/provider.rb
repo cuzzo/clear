@@ -109,6 +109,20 @@ module NilKill
         {}
       end
 
+      # Return normalized SCIP occurrence locations for one runtime event.
+      # `nil` asks the shared emitter to use its exact-token fallback; an empty
+      # array deliberately rejects an implicit/runtime-internal event.
+      def runtime_scip_callsite_locations(event:, root:)
+        nil
+      end
+
+      # Optional language-owned extrapolation from observed dispatch domains to
+      # syntactic callsites. Returned rows use the same runtime_call schema and
+      # must carry an exact `callsite.range`.
+      def runtime_scip_inferred_events(events:, root:)
+        []
+      end
+
       def return_type_index(root:)
         nil
       end

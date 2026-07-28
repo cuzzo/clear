@@ -1315,6 +1315,15 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    fn scip_occurrence_matches_call(
+        &self,
+        _symbol: &str,
+        source_text: &str,
+        message: &str,
+    ) -> bool {
+        source_text == message
+    }
+
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
         ControlFlowProfile::neutral_ref()
     }

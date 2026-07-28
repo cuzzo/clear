@@ -24,7 +24,7 @@ module NilKill
           "optional_events" => %w[method_raise return_observed field_observed collection_observed hash_shape_observed call_edge runtime_call branch_observed type_assertion_observed nil_guard_observed],
           "runtime_scip" => {
             "event" => "runtime_call",
-            "authority" => "observed-open",
+            "authority" => Runtime::ScipEmitter::AUTHORITY,
             "required_fields" => %w[schema_version event language run_id caller callsite callee count],
             "caller_fields" => %w[class method kind path line],
             "callsite_fields" => %w[path line],

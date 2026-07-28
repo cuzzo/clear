@@ -1847,4 +1847,52 @@ class AggregatorTest < Minitest::Test
     refute_includes Array(caller[:quality_metrics][:big_o_bound_qualities]), "upper_bound_closed_candidate_max"
   end
 
+  def test_big_o_certifies_runtime_candidates_only_as_modeled_world
+    empty_fact = lambda do |line, contexts = []|
+      {
+        "line" => line, "parameters" => [], "collection_parameters" => [],
+        "iterations" => [], "allocations" => [], "call_contexts" => contexts,
+        "size_domains" => [], "recursion" => { "calls" => 0 }
+      }
+    end
+    closure_assumption =
+      "observed call targets exhaust the attested workload and runtime environment"
+    modules = [{
+      type: :class, name: "RuntimeObserved", file: "runtime.rb", states: Set.new,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 3],
+        parameters: [], effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "worker", message: "work", line: 2,
+          candidate_target_ids: ["observed"],
+          candidate_reason: "runtime_modeled_observed_candidate_set",
+          consumer_closed_candidate_set: true,
+          complexity_bound_quality: "upper_bound_modeled_world",
+          complexity_assumptions: [closure_assumption]
+        }],
+        complexity_facts: [empty_fact.call(1, [{
+          "line" => 2, "message" => "work", "execution_multiplicity" => "O(1)",
+          "power" => 0, "evidence_gap" => "unknown_call_target"
+        }])]
+      }, {
+        id: "observed", name: "work", line: 5, span: [5, 0, 7, 3],
+        parameters: [], effects: { reads: Set.new, writes: Set.new },
+        delegations: [], complexity_facts: [empty_fact.call(5)]
+      }]
+    }]
+
+    caller = Espalier::Aggregator.new.aggregate(modules).first[:functions].find do |function|
+      function[:id] == "caller"
+    end
+
+    assert caller[:quality_metrics][:big_o_complete]
+    assert_includes caller[:quality_metrics][:big_o_bound_qualities],
+      "upper_bound_modeled_world"
+    assert_includes caller[:quality_metrics][:big_o_bound_qualities],
+      "upper_bound_closed_candidate_max"
+    assert_includes caller[:quality_metrics][:big_o_assumptions], closure_assumption
+    assert_equal :known_candidate_max,
+      Espalier::BigOProofMetrics.classify(caller[:quality_metrics])
+  end
+
 end

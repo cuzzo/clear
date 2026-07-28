@@ -53,13 +53,18 @@ struct ToolInfo {
     arguments: Vec<String>,
 }
 
-const OBSERVED_OPEN_AUTHORITY_ARGUMENT: &str =
-    "--fact-mine-index-authority=observed-open";
+const OBSERVED_OPEN_AUTHORITY_ARGUMENT: &str = "--fact-mine-index-authority=observed-open";
+const RUNTIME_MODELED_AUTHORITY_ARGUMENT: &str =
+    "--fact-mine-index-authority=runtime-modeled-world";
+const RUNTIME_MODELED_QUALITY: &str = "upper_bound_modeled_world";
+const RUNTIME_MODELED_ASSUMPTION: &str =
+    "observed call targets exhaust the attested workload and runtime environment";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum IndexAuthority {
     Compiler,
     ObservedOpen,
+    RuntimeModeled,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -351,6 +356,17 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
             })
             .filter_map(|definition| definition.method_id.as_deref())
             .collect::<BTreeSet<_>>();
+        let project_symbols = selected
+            .alternatives
+            .iter()
+            .filter(|candidate| {
+                let key = definition_key(&document.relative_path, &candidate.symbol);
+                definitions.get(&key).is_some_and(|rows| {
+                    rows.iter().any(|definition| definition.method_id.is_some())
+                })
+            })
+            .map(|candidate| candidate.symbol.as_str())
+            .collect::<BTreeSet<_>>();
         if authority == IndexAuthority::ObservedOpen {
             stats.matched_occurrences += 1;
             if call.target.is_some() {
@@ -373,6 +389,22 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
                 syntax::external_symbol_call_complexity(language, &candidate.symbol, &call.message)
             })
             .collect::<Vec<_>>();
+        if authority == IndexAuthority::RuntimeModeled {
+            stats.matched_occurrences += 1;
+            if call.target.is_some() {
+                continue;
+            }
+            apply_runtime_modeled_candidates(
+                call,
+                language,
+                occurrence,
+                &selected_symbols,
+                &project_symbols,
+                target_ids,
+                &mut stats,
+            )?;
+            continue;
+        }
         let compiler_macro = selected
             .alternatives
             .iter()
@@ -691,11 +723,214 @@ fn index_authority(index: &Index) -> Result<IndexAuthority> {
         )
     {
         Ok(IndexAuthority::ObservedOpen)
+    } else if declared.len() == 1
+        && declared.contains(
+            RUNTIME_MODELED_AUTHORITY_ARGUMENT
+                .strip_prefix("--fact-mine-index-authority=")
+                .expect("authority argument prefix"),
+        )
+    {
+        Ok(IndexAuthority::RuntimeModeled)
     } else {
         anyhow::bail!(
             "unsupported or conflicting SCIP index authority declarations: {}",
             declared.into_iter().collect::<Vec<_>>().join(", ")
         )
+    }
+}
+
+fn apply_runtime_modeled_candidates(
+    call: &mut CallRecord,
+    language: &str,
+    occurrence: &Occurrence,
+    selected_symbols: &BTreeSet<&str>,
+    project_symbols: &BTreeSet<&str>,
+    target_ids: BTreeSet<&str>,
+    stats: &mut ImportStats,
+) -> Result<()> {
+    call.target = None;
+    call.semantic_symbol = Some(occurrence.symbol.clone());
+    call.target_provenance = Some("runtime_scip_modeled".to_string());
+    call.candidate_targets.clear();
+    call.complexity_candidates = selected_symbols
+        .iter()
+        .map(|symbol| (*symbol).to_string())
+        .collect();
+    call.complexity_bound_quality = Some(RUNTIME_MODELED_QUALITY.to_string());
+    call.complexity_assumptions = vec![RUNTIME_MODELED_ASSUMPTION.to_string()];
+    call.empty_domain_cause = None;
+
+    let all_project = !selected_symbols.is_empty() && project_symbols == selected_symbols;
+    let all_external = project_symbols.is_empty();
+    let external_symbols = selected_symbols
+        .difference(project_symbols)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let external_upper_bound =
+        runtime_external_candidate_upper_bound(language, &external_symbols, &call.message)?;
+    if all_project {
+        call.kind = "unresolved_call".to_string();
+        call.external_symbol_scope = Some("project".to_string());
+        call.complexity_missing_kind = None;
+        call.known_time_complexity = None;
+        call.known_space_complexity = None;
+        call.complexity_provenance = Some("runtime_scip_modeled_project_set".to_string());
+        call.candidate_targets = target_ids.into_iter().map(str::to_string).collect();
+        call.candidate_reason = Some("runtime_modeled_observed_candidate_set".to_string());
+        call.consumer_closed_candidate_set = true;
+        call.unresolved_reason =
+            Some("runtime_modeled_project_candidate_set_requires_summary".to_string());
+        call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+        return Ok(());
+    }
+
+    if all_external {
+        let metadata = syntax::external_symbol_metadata(language, &occurrence.symbol);
+        call.kind = "external_call".to_string();
+        call.external_symbol_scope = Some(metadata.scope.to_string());
+        call.complexity_missing_kind = Some(metadata.missing_cost_kind);
+        call.candidate_reason = Some("runtime_modeled_observed_external_set".to_string());
+        call.consumer_closed_candidate_set = true;
+        stats.external_symbols += 1;
+
+        if let Some((time, space, assumptions)) = external_upper_bound {
+            call.known_time_complexity = Some(time);
+            call.known_space_complexity = Some(space);
+            call.complexity_provenance =
+                Some("runtime_scip_modeled:conservative_external_candidate_max".to_string());
+            call.complexity_assumptions.extend(assumptions);
+            call.complexity_assumptions.sort();
+            call.complexity_assumptions.dedup();
+            call.complexity_missing_kind = None;
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            stats.modeled_external_symbols += 1;
+            return Ok(());
+        }
+
+        // Preserve a language adapter's independently justified source model.
+        if call.known_time_complexity.is_some() && call.known_space_complexity.is_some() {
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            call.complexity_missing_kind = None;
+            stats.modeled_external_symbols += 1;
+        } else {
+            call.unresolved_reason = Some("runtime_modeled_external_symbol_unmodeled".to_string());
+            call.resolution_missing_proof =
+                Some("dependency_or_stdlib_symbol_known_cost_unavailable".to_string());
+        }
+        return Ok(());
+    }
+
+    if let Some((time, space, assumptions)) = external_upper_bound {
+        call.kind = "unresolved_call".to_string();
+        call.external_symbol_scope = Some("mixed".to_string());
+        call.complexity_missing_kind = None;
+        call.candidate_targets = target_ids.into_iter().map(str::to_string).collect();
+        call.candidate_reason = Some("runtime_modeled_mixed_candidate_set".to_string());
+        call.consumer_closed_candidate_set = true;
+        call.known_time_complexity = Some(time);
+        call.known_space_complexity = Some(space);
+        call.complexity_provenance =
+            Some("runtime_scip_modeled:mixed_project_external_candidate_max".to_string());
+        call.complexity_assumptions.extend(assumptions);
+        call.complexity_assumptions.sort();
+        call.complexity_assumptions.dedup();
+        call.unresolved_reason =
+            Some("runtime_modeled_mixed_candidate_set_requires_summary".to_string());
+        call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+        stats.external_symbols += external_symbols.len();
+        stats.modeled_external_symbols += external_symbols.len();
+        return Ok(());
+    }
+
+    // Retain every identity but do not claim closure when at least one
+    // external candidate has no reviewed or parametric cost.
+    call.kind = "unresolved_call".to_string();
+    call.external_symbol_scope = Some("mixed".to_string());
+    call.complexity_missing_kind = Some("mixed_project_external_cost_join_missing".to_string());
+    call.candidate_targets = target_ids.into_iter().map(str::to_string).collect();
+    call.candidate_reason = Some("runtime_observed_mixed_candidate_set".to_string());
+    call.consumer_closed_candidate_set = false;
+    call.known_time_complexity = None;
+    call.known_space_complexity = None;
+    call.unresolved_reason = Some("runtime_observed_mixed_candidate_set_open".to_string());
+    call.resolution_missing_proof =
+        Some("mixed_project_external_candidate_join_required".to_string());
+    Ok(())
+}
+
+fn runtime_external_candidate_upper_bound(
+    language: &str,
+    symbols: &BTreeSet<&str>,
+    message: &str,
+) -> Result<Option<(String, String, Vec<String>)>> {
+    if symbols.is_empty() {
+        return Ok(None);
+    }
+    let mut costs = Vec::new();
+    for symbol in symbols {
+        if let Some(complexity) = syntax::external_symbol_call_complexity(language, symbol, message)
+        {
+            costs.push((
+                complexity.time.to_string(),
+                complexity.space.to_string(),
+                complexity.assumption.into_iter().collect::<Vec<_>>(),
+            ));
+            continue;
+        }
+        let metadata = syntax::external_symbol_metadata(language, symbol);
+        let Some(parametric) = metadata.parametric_cost else {
+            return Ok(None);
+        };
+        let (time, space) = syntax::parametric_call_complexity(&parametric).ok_or_else(|| {
+            anyhow::anyhow!("unsupported parametric runtime cost {parametric} for {symbol}")
+        })?;
+        costs.push((time.to_string(), space.to_string(), Vec::new()));
+    }
+    let time = costs
+        .iter()
+        .max_by_key(|(time, _, _)| conservative_complexity_rank(time))
+        .map(|(time, _, _)| time.clone())
+        .expect("nonempty runtime candidate costs");
+    let space = costs
+        .iter()
+        .max_by_key(|(_, space, _)| conservative_complexity_rank(space))
+        .map(|(_, space, _)| space.clone())
+        .expect("nonempty runtime candidate costs");
+    let mut assumptions = costs
+        .into_iter()
+        .flat_map(|(_, _, assumptions)| assumptions)
+        .collect::<Vec<_>>();
+    assumptions.sort();
+    assumptions.dedup();
+    Ok(Some((time, space, assumptions)))
+}
+
+fn conservative_complexity_rank(complexity: &str) -> usize {
+    let normalized = complexity.replace([' ', '_'], "").to_ascii_uppercase();
+    if normalized == "O(1)" {
+        0
+    } else if normalized.contains('!') {
+        4_000_000
+    } else if normalized.contains("2^") {
+        3_000_000
+    } else if normalized.contains('N') || normalized.contains('C') || normalized.contains('R') {
+        let explicit_exponent = normalized.split('^').nth(1).and_then(|value| {
+            let digits = value
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>();
+            (!digits.is_empty())
+                .then(|| digits.parse::<usize>().ok())
+                .flatten()
+        });
+        let degree = explicit_exponent.unwrap_or_else(|| normalized.matches('*').count() + 1);
+        2_000_000 + degree * 100 + usize::from(normalized.contains("LOG"))
+    } else if normalized.contains("LOG") {
+        1_000_000
+    } else {
+        1
     }
 }
 
@@ -2048,9 +2283,14 @@ fn select_call_occurrences<'a>(
         .iter()
         .copied()
         .filter(|occurrence| {
-            occurrence
-                .span()
-                .is_some_and(|span| occurrence_text(source, span) == message)
+            occurrence.span().is_some_and(|span| {
+                syntax::scip_occurrence_matches_call(
+                    language,
+                    &occurrence.symbol,
+                    occurrence_text(source, span),
+                    message,
+                )
+            })
         })
         .collect::<Vec<_>>();
     exact.sort_by_key(|occurrence| occurrence.span());
@@ -2077,6 +2317,23 @@ fn select_call_occurrences<'a>(
             }
         } else if !outside_receiver.is_empty() {
             return selected_occurrences(&outside_receiver);
+        }
+    }
+    if !exact.is_empty()
+        && exact
+            .windows(2)
+            .all(|pair| pair[0].span() == pair[1].span())
+    {
+        let callable_alternatives = exact
+            .iter()
+            .copied()
+            .filter(|occurrence| {
+                callable_symbol(&occurrence.symbol)
+                    || syntax::scip_noncall_access_is_callable(language, &occurrence.symbol)
+            })
+            .collect::<Vec<_>>();
+        if !callable_alternatives.is_empty() {
+            return selected_occurrences(&callable_alternatives);
         }
     }
     // A normalized call span covers its arguments, so a nested call may
@@ -4667,6 +4924,205 @@ void run_dependent() {
         assert!(output.semantic_indexes.iter().any(|index| {
             index.tool == "nil-kill-runtime" && index.version == "1"
         }));
+    }
+
+    #[test]
+    fn runtime_modeled_scip_closes_observed_project_targets_with_an_assumption() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let declaration = "  def callee; 1; end";
+        let caller = "  def caller; callee; end";
+        fs::write(
+            &path,
+            format!("class Demo\n{declaration}\n{caller}\nend\n"),
+        )
+        .unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "nil-kill-runtime workspace demo abc Demo#callee().";
+        let declaration_column = declaration.find("callee").unwrap();
+        let call_column = caller.find("callee").unwrap();
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "symbols": [{"symbol": symbol}],
+                "occurrences": [
+                    {"range": [1, declaration_column, declaration_column + 6], "symbol": symbol, "symbolRoles": 1},
+                    {"range": [2, call_column, call_column + 6], "symbol": symbol, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut callee = method("callee", &path, "callee", [2, 2, 2, declaration.len()]);
+        let mut caller_method = method("caller", &path, "caller", [3, 2, 3, caller.len()]);
+        callee.language = "ruby".into();
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call(
+            "caller",
+            &path,
+            "callee",
+            [3, call_column, 3, call_column + 8],
+        );
+        runtime_call.owner = "Demo".into();
+        runtime_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![callee, caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.target, None);
+        assert_eq!(
+            call.target_provenance.as_deref(),
+            Some("runtime_scip_modeled")
+        );
+        assert_eq!(call.candidate_targets, vec!["callee"]);
+        assert_eq!(
+            call.candidate_reason.as_deref(),
+            Some("runtime_modeled_observed_candidate_set")
+        );
+        assert!(call.consumer_closed_candidate_set);
+        assert_eq!(
+            call.complexity_bound_quality.as_deref(),
+            Some(RUNTIME_MODELED_QUALITY)
+        );
+        assert_eq!(
+            call.complexity_assumptions,
+            vec![RUNTIME_MODELED_ASSUMPTION]
+        );
+    }
+
+    #[test]
+    fn runtime_modeled_scip_prices_native_ruby_symbols() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(values)\n  values.length\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "nil-kill-runtime ruby ruby 3.2.3 Array#length().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [
+                    {"range": [1, 9, 15], "symbol": symbol, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut caller_method = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call("caller", &path, "length", [2, 2, 2, 15]);
+        runtime_call.owner = "Object".into();
+        runtime_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(call.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(call.external_symbol_scope.as_deref(), Some("stdlib"));
+        assert_eq!(
+            call.complexity_provenance.as_deref(),
+            Some("runtime_scip_modeled:conservative_external_candidate_max")
+        );
+        assert_eq!(
+            call.complexity_bound_quality.as_deref(),
+            Some(RUNTIME_MODELED_QUALITY)
+        );
+        assert_eq!(
+            call.complexity_assumptions,
+            vec![RUNTIME_MODELED_ASSUMPTION]
+        );
+        assert!(call.consumer_closed_candidate_set);
+        assert_eq!(call.unresolved_reason, None);
+    }
+
+    #[test]
+    fn runtime_modeled_scip_joins_ruby_operator_candidates() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(values)\n  values[:x]\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let array = "nil-kill-runtime ruby ruby 3.2.3 Array#`[]`().";
+        let hash = "nil-kill-runtime ruby ruby 3.2.3 Hash#`[]`().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [
+                    {"range": [1, 8, 12], "symbol": array, "symbolRoles": 0},
+                    {"range": [1, 8, 12], "symbol": hash, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut caller_method = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call("caller", &path, "[]", [2, 2, 2, 12]);
+        runtime_call.owner = "Object".into();
+        runtime_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(call.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(
+            call.complexity_candidates,
+            vec![array.to_string(), hash.to_string()]
+        );
+        assert!(call.consumer_closed_candidate_set);
+        assert_eq!(call.unresolved_reason, None);
+    }
+
+    #[test]
+    fn runtime_candidate_complexity_order_is_asymptotically_conservative() {
+        assert!(
+            conservative_complexity_rank("O(N log N)")
+                > conservative_complexity_rank("O(N)")
+        );
+        assert!(
+            conservative_complexity_rank("O(N^20)")
+                > conservative_complexity_rank("O(N^2 log N)")
+        );
+        assert!(
+            conservative_complexity_rank("O(2^N)")
+                > conservative_complexity_rank("O(N^20)")
+        );
+        assert!(
+            conservative_complexity_rank("O(N!)")
+                > conservative_complexity_rank("O(2^N)")
+        );
     }
 
     #[test]
