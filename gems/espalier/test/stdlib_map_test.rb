@@ -10,9 +10,10 @@ class StdlibMapTest < Minitest::Test
       @raw_call_gaps = raw_call_gaps
       @index_working_directory = nil
       @profile_files = nil
+      @export_commands = []
     end
 
-    attr_reader :index_working_directory, :profile_files
+    attr_reader :index_working_directory, :profile_files, :export_commands
 
     def run!(command, chdir:, env: {})
       raise "missing cwd" unless File.directory?(chdir)
@@ -49,6 +50,7 @@ class StdlibMapTest < Minitest::Test
           }
         }))
       elsif command.length > 1 && File.basename(command.fetch(1)) == "export_complexity_summary.rb"
+        @export_commands << command
         output = command.last
         claims = if command.include?("--compatibility")
                    JSON.parse(File.read(command.fetch(command.index("--compatibility") + 1))).fetch("claims")
@@ -67,7 +69,10 @@ class StdlibMapTest < Minitest::Test
               "complete_symbol_count" => 1,
               "source_proven_method_count" => 1,
               "profile_sha256" => "sha256:test",
-              "indexer" => "fake-scip@1.2.3"
+              "indexer" => "fake-scip@1.2.3",
+              "consumer_indexers" => command.each_index.filter_map do |index|
+                command[index + 1] if command[index] == "--consumer-indexer"
+              end
             },
             "compatibility" => {"claims" => claims},
             "symbols" => {
@@ -150,6 +155,7 @@ class StdlibMapTest < Minitest::Test
           corpus: fake-stdlib
           output: #{output}
           minimum_symbols: 1
+          consumer_indexers: ["consumer-scip@4.5.6"]
           expected_symbol_prefix: "fake consumer std 1 "
           symbol_relocation:
             from: "fake pkg std 1 "
@@ -168,11 +174,12 @@ class StdlibMapTest < Minitest::Test
             minimum_complete_percent: 100
       YAML
 
+      runner = FakeRunner.new
       report = Espalier::StdlibMap.new(
         manifest,
         work_dir: work,
         fact_mine: binary,
-        runner: FakeRunner.new
+        runner: runner
       ).run
 
       assert_equal 1, report.fetch("source_files")
@@ -184,6 +191,11 @@ class StdlibMapTest < Minitest::Test
       assert_equal 100.0, report.dig("consumers", 0, "after", "mapped_percent")
       assert File.size?(output)
       assert File.exist?(File.join(work, "stdlib-map-report.json"))
+      assert(runner.export_commands.all? do |command|
+        command.each_cons(2).include?(["--consumer-indexer", "consumer-scip@4.5.6"])
+      end)
+      summary = Zlib::GzipReader.open(output) { |gzip| JSON.parse(gzip.read) }
+      assert_equal ["consumer-scip@4.5.6"], summary.dig("source", "consumer_indexers")
     end
   end
 

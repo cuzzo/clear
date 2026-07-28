@@ -266,6 +266,11 @@ module Espalier
           raise ArgumentError, "summary.symbol_bridge requires path or command"
         end
       end
+      consumer_indexers = Array(summary["consumer_indexers"])
+      if consumer_indexers.any? { |indexer| indexer.to_s.empty? || !indexer.to_s.include?("@") }
+        raise ArgumentError,
+              "summary.consumer_indexers must contain tool@version identities"
+      end
       if manifest["compatibility"]
         compatibility = fetch_hash(manifest, "compatibility")
         modes = [
@@ -496,6 +501,9 @@ module Espalier
         "--source-revision", fetch_hash(manifest, "source").fetch("revision"),
         "--indexer", "#{indexer.fetch('tool')}@#{indexer.fetch('version')}"
       ]
+      Array(summary["consumer_indexers"]).each do |consumer_indexer|
+        command.concat(["--consumer-indexer", consumer_indexer])
+      end
       command.concat(["--compatibility", compatibility]) if compatibility
       if relocate && (relocation = summary["symbol_relocation"])
         command.concat(["--symbol-prefix-from", relocation.fetch("from")])
