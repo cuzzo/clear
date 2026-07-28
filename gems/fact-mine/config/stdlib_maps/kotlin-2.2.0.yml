@@ -1,0 +1,67 @@
+schema: fact-mine.stdlib-map.v1
+language: kotlin
+
+source:
+  root_command:
+    - ruby
+    - "{manifest_dir}/kotlin/materialize_source.rb"
+    - "{workspace_root}"
+  revision: kotlin-stdlib-2.2.0
+  revision_check:
+    command:
+      - ruby
+      - "{manifest_dir}/kotlin/revision.rb"
+      - "{source_root}"
+    equals: "kotlin-stdlib-2.2.0 sources sha256:967ad9599254e3a60d96d6c789547cc35c22d770d9c8fb1e3f15fac3b4c3b65d"
+  include:
+    - "commonMain/generated/*.kt"
+    - "jvmMain/generated/*.kt"
+    - "commonMain/kotlin/collections/*.kt"
+  exclude:
+    - "**/AbstractMutableCollection.kt"
+    - "**/AbstractMutableList.kt"
+    - "**/AbstractMutableMap.kt"
+    - "**/AbstractMutableSet.kt"
+    - "**/ArrayList.kt"
+    - "**/Collections.kt"
+    - "**/CollectionsH.kt"
+    - "**/HashMap.kt"
+    - "**/HashSet.kt"
+    - "**/LinkedHashMap.kt"
+    - "**/LinkedHashSet.kt"
+    - "**/Maps.kt"
+    - "**/Sets.kt"
+
+index:
+  command:
+    - ruby
+    - "{manifest_dir}/kotlin/index_stdlib.rb"
+    - "{source_root}"
+    - "{index}"
+    - "{workspace_root}"
+    - "{manifest_dir}/kotlin/scip-kotlin-top-level-symbols.patch"
+  working_directory: "{source_root}"
+  output: kotlin-stdlib.scip
+  expected:
+    tool: scip-java
+    version: 0.12.3
+
+compatibility:
+  command:
+    - ruby
+    - "{manifest_dir}/kotlin/semantic_environment.rb"
+    - "{source_root}"
+    - "{environment}"
+  working_directory: "{source_root}"
+
+soundness:
+  minimum_export_eligible_methods: 3500
+
+summary:
+  corpus: kotlin-stdlib-jvm
+  output: ../complexity_summaries/kotlin-stdlib.kotlin2.2.0.json.gz
+  minimum_symbols: 80
+  expected_symbol_prefix: "scip-java maven . . kotlin/"
+  symbol_relocation:
+    from: "semanticdb maven . . kotlin/"
+    to: "scip-java maven . . kotlin/"

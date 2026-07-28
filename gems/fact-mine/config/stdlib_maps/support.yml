@@ -16,9 +16,8 @@ languages:
     status: bundled
     manifest: csharp-10.0.10.yml
   kotlin:
-    status: blocked
-    blocker: unversioned_consumer_symbols
-    required_fix: scip-java must encode the Kotlin stdlib package and version in consumer symbols or equivalent SCIP metadata.
+    status: bundled
+    manifest: kotlin-2.2.0.yml
   c:
     status: blocked
     blocker: unversioned_consumer_symbols

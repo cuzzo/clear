@@ -100,6 +100,30 @@ bundle exec ruby gems/espalier/exe/espalier stdlib-map \
   --manifest gems/fact-mine/config/stdlib_maps/csharp-10.0.10.yml
 ```
 
+`kotlin-stdlib.kotlin2.2.0.json.gz` contains 85 source-proven symbols from
+4,811 Kotlin/JVM stdlib implementation methods. Both the Maven source jar and
+runtime jar are pinned by SHA-256. Kotlin 2.2 consumers use unversioned
+`scip-java maven . .` symbols, so applicability additionally requires a
+semantic-environment sidecar containing the exact runtime-jar digest.
+
+The published `semanticdb-kotlinc` 0.6.0 plugin numbered top-level overloads
+within each source file while `scip-java` numbered binary dependency overloads
+across their package. The language-owned index recipe applies the included
+upstream patch so both sides enumerate the full package callable set before the
+generic producer relocates the otherwise identical symbol prefix. This is an
+indexer correction, not a hand-maintained complexity override.
+
+```bash
+JAVA_HOME=/path/to/jdk-21 \
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/kotlin-2.2.0.yml
+```
+
+On Picnic 0.7.0 production sources, the generated bundle leaves complete
+coverage unchanged at 207/229 (90.39%): its currently exported symbols do not
+intersect Picnic's unresolved stdlib calls. It therefore adds verified stdlib
+coverage without overstating the measured consumer gain.
+
 FactMine discovers all `.json.gz` files in this directory at build time.
 Adding a generated bundle therefore requires no language-specific registration
 code. `../stdlib_maps/support.yml` records the fail-closed status of maintained
