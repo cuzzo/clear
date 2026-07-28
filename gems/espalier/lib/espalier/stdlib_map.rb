@@ -384,12 +384,21 @@ module Espalier
       stage_root = File.join(@work_dir, "selected-source")
       FileUtils.rm_rf(stage_root)
       FileUtils.mkdir_p(stage_root)
-      staged_files = files.map do |path|
+      stage_files = files.dup
+      Array(source["stage_include"]).each do |pattern|
+        Dir.glob(File.join(source_root, pattern), File::FNM_EXTGLOB).each do |path|
+          stage_files << File.expand_path(path) if File.file?(path)
+        end
+      end
+      stage_files.uniq.each do |path|
         relative = Pathname.new(path).relative_path_from(Pathname.new(source_root)).to_s
         destination = File.join(stage_root, relative)
         FileUtils.mkdir_p(File.dirname(destination))
         FileUtils.copy_file(path, destination)
-        destination
+      end
+      staged_files = files.map do |path|
+        relative = Pathname.new(path).relative_path_from(Pathname.new(source_root)).to_s
+        File.join(stage_root, relative)
       end
       [stage_root, staged_files]
     end
