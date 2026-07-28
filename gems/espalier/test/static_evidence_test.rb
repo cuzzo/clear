@@ -306,6 +306,7 @@ class StaticEvidenceTest < Minitest::Test
     assert_equal "test", Espalier::StaticEvidence.source_role("src/widget_test.go")
     assert_equal "test", Espalier::StaticEvidence.source_role("src/normalizer-test.rs")
     assert_equal "test", Espalier::StaticEvidence.source_role("tests/test_widget.py")
+    assert_equal "production", Espalier::StaticEvidence.source_role("gems/test-miser/lib/test_miser.rb")
     assert_equal "test", Espalier::StaticEvidence.source_role("Tests/ArgumentParserTests/AnyArgumentTests.swift")
     assert_equal "test", Espalier::StaticEvidence.source_role("src/jvmTest/kotlin/Foo.kt")
     assert_equal "test", Espalier::StaticEvidence.source_role("src/nonWasmTest/kotlin/Foo.kt")

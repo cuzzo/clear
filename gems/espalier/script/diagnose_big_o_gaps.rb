@@ -8,6 +8,7 @@
 
 require "json"
 require "optparse"
+require "pathname"
 require "set"
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
@@ -33,7 +34,14 @@ if repositories.empty?
   end.uniq.sort
 end
 prefixes = repositories.map { |repository| File.join(source_root, repository, "") }
-in_scope = ->(row) { prefixes.any? { |prefix| row.fetch("path", "").start_with?(prefix) } }
+absolute_profile_path = lambda do |path|
+  path = path.to_s
+  Pathname.new(path).absolute? ? path : File.expand_path(path, source_root)
+end
+in_scope = lambda do |row|
+  absolute = absolute_profile_path.call(row.fetch("path", ""))
+  prefixes.any? { |prefix| absolute.start_with?(prefix) }
+end
 
 scoped_methods = Array(profile["methods"]).select(&in_scope)
 method_roles = Espalier::StaticEvidence.method_source_roles(scoped_methods)

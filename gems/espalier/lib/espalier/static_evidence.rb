@@ -358,7 +358,15 @@ module Espalier
       return "example" if (parts & %w[example examples sample samples]).any?
       return "test" if (parts & %w[test tests spec specs __tests__ jvmtest androidtest commontest nativetest nonwasmtest wasmtest integrationtest unittest uitest functionaltest]).any?
       return "test" if parts.any? { |part| part.end_with?("test") && part.match?(/\A(?:android|common|functional|integration|jvm|native|nonwasm|unit|ui|wasm)/) }
-      return "test" if basename.match?(/(?:\A|[-_\.])test(?:[-_\.]|\z)|(?:\A|[-_\.])spec(?:[-_\.]|\z)/)
+      test_named_basename = basename.match?(
+        /(?:\A|[-_\.])test(?:[-_\.]|\z)|(?:\A|[-_\.])spec(?:[-_\.]|\z)/
+      )
+      # A production library may legitimately expose a `test_*` or `spec_*`
+      # entrypoint (for example TestMiser's `lib/test_miser.rb`). Directory
+      # role is stronger evidence than that filename prefix; helper products
+      # remain covered by the dedicated test-helper rule below.
+      library_entrypoint = parts.include?("lib") && basename.match?(/\A(?:test|spec)[-_]/)
+      return "test" if test_named_basename && !library_entrypoint
       # Test-helper products are executable support code, not production
       # library surface. Match common portable path spellings, including the
       # Swift Package Manager `ArgumentParserTestHelpers` convention.
