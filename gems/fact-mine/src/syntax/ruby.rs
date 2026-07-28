@@ -30,7 +30,8 @@ use super::normalized_behavior::{
     method_parameter_type_key, BlockCallSemantics, CardinalityCallSemantics,
     CollectionAllocationSemantics, NormalizedCallComplexity, NormalizedCallParts,
     NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedVisibilityEvent, SyntaxMetadata,
+    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedVisibilityEvent,
+    RuntimeCallResultProjection, RuntimeValueProjection, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, FunctionDef, StateDeclaration};
 use crate::ast::{self, Node, Span};
@@ -1769,13 +1770,10 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             let inner = &r[9..r.len() - 1];
             return Some(wrap_nilable(inner));
         }
-        if message == "map"
-            || message == "select"
-            || message == "reject"
-            || message == "filter"
-            || message == "sort"
-            || message == "split"
-        {
+        if message == "select" || message == "reject" || message == "filter" || message == "sort" {
+            return receiver_type.map(str::to_string);
+        }
+        if message == "map" || message == "split" {
             return Some("T::Array[T.untyped]".to_string());
         }
         if message == "compact" && r.starts_with("T::Array[") && r.ends_with(']') {
@@ -1807,6 +1805,137 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         }
         if message == "to_h" && (r.starts_with("T::Hash[") || r.starts_with("T::Array[")) {
             return Some(r.to_string());
+        }
+        None
+    }
+
+    fn runtime_value_domain_type(
+        &self,
+        owners: &[String],
+        elements: &[String],
+        keys: &[String],
+        values: &[String],
+    ) -> Option<String> {
+        let owner = (owners.len() == 1).then(|| owners[0].as_str())?;
+        match owner {
+            "Array" if elements.len() == 1 => Some(self.format_array_type(&elements[0])),
+            "Hash" if keys.len() == 1 && values.len() == 1 => {
+                Some(self.format_hash_type(&keys[0], &values[0]))
+            }
+            "Set" if elements.len() == 1 => Some(self.format_set_type(&elements[0])),
+            _ => Some(owner.to_string()),
+        }
+    }
+
+    fn runtime_nil_type_name(&self) -> Option<&'static str> {
+        Some("NilClass")
+    }
+
+    fn runtime_array_type_name(&self) -> Option<&'static str> {
+        Some("Array")
+    }
+
+    fn runtime_hash_type_name(&self) -> Option<&'static str> {
+        Some("Hash")
+    }
+
+    fn runtime_set_type_name(&self) -> Option<&'static str> {
+        Some("Set")
+    }
+
+    fn runtime_collection_callback_projections(
+        &self,
+        receiver_type: Option<&str>,
+        message: &str,
+        parameter_count: usize,
+    ) -> Vec<RuntimeValueProjection> {
+        let hash = receiver_type.is_some_and(|value| {
+            value == "Hash" || value.starts_with("T::Hash[") || value.starts_with("Hash[")
+        });
+        if hash && matches!(message, "each" | "each_pair" | "map") {
+            return if parameter_count > 1 {
+                vec![RuntimeValueProjection::Key, RuntimeValueProjection::Value]
+            } else {
+                vec![RuntimeValueProjection::Entry {
+                    collection_type: "Array",
+                }]
+            };
+        }
+        if hash && message == "each_key" {
+            return vec![RuntimeValueProjection::Key];
+        }
+        if hash && message == "each_value" {
+            return vec![RuntimeValueProjection::Value];
+        }
+        if message == "each_with_index" {
+            return vec![
+                RuntimeValueProjection::Element,
+                RuntimeValueProjection::Index {
+                    type_name: "Integer",
+                },
+            ];
+        }
+        (parameter_count > 0)
+            .then_some(vec![RuntimeValueProjection::Element])
+            .unwrap_or_default()
+    }
+
+    fn runtime_call_result_projection(
+        &self,
+        receiver_type: Option<&str>,
+        message: &str,
+        arguments: &[String],
+    ) -> Option<RuntimeCallResultProjection> {
+        let receiver = receiver_type.unwrap_or_default();
+        let hash =
+            receiver == "Hash" || receiver.starts_with("T::Hash[") || receiver.starts_with("Hash[");
+        let sequence = receiver == "Array"
+            || receiver == "Set"
+            || receiver == "Range"
+            || receiver.starts_with("T::Array[")
+            || receiver.starts_with("Array[")
+            || receiver.starts_with("T::Set[")
+            || receiver.starts_with("Set[");
+        if hash && matches!(message, "[]" | "fetch") {
+            return Some(RuntimeCallResultProjection::Value);
+        }
+        if sequence && matches!(message, "[]" | "fetch") {
+            // A range index returns a collection. Preserve uncertainty rather
+            // than treating source argument text in the shared overlay.
+            return (!arguments.iter().any(|argument| argument.contains("..")))
+                .then_some(RuntimeCallResultProjection::Element);
+        }
+        if sequence
+            && matches!(message, "first" | "last" | "pop" | "shift" | "sample")
+            && arguments.is_empty()
+        {
+            return Some(RuntimeCallResultProjection::Element);
+        }
+        if hash && message == "keys" {
+            return Some(RuntimeCallResultProjection::Keys {
+                collection_type: "Array",
+            });
+        }
+        if hash && message == "values" {
+            return Some(RuntimeCallResultProjection::Values {
+                collection_type: "Array",
+            });
+        }
+        if matches!(
+            message,
+            "select"
+                | "reject"
+                | "filter"
+                | "compact"
+                | "uniq"
+                | "sort"
+                | "sort_by"
+                | "reverse"
+                | "take"
+                | "drop"
+                | "merge"
+        ) {
+            return Some(RuntimeCallResultProjection::Receiver);
         }
         None
     }

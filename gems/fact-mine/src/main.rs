@@ -290,6 +290,36 @@ fn run() -> Result<()> {
                 generated.stats.unresolved_calls,
             );
         }
+        Command::RuntimeScip {
+            files,
+            evidence,
+            output,
+            language_override,
+        } => {
+            let language_override = language_override
+                .as_deref()
+                .map(Language::parse)
+                .transpose()?;
+            let mut profile = build_profile(&files, language_override, Profile::Espalier)?;
+            let evidence =
+                fact_mine_rust::runtime_evidence::RuntimeValueEvidence::from_path(&evidence)?;
+            let overlay =
+                fact_mine_rust::runtime_evidence::apply_to_profile(&mut profile, &evidence)?;
+            let rendered = serde_json::to_string_pretty(&overlay.index)? + "\n";
+            if let Some(output) = output {
+                fs::write(&output, rendered)
+                    .with_context(|| format!("failed to write {}", output.display()))?;
+            } else {
+                print!("{rendered}");
+            }
+            eprintln!(
+                "Runtime SCIP: {} observed sites, {} inferred sites, {} typed receivers, {} occurrences",
+                overlay.stats.observed_call_sites,
+                overlay.stats.inferred_call_sites,
+                overlay.stats.typed_receivers,
+                overlay.stats.emitted_occurrences,
+            );
+        }
     }
     Ok(())
 }
@@ -545,6 +575,12 @@ enum Command {
         root: Option<PathBuf>,
         server: Option<PathBuf>,
     },
+    RuntimeScip {
+        files: Vec<PathBuf>,
+        evidence: PathBuf,
+        output: Option<PathBuf>,
+        language_override: Option<String>,
+    },
 }
 
 fn parse_args(args: Vec<String>) -> Result<Command> {
@@ -552,6 +588,56 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
     let command = iter.next().unwrap_or_default();
 
     match command.as_str() {
+        "runtime-scip" => {
+            let mut output = None;
+            let mut evidence = None;
+            let mut language_override = None;
+            let mut files = Vec::new();
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--output" => {
+                        output = Some(PathBuf::from(
+                            iter.next().with_context(|| "--output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--output=") => {
+                        output = Some(PathBuf::from(other.strip_prefix("--output=").unwrap()));
+                    }
+                    "--runtime-evidence" => {
+                        evidence = Some(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--runtime-evidence requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--runtime-evidence=") => {
+                        evidence = Some(PathBuf::from(
+                            other.strip_prefix("--runtime-evidence=").unwrap(),
+                        ));
+                    }
+                    "--language" => {
+                        language_override =
+                            Some(iter.next().with_context(|| "--language requires a value")?);
+                    }
+                    other if other.starts_with("--language=") => {
+                        language_override =
+                            Some(other.strip_prefix("--language=").unwrap().to_string());
+                    }
+                    other if other.starts_with("--") => bail!("unsupported option: {other}"),
+                    path => files.push(PathBuf::from(path)),
+                }
+            }
+            if files.is_empty() {
+                bail!("runtime-scip requires at least one source file");
+            }
+            let evidence =
+                evidence.with_context(|| "runtime-scip requires --runtime-evidence FILE")?;
+            Ok(Command::RuntimeScip {
+                files,
+                evidence,
+                output,
+                language_override,
+            })
+        }
         "scip-lua" => {
             let mut output = None;
             let mut root = None;
@@ -819,7 +905,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             })
         }
         other => bail!(
-            "usage: fact-mine-rust {{syntax-facts|profile|call-resolution|scip-lua}} FILE... (got: {other})"
+            "usage: fact-mine-rust {{syntax-facts|profile|call-resolution|runtime-scip|scip-lua}} FILE... (got: {other})"
         ),
     }
 }
@@ -923,6 +1009,37 @@ mod tests {
             }
             _ => panic!("expected profile command"),
         }
+    }
+
+    #[test]
+    fn runtime_scip_requires_evidence_and_accepts_language_neutral_sources() {
+        let parsed = parse_args(vec![
+            "runtime-scip".to_string(),
+            "--runtime-evidence=runtime-values.json".to_string(),
+            "--output".to_string(),
+            "runtime.scip.json".to_string(),
+            "one.rb".to_string(),
+            "two.py".to_string(),
+        ])
+        .expect("runtime SCIP command");
+        match parsed {
+            Command::RuntimeScip {
+                files,
+                evidence,
+                output,
+                language_override,
+            } => {
+                assert_eq!(
+                    files,
+                    vec![PathBuf::from("one.rb"), PathBuf::from("two.py")]
+                );
+                assert_eq!(evidence, PathBuf::from("runtime-values.json"));
+                assert_eq!(output, Some(PathBuf::from("runtime.scip.json")));
+                assert_eq!(language_override, None);
+            }
+            _ => panic!("expected runtime SCIP"),
+        }
+        assert!(parse_args(vec!["runtime-scip".to_string(), "one.rb".to_string()]).is_err());
     }
 
     #[test]

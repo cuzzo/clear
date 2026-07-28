@@ -697,7 +697,7 @@ fn parse_range(value: &Value) -> Option<[usize; 4]> {
     ])
 }
 
-fn path_to_file_uri(path: &Path) -> String {
+pub(crate) fn path_to_file_uri(path: &Path) -> String {
     let path = path.to_string_lossy();
     let encoded = path
         .bytes()

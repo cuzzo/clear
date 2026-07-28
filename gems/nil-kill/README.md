@@ -173,12 +173,12 @@ Config:
 ```
 
 Ruby collection also writes `runtime.scip.json` and
-`runtime-attestation.json` in the runtime output directory. The SCIP index
-contains exact call-site and package identities observed during the run. It
-declares `observed-open` authority, so FactMine can join those identities while
-preserving the fact that a runtime trace is not a closed-world call graph.
-Language providers emit the shared `runtime_call` event contract; the common
-encoder and FactMine importer contain no language-specific dispatch.
+`runtime-attestation.json` in the runtime output directory. NilKill serializes
+observed calls and values into `runtime-values.json` without parsing source or
+inferring flow. FactMine overlays that evidence on its normalized CFG/DFG and
+emits the SCIP index with `runtime-modeled-world` authority. Language providers
+only trace values and define genuine language semantics; the evidence contract,
+flow propagation, and SCIP emission are language-neutral.
 
 ## FAQ
 

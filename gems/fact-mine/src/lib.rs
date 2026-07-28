@@ -9,6 +9,7 @@ pub mod lsp_scip;
 pub mod lua_scip;
 pub mod parallel;
 pub mod profile;
+pub mod runtime_evidence;
 pub mod scip;
 pub mod syntax;
 pub mod syntax_oracle;

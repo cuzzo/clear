@@ -741,16 +741,22 @@ RSpec.describe "NilKill coverage hardening" do
         pending_mut: nil,
         coalesce: true,
         coverage_owned: false,
+        runtime_calls: {},
+        runtime_package_by_path: {},
+        runtime_scip_frames: Hash.new { |hash, thread_id| hash[thread_id] = [] },
+        runtime_scip_native_calls: Hash.new { |hash, thread_id| hash[thread_id] = [] },
       }.each do |name, value|
         described_class.instance_variable_set(:"@#{name}", value)
       end
     end
 
     FakeTracePoint = Struct.new(
+      :event,
       :path,
       :lineno,
       :defined_class,
       :method_id,
+      :self_value,
       :parameters,
       :return_value,
       :raised_exception,
@@ -760,6 +766,47 @@ RSpec.describe "NilKill coverage hardening" do
       def binding
         trace_binding
       end
+
+      def self
+        self_value
+      end
+    end
+
+    it "records exact receiver and result value domains for runtime calls" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_result_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "rows = payload.fetch('rows', [])\n")
+      described_class.runtime_scip_frames[Thread.current.object_id] << {
+        caller: {
+          class: "Worker", method: "run", kind: "instance",
+          path: target_file, line: 1,
+        },
+        callsite: { path: target_file, line: 1 },
+      }
+      owner = Class.new
+      allow(described_class).to receive(:method_owner)
+        .with(owner).and_return(["Hash", "instance"])
+      call = FakeTracePoint.new(
+        event: :c_call,
+        path: target_file,
+        lineno: 1,
+        defined_class: owner,
+        method_id: :fetch,
+        self_value: { "rows" => [Object.new] }
+      )
+      described_class.enter_runtime_scip_native_call(call)
+      described_class.leave_runtime_scip_native_call(
+        FakeTracePoint.new(event: :c_return, return_value: [Object.new])
+      )
+
+      record = described_class.runtime_calls.values.fetch(0)
+      expect(record.dig(:receiver_domain, :types)).to eq(["Hash"])
+      expect(record.dig(:receiver_domain, :keys)).to eq(["String"])
+      expect(record.dig(:receiver_domain, :values)).to eq(["Array"])
+      expect(record.dig(:result_domain, :types)).to eq(["Array"])
+      expect(record.dig(:result_domain, :elements)).not_to be_empty
+    ensure
+      FileUtils.rm_f(target_file)
     end
 
     def binding_for_forced_args(args)

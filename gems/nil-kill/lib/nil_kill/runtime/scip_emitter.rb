@@ -1,33 +1,32 @@
 # typed: false
 # frozen_string_literal: true
 
+require "open3"
+
 module NilKill
   module Runtime
-    # Converts language-neutral runtime_call events into a SCIP index.
-    #
-    # Runtime observations are intentionally encoded as ordinary SCIP
-    # occurrences. Their modeled-world authority is declared in ToolInfo
-    # arguments, so consumers can use the wire format without mistaking an
-    # observed target set for compiler proof.
+    # Orchestrates the evidence-only NilKill -> FactMine boundary. NilKill
+    # serializes observations; FactMine owns source analysis and SCIP output.
     class ScipEmitter
       SCHEMA_VERSION = 1
       TOOL_NAME = "nil-kill-runtime"
-      TOOL_VERSION = "1"
+      TOOL_VERSION = "2"
       AUTHORITY = "runtime-modeled-world"
       AUTHORITY_ARGUMENT = "--fact-mine-index-authority=#{AUTHORITY}"
       EVENT_GLOB = "runtime-calls-*.jsonl"
 
-      def self.emit(root:, runtime_dir:, output: nil, attestation: nil, environment: {})
+      def self.emit(root:, runtime_dir:, output: nil, attestation: nil, environment: {}, files: nil)
         new(
           root: root,
           runtime_dir: runtime_dir,
           output: output,
           attestation: attestation,
-          environment: environment
+          environment: environment,
+          files: files
         ).emit
       end
 
-      def initialize(root:, runtime_dir:, output: nil, attestation: nil, environment: {})
+      def initialize(root:, runtime_dir:, output: nil, attestation: nil, environment: {}, files: nil)
         @root = File.expand_path(root)
         @runtime_dir = File.expand_path(runtime_dir)
         @output = File.expand_path(output || File.join(@runtime_dir, "runtime.scip.json"))
@@ -35,6 +34,7 @@ module NilKill
           attestation || File.join(@runtime_dir, "runtime-attestation.json")
         )
         @environment = environment.transform_keys(&:to_s).transform_values(&:to_s)
+        @files = files
       end
 
       def emit
@@ -44,22 +44,21 @@ module NilKill
             .runtime_scip_event_eligible?(event: event, root: @root)
         end
         excluded_events = events.length - semantic_events.length
-        inferred_events = infer_events(semantic_events)
-        documents = build_documents(semantic_events + inferred_events)
-        index = {
-          "metadata" => {
-            "version" => 0,
-            "toolInfo" => {
-              "name" => TOOL_NAME,
-              "version" => TOOL_VERSION,
-              "arguments" => [AUTHORITY_ARGUMENT],
-            },
-            "projectRoot" => project_root_uri,
-            "textDocumentEncoding" => 1,
-          },
-          "documents" => documents,
-          "externalSymbols" => [],
-        }
+        value_evidence = ValueEvidenceEmitter.emit(
+          root: @root,
+          runtime_dir: @runtime_dir,
+          events: semantic_events
+        )
+        sources = runtime_sources(semantic_events, value_evidence.fetch("path"))
+        index =
+          if sources.empty?
+            empty_index
+          else
+            emit_with_fact_mine(value_evidence.fetch("path"), sources)
+          end
+        documents = index.fetch("documents", [])
+        inference = index.fetch("_runtimeEvidence", {})
+        inferred_events = inference.fetch("inferredCallSites", 0).to_i
 
         FileUtils.mkdir_p(File.dirname(@output))
         write_atomically(@output, JSON.pretty_generate(index) + "\n")
@@ -70,7 +69,7 @@ module NilKill
               events,
               documents,
               invalid_events,
-              inferred_events.length,
+              inferred_events,
               excluded_events
             )
           ) + "\n"
@@ -79,23 +78,92 @@ module NilKill
           "index" => @output,
           "attestation" => @attestation,
           "events" => events.length,
-          "inferred_events" => inferred_events.length,
+          "inferred_events" => inferred_events,
           "documents" => documents.length,
           "occurrences" => documents.sum { |document| document.fetch("occurrences").length },
           "invalid_events" => invalid_events,
           "excluded_events" => excluded_events,
+          "runtime_evidence" => value_evidence.fetch("path"),
+          "runtime_value_observations" => value_evidence.fetch("observations"),
         }
       end
 
       private
 
-      def infer_events(events)
-        events.group_by { |event| event.fetch("language") }.sort.flat_map do |language, rows|
-          Languages.provider_for(language).runtime_scip_inferred_events(
-            events: rows,
-            root: @root,
-            runtime_dir: @runtime_dir
-          )
+      def empty_index
+        {
+          "metadata" => {
+            "version" => 0,
+            "toolInfo" => {
+              "name" => TOOL_NAME,
+              "version" => "2",
+              "arguments" => [AUTHORITY_ARGUMENT],
+            },
+            "projectRoot" => project_root_uri,
+            "textDocumentEncoding" => 1,
+          },
+          "documents" => [],
+          "externalSymbols" => [],
+          "_runtimeEvidence" => {
+            "schema" => ValueEvidenceEmitter::SCHEMA,
+            "observedCallSites" => 0,
+            "inferredCallSites" => 0,
+            "typedReceivers" => 0,
+            "emittedOccurrences" => 0,
+          },
+        }
+      end
+
+      def runtime_sources(events, evidence_path)
+        evidence = JSON.parse(File.read(evidence_path))
+        sources = Array(@files).map { |path| File.expand_path(path, @root) }
+        if sources.empty?
+          sources.concat(events.filter_map { |event| event.dig("callsite", "path") })
+          sources.concat(evidence.fetch("observations", []).filter_map do |observation|
+            path = observation.dig("scope", "path").to_s
+            File.expand_path(path, @root) unless path.empty?
+          end)
+        end
+        languages = (
+          events.map { |event| event.fetch("language") } +
+          evidence.fetch("observations", []).map { |row| row.dig("scope", "language") }
+        ).compact.uniq
+        extensions = languages.flat_map do |language|
+          Languages.provider_for(language).extensions
+        end.to_set
+        sources.compact.map { |path| File.expand_path(path, @root) }
+          .select { |path| File.file?(path) }
+          .select { |path| extensions.include?(File.extname(path)) }
+          .uniq.sort
+      end
+
+      def emit_with_fact_mine(evidence_path, sources)
+        binary = fact_mine_binary
+        command = [
+          binary,
+          "runtime-scip",
+          "--runtime-evidence", evidence_path,
+          "--output", @output,
+          *sources,
+        ]
+        stdout, stderr, status = Open3.capture3(*command, chdir: @root)
+        unless status.success?
+          raise "fact-mine runtime-scip failed with status #{status.exitstatus}: " \
+            "#{stderr.strip}#{stdout.empty? ? "" : "\n#{stdout.strip}"}"
+        end
+        JSON.parse(File.read(@output))
+      end
+
+      def fact_mine_binary
+        return File.expand_path(ENV.fetch("FACT_MINE_RUST_BINARY")) if ENV["FACT_MINE_RUST_BINARY"]
+
+        release = File.join(NilKill::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
+        debug = File.join(NilKill::ROOT, "gems", "fact-mine", "target", "debug", "fact-mine-rust")
+        if File.executable?(debug) &&
+            (!File.executable?(release) || File.mtime(debug) > File.mtime(release))
+          debug
+        else
+          release
         end
       end
 
@@ -129,160 +197,9 @@ module NilKill
           !callsite["path"].to_s.empty? && callsite["line"].to_i.positive?
       end
 
-      def build_documents(events)
-        occurrences = Hash.new { |hash, key| hash[key] = [] }
-        symbols = Hash.new { |hash, key| hash[key] = {} }
-        languages = {}
-
-        events.each do |event|
-          language = event.fetch("language")
-          callee = event.fetch("callee")
-          callsite = event.fetch("callsite")
-          callsite_path = File.expand_path(callsite.fetch("path"), @root)
-          provider = Languages.provider_for(language)
-          locations =
-            if callsite["range"].is_a?(Array)
-              [{
-                "range" => callsite.fetch("range"),
-                "selector" => callsite.fetch("selector", callee.fetch("name")),
-              }]
-            else
-              provider.runtime_scip_callsite_locations(event: event, root: @root)
-            end
-          locations ||= token_ranges(
-            callsite_path,
-            callsite.fetch("line").to_i,
-            callee.fetch("name")
-          ).map { |range| { "range" => range, "selector" => callee.fetch("name") } }
-          next if locations.empty?
-
-          caller_document = document_path(callsite_path)
-          register_document_language(languages, caller_document, language)
-          locations.each do |location|
-            selector = location.fetch("selector", callee.fetch("name"))
-            symbol = runtime_symbol(language, callee, selector: selector)
-            occurrences[caller_document] <<
-              occurrence(location.fetch("range"), symbol, definition: false)
-
-            callee_path = callee["path"].to_s
-            next if callee_path.empty? || callee["native"] == true
-
-            absolute_callee = File.expand_path(callee_path, @root)
-            next unless inside_root?(absolute_callee)
-
-            definition_range = token_ranges(
-              absolute_callee,
-              callee["line"].to_i,
-              callee.fetch("name")
-            ).then { |ranges| ranges.one? ? ranges.first : nil }
-            next unless definition_range
-
-            callee_document = document_path(absolute_callee)
-            register_document_language(languages, callee_document, language)
-            occurrences[callee_document] <<
-              occurrence(definition_range, symbol, definition: true)
-            symbols[callee_document][symbol] ||= { "symbol" => symbol }
-          end
-        end
-
-        occurrences.keys.sort.map do |path|
-          {
-            "language" => languages.fetch(path),
-            "relativePath" => path,
-            "occurrences" => occurrences[path].uniq.sort_by do |row|
-              [row.fetch("range"), row.fetch("symbol"), row.fetch("symbolRoles")]
-            end,
-            "symbols" => symbols[path].values.sort_by { |row| row.fetch("symbol") },
-          }
-        end
-      end
-
-      def register_document_language(languages, path, language)
-        existing = languages[path]
-        return languages[path] = language unless existing
-        return if existing == language
-
-        raise ArgumentError,
-          "runtime SCIP document #{path} was traced as both #{existing} and #{language}"
-      end
-
-      def occurrence(range, symbol, definition:)
-        {
-          "range" => range,
-          "symbol" => symbol,
-          "symbolRoles" => definition ? 1 : 0,
-        }
-      end
-
       def project_root_uri
         encoded_path = URI::DEFAULT_PARSER.escape(@root)
         URI::Generic.build(scheme: "file", path: encoded_path).to_s
-      end
-
-      def runtime_symbol(language, callee, selector: callee.fetch("name"))
-        manager = symbol_word(callee["package_manager"] || "runtime")
-        package = symbol_word(callee["package"] || language)
-        version = symbol_word(callee["version"] || "workspace")
-        owner = descriptor_owner(callee["owner"] || callee["receiver_type"] || language)
-        method = descriptor_name(selector)
-        separator = callee["kind"].to_s == "class" ? "." : "#"
-        "#{TOOL_NAME} #{manager} #{package} #{version} #{owner}#{separator}#{method}()."
-      end
-
-      def symbol_word(value)
-        text = value.to_s
-        return "." if text.empty?
-        return text if text.match?(/\A[A-Za-z0-9_.+@\/-]+\z/)
-
-        "`#{text.gsub("`", "``")}`"
-      end
-
-      def descriptor_owner(value)
-        value.to_s.split("::").reject(&:empty?).map { |part| descriptor_name(part) }.join("/")
-      end
-
-      def descriptor_name(value)
-        text = value.to_s
-        return text if text.match?(/\A[A-Za-z_][A-Za-z0-9_!?=]*\z/)
-
-        "`#{text.gsub("`", "``")}`"
-      end
-
-      def token_ranges(path, one_based_line, token)
-        return [] unless one_based_line.positive? && File.file?(path)
-
-        line = File.foreach(path).with_index(1).find { |_source, number| number == one_based_line }&.first
-        return [] unless line
-
-        token_matches(line, token.to_s).map do |start_byte, end_byte|
-          [one_based_line - 1, start_byte, end_byte]
-        end
-      end
-
-      def token_matches(line, token)
-        return [] if token.empty?
-
-        expression =
-          if token.match?(/\A[A-Za-z_][A-Za-z0-9_!?=]*\z/)
-            /(?<![A-Za-z0-9_])#{Regexp.escape(token)}(?![A-Za-z0-9_!?=])/
-          else
-            /#{Regexp.escape(token)}/
-          end
-        line.to_enum(:scan, expression).map do
-          match = Regexp.last_match
-          [
-            line[0...match.begin(0)].to_s.bytesize,
-            line[0...match.end(0)].to_s.bytesize,
-          ]
-        end
-      end
-
-      def document_path(path)
-        Pathname.new(path).relative_path_from(Pathname.new(@root)).to_s
-      end
-
-      def inside_root?(path)
-        path == @root || path.start_with?("#{@root}#{File::SEPARATOR}")
       end
 
       def attestation_payload(
@@ -304,7 +221,7 @@ module NilKill
           "runtime_scip.excluded_nonproduction_event_count" => excluded_events.to_s,
           "runtime_scip.inferred_event_count" => inferred_events.to_s,
           "runtime_scip.inference" =>
-            "language-owned source callsites joined to observed modeled dispatch domains",
+            "FactMine normalized CFG/DFG overlaid with observed runtime value domains",
           "runtime_scip.run_ids_sha256" => digest(
             events.map { |event| event["run_id"].to_s }.reject(&:empty?).uniq.sort.join("\n")
           ),

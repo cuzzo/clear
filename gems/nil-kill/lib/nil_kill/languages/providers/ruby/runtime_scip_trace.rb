@@ -7,6 +7,11 @@ module NilKillRuntimeTrace
   @runtime_calls = {}
   @runtime_package_by_path = {}
   @runtime_scip_frames = Hash.new { |hash, thread_id| hash[thread_id] = [] }
+  @runtime_scip_native_calls = Hash.new { |hash, thread_id| hash[thread_id] = [] }
+
+  class << self
+    attr_reader :runtime_calls, :runtime_scip_frames, :runtime_scip_native_calls
+  end
 
   def self.record_runtime_scip_line(tp)
     path = abs_path(tp.path)
@@ -22,7 +27,7 @@ module NilKillRuntimeTrace
   end
 
   def self.enter_runtime_scip_ruby_call(tp)
-    record_runtime_scip_call(tp)
+    observed_call = record_runtime_scip_call(tp)
     owner = method_owner(tp.defined_class)
     path = abs_path(tp.path)
     @runtime_scip_frames[Thread.current.object_id] << {
@@ -34,11 +39,23 @@ module NilKillRuntimeTrace
         line: src_line(path, tp.lineno),
       },
       callsite: nil,
+      observed_call: observed_call,
     }
   end
 
-  def self.leave_runtime_scip_ruby_call
-    @runtime_scip_frames[Thread.current.object_id].pop
+  def self.leave_runtime_scip_ruby_call(tp)
+    frame = @runtime_scip_frames[Thread.current.object_id].pop
+    record_runtime_scip_result(frame&.fetch(:observed_call, nil), tp.return_value)
+  end
+
+  def self.enter_runtime_scip_native_call(tp)
+    observed_call = record_runtime_scip_call(tp)
+    @runtime_scip_native_calls[Thread.current.object_id] << observed_call
+  end
+
+  def self.leave_runtime_scip_native_call(tp)
+    observed_call = @runtime_scip_native_calls[Thread.current.object_id].pop
+    record_runtime_scip_result(observed_call, tp.return_value)
   end
 
   def self.runtime_package(path, native:)
@@ -124,6 +141,7 @@ module NilKillRuntimeTrace
       native: native,
       receiver_type: class_name(tp.self),
     }.merge(package)
+    receiver_domain = runtime_value_domain(tp.self)
 
     @lock.synchronize do
       key = [
@@ -140,9 +158,12 @@ module NilKillRuntimeTrace
         caller: caller,
         callsite: callsite,
         callee: callee,
+        receiver_domain: receiver_domain,
         count: 0,
       })
+      merge_runtime_value_domain!(record[:receiver_domain], receiver_domain)
       record[:count] += 1
+      key
     end
   rescue StandardError
     # Tracing is observational and must never alter application behavior.
@@ -152,17 +173,72 @@ module NilKillRuntimeTrace
     Thread.current[:__nil_kill_runtime_scip] = nil
   end
 
+  def self.record_runtime_scip_result(key, value)
+    return unless key
+    return if Thread.current[:__nil_kill_runtime_scip]
+
+    Thread.current[:__nil_kill_runtime_scip] = true
+    observed = runtime_value_domain(value)
+    @lock.synchronize do
+      record = @runtime_calls[key]
+      merge_runtime_value_domain!(record[:result_domain] ||= empty_runtime_value_domain, observed) if record
+    end
+  rescue StandardError
+    nil
+  ensure
+    Thread.current[:__nil_kill_runtime_scip] = nil
+  end
+
+  def self.empty_runtime_value_domain
+    {
+      types: [],
+      elements: [],
+      keys: [],
+      values: [],
+      shapes: [],
+    }
+  end
+
+  def self.runtime_value_domain(value)
+    domain = empty_runtime_value_domain
+    domain[:types] << class_name(value)
+    shape = container_shape(value)
+    if shape
+      if shape[0] == :array
+        domain[:elements].concat(shape[1].to_a)
+      else
+        domain[:keys].concat(shape[1][0].to_a)
+        domain[:values].concat(shape[1][1].to_a)
+      end
+      domain[:shapes] << shape_payload(collection_type_shape_key(value))
+    end
+    %i[types elements keys values].each { |field| domain[field].sort! }
+    domain[:shapes].sort_by! { |value_shape| JSON.generate(value_shape) }
+    domain
+  end
+
+  def self.merge_runtime_value_domain!(target, source)
+    source.each do |field, values|
+      target[field] = (Array(target[field]) | Array(values)).sort_by do |item|
+        item.is_a?(Hash) ? JSON.generate(item) : item.to_s
+      end
+    end
+    target
+  end
+
   def self.install_runtime_scip_trace
-    TracePoint.new(:line, :call, :return, :c_call) do |trace|
+    TracePoint.new(:line, :call, :return, :c_call, :c_return) do |trace|
       case trace.event
       when :line
         record_runtime_scip_line(trace)
       when :call
         enter_runtime_scip_ruby_call(trace)
       when :return
-        leave_runtime_scip_ruby_call
+        leave_runtime_scip_ruby_call(trace)
       when :c_call
-        record_runtime_scip_call(trace)
+        enter_runtime_scip_native_call(trace)
+      when :c_return
+        leave_runtime_scip_native_call(trace)
       end
     end.enable
   end

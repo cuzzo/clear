@@ -109,13 +109,6 @@ module NilKill
         {}
       end
 
-      # Return normalized SCIP occurrence locations for one runtime event.
-      # `nil` asks the shared emitter to use its exact-token fallback; an empty
-      # array deliberately rejects an implicit/runtime-internal event.
-      def runtime_scip_callsite_locations(event:, root:)
-        nil
-      end
-
       # Reject runtime identities whose definition belongs to a language-owned
       # non-production source role (for example, a test double). The shared
       # emitter deliberately knows nothing about language-specific test paths.
@@ -123,10 +116,18 @@ module NilKill
         true
       end
 
-      # Optional language-owned extrapolation from observed dispatch domains to
-      # syntactic callsites. Returned rows use the same runtime_call schema and
-      # must carry an exact `callsite.range`.
-      def runtime_scip_inferred_events(events:, root:, runtime_dir: nil)
+      # Mechanically decode one tracer-owned call event into the neutral
+      # runtime-evidence call shape. Package/symbol grammar and source-language
+      # naming conventions belong to the provider.
+      def runtime_scip_call_evidence(event:, root:)
+        raise UnsupportedRuntimeTracer,
+          "#{display_name} does not implement runtime call evidence decoding"
+      end
+
+      # Serialize tracer-owned value observations into the shared FactMine
+      # runtime evidence contract. Providers may decode their own trace storage
+      # here, but must not inspect source or infer flow relationships.
+      def runtime_value_observations(runtime_dir:, root:)
         []
       end
 

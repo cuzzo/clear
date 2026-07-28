@@ -4112,7 +4112,22 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
             )
         })
         .collect::<BTreeMap<_, _>>();
-    document
+    let effects = document
+        .node_effects
+        .iter()
+        .map(|effect| (effect.node_id.as_str(), effect))
+        .collect::<BTreeMap<_, _>>();
+    let callback_positions = document
+        .callback_bindings
+        .iter()
+        .map(|binding| {
+            (
+                (binding.node_id.as_str(), binding.place_id.as_str()),
+                binding.position,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut rows = document
         .flow_types
         .iter()
         .filter_map(|fact| {
@@ -4123,6 +4138,20 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
                 .iter()
                 .filter_map(|hint| TypeExpr::from_flow_hint(hint, document.language.as_str()))
                 .collect::<BTreeSet<_>>();
+            let reaching = definitions
+                .get(&(fact.node_id.as_str(), fact.place_id.as_str()))
+                .cloned()
+                .cloned()
+                .unwrap_or_default();
+            let definition_call_sources = reaching
+                .iter()
+                .filter_map(|definition| {
+                    effects
+                        .get(definition.as_str())
+                        .and_then(|effect| effect.write_call_sources.get(&fact.place_id))
+                        .map(|span| (definition.clone(), *span))
+                })
+                .collect::<BTreeMap<_, _>>();
             Some(json!({
                 "file": document.file,
                 "function": fact.function,
@@ -4135,14 +4164,50 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
                 "types": fact.types,
                 "resolved_types": resolved_types,
                 "complete": fact.complete,
-                "reaching_definitions": definitions
-                    .get(&(fact.node_id.as_str(), fact.place_id.as_str()))
-                    .cloned()
-                    .cloned()
-                    .unwrap_or_default(),
+                "reaching_definitions": reaching,
+                "definition_call_sources": definition_call_sources,
+                "callback_binding_position": callback_positions
+                    .get(&(fact.node_id.as_str(), fact.place_id.as_str())),
             }))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let existing = rows
+        .iter()
+        .filter_map(|row| {
+            Some((
+                row["node_id"].as_str()?.to_string(),
+                row["place_id"].as_str()?.to_string(),
+            ))
+        })
+        .collect::<BTreeSet<_>>();
+    for binding in &document.callback_bindings {
+        if existing.contains(&(binding.node_id.clone(), binding.place_id.clone())) {
+            continue;
+        }
+        let Some(place) = places.get(binding.place_id.as_str()) else {
+            continue;
+        };
+        let Some(node) = nodes.get(binding.node_id.as_str()) else {
+            continue;
+        };
+        rows.push(json!({
+            "file": document.file,
+            "function": binding.function,
+            "owner": binding.owner,
+            "name": place.name,
+            "place_id": binding.place_id,
+            "node_id": binding.node_id,
+            "line": node.line,
+            "span": node.span,
+            "types": [],
+            "resolved_types": [],
+            "complete": false,
+            "reaching_definitions": [],
+            "definition_call_sources": {},
+            "callback_binding_position": binding.position,
+        }));
+    }
+    rows
 }
 
 fn extract_type_dependencies(
@@ -8193,6 +8258,7 @@ pub(crate) mod tests {
             def_use: vec![],
             liveness: vec![],
             flow_types: vec![],
+            callback_bindings: vec![],
             protocol_method_effects: vec![],
             protocol_call_paths: vec![],
             clone_candidates: vec![],

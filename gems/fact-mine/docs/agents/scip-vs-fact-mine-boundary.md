@@ -228,9 +228,11 @@ strictly dominated by just running the indexer.
 ### Phase 4 — Serve the languages SCIP abandons
 9. **Redirect all resolution effort to Swift, Lua, PHP, Zig, Ruby.** Hold it to a
    measured bar: ship only if completeness moves on a real corpus.
-10. **Ruby/PHP need the NilKill runtime SCIP join**, not a static resolver — their
-    ceiling is type *availability*, not type *inference*. Keep tracing
-    language-owned and the emitted contract and consumers language-neutral.
+10. **Ruby/PHP need the runtime-evidence overlay**, not a static resolver —
+    their ceiling is type *availability*, not type *inference*. NilKill records
+    language-owned runtime values in the language-neutral evidence contract;
+    FactMine alone joins those values through normalized CFG/DFG facts and
+    emits the inferred SCIP index.
 
 ### The one-line rule
 

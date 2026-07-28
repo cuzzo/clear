@@ -201,7 +201,11 @@ module NilKill
         NilKill.restore_inplace_snapshot! if instrument_source
       end
       assert_collect_coverage_produced! if instrument_source
-      emitted = Runtime::ScipEmitter.emit(root: ROOT, runtime_dir: RUNTIME_DIR)
+      emitted = Runtime::ScipEmitter.emit(
+        root: ROOT,
+        runtime_dir: RUNTIME_DIR,
+        files: NilKill.target_files
+      )
       puts "wrote runtime SCIP index to #{emitted.fetch("index")}"
     end
 

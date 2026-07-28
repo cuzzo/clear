@@ -45,6 +45,7 @@ pub struct ControlFlowFacts {
     pub def_use: Vec<DefUseFact>,
     pub liveness: Vec<LivenessFact>,
     pub flow_types: Vec<FlowTypeFact>,
+    pub callback_bindings: Vec<CallbackBindingFact>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -56,6 +57,16 @@ pub struct Place {
     pub kind: String,
     pub name: String,
     pub declaration_span: Span,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct CallbackBindingFact {
+    pub node_id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub place_id: String,
+    pub position: usize,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

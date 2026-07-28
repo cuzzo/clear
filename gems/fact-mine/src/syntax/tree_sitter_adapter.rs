@@ -181,6 +181,7 @@ fn parse_normalized_file(
         def_use: metadata.control_flow.def_use,
         liveness: metadata.control_flow.liveness,
         flow_types: metadata.control_flow.flow_types,
+        callback_bindings: metadata.control_flow.callback_bindings,
         protocol_method_effects: metadata.protocol_method_effects,
         protocol_call_paths: metadata.protocol_call_paths,
         clone_candidates: metadata.clone_candidates,

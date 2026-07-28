@@ -1,5 +1,6 @@
 use super::{
-    branches, loops, ControlFlowFacts, ControlFlowNode, ControlFlowProfile, NodeEffect, Place,
+    branches, loops, CallbackBindingFact, ControlFlowFacts, ControlFlowNode, ControlFlowProfile,
+    NodeEffect, Place,
 };
 use crate::ast::{self, Child, Node};
 use crate::syntax::normalized_behavior::NormalizedLanguageBehavior;
@@ -28,6 +29,7 @@ struct RawEffect {
     write_sources: BTreeMap<String, String>,
     write_call_sources: BTreeMap<String, Span>,
     write_nullable_contracts: BTreeMap<String, String>,
+    callback_bindings: Vec<String>,
     return_state_hint: Option<String>,
     unknown_call: bool,
     complete: bool,
@@ -302,6 +304,16 @@ pub(crate) fn extract(
                     format!("place:{}#{}:unknown:{}", node.owner, node.function, name)
                 })
         };
+        for (position, name) in raw.callback_bindings.iter().enumerate() {
+            facts.callback_bindings.push(CallbackBindingFact {
+                node_id: node.id.clone(),
+                file: node.file.clone(),
+                function: node.function.clone(),
+                owner: node.owner.clone(),
+                place_id: id_for(name),
+                position,
+            });
+        }
         facts.effects.push(NodeEffect {
             node_id: node.id.clone(),
             file: node.file.clone(),
@@ -488,7 +500,26 @@ fn collect_scope_bindings(scope: Option<&Node>, effect: &mut RawEffect) {
         None
     };
     if let Some(args) = args {
+        let mut names = Vec::new();
+        collect_binding_names(args, &mut names);
+        for name in names {
+            if !effect.callback_bindings.contains(&name) {
+                effect.callback_bindings.push(name);
+            }
+        }
         collect(args, effect, false);
+    }
+}
+
+fn collect_binding_names(node: &Node, names: &mut Vec<String>) {
+    if WRITE_TYPES.contains(&node.r#type.as_str()) {
+        if let Some(name) = node_name(node) {
+            names.push(name);
+        }
+        return;
+    }
+    for child in node.children.iter().filter_map(ast::node) {
+        collect_binding_names(child, names);
     }
 }
 
@@ -630,6 +661,11 @@ fn direct_return_state_hint(node: &Node) -> Option<String> {
 /// preserving assignment edges.
 fn direct_call_result_span(node: &Node) -> Option<Span> {
     match node.r#type.as_str() {
+        "ITER" => node
+            .children
+            .first()
+            .and_then(ast::node)
+            .and_then(direct_call_result_span),
         "PAREN" | "BEGIN" | "EXPRESSION_LIST" => {
             let mut children = node.children.iter().filter_map(ast::node);
             let only = children.next()?;
@@ -653,6 +689,13 @@ fn direct_call_result_node(node: &Node) -> Option<&Node> {
         "CALL" | "QCALL" | "FCALL" | "VCALL" | "NEW_EXPRESSION"
     ) {
         return Some(node);
+    }
+    if node.r#type == "ITER" {
+        return node
+            .children
+            .first()
+            .and_then(ast::node)
+            .and_then(direct_call_result_node);
     }
     if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
         return node

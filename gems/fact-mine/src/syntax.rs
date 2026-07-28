@@ -361,6 +361,8 @@ pub struct Document {
     #[serde(default)]
     pub flow_types: Vec<cfg::FlowTypeFact>,
     #[serde(default)]
+    pub callback_bindings: Vec<cfg::CallbackBindingFact>,
+    #[serde(default)]
     pub protocol_method_effects: Vec<ProtocolMethodEffect>,
     #[serde(default)]
     pub protocol_call_paths: Vec<ProtocolMethodPath>,

@@ -19,7 +19,17 @@ module NilKill
 
         provider.collect_runtime(argv: @argv, root: root, output: output, targets: targets, append: append)
         if provider.runtime_capabilities.fetch("runtime_scip_calls", false)
-          emitted = Runtime::ScipEmitter.emit(root: root, runtime_dir: output)
+          source_files = targets.flat_map do |target|
+            path = File.expand_path(target, root)
+            File.directory?(path) ?
+              Dir.glob(File.join(path, "**", "*")).select { |candidate| File.file?(candidate) } :
+              [path]
+          end
+          emitted = Runtime::ScipEmitter.emit(
+            root: root,
+            runtime_dir: output,
+            files: source_files
+          )
           puts "wrote runtime SCIP index to #{emitted.fetch("index")}"
         end
       rescue Languages::UnsupportedRuntimeTracer => e

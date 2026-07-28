@@ -189,6 +189,24 @@ pub(crate) enum NormalizedCollectionOperation {
     Exponential,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeValueProjection {
+    Element,
+    Key,
+    Value,
+    Entry { collection_type: &'static str },
+    Index { type_name: &'static str },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeCallResultProjection {
+    Receiver,
+    Element,
+    Value,
+    Keys { collection_type: &'static str },
+    Values { collection_type: &'static str },
+}
+
 impl NormalizedCollectionOperation {
     pub(crate) fn complexity(self) -> NormalizedCallComplexity {
         match self {
@@ -1735,6 +1753,62 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         _message: &str,
         _receiver_type: Option<&str>,
     ) -> Option<String> {
+        None
+    }
+
+    /// Reconstruct the adapter's native type spelling from a runtime value
+    /// domain. The shared runtime overlay owns propagation; an adapter only
+    /// translates its collection nominal/generic grammar.
+    fn runtime_value_domain_type(
+        &self,
+        owners: &[String],
+        _elements: &[String],
+        _keys: &[String],
+        _values: &[String],
+    ) -> Option<String> {
+        (owners.len() == 1).then(|| owners[0].clone())
+    }
+
+    /// Runtime nominal identities for normalized container/type shapes. These
+    /// spellings belong to the language adapter; the shared evidence overlay
+    /// must not assume that an array is named `Array`, `list`, or anything
+    /// else in the consumer language.
+    fn runtime_nil_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn runtime_array_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn runtime_hash_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn runtime_set_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Map normalized callback parameter positions to collection value
+    /// projections. Yield/destructuring conventions are language semantics,
+    /// while applying these projections to runtime domains remains shared.
+    fn runtime_collection_callback_projections(
+        &self,
+        _receiver_type: Option<&str>,
+        _message: &str,
+        parameter_count: usize,
+    ) -> Vec<RuntimeValueProjection> {
+        (parameter_count > 0)
+            .then_some(vec![RuntimeValueProjection::Element])
+            .unwrap_or_default()
+    }
+
+    fn runtime_call_result_projection(
+        &self,
+        _receiver_type: Option<&str>,
+        _message: &str,
+        _arguments: &[String],
+    ) -> Option<RuntimeCallResultProjection> {
         None
     }
 
