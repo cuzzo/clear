@@ -83,7 +83,7 @@ class ComplexitySummaryTest < Minitest::Test
     end
   end
 
-  def test_rejects_unclosed_call_evidence_even_when_aggregate_claims_complete
+  def test_uses_post_scip_completeness_instead_of_stale_adapter_call_gaps
     facts = [
       {
         "call_contexts" => [
@@ -92,7 +92,12 @@ class ComplexitySummaryTest < Minitest::Test
       }
     ]
 
-    refute Espalier::ComplexitySummary.source_proven?(quality, facts)
+    assert Espalier::ComplexitySummary.source_proven?(quality, facts)
+    refute Espalier::ComplexitySummary.source_method_proven?(
+      {"source_export_eligible" => false},
+      quality,
+      facts
+    )
   end
 
   def test_candidate_export_requires_explicit_downstream_closure

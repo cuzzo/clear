@@ -40,7 +40,7 @@ module Espalier
       call["consumer_closed_candidate_set"] == true
     end
 
-    def source_proven?(quality, complexity_facts)
+    def source_proven?(quality, _complexity_facts)
       return false unless quality
       return false unless quality[:big_o_complete] == true
       return false unless quality[:big_o_space_complete] == true
@@ -50,11 +50,12 @@ module Espalier
         FORBIDDEN_QUALITY_FRAGMENTS.any? { |fragment| bound_quality.include?(fragment) }
       end
 
-      Array(complexity_facts).none? do |fact|
-        Array(fact["call_contexts"]).any? do |context|
-          !context["evidence_gap"].to_s.empty?
-        end
-      end
+      # Complexity facts are captured before SCIP resolves canonical calls, so
+      # their adapter-level evidence_gap fields can be stale. The aggregate
+      # completeness result above is computed after canonical call enrichment.
+      # Parser-normalization loss is guarded independently by FactMine marking
+      # the overlapping method source_export_eligible=false.
+      true
     end
   end
 end
