@@ -18,6 +18,7 @@ metadata = {
   corpus: nil,
   source_revision: nil,
   indexer: nil,
+  consumer_indexers: [],
   symbol_prefix_from: nil,
   symbol_prefix_to: nil,
   compatibility: nil,
@@ -28,6 +29,9 @@ OptionParser.new do |opts|
   opts.on("--corpus ID", "Stable corpus identity (for example go-stdlib)") { |value| metadata[:corpus] = value }
   opts.on("--source-revision REV", "Source commit or release") { |value| metadata[:source_revision] = value }
   opts.on("--indexer ID", "SCIP indexer and version") { |value| metadata[:indexer] = value }
+  opts.on("--consumer-indexer ID", "Compatible consumer SCIP indexer and version (repeatable)") do |value|
+    metadata[:consumer_indexers] << value
+  end
   opts.on("--producer-version VERSION", "Override the Espalier producer version") { |value| metadata[:producer_version] = value }
   opts.on("--symbol-prefix-from PREFIX", "Relocate producer symbols from this exact prefix") do |value|
     metadata[:symbol_prefix_from] = value
@@ -210,6 +214,7 @@ output = {
     "corpus" => metadata[:corpus],
     "source_revision" => metadata[:source_revision],
     "indexer" => metadata[:indexer],
+    "consumer_indexers" => metadata[:consumer_indexers].uniq.sort,
     "symbol_relocation" => if metadata[:symbol_prefix_from] || metadata[:symbol_prefix_to]
       {
         "from" => metadata[:symbol_prefix_from],

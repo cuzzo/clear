@@ -61,6 +61,8 @@ struct SummarySource {
     complete_symbol_count: usize,
     #[serde(default)]
     indexer: Option<String>,
+    #[serde(default)]
+    consumer_indexers: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -143,7 +145,7 @@ pub fn apply_bundled(output: &mut ProfileOutput) -> Result<usize> {
             .with_context(|| format!("failed to parse bundled complexity summary {name}"))?;
         validate(&summary)
             .with_context(|| format!("failed to validate bundled complexity summary {name}"))?;
-        let required_indexer = summary
+        let producer_indexer = summary
             .source
             .as_ref()
             .and_then(|source| source.indexer.as_deref())
@@ -151,12 +153,9 @@ pub fn apply_bundled(output: &mut ProfileOutput) -> Result<usize> {
                 format!(
                     "bundled complexity summary {name} must declare its exact compatible indexer"
                 )
-            })?;
-        if !output
-            .semantic_indexes
-            .iter()
-            .any(|index| format!("{}@{}", index.tool, index.version) == required_indexer)
-        {
+        })?;
+        let source = summary.source.as_ref().expect("validated summary source");
+        if !has_compatible_indexer(output, source, producer_indexer) {
             continue;
         }
         if !is_compatible(output, &summary) {
@@ -165,6 +164,24 @@ pub fn apply_bundled(output: &mut ProfileOutput) -> Result<usize> {
         applied += apply_summary(output, &summary)?;
     }
     Ok(applied)
+}
+
+fn has_compatible_indexer(
+    output: &ProfileOutput,
+    source: &SummarySource,
+    producer_indexer: &str,
+) -> bool {
+    output.semantic_indexes.iter().any(|index| {
+        let identity = format!("{}@{}", index.tool, index.version);
+        if source.consumer_indexers.is_empty() {
+            identity == producer_indexer
+        } else {
+            source
+                .consumer_indexers
+                .iter()
+                .any(|required| required == &identity)
+        }
+    })
 }
 
 fn read_file(path: &Path) -> Result<SummaryFile> {
@@ -428,6 +445,15 @@ fn validate(summary: &SummaryFile) -> Result<()> {
                     "versioned complexity summary with exported symbols must analyze at least one method"
                 );
             }
+            if source
+                .consumer_indexers
+                .iter()
+                .any(|indexer| indexer.trim().is_empty() || !indexer.contains('@'))
+            {
+                bail!(
+                    "versioned complexity summary consumer indexers must use non-empty tool@version identities"
+                );
+            }
             if summary.schema == SCHEMA_V3 {
                 let compatibility = summary
                     .compatibility
@@ -671,6 +697,59 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("declares 2 complete symbols but contains 1")
+        );
+    }
+
+    #[test]
+    fn bundled_summary_may_name_a_distinct_consumer_indexer() {
+        let summary: SummaryFile = serde_json::from_value(serde_json::json!({
+            "schema": SCHEMA_V3,
+            "producer": {"name": "espalier", "version": "0.1.0"},
+            "source": {
+                "profile_sha256": format!("sha256:{}", "a".repeat(64)),
+                "method_count": 1,
+                "complete_symbol_count": 1,
+                "indexer": "scip-clang@0.4.0",
+                "consumer_indexers": ["scip-php@0.4.7"]
+            },
+            "compatibility": {"claims": {}},
+            "symbols": {
+                "scip-php composer php 8.4.21 strlen().": {
+                    "time": "O(N)",
+                    "space": "O(1)"
+                }
+            }
+        }))
+        .unwrap();
+        validate(&summary).unwrap();
+        let producer = ProfileOutput {
+            semantic_indexes: vec![SemanticIndex {
+                tool: "scip-clang".into(),
+                version: "0.4.0".into(),
+            }],
+            ..ProfileOutput::default()
+        };
+        let consumer = ProfileOutput {
+            semantic_indexes: vec![SemanticIndex {
+                tool: "scip-php".into(),
+                version: "0.4.7".into(),
+            }],
+            ..ProfileOutput::default()
+        };
+        let source = summary.source.as_ref().unwrap();
+        assert!(!has_compatible_indexer(
+            &producer,
+            source,
+            "scip-clang@0.4.0"
+        ));
+        assert!(has_compatible_indexer(
+            &consumer,
+            source,
+            "scip-clang@0.4.0"
+        ));
+        assert_eq!(
+            source.consumer_indexers,
+            ["scip-php@0.4.7"]
         );
     }
 
@@ -924,10 +1003,12 @@ mod tests {
             let summary: SummaryFile = serde_json::from_str(&source).unwrap();
             validate(&summary).unwrap();
             let symbol = summary.symbols.keys().next().unwrap();
-            let indexer = summary
-                .source
-                .as_ref()
-                .and_then(|source| source.indexer.as_deref())
+            let source = summary.source.as_ref().unwrap();
+            let indexer = source
+                .consumer_indexers
+                .first()
+                .map(String::as_str)
+                .or(source.indexer.as_deref())
                 .unwrap();
             let (tool, version) = indexer.split_once('@').unwrap();
             let semantic_environment = summary

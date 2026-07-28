@@ -25,6 +25,12 @@ summary. Bridge commands run after the producer profile and unrelocated summary
 exist, and may use `{profile}` and `{producer_summary}` in addition to the
 standard manifest substitutions.
 
+When implementation and consumer source require different SCIP producers, a
+manifest may declare `summary.consumer_indexers`. The generated summary retains
+the implementation indexer as producer provenance but activates only for one
+of those exact consumer `tool@version` identities. The symbol bridge remains
+responsible for proving each cross-indexer declaration identity.
+
 Current publishable mappings:
 
 | Language | Source | Indexer | Exact symbols |
