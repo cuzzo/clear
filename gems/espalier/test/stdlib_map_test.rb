@@ -9,9 +9,10 @@ class StdlibMapTest < Minitest::Test
     def initialize(raw_call_gaps: 0)
       @raw_call_gaps = raw_call_gaps
       @index_working_directory = nil
+      @profile_files = nil
     end
 
-    attr_reader :index_working_directory
+    attr_reader :index_working_directory, :profile_files
 
     def run!(command, chdir:, env: {})
       raise "missing cwd" unless File.directory?(chdir)
@@ -32,6 +33,7 @@ class StdlibMapTest < Minitest::Test
           semantic_environment = environment.fetch("claims")
           sources.slice!(environment_index, 2)
         end
+        @profile_files = sources
         File.write(output, JSON.generate({
           "input_coverage" => {
             "selected_files" => sources.length,
@@ -367,6 +369,54 @@ class StdlibMapTest < Minitest::Test
       assert File.file?(File.join(work, "selected-source", "keep.py"))
       refute File.exist?(File.join(work, "selected-source", "broken.py"))
       assert_equal File.join(work, "selected-source"), report.fetch("analysis_root")
+    end
+  end
+
+  def test_index_staging_can_include_build_inputs_without_analyzing_them
+    Dir.mktmpdir do |directory|
+      source = File.join(directory, "source")
+      work = File.join(directory, "work")
+      binary = File.join(directory, "fact-mine-rust")
+      FileUtils.mkdir_p(File.join(source, "include"))
+      File.write(File.join(source, "implementation.cc"), "int implementation() { return 1; }\n")
+      File.write(File.join(source, "include", "dependency.h"), "#define VALUE 1\n")
+      File.write(binary, "binary")
+      manifest = File.join(directory, "stdlib.yml")
+      File.write(manifest, <<~YAML)
+        schema: fact-mine.stdlib-map.v1
+        language: cpp
+        source:
+          root: source
+          revision: fake-1
+          revision_check:
+            command: ["fake-version"]
+            equals: fake-1
+          include: ["implementation.cc"]
+          stage_selected_files: true
+          stage_include: ["include/**/*"]
+        index:
+          command: ["fake-index", "{index}"]
+          expected:
+            tool: fake-scip
+            version: 1.2.3
+        summary:
+          corpus: fake-stdlib
+          output: stdlib.json.gz
+      YAML
+      runner = FakeRunner.new
+
+      report = Espalier::StdlibMap.new(
+        manifest,
+        work_dir: work,
+        fact_mine: binary,
+        runner: runner
+      ).run
+
+      stage = File.join(work, "selected-source")
+      assert File.file?(File.join(stage, "implementation.cc"))
+      assert File.file?(File.join(stage, "include", "dependency.h"))
+      assert_equal 1, report.fetch("source_files")
+      assert_equal [File.join(stage, "implementation.cc")], runner.profile_files
     end
   end
 
