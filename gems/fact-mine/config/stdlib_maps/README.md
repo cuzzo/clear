@@ -34,6 +34,8 @@ Current publishable mappings:
 | Java | JDK 21.0.12 `java.lang`/`java.util` | scip-java 0.12.3 | 2,598 |
 | Python | CPython 3.11.9 selected pure-Python core | scip-python 0.6.6 | 200 |
 | C# | .NET 10.0.10 CoreLib collections/string/array | scip-dotnet 0.2.14 | 316 |
+| Kotlin | Kotlin/JVM 2.2.0 stdlib | semanticdb-kotlinc 0.6.0 + patch | 85 |
+| C++ | libstdc++ 13.3.0 selected C++17/C++20 surfaces | scip-clang 0.4.0 | 772 unique |
 
 The checked-in exact-symbol consumers prove that the generated data changes
 the final function result, not merely call metadata:
@@ -50,10 +52,8 @@ still useful canonicalization, but it is not reported as completeness impact.
 
 The remaining SCIP languages are deliberately fail-closed:
 
-- Kotlin standard-library symbols from scip-java use `maven . .`, so a bundle
-  cannot distinguish Kotlin releases.
-- C and C++ standard-library symbols from scip-clang use `cxx . .`; neither
-  libc/libstdc++ identity nor version is present.
+- C standard-library symbols from scip-clang use `cxx . .`; the libc producer
+  and exact compiler/sysroot environment attestation are not yet published.
 - TypeScript and JavaScript built-ins resolve to versioned TypeScript `.d.ts`
   declarations. Those files have no executable bodies, while the real
   implementations belong to a particular JS engine and release.
@@ -75,3 +75,16 @@ raises completion from 755/888 (85.02%) to 765/888 (86.15%); the generated
 bundle has zero additional count impact because all overlapping calls already
 had complete fallback models, and it produces no complete/complete
 disagreements.
+
+The three C++ manifests preprocess bounded libstdc++ surfaces under the exact
+consumer compiler configuration before SCIP indexing. Because scip-clang uses
+unversioned `cxx . .` symbols, each bundle requires an opaque language-owned
+attestation of the compiler binary, target, C++ standard, macro set, effective
+generic and architecture-specific header overlays, and scip-clang binary.
+Only exact-bound `std::` rows cross the generated identity bridge. C++ template
+functions with unmodeled implicit construction, assignment, or destruction
+fail the generic source-export gate through the C++ behavior interface rather
+than being published as O(1). The eventpp, plog, and proxy audits join 2, 30,
+and 4 calls respectively with zero complete/complete disagreements; all were
+already covered by complete fallback models, so their function-completion
+counts do not change.

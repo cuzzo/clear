@@ -124,6 +124,30 @@ coverage unchanged at 207/229 (90.39%): its currently exported symbols do not
 intersect Picnic's unresolved stdlib calls. It therefore adds verified stdlib
 coverage without overstating the measured consumer gain.
 
+The three `cpp-libstdcxx.13.3.0-*.json.gz` bundles contain 772 unique exact
+`std::` symbols from selected libstdc++ 13.3.0 container, string/stream, and
+memory surfaces. The producer preprocesses those surfaces with the pinned
+compiler configuration, then analyzes the resulting implementation bodies
+with the same generic CFG/DFG pipeline. Compatibility does not trust
+scip-clang's unversioned `cxx . .` package text: it requires exact digests for
+the compiler, indexer, macro set, and effective generic/architecture header
+overlay, plus the target and selected C++ standard.
+
+Only rows whose analyzed bound quality is exact are published. Template bodies
+with dependent implicit value construction, assignment, or destruction are
+marked ineligible by the C++ language adapter, preventing generic
+`std::swap<T>` from being incorrectly exported as O(1). Rebuild each surface
+through its manifest:
+
+```bash
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/cpp-libstdcxx-13.3.0-cxx17-containers.yml
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/cpp-libstdcxx-13.3.0-cxx17-strings.yml
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/cpp-libstdcxx-13.3.0-cxx20-memory.yml
+```
+
 FactMine discovers all `.json.gz` files in this directory at build time.
 Adding a generated bundle therefore requires no language-specific registration
 code. `../stdlib_maps/support.yml` records the fail-closed status of maintained

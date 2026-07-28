@@ -1,0 +1,55 @@
+schema: fact-mine.stdlib-map.v1
+language: cpp
+
+source:
+  root_command:
+    - ruby
+    - "{manifest_dir}/cpp/materialize_source.rb"
+    - "{workspace_root}"
+  revision: libstdcxx-13.3.0-ubuntu24.04-cxx17-strings
+  revision_check:
+    command:
+      - ruby
+      - "{manifest_dir}/cpp/revision.rb"
+      - "{source_root}"
+    equals: "libstdcxx-13.3.0 effective sha256:cab188eb89bb4b5cf99c97a16f9d1d3196d1d2ce9536ea70a9f74b782bc7bec2"
+  include:
+    - "preprocessed/c++17/strings.cpp"
+  stage_selected_files: true
+
+index:
+  command:
+    - ruby
+    - "{manifest_dir}/cpp/index_stdlib.rb"
+    - "{source_root}"
+    - "{index}"
+    - c++17
+    - strings
+  working_directory: "{source_root}"
+  output: libstdcxx.scip
+  expected:
+    tool: scip-clang
+    version: "0.4.0"
+
+compatibility:
+  command:
+    - ruby
+    - "{manifest_dir}/cpp/semantic_environment.rb"
+    - "{source_root}"
+    - "{environment}"
+  working_directory: "{source_root}"
+
+soundness:
+  minimum_export_eligible_methods: 2000
+
+summary:
+  corpus: libstdcxx-13.3.0-cxx17-strings
+  output: ../complexity_summaries/cpp-libstdcxx.13.3.0-cxx17-strings.json.gz
+  minimum_symbols: 420
+  symbol_bridge:
+    command:
+      - ruby
+      - "{manifest_dir}/cpp/build_symbol_bridge.rb"
+      - "{producer_summary}"
+      - "{symbol_bridge}"
+    working_directory: "{source_root}"
