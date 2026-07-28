@@ -91,6 +91,14 @@ The remaining SCIP languages are deliberately fail-closed:
   scip-ruby must first give core classes a stable, versioned runtime identity;
   a CRuby producer can then use the cross-indexer bridge, subject to the same
   callback and VM-state cost preservation required for PHP.
+- The SCIP ecosystem also includes Scala through scip-java, Visual Basic
+  through scip-dotnet, and Dart through scip-dart. They were previously absent
+  from the inventory. FactMine does not yet have syntax/CFG/DFG adapters for
+  those languages, so claiming stdlib quality would be meaningless. Once an
+  adapter exists, Scala can immediately reuse exact JDK rows and Visual Basic
+  can reuse exact CoreLib rows because those bundles join on compiler symbols,
+  not the source language. Dart additionally needs a pinned SDK-source
+  manifest.
 
 These are compatibility failures, not requests for manual overrides. Move an
 entry to `bundled` only after its required identity/body capability exists and a

@@ -48,3 +48,20 @@ languages:
     status: blocked
     blocker: project_scoped_core_symbols
     required_fix: scip-ruby must emit core classes and methods under a stable runtime package and version instead of the consumer project's gem/workspace identity; a CRuby producer must then preserve native callback and VM-state costs.
+  scala:
+    status: blocked
+    blocker: fact_mine_language_adapter_missing
+    indexer: scip-java
+    reusable_bundle: java-21.0.12.yml
+    required_fix: Add a Scala syntax/CFG/DFG adapter and validate scip-java's Scala symbols; JDK calls can then reuse the existing exact Java bundle before a scala-library manifest is added.
+  visual_basic:
+    status: blocked
+    blocker: fact_mine_language_adapter_missing
+    indexer: scip-dotnet
+    reusable_bundle: csharp-10.0.10.yml
+    required_fix: Add a Visual Basic syntax/CFG/DFG adapter and validate scip-dotnet's language-neutral assembly symbols; CoreLib calls can then reuse the existing exact C# producer bundle.
+  dart:
+    status: blocked
+    blocker: fact_mine_language_adapter_missing
+    indexer: scip-dart
+    required_fix: Add a Dart syntax/CFG/DFG adapter, pin a scip-dart and Dart SDK pair, and express the SDK source mapping as a standard manifest.
