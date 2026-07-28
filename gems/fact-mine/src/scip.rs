@@ -353,7 +353,7 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
             .collect::<BTreeSet<_>>();
         if authority == IndexAuthority::ObservedOpen {
             stats.matched_occurrences += 1;
-            if call.target_provenance.as_deref() == Some("scip") {
+            if call.target.is_some() {
                 continue;
             }
             apply_observed_open_candidates(
@@ -4670,7 +4670,7 @@ void run_dependent() {
     }
 
     #[test]
-    fn compiler_scip_identity_outranks_a_later_runtime_observation() {
+    fn resolved_static_identity_outranks_a_later_runtime_observation() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("demo.rb");
         let source = "def caller\n  value.call\nend\n";
@@ -4697,7 +4697,7 @@ void run_dependent() {
         let mut runtime_call = call("caller", &path, "call", [2, 2, 2, 12]);
         runtime_call.target = Some("compiler-target".into());
         runtime_call.semantic_symbol = Some("compiler symbol".into());
-        runtime_call.target_provenance = Some("scip".into());
+        runtime_call.target_provenance = Some("source_exact".into());
         let mut output = ProfileOutput::default();
         output.methods = vec![caller_method];
         output.calls = vec![runtime_call];
@@ -4709,7 +4709,10 @@ void run_dependent() {
             output.calls[0].semantic_symbol.as_deref(),
             Some("compiler symbol")
         );
-        assert_eq!(output.calls[0].target_provenance.as_deref(), Some("scip"));
+        assert_eq!(
+            output.calls[0].target_provenance.as_deref(),
+            Some("source_exact")
+        );
     }
 
     #[test]

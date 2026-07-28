@@ -193,4 +193,22 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
       )
     end
   end
+
+  it "never re-enters NilKill's collection lock or leaks tracing failures" do
+    require File.join(
+      NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace"
+    )
+    lock = NilKillRuntimeTrace.lock
+    expect do
+      lock.synchronize do
+        trace = Object.new
+        trace.define_singleton_method(:event) { raise "must not run" }
+        NilKillRuntimeTrace.record_runtime_scip_call(trace)
+      end
+    end.not_to raise_error
+
+    broken_trace = Object.new
+    broken_trace.define_singleton_method(:defined_class) { raise "metadata unavailable" }
+    expect { NilKillRuntimeTrace.record_runtime_scip_call(broken_trace) }.not_to raise_error
+  end
 end

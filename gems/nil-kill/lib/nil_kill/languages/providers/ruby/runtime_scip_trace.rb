@@ -7,22 +7,27 @@ module NilKillRuntimeTrace
   @runtime_calls = {}
   @runtime_package_by_path = {}
 
-  def self.runtime_callsite(skip_first_target: false)
-    skipped_target = false
-    Thread.each_caller_location do |location|
-      raw = location.absolute_path || location.path
-      next unless raw
+  def self.record_runtime_scip_line(tp)
+    path = abs_path(tp.path)
+    return unless target_path?(path)
 
-      path = abs_path(raw)
-      next if path == SELF_ABS || !target_path?(path)
-      if skip_first_target && !skipped_target
-        skipped_target = true
-        next
-      end
+    Thread.current[:__nil_kill_runtime_scip_callsite] = {
+      path: path,
+      line: src_line(path, tp.lineno),
+    }
+  end
 
-      return { path: path, line: location.lineno }
-    end
-    nil
+  def self.enter_runtime_scip_ruby_call(tp)
+    stack = (Thread.current[:__nil_kill_runtime_scip_callsite_stack] ||= [])
+    caller = Thread.current[:__nil_kill_runtime_scip_callsite]
+    record_runtime_scip_call(tp)
+    stack << caller
+    Thread.current[:__nil_kill_runtime_scip_callsite] = nil
+  end
+
+  def self.leave_runtime_scip_ruby_call
+    stack = Thread.current[:__nil_kill_runtime_scip_callsite_stack]
+    Thread.current[:__nil_kill_runtime_scip_callsite] = stack&.pop
   end
 
   def self.runtime_package(path, native:)
@@ -74,13 +79,18 @@ module NilKillRuntimeTrace
   def self.record_runtime_scip_call(tp)
     return if Thread.current[:__nil_kill_runtime_scip] ||
       Thread.current[:__nil_kill_collection_hook]
+    # Existing NilKill recorders also use this mutex. Metadata discovery may
+    # execute instrumented Ruby (or raise through an instrumented rescue path),
+    # so never enter this recorder while the current thread owns that lock.
+    return if @lock.respond_to?(:owned?) && @lock.owned?
 
     Thread.current[:__nil_kill_runtime_scip] = true
     owner = method_owner(tp.defined_class)
     return unless owner
+    return if owner[0] == "NilKillRuntimeTrace"
 
     native = tp.event == :c_call
-    callsite = runtime_callsite(skip_first_target: !native)
+    callsite = Thread.current[:__nil_kill_runtime_scip_callsite]
     return unless callsite
 
     callee_path = native ? nil : abs_path(tp.path)
@@ -96,7 +106,7 @@ module NilKillRuntimeTrace
       name: tp.method_id.to_s,
       kind: owner[1],
       path: callee_path,
-      line: native ? nil : tp.lineno,
+      line: native ? nil : src_line(callee_path, tp.lineno),
       native: native,
       receiver_type: class_name(tp.self),
     }.merge(package)
@@ -131,12 +141,27 @@ module NilKillRuntimeTrace
       })
       record[:count] += 1
     end
+  rescue StandardError
+    # Tracing is observational and must never alter application behavior.
+    # Unavailable metadata is omitted instead of escaping into user code.
+    nil
   ensure
     Thread.current[:__nil_kill_runtime_scip] = nil
   end
 
   def self.install_runtime_scip_trace
-    TracePoint.new(:call, :c_call) { |trace| record_runtime_scip_call(trace) }.enable
+    TracePoint.new(:line, :call, :return, :c_call) do |trace|
+      case trace.event
+      when :line
+        record_runtime_scip_line(trace)
+      when :call
+        enter_runtime_scip_ruby_call(trace)
+      when :return
+        leave_runtime_scip_ruby_call
+      when :c_call
+        record_runtime_scip_call(trace)
+      end
+    end.enable
   end
 
   def self.dump_runtime_scip_calls(pid)
