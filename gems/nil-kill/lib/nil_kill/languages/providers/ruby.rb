@@ -811,6 +811,7 @@ module NilKill
                            [element_domain]
                          end
             parameters.zip(candidates).each do |name, candidate|
+              candidate ||= scalar_domain.call([])
               classes = Array(candidate[:owners]).map(&:to_s).uniq.sort
               next if classes.empty?
 

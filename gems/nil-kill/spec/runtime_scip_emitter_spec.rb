@@ -1177,6 +1177,48 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
     end
   end
 
+  it "fails closed when destructuring exposes more block parameters than known domains" do
+    Dir.mktmpdir("nil-kill-runtime-scip-destructuring", NilKill::ROOT) do |root|
+      source = File.join(root, "worker.rb")
+      File.write(source, <<~RUBY)
+        class Worker
+          def observed(value)
+            value.to_s
+          end
+
+          def inferred(pairs)
+            pairs.each { |key, value| value.to_s }
+          end
+        end
+      RUBY
+      event = {
+        "schema_version" => 1,
+        "event" => "runtime_call",
+        "language" => "ruby",
+        "run_id" => "destructuring",
+        "caller" => {
+          "class" => "Worker", "method" => "observed", "kind" => "instance",
+          "path" => source, "line" => 2,
+        },
+        "callsite" => { "path" => source, "line" => 3 },
+        "callee" => {
+          "owner" => "String", "name" => "to_s", "kind" => "instance",
+          "native" => true, "receiver_type" => "String",
+          "package_manager" => "ruby", "package" => "ruby",
+          "version" => RUBY_VERSION,
+        },
+        "count" => 1,
+      }
+
+      expect do
+        NilKill::Languages::Providers::Ruby.new.runtime_scip_inferred_events(
+          events: [event],
+          root: root
+        )
+      end.not_to raise_error
+    end
+  end
+
   it "propagates appended element shapes from initially empty collections" do
     Dir.mktmpdir("nil-kill-runtime-scip-appended-shapes", NilKill::ROOT) do |root|
       source = File.join(root, "worker.rb")
