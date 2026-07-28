@@ -702,6 +702,10 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
     // symbol parsing and declaration syntax, then apply the generic unique
     // project join.
     crate::profile::reapply_generated_callable_costs(output);
+    // Runtime SCIP can likewise be the first source of a generated record
+    // reader's receiver identity. Re-run the same normalized declaration
+    // contract after semantic identities are imported.
+    crate::profile::reapply_generated_record_costs(output);
     // SCIP may be the first proof of the producer call's exact project target.
     // Re-run direct-result propagation after importing those identities so an
     // `auto value = factory(); value.method()` chain can consume the declared

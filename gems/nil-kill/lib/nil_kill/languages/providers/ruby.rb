@@ -98,7 +98,7 @@ module NilKill
           callee = event.fetch("callee")
           path = File.expand_path(callsite.fetch("path"), root)
           return [] unless File.expand_path(caller.fetch("path"), root) == path
-          return [] if callee["native"] == true &&
+          class_constructor = callee["native"] == true &&
             callee["owner"].to_s == "Class" && callee["name"].to_s == "new"
 
           method = ruby_runtime_scip_methods(path).find do |candidate|
@@ -110,6 +110,11 @@ module NilKill
           source_name = callee.fetch("name").to_s == "initialize" ?
             "new" : callee.fetch("name").to_s
           calls = method.fetch(:calls).select { |call| call.fetch(:name) == source_name }
+          if class_constructor
+            calls = calls.select do |call|
+              call[:receiver_owner].nil? && call[:receiver_name].nil?
+            end
+          end
           same_line = calls.select do |call|
             call.fetch(:line) == callsite.fetch("line").to_i
           end
@@ -166,8 +171,6 @@ module NilKill
           end
           observed = eligible.each_with_object(Hash.new { |hash, key| hash[key] = {} }) do |event, index|
             callee = event.fetch("callee")
-            next if callee["native"] == true &&
-              callee["owner"].to_s == "Class" && callee["name"].to_s == "new"
 
             selector = callee.fetch("name").to_s == "initialize" ?
               "new" : callee.fetch("name").to_s
@@ -340,6 +343,7 @@ module NilKill
               assignments = Hash.new { |hash, name| hash[name] = [] }
               ivar_assignments = Hash.new { |hash, name| hash[name] = [] }
               block_bindings = []
+              collection_writes = []
               collect = lambda do |child|
                 return if child.is_a?(Prism::DefNode)
 
@@ -349,6 +353,16 @@ module NilKill
                   ivar_assignments[child.name.to_s] <<
                     ruby_runtime_scip_value_shape(child.value)
                 elsif child.is_a?(Prism::CallNode)
+                  receiver_name = ruby_runtime_scip_receiver_name(child.receiver)
+                  if receiver_name
+                    collection_writes << {
+                      receiver_name: receiver_name,
+                      message: child.name.to_s,
+                      arguments: Array(child.arguments&.arguments).map do |argument|
+                        ruby_runtime_scip_value_shape(argument)
+                      end,
+                    }
+                  end
                   block_parameters = ruby_runtime_scip_block_parameter_names(child.block)
                   unless block_parameters.empty?
                     block_bindings << {
@@ -357,6 +371,9 @@ module NilKill
                         ruby_runtime_scip_value_shape(child.receiver),
                       message: child.name.to_s,
                       parameters: block_parameters,
+                      arguments: Array(child.arguments&.arguments).map do |argument|
+                        ruby_runtime_scip_value_shape(argument)
+                      end,
                     }
                   end
                   location =
@@ -403,6 +420,7 @@ module NilKill
                 assignments: assignments,
                 ivar_assignments: ivar_assignments,
                 block_bindings: block_bindings,
+                collection_writes: collection_writes,
               }
               # Nested definitions are separate caller domains.
               node.compact_child_nodes.each { |child| visit.call(child) }
@@ -571,6 +589,18 @@ module NilKill
           case node
           when Prism::LocalVariableReadNode
             { kind: :alias, name: node.name.to_s }
+          when Prism::ArrayNode
+            {
+              kind: :array,
+              elements: node.elements.map { |element| ruby_runtime_scip_value_shape(element) },
+            }
+          when Prism::HashNode
+            pairs = node.elements.grep(Prism::AssocNode)
+            {
+              kind: :hash,
+              keys: pairs.map { |pair| ruby_runtime_scip_value_shape(pair.key) },
+              values: pairs.map { |pair| ruby_runtime_scip_value_shape(pair.value) },
+            }
           when Prism::CallNode
             receiver_owner = ruby_runtime_scip_receiver_owner(node.receiver)
             if node.name == :new && receiver_owner
@@ -586,6 +616,7 @@ module NilKill
                   ruby_runtime_scip_value_shape(argument)
                 end,
                 argument_count: node.arguments&.arguments&.length.to_i,
+                block_result: ruby_runtime_scip_block_result_shape(node.block),
               }
             end
           else
@@ -605,34 +636,35 @@ module NilKill
           ivar_owners.each do |name, classes|
             owners[name] = (owners.fetch(name, []) | classes).sort
           end
-          assignments = method.fetch(:assignments, {})
-          assignments.length.times do
-            changed = false
-            assignments.each do |name, values|
-              inferred_domains = values.map do |value|
-                ruby_runtime_scip_value_domain(
-                  value, :owners, owners, {}, {}, {}, runtime_observations
-                )
-              end
-              next if inferred_domains.any?(&:empty?)
-
-              inferred = inferred_domains.flatten.map(&:to_s).uniq.sort
-              inferred |= owners.fetch(name, [])
-              next if owners[name] == inferred
-
-              owners[name] = inferred
-              changed = true
-            end
-            break unless changed
-          end
           elements = runtime_observations.fetch(:parameter_elements)
             .fetch(method_key, {}).transform_values(&:dup)
           keys = runtime_observations.fetch(:parameter_keys)
             .fetch(method_key, {}).transform_values(&:dup)
           values = runtime_observations.fetch(:parameter_values)
             .fetch(method_key, {}).transform_values(&:dup)
-          assignments.length.times do
+          assignments = method.fetch(:assignments, {})
+          iterations = assignments.length +
+            method.fetch(:block_bindings, []).length +
+            method.fetch(:collection_writes, []).length + 1
+          iterations.times do
             changed = false
+            assignments.each do |name, assigned|
+              domains = assigned.map do |value|
+                ruby_runtime_scip_value_domain(
+                  value, :owners, owners, elements, keys, values,
+                  runtime_observations
+                )
+              end
+              unless domains.any?(&:empty?)
+                inferred = (
+                  domains.flatten.map(&:to_s).uniq | owners.fetch(name, [])
+                ).sort
+                if owners[name] != inferred
+                  owners[name] = inferred
+                  changed = true
+                end
+              end
+            end
             assignments.each do |name, assigned|
               {
                 elements: elements,
@@ -655,9 +687,42 @@ module NilKill
                 changed = true
               end
             end
+            changed = ruby_runtime_scip_apply_block_bindings(
+              method.fetch(:block_bindings, []),
+              owners,
+              elements,
+              keys,
+              values,
+              runtime_observations
+            ) || changed
+            changed = ruby_runtime_scip_apply_collection_writes(
+              method.fetch(:collection_writes, []),
+              owners,
+              elements,
+              keys,
+              values,
+              runtime_observations
+            ) || changed
             break unless changed
           end
-          method.fetch(:block_bindings, []).each do |binding|
+          {
+            owners: owners,
+            elements: elements,
+            keys: keys,
+            values: values,
+          }
+        end
+
+        def ruby_runtime_scip_apply_block_bindings(
+          bindings,
+          owners,
+          elements,
+          keys,
+          values,
+          runtime_observations
+        )
+          changed = false
+          bindings.each do |binding|
             collection = binding[:receiver_name].to_s
             receiver_shape = binding[:receiver_shape]
             collection_owner = owners.fetch(collection, [])
@@ -685,35 +750,202 @@ module NilKill
               ) if Array(collection_values).empty?
             end
             parameters = binding.fetch(:parameters)
+            element_domain = {
+              owners: collection_elements,
+              elements: [],
+              keys: collection_keys,
+              values: collection_values,
+            }
+            scalar_domain = lambda do |classes|
+              { owners: classes, elements: [], keys: [], values: [] }
+            end
+            argument_domain = lambda do |argument|
+              next scalar_domain.call([]) unless argument
+
+              {
+                owners: ruby_runtime_scip_value_domain(
+                  argument, :owners, owners, elements, keys, values,
+                  runtime_observations
+                ),
+                elements: ruby_runtime_scip_value_domain(
+                  argument, :elements, owners, elements, keys, values,
+                  runtime_observations
+                ),
+                keys: ruby_runtime_scip_value_domain(
+                  argument, :keys, owners, elements, keys, values,
+                  runtime_observations
+                ),
+                values: ruby_runtime_scip_value_domain(
+                  argument, :values, owners, elements, keys, values,
+                  runtime_observations
+                ),
+              }
+            end
+            arguments = binding.fetch(:arguments, [])
             candidates = case [collection_owner.one? && collection_owner.first, binding[:message]]
                          in ["Hash", "each" | "each_pair" | "map"]
-                           [collection_keys, collection_values]
+                           [
+                             scalar_domain.call(collection_keys),
+                             scalar_domain.call(collection_values),
+                           ]
                          in ["Hash", "each_key"]
-                           [collection_keys]
+                           [scalar_domain.call(collection_keys)]
                          in ["Hash", "each_value"]
-                           [collection_values]
+                           [scalar_domain.call(collection_values)]
                          in [_, "each_with_index"]
-                           [collection_elements, ["Integer"]]
+                           [element_domain, scalar_domain.call(["Integer"])]
+                         in [_, "each_with_object"]
+                           [element_domain, argument_domain.call(arguments[0])]
+                         in [_, "inject" | "reduce"]
+                           accumulator = arguments.empty? ?
+                             element_domain : argument_domain.call(arguments[0])
+                           [accumulator, element_domain]
+                         in [_, "each_slice" | "each_cons"]
+                           [{
+                             owners: ["Array"],
+                             elements: collection_elements,
+                             keys: collection_keys,
+                             values: collection_values,
+                           }]
                          else
-                           [collection_elements]
+                           [element_domain]
                          end
-            parameters.zip(candidates).each do |name, classes|
-              classes = Array(classes).map(&:to_s).uniq.sort
+            parameters.zip(candidates).each do |name, candidate|
+              classes = Array(candidate[:owners]).map(&:to_s).uniq.sort
               next if classes.empty?
 
-              owners[name] = (owners.fetch(name, []) | classes).sort
+              inferred_owners = (owners.fetch(name, []) | classes).sort
+              if owners[name] != inferred_owners
+                owners[name] = inferred_owners
+                changed = true
+              end
+              if classes.include?("Array")
+                inferred_elements = (
+                  elements.fetch(name, []) | Array(candidate[:elements])
+                ).sort
+                if elements[name] != inferred_elements
+                  elements[name] = inferred_elements
+                  changed = true
+                end
+              end
               next unless classes.include?("Hash")
 
-              keys[name] = (keys.fetch(name, []) | Array(collection_keys)).sort
-              values[name] = (values.fetch(name, []) | Array(collection_values)).sort
+              inferred_keys = (keys.fetch(name, []) | Array(candidate[:keys])).sort
+              if keys[name] != inferred_keys
+                keys[name] = inferred_keys
+                changed = true
+              end
+              inferred_values = (values.fetch(name, []) | Array(candidate[:values])).sort
+              if values[name] != inferred_values
+                values[name] = inferred_values
+                changed = true
+              end
             end
           end
-          {
-            owners: owners,
-            elements: elements,
-            keys: keys,
-            values: values,
-          }
+          changed
+        end
+
+        def ruby_runtime_scip_apply_collection_writes(
+          writes,
+          owners,
+          elements,
+          keys,
+          values,
+          runtime_observations
+        )
+          changed = false
+          writes.each do |write|
+            receiver = write.fetch(:receiver_name)
+            arguments = write.fetch(:arguments)
+            updates = case write.fetch(:message)
+                      when "<<", "push", "append", "unshift"
+                        {
+                          elements: arguments.flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :owners, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                          keys: arguments.flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :keys, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                          values: arguments.flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :values, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                        }
+                      when "concat"
+                        {
+                          elements: arguments.flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :elements, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                          keys: arguments.flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :keys, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                          values: arguments.flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :values, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                        }
+                      when "[]=", "store"
+                        {
+                          keys: (arguments[0] ? [arguments[0]] : []).flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :owners, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                          values: (arguments[1] ? [arguments[1]] : []).flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :owners, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                        }
+                      when "merge!", "update"
+                        {
+                          keys: arguments.flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :keys, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                          values: arguments.flat_map do |argument|
+                            ruby_runtime_scip_value_domain(
+                              argument, :values, owners, elements, keys, values,
+                              runtime_observations
+                            )
+                          end,
+                        }
+                      else
+                        {}
+                      end
+            updates.each do |domain, inferred|
+              inferred = Array(inferred).map(&:to_s).uniq
+              next if inferred.empty?
+
+              domains = { elements: elements, keys: keys, values: values }.fetch(domain)
+              merged = (domains.fetch(receiver, []) | inferred).sort
+              next if domains[receiver] == merged
+
+              domains[receiver] = merged
+              changed = true
+            end
+          end
+          changed
         end
 
         def ruby_runtime_scip_ivar_owners(
@@ -797,6 +1029,29 @@ module NilKill
           }
           return [value[:owner]].compact if value[:kind] == :owner && domain == :owners
           return local_domains.fetch(domain).fetch(value[:name], []) if value[:kind] == :alias
+          if value[:kind] == :array
+            return ["Array"] if domain == :owners
+
+            child_domain = domain == :elements ? :owners : domain
+            return Array(value[:elements]).flat_map do |element|
+              ruby_runtime_scip_value_domain(
+                element, child_domain, owners, elements, keys, values,
+                runtime_observations
+              )
+            end.map(&:to_s).uniq.sort
+          end
+          if value[:kind] == :hash
+            return ["Hash"] if domain == :owners
+
+            shapes = domain == :keys ? value[:keys] :
+              (domain == :values ? value[:values] : [])
+            return Array(shapes).flat_map do |shape|
+              ruby_runtime_scip_value_domain(
+                shape, :owners, owners, elements, keys, values,
+                runtime_observations
+              )
+            end.map(&:to_s).uniq.sort
+          end
           return [] unless value[:kind] == :call
 
           message = value[:message]
@@ -845,7 +1100,7 @@ module NilKill
                        else
                          []
                        end
-                     when "first"
+                     when "first", "last", "pop", "shift", "sample"
                        if value[:argument_count].to_i.positive?
                          domain == :owners ? ["Array"] : receiver_domain
                        elsif domain == :owners
@@ -872,7 +1127,21 @@ module NilKill
                            runtime_observations
                          ) : [])
                      when "map", "filter_map", "flat_map"
-                       domain == :owners ? ["Array"] : []
+                       if domain == :owners
+                         ["Array"]
+                       elsif domain == :elements && value[:block_result]
+                         ruby_runtime_scip_value_domain(
+                           value[:block_result], :owners, owners, elements, keys,
+                           values, runtime_observations
+                         )
+                       elsif %i[keys values].include?(domain) && value[:block_result]
+                         ruby_runtime_scip_value_domain(
+                           value[:block_result], domain, owners, elements, keys,
+                           values, runtime_observations
+                         )
+                       else
+                         []
+                       end
                      when "merge"
                        receiver_owners.include?("Hash") && domain == :owners ?
                          ["Hash"] : receiver_domain
@@ -904,6 +1173,14 @@ module NilKill
             end
           end
           (Array(observed) | Array(inferred)).map(&:to_s).uniq.sort
+        end
+
+        def ruby_runtime_scip_block_result_shape(block)
+          return unless block&.respond_to?(:body)
+
+          body = block.body
+          node = body.is_a?(Prism::StatementsNode) ? body.body.last : body
+          ruby_runtime_scip_value_shape(node) if node
         end
 
         def ruby_runtime_scip_block_parameter_names(block)

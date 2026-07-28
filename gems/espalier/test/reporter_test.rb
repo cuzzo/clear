@@ -6,6 +6,18 @@ require "fileutils"
 require_relative "../lib/espalier"
 
 class ReporterTest < Minitest::Test
+  def test_from_yaml_file_constructs_reporter_from_real_yaml
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "manifest.yml")
+      File.write(path, YAML.dump([{ module: "Example", functions: [] }]))
+
+      reporter = Espalier::Reporter.from_yaml_file(path, root: dir)
+
+      assert_instance_of Espalier::Reporter, reporter
+      assert_includes reporter.to_markdown, "Modules/classes indexed: 1"
+    end
+  end
+
   def test_report_ranks_architecture_specific_findings
     manifest = [
       {

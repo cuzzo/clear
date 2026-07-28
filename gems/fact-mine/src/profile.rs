@@ -2073,10 +2073,15 @@ fn apply_generated_record_costs(
         let Some(language) = source_languages.get(call.source.as_str()).copied() else {
             continue;
         };
+        let semantic_receiver = call.semantic_symbol.as_deref().and_then(|symbol| {
+            crate::syntax::normalized_behavior::behavior_for_name(language)?
+                .external_symbol_owner(symbol)
+        });
         let receiver = call
             .receiver_type
             .as_deref()
             .or(call.receiver_symbol.as_deref())
+            .or(semantic_receiver.as_deref())
             .unwrap_or(call.receiver.as_str());
         let matching_contracts = declarations
             .iter()
@@ -2103,12 +2108,33 @@ fn apply_generated_record_costs(
         call.complexity_provenance = Some("generated_record_contract".to_string());
         call.complexity_bound_quality =
             Some("upper_bound_normalized_declaration_contract".to_string());
-        call.complexity_candidates = matching_contracts.into_iter().map(str::to_string).collect();
+        call.complexity_candidates = matching_contracts
+            .iter()
+            .map(|contract| (*contract).to_string())
+            .collect();
+        if call.receiver_symbol.is_none() {
+            call.receiver_symbol = matching_contracts
+                .iter()
+                .next()
+                .map(|contract| (*contract).to_string());
+            call.receiver_symbol_origin = call
+                .receiver_symbol
+                .as_ref()
+                .map(|_| "semantic_generated_record_contract".to_string());
+        }
         call.complexity_missing_kind = None;
         call.unresolved_reason = None;
         call.resolution_missing_proof = None;
         call.empty_domain_cause = None;
     }
+}
+
+pub(crate) fn reapply_generated_record_costs(output: &mut ProfileOutput) {
+    apply_generated_record_costs(
+        &output.struct_declarations,
+        &output.methods,
+        &mut output.calls,
+    );
 }
 
 pub(crate) fn reapply_generated_callable_costs(output: &mut ProfileOutput) {
@@ -7760,9 +7786,64 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             }
         })
         .collect::<Vec<_>>();
+    remove_binding_receiver_pseudo_calls(&mut calls);
     propagate_direct_call_result_receiver_types(&mut calls, language, behavior);
     propagate_collection_callback_parameter_types(&mut calls, document, language, behavior);
     calls
+}
+
+fn remove_binding_receiver_pseudo_calls(calls: &mut Vec<CallRecord>) {
+    let binding_receivers = calls
+        .iter()
+        .filter(|call| {
+            matches!(
+                call.receiver_binding_kind.as_str(),
+                "parameter" | "local" | "state"
+            )
+        })
+        .filter_map(|call| {
+            Some((
+                call.source.clone(),
+                call.path.clone(),
+                call.receiver_call_span?,
+                call.receiver.clone(),
+            ))
+        })
+        .collect::<BTreeSet<_>>();
+    if binding_receivers.is_empty() {
+        return;
+    }
+
+    let pseudo_ids = calls
+        .iter()
+        .filter(|call| call.implicit_receiver && call.argument_count == 0)
+        .filter(|call| {
+            binding_receivers.contains(&(
+                call.source.clone(),
+                call.path.clone(),
+                call.span,
+                call.message.clone(),
+            ))
+        })
+        .map(|call| call.id.clone())
+        .collect::<BTreeSet<_>>();
+    if pseudo_ids.is_empty() {
+        return;
+    }
+
+    for call in calls.iter_mut() {
+        if call.receiver_call_span.is_some_and(|span| {
+            binding_receivers.contains(&(
+                call.source.clone(),
+                call.path.clone(),
+                span,
+                call.receiver.clone(),
+            ))
+        }) {
+            call.receiver_call_span = None;
+        }
+    }
+    calls.retain(|call| !pseudo_ids.contains(&call.id));
 }
 
 fn propagate_direct_call_result_receiver_types(
@@ -7774,9 +7855,17 @@ fn propagate_direct_call_result_receiver_types(
         let producers = calls
             .iter()
             .filter_map(|call| {
+                let receiver_type = call
+                    .receiver_type
+                    .clone()
+                    .or_else(|| call.receiver_symbol.clone())
+                    .or_else(|| {
+                        (call.receiver_kind == "type" && !call.receiver.is_empty())
+                            .then(|| call.receiver.clone())
+                    })?;
                 Some((
                     (call.source.clone(), call.path.clone(), call.span),
-                    (call.message.clone(), call.receiver_type.clone()?),
+                    (call.message.clone(), receiver_type),
                 ))
             })
             .collect::<BTreeMap<_, _>>();
@@ -7791,7 +7880,13 @@ fn propagate_direct_call_result_receiver_types(
                 continue;
             };
             let Some(receiver_type) = behavior
-                .propagated_collection_return_type(producer_message, Some(producer_receiver_type))
+                .static_return_type(producer_message, Some(producer_receiver_type))
+                .or_else(|| {
+                    behavior.propagated_collection_return_type(
+                        producer_message,
+                        Some(producer_receiver_type),
+                    )
+                })
             else {
                 continue;
             };

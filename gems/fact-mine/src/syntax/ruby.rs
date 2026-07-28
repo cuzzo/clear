@@ -931,6 +931,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
 
     fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
         scip_ruby_descriptor(symbol)
+            .or_else(|| runtime_ruby_dependency_descriptor(symbol))
             .and_then(ruby_descriptor_parts)
             .map(|(owner, _)| owner.trim_matches('`').replace('/', "::"))
     }
@@ -1721,6 +1722,9 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         }
         if message == "class" {
             return Some("Class".to_string());
+        }
+        if r == "Regexp" && message == "last_match" {
+            return Some("T.nilable(MatchData)".to_string());
         }
         if r == "String" {
             if message == "upcase"

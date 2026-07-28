@@ -3319,6 +3319,153 @@ end
 }
 
 #[test]
+fn ruby_chained_stdlib_return_types_propagate_to_nested_receivers() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"def owner_name
+  "Outer::Inner".split("::").last.to_s
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.function == "owner_name")
+        .collect::<Vec<_>>();
+
+    let last = calls
+        .iter()
+        .find(|call| call.message == "last")
+        .context("missing nested Array#last")?;
+    assert_eq!(
+        last.receiver_type.as_deref(),
+        Some("T::Array[String]"),
+        "String#split's language-owned return contract must type Array#last"
+    );
+    assert_eq!(last.known_time_complexity.as_deref(), Some("O(1)"));
+
+    let to_s = calls
+        .iter()
+        .find(|call| call.message == "to_s")
+        .context("missing nested #to_s")?;
+    assert_eq!(
+        to_s.receiver_type.as_deref(),
+        Some("T.nilable(String)"),
+        "Array#last's language-owned return contract must type the next receiver"
+    );
+    assert!(to_s.known_time_complexity.is_some());
+    assert!(to_s.known_space_complexity.is_some());
+    Ok(())
+}
+
+#[test]
+fn ruby_default_parameter_receiver_is_not_emitted_as_a_phantom_call() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"def build(evidence, root: evidence["root"])
+  [root, evidence["owners"]]
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.function == "build")
+        .collect::<Vec<_>>();
+
+    assert!(
+        calls.iter().all(|call| call.message != "evidence"),
+        "a parameter used as an index receiver must not become an implicit call"
+    );
+    assert_eq!(
+        calls.iter().filter(|call| call.message == "[]").count(),
+        2,
+        "both actual Hash reads must remain normalized"
+    );
+    Ok(())
+}
+
+#[test]
+fn ruby_regexp_last_match_return_contract_types_index_access() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"def capture
+  Regexp.last_match[1]
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let index = output
+        .calls
+        .iter()
+        .find(|call| call.function == "capture" && call.message == "[]")
+        .context("missing MatchData index access")?;
+
+    assert_eq!(index.receiver_type.as_deref(), Some("T.nilable(MatchData)"));
+    assert_eq!(index.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(index.known_space_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_generated_record_contract_accepts_runtime_scip_receiver_identity() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"Node = Struct.new(:kind)
+
+def label(node)
+  node.kind
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let mut output = profile::extract(&document, Profile::Espalier);
+    let index = json!({
+        "metadata": {
+            "toolInfo": {
+                "name": "nil-kill-runtime",
+                "version": "1",
+                "arguments": ["--fact-mine-index-authority=runtime-modeled-world"]
+            },
+            "textDocumentEncoding": 1
+        },
+        "documents": [{
+            "relativePath": tmp.path().file_name().unwrap().to_string_lossy(),
+            "language": "ruby",
+            "occurrences": [{
+                "range": [3, 7, 11],
+                "symbol": "nil-kill-runtime workspace demo 1 Node#kind().",
+                "symbolRoles": 0
+            }]
+        }]
+    });
+    fact_mine_rust::scip::apply_json(&mut output, &index.to_string())?;
+    let accessor = output
+        .calls
+        .iter()
+        .find(|call| call.function == "label" && call.message == "kind")
+        .context("missing generated record reader")?;
+
+    assert_eq!(accessor.receiver_symbol.as_deref(), Some("Node"));
+    assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        accessor.complexity_provenance.as_deref(),
+        Some("generated_record_contract")
+    );
+    Ok(())
+}
+
+#[test]
 fn go_top_level_calls_retain_declared_parameter_receiver_types() -> Result<()> {
     use std::io::Write;
 

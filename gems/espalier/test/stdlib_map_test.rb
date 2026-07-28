@@ -115,6 +115,27 @@ class StdlibMapTest < Minitest::Test
     FakeStatus = Struct.new(:success?)
   end
 
+  def test_run_cli_reports_invalid_arguments
+    _stdout, stderr = capture_io do
+      assert_equal 1, Espalier::StdlibMap.run_cli([])
+    end
+
+    assert_includes stderr, "stdlib-map failed:"
+  end
+
+  def test_command_runner_executes_and_displays_real_command
+    Dir.mktmpdir do |dir|
+      _stdout, stderr = capture_io do
+        Espalier::StdlibMap::CommandRunner.new.run!(
+          [RbConfig.ruby, "-e", "exit 0"],
+          chdir: dir
+        )
+      end
+
+      assert_includes stderr, RbConfig.ruby
+    end
+  end
+
   def test_manifest_drives_index_profile_validation_export_and_publication
     Dir.mktmpdir do |directory|
       source = File.join(directory, "source")

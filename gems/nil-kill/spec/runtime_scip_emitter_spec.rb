@@ -511,6 +511,54 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
     end
   end
 
+  it "keeps implicit Class#new identities without poisoning explicit constructors" do
+    Dir.mktmpdir("nil-kill-runtime-scip-implicit-new", NilKill::ROOT) do |root|
+      source = File.join(root, "worker.rb")
+      File.write(source, <<~RUBY)
+        class Worker
+          def self.build
+            new
+          end
+
+          def self.explicit
+            Widget.new
+          end
+        end
+      RUBY
+      event = {
+        "schema_version" => 1,
+        "event" => "runtime_call",
+        "language" => "ruby",
+        "run_id" => "implicit-new",
+        "caller" => {
+          "class" => "Worker", "method" => "build", "kind" => "class",
+          "path" => source, "line" => 2,
+        },
+        "callsite" => { "path" => source, "line" => 3 },
+        "callee" => {
+          "owner" => "Class", "name" => "new", "kind" => "instance",
+          "native" => true, "receiver_type" => "Class",
+          "package_manager" => "ruby", "package" => "ruby",
+          "version" => RUBY_VERSION,
+        },
+        "count" => 1,
+      }
+      provider = NilKill::Languages::Providers::Ruby.new
+
+      locations = provider.runtime_scip_callsite_locations(event: event, root: root)
+      inferred = provider.runtime_scip_inferred_events(events: [event], root: root)
+
+      expect(locations.map { |location| location.fetch("range") }).to eq([[2, 4, 7]])
+      expect(inferred).to include(a_hash_including(
+        "callsite" => a_hash_including("line" => 3, "range" => [2, 4, 7]),
+        "callee" => a_hash_including("owner" => "Class", "name" => "new")
+      ))
+      expect(inferred).not_to include(a_hash_including(
+        "callsite" => a_hash_including("line" => 7)
+      ))
+    end
+  end
+
   it "preserves every observed runtime receiver type as a closed candidate set" do
     Dir.mktmpdir("nil-kill-runtime-scip-union-types", NilKill::ROOT) do |root|
       runtime_dir = File.join(root, "runtime")
@@ -905,6 +953,376 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
       )
       target = inferred.find do |row|
         row.dig("callsite", "line") == 7 && row.dig("callee", "name") == "strip"
+      end
+
+      expect(target).not_to be_nil
+      expect(target.dig("callee", "owner")).to eq("String")
+    end
+  end
+
+  it "propagates literal hash and array shapes into block receivers" do
+    Dir.mktmpdir("nil-kill-runtime-scip-literal-shapes", NilKill::ROOT) do |root|
+      source = File.join(root, "worker.rb")
+      File.write(source, <<~RUBY)
+        class Worker
+          def observed(value)
+            value.strip
+          end
+
+          def inferred
+            rows = [{ name: "Ada" }]
+            rows.each { |row| row[:name].strip }
+          end
+        end
+      RUBY
+      event = lambda do |owner|
+        {
+          "schema_version" => 1,
+          "event" => "runtime_call",
+          "language" => "ruby",
+          "run_id" => "literal-shapes",
+          "caller" => {
+            "class" => "Worker", "method" => "observed", "kind" => "instance",
+            "path" => source, "line" => 2,
+          },
+          "callsite" => { "path" => source, "line" => 3 },
+          "callee" => {
+            "owner" => owner, "name" => "strip", "kind" => "instance",
+            "native" => true, "receiver_type" => owner,
+            "package_manager" => "ruby", "package" => "ruby",
+            "version" => RUBY_VERSION,
+          },
+          "count" => 1,
+        }
+      end
+
+      inferred = NilKill::Languages::Providers::Ruby.new.runtime_scip_inferred_events(
+        events: [event.call("String"), event.call("OtherString")],
+        root: root
+      )
+      target = inferred.find do |row|
+        row.dig("callsite", "line") == 8 && row.dig("callee", "name") == "strip"
+      end
+
+      expect(target).not_to be_nil
+      expect(target.dig("callee", "owner")).to eq("String")
+    end
+  end
+
+  it "propagates map block result shapes into downstream block receivers" do
+    Dir.mktmpdir("nil-kill-runtime-scip-map-shapes", NilKill::ROOT) do |root|
+      runtime_dir = File.join(root, "runtime")
+      source = File.join(root, "worker.rb")
+      FileUtils.mkdir_p(runtime_dir)
+      File.write(source, <<~RUBY)
+        class Worker
+          def observed(value)
+            value.strip
+          end
+
+          def inferred(rows)
+            names = rows.map { |row| row[:name] }
+            names.each { |name| name.strip }
+          end
+        end
+      RUBY
+      File.write(
+        File.join(runtime_dir, "methods-1.jsonl"),
+        JSON.generate(
+          "class" => "Worker", "method" => "inferred", "kind" => "instance",
+          "path" => source, "line" => 6, "calls" => 1, "ok_calls" => 1,
+          "raised_calls" => 0,
+          "params_by_name" => { "rows" => ["Array"] },
+          "params_ok" => { "rows" => ["Array"] },
+          "param_elem" => { "rows" => ["Hash"] },
+          "param_elem_shapes" => {
+            "rows" => [{
+              "kind" => "hash",
+              "keys" => [{ "kind" => "class", "name" => "Symbol" }],
+              "values" => [{ "kind" => "class", "name" => "String" }],
+            }]
+          }
+        ) + "\n"
+      )
+      event = lambda do |owner|
+        {
+          "schema_version" => 1,
+          "event" => "runtime_call",
+          "language" => "ruby",
+          "run_id" => "map-shapes",
+          "caller" => {
+            "class" => "Worker", "method" => "observed", "kind" => "instance",
+            "path" => source, "line" => 2,
+          },
+          "callsite" => { "path" => source, "line" => 3 },
+          "callee" => {
+            "owner" => owner, "name" => "strip", "kind" => "instance",
+            "native" => true, "receiver_type" => owner,
+            "package_manager" => "ruby", "package" => "ruby",
+            "version" => RUBY_VERSION,
+          },
+          "count" => 1,
+        }
+      end
+
+      inferred = NilKill::Languages::Providers::Ruby.new.runtime_scip_inferred_events(
+        events: [event.call("String"), event.call("OtherString")],
+        root: root,
+        runtime_dir: runtime_dir
+      )
+      target = inferred.find do |row|
+        row.dig("callsite", "line") == 8 && row.dig("callee", "name") == "strip"
+      end
+
+      expect(target).not_to be_nil
+      expect(target.dig("callee", "owner")).to eq("String")
+    end
+  end
+
+  it "propagates each_with_object argument shapes into accumulator receivers" do
+    Dir.mktmpdir("nil-kill-runtime-scip-each-with-object", NilKill::ROOT) do |root|
+      source = File.join(root, "worker.rb")
+      File.write(source, <<~RUBY)
+        class Worker
+          def observed(out)
+            out[:name] = "Ada"
+          end
+
+          def inferred(values)
+            values.each_with_object({}) do |value, out|
+              out[value] = "seen"
+            end
+          end
+        end
+      RUBY
+      event = lambda do |owner|
+        {
+          "schema_version" => 1,
+          "event" => "runtime_call",
+          "language" => "ruby",
+          "run_id" => "each-with-object",
+          "caller" => {
+            "class" => "Worker", "method" => "observed", "kind" => "instance",
+            "path" => source, "line" => 2,
+          },
+          "callsite" => { "path" => source, "line" => 3 },
+          "callee" => {
+            "owner" => owner, "name" => "[]=", "kind" => "instance",
+            "native" => true, "receiver_type" => owner,
+            "package_manager" => "ruby", "package" => "ruby",
+            "version" => RUBY_VERSION,
+          },
+          "count" => 1,
+        }
+      end
+
+      inferred = NilKill::Languages::Providers::Ruby.new.runtime_scip_inferred_events(
+        events: [event.call("Hash"), event.call("OtherHash")],
+        root: root
+      )
+      target = inferred.find do |row|
+        row.dig("callsite", "line") == 8 && row.dig("callee", "name") == "[]="
+      end
+
+      expect(target).not_to be_nil
+      expect(target.dig("callee", "owner")).to eq("Hash")
+    end
+  end
+
+  it "propagates reduce initial-value shapes into accumulator receivers" do
+    Dir.mktmpdir("nil-kill-runtime-scip-reduce", NilKill::ROOT) do |root|
+      source = File.join(root, "worker.rb")
+      File.write(source, <<~RUBY)
+        class Worker
+          def observed(value)
+            value + "!"
+          end
+
+          def inferred(words)
+            words.reduce("") { |memo, word| memo + word }
+          end
+        end
+      RUBY
+      event = lambda do |owner|
+        {
+          "schema_version" => 1,
+          "event" => "runtime_call",
+          "language" => "ruby",
+          "run_id" => "reduce",
+          "caller" => {
+            "class" => "Worker", "method" => "observed", "kind" => "instance",
+            "path" => source, "line" => 2,
+          },
+          "callsite" => { "path" => source, "line" => 3 },
+          "callee" => {
+            "owner" => owner, "name" => "+", "kind" => "instance",
+            "native" => true, "receiver_type" => owner,
+            "package_manager" => "ruby", "package" => "ruby",
+            "version" => RUBY_VERSION,
+          },
+          "count" => 1,
+        }
+      end
+
+      inferred = NilKill::Languages::Providers::Ruby.new.runtime_scip_inferred_events(
+        events: [event.call("String"), event.call("OtherString")],
+        root: root
+      )
+      target = inferred.find do |row|
+        row.dig("callsite", "line") == 7 && row.dig("callee", "name") == "+"
+      end
+
+      expect(target).not_to be_nil
+      expect(target.dig("callee", "owner")).to eq("String")
+    end
+  end
+
+  it "propagates appended element shapes from initially empty collections" do
+    Dir.mktmpdir("nil-kill-runtime-scip-appended-shapes", NilKill::ROOT) do |root|
+      source = File.join(root, "worker.rb")
+      File.write(source, <<~RUBY)
+        class Worker
+          def observed(value)
+            value.strip
+          end
+
+          def inferred
+            rows = []
+            rows << { name: "Ada" }
+            rows.each { |row| row[:name].strip }
+          end
+        end
+      RUBY
+      event = lambda do |owner|
+        {
+          "schema_version" => 1,
+          "event" => "runtime_call",
+          "language" => "ruby",
+          "run_id" => "appended-shapes",
+          "caller" => {
+            "class" => "Worker", "method" => "observed", "kind" => "instance",
+            "path" => source, "line" => 2,
+          },
+          "callsite" => { "path" => source, "line" => 3 },
+          "callee" => {
+            "owner" => owner, "name" => "strip", "kind" => "instance",
+            "native" => true, "receiver_type" => owner,
+            "package_manager" => "ruby", "package" => "ruby",
+            "version" => RUBY_VERSION,
+          },
+          "count" => 1,
+        }
+      end
+
+      inferred = NilKill::Languages::Providers::Ruby.new.runtime_scip_inferred_events(
+        events: [event.call("String"), event.call("OtherString")],
+        root: root
+      )
+      target = inferred.find do |row|
+        row.dig("callsite", "line") == 9 && row.dig("callee", "name") == "strip"
+      end
+
+      expect(target).not_to be_nil
+      expect(target.dig("callee", "owner")).to eq("String")
+    end
+  end
+
+  it "propagates appended generated-record owners into block receivers" do
+    Dir.mktmpdir("nil-kill-runtime-scip-appended-records", NilKill::ROOT) do |root|
+      source = File.join(root, "worker.rb")
+      File.write(source, <<~RUBY)
+        Node = Struct.new(:kind)
+        OtherNode = Struct.new(:kind)
+
+        class Worker
+          def observed(node)
+            node.kind
+          end
+
+          def inferred
+            nodes = []
+            nodes << Node.new(:root)
+            nodes.each { |node| node.kind }
+          end
+        end
+      RUBY
+      event = lambda do |owner|
+        {
+          "schema_version" => 1,
+          "event" => "runtime_call",
+          "language" => "ruby",
+          "run_id" => "appended-records",
+          "caller" => {
+            "class" => "Worker", "method" => "observed", "kind" => "instance",
+            "path" => source, "line" => 5,
+          },
+          "callsite" => { "path" => source, "line" => 6 },
+          "callee" => {
+            "owner" => owner, "name" => "kind", "kind" => "instance",
+            "native" => true, "receiver_type" => owner,
+            "package_manager" => "ruby", "package" => "workspace",
+            "version" => "1",
+          },
+          "count" => 1,
+        }
+      end
+
+      inferred = NilKill::Languages::Providers::Ruby.new.runtime_scip_inferred_events(
+        events: [event.call("Node"), event.call("OtherNode")],
+        root: root
+      )
+      target = inferred.find do |row|
+        row.dig("callsite", "line") == 12 && row.dig("callee", "name") == "kind"
+      end
+
+      expect(target).not_to be_nil
+      expect(target.dig("callee", "owner")).to eq("Node")
+    end
+  end
+
+  it "propagates indexed value shapes from initially empty hashes" do
+    Dir.mktmpdir("nil-kill-runtime-scip-indexed-shapes", NilKill::ROOT) do |root|
+      source = File.join(root, "worker.rb")
+      File.write(source, <<~RUBY)
+        class Worker
+          def observed(value)
+            value.strip
+          end
+
+          def inferred
+            index = {}
+            index[:name] = "Ada"
+            index[:name].strip
+          end
+        end
+      RUBY
+      event = lambda do |owner|
+        {
+          "schema_version" => 1,
+          "event" => "runtime_call",
+          "language" => "ruby",
+          "run_id" => "indexed-shapes",
+          "caller" => {
+            "class" => "Worker", "method" => "observed", "kind" => "instance",
+            "path" => source, "line" => 2,
+          },
+          "callsite" => { "path" => source, "line" => 3 },
+          "callee" => {
+            "owner" => owner, "name" => "strip", "kind" => "instance",
+            "native" => true, "receiver_type" => owner,
+            "package_manager" => "ruby", "package" => "ruby",
+            "version" => RUBY_VERSION,
+          },
+          "count" => 1,
+        }
+      end
+
+      inferred = NilKill::Languages::Providers::Ruby.new.runtime_scip_inferred_events(
+        events: [event.call("String"), event.call("OtherString")],
+        root: root
+      )
+      target = inferred.find do |row|
+        row.dig("callsite", "line") == 9 && row.dig("callee", "name") == "strip"
       end
 
       expect(target).not_to be_nil
