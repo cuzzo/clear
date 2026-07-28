@@ -84,6 +84,13 @@ The remaining SCIP languages are deliberately fail-closed:
   remain parametric. Publishing the apparent native helper cost would silently
   discard those executable paths, so PHP remains fail-closed until generated
   summaries can carry and compose those runtime cost parameters.
+- Ruby is blocked one stage earlier. scip-ruby 0.4.7 emits core identities such
+  as `scip-ruby gem probe workspace String#`, where `probe` is the consumer
+  project rather than a Ruby runtime package. Relocating that prefix in the
+  consumer would also relocate project declarations and is therefore unsafe.
+  scip-ruby must first give core classes a stable, versioned runtime identity;
+  a CRuby producer can then use the cross-indexer bridge, subject to the same
+  callback and VM-state cost preservation required for PHP.
 
 These are compatibility failures, not requests for manual overrides. Move an
 entry to `bundled` only after its required identity/body capability exists and a
