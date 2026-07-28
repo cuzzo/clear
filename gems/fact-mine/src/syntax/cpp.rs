@@ -6,13 +6,13 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     balanced_selector_name, configured_collection_operation, configured_intrinsic_call_complexity,
     configured_modeled_runtime_bound, configured_non_call_construct,
-    configured_semantic_symbol_call_complexity,
-    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    configured_stdlib_type, eliminable_guard_from_call, exact_direct_call_name,
-    native_pointer_nullability_contract, nil_guard_from_predicates, scip_descriptor_owner,
-    scip_global_parts, split_top_level_commas, type_before_parameter_name, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedLanguageBehavior, NormalizedNilGuardFact,
-    NormalizedNullableOperation, NormalizedSemanticEffect, NormalizedStateRead, SyntaxMetadata,
+    configured_semantic_symbol_call_complexity, configured_semantic_symbol_kind,
+    configured_semantic_symbol_parametric_cost, configured_stdlib_type, eliminable_guard_from_call,
+    exact_direct_call_name, native_pointer_nullability_contract, nil_guard_from_predicates,
+    scip_descriptor_owner, scip_global_parts, split_top_level_commas, type_before_parameter_name,
+    NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedNullableOperation, NormalizedSemanticEffect,
+    NormalizedStateRead, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, ExternalSymbolMetadata, FunctionDef};
 use crate::ast::{Child, Node, Span};
@@ -59,12 +59,7 @@ pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     if normalized.starts_with("std::")
         && matches!(
             terminal,
-            "fstream"
-                | "ifstream"
-                | "ofstream"
-                | "wfstream"
-                | "wifstream"
-                | "wofstream"
+            "fstream" | "ifstream" | "ofstream" | "wfstream" | "wifstream" | "wofstream"
         )
     {
         return TypeExpr::Primitive("FileStream".to_string());
@@ -89,12 +84,8 @@ pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
         return TypeExpr::Primitive("StdAtomic".to_string());
     }
     match terminal {
-        "ostringstream"
-        | "wostringstream"
-        | "istringstream"
-        | "wistringstream"
-        | "stringstream"
-        | "wstringstream" => TypeExpr::Primitive("StringStream".to_string()),
+        "ostringstream" | "wostringstream" | "istringstream" | "wistringstream"
+        | "stringstream" | "wstringstream" => TypeExpr::Primitive("StringStream".to_string()),
         "ostream" | "wostream" => TypeExpr::Primitive("OutputStream".to_string()),
         _ => parsed,
     }
@@ -130,12 +121,9 @@ fn cpp_type_aliases(
                         && name
                             .chars()
                             .all(|character| character == '_' || character.is_ascii_alphanumeric())
-                        && name
-                            .chars()
-                            .next()
-                            .is_some_and(|character| {
-                                character == '_' || character.is_ascii_alphabetic()
-                            });
+                        && name.chars().next().is_some_and(|character| {
+                            character == '_' || character.is_ascii_alphabetic()
+                        });
                     valid.then(|| {
                         (
                             name.to_string(),
@@ -155,9 +143,9 @@ fn cpp_type_aliases(
                     let name = declaration[split..].trim();
                     (!target.is_empty()
                         && !name.is_empty()
-                        && name.chars().all(|character| {
-                            character == '_' || character.is_ascii_alphanumeric()
-                        }))
+                        && name
+                            .chars()
+                            .all(|character| character == '_' || character.is_ascii_alphanumeric()))
                     .then(|| {
                         (
                             name.to_string(),
@@ -165,7 +153,8 @@ fn cpp_type_aliases(
                         )
                     })
                 });
-            if let Some((name, target)) = using.or(typedef).filter(|(_, target)| !target.is_empty()) {
+            if let Some((name, target)) = using.or(typedef).filter(|(_, target)| !target.is_empty())
+            {
                 candidates
                     .entry(name)
                     .or_default()
@@ -179,9 +168,10 @@ fn cpp_type_aliases(
     let mut lines = BTreeMap::new();
     let mut dependent_aliases = BTreeSet::new();
     for (name, definitions) in candidates {
-        if definitions.iter().all(|(target, _)| {
-            cpp_identifier_tokens(target).any(|token| token == "typename")
-        }) {
+        if definitions
+            .iter()
+            .all(|(target, _)| cpp_identifier_tokens(target).any(|token| token == "typename"))
+        {
             // `typename X::Y` is a compiler-level declaration that Y depends
             // on a template type. Preserve that proof even when an
             // unqualified intermediate alias such as `super` has different
@@ -238,15 +228,15 @@ fn cpp_function_imports_symbol(source: &str, qualified: &str) -> bool {
 }
 
 fn cpp_function_is_friend(node: &Node, lines: &[String]) -> bool {
-    let normalized_node_has_friend = node
-        .text
-        .trim_start()
-        .strip_prefix("friend")
-        .is_some_and(|rest| {
-            rest.chars()
-                .next()
-                .is_some_and(|character| character.is_ascii_whitespace())
-        });
+    let normalized_node_has_friend =
+        node.text
+            .trim_start()
+            .strip_prefix("friend")
+            .is_some_and(|rest| {
+                rest.chars()
+                    .next()
+                    .is_some_and(|character| character.is_ascii_whitespace())
+            });
     if normalized_node_has_friend || node.first_lineno == 0 {
         return normalized_node_has_friend;
     }
@@ -341,14 +331,7 @@ fn cpp_owner_template_type_names(owner: &str) -> BTreeSet<String> {
         .filter(|token| {
             !matches!(
                 *token,
-                "const"
-                    | "false"
-                    | "std"
-                    | "template"
-                    | "true"
-                    | "type"
-                    | "typename"
-                    | "void"
+                "const" | "false" | "std" | "template" | "true" | "type" | "typename" | "void"
             )
         })
         .map(str::to_string)
@@ -407,10 +390,7 @@ fn cpp_declared_owner_template_types(
         let suffix = declaration[close + 1..].trim_start();
         let owner = ["class ", "struct "].into_iter().find_map(|keyword| {
             let rest = suffix.strip_prefix(keyword)?;
-            let header = rest
-                .split(['{', ':', ';'])
-                .next()
-                .unwrap_or(rest);
+            let header = rest.split(['{', ':', ';']).next().unwrap_or(rest);
             let candidates = cpp_identifier_tokens(header)
                 .filter(|token| function_owners.contains(token))
                 .collect::<BTreeSet<_>>();
@@ -468,26 +448,19 @@ fn cpp_method_template_types(
             }
             if !parameters.is_empty() {
                 parameters.extend(dependent_aliases.iter().cloned());
-                let key = format!(
-                    "{}\0{}\0{}",
-                    function.owner, function.name, function.line
-                );
+                let key = format!("{}\0{}\0{}", function.owner, function.name, function.line);
                 let dependent_locals = method_local_types
                     .get(&key)
                     .into_iter()
                     .flat_map(|locals| locals.iter())
                     .filter(|(_, declared_type)| {
-                        cpp_identifier_tokens(declared_type)
-                            .any(|token| parameters.contains(token))
+                        cpp_identifier_tokens(declared_type).any(|token| parameters.contains(token))
                     })
                     .map(|(name, _)| name.clone())
                     .collect::<BTreeSet<_>>();
                 parameters.extend(dependent_locals);
                 let body = lines
-                    .get(
-                        function.line.saturating_sub(1)
-                            ..lines.len().min(function.span[2]),
-                    )
+                    .get(function.line.saturating_sub(1)..lines.len().min(function.span[2]))
                     .unwrap_or_default()
                     .join(" ");
                 let statements = body.split(';').collect::<Vec<_>>();
@@ -505,10 +478,7 @@ fn cpp_method_template_types(
             }
             (!parameters.is_empty()).then(|| {
                 (
-                    format!(
-                        "{}\0{}\0{}",
-                        function.owner, function.name, function.line
-                    ),
+                    format!("{}\0{}\0{}", function.owner, function.name, function.line),
                     parameters,
                 )
             })
@@ -516,10 +486,7 @@ fn cpp_method_template_types(
         .collect()
 }
 
-fn cpp_dependent_auto_binding(
-    statement: &str,
-    dependencies: &BTreeSet<String>,
-) -> Option<String> {
+fn cpp_dependent_auto_binding(statement: &str, dependencies: &BTreeSet<String>) -> Option<String> {
     for (auto, _) in statement.match_indices("auto") {
         let boundary_before = statement[..auto]
             .chars()
@@ -595,16 +562,10 @@ fn cpp_method_local_types(
                     .next()
                     .unwrap_or(statement)
                     .trim();
-                if declaration.is_empty()
-                    || declaration.starts_with('#')
-                {
+                if declaration.is_empty() || declaration.starts_with('#') {
                     continue;
                 }
-                let before_assignment = declaration
-                    .split('=')
-                    .next()
-                    .unwrap_or(declaration)
-                    .trim();
+                let before_assignment = declaration.split('=').next().unwrap_or(declaration).trim();
                 // Constructor-style locals (`std::string out(n, 0)`) put the
                 // initializer beside the binding rather than after `=`.
                 // Keep the declaration prefix. A plain call (`out.resize(n)`)
@@ -621,7 +582,9 @@ fn cpp_method_local_types(
                     continue;
                 };
                 let declared_type = left[..name_start].trim();
-                let first = cpp_identifier_tokens(declared_type).next().unwrap_or_default();
+                let first = cpp_identifier_tokens(declared_type)
+                    .next()
+                    .unwrap_or_default();
                 if declared_type.is_empty()
                     || declared_type.ends_with(['.', ':'])
                     || declared_type.contains("->")
@@ -658,10 +621,7 @@ fn cpp_method_local_types(
                 .collect::<BTreeMap<_, _>>();
             (!locals.is_empty()).then(|| {
                 (
-                    format!(
-                        "{}\0{}\0{}",
-                        function.owner, function.name, function.line
-                    ),
+                    format!("{}\0{}\0{}", function.owner, function.name, function.line),
                     locals,
                 )
             })
@@ -1053,9 +1013,7 @@ fn cpp_collection_element_binding(source: &str, local: &str) -> Option<String> {
             let collection = suffix
                 .strip_prefix(':')?
                 .trim_start()
-                .split(|character: char| {
-                    !character.is_ascii_alphanumeric() && character != '_'
-                })
+                .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
                 .next()
                 .unwrap_or_default();
             if !collection.is_empty() {
@@ -1071,9 +1029,7 @@ fn cpp_collection_element_binding(source: &str, local: &str) -> Option<String> {
         }
         let initializer = suffix.strip_prefix('=')?.trim_start();
         let collection = initializer
-            .split(|character: char| {
-                !character.is_ascii_alphanumeric() && character != '_'
-            })
+            .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
             .next()
             .unwrap_or_default();
         if collection.is_empty() {
@@ -1126,14 +1082,25 @@ fn cpp_pointer_member_receiver_type(
     message: &str,
     declared_type: &str,
 ) -> Option<String> {
-    let tight_source = source.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-    let tight_message = message.chars().filter(|character| !character.is_whitespace()).collect::<String>();
+    let tight_source = source
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    let tight_message = message
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
     if !tight_source.contains(&format!("{receiver}->{tight_message}")) {
         return None;
     }
 
     let declared_type = declared_type.trim().trim_end_matches(['&', '*']).trim();
-    for pointer in ["std::shared_ptr", "shared_ptr", "std::unique_ptr", "unique_ptr"] {
+    for pointer in [
+        "std::shared_ptr",
+        "shared_ptr",
+        "std::unique_ptr",
+        "unique_ptr",
+    ] {
         let Some(arguments) = declared_type.strip_prefix(pointer) else {
             continue;
         };
@@ -1163,10 +1130,7 @@ fn cpp_owner_has_direct_pure_virtual(source: &str) -> bool {
                 statement.clear();
             }
             ';' => {
-                if brace_depth == 1
-                    && statement.contains("virtual")
-                    && statement.contains("= 0")
-                {
+                if brace_depth == 1 && statement.contains("virtual") && statement.contains("= 0") {
                     return true;
                 }
                 statement.clear();
@@ -1197,12 +1161,9 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                 };
                 let suffix = suffix.trim_start();
                 !suffix.starts_with(['*', '&'])
-                    && suffix
-                        .chars()
-                        .next()
-                        .is_some_and(|character| {
-                            character == '_' || character.is_ascii_alphabetic()
-                        })
+                    && suffix.chars().next().is_some_and(|character| {
+                        character == '_' || character.is_ascii_alphabetic()
+                    })
                     && (suffix.contains('=') || suffix.contains('(') || suffix.contains('{'))
             })
         });
@@ -1220,9 +1181,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                     .iter()
                     .find(|template_type| parameter.contains(template_type.as_str()))?;
                 let name = parameter
-                    .split(|character: char| {
-                        character != '_' && !character.is_ascii_alphanumeric()
-                    })
+                    .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
                     .filter(|token| !token.is_empty())
                     .next_back()?;
                 Some(name.to_string())
@@ -1234,8 +1193,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                 let line = line.trim_start();
                 line.strip_prefix(parameter).is_some_and(|suffix| {
                     let suffix = suffix.trim_start();
-                    suffix.starts_with('=')
-                        && !suffix.starts_with("==")
+                    suffix.starts_with('=') && !suffix.starts_with("==")
                 })
             })
         })
@@ -1334,11 +1292,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         identity.contains('<')
     }
 
-    fn inherited_call_receiver_type(
-        &self,
-        supertypes: &[String],
-        message: &str,
-    ) -> Option<String> {
+    fn inherited_call_receiver_type(&self, supertypes: &[String], message: &str) -> Option<String> {
         let [supertype] = supertypes else {
             return None;
         };
@@ -1382,9 +1336,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
                     ')' => paren_depth -= 1,
                     '[' => bracket_depth += 1,
                     ']' => bracket_depth -= 1,
-                    '{' | ';'
-                        if saw_parameters && paren_depth <= 0 && bracket_depth <= 0 =>
-                    {
+                    '{' | ';' if saw_parameters && paren_depth <= 0 && bracket_depth <= 0 => {
                         return Some(header);
                     }
                     _ => {}
@@ -1490,10 +1442,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
     }
 
     // C++ declares `Ret name(T a)`, not `name(a: T) -> Ret`.
-    fn parse_signature(
-        &self,
-        signature: &str,
-    ) -> super::normalized_behavior::NormalizedSignature {
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
         super::normalized_behavior::parse_prefix_return_declarator(signature)
     }
 
@@ -1565,10 +1514,7 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         external_symbol_call_complexity(symbol, message)
     }
 
-    fn modeled_runtime_call_complexity(
-        &self,
-        message: &str,
-    ) -> Option<ExternalCallComplexity> {
+    fn modeled_runtime_call_complexity(&self, message: &str) -> Option<ExternalCallComplexity> {
         modeled_runtime_call_complexity(message)
     }
 
@@ -1605,19 +1551,20 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         // `if (!value)` or `value.method()` is not a declaration; the shared
         // type-before-name fallback would otherwise turn punctuation such as
         // `if(`, `(!`, or `auto item =` into a complete C++ type.
-        let function_pointer = source.contains(&format!("(*{name}"))
-            || source.contains(&format!("(&{name}"));
+        let function_pointer =
+            source.contains(&format!("(*{name}")) || source.contains(&format!("(&{name}"));
         // Taking a local's address establishes a possible indirect write.
         // Keeping this conservative complete hint makes the nullable lattice
         // forget an earlier value proof until pointer-alias mutation is
         // represented explicitly.
         let address_alias = declared.contains('=') && declared.trim_end().ends_with('&');
-        ((function_pointer || address_alias
-            || !declared.contains(['(', ')', '!', '=', '?']))
+        ((function_pointer || address_alias || !declared.contains(['(', ')', '!', '=', '?']))
             && !declared.contains("->")
             && !declared.ends_with('.')
             && !declared.ends_with(',')
-            && declared.chars().any(|character| character.is_ascii_alphanumeric())
+            && declared
+                .chars()
+                .any(|character| character.is_ascii_alphanumeric())
             && !matches!(
                 declared.split_whitespace().next().unwrap_or_default(),
                 "if" | "while" | "switch" | "return"
@@ -1725,7 +1672,10 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
     }
 
     fn declared_callable_cost(&self, declared_type: &str) -> Option<String> {
-        let normalized = declared_type.split_whitespace().collect::<Vec<_>>().join(" ");
+        let normalized = declared_type
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         (normalized.contains("(*)")
             || (normalized.contains("(*") && normalized.contains(")("))
             || normalized.contains("std::function<"))
@@ -1738,10 +1688,9 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         SyntaxMetadata {
             type_aliases,
             type_alias_lines,
-            method_param_types:
-                super::normalized_behavior::method_param_types_from_signatures(
-                    self, source, functions,
-                ),
+            method_param_types: super::normalized_behavior::method_param_types_from_signatures(
+                self, source, functions,
+            ),
             method_local_types: method_local_types.clone(),
             method_template_types: cpp_method_template_types(
                 source,
@@ -2109,16 +2058,13 @@ mod tests {
         .expect("stream materialization descriptor is reviewed");
         assert_eq!(string.time, "O(N)");
 
-        let swap = external_symbol_metadata(
-            "cxx . . $ std/swap(c75b8fd57d7c2e06).",
-        );
+        let swap = external_symbol_metadata("cxx . . $ std/swap(c75b8fd57d7c2e06).");
         assert_eq!(swap.scope, "stdlib");
         assert_eq!(swap.parametric_cost.as_deref(), Some("reflective_once"));
-        assert!(external_symbol_call_complexity(
-            "cxx . . $ std/swap(c75b8fd57d7c2e06).",
-            "swap"
-        )
-        .is_none());
+        assert!(
+            external_symbol_call_complexity("cxx . . $ std/swap(c75b8fd57d7c2e06).", "swap")
+                .is_none()
+        );
     }
 
     #[test]
@@ -2211,8 +2157,8 @@ mod tests {
 
     #[test]
     fn inactive_platform_runtime_models_are_explicit_assumptions() {
-        let write = modeled_runtime_call_complexity("::write")
-            .expect("reviewed inactive POSIX branch");
+        let write =
+            modeled_runtime_call_complexity("::write").expect("reviewed inactive POSIX branch");
         assert_eq!((write.time, write.space), ("O(N)", "O(1)"));
         assert_eq!(write.bound_quality, "upper_bound_modeled_world");
         assert!(write.assumption.is_some());
@@ -2369,8 +2315,14 @@ struct Second { using super = BaseTwo; };
             behavior.declared_local_type("gsl::not_null<Widget *> value = load_widget()", "value"),
             Some("gsl::not_null<Widget *>".to_string())
         );
-        assert_eq!(behavior.declared_local_type("if(! value.empty())", "value"), None);
-        assert_eq!(behavior.declared_local_type("value.resize(2)", "value"), None);
+        assert_eq!(
+            behavior.declared_local_type("if(! value.empty())", "value"),
+            None
+        );
+        assert_eq!(
+            behavior.declared_local_type("value.resize(2)", "value"),
+            None
+        );
         assert_eq!(
             behavior.declared_local_type(
                 "auto data = make_data(Data { condition, callbackList, listener });",

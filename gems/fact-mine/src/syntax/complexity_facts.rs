@@ -310,6 +310,24 @@ impl DomainRegistry {
             span,
         })
     }
+
+    fn allocation_output(&mut self, names: &BTreeSet<String>, span: [usize; 4]) -> String {
+        let name = if names.is_empty() {
+            format!("materialization at line {}", span[0])
+        } else {
+            format!(
+                "materialized {}",
+                names.iter().cloned().collect::<Vec<_>>().join(" + ")
+            )
+        };
+        self.insert(SizeDomainFact {
+            id: format!("allocation:{}:{}:{}", self.path, span[0], span[1]),
+            name,
+            source_kind: "output".to_string(),
+            path: self.path.clone(),
+            span,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -463,9 +481,6 @@ fn preliminary_block_summaries(
                 .iter()
                 .cloned()
                 .collect::<BTreeSet<_>>();
-            if callback_params.is_empty() {
-                return None;
-            }
             let mut summary = BlockSummary::default();
             collect_block_invocations(
                 &method.node,
@@ -475,7 +490,8 @@ fn preliminary_block_summaries(
                 &mut summary,
                 behavior,
             );
-            Some(((definition.owner.clone(), method.name.clone()), summary))
+            (summary.invocations > 0)
+                .then(|| ((definition.owner.clone(), method.name.clone()), summary))
         })
         .collect()
 }
@@ -491,6 +507,11 @@ fn collect_block_invocations(
     if deferred_block(node, behavior) {
         return;
     }
+    if node.r#type == "YIELD" && behavior.yield_semantic_effect(node) {
+        summary.invocations += 1;
+        summary.power = summary.power.max(power);
+        summary.unknown |= unknown;
+    }
     if let Some(message) = direct_call_message(node) {
         if behavior.callback_invocation_message(message) {
             let receiver_names = call_receiver(node).map(local_names).unwrap_or_default();
@@ -504,9 +525,7 @@ fn collect_block_invocations(
 
     if loop_node(node, behavior) {
         let semantics = if node.r#type == "ITER" {
-            iterator_message(node)
-                .map(|message| behavior.block_call_semantics(message))
-                .unwrap_or(BlockCallSemantics::Unknown)
+            iterator_block_semantics(node, behavior)
         } else {
             BlockCallSemantics::Iteration
         };
@@ -619,9 +638,7 @@ fn fact_for_method(
                 .get(&type_key)
                 .into_iter()
                 .flat_map(|types| types.iter())
-                .map(|(name, declared)| {
-                    (name.clone(), TypeExpr::parse(declared, language))
-                }),
+                .map(|(name, declared)| (name.clone(), TypeExpr::parse(declared, language))),
         );
     }
     for (receiver_var, target) in behavior.receiver_aliases_for_function(node) {
@@ -633,6 +650,7 @@ fn fact_for_method(
     }
     let parameter_types = &augmented_parameter_types;
     visit_loops(
+        node,
         node,
         params,
         &assignments,
@@ -658,6 +676,7 @@ fn fact_for_method(
     let mut recursion = RecursionFacts::default();
     let visited_guards = visited_guard_parameters(node, params, behavior);
     collect_recursion(
+        node,
         node,
         function,
         false,
@@ -731,6 +750,26 @@ fn fact_for_method(
                 allocation.domain_expression = iteration.domain_expression.clone();
             }
         }
+    }
+    // A materialization has a sound output-sensitive space bound even when
+    // DFG cannot relate its cardinality to a particular input. Preserve that
+    // distinction instead of reporting the allocation as unknowable: O(M)
+    // here means linear in the actual materialized result size M, represented
+    // by an explicit output domain.
+    for allocation in &mut allocations {
+        if allocation.cardinality_relation != "unknown" {
+            continue;
+        }
+        let names = allocation
+            .domain_expression
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let domain = domain_registry.allocation_output(&names, allocation.span);
+        allocation.cardinality_relation = "output_size".to_string();
+        allocation.bound_classification = "output".to_string();
+        allocation.evidence_gap = None;
+        allocation.symbolic_size = Some(symbolic_complexity(&BTreeMap::from([(domain, 1)]), true));
     }
     allocations.sort_by_key(|fact| (fact.line, fact.span[1], fact.kind.clone()));
     allocations.dedup_by(|left, right| left.span == right.span && left.kind == right.kind);
@@ -1173,6 +1212,7 @@ fn collect_allocations(
 #[allow(clippy::too_many_arguments)] // Loop analysis requires the full immutable analysis context.
 fn visit_loops(
     node: &Node,
+    method: &Node,
     params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
     collection_mutations: &BTreeMap<String, Vec<(usize, usize)>>,
@@ -1197,7 +1237,23 @@ fn visit_loops(
     let block_semantics = if node.r#type == "ITER" {
         iterator_message(node)
             .map(|message| {
-                let configured = behavior.block_call_semantics(message);
+                let configured = behavior.block_call_semantics_with_receiver(
+                    iterator_receiver(node),
+                    loop_control(node)
+                        .and_then(|control| {
+                            call_receiver_type(
+                                control,
+                                parameter_types,
+                                assignments,
+                                state_types,
+                                field_types,
+                                (node.first_lineno, node.first_column),
+                                behavior,
+                            )
+                        })
+                        .as_ref(),
+                    message,
+                );
                 if configured != BlockCallSemantics::Unknown {
                     configured
                 } else {
@@ -1223,6 +1279,7 @@ fn visit_loops(
         if let Some(control) = loop_control(node) {
             visit_loops(
                 control,
+                method,
                 params,
                 assignments,
                 collection_mutations,
@@ -1251,6 +1308,7 @@ fn visit_loops(
         for child in child_nodes(node) {
             visit_loops(
                 child,
+                method,
                 params,
                 assignments,
                 collection_mutations,
@@ -1319,8 +1377,13 @@ fn visit_loops(
             .max_by_key(|growth| growth.power)
             .cloned();
         let growth_power = growth.as_ref().map(|growth| growth.power);
-        let unknown_iteration =
-            node.r#type == "ITER" && block_semantics == BlockCallSemantics::Unknown;
+        let inferred_project_block = node.r#type == "ITER"
+            && iterator_message(node).is_some_and(|message| {
+                block_summaries.contains_key(&(owner.to_string(), message.to_string()))
+            });
+        let unknown_iteration = node.r#type == "ITER"
+            && block_semantics == BlockCallSemantics::Unknown
+            && !inferred_project_block;
         let fixed_locals = !locals.is_empty()
             && locals.iter().all(|local| {
                 fixed_collection_local(
@@ -1556,6 +1619,7 @@ fn visit_loops(
         if let Some(control) = control {
             visit_loops(
                 control,
+                method,
                 params,
                 assignments,
                 collection_mutations,
@@ -1581,6 +1645,7 @@ fn visit_loops(
         if let Some(body) = loop_body(node) {
             visit_loops(
                 body,
+                method,
                 params,
                 assignments,
                 collection_mutations,
@@ -1761,6 +1826,7 @@ fn visit_loops(
                 parameter_arguments: local_names(node).intersection(params).cloned().collect(),
                 argument_cardinality_relation: argument_cardinality_relation.to_string(),
                 argument_progress: call_argument_progress(
+                    method,
                     node,
                     params,
                     assignments,
@@ -1784,6 +1850,7 @@ fn visit_loops(
         for child in child_nodes(node) {
             visit_loops(
                 child,
+                method,
                 params,
                 assignments,
                 collection_mutations,
@@ -1831,9 +1898,12 @@ fn call_receiver_type(
     // `base.field` receiver: resolve the base's type, then read the field's
     // declared type. Runs before the plain local-name fallback, which would
     // otherwise yield the base's own type for `c.field.method()`.
-    if let Some(field_type) =
-        field_access_type(receiver.text.trim(), parameter_types, state_types, field_types)
-    {
+    if let Some(field_type) = field_access_type(
+        receiver.text.trim(),
+        parameter_types,
+        state_types,
+        field_types,
+    ) {
         return Some(field_type);
     }
     let receiver_names = local_names(receiver);
@@ -2311,7 +2381,7 @@ fn call_argument_nodes(node: &Node) -> Vec<&Node> {
 }
 
 fn call_receiver(node: &Node) -> Option<&Node> {
-    if node.r#type != "CALL" {
+    if !matches!(node.r#type.as_str(), "CALL" | "QCALL") {
         return None;
     }
     node.children.first().and_then(ast::node)
@@ -2446,6 +2516,7 @@ fn structural_projection_expression(
 }
 
 fn call_argument_progress(
+    method: &Node,
     node: &Node,
     params: &BTreeSet<String>,
     assignments: &BTreeMap<String, Vec<Assignment>>,
@@ -2487,6 +2558,9 @@ fn call_argument_progress(
         || structural_descent_argument(node, params, assignments, before, behavior)
     {
         "structural".to_string()
+    } else if behavior.recursive_call_argument_progress(method, node, params) == Some("structural")
+    {
+        "structural".to_string()
     } else {
         "unknown".to_string()
     }
@@ -2495,6 +2569,7 @@ fn call_argument_progress(
 #[allow(clippy::too_many_arguments)] // Recursion evidence is accumulated from independent control-flow inputs.
 fn collect_recursion(
     node: &Node,
+    method: &Node,
     function: &str,
     inside_loop: bool,
     params: &BTreeSet<String>,
@@ -2568,11 +2643,16 @@ fn collect_recursion(
             )
         {
             out.structural_calls += 1;
+        } else if behavior.recursive_call_argument_progress(method, node, params)
+            == Some("structural")
+        {
+            out.structural_calls += 1;
         }
     }
     for child in child_nodes(node) {
         collect_recursion(
             child,
+            method,
             function,
             now_inside,
             params,
@@ -2638,7 +2718,10 @@ fn recursive_self_call(node: &Node, function: &str, bare_self_calls_are_recursiv
 }
 
 fn direct_call_message(node: &Node) -> Option<&str> {
-    if !matches!(node.r#type.as_str(), "CALL" | "VCALL" | "FCALL" | "OPCALL") {
+    if !matches!(
+        node.r#type.as_str(),
+        "CALL" | "QCALL" | "VCALL" | "FCALL" | "OPCALL"
+    ) {
         return None;
     }
     node.children.iter().find_map(|child| match child {
@@ -2662,19 +2745,15 @@ fn descendant_symbols(node: &Node) -> Vec<String> {
 fn loop_node(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> bool {
     matches!(node.r#type.as_str(), "FOR" | "WHILE" | "UNTIL")
         || (node.r#type == "ITER"
-            && iterator_message(node).is_some_and(|message| {
-                matches!(
-                    behavior.block_call_semantics(message),
-                    BlockCallSemantics::Iteration | BlockCallSemantics::Unknown
-                )
-            }))
+            && matches!(
+                iterator_block_semantics(node, behavior),
+                BlockCallSemantics::Iteration | BlockCallSemantics::Unknown
+            ))
 }
 
 fn deferred_block(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> bool {
     node.r#type == "ITER"
-        && iterator_message(node).is_some_and(|message| {
-            behavior.block_call_semantics(message) == BlockCallSemantics::Deferred
-        })
+        && iterator_block_semantics(node, behavior) == BlockCallSemantics::Deferred
 }
 
 fn iterator_message(node: &Node) -> Option<&str> {
@@ -2682,6 +2761,26 @@ fn iterator_message(node: &Node) -> Option<&str> {
         .first()
         .and_then(ast::node)
         .and_then(direct_call_message)
+}
+
+fn iterator_receiver(node: &Node) -> Option<&str> {
+    node.children
+        .first()
+        .and_then(ast::node)
+        .and_then(call_receiver)
+        .map(|receiver| receiver.text.trim())
+}
+
+fn iterator_block_semantics(
+    node: &Node,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> BlockCallSemantics {
+    iterator_message(node)
+        .map(|message| {
+            // Syntax-only callers deliberately omit inferred flow types.
+            behavior.block_call_semantics_with_receiver(iterator_receiver(node), None, message)
+        })
+        .unwrap_or(BlockCallSemantics::Unknown)
 }
 
 fn loop_control(node: &Node) -> Option<&Node> {
@@ -3347,7 +3446,9 @@ end
             .iter()
             .find(|row| row.function == "unknown_materialize")
             .unwrap();
-        assert_eq!(unknown.allocations[0].cardinality_relation, "unknown");
+        assert_eq!(unknown.allocations[0].cardinality_relation, "output_size");
+        assert_eq!(unknown.allocations[0].bound_classification, "output");
+        assert!(unknown.allocations[0].symbolic_size.is_some());
         let callback_result = rows
             .iter()
             .find(|row| row.function == "callback_result")
@@ -3355,7 +3456,7 @@ end
         assert!(callback_result
             .allocations
             .iter()
-            .any(|fact| fact.cardinality_relation == "unknown"));
+            .any(|fact| fact.cardinality_relation == "output_size"));
         let looped = rows
             .iter()
             .find(|row| row.function == "looped_call")
@@ -3402,6 +3503,31 @@ def tree_via_local(node)
 end
 def opaque_wrapper(node)
   opaque_wrapper(identity(node))
+end
+def unwrap_type(type_str)
+  if type_str =~ /^T\.nilable\((.+)\)$/
+    unwrap_type($1)
+  elsif type_str =~ /^T\.any\((.+)\)$/
+    types = $1.split(/\s*,\s*/)
+    present = types.reject { |type| type == "nil" }
+    unwrap_type(present.first || types.first)
+  else
+    type_str
+  end
+end
+def unwrap_match_data(type)
+  if type =~ /\AT\.nilable\((.+)\)\z/
+    unwrap_match_data(Regexp.last_match(1))
+  else
+    type
+  end
+end
+def unsafe_capture(value)
+  if value =~ /^(.*)$/
+    unsafe_capture($1)
+  else
+    value
+  end
 end
 def guarded_tree(node, seen)
   return if seen.include?(node)
@@ -3451,6 +3577,24 @@ end
         assert_eq!(complexity(&rows, "tree"), Some("O(N)".into()));
         assert_eq!(complexity(&rows, "tree_via_local"), Some("O(N)".into()));
         assert_eq!(complexity(&rows, "opaque_wrapper"), Some("unknown".into()));
+        for function in ["unwrap_type", "unwrap_match_data"] {
+            let row = rows.iter().find(|row| row.function == function).unwrap();
+            assert!(row.recursion.structural_calls > 0, "{function}");
+            assert_eq!(row.recursion.unknown_progress_calls, 0, "{function}");
+            assert!(row
+                .call_contexts
+                .iter()
+                .filter(|context| context.message == function)
+                .all(|context| context.argument_progress == "structural"));
+            assert_eq!(complexity(&rows, function), Some("O(N)".into()));
+        }
+        let unsafe_capture = rows
+            .iter()
+            .find(|row| row.function == "unsafe_capture")
+            .unwrap();
+        assert_eq!(unsafe_capture.recursion.structural_calls, 0);
+        assert_eq!(unsafe_capture.recursion.unknown_progress_calls, 1);
+        assert_eq!(complexity(&rows, "unsafe_capture"), Some("unknown".into()));
         assert_eq!(
             rows.iter()
                 .find(|row| row.function == "tree_via_local")
@@ -3852,6 +3996,10 @@ class Driver
     items.each { |item| blk.call(item) }
   end
 
+  def each_yielded_item(items)
+    items.each { |item| yield item }
+  end
+
   def wrapped(items)
     with_scope { items.each { |item| consume(item) } }
   end
@@ -3859,12 +4007,17 @@ class Driver
   def traversed(items)
     each_item(items) { |item| consume(item) }
   end
+
+  def yielded(items)
+    each_yielded_item(items) { |item| consume(item) }
+  end
 end
 "#,
         );
 
         assert_eq!(complexity(&rows, "wrapped"), Some("O(N)".into()));
         assert_eq!(complexity(&rows, "traversed"), Some("O(N)".into()));
+        assert_eq!(complexity(&rows, "yielded"), Some("O(N)".into()));
         let wrapper = rows
             .iter()
             .find(|row| row.function == "with_scope")

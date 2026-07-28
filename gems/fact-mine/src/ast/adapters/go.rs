@@ -1,7 +1,7 @@
 use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
-use tree_sitter::Node as TreeSitterNode;
 use crate::syntax::nullable::PresenceCorrelationSeed;
+use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) struct GoAstAdapter;
 

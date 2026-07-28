@@ -988,12 +988,7 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
 
     /// Project one parser-owned import target into the same corpus identity as
     /// a declaration namespace.
-    fn canonical_project_import(
-        &self,
-        _file: &Path,
-        _namespace: &str,
-        target: &str,
-    ) -> String {
+    fn canonical_project_import(&self, _file: &Path, _namespace: &str, target: &str) -> String {
         target.to_string()
     }
 
@@ -1164,6 +1159,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Prove the type written by one normalized, unconditional local
+    /// assignment. The shared CFG owns reaching-definition propagation while
+    /// adapters own source literal and constructor grammar.
+    fn local_assignment_type_hint(&self, _value: &str) -> Option<String> {
+        None
+    }
+
     /// A parametric cost implied by a declared call-result type. The shared
     /// resolver owns propagation; adapters own dependent-type grammar.
     fn call_result_parametric_cost(&self, _type_expr: &TypeExpr) -> Option<String> {
@@ -1308,6 +1310,31 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Price a source declaration that the language runtime turns into a
+    /// generated callable (for example an attribute reader). The adapter owns
+    /// the syntax decision; the shared project join owns identity and
+    /// uniqueness.
+    fn generated_callable_complexity(
+        &self,
+        _source: &str,
+        _name: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
+    /// Prove progress for a recursive call whose argument transformation is
+    /// expressed through language-owned syntax. Shared recursion analysis
+    /// handles arithmetic and normalized structural projections; adapters may
+    /// add only native, strictly decreasing transformations.
+    fn recursive_call_argument_progress(
+        &self,
+        _method: &Node,
+        _call: &Node,
+        _parameters: &BTreeSet<String>,
+    ) -> Option<&'static str> {
+        None
+    }
+
     /// Whether a non-call SCIP occurrence can execute source-language code.
     /// Most field/property-shaped symbols are data access; adapters opt in
     /// only when their language gives that syntax callable semantics.
@@ -1400,6 +1427,30 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     fn block_call_semantics(&self, _message: &str) -> BlockCallSemantics {
+        BlockCallSemantics::Unknown
+    }
+
+    /// Refine block execution semantics when the normalized receiver spelling
+    /// is itself significant. The default remains language-neutral and falls
+    /// back to the message-only contract.
+    fn block_call_semantics_with_receiver(
+        &self,
+        _receiver: Option<&str>,
+        _receiver_type: Option<&TypeExpr>,
+        message: &str,
+    ) -> BlockCallSemantics {
+        self.block_call_semantics(message)
+    }
+
+    /// Refine block execution only after a semantic index proves the exact
+    /// callable identity. This is deliberately separate from receiver-text
+    /// heuristics so a shared SCIP join can consume language-owned runtime
+    /// semantics without recognizing language-specific symbols.
+    fn semantic_symbol_block_call_semantics(
+        &self,
+        _symbol: &str,
+        _message: &str,
+    ) -> BlockCallSemantics {
         BlockCallSemantics::Unknown
     }
 
@@ -2402,9 +2453,7 @@ pub(crate) fn behavior(language: Language) -> &'static dyn NormalizedLanguageBeh
     }
 }
 
-pub(crate) fn behavior_for_name(
-    language: &str,
-) -> Option<&'static dyn NormalizedLanguageBehavior> {
+pub(crate) fn behavior_for_name(language: &str) -> Option<&'static dyn NormalizedLanguageBehavior> {
     Language::parse(language).ok().map(behavior)
 }
 

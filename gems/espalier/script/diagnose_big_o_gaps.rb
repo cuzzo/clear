@@ -96,6 +96,7 @@ external_category = lambda do |call|
   call["complexity_missing_kind"] || case call["external_symbol_scope"]
                                       when "stdlib" then "stdlib_cost_model_missing"
                                       when "dependency" then "dependency_cost_model_missing"
+                                      when "project" then "project_candidate_summary_missing"
                                       else "external_cost_model_missing"
                                       end
 end

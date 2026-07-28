@@ -39,8 +39,13 @@ module NilKill
 
       def emit
         events, invalid_events = load_events
-        inferred_events = infer_events(events)
-        documents = build_documents(events + inferred_events)
+        semantic_events = events.select do |event|
+          Languages.provider_for(event.fetch("language"))
+            .runtime_scip_event_eligible?(event: event, root: @root)
+        end
+        excluded_events = events.length - semantic_events.length
+        inferred_events = infer_events(semantic_events)
+        documents = build_documents(semantic_events + inferred_events)
         index = {
           "metadata" => {
             "version" => 0,
@@ -61,7 +66,13 @@ module NilKill
         write_atomically(
           @attestation,
           JSON.pretty_generate(
-            attestation_payload(events, documents, invalid_events, inferred_events.length)
+            attestation_payload(
+              events,
+              documents,
+              invalid_events,
+              inferred_events.length,
+              excluded_events
+            )
           ) + "\n"
         )
         {
@@ -72,6 +83,7 @@ module NilKill
           "documents" => documents.length,
           "occurrences" => documents.sum { |document| document.fetch("occurrences").length },
           "invalid_events" => invalid_events,
+          "excluded_events" => excluded_events,
         }
       end
 
@@ -81,7 +93,8 @@ module NilKill
         events.group_by { |event| event.fetch("language") }.sort.flat_map do |language, rows|
           Languages.provider_for(language).runtime_scip_inferred_events(
             events: rows,
-            root: @root
+            root: @root,
+            runtime_dir: @runtime_dir
           )
         end
       end
@@ -272,7 +285,13 @@ module NilKill
         path == @root || path.start_with?("#{@root}#{File::SEPARATOR}")
       end
 
-      def attestation_payload(events, documents, invalid_events, inferred_events)
+      def attestation_payload(
+        events,
+        documents,
+        invalid_events,
+        inferred_events,
+        excluded_events
+      )
         claims = {
           "runtime_scip.authority" => AUTHORITY,
           "runtime_scip.closure_assumption" =>
@@ -282,6 +301,7 @@ module NilKill
           "runtime_scip.event_count" => events.length.to_s,
           "runtime_scip.document_count" => documents.length.to_s,
           "runtime_scip.invalid_event_count" => invalid_events.to_s,
+          "runtime_scip.excluded_nonproduction_event_count" => excluded_events.to_s,
           "runtime_scip.inferred_event_count" => inferred_events.to_s,
           "runtime_scip.inference" =>
             "language-owned source callsites joined to observed modeled dispatch domains",

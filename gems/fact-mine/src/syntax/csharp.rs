@@ -5,11 +5,10 @@ use super::cfg::ControlFlowProfile;
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     configured_collection_operation, configured_external_latency_bound,
-    configured_intrinsic_call_complexity,
-    configured_semantic_symbol_call_complexity, configured_semantic_symbol_kind,
-    configured_semantic_symbol_parametric_cost, eliminable_guard_from_call,
-    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
-    type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
+    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
     NormalizedSemanticEffect,
 };
@@ -115,8 +114,7 @@ pub(crate) fn external_symbol_call_complexity(
             assumption: None,
         });
     }
-    let complexity =
-        configured_external_latency_bound("csharp", owner.as_deref()?, message)?;
+    let complexity = configured_external_latency_bound("csharp", owner.as_deref()?, message)?;
     Some(ExternalCallComplexity {
         time: complexity.time,
         space: complexity.space,
@@ -262,13 +260,11 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
             .rsplit('.')
             .next()
             .unwrap_or(declared_type);
-        (nominal == "Action"
-            || nominal.starts_with("Action<")
-            || nominal.starts_with("Func<"))
-        .then(|| "callback_once".to_string())
-        .or_else(|| {
-            super::normalized_behavior::configured_callable_type_cost("csharp", declared_type)
-        })
+        (nominal == "Action" || nominal.starts_with("Action<") || nominal.starts_with("Func<"))
+            .then(|| "callback_once".to_string())
+            .or_else(|| {
+                super::normalized_behavior::configured_callable_type_cost("csharp", declared_type)
+            })
     }
 
     // C-family indexers render a local as `Type name` - the type leads.
@@ -280,10 +276,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     }
 
     // C# declares `Ret name(T a)`, not `name(a: T) -> Ret`.
-    fn parse_signature(
-        &self,
-        signature: &str,
-    ) -> super::normalized_behavior::NormalizedSignature {
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
         super::normalized_behavior::parse_prefix_return_declarator(signature)
     }
 
@@ -369,9 +362,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         let owner = owner.rsplit("::").next().unwrap_or(owner);
         source.lines().find_map(|line| {
             let tokens = line
-                .split(|character: char| {
-                    !(character == '_' || character.is_ascii_alphanumeric())
-                })
+                .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
                 .filter(|token| !token.is_empty())
                 .collect::<Vec<_>>();
             tokens
@@ -563,14 +554,7 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
     fn collection_callback_parameter(&self, message: &str) -> bool {
         matches!(
             message,
-            "Aggregate"
-                | "All"
-                | "Any"
-                | "Count"
-                | "First"
-                | "FirstOrDefault"
-                | "Select"
-                | "Where"
+            "Aggregate" | "All" | "Any" | "Count" | "First" | "FirstOrDefault" | "Select" | "Where"
         )
     }
 
@@ -1157,9 +1141,8 @@ mod tests {
 
     #[test]
     fn scip_dotnet_symbols_use_reviewed_exact_and_parametric_costs() {
-        let symbol = |descriptor: &str| {
-            format!("scip-dotnet nuget System.Runtime 10.0.0.0 {descriptor}")
-        };
+        let symbol =
+            |descriptor: &str| format!("scip-dotnet nuget System.Runtime 10.0.0.0 {descriptor}");
         for (descriptor, message, expected) in [
             ("IO/TextWriter#Write(+1).", "Write", "O(1)"),
             ("IO/TextWriter#Write(+11).", "Write", "O(N)"),
@@ -1175,11 +1158,7 @@ mod tests {
             ("Linq/Enumerable#Any().", "Any", "O(N)"),
             ("System/AppContext#TryGetSwitch().", "TryGetSwitch", "O(N)"),
             ("System/Exception#ToString().", "ToString", "O(N)"),
-            (
-                "RegularExpressions/Regex#IsMatch(+5).",
-                "IsMatch",
-                "O(N)",
-            ),
+            ("RegularExpressions/Regex#IsMatch(+5).", "IsMatch", "O(N)"),
             ("System/ReadOnlySpan#Slice(+1).", "Slice", "O(1)"),
             (
                 "InteropServices/MemoryMarshal#CreateSpan().",
@@ -1193,15 +1172,11 @@ mod tests {
             assert_eq!(cost.provenance, "csharp_scip_symbol_registry");
         }
 
-        let callback =
-            "scip-dotnet nuget System.Linq 10.0.0.0 Linq/Enumerable#Where().";
+        let callback = "scip-dotnet nuget System.Linq 10.0.0.0 Linq/Enumerable#Where().";
         assert!(external_symbol_call_complexity(callback, "Where").is_none());
         let metadata = external_symbol_metadata(callback);
         assert_eq!(metadata.scope, "stdlib");
-        assert_eq!(
-            metadata.parametric_cost.as_deref(),
-            Some("callback_linear")
-        );
+        assert_eq!(metadata.parametric_cost.as_deref(), Some("callback_linear"));
 
         let action = external_symbol_metadata(
             "scip-dotnet nuget System.Runtime 10.0.0.0 System/Action#Invoke().",
@@ -1235,10 +1210,7 @@ mod tests {
             let cost = external_symbol_call_complexity(&symbol(descriptor), message)
                 .unwrap_or_else(|| panic!("missing external-latency cost for {descriptor}"));
             assert_eq!(cost.time, expected);
-            assert_eq!(
-                cost.bound_quality,
-                "upper_bound_external_latency_excluded"
-            );
+            assert_eq!(cost.bound_quality, "upper_bound_external_latency_excluded");
             assert!(cost.assumption.is_some());
         }
     }

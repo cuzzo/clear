@@ -198,10 +198,7 @@ fn cpp_relative_scoped_call_searches_enclosing_namespaces_across_files() -> Resu
         .iter()
         .find(|call| call.function == "run" && call.message == "util::work")
         .context("missing relative scoped call")?;
-    assert_eq!(
-        call.lexical_symbol.as_deref(),
-        Some("plog::util::work")
-    );
+    assert_eq!(call.lexical_symbol.as_deref(), Some("plog::util::work"));
     assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
     assert_eq!(
         call.lexical_symbol_origin.as_deref(),
@@ -1635,11 +1632,15 @@ fn synthetic_lambda_names_survive_qualified_name_handling() -> Result<()> {
         )
         .collect::<Vec<_>>();
     assert!(
-        names.iter().any(|name| name.starts_with("<lambda@") && name.ends_with('>')),
+        names
+            .iter()
+            .any(|name| name.starts_with("<lambda@") && name.ends_with('>')),
         "expected an intact synthetic lambda name, got {names:?}"
     );
     assert!(
-        !names.iter().any(|name| name.ends_with('>') && !name.starts_with('<')),
+        !names
+            .iter()
+            .any(|name| name.ends_with('>') && !name.starts_with('<')),
         "a lambda name was split on its span separator, got {names:?}"
     );
     Ok(())
@@ -1672,7 +1673,11 @@ fn closures_are_extracted_as_first_class_functions() -> Result<()> {
             .with_context(|| {
                 format!(
                     "{label}: no lambda function extracted, got {:?}",
-                    output.methods.iter().map(|m| m.name.as_str()).collect::<Vec<_>>()
+                    output
+                        .methods
+                        .iter()
+                        .map(|m| m.name.as_str())
+                        .collect::<Vec<_>>()
                 )
             })?;
         assert!(

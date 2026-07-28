@@ -90,6 +90,7 @@
     "raw_parser_call_sites": 9,
     "semantically_accounted_call_percent": 0.0,
     "semantically_accounted_call_sites": 0,
+    "source_export_eligible_methods_overlapping_raw_call_loss": 0,
     "total_call_sites": 0,
     "unresolved_call_percent": 0.0,
     "unresolved_call_sites": 0,
@@ -99,10 +100,14 @@
   "calls": [
     {
       "argument_count": 1,
+      "arguments": [
+        "T::Sig"
+      ],
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:ff1a68259204d148",
+      "id": "edge:cdffe927ac3f9ffa",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 4,
@@ -112,7 +117,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:9e3ca9e165154fb5",
+      "source": "fn:50c72744be604cfe",
       "span": [
         4,
         2,
@@ -125,8 +130,9 @@
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:43d35f2eaeb4e354",
+      "id": "edge:076f3c3aeabfa362",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 6,
@@ -136,7 +142,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:9e3ca9e165154fb5",
+      "source": "fn:50c72744be604cfe",
       "span": [
         6,
         2,
@@ -147,10 +153,15 @@
     },
     {
       "argument_count": 2,
+      "arguments": [
+        "name: String",
+        "node: Integer"
+      ],
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:6f9ce6b0c86529e3",
+      "id": "edge:76ccf5be66afda01",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 6,
@@ -160,7 +171,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:9e3ca9e165154fb5",
+      "source": "fn:50c72744be604cfe",
       "span": [
         6,
         8,
@@ -171,12 +182,16 @@
     },
     {
       "argument_count": 1,
+      "arguments": [
+        "T.untyped"
+      ],
       "complexity_bound_quality": "upper_bound_declared_receiver",
       "complexity_provenance": "language_stdlib_registry",
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:b7b09cfc47b13c91",
+      "id": "edge:6882f14e9bd38faf",
       "kind": "external_call",
       "known_space_complexity": "O(1)",
       "known_time_complexity": "O(1)",
@@ -187,7 +202,7 @@
       "receiver": "T::Array",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
-      "source": "fn:9e3ca9e165154fb5",
+      "source": "fn:50c72744be604cfe",
       "span": [
         6,
         52,
@@ -198,10 +213,14 @@
     },
     {
       "argument_count": 1,
+      "arguments": [
+        "T::Array[T.untyped]"
+      ],
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:7efbdfbf5018b4a6",
+      "id": "edge:6c8f91d877151140",
       "kind": "external_call",
       "line": 6,
       "message": "returns",
@@ -216,7 +235,7 @@
         43
       ],
       "receiver_kind": "value",
-      "source": "fn:9e3ca9e165154fb5",
+      "source": "fn:50c72744be604cfe",
       "span": [
         6,
         8,
@@ -227,10 +246,15 @@
     },
     {
       "argument_count": 2,
+      "arguments": [
+        ":CHAR",
+        "\">\""
+      ],
       "conditional": false,
       "confidence": "high",
+      "consumer_closed_candidate_set": false,
       "function": "build",
-      "id": "edge:778219360a79f571",
+      "id": "edge:416e344494dba7b4",
       "implicit_receiver": true,
       "kind": "internal_call",
       "line": 8,
@@ -240,21 +264,22 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:8674f476ac85a3cb",
+      "source": "fn:5806bc2a76308928",
       "span": [
         8,
         4,
         8,
         23
       ],
-      "target": "fn:1884cd1bd6dcfeff"
+      "target": "fn:44e64e0b9ace44e0"
     },
     {
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "build",
-      "id": "edge:c60bc64c59d16ea7",
+      "id": "edge:63ca1822919c0c60",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 9,
@@ -264,7 +289,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:8674f476ac85a3cb",
+      "source": "fn:5806bc2a76308928",
       "span": [
         9,
         19,
@@ -277,8 +302,9 @@
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:5ad5ca69b25060fe",
+      "id": "edge:37b2cae7c28e488c",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 12,
@@ -288,7 +314,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:9e3ca9e165154fb5",
+      "source": "fn:50c72744be604cfe",
       "span": [
         12,
         2,
@@ -299,10 +325,15 @@
     },
     {
       "argument_count": 2,
+      "arguments": [
+        "kind: Symbol",
+        "text: String"
+      ],
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:2ef535ce9096e5da",
+      "id": "edge:3cd81ecb12dec218",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 12,
@@ -312,7 +343,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:9e3ca9e165154fb5",
+      "source": "fn:50c72744be604cfe",
       "span": [
         12,
         8,
@@ -325,8 +356,9 @@
       "argument_count": 0,
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:c39cb5d499cfe191",
+      "id": "edge:1e874f9f09744053",
       "kind": "external_call",
       "line": 12,
       "message": "void",
@@ -341,7 +373,7 @@
         42
       ],
       "receiver_kind": "value",
-      "source": "fn:9e3ca9e165154fb5",
+      "source": "fn:50c72744be604cfe",
       "span": [
         12,
         8,
@@ -422,6 +454,7 @@
         "halving_calls": 0,
         "loop_contained_shrinking_calls": 0,
         "shrinking_calls": 0,
+        "structural_calls": 0,
         "unknown_progress_calls": 0,
         "visited_guarded_calls": 0
       },
@@ -659,7 +692,7 @@
   "methods": [
     {
       "dispatch_name": "build",
-      "id": "fn:8674f476ac85a3cb",
+      "id": "fn:5806bc2a76308928",
       "key": [
         "TupleArrayEvidence",
         "build",
@@ -672,7 +705,7 @@
       "name": "build",
       "normalized_source": "def build(name, node) consume(:CHAR, \">\") [[name, node], current] end",
       "owner": "TupleArrayEvidence",
-      "owner_id": "owner:7a8369774f6ec03b",
+      "owner_id": "owner:d4ede25f803af7ee",
       "params": [
         "name",
         "node"
@@ -686,6 +719,7 @@
         "source": "annotation",
         "type_system": "sorbet"
       },
+      "source_export_eligible": true,
       "span": [
         7,
         2,
@@ -696,7 +730,7 @@
     },
     {
       "dispatch_name": "consume",
-      "id": "fn:1884cd1bd6dcfeff",
+      "id": "fn:44e64e0b9ace44e0",
       "key": [
         "TupleArrayEvidence",
         "consume",
@@ -709,7 +743,7 @@
       "name": "consume",
       "normalized_source": "def consume(kind, text); end",
       "owner": "TupleArrayEvidence",
-      "owner_id": "owner:7a8369774f6ec03b",
+      "owner_id": "owner:d4ede25f803af7ee",
       "params": [
         "kind",
         "text"
@@ -723,6 +757,7 @@
         "source": "annotation",
         "type_system": "sorbet"
       },
+      "source_export_eligible": true,
       "span": [
         13,
         2,
@@ -759,7 +794,7 @@
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:7a8369774f6ec03b",
+      "id": "owner:d4ede25f803af7ee",
       "kind": "class",
       "language": "ruby",
       "line": 3,
@@ -1175,7 +1210,7 @@
     {
       "array_element_shape": null,
       "blockers": [
-        "unknown return expression ARGS at /home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:13"
+        "unknown return expression ARGS at /home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:13"
       ],
       "candidate_type": {
         "kind": "Untyped"
@@ -1496,7 +1531,7 @@
       "name": "name",
       "owner": "TupleArrayEvidence",
       "requirements": [
-        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name"
+        "type-definition:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name"
       ],
       "resolved": true,
       "span": [
@@ -1520,7 +1555,7 @@
       "name": "node",
       "owner": "TupleArrayEvidence",
       "requirements": [
-        "type-definition:/home/yahn/cheat/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node"
+        "type-definition:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node"
       ],
       "resolved": true,
       "span": [

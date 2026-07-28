@@ -77,10 +77,7 @@ const PYTHON_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PythonNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
-    fn parse_signature(
-        &self,
-        signature: &str,
-    ) -> super::normalized_behavior::NormalizedSignature {
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
         let signature = signature.trim();
         let (Some(open), Some(close)) = (signature.find('('), signature.rfind(')')) else {
             return super::normalized_behavior::NormalizedSignature::default();

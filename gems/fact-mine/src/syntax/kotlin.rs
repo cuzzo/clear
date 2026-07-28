@@ -520,16 +520,8 @@ mod tests {
                 "contentToString",
                 "O(N)",
             ),
-            (
-                "kotlin/collections/MutableList#add().",
-                "add",
-                "O(N)",
-            ),
-            (
-                "kotlin/collections/toList(+10).",
-                "toList",
-                "O(N)",
-            ),
+            ("kotlin/collections/MutableList#add().", "add", "O(N)"),
+            ("kotlin/collections/toList(+10).", "toList", "O(N)"),
             ("kotlin/text/trimMargin().", "trimMargin", "O(N)"),
         ];
         for (descriptor, message, expected) in exact {

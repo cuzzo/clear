@@ -246,11 +246,7 @@ pub(super) fn preprocessor_callable_definitions(
     root: TreeSitterNode<'_>,
     source: &str,
 ) -> Vec<(String, String)> {
-    fn visit(
-        node: TreeSitterNode<'_>,
-        source: &str,
-        definitions: &mut Vec<(String, String)>,
-    ) {
+    fn visit(node: TreeSitterNode<'_>, source: &str, definitions: &mut Vec<(String, String)>) {
         if node.kind() == "preproc_function_def" {
             if let Some(name) = node.child_by_field_name("name") {
                 let name = super::super::node_text(name, source).trim();

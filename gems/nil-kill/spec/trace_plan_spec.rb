@@ -190,7 +190,7 @@ RSpec.describe NilKill::TracePlan do
         "fields" => %w[name metadata]
       ))
       expect(evidence.dig("facts", "struct_declarations")).to include(a_hash_including(
-        "class" => "MutableState",
+        "class" => "Worker::MutableState",
         "fields" => %w[items],
         "field_types" => { "items" => "T::Array[String]" }
       ))

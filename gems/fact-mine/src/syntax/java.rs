@@ -253,8 +253,7 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
     }
 
     fn unbound_receiver_may_name_project_type(&self, receiver: &str) -> bool {
-        !receiver.is_empty()
-            && !receiver.contains(['.', ':', '(', ')', '[', ']'])
+        !receiver.is_empty() && !receiver.contains(['.', ':', '(', ')', '[', ']'])
     }
 
     fn declared_flow_type_fallback(&self, declared_type: &str) -> bool {
@@ -277,10 +276,7 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
     }
 
     // java declares `Ret name(T a)`, not `name(a: T) -> Ret`.
-    fn parse_signature(
-        &self,
-        signature: &str,
-    ) -> super::normalized_behavior::NormalizedSignature {
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
         super::normalized_behavior::parse_prefix_return_declarator(signature)
     }
 
@@ -878,10 +874,7 @@ mod tests {
     fn test_java_behavior_comprehensive() {
         let b = JavaNormalizedBehavior;
 
-        assert!(b.function_has_executable_body(&node(
-            "DEFN",
-            "default int size() { return 0; }"
-        )));
+        assert!(b.function_has_executable_body(&node("DEFN", "default int size() { return 0; }")));
         assert!(!b.function_has_executable_body(&node("DEFN", "int size();")));
 
         assert_eq!(

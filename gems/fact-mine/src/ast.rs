@@ -221,8 +221,7 @@ pub(crate) fn preprocessor_callable_definitions(
     source: &str,
     language: Language,
 ) -> Vec<(String, String)> {
-    adapters::normalization_adapter(language)
-        .preprocessor_callable_definitions(root, source)
+    adapters::normalization_adapter(language).preprocessor_callable_definitions(root, source)
 }
 
 pub fn node(child: &Child) -> Option<&Node> {

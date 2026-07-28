@@ -306,9 +306,9 @@ impl<'a> Extractor<'a> {
             self.record_semantic_effect(node, &effect.kind, &effect.detail);
         }
         let params = function_params(node, self.behavior);
-        let implicit_exit_calls =
-            self.behavior
-                .implicit_function_exit_calls(node, &name, &params);
+        let implicit_exit_calls = self
+            .behavior
+            .implicit_function_exit_calls(node, &name, &params);
         let visibility = self.behavior.function_visibility(&name, node, &self.lines);
         self.facts.function_defs.push(FunctionDef {
             file: self.file.clone(),
@@ -2852,11 +2852,9 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
         .filter(|(index, _)| {
             let before = text[..*index].chars().next_back();
             let after = text[*index + field_name.len()..].chars().next();
-            before.is_none_or(|character| {
-                character != '_' && !character.is_ascii_alphanumeric()
-            }) && after.is_none_or(|character| {
-                character != '_' && !character.is_ascii_alphanumeric()
-            })
+            before.is_none_or(|character| character != '_' && !character.is_ascii_alphanumeric())
+                && after
+                    .is_none_or(|character| character != '_' && !character.is_ascii_alphanumeric())
         })
         .map(|(index, _)| index)
         .last();
@@ -2884,9 +2882,9 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
                 .next()
                 .unwrap_or(first_declarator)
                 .trim();
-            if let Some(name_start) = declaration.rfind(|character: char| {
-                !character.is_ascii_alphanumeric() && character != '_'
-            }) {
+            if let Some(name_start) = declaration
+                .rfind(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            {
                 let shared_type = declaration[..=name_start].trim();
                 if is_valid_type_text(shared_type) {
                     return Some(shared_type.to_string());

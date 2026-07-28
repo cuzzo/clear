@@ -8,6 +8,12 @@ module NilKill
   module Languages
     module Providers
       class Ruby < Provider
+        RUNTIME_SCIP_SELECTOR_ALIASES = {
+          "Set" => {
+            "add" => ["add?"],
+          }.freeze,
+        }.freeze
+
         def language
           "ruby"
         end
@@ -104,6 +110,10 @@ module NilKill
           source_name = callee.fetch("name").to_s == "initialize" ?
             "new" : callee.fetch("name").to_s
           calls = method.fetch(:calls).select { |call| call.fetch(:name) == source_name }
+          same_line = calls.select do |call|
+            call.fetch(:line) == callsite.fetch("line").to_i
+          end
+          calls = same_line unless same_line.empty?
           # The index authority explicitly models the traced workload as a
           # closed world. Within one caller method, the conservative dispatch
           # domain for a selector is therefore the union of every target
@@ -120,8 +130,28 @@ module NilKill
           []
         end
 
-        def runtime_scip_inferred_events(events:, root:)
+        def runtime_scip_event_eligible?(event:, root:)
+          package = event.dig("callee", "package").to_s
+          return false if %w[minitest mocha rspec-mocks rr].include?(package)
+
+          callee_path = event.dig("callee", "path").to_s
+          return true if callee_path.empty?
+
+          absolute = File.expand_path(callee_path, root)
+          root = File.expand_path(root)
+          return true unless absolute.start_with?("#{root}#{File::SEPARATOR}")
+
+          relative = absolute.delete_prefix("#{root}#{File::SEPARATOR}")
+          components = Pathname.new(relative).each_filename.to_a
+          basename = components.last.to_s
+          !components.any? { |component| %w[test tests spec specs].include?(component) } &&
+            !basename.match?(/(?:_test|_spec)\.rb\z/)
+        end
+
+        def runtime_scip_inferred_events(events:, root:, runtime_dir: nil)
           methods_by_path = {}
+          runtime_observations = ruby_runtime_scip_observations(runtime_dir)
+          method_observations = runtime_observations.fetch(:parameters)
           eligible = events.select do |event|
             caller = event.fetch("caller")
             callsite = event.fetch("callsite")
@@ -147,22 +177,100 @@ module NilKill
             ].map { |field| callee[field] }
             index[selector][identity] ||= event
           end
+          ivar_owners = ruby_runtime_scip_ivar_owners(
+            methods_by_path,
+            method_observations,
+            runtime_observations
+          )
 
           inferred = []
           methods_by_path.sort.each do |path, methods|
             methods.each do |method|
+              receiver_domains = ruby_runtime_scip_local_owners(
+                method,
+                method_observations.fetch(
+                  [path, method.fetch(:line), method.fetch(:name)],
+                  {}
+                ),
+                runtime_observations,
+                [path, method.fetch(:line), method.fetch(:name)],
+                ivar_owners
+              )
               method.fetch(:calls).each do |call|
                 selector = call.fetch(:name)
                 candidates = observed.fetch(selector, {}).values
-                receiver_owner = call[:receiver_owner]
-                if receiver_owner
+                observed_receivers = receiver_domains.fetch(:owners)
+                  .fetch(call[:receiver_name].to_s, [])
+                if observed_receivers.empty? && call[:receiver_shape]
+                  observed_receivers = ruby_runtime_scip_value_domain(
+                    call.fetch(:receiver_shape),
+                    :owners,
+                    receiver_domains.fetch(:owners),
+                    receiver_domains.fetch(:elements),
+                    receiver_domains.fetch(:keys),
+                    receiver_domains.fetch(:values),
+                    runtime_observations
+                  )
+                end
+                receiver_owners_for_call =
+                  if call[:receiver_owner]
+                    [call[:receiver_owner]]
+                  else
+                    observed_receivers
+                  end
+                if candidates.empty? && !receiver_owners_for_call.empty?
+                  aliases = receiver_owners_for_call.flat_map do |receiver_owner|
+                    RUNTIME_SCIP_SELECTOR_ALIASES
+                      .fetch(receiver_owner, {})
+                      .fetch(selector, [])
+                  end.uniq
+                  candidates = aliases.flat_map do |runtime_selector|
+                    observed.fetch(runtime_selector, {}).values.filter_map do |event|
+                      callee = event.fetch("callee")
+                      next unless receiver_owners_for_call.any? do |receiver_owner|
+                        ruby_runtime_owner_matches?(
+                          callee.fetch("owner").to_s,
+                          receiver_owner
+                        ) || ruby_runtime_owner_matches?(
+                          callee["receiver_type"].to_s,
+                          receiver_owner
+                        )
+                      end
+
+                      event.merge(
+                        "callee" => callee.merge("name" => selector)
+                      )
+                    end
+                  end
+                end
+                unless receiver_owners_for_call.empty?
+                  receiver_kind = call[:receiver_kind]
+                  receiver_kind ||= "instance" unless observed_receivers.empty?
                   narrowed = candidates.select do |event|
-                    ruby_runtime_owner_matches?(
-                      event.fetch("callee").fetch("owner").to_s,
-                      receiver_owner
+                    callee = event.fetch("callee")
+                    receiver_owners_for_call.any? do |receiver_owner|
+                      ruby_runtime_owner_matches?(
+                        callee.fetch("owner").to_s,
+                        receiver_owner
+                      ) || ruby_runtime_owner_matches?(
+                        callee["receiver_type"].to_s,
+                        receiver_owner
+                      )
+                    end && (
+                      receiver_kind.nil? ||
+                      callee.fetch("kind").to_s == receiver_kind
                     )
                   end
-                  candidates = narrowed unless narrowed.empty?
+                  candidates = narrowed
+                else
+                  owners = candidates.map do |event|
+                    event.fetch("callee").fetch("owner").to_s
+                  end.uniq
+                  # An unexecuted dynamic receiver cannot inherit a global
+                  # selector-wide dispatch union. Infer only when every
+                  # observed candidate proves the same runtime owner; actual
+                  # executed callsites remain represented by their events.
+                  candidates = [] unless owners.one?
                 end
                 candidates.each do |event|
                   inferred << event.merge(
@@ -229,16 +337,58 @@ module NilKill
           visit = lambda do |node|
             if node.is_a?(Prism::DefNode)
               calls = []
+              assignments = Hash.new { |hash, name| hash[name] = [] }
+              ivar_assignments = Hash.new { |hash, name| hash[name] = [] }
+              block_bindings = []
               collect = lambda do |child|
                 return if child.is_a?(Prism::DefNode)
 
-                if child.is_a?(Prism::CallNode)
-                  location = child.message_loc || child.location
+                if child.is_a?(Prism::LocalVariableWriteNode)
+                  assignments[child.name.to_s] << ruby_runtime_scip_value_shape(child.value)
+                elsif child.is_a?(Prism::InstanceVariableWriteNode)
+                  ivar_assignments[child.name.to_s] <<
+                    ruby_runtime_scip_value_shape(child.value)
+                elsif child.is_a?(Prism::CallNode)
+                  block_parameters = ruby_runtime_scip_block_parameter_names(child.block)
+                  unless block_parameters.empty?
+                    block_bindings << {
+                      receiver_name: ruby_runtime_scip_receiver_name(child.receiver),
+                      receiver_shape: child.receiver &&
+                        ruby_runtime_scip_value_shape(child.receiver),
+                      message: child.name.to_s,
+                      parameters: block_parameters,
+                    }
+                  end
+                  location =
+                    if %i[[] []=].include?(child.name) && child.opening_loc
+                      child.opening_loc
+                    else
+                      child.message_loc || child.location
+                    end
                   calls << {
                     name: child.name.to_s,
                     line: location.start_line,
                     range: ruby_runtime_scip_range(location),
                     receiver_owner: ruby_runtime_scip_receiver_owner(child.receiver),
+                    receiver_kind: ruby_runtime_scip_receiver_kind(child.receiver),
+                    receiver_name: ruby_runtime_scip_receiver_name(child.receiver),
+                    receiver_shape: child.receiver &&
+                      ruby_runtime_scip_value_shape(child.receiver),
+                  }
+                elsif child.class.name.end_with?("OperatorWriteNode") &&
+                    child.respond_to?(:binary_operator) &&
+                    child.respond_to?(:binary_operator_loc)
+                  location = child.binary_operator_loc
+                  calls << {
+                    name: child.binary_operator.to_s,
+                    line: location.start_line,
+                    range: ruby_runtime_scip_range(location),
+                    receiver_owner: child.respond_to?(:receiver) ?
+                      ruby_runtime_scip_receiver_owner(child.receiver) : nil,
+                    receiver_kind: child.respond_to?(:receiver) ?
+                      ruby_runtime_scip_receiver_kind(child.receiver) : nil,
+                    receiver_name: child.respond_to?(:receiver) ?
+                      ruby_runtime_scip_receiver_name(child.receiver) : nil,
                   }
                 end
                 child.compact_child_nodes.each do |grandchild|
@@ -250,6 +400,9 @@ module NilKill
                 name: node.name.to_s,
                 line: node.location.start_line,
                 calls: calls,
+                assignments: assignments,
+                ivar_assignments: ivar_assignments,
+                block_bindings: block_bindings,
               }
               # Nested definitions are separate caller domains.
               node.compact_child_nodes.each { |child| visit.call(child) }
@@ -298,6 +451,477 @@ module NilKill
           when Prism::RangeNode
             "Range"
           end
+        end
+
+        def ruby_runtime_scip_receiver_kind(node)
+          case node
+          when Prism::ConstantReadNode, Prism::ConstantPathNode
+            "class"
+          when Prism::StringNode, Prism::InterpolatedStringNode,
+              Prism::ArrayNode, Prism::HashNode,
+              Prism::SymbolNode, Prism::InterpolatedSymbolNode,
+              Prism::IntegerNode, Prism::FloatNode,
+              Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode,
+              Prism::RangeNode
+            "instance"
+          end
+        end
+
+        def ruby_runtime_scip_receiver_name(node)
+          case node
+          when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode,
+              Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+            node.name.to_s
+          end
+        end
+
+        def ruby_runtime_scip_observations(runtime_dir)
+          parameters = Hash.new do |methods, key|
+            methods[key] = Hash.new { |parameters, name| parameters[name] = Set.new }
+          end
+          parameter_elements = Hash.new do |methods, key|
+            methods[key] = Hash.new { |parameters, name| parameters[name] = Set.new }
+          end
+          parameter_keys = Hash.new do |methods, key|
+            methods[key] = Hash.new { |parameters, name| parameters[name] = Set.new }
+          end
+          parameter_values = Hash.new do |methods, key|
+            methods[key] = Hash.new { |parameters, name| parameters[name] = Set.new }
+          end
+          returns = Hash.new { |methods, name| methods[name] = Set.new }
+          return_elements = Hash.new { |methods, name| methods[name] = Set.new }
+          return_keys = Hash.new { |methods, name| methods[name] = Set.new }
+          return_values = Hash.new { |methods, name| methods[name] = Set.new }
+          return {
+            parameters: parameters,
+            parameter_elements: parameter_elements,
+            parameter_keys: parameter_keys,
+            parameter_values: parameter_values,
+            returns: returns,
+            return_elements: return_elements,
+            return_keys: return_keys,
+            return_values: return_values,
+          } unless runtime_dir
+
+          Dir.glob(File.join(runtime_dir, "methods-*.jsonl")).sort.each do |path|
+            File.foreach(path) do |line|
+              row = JSON.parse(line)
+              source_path = File.expand_path(row.fetch("path"))
+              key = [source_path, row.fetch("line").to_i, row.fetch("method").to_s]
+              all = row.fetch("params_by_name", {})
+              ok = row.fetch("params_ok", {})
+              all.each_key do |name|
+                classes = Array(ok[name])
+                classes = Array(all[name]) if classes.empty?
+                parameters[key][name.to_s].merge(classes.map(&:to_s))
+              end
+              row.fetch("param_elem", {}).each do |name, classes|
+                parameter_elements[key][name.to_s].merge(Array(classes).map(&:to_s))
+              end
+              row.fetch("param_elem_shapes", {}).each do |name, shapes|
+                shape_keys, shape_values = ruby_runtime_scip_shape_hash_domains(shapes)
+                parameter_keys[key][name.to_s].merge(shape_keys)
+                parameter_values[key][name.to_s].merge(shape_values)
+              end
+              row.fetch("param_kv", {}).each do |name, pair|
+                parameter_keys[key][name.to_s].merge(Array(pair&.first).map(&:to_s))
+                parameter_values[key][name.to_s].merge(Array(pair&.[](1)).map(&:to_s))
+              end
+              returns[row.fetch("method").to_s].merge(Array(row["returns"]).map(&:to_s))
+              return_elements[row.fetch("method").to_s]
+                .merge(Array(row["return_elem"]).map(&:to_s))
+              shape_keys, shape_values =
+                ruby_runtime_scip_shape_hash_domains(row["return_elem_shapes"])
+              return_keys[row.fetch("method").to_s].merge(shape_keys)
+              return_values[row.fetch("method").to_s].merge(shape_values)
+              return_pair = Array(row["return_kv"])
+              return_keys[row.fetch("method").to_s]
+                .merge(Array(return_pair[0]).map(&:to_s))
+              return_values[row.fetch("method").to_s]
+                .merge(Array(return_pair[1]).map(&:to_s))
+            rescue JSON::ParserError, KeyError
+              next
+            end
+          end
+          parameters.each_value do |method_parameters|
+            method_parameters.transform_values! { |classes| classes.to_a.sort }
+          end
+          [parameter_elements, parameter_keys, parameter_values].each do |observations|
+            observations.each_value do |method_parameters|
+              method_parameters.transform_values! { |classes| classes.to_a.sort }
+            end
+          end
+          returns.transform_values! { |classes| classes.to_a.sort }
+          [return_elements, return_keys, return_values].each do |observations|
+            observations.transform_values! { |classes| classes.to_a.sort }
+          end
+          {
+            parameters: parameters,
+            parameter_elements: parameter_elements,
+            parameter_keys: parameter_keys,
+            parameter_values: parameter_values,
+            returns: returns,
+            return_elements: return_elements,
+            return_keys: return_keys,
+            return_values: return_values,
+          }
+        end
+
+        def ruby_runtime_scip_value_shape(node)
+          case node
+          when Prism::LocalVariableReadNode
+            { kind: :alias, name: node.name.to_s }
+          when Prism::CallNode
+            receiver_owner = ruby_runtime_scip_receiver_owner(node.receiver)
+            if node.name == :new && receiver_owner
+              { kind: :owner, owner: receiver_owner }
+            else
+              {
+                kind: :call,
+                message: node.name.to_s,
+                receiver_owner: receiver_owner,
+                receiver_name: ruby_runtime_scip_receiver_name(node.receiver),
+                receiver: node.receiver && ruby_runtime_scip_value_shape(node.receiver),
+                arguments: Array(node.arguments&.arguments).map do |argument|
+                  ruby_runtime_scip_value_shape(argument)
+                end,
+                argument_count: node.arguments&.arguments&.length.to_i,
+              }
+            end
+          else
+            owner = ruby_runtime_scip_receiver_owner(node)
+            owner ? { kind: :owner, owner: owner } : { kind: :unknown }
+          end
+        end
+
+        def ruby_runtime_scip_local_owners(
+          method,
+          parameter_observations,
+          runtime_observations,
+          method_key,
+          ivar_owners = {}
+        )
+          owners = parameter_observations.transform_values(&:dup)
+          ivar_owners.each do |name, classes|
+            owners[name] = (owners.fetch(name, []) | classes).sort
+          end
+          assignments = method.fetch(:assignments, {})
+          assignments.length.times do
+            changed = false
+            assignments.each do |name, values|
+              inferred_domains = values.map do |value|
+                ruby_runtime_scip_value_domain(
+                  value, :owners, owners, {}, {}, {}, runtime_observations
+                )
+              end
+              next if inferred_domains.any?(&:empty?)
+
+              inferred = inferred_domains.flatten.map(&:to_s).uniq.sort
+              inferred |= owners.fetch(name, [])
+              next if owners[name] == inferred
+
+              owners[name] = inferred
+              changed = true
+            end
+            break unless changed
+          end
+          elements = runtime_observations.fetch(:parameter_elements)
+            .fetch(method_key, {}).transform_values(&:dup)
+          keys = runtime_observations.fetch(:parameter_keys)
+            .fetch(method_key, {}).transform_values(&:dup)
+          values = runtime_observations.fetch(:parameter_values)
+            .fetch(method_key, {}).transform_values(&:dup)
+          assignments.length.times do
+            changed = false
+            assignments.each do |name, assigned|
+              {
+                elements: elements,
+                keys: keys,
+                values: values,
+              }.each do |shape, local_shapes|
+                domains = assigned.map do |value|
+                  ruby_runtime_scip_value_domain(
+                    value, shape, owners, elements, keys, values,
+                    runtime_observations
+                  )
+                end
+                next if domains.any?(&:empty?)
+
+                inferred = domains.flatten.map(&:to_s).uniq.sort
+                inferred |= local_shapes.fetch(name, [])
+                next if local_shapes[name] == inferred
+
+                local_shapes[name] = inferred
+                changed = true
+              end
+            end
+            break unless changed
+          end
+          method.fetch(:block_bindings, []).each do |binding|
+            collection = binding[:receiver_name].to_s
+            receiver_shape = binding[:receiver_shape]
+            collection_owner = owners.fetch(collection, [])
+            if collection_owner.empty? && receiver_shape
+              collection_owner = ruby_runtime_scip_value_domain(
+                receiver_shape, :owners, owners, elements, keys, values,
+                runtime_observations
+              )
+            end
+            collection_elements = elements[collection]
+            collection_keys = keys[collection]
+            collection_values = values[collection]
+            if receiver_shape
+              collection_elements = ruby_runtime_scip_value_domain(
+                receiver_shape, :elements, owners, elements, keys, values,
+                runtime_observations
+              ) if Array(collection_elements).empty?
+              collection_keys = ruby_runtime_scip_value_domain(
+                receiver_shape, :keys, owners, elements, keys, values,
+                runtime_observations
+              ) if Array(collection_keys).empty?
+              collection_values = ruby_runtime_scip_value_domain(
+                receiver_shape, :values, owners, elements, keys, values,
+                runtime_observations
+              ) if Array(collection_values).empty?
+            end
+            parameters = binding.fetch(:parameters)
+            candidates = case [collection_owner.one? && collection_owner.first, binding[:message]]
+                         in ["Hash", "each" | "each_pair" | "map"]
+                           [collection_keys, collection_values]
+                         in ["Hash", "each_key"]
+                           [collection_keys]
+                         in ["Hash", "each_value"]
+                           [collection_values]
+                         in [_, "each_with_index"]
+                           [collection_elements, ["Integer"]]
+                         else
+                           [collection_elements]
+                         end
+            parameters.zip(candidates).each do |name, classes|
+              classes = Array(classes).map(&:to_s).uniq.sort
+              next if classes.empty?
+
+              owners[name] = (owners.fetch(name, []) | classes).sort
+              next unless classes.include?("Hash")
+
+              keys[name] = (keys.fetch(name, []) | Array(collection_keys)).sort
+              values[name] = (values.fetch(name, []) | Array(collection_values)).sort
+            end
+          end
+          {
+            owners: owners,
+            elements: elements,
+            keys: keys,
+            values: values,
+          }
+        end
+
+        def ruby_runtime_scip_ivar_owners(
+          methods_by_path,
+          method_observations,
+          runtime_observations
+        )
+          domains = Hash.new { |hash, name| hash[name] = Set.new }
+          methods_by_path.each do |path, methods|
+            methods.each do |method|
+              parameters = method_observations.fetch(
+                [path, method.fetch(:line), method.fetch(:name)],
+                {}
+              ).transform_values(&:dup)
+              method.fetch(:ivar_assignments, {}).each do |name, assignments|
+                assignments.each do |assignment|
+                  ruby_runtime_scip_value_domain(
+                    assignment, :owners, parameters, {}, {}, {},
+                    runtime_observations
+                  ).each { |owner| domains[name] << owner }
+                end
+              end
+            end
+          end
+          domains.transform_values { |owners| owners.to_a.sort }
+        end
+
+        def ruby_runtime_scip_shape_hash_domains(shapes)
+          keys = Set.new
+          values = Set.new
+          visit = lambda do |shape|
+            case shape
+            when Array
+              shape.each { |child| visit.call(child) }
+            when Hash
+              case shape["kind"]
+              when "hash"
+                Array(shape["keys"]).each do |child|
+                  owner = ruby_runtime_scip_shape_owner(child)
+                  keys << owner if owner
+                  visit.call(child)
+                end
+                Array(shape["values"]).each do |child|
+                  owner = ruby_runtime_scip_shape_owner(child)
+                  values << owner if owner
+                  visit.call(child)
+                end
+              when "array"
+                visit.call(shape["elements"])
+              end
+            end
+          end
+          visit.call(shapes)
+          [keys.to_a.sort, values.to_a.sort]
+        end
+
+        def ruby_runtime_scip_shape_owner(shape)
+          return unless shape.is_a?(Hash)
+
+          case shape["kind"]
+          when "class" then shape["name"].to_s
+          when "array" then "Array"
+          when "hash" then "Hash"
+          end
+        end
+
+        def ruby_runtime_scip_value_domain(
+          value,
+          domain,
+          owners,
+          elements,
+          keys,
+          values,
+          runtime_observations
+        )
+          local_domains = {
+            owners: owners,
+            elements: elements,
+            keys: keys,
+            values: values,
+          }
+          return [value[:owner]].compact if value[:kind] == :owner && domain == :owners
+          return local_domains.fetch(domain).fetch(value[:name], []) if value[:kind] == :alias
+          return [] unless value[:kind] == :call
+
+          message = value[:message]
+          observed = runtime_observations.fetch(
+            {
+              owners: :returns,
+              elements: :return_elements,
+              keys: :return_keys,
+              values: :return_values,
+            }.fetch(domain)
+          ).fetch(message, [])
+          receiver = value[:receiver]
+          receiver_domain =
+            if receiver
+              ruby_runtime_scip_value_domain(
+                receiver, domain, owners, elements, keys, values,
+                runtime_observations
+              )
+            else
+              []
+            end
+          receiver_owners =
+            if receiver
+              ruby_runtime_scip_value_domain(
+                receiver, :owners, owners, elements, keys, values,
+                runtime_observations
+              )
+            else
+              []
+            end
+
+          inferred = if receiver
+            case message
+                     when "[]", "fetch"
+                       if domain == :owners
+                         collection_values = []
+                         collection_values |= ruby_runtime_scip_value_domain(
+                           receiver, :values, owners, elements, keys, values,
+                           runtime_observations
+                         ) if receiver_owners.include?("Hash")
+                         collection_values |= ruby_runtime_scip_value_domain(
+                           receiver, :elements, owners, elements, keys, values,
+                           runtime_observations
+                         ) if (receiver_owners & ["Array", "Range"]).any?
+                         collection_values
+                       else
+                         []
+                       end
+                     when "first"
+                       if value[:argument_count].to_i.positive?
+                         domain == :owners ? ["Array"] : receiver_domain
+                       elsif domain == :owners
+                         ruby_runtime_scip_value_domain(
+                           receiver, :elements, owners, elements, keys, values,
+                           runtime_observations
+                         )
+                       else
+                         []
+                       end
+                     when "select", "reject", "filter", "compact", "uniq",
+                         "sort", "sort_by", "reverse", "take", "drop"
+                       receiver_domain
+                     when "keys"
+                       domain == :owners ? ["Array"] :
+                         (domain == :elements ? ruby_runtime_scip_value_domain(
+                           receiver, :keys, owners, elements, keys, values,
+                           runtime_observations
+                         ) : [])
+                     when "values"
+                       domain == :owners ? ["Array"] :
+                         (domain == :elements ? ruby_runtime_scip_value_domain(
+                           receiver, :values, owners, elements, keys, values,
+                           runtime_observations
+                         ) : [])
+                     when "map", "filter_map", "flat_map"
+                       domain == :owners ? ["Array"] : []
+                     when "merge"
+                       receiver_owners.include?("Hash") && domain == :owners ?
+                         ["Hash"] : receiver_domain
+            else
+              []
+            end
+          else
+            case message
+            when "Array"
+              if domain == :owners
+                ["Array"]
+              elsif domain == :elements
+                Array(value[:arguments]).flat_map do |argument|
+                  ruby_runtime_scip_value_domain(
+                    argument, :elements, owners, elements, keys, values,
+                    runtime_observations
+                  ) | ruby_runtime_scip_value_domain(
+                    argument, :owners, owners, elements, keys, values,
+                    runtime_observations
+                  )
+                end
+              else
+                []
+              end
+            when "Hash"
+              domain == :owners ? ["Hash"] : []
+            else
+              []
+            end
+          end
+          (Array(observed) | Array(inferred)).map(&:to_s).uniq.sort
+        end
+
+        def ruby_runtime_scip_block_parameter_names(block)
+          return [] unless block&.respond_to?(:parameters)
+
+          parameters = block.parameters
+          return [] unless parameters
+
+          names = []
+          visit = lambda do |node|
+            if node.is_a?(Prism::RequiredParameterNode)
+              names << node.name.to_s
+              return
+            end
+            node.compact_child_nodes.each { |child| visit.call(child) }
+          end
+          visit.call(parameters)
+          names
         end
 
         def ruby_runtime_owner_matches?(observed, inferred)

@@ -144,10 +144,7 @@ pub(crate) struct LuaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
     fn native_profile_literal_type(&self, value: &str) -> Option<String> {
-        value
-            .parse::<f64>()
-            .is_ok()
-            .then(|| "number".to_string())
+        value.parse::<f64>().is_ok().then(|| "number".to_string())
     }
 
     fn external_symbol_call_complexity(

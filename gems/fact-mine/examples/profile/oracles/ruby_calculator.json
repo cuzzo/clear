@@ -18,6 +18,7 @@
     "raw_parser_call_sites": 1,
     "semantically_accounted_call_percent": 0.0,
     "semantically_accounted_call_sites": 0,
+    "source_export_eligible_methods_overlapping_raw_call_loss": 0,
     "total_call_sites": 0,
     "unresolved_call_percent": 0.0,
     "unresolved_call_sites": 0,
@@ -27,10 +28,14 @@
   "calls": [
     {
       "argument_count": 1,
+      "arguments": [
+        ":total"
+      ],
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:32f7ae34c97f05b8",
+      "id": "edge:cebb9c2d26f6f0e8",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 2,
@@ -40,7 +45,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:e15b261be3125599",
+      "source": "fn:736040629b8b4788",
       "span": [
         2,
         2,
@@ -100,6 +105,7 @@
         "halving_calls": 0,
         "loop_contained_shrinking_calls": 0,
         "shrinking_calls": 0,
+        "structural_calls": 0,
         "unknown_progress_calls": 0,
         "visited_guarded_calls": 0
       },
@@ -155,12 +161,12 @@
   "fields": [
     {
       "declared_type": null,
-      "id": "state:9401a0fe39c9038e",
+      "id": "state:45b35020fc10ea6f",
       "language": "ruby",
       "line": 5,
       "name": "total",
       "owner": "Calculator",
-      "owner_id": "owner:c89bc43899119c68",
+      "owner_id": "owner:4b045cb69a6f8a63",
       "path": "examples/profile/ruby_calculator.rb",
       "source": "syntax",
       "span": [
@@ -240,7 +246,7 @@
         "boolean_ops": 1
       },
       "dispatch_name": "add",
-      "id": "fn:b4b63e5d9de70e44",
+      "id": "fn:e726a8cb5d1043bf",
       "key": [
         "Calculator",
         "add",
@@ -253,7 +259,7 @@
       "name": "add",
       "normalized_source": "def add(value) @total = (@total || 0) + value end",
       "owner": "Calculator",
-      "owner_id": "owner:c89bc43899119c68",
+      "owner_id": "owner:4b045cb69a6f8a63",
       "params": [
         "value"
       ],
@@ -261,6 +267,7 @@
       "raw_source": "def add(value)\n    @total = (@total || 0) + value\n  end",
       "signature": "",
       "source": {},
+      "source_export_eligible": true,
       "span": [
         4,
         2,
@@ -271,7 +278,7 @@
     },
     {
       "dispatch_name": "result",
-      "id": "fn:02c66c914712165d",
+      "id": "fn:e4bc7514d4fff252",
       "key": [
         "Calculator",
         "result",
@@ -284,12 +291,13 @@
       "name": "result",
       "normalized_source": "def result @total end",
       "owner": "Calculator",
-      "owner_id": "owner:c89bc43899119c68",
+      "owner_id": "owner:4b045cb69a6f8a63",
       "params": [],
       "path": "examples/profile/ruby_calculator.rb",
       "raw_source": "def result\n    @total\n  end",
       "signature": "",
       "source": {},
+      "source_export_eligible": true,
       "span": [
         8,
         2,
@@ -300,7 +308,7 @@
     },
     {
       "dispatch_name": "total",
-      "id": "fn:588c35772c399506",
+      "id": "fn:1fc2156dc148b3bf",
       "key": [
         "Calculator",
         "total",
@@ -313,12 +321,13 @@
       "name": "total",
       "normalized_source": "attr_accessor :total",
       "owner": "Calculator",
-      "owner_id": "owner:c89bc43899119c68",
+      "owner_id": "owner:4b045cb69a6f8a63",
       "params": [],
       "path": "examples/profile/ruby_calculator.rb",
       "raw_source": "attr_accessor :total",
       "signature": "",
       "source": {},
+      "source_export_eligible": true,
       "span": [
         2,
         2,
@@ -329,7 +338,7 @@
     },
     {
       "dispatch_name": "total=",
-      "id": "fn:bc2167e86fe1e86f",
+      "id": "fn:9a1c2c9298c4a8f0",
       "key": [
         "Calculator",
         "total=",
@@ -342,7 +351,7 @@
       "name": "total=",
       "normalized_source": "attr_accessor :total",
       "owner": "Calculator",
-      "owner_id": "owner:c89bc43899119c68",
+      "owner_id": "owner:4b045cb69a6f8a63",
       "params": [
         "value"
       ],
@@ -350,6 +359,7 @@
       "raw_source": "attr_accessor :total",
       "signature": "",
       "source": {},
+      "source_export_eligible": true,
       "span": [
         2,
         2,
@@ -364,7 +374,7 @@
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:c89bc43899119c68",
+      "id": "owner:4b045cb69a6f8a63",
       "kind": "class",
       "language": "ruby",
       "line": 1,
@@ -386,8 +396,8 @@
       "confidence": "high",
       "field": "total",
       "function": "add",
-      "function_id": "fn:b4b63e5d9de70e44",
-      "id": "edge:5c77df72bc6857e8",
+      "function_id": "fn:e726a8cb5d1043bf",
+      "id": "edge:0fd334b1095d3d2a",
       "kind": "reads",
       "line": 5,
       "owner": "Calculator",
@@ -399,15 +409,15 @@
         5,
         20
       ],
-      "state_id": "state:9401a0fe39c9038e"
+      "state_id": "state:45b35020fc10ea6f"
     },
     {
       "conditional": false,
       "confidence": "high",
       "field": "total",
       "function": "result",
-      "function_id": "fn:02c66c914712165d",
-      "id": "edge:766d575d6dfd5769",
+      "function_id": "fn:e4bc7514d4fff252",
+      "id": "edge:73594ef170faf329",
       "kind": "reads",
       "line": 9,
       "owner": "Calculator",
@@ -419,15 +429,15 @@
         9,
         10
       ],
-      "state_id": "state:9401a0fe39c9038e"
+      "state_id": "state:45b35020fc10ea6f"
     },
     {
       "conditional": false,
       "confidence": "high",
       "field": "total",
       "function": "add",
-      "function_id": "fn:b4b63e5d9de70e44",
-      "id": "edge:f14dbb90ca9496a1",
+      "function_id": "fn:e726a8cb5d1043bf",
+      "id": "edge:42a4ddc6eb248bf5",
       "kind": "writes",
       "line": 5,
       "owner": "Calculator",
@@ -439,7 +449,7 @@
         5,
         34
       ],
-      "state_id": "state:9401a0fe39c9038e"
+      "state_id": "state:45b35020fc10ea6f"
     }
   ],
   "state_param_origin_records": [

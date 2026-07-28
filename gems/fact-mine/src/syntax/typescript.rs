@@ -132,10 +132,7 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         node.text.trim_end().ends_with('}')
     }
 
-    fn parse_signature(
-        &self,
-        signature: &str,
-    ) -> super::normalized_behavior::NormalizedSignature {
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
         parse_profile_signature(signature)
     }
 

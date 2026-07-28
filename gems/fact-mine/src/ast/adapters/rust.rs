@@ -49,10 +49,7 @@ impl AstNormalizationAdapter for RustAstAdapter {
         kind == "impl_item"
     }
 
-    fn case_arm_guard<'tree>(
-        &self,
-        node: TreeSitterNode<'tree>,
-    ) -> Option<TreeSitterNode<'tree>> {
+    fn case_arm_guard<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
         (node.kind() == "match_arm")
             .then(|| {
                 node.child_by_field_name("pattern")

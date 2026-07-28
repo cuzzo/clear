@@ -154,14 +154,25 @@ pub fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, St
     map
 }
 
-fn local_contract_source(name: &str, source: &str) -> Option<String> {
+pub(crate) fn raw_local_assignment_source(name: &str, source: &str) -> Option<String> {
     let pattern = format!(
         r"(?s)\b{}\b\s*(?::=|=)\s*(.+?)\s*;?\s*$",
         regex::escape(name)
     );
     let assignment = Regex::new(&pattern).ok()?;
-    let rhs = assignment.captures(source)?.get(1)?.as_str().trim();
-    (!rhs.contains('?') && !rhs.contains(':')).then(|| rhs.to_string())
+    Some(
+        assignment
+            .captures(source)?
+            .get(1)?
+            .as_str()
+            .trim()
+            .to_string(),
+    )
+}
+
+fn local_contract_source(name: &str, source: &str) -> Option<String> {
+    let rhs = raw_local_assignment_source(name, source)?;
+    (!rhs.contains('?') && !rhs.contains(':')).then_some(rhs)
 }
 
 fn local_contract_conditional_statement(root: &Node, span: Span) -> bool {
@@ -489,11 +500,7 @@ impl<'a> LocalFlow<'a> {
         methods
     }
 
-    fn collect_owner_method<'node>(
-        &self,
-        node: &'node Node,
-        methods: &mut Vec<&'node Node>,
-    ) {
+    fn collect_owner_method<'node>(&self, node: &'node Node, methods: &mut Vec<&'node Node>) {
         if METHOD_TYPES.contains(&node.r#type.as_str()) {
             let span = [
                 node.first_lineno,

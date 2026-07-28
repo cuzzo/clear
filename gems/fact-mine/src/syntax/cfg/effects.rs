@@ -131,7 +131,7 @@ pub(crate) fn extract(
                                 .insert(name, contract.to_string());
                         }
                     }
-                    apply_normalized_local_contract(method, node, &mut raw);
+                    apply_normalized_local_contract(method, node, &mut raw, behavior);
                     let declared_candidates = raw
                         .writes
                         .iter()
@@ -188,7 +188,11 @@ pub(crate) fn extract(
         let raw = &raw_by_node[node_id];
         let names = graph_local_names.entry(node_graph_key.clone()).or_default();
         for name in raw.reads.iter().chain(raw.writes.iter()) {
-            if raw.place_kinds.get(name).is_some_and(|kind| kind == "local") {
+            if raw
+                .place_kinds
+                .get(name)
+                .is_some_and(|kind| kind == "local")
+            {
                 names.insert(name.clone());
             }
         }
@@ -210,7 +214,10 @@ pub(crate) fn extract(
             })
             .flat_map(|(_, names)| names.iter().cloned())
             .collect::<BTreeSet<_>>();
-        let local_reads = graph_local_names.get(graph_key).cloned().unwrap_or_default();
+        let local_reads = graph_local_names
+            .get(graph_key)
+            .cloned()
+            .unwrap_or_default();
         let local_writes = graph_key_by_node
             .iter()
             .filter(|(_, node_graph_key)| *node_graph_key == graph_key)
@@ -218,7 +225,11 @@ pub(crate) fn extract(
                 let raw = &raw_by_node[node_id];
                 raw.writes
                     .iter()
-                    .filter(|name| raw.place_kinds.get(*name).is_some_and(|kind| kind == "local"))
+                    .filter(|name| {
+                        raw.place_kinds
+                            .get(*name)
+                            .is_some_and(|kind| kind == "local")
+                    })
                     .cloned()
                     .collect::<Vec<_>>()
             })
@@ -240,7 +251,9 @@ pub(crate) fn extract(
         }
         let places = all_places.entry(graph_key.clone()).or_default();
         for name in &captures {
-            places.entry(name.clone()).or_insert_with(|| "local".to_string());
+            places
+                .entry(name.clone())
+                .or_insert_with(|| "local".to_string());
             declaration_spans
                 .entry((graph_key.clone(), name.clone()))
                 .or_insert(*entry_span);
@@ -343,8 +356,8 @@ fn apply_normalized_local_contract(
     method: &MethodSummary,
     node: &ControlFlowNode,
     effect: &mut RawEffect,
+    behavior: &dyn NormalizedLanguageBehavior,
 ) {
-    let contracts = crate::syntax::local_flow::local_contract_assignments(method);
     let Some(statement) = method
         .statements
         .iter()
@@ -353,9 +366,21 @@ fn apply_normalized_local_contract(
         return;
     };
     let name = statement.writes.iter().next().expect("single local write");
-    if contracts.get(name).is_some_and(|value| value == "nil")
-        && !effect.write_value_hints.contains_key(name)
-    {
+    if effect.place_kinds.iter().any(|(raw_name, kind)| {
+        kind != "local"
+            && (raw_name == name
+                || raw_name.trim_start_matches(|character: char| {
+                    !character.is_alphanumeric() && character != '_'
+                }) == name)
+    }) {
+        return;
+    }
+    let Some(value) =
+        crate::syntax::local_flow::raw_local_assignment_source(name, &statement.source)
+    else {
+        return;
+    };
+    if value == "nil" && !effect.write_value_hints.contains_key(name) {
         effect.writes.insert(name.clone());
         effect.record_place(name.clone(), "local");
         effect
@@ -364,6 +389,12 @@ fn apply_normalized_local_contract(
         effect
             .write_value_hints
             .insert(name.clone(), "nil".to_string());
+    } else if !effect.write_type_hints.contains_key(name) {
+        if let Some(type_name) = behavior.local_assignment_type_hint(&value) {
+            effect.writes.insert(name.clone());
+            effect.record_place(name.clone(), "local");
+            effect.write_type_hints.insert(name.clone(), type_name);
+        }
     }
 }
 

@@ -17,10 +17,7 @@ const SCHEMA_V1: &str = "fact-mine.external-complexity-summary.v1";
 const SCHEMA_V2: &str = "fact-mine.external-complexity-summary.v2";
 const SCHEMA_V3: &str = "fact-mine.external-complexity-summary.v3";
 const ENVIRONMENT_SCHEMA_V1: &str = "fact-mine.semantic-environment.v1";
-include!(concat!(
-    env!("OUT_DIR"),
-    "/bundled_complexity_summaries.rs"
-));
+include!(concat!(env!("OUT_DIR"), "/bundled_complexity_summaries.rs"));
 
 #[derive(Debug, Deserialize)]
 struct SummaryFile {
@@ -153,7 +150,7 @@ pub fn apply_bundled(output: &mut ProfileOutput) -> Result<usize> {
                 format!(
                     "bundled complexity summary {name} must declare its exact compatible indexer"
                 )
-        })?;
+            })?;
         let source = summary.source.as_ref().expect("validated summary source");
         if !has_compatible_indexer(output, source, producer_indexer) {
             continue;
@@ -779,10 +776,7 @@ mod tests {
             source,
             "scip-clang@0.4.0"
         ));
-        assert_eq!(
-            source.consumer_indexers,
-            ["scip-php@0.4.7"]
-        );
+        assert_eq!(source.consumer_indexers, ["scip-php@0.4.7"]);
     }
 
     #[test]

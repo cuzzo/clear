@@ -116,10 +116,17 @@ module NilKill
         nil
       end
 
+      # Reject runtime identities whose definition belongs to a language-owned
+      # non-production source role (for example, a test double). The shared
+      # emitter deliberately knows nothing about language-specific test paths.
+      def runtime_scip_event_eligible?(event:, root:)
+        true
+      end
+
       # Optional language-owned extrapolation from observed dispatch domains to
       # syntactic callsites. Returned rows use the same runtime_call schema and
       # must carry an exact `callsite.range`.
-      def runtime_scip_inferred_events(events:, root:)
+      def runtime_scip_inferred_events(events:, root:, runtime_dir: nil)
         []
       end
 

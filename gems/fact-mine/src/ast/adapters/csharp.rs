@@ -88,11 +88,7 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         ) && !csharp_attribute_invocation(node, source)
     }
 
-    fn intrinsic_call_name(
-        &self,
-        node: TreeSitterNode<'_>,
-        source: &str,
-    ) -> Option<&'static str> {
+    fn intrinsic_call_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<&'static str> {
         if node.kind() != "constructor_initializer" {
             return None;
         }
@@ -231,11 +227,7 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         )
     }
 
-    fn local_identifier_text(
-        &self,
-        node: TreeSitterNode<'_>,
-        source: &str,
-    ) -> Option<String> {
+    fn local_identifier_text(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
         (node.kind() == "implicit_parameter").then(|| node_text(node, source).to_string())
     }
 
@@ -250,8 +242,7 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
     }
 
     fn valid_function_definition(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
-        csharp_split_preprocessor_method(node, source)
-            .is_none_or(|split| split.declaration != node)
+        csharp_split_preprocessor_method(node, source).is_none_or(|split| split.declaration != node)
     }
 
     fn function_declaration_span_nodes<'tree>(
@@ -345,10 +336,7 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
             .map(|pattern| vec![pattern])
     }
 
-    fn case_arm_guard<'tree>(
-        &self,
-        node: TreeSitterNode<'tree>,
-    ) -> Option<TreeSitterNode<'tree>> {
+    fn case_arm_guard<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
         named_children(node)
             .into_iter()
             .find(|child| child.kind() == "when_clause")
@@ -389,7 +377,9 @@ fn csharp_split_preprocessor_method<'tree>(
     let parent = node.parent()?;
     let structured = match parent.kind() {
         "preproc_if" => Some(parent),
-        "preproc_else" => parent.parent().filter(|parent| parent.kind() == "preproc_if"),
+        "preproc_else" => parent
+            .parent()
+            .filter(|parent| parent.kind() == "preproc_if"),
         _ => None,
     };
     let structured_pair = structured.and_then(|wrapper| {

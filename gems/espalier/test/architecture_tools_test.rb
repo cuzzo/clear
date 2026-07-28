@@ -7,11 +7,11 @@ require "open3"
 require "fileutils"
 
 # End-to-end coverage for the architecture tools: cycle_report,
-# reach_through_report (espalier/tools) and change_coupling (lineage/tools),
-# including SARIF emission, changed-file scoping, and Lineage SARIF ingestion.
+# reach_through_report (espalier/tools) and change_coupling (gigasail/tools),
+# including SARIF emission, changed-file scoping, and Gigasail SARIF ingestion.
 class ArchitectureToolsTest < Minitest::Test
   TOOLS = File.expand_path("../tools", __dir__)
-  LINEAGE_TOOLS = File.expand_path("../../lineage/tools", __dir__)
+  GIGASAIL_TOOLS = File.expand_path("../../gigasail/tools", __dir__)
   LINEAGE_BIN = File.expand_path("../../gigasail/target/release/giga", __dir__)
   FACT_MINE_BIN = File.expand_path("../../fact-mine/target/release/fact-mine-rust", __dir__)
 
@@ -259,7 +259,7 @@ class ArchitectureToolsTest < Minitest::Test
       commit_all("solo change")
 
       sarif = File.join(dir, "coupling.sarif")
-      out = run_tool(File.join(LINEAGE_TOOLS, "change_coupling.rb"), dir, "5", "--sarif=#{sarif}")
+      out = run_tool(File.join(GIGASAIL_TOOLS, "change_coupling.rb"), dir, "5", "--sarif=#{sarif}")
       # 6 explicit co-changes plus the creating commit.
       assert_match(/s=7\s+c=1\.00\s+cross-module\s+core\/a\.rb <-> util\/b\.rb/, out)
 
@@ -270,7 +270,7 @@ class ArchitectureToolsTest < Minitest::Test
 
       # Changed-scope: a diff touching only the uncoupled file reports nothing.
       out_scoped = run_tool(
-        File.join(LINEAGE_TOOLS, "change_coupling.rb"), dir, "5", "--base=HEAD~1"
+        File.join(GIGASAIL_TOOLS, "change_coupling.rb"), dir, "5", "--base=HEAD~1"
       )
       assert_includes out_scoped, "(none)"
     end
@@ -317,8 +317,8 @@ class ArchitectureToolsTest < Minitest::Test
       build_output, build_status = Open3.capture2(LINEAGE_BIN, "build", "--db", db, "--repo", dir)
       assert build_status.success?, "lineage build failed: #{build_output}"
 
-      out_default = run_tool(File.join(LINEAGE_TOOLS, "change_coupling.rb"), dir, "5")
-      out_db = run_tool(File.join(LINEAGE_TOOLS, "change_coupling.rb"), dir, "5", "--db=#{db}")
+      out_default = run_tool(File.join(GIGASAIL_TOOLS, "change_coupling.rb"), dir, "5")
+      out_db = run_tool(File.join(GIGASAIL_TOOLS, "change_coupling.rb"), dir, "5", "--db=#{db}")
 
       assert_match(/s=6\s+c=1\.00\s+cross-module\s+core\/a\.rb <-> util\/b\.rb/, out_default,
                    "default mode should only see the pre-rename co-changes under the old name")

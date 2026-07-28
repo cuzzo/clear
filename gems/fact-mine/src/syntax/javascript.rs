@@ -235,10 +235,7 @@ const JAVASCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
-    fn parse_signature(
-        &self,
-        signature: &str,
-    ) -> super::normalized_behavior::NormalizedSignature {
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
         super::typescript::parse_profile_signature(signature)
     }
 

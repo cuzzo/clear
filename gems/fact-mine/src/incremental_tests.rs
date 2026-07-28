@@ -445,8 +445,8 @@ fn corrupt_json_identity_and_manifest_entries_are_misses() -> Result<()> {
         &stdlib_registry_digest()?,
         &configuration_digest()?,
     )?;
-    let shard_path = ShardCache::new(cache_config.directory.clone())
-        .shard_path(&candidate.cache_key);
+    let shard_path =
+        ShardCache::new(cache_config.directory.clone()).shard_path(&candidate.cache_key);
 
     let mut bad_json = GzEncoder::new(Vec::new(), Compression::default());
     bad_json.write_all(b"{}")?;

@@ -11,8 +11,8 @@ use super::super::{
     LEADING_LOOP_WRAPPER_KINDS, LEADING_OWNER_WRAPPER_KINDS, LOOP_NODE_KINDS, OWNER_NODE_KINDS,
     OWNER_STATEMENT_NESTED_KINDS, QUESTION_COLON_TERNARY_KINDS,
 };
-use tree_sitter::Node as TreeSitterNode;
 use crate::syntax::nullable::PresenceCorrelationSeed;
+use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) const COMMON_ASSIGNMENT_OPERATORS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%="];
 
@@ -440,10 +440,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
-    fn case_arm_guard<'tree>(
-        &self,
-        _node: TreeSitterNode<'tree>,
-    ) -> Option<TreeSitterNode<'tree>> {
+    fn case_arm_guard<'tree>(&self, _node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
         None
     }
 

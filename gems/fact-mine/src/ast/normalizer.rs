@@ -352,11 +352,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 // executable calls for CFG/DFG and call-soundness accounting.
                 children.push(Child::Node(Box::new(alternative)));
             }
-            return Some(self.wrap(
-                &kind_type(node.kind()),
-                children,
-                node,
-            ));
+            return Some(self.wrap(&kind_type(node.kind()), children, node));
         }
         if self
             .normalization_adapter

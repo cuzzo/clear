@@ -38,6 +38,9 @@ Array:
   unshift: linear_scan
   count: linear_scan
   sum: linear_scan
+  min: linear_scan
+  max: linear_scan
+  product: pairwise
   delete: linear_scan
   insert: linear_scan
   clear: linear_scan
@@ -77,6 +80,7 @@ Hash:
   merge: linear_materialize
   keys: linear_materialize
   values: linear_materialize
+  values_at: linear_materialize
   dup: linear_materialize
   to_set: linear_materialize
   transform_keys: linear_materialize
@@ -86,6 +90,9 @@ Hash:
   to_a: linear_materialize
   slice: linear_materialize
   transform_values!: linear_scan
+OptionParser:
+  parse!: linear_scan
+  to_s: linear_materialize
 Set:
   include?: constant
   contains: constant
@@ -133,6 +140,9 @@ String:
   delete_prefix: linear_materialize
   delete_suffix: linear_materialize
   downcase: linear_materialize
+  upcase: linear_materialize
+  capitalize: linear_materialize
+  casecmp: linear_scan
   inspect: linear_materialize
   reverse: linear_materialize
   lstrip: linear_materialize
@@ -169,16 +179,48 @@ Kernel:
   __dir__: constant
   frozen?: constant
   method: constant
+  rand: constant
+  Integer: linear_scan
+  Float: linear_scan
 BasicObject:
   equal?: constant
 Integer:
+  "+": linear_materialize
+  "-": linear_materialize
+  "*": pairwise
+  "/": pairwise
+  "%": pairwise
+  "<": linear_scan
+  "<=": linear_scan
+  ">": linear_scan
+  ">=": linear_scan
+  "<=>": linear_scan
+  "==": linear_scan
   positive?: constant
   zero?: constant
   abs: constant
   to_s: linear_materialize
   to_f: constant
   chr: constant
+  modulo: pairwise
+  floor: constant
+  ceil: constant
 Float:
+  "+": constant
+  "-": constant
+  "*": constant
+  "/": constant
+  "%": constant
+  "<": constant
+  "<=": constant
+  ">": constant
+  ">=": constant
+  "<=>": constant
+  "==": constant
+  modulo: constant
+  floor: constant
+  ceil: constant
+  round: constant
   to_i: constant
 T:
   must: constant
@@ -209,7 +251,10 @@ Pathname:
   relative_path_from: linear_materialize
 Process/Status:
   success?: constant
+Process:
+  pid: constant
 Digest/Class:
+  new: constant
   hexdigest: linear_materialize
   file: linear_materialize
 Digest/Instance:
@@ -238,6 +283,7 @@ Enumerable:
   first: constant
   min: linear_scan
   max: linear_scan
+  partition: linear_materialize
   include?: linear_scan
   any?: linear_scan
   all?: linear_scan
@@ -247,6 +293,11 @@ Enumerable:
   tally: linear_materialize
   grep: linear_materialize
 Numeric:
+  "+": linear_materialize
+  "-": linear_materialize
+  "*": pairwise
+  "/": pairwise
+  "%": pairwise
   positive?: constant
   negative?: constant
   zero?: constant
@@ -267,8 +318,13 @@ Intrinsic:
   "Hash.new": constant
   "Set.new": linear_materialize
   "Pathname.new": linear_materialize
+  "Dir.pwd": linear_materialize
 SemanticSymbol:
   'Hash.`[]`().': linear_materialize
+  'JSON.parse().': linear_materialize
+  'JSON.generate().': linear_materialize
+  'JSON.pretty_generate().': linear_materialize
+  'Psych.safe_load().': linear_materialize
 ExternalLatency:
   "File.exist?": linear_scan
   "File.read": linear_materialize
@@ -286,6 +342,8 @@ ExternalLatency:
   "File.delete": linear_scan
   "File.file?": linear_scan
   "File.directory?": linear_scan
+  "File.size?": linear_scan
+  "File.rename": linear_scan
   "File.extname": linear_materialize
   "File.fnmatch?": linear_scan
   "File.symlink?": linear_scan
@@ -295,6 +353,12 @@ ExternalLatency:
   "Dir.glob": linear_materialize
   "FileUtils.mkdir_p": linear_scan
   "FileUtils.copy_file": linear_scan
+  "FileUtils.rm_rf": linear_scan
+  "Dir.mktmpdir": linear_materialize
+  "Tempfile.new": linear_materialize
+  "Open3.capture2": linear_materialize
+  "Open3.capture2e": linear_materialize
+  "Open3.capture3": linear_materialize
   "Dir.pwd": linear_materialize
   "Kernel.printf": linear_scan
   "Kernel.warn": linear_scan
@@ -347,6 +411,12 @@ SemanticSymbolParametricCost:
   'Enumerable#find_index().': callback_linear
   'Enumerable#`none?`().': callback_linear
   'Enumerable#min_by().': callback_linear
+  'Enumerable#max_by().': callback_linear
+  'Enumerable#partition().': callback_linear
+  'Integer#times().': callback_linear
+  'Comparable#`between?`().': reflective_once
+  'Comparable#between?().': reflective_once
+  'Zlib/GzipReader.open().': callback_once
   'Enumerator#with_index().': callback_linear
   'Method#call().': callback_once
   'Kernel#tap().': callback_once
@@ -370,6 +440,7 @@ Namespace:
   Module: declaration
   NilClass: declaration
   Numeric: declaration
+  Open3: declaration
   Object: declaration
   Pathname: declaration
   Process: declaration

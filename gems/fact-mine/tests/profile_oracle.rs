@@ -427,18 +427,22 @@ class Demo {
             .raw_calls_not_normalized_inside_function,
         0
     );
-    assert!(!output
-        .methods
-        .iter()
-        .find(|method| method.name == "size")
-        .context("declaration-only method")?
-        .source_export_eligible);
-    assert!(output
-        .methods
-        .iter()
-        .find(|method| method.name == "fallback")
-        .context("default method")?
-        .source_export_eligible);
+    assert!(
+        !output
+            .methods
+            .iter()
+            .find(|method| method.name == "size")
+            .context("declaration-only method")?
+            .source_export_eligible
+    );
+    assert!(
+        output
+            .methods
+            .iter()
+            .find(|method| method.name == "fallback")
+            .context("default method")?
+            .source_export_eligible
+    );
     Ok(())
 }
 
@@ -566,7 +570,10 @@ fn run() -> usize {
     assert!(messages.contains("unwrap"), "calls={messages:?}");
     assert!(messages.contains("callback"), "calls={messages:?}");
     assert!(messages.contains("call"), "calls={messages:?}");
-    assert!(!messages.contains("width"), "compile-time call leaked: {messages:?}");
+    assert!(
+        !messages.contains("width"),
+        "compile-time call leaked: {messages:?}"
+    );
     assert_eq!(
         output
             .call_resolution_coverage
@@ -594,12 +601,10 @@ fn run() {
         .iter()
         .find(|method| method.name == "run")
         .context("run method")?;
-    assert!(
-        output
-            .calls
-            .iter()
-            .any(|call| call.source == run.id && call.message == "helper")
-    );
+    assert!(output
+        .calls
+        .iter()
+        .any(|call| call.source == run.id && call.message == "helper"));
     assert_eq!(
         output
             .call_resolution_coverage
@@ -793,9 +798,7 @@ impl Widget {
         .complexity_facts
         .iter()
         .find(|fact| {
-            fact.function == lambda.name
-                && fact.line == lambda.line
-                && fact.path == lambda.path
+            fact.function == lambda.name && fact.line == lambda.line && fact.path == lambda.path
         })
         .context("lambda complexity fact")?;
     assert!(
@@ -3016,10 +3019,7 @@ const void * address(char * buffer) {
         callback.receiver_type_origin.as_deref(),
         Some("declared_parameter")
     );
-    assert_eq!(
-        callback.known_time_complexity.as_deref(),
-        Some("O(R)")
-    );
+    assert_eq!(callback.known_time_complexity.as_deref(), Some("O(R)"));
     let address = output
         .calls
         .iter()
@@ -3030,7 +3030,10 @@ const void * address(char * buffer) {
         address.receiver_type_origin.as_deref(),
         Some("explicit_native_cast")
     );
-    assert!(address.target.is_some(), "cast receiver should resolve LargeData");
+    assert!(
+        address.target.is_some(),
+        "cast receiver should resolve LargeData"
+    );
     Ok(())
 }
 
@@ -3095,10 +3098,7 @@ class Ordered : private std::list<T> {
         sort.receiver_type_origin.as_deref(),
         Some("declared_supertype")
     );
-    assert_eq!(
-        sort.known_time_complexity.as_deref(),
-        Some("O(N log N*C)")
-    );
+    assert_eq!(sort.known_time_complexity.as_deref(), Some("O(N log N*C)"));
     Ok(())
 }
 
@@ -3188,10 +3188,7 @@ struct Dispatcher {
             .find(|call| call.function == "add" && call.message == message)
             .with_context(|| format!("missing indexed {message} call"))?;
         assert_eq!(call.receiver_type.as_deref(), Some("CallbackList"));
-        assert_eq!(
-            call.receiver_type_origin.as_deref(),
-            Some("declared_state")
-        );
+        assert_eq!(call.receiver_type_origin.as_deref(), Some("declared_state"));
         let target = call
             .target
             .as_deref()
@@ -3250,6 +3247,74 @@ Number overloaded(Number left, Number right) {
         .find(|context| context.message == "+")
         .context("missing overloaded addition context")?;
     assert_ne!(addition.known_time_complexity.as_deref(), Some("O(1)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_normalization_prices_control_flow_literals_locals_and_record_accessors() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"Node = Struct.new(:kind)
+
+def exercise(values)
+  @memo ||= values
+  cache = {}
+  cache[:items] ||= []
+  rows = []
+  rows.concat(values)
+  smallest = [rows.length, 1].min
+  node = Node.new(:sample)
+  [smallest, node.kind, Dir.pwd]
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.function == "exercise")
+        .collect::<Vec<_>>();
+
+    let logical = calls
+        .iter()
+        .find(|call| call.message == "||")
+        .context("missing normalized ||= control-flow operation")?;
+    assert_eq!(logical.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(logical.known_space_complexity.as_deref(), Some("O(1)"));
+
+    let concat = calls
+        .iter()
+        .find(|call| call.message == "concat")
+        .context("missing local Array#concat")?;
+    assert_eq!(concat.receiver_type.as_deref(), Some("T::Array[T.untyped]"));
+    assert_eq!(concat.known_time_complexity.as_deref(), Some("O(N)"));
+
+    let min = calls
+        .iter()
+        .find(|call| call.message == "min")
+        .context("missing literal Array#min")?;
+    assert_eq!(min.receiver_type.as_deref(), Some("T::Array[T.untyped]"));
+    assert_eq!(min.known_time_complexity.as_deref(), Some("O(N)"));
+
+    let accessor = calls
+        .iter()
+        .find(|call| call.message == "kind")
+        .context("missing Struct reader")?;
+    assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        accessor.complexity_provenance.as_deref(),
+        Some("generated_record_contract")
+    );
+
+    let pwd = calls
+        .iter()
+        .find(|call| call.message == "pwd")
+        .context("missing Dir.pwd")?;
+    assert_eq!(pwd.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(pwd.known_space_complexity.as_deref(), Some("O(N)"));
     Ok(())
 }
 
@@ -4083,10 +4148,14 @@ end
             && record.field == "items"
             && record.declared_type.to_sorbet_string() == "T::Array[String]"
     }));
-    assert!(output.struct_declarations.iter().any(|declaration| {
-        declaration.class == "Worker::Payload"
-            && declaration.fields == vec!["name".to_string(), "metadata".to_string()]
-    }));
+    assert!(
+        output.struct_declarations.iter().any(|declaration| {
+            declaration.class == "Worker::Payload"
+                && declaration.fields == vec!["name".to_string(), "metadata".to_string()]
+        }),
+        "unexpected declarations: {:?}",
+        output.struct_declarations
+    );
     assert!(output.struct_declarations.iter().any(|declaration| {
         declaration.class == "MutableState"
             && declaration.fields == vec!["items".to_string(), "name".to_string()]
@@ -4694,5 +4763,327 @@ fn rust_enum_constructors_and_transmute_are_constant_time() -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+#[test]
+fn injected_state_parameter_dispatch_is_a_parametric_callback() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+class Pipeline
+  def initialize(runner:)
+    @runner = runner
+  end
+
+  def execute(command)
+    @runner.run!(command)
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "run!")
+        .context("injected runner call present")?;
+
+    assert!(
+        call.state_receiver,
+        "the ivar read must retain state identity"
+    );
+    assert!(
+        call.callback_receiver,
+        "constructor injection proves a callback boundary"
+    );
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(C)"));
+    assert_eq!(call.known_space_complexity.as_deref(), Some("O(S)"));
+    assert_eq!(
+        call.complexity_bound_quality.as_deref(),
+        Some("upper_bound_parametric_callback_once")
+    );
+    Ok(())
+}
+
+#[test]
+fn ruby_hash_default_block_is_deferred_not_an_unbounded_loop() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def group(rows)
+  index = Hash.new { |hash, key| hash[key] = [] }
+  fallback = {}
+  fallback.fetch(:missing) { [] }
+  rows.each { |row| index[row] << row }
+  index
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let facts = output
+        .complexity_facts
+        .iter()
+        .find(|facts| facts.function == "group")
+        .context("group complexity facts present")?;
+
+    assert!(
+        facts
+            .iterations
+            .iter()
+            .all(|iteration| iteration.message.as_deref() != Some("new")),
+        "Hash.new stores its fallback block and must not create an unknown loop"
+    );
+    assert!(facts
+        .iterations
+        .iter()
+        .all(|iteration| iteration.cardinality_relation != "unknown"));
+    Ok(())
+}
+
+#[test]
+fn runtime_scip_hash_fetch_identity_proves_its_block_runs_at_most_once() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def lookup(table, key)
+  table.fetch(key) { key.to_s }
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let mut output = profile::extract(&document, Profile::Espalier);
+    let facts = output
+        .complexity_facts
+        .iter()
+        .find(|facts| facts.function == "lookup")
+        .context("lookup complexity facts present")?;
+    assert!(
+        facts.iterations.iter().any(|iteration| {
+            iteration.message.as_deref() == Some("fetch")
+                && iteration.cardinality_relation == "unknown"
+        }),
+        "without receiver identity, fetch must remain conservative"
+    );
+
+    let index = json!({
+        "metadata": {
+            "toolInfo": {
+                "name": "nil-kill-runtime",
+                "version": "1",
+                "arguments": ["--fact-mine-index-authority=runtime-modeled-world"]
+            },
+            "textDocumentEncoding": 1
+        },
+        "documents": [{
+            "relativePath": tmp.path().file_name().unwrap().to_string_lossy(),
+            "language": "ruby",
+            "occurrences": [{
+                "range": [2, 8, 13],
+                "symbol": "nil-kill-runtime ruby ruby 3.2.3 Hash#fetch().",
+                "symbolRoles": 0
+            }]
+        }]
+    });
+    fact_mine_rust::scip::apply_json(&mut output, &index.to_string())?;
+
+    let facts = output
+        .complexity_facts
+        .iter()
+        .find(|facts| facts.function == "lookup")
+        .context("lookup complexity facts remain present")?;
+    assert!(
+        facts
+            .iterations
+            .iter()
+            .all(|iteration| iteration.message.as_deref() != Some("fetch")),
+        "exact Hash#fetch identity must remove the false unbounded iteration"
+    );
+    let nested = facts
+        .call_contexts
+        .iter()
+        .find(|context| context.message == "to_s")
+        .context("fetch fallback call context present")?;
+    assert_eq!(nested.execution_multiplicity, "O(1)");
+    assert!(nested
+        .symbolic_execution
+        .as_ref()
+        .is_some_and(|symbolic| symbolic.complete));
+    Ok(())
+}
+
+#[test]
+fn ruby_class_method_recursion_keeps_its_unique_local_target() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+module Types
+  def self.unwrap(value)
+    value.is_a?(Array) ? value.map { |item| unwrap(item) } : value
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let method = output
+        .methods
+        .iter()
+        .find(|method| method.dispatch_name == "unwrap")
+        .context("unwrap method present")?;
+    let recursive = output
+        .calls
+        .iter()
+        .find(|call| call.source == method.id && call.message == "unwrap")
+        .context("recursive unwrap call present")?;
+
+    assert_eq!(recursive.target.as_deref(), Some(method.id.as_str()));
+    assert_eq!(recursive.kind, "internal_call");
+    Ok(())
+}
+
+#[test]
+fn ruby_option_parser_calls_use_reviewed_stdlib_costs() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def parse_options
+  parser = OptionParser.new
+  parser.parse!
+  parser.to_s
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let parse = output
+        .calls
+        .iter()
+        .find(|call| call.message == "parse!")
+        .context("OptionParser#parse! call present")?;
+    let render = output
+        .calls
+        .iter()
+        .find(|call| call.message == "to_s")
+        .context("OptionParser#to_s call present")?;
+
+    assert_eq!(parse.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(parse.known_space_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(render.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(render.known_space_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_string_capitalize_uses_reviewed_stdlib_cost() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def title
+  "sample".capitalize
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let capitalize = output
+        .calls
+        .iter()
+        .find(|call| call.message == "capitalize")
+        .context("String#capitalize call present")?;
+
+    assert_eq!(capitalize.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(capitalize.known_space_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_env_uses_its_hashlike_receiver_contract_without_trace_coverage() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def setting
+  ENV.fetch("SETTING", "default")
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let fetch = output
+        .calls
+        .iter()
+        .find(|call| call.receiver == "ENV" && call.message == "fetch")
+        .context("ENV.fetch call present")?;
+
+    assert_eq!(fetch.receiver_type.as_deref(), Some("Hash"));
+    assert_eq!(fetch.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(fetch.known_space_complexity.as_deref(), Some("O(1)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_module_function_dispatch_matches_runtime_scip_class_symbols() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+module Toolkit
+  module_function
+
+  def render(value)
+    value.to_s
+  end
+
+  public
+
+  def helper
+    :ok
+  end
+end
+
+def report(value)
+  Toolkit.render(value)
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let render = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "Toolkit" && method.dispatch_name == "render")
+        .context("module function present")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "render")
+        .context("module function call present")?;
+    let helper = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "Toolkit" && method.dispatch_name == "helper")
+        .context("ordinary instance method present")?;
+
+    assert_eq!(render.kind, "class");
+    assert_eq!(helper.kind, "instance");
+    assert_eq!(call.target.as_deref(), Some(render.id.as_str()));
+    assert_eq!(call.kind, "resolved_call");
     Ok(())
 }

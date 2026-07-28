@@ -306,8 +306,8 @@ const GO_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
 // Go builtin operators, emitted as call messages by the normalizer. They carry
 // no overload in Go, so each is constant-time on primitive operands.
 const GO_BUILTIN_OPERATORS: &[&str] = &[
-    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^",
-    "<<", ">>", "&^", "&&", "||", "!",
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "&^",
+    "&&", "||", "!",
 ];
 // Fixed-arg predeclared builtins that reduce to a constant-time comparison.
 const GO_BUILTIN_FUNCTIONS: &[&str] = &["max", "min"];
@@ -1459,9 +1459,7 @@ fn type_after_go_local_name(source: &str, name: &str) -> Option<String> {
             .next()
             .unwrap_or_default()
             .trim();
-        if let Some(resolved) =
-            super::normalized_behavior::usable_declared_local_type(type_name)
-        {
+        if let Some(resolved) = super::normalized_behavior::usable_declared_local_type(type_name) {
             return Some(resolved);
         }
     }
@@ -1673,10 +1671,9 @@ mod tests {
     fn test_go_behavior_uncovered_methods() {
         let behavior = GoNormalizedBehavior;
 
-        assert!(behavior.function_has_executable_body(&node(
-            "DEFN",
-            "func size() int { return 0 }"
-        )));
+        assert!(
+            behavior.function_has_executable_body(&node("DEFN", "func size() int { return 0 }"))
+        );
         assert!(!behavior.function_has_executable_body(&node("DEFN", "Size() int")));
 
         // format_array_type etc
@@ -1860,15 +1857,24 @@ mod tests {
         // Owner table on a pointer receiver.
         assert_eq!(time_of("bytes/Buffer#Len().", "Len"), Some("O(1)"));
         assert_eq!(time_of("bytes/Buffer#String().", "String"), Some("O(N)"));
-        assert_eq!(time_of("`io/fs`/FileInfo#ModTime().", "ModTime"), Some("O(1)"));
+        assert_eq!(
+            time_of("`io/fs`/FileInfo#ModTime().", "ModTime"),
+            Some("O(1)")
+        );
         assert_eq!(time_of("flag/FlagSet#Bool().", "Bool"), Some("O(1)"));
         assert_eq!(time_of("bufio/Scanner#Text().", "Text"), Some("O(N)"));
         assert_eq!(time_of("time/Time#Format().", "Format"), Some("O(N)"));
         assert_eq!(time_of("time/Duration#Hours().", "Hours"), Some("O(1)"));
         assert_eq!(time_of("bytes/TrimSpace().", "TrimSpace"), Some("O(N)"));
         assert_eq!(time_of("strings/IndexByte().", "IndexByte"), Some("O(N)"));
-        assert_eq!(time_of("strings/NewReplacer().", "NewReplacer"), Some("O(N)"));
-        assert_eq!(time_of("regexp/Regexp#MatchString().", "MatchString"), Some("O(N)"));
+        assert_eq!(
+            time_of("strings/NewReplacer().", "NewReplacer"),
+            Some("O(N)")
+        );
+        assert_eq!(
+            time_of("regexp/Regexp#MatchString().", "MatchString"),
+            Some("O(N)")
+        );
         assert_eq!(time_of("strconv/Atoi().", "Atoi"), Some("O(N)"));
         assert_eq!(time_of("math/Round().", "Round"), Some("O(1)"));
         assert_eq!(time_of("flag/String().", "String"), Some("O(1)"));
@@ -1889,7 +1895,10 @@ mod tests {
         assert_eq!(time_of("os/Stat().", "Stat"), Some("O(1)"));
         assert_eq!(time_of("os/Getuid().", "Getuid"), Some("O(1)"));
         assert_eq!(time_of("syscall/Flock().", "Flock"), Some("O(1)"));
-        assert_eq!(time_of("bufio/Reader#ReadString().", "ReadString"), Some("O(N)"));
+        assert_eq!(
+            time_of("bufio/Reader#ReadString().", "ReadString"),
+            Some("O(N)")
+        );
         assert_eq!(time_of("`os/exec`/Cmd#Output().", "Output"), Some("O(N)"));
         assert_eq!(time_of("`os/exec`/Command().", "Command"), Some("O(N)"));
         assert_eq!(
@@ -1910,12 +1919,18 @@ mod tests {
                 "Encode",
                 "reflective_once",
             ),
-            ("`encoding/xml`/Unmarshal().", "Unmarshal", "reflective_once"),
+            (
+                "`encoding/xml`/Unmarshal().",
+                "Unmarshal",
+                "reflective_once",
+            ),
             ("fmt/Print().", "Print", "reflective_once"),
         ] {
             assert_eq!(time_of(descriptor, message), None, "{descriptor}");
             assert_eq!(
-                external_symbol_metadata(&go(descriptor)).parametric_cost.as_deref(),
+                external_symbol_metadata(&go(descriptor))
+                    .parametric_cost
+                    .as_deref(),
                 Some(kind),
                 "{descriptor}"
             );
@@ -2001,7 +2016,9 @@ mod tests {
     #[test]
     fn go_builtin_operators_are_constant_time_intrinsics() {
         let behavior = GoNormalizedBehavior;
-        for op in ["<", "==", "+", "*", "&", "<<", "!=", "-@", "+@", "max", "min"] {
+        for op in [
+            "<", "==", "+", "*", "&", "<<", "!=", "-@", "+@", "max", "min",
+        ] {
             let complexity = behavior.intrinsic_call_complexity(Some("x"), op);
             assert_eq!(
                 complexity.map(|c| c.time),
