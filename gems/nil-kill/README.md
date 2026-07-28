@@ -172,6 +172,14 @@ Config:
   NIL_KILL_TRACE_METHODS=0            disable TracePoint method collection
 ```
 
+Ruby collection also writes `runtime.scip.json` and
+`runtime-attestation.json` in the runtime output directory. The SCIP index
+contains exact call-site and package identities observed during the run. It
+declares `observed-open` authority, so FactMine can join those identities while
+preserving the fact that a runtime trace is not a closed-world call graph.
+Language providers emit the shared `runtime_call` event contract; the common
+encoder and FactMine importer contain no language-specific dispatch.
+
 ## FAQ
 
  1. But what if I'm not on Sorbet?

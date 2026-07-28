@@ -175,11 +175,15 @@ long-term value.**
 ¹ `scip-clang` needs `compile_commands.json`, often absent.
 ² `scip-ruby` requires Sorbet; unusable on ordinary Ruby.
 
-For these, our own resolution is the *only* option — and the session did nothing for
-them. Ruby went from **40 complete functions to 40**. This is the real gap in our
-coverage and it is where resolution effort belongs. **Closeable: partially** — Ruby
-and PHP need runtime type feedback (the nil-kill join), not a static resolver;
-Swift/Zig are tractable statically.
+For these, our own resolution is the *only* option. NilKill now defines a
+language-neutral `runtime_call` event contract and emits canonical SCIP indexes
+with `observed-open` authority. FactMine consumes that authority generically:
+observed targets remain explicit open candidate sets, while compiler SCIP keeps
+precedence. Ruby supplies the first tracing implementation. Python can reuse the
+same event/SCIP/FactMine/Espalier path; PHP and JavaScript need provider-owned
+tracers rather than new consumer logic. **Closeable: partially** — runtime
+observations improve identity and cost joins but cannot prove unobserved dispatch
+targets absent. Swift/Zig remain tractable statically.
 
 ### 4.4 GAP: SCIP is a stale snapshot requiring a build — **MITIGATE, not close**
 
@@ -224,8 +228,9 @@ strictly dominated by just running the indexer.
 ### Phase 4 — Serve the languages SCIP abandons
 9. **Redirect all resolution effort to Swift, Lua, PHP, Zig, Ruby.** Hold it to a
    measured bar: ship only if completeness moves on a real corpus.
-10. **Ruby/PHP need the nil-kill runtime-type join**, not a static resolver — their
-    ceiling is type *availability*, not type *inference*.
+10. **Ruby/PHP need the NilKill runtime SCIP join**, not a static resolver — their
+    ceiling is type *availability*, not type *inference*. Keep tracing
+    language-owned and the emitted contract and consumers language-neutral.
 
 ### The one-line rule
 

@@ -175,6 +175,11 @@ module NilKill
       rubyopt = (ENV["RUBYOPT"].to_s.split + ["-r#{tracer}"]).join(" ")
       env = ENV.to_h.merge(
         "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_RUNTIME_SCIP" => "1",
+        "NIL_KILL_RUN_ID" => ENV["NIL_KILL_RUN_ID"] || SecureRandom.uuid,
+        "NIL_KILL_PROJECT_NAME" => ENV["NIL_KILL_PROJECT_NAME"] || File.basename(ROOT),
+        "NIL_KILL_PROJECT_VERSION" => ENV["NIL_KILL_PROJECT_VERSION"] ||
+          git_capture("rev-parse", "HEAD")&.strip || "workspace",
         "RUBYOPT" => rubyopt,
         "WORKERS" => ENV["WORKERS"] || jobs,
         "NK_JOBS" => ENV["NK_JOBS"] || jobs,
@@ -196,6 +201,8 @@ module NilKill
         NilKill.restore_inplace_snapshot! if instrument_source
       end
       assert_collect_coverage_produced! if instrument_source
+      emitted = Runtime::ScipEmitter.emit(root: ROOT, runtime_dir: RUNTIME_DIR)
+      puts "wrote runtime SCIP index to #{emitted.fetch("index")}"
     end
 
     # A second concurrent `collect` would race in-place writes against

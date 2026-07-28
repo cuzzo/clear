@@ -282,6 +282,7 @@ RSpec.describe "NilKill coverage hardening" do
     it "parses options and delegates to the requested language provider" do
       provider = instance_double(NilKill::Languages::Provider)
       expect(NilKill::Languages).to receive(:provider_for).with("python").and_return(provider)
+      allow(provider).to receive(:runtime_capabilities).and_return({})
       expect(provider).to receive(:collect_runtime).with(
         argv: ["--", "pytest"],
         root: File.expand_path("."),
@@ -298,6 +299,23 @@ RSpec.describe "NilKill coverage hardening" do
         "--append-runtime",
         "--", "pytest",
       ]).run
+    end
+
+    it "emits SCIP only for providers that implement runtime call tracing" do
+      provider = instance_double(
+        NilKill::Languages::Provider,
+        runtime_capabilities: { "runtime_scip_calls" => true }
+      )
+      allow(NilKill::Languages).to receive(:provider_for).and_return(provider)
+      allow(provider).to receive(:collect_runtime)
+      emitted = { "index" => "/tmp/runtime.scip.json" }
+      expect(NilKill::Runtime::ScipEmitter).to receive(:emit).and_return(emitted)
+
+      out, = capture_io do
+        described_class.new(["--language", "ruby", "--", "ruby", "workload.rb"]).run
+      end
+
+      expect(out).to include("/tmp/runtime.scip.json")
     end
 
     it "turns unsupported runtime tracers into a user-facing abort" do

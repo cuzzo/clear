@@ -175,6 +175,7 @@ module Espalier
           target_provenance: call["target_provenance"],
           candidate_target_ids: Array(call["candidate_targets"]),
           candidate_reason: call["candidate_reason"],
+          consumer_closed_candidate_set: call["consumer_closed_candidate_set"] == true,
           complexity_provenance: call["complexity_provenance"],
           complexity_bound_quality: call["complexity_bound_quality"],
           complexity_candidates: Array(call["complexity_candidates"]),

@@ -15,4 +15,28 @@ RSpec.describe "nil-kill package layout" do
 
     expect(status).to be_success, err
   end
+
+  it "keeps runtime SCIP tracing implementations inside language providers" do
+    shared = File.read(
+      File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime", "scip_emitter.rb")
+    )
+
+    expect(shared).not_to match(/\b(?:if|case)\s+language\b/)
+    expect(shared).not_to match(/provider_for\(\s*["']/)
+    expect(
+      Dir.glob(
+        File.join(
+          NilKill::ROOT,
+          "gems",
+          "nil-kill",
+          "lib",
+          "nil_kill",
+          "languages",
+          "providers",
+          "*",
+          "runtime_scip_trace.rb"
+        )
+      )
+    ).not_to be_empty
+  end
 end

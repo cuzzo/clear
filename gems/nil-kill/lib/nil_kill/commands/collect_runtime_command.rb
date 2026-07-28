@@ -18,6 +18,10 @@ module NilKill
         provider = Languages.provider_for(language)
 
         provider.collect_runtime(argv: @argv, root: root, output: output, targets: targets, append: append)
+        if provider.runtime_capabilities.fetch("runtime_scip_calls", false)
+          emitted = Runtime::ScipEmitter.emit(root: root, runtime_dir: output)
+          puts "wrote runtime SCIP index to #{emitted.fetch("index")}"
+        end
       rescue Languages::UnsupportedRuntimeTracer => e
         abort "nil-kill: #{e.message}"
       end

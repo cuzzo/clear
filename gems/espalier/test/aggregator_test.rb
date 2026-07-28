@@ -698,6 +698,7 @@ class AggregatorTest < Minitest::Test
         delegations: [{
           call_id: "recur", receiver: "self", message: "visit", line: 2,
           span: [2, 22, 2, 38], candidate_target_ids: ["visit"],
+          consumer_closed_candidate_set: true,
           candidate_reason: "scip_project_candidate_set"
         }],
         complexity_facts: [{
@@ -726,7 +727,8 @@ class AggregatorTest < Minitest::Test
         delegations: [{
           receiver: "self", message: target, line: line + 1,
           span: [line + 1, 2, line + 1, 12],
-          candidate_target_ids: [target], candidate_reason: "closed_candidate_set"
+          candidate_target_ids: [target], candidate_reason: "closed_candidate_set",
+          consumer_closed_candidate_set: true
         }],
         complexity_facts: [{
           "line" => line, "parameters" => ["items"], "collection_parameters" => ["items"],
@@ -1783,7 +1785,8 @@ class AggregatorTest < Minitest::Test
         effects: { reads: Set.new, writes: Set.new }, complexity_facts: [caller_fact],
         delegations: [{
           receiver: "worker", message: "work", line: 3, type: :always,
-          candidate_target_ids: %w[fast slow], candidate_reason: "scip_implementation_set"
+          candidate_target_ids: %w[fast slow], candidate_reason: "scip_implementation_set",
+          consumer_closed_candidate_set: true
         }]
       }]
     }, {
@@ -1805,6 +1808,43 @@ class AggregatorTest < Minitest::Test
     assert caller[:quality_metrics][:big_o_complete]
     assert_includes caller[:quality_metrics][:big_o_bound_qualities], "upper_bound_closed_candidate_max"
     assert_includes caller[:quality_metrics][:big_o_assumptions].first, "implementation set is closed"
+  end
+
+  def test_big_o_does_not_certify_an_open_runtime_candidate_set
+    empty_fact = lambda do |line, contexts = []|
+      {
+        "line" => line, "parameters" => [], "collection_parameters" => [],
+        "iterations" => [], "allocations" => [], "call_contexts" => contexts,
+        "size_domains" => [], "recursion" => { "calls" => 0 }
+      }
+    end
+    modules = [{
+      type: :class, name: "RuntimeObserved", file: "runtime.rb", states: Set.new,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 3],
+        parameters: [], effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "worker", message: "work", line: 2,
+          candidate_target_ids: ["observed"], candidate_reason: "runtime_observed_candidate_set",
+          consumer_closed_candidate_set: false
+        }],
+        complexity_facts: [empty_fact.call(1, [{
+          "line" => 2, "message" => "work", "execution_multiplicity" => "O(1)",
+          "power" => 0, "evidence_gap" => "unknown_call_target"
+        }])]
+      }, {
+        id: "observed", name: "work", line: 5, span: [5, 0, 7, 3],
+        parameters: [], effects: { reads: Set.new, writes: Set.new },
+        delegations: [], complexity_facts: [empty_fact.call(5)]
+      }]
+    }]
+
+    caller = Espalier::Aggregator.new.aggregate(modules).first[:functions].find do |function|
+      function[:id] == "caller"
+    end
+
+    refute caller[:quality_metrics][:big_o_complete]
+    refute_includes Array(caller[:quality_metrics][:big_o_bound_qualities]), "upper_bound_closed_candidate_max"
   end
 
 end

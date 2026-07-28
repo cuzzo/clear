@@ -613,9 +613,11 @@ module Espalier
                      aliases[[mod[:name].to_s, delegation[:message].to_s]]
                    end
           graph[source] << target if target
-          Array(delegation[:candidate_target_ids]).each do |candidate|
-            candidate_target = aliases[candidate.to_s]
-            graph[source] << candidate_target if candidate_target
+          if delegation[:consumer_closed_candidate_set] == true
+            Array(delegation[:candidate_target_ids]).each do |candidate|
+              candidate_target = aliases[candidate.to_s]
+              graph[source] << candidate_target if candidate_target
+            end
           end
           # A callable passed at this call site is a real summary dependency:
           # its cost is substituted for the callee's open C, so it must be
@@ -699,7 +701,9 @@ module Espalier
               delegation[:target_id].to_s
             graph[source] << target if identities[target]
           end
-          Array(method[:delegations]).flat_map { |delegation| Array(delegation[:candidate_target_ids]) }
+          Array(method[:delegations])
+            .select { |delegation| delegation[:consumer_closed_candidate_set] == true }
+            .flat_map { |delegation| Array(delegation[:candidate_target_ids]) }
             .map(&:to_s).each do |target|
               graph[source] << target if identities[target]
             end
@@ -903,6 +907,8 @@ module Espalier
       modules.each_with_object({}) do |mod, index|
         Array(mod[:methods]).each do |method|
           Array(method[:delegations]).each do |delegation|
+            next unless delegation[:consumer_closed_candidate_set] == true
+
             candidates = Array(delegation[:candidate_target_ids]).map(&:to_s).reject(&:empty?).uniq.sort
             next if candidates.empty?
 
@@ -1146,7 +1152,8 @@ module Espalier
           internal_call: (delegation[:receiver].to_s == "self" &&
             module_method_names.include?(delegation[:message].to_s)) ||
             (delegation[:target_owner] && delegation[:target_method] && context) ||
-            (Array(delegation[:candidate_target_ids]).any? && context)
+            (delegation[:consumer_closed_candidate_set] == true &&
+              Array(delegation[:candidate_target_ids]).any? && context)
         }.compact
       end
 

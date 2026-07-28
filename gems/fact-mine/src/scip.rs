@@ -49,6 +49,17 @@ struct ToolInfo {
     name: String,
     #[serde(default)]
     version: String,
+    #[serde(default)]
+    arguments: Vec<String>,
+}
+
+const OBSERVED_OPEN_AUTHORITY_ARGUMENT: &str =
+    "--fact-mine-index-authority=observed-open";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IndexAuthority {
+    Compiler,
+    ObservedOpen,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -242,6 +253,7 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
 }
 
 fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportStats> {
+    let authority = index_authority(&index)?;
     for information in index
         .documents
         .iter_mut()
@@ -261,10 +273,12 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
             "SCIP index uses non-UTF-8 text_document_encoding; column conversion is required"
         );
     }
-    assign_method_symbols(&mut output.methods, &index.documents);
-    apply_signature_types(output, &index);
-    apply_local_variable_types(output, &index);
-    apply_scalar_operator_types(output, &index);
+    if authority == IndexAuthority::Compiler {
+        assign_method_symbols(&mut output.methods, &index.documents);
+        apply_signature_types(output, &index);
+        apply_local_variable_types(output, &index);
+        apply_scalar_operator_types(output, &index);
+    }
     let methods_by_path = methods_by_document(&output.methods, &index.documents);
     // An index that joins to no analyzed method contributes no identity, yet
     // every downstream metric would still be stamped with the SCIP resolution
@@ -337,6 +351,21 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
             })
             .filter_map(|definition| definition.method_id.as_deref())
             .collect::<BTreeSet<_>>();
+        if authority == IndexAuthority::ObservedOpen {
+            stats.matched_occurrences += 1;
+            if call.target_provenance.as_deref() == Some("scip") {
+                continue;
+            }
+            apply_observed_open_candidates(
+                call,
+                language,
+                occurrence,
+                &selected_symbols,
+                target_ids,
+                &mut stats,
+            );
+            continue;
+        }
         let candidate_costs = selected
             .alternatives
             .iter()
@@ -410,6 +439,7 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
         call.preprocessor_callable |= compiler_macro;
         call.candidate_targets.clear();
         call.candidate_reason = None;
+        call.consumer_closed_candidate_set = true;
 
         if target_ids.len() == 1
             && compiler_proven_abstract_project_target(
@@ -575,9 +605,11 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
         }
     }
 
-    reconcile_constructor_delegations(output);
-    reconcile_inactive_preprocessor_project_calls(output);
-    reconcile_non_recursive_overload_calls(output);
+    if authority == IndexAuthority::Compiler {
+        reconcile_constructor_delegations(output);
+        reconcile_inactive_preprocessor_project_calls(output);
+        reconcile_non_recursive_overload_calls(output);
+    }
 
     let raw_parser_call_sites = output.call_resolution_coverage.raw_parser_call_sites;
     let raw_calls_not_normalized = output.call_resolution_coverage.raw_calls_not_normalized;
@@ -636,6 +668,72 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
     crate::profile::reapply_direct_call_result_costs(output);
     apply_resolved_call_costs_to_contexts(output);
     Ok(stats)
+}
+
+fn index_authority(index: &Index) -> Result<IndexAuthority> {
+    let arguments = index
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.tool_info.as_ref())
+        .map(|tool_info| tool_info.arguments.as_slice())
+        .unwrap_or_default();
+    let declared = arguments
+        .iter()
+        .filter_map(|argument| argument.strip_prefix("--fact-mine-index-authority="))
+        .collect::<BTreeSet<_>>();
+    if declared.is_empty() {
+        Ok(IndexAuthority::Compiler)
+    } else if declared.len() == 1
+        && declared.contains(
+            OBSERVED_OPEN_AUTHORITY_ARGUMENT
+                .strip_prefix("--fact-mine-index-authority=")
+                .expect("authority argument prefix"),
+        )
+    {
+        Ok(IndexAuthority::ObservedOpen)
+    } else {
+        anyhow::bail!(
+            "unsupported or conflicting SCIP index authority declarations: {}",
+            declared.into_iter().collect::<Vec<_>>().join(", ")
+        )
+    }
+}
+
+fn apply_observed_open_candidates(
+    call: &mut CallRecord,
+    language: &str,
+    occurrence: &Occurrence,
+    selected_symbols: &BTreeSet<&str>,
+    target_ids: BTreeSet<&str>,
+    stats: &mut ImportStats,
+) {
+    call.target = None;
+    call.semantic_symbol = Some(occurrence.symbol.clone());
+    call.target_provenance = Some("runtime_scip_observed".to_string());
+    call.consumer_closed_candidate_set = false;
+    call.candidate_targets
+        .extend(target_ids.iter().map(|target| (*target).to_string()));
+    call.candidate_targets.sort();
+    call.candidate_targets.dedup();
+    call.complexity_candidates
+        .extend(selected_symbols.iter().map(|symbol| (*symbol).to_string()));
+    call.complexity_candidates.sort();
+    call.complexity_candidates.dedup();
+    call.candidate_reason = Some("runtime_observed_candidate_set".to_string());
+    call.unresolved_reason = Some("runtime_observed_candidate_set_open".to_string());
+    call.resolution_missing_proof = Some("consumer_closed_candidate_set_required".to_string());
+    call.empty_domain_cause = None;
+    if target_ids.is_empty() {
+        let metadata = syntax::external_symbol_metadata(language, &occurrence.symbol);
+        call.kind = "external_call".to_string();
+        call.external_symbol_scope = Some(metadata.scope.to_string());
+        call.complexity_missing_kind = Some(metadata.missing_cost_kind);
+        stats.external_symbols += 1;
+    } else {
+        call.kind = "unresolved_call".to_string();
+        call.external_symbol_scope = Some("project".to_string());
+        call.complexity_missing_kind = None;
+    }
 }
 
 pub(crate) fn apply_resolved_call_costs_to_contexts(output: &mut ProfileOutput) -> usize {
@@ -715,6 +813,7 @@ fn index_from_protobuf(index: scip::types::Index) -> Result<Index> {
         tool_info: metadata.tool_info.as_ref().map(|tool_info| ToolInfo {
             name: tool_info.name.clone(),
             version: tool_info.version.clone(),
+            arguments: tool_info.arguments.clone(),
         }),
         text_document_encoding: TextDocumentEncoding::Number(
             u32::try_from(metadata.text_document_encoding.value()).unwrap_or(u32::MAX),
@@ -4493,6 +4592,124 @@ void run_dependent() {
 
         assert_eq!(output.calls[0].target.as_deref(), Some("callee"));
         assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
+    }
+
+    #[test]
+    fn runtime_scip_imports_observed_project_targets_as_an_open_candidate_set() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let declaration = "  def callee; 1; end";
+        let caller = "  def caller; callee; end";
+        fs::write(
+            &path,
+            format!("class Demo\n{declaration}\n{caller}\nend\n"),
+        )
+        .unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "nil-kill-runtime workspace demo abc Demo#callee().";
+        let declaration_column = declaration.find("callee").unwrap();
+        let call_column = caller.find("callee").unwrap();
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [OBSERVED_OPEN_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "symbols": [{"symbol": symbol}],
+                "occurrences": [
+                    {"range": [1, declaration_column, declaration_column + 6], "symbol": symbol, "symbolRoles": 1},
+                    {"range": [2, call_column, call_column + 6], "symbol": symbol, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut callee = method("callee", &path, "callee", [2, 2, 2, declaration.len()]);
+        let mut caller_method = method("caller", &path, "caller", [3, 2, 3, caller.len()]);
+        callee.language = "ruby".into();
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call(
+            "caller",
+            &path,
+            "callee",
+            [3, call_column, 3, call_column + 8],
+        );
+        runtime_call.owner = "Demo".into();
+        runtime_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![callee, caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.target, None);
+        assert_eq!(call.semantic_symbol.as_deref(), Some(symbol));
+        assert_eq!(
+            call.target_provenance.as_deref(),
+            Some("runtime_scip_observed")
+        );
+        assert_eq!(call.candidate_targets, vec!["callee"]);
+        assert_eq!(
+            call.candidate_reason.as_deref(),
+            Some("runtime_observed_candidate_set")
+        );
+        assert!(!call.consumer_closed_candidate_set);
+        assert_eq!(
+            call.unresolved_reason.as_deref(),
+            Some("runtime_observed_candidate_set_open")
+        );
+        assert_eq!(output.methods[0].semantic_symbol, None);
+        assert!(output.semantic_indexes.iter().any(|index| {
+            index.tool == "nil-kill-runtime" && index.version == "1"
+        }));
+    }
+
+    #[test]
+    fn compiler_scip_identity_outranks_a_later_runtime_observation() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller\n  value.call\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let runtime_symbol = "nil-kill-runtime rubygems demo 1 Other#call().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [OBSERVED_OPEN_AUTHORITY_ARGUMENT]
+                }
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "occurrences": [
+                    {"range": [1, 8, 12], "symbol": runtime_symbol, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut caller_method = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call("caller", &path, "call", [2, 2, 2, 12]);
+        runtime_call.target = Some("compiler-target".into());
+        runtime_call.semantic_symbol = Some("compiler symbol".into());
+        runtime_call.target_provenance = Some("scip".into());
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].target.as_deref(), Some("compiler-target"));
+        assert_eq!(
+            output.calls[0].semantic_symbol.as_deref(),
+            Some("compiler symbol")
+        );
+        assert_eq!(output.calls[0].target_provenance.as_deref(), Some("scip"));
     }
 
     #[test]

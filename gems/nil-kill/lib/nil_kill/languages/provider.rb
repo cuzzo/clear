@@ -71,6 +71,7 @@ module NilKill
           "hash_shapes" => false,
           "call_edges" => false,
           "line_coverage" => false,
+          "runtime_scip_calls" => false,
         }
       end
 
@@ -99,6 +100,13 @@ module NilKill
 
       def collect_runtime(argv:, root:, output:, targets:, append: false)
         raise UnsupportedRuntimeTracer, "#{display_name} does not have a Nil-Kill runtime tracer provider"
+      end
+
+      # Opaque semantic-environment claims attached to runtime SCIP output.
+      # Language and package-manager discovery belongs in providers; the
+      # shared SCIP encoder only records and hashes supplied values.
+      def runtime_scip_environment(root:)
+        {}
       end
 
       def return_type_index(root:)

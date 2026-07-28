@@ -311,7 +311,7 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
     // order. Incomplete results are deliberately replaceable by a complete
     // generated result.
     for call in &output.calls {
-        if call.target.is_some() {
+        if call.target.is_some() || has_open_candidate_set(call) {
             continue;
         }
         let Some(symbol) = call.semantic_symbol.as_deref() else {
@@ -339,7 +339,7 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
 
     let mut applied = 0;
     for call in &mut output.calls {
-        if call.target.is_some() {
+        if call.target.is_some() || has_open_candidate_set(call) {
             continue;
         }
         let Some(symbol) = call.semantic_symbol.as_deref() else {
@@ -409,6 +409,11 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
         crate::scip::apply_resolved_call_costs_to_contexts(output);
     }
     Ok(applied)
+}
+
+fn has_open_candidate_set(call: &crate::profile::CallRecord) -> bool {
+    !call.consumer_closed_candidate_set
+        && (call.candidate_reason.is_some() || !call.candidate_targets.is_empty())
 }
 
 fn validate(summary: &SummaryFile) -> Result<()> {
@@ -570,6 +575,33 @@ mod tests {
         assert_eq!(output.calls[0].target_provenance.as_deref(), Some("scip"));
         assert_eq!(output.calls[1].known_time_complexity, None);
         assert_eq!(output.calls[2].known_time_complexity, None);
+    }
+
+    #[test]
+    fn does_not_close_an_observed_open_candidate_set() {
+        let symbol = "nil-kill-runtime ruby ruby 3.2.3 String#upcase().";
+        let mut observed = call(Some(symbol));
+        observed.target_provenance = Some("runtime_scip_observed".into());
+        observed.candidate_targets = vec!["fn:observed".into()];
+        observed.candidate_reason = Some("runtime_observed_candidate_set".into());
+        observed.consumer_closed_candidate_set = false;
+        let mut output = ProfileOutput {
+            calls: vec![observed],
+            ..ProfileOutput::default()
+        };
+        let json = serde_json::json!({
+            "schema": SCHEMA_V1,
+            "symbols": {
+                symbol: {"time": "O(1)", "space": "O(1)"}
+            }
+        });
+
+        assert_eq!(apply_json(&mut output, &json.to_string()).unwrap(), 0);
+        assert_eq!(output.calls[0].known_time_complexity, None);
+        assert_eq!(
+            output.calls[0].unresolved_reason.as_deref(),
+            Some("scip_external_symbol_unmodeled")
+        );
     }
 
     #[test]

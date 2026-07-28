@@ -41,6 +41,7 @@ module NilKill
             collection_observed
             hash_shape_observed
             call_edge
+            runtime_call
             coverage
           ]
         end
@@ -55,12 +56,28 @@ module NilKill
             "collections" => true,
             "hash_shapes" => true,
             "call_edges" => true,
-            "line_coverage" => true
+            "line_coverage" => true,
+            "runtime_scip_calls" => true
           )
         end
 
         def notes
           ["runtime collection uses the existing nil-kill collect command and Ruby source instrumentation"]
+        end
+
+        def runtime_scip_environment(root:)
+          claims = {
+            "runtime.language" => "ruby",
+            "runtime.version" => RUBY_VERSION,
+            "runtime.engine" => RUBY_ENGINE,
+            "runtime.engine_version" => RUBY_ENGINE_VERSION,
+          }
+          lockfile = File.join(root, "Gemfile.lock")
+          if File.file?(lockfile)
+            claims["runtime.lockfile.Gemfile.lock.sha256"] =
+              "sha256:#{Digest::SHA256.file(lockfile).hexdigest}"
+          end
+          claims
         end
 
         def return_type_index(root:)
