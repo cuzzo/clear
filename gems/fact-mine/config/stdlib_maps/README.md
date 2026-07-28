@@ -68,6 +68,12 @@ The remaining SCIP languages are deliberately fail-closed:
 - TypeScript and JavaScript built-ins resolve to versioned TypeScript `.d.ts`
   declarations. Those files have no executable bodies, while the real
   implementations belong to a particular JS engine and release.
+  `javascript/semantic_environment.rb` now pins the Node binary and release,
+  V8 release, native-module ABI, and scip-typescript binary for both languages.
+  This removes runtime identity as an excuse for a guessed declaration model;
+  the remaining producer must analyze the matching V8/Node bodies and generate
+  the declaration bridge while retaining callback and reflective cost
+  parameters.
 - PHP built-ins can be connected to their `php-src` C implementations through
   the generic cross-indexer symbol bridge, and
   `php/scip-php-exact-version.patch` replaces scip-php's hard-coded `0.0.1`

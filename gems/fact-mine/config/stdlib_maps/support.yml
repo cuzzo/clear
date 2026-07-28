@@ -32,11 +32,13 @@ languages:
   typescript:
     status: blocked
     blocker: declaration_only_standard_library
-    required_fix: A runtime-specific producer must provide executable implementation bodies compatible with the versioned TypeScript declaration symbols.
+    compatibility_probe: javascript/semantic_environment.rb
+    required_fix: A Node/V8 producer must bridge executable runtime implementations to TypeScript declaration symbols while preserving callback and reflective costs; the runtime identity is captured by the compatibility probe.
   javascript:
     status: blocked
     blocker: declaration_only_standard_library
-    required_fix: A runtime-specific producer must provide executable implementation bodies compatible with the versioned TypeScript declaration symbols.
+    compatibility_probe: javascript/semantic_environment.rb
+    required_fix: A Node/V8 producer must bridge executable runtime implementations to TypeScript declaration symbols while preserving callback and reflective costs; the runtime identity is captured by the compatibility probe.
   php:
     status: blocked
     blocker: parametric_runtime_callbacks_and_allocator_state
