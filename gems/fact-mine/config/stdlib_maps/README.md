@@ -58,8 +58,13 @@ still useful canonicalization, but it is not reported as completeness impact.
 
 The remaining SCIP languages are deliberately fail-closed:
 
-- C standard-library symbols from scip-clang use `cxx . .`; the libc producer
-  and exact compiler/sysroot environment attestation are not yet published.
+- C standard-library symbols from scip-clang use `cxx . .`.
+  `c/semantic_environment.rb` now closes the missing consumer identity by
+  attesting the libc binary and release, effective public headers, compiler,
+  target, semantic flags, preprocessor macros, and scip-clang binary. The
+  remaining blocker is an implementation producer: the matching patched glibc
+  source must be configured and indexed under that same environment before a
+  bundle can be published.
 - TypeScript and JavaScript built-ins resolve to versioned TypeScript `.d.ts`
   declarations. Those files have no executable bodies, while the real
   implementations belong to a particular JS engine and release.

@@ -20,8 +20,9 @@ languages:
     manifest: kotlin-2.2.0.yml
   c:
     status: blocked
-    blocker: unversioned_consumer_symbols
-    required_fix: scip-clang must expose the C runtime implementation and version used by the compilation database.
+    blocker: implementation_source_not_indexed
+    compatibility_probe: c/semantic_environment.rb
+    required_fix: A pinned glibc source/build recipe must expose executable libc bodies under the same compiler, ABI, headers, and scip-clang environment now captured by the compatibility probe.
   cpp:
     status: bundled
     manifests:
