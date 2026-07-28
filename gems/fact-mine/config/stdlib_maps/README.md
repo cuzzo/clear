@@ -63,6 +63,16 @@ The remaining SCIP languages are deliberately fail-closed:
 - TypeScript and JavaScript built-ins resolve to versioned TypeScript `.d.ts`
   declarations. Those files have no executable bodies, while the real
   implementations belong to a particular JS engine and release.
+- PHP built-ins can be connected to their `php-src` C implementations through
+  the generic cross-indexer symbol bridge, and
+  `php/scip-php-exact-version.patch` replaces scip-php's hard-coded `0.0.1`
+  metadata with its exact source revision. A PHP 8.4.21 producer trial
+  nevertheless exported zero of 70 analyzed `zif_*` string built-ins under the
+  source-proof policy. Weak scalar coercion can invoke user object handlers,
+  while Zend allocation depends on allocator state and hooks; both costs must
+  remain parametric. Publishing the apparent native helper cost would silently
+  discard those executable paths, so PHP remains fail-closed until generated
+  summaries can carry and compose those runtime cost parameters.
 
 These are compatibility failures, not requests for manual overrides. Move an
 entry to `bundled` only after its required identity/body capability exists and a
