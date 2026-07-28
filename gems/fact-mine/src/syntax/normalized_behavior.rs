@@ -951,6 +951,13 @@ pub(crate) fn native_pointer_nullability_contract(type_name: &str) -> Option<&'s
 }
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    /// Resolve a compile-time condition literal using native truthiness rules.
+    /// The shared extractor uses this only to omit a syntactically present but
+    /// provably unreachable branch; unknown expressions retain both arms.
+    fn constant_condition_truth(&self, _node: &Node) -> Option<bool> {
+        None
+    }
+
     /// Whether language-owned implicit runtime work in an otherwise executable
     /// body is fully represented by the normalized calls and complexity facts.
     ///
