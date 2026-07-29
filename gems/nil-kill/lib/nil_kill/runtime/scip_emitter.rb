@@ -23,7 +23,8 @@ module NilKill
         attestation: nil,
         environment: {},
         files: nil,
-        value_evidence_path: nil
+        value_evidence_path: nil,
+        plan: nil
       )
         new(
           root: root,
@@ -32,7 +33,8 @@ module NilKill
           attestation: attestation,
           environment: environment,
           files: files,
-          value_evidence_path: value_evidence_path
+          value_evidence_path: value_evidence_path,
+          plan: plan
         ).emit
       end
 
@@ -51,7 +53,8 @@ module NilKill
         attestation: nil,
         environment: {},
         files: nil,
-        value_evidence_path: nil
+        value_evidence_path: nil,
+        plan: nil
       )
         @root = File.expand_path(root)
         @runtime_dir = File.expand_path(runtime_dir)
@@ -62,33 +65,38 @@ module NilKill
         @environment = environment.transform_keys(&:to_s).transform_values(&:to_s)
         @files = files
         @value_evidence_path = value_evidence_path && File.expand_path(value_evidence_path)
+        @runtime_plan = plan
       end
 
       def emit
         events, invalid_events = load_events
-        semantic_events = events.select do |event|
-          Languages.provider_for(event.fetch("language"))
-            .runtime_scip_event_eligible?(event: event, root: @root)
-        end
-        excluded_events = events.length - semantic_events.length
+        semantic_events = events
+        excluded_events = 0
         value_evidence =
           if @value_evidence_path
             parsed = JsonIO.parse(@value_evidence_path)
             {
               "path" => @value_evidence_path,
-              "observations" => parsed.fetch("observations", []).length,
-              "calls" => parsed.fetch("calls", []).length,
+              "observations" => parsed.fetch("anchors", []).count {
+                |row| row.fetch("executions", []).any? { |bucket| bucket["value"] }
+              },
+              "calls" => parsed.fetch("anchors", []).count {
+                |row| row.fetch("executions", []).any? { |bucket| bucket["target"] }
+              },
             }
           else
             ValueEvidenceEmitter.emit(
               root: @root,
               runtime_dir: @runtime_dir,
-              events: semantic_events
+              events: semantic_events,
+              plan: runtime_plan
             )
           end
         parsed_evidence = JsonIO.parse(value_evidence.fetch("path"))
-        evidence_runs = parsed_evidence.fetch("runs", [])
-        evidence_environment = parsed_evidence.fetch("environment", {})
+        evidence_runs = parsed_evidence.fetch("runs", []).map { |run| run.fetch("id") }
+        evidence_environment = parsed_evidence.fetch("environment", []).to_h do |claim|
+          [claim.fetch("key"), claim.fetch("value")]
+        end
         sources = runtime_sources(semantic_events, value_evidence.fetch("path"))
         index =
           if sources.empty?
@@ -132,22 +140,19 @@ module NilKill
 
       def emit_value_evidence(output: nil, languages: nil, run_ids: nil)
         events, invalid_events = load_events
-        semantic_events = events.select do |event|
-          Languages.provider_for(event.fetch("language"))
-            .runtime_scip_event_eligible?(event: event, root: @root)
-        end
         result = ValueEvidenceEmitter.emit(
           root: @root,
           runtime_dir: @runtime_dir,
-          events: semantic_events,
+          events: events,
           output: output,
           languages: languages,
-          run_ids: run_ids
+          run_ids: run_ids,
+          plan: runtime_plan
         )
         result.merge(
           "events" => events.length,
           "invalid_events" => invalid_events,
-          "excluded_events" => events.length - semantic_events.length
+          "excluded_events" => 0
         )
       end
 
@@ -168,7 +173,7 @@ module NilKill
           "documents" => [],
           "externalSymbols" => [],
           "_runtimeEvidence" => {
-            "schema" => ValueEvidenceEmitter::SCHEMA,
+            "schema" => "factmine.runtime.v1",
             "observedCallSites" => 0,
             "inferredCallSites" => 0,
             "typedReceivers" => 0,
@@ -177,14 +182,12 @@ module NilKill
         }
       end
 
-      def runtime_sources(events, evidence_path)
-        evidence = JsonIO.parse(evidence_path)
+      def runtime_sources(events, _evidence_path)
         sources = Array(@files).map { |path| File.expand_path(path, @root) }
         if sources.empty?
           sources.concat(events.filter_map { |event| event.dig("callsite", "path") })
-          sources.concat(evidence.fetch("observations", []).filter_map do |observation|
-            path = observation.dig("scope", "path").to_s
-            File.expand_path(path, @root) unless path.empty?
+          sources.concat(runtime_plan.fetch("documents", []).map do |document|
+            File.expand_path(document.fetch("relative_path"), @root)
           end)
         end
         # A runtime call can cross from the selected product source into a
@@ -198,7 +201,7 @@ module NilKill
         sources.concat(events.filter_map { |event| workspace_callee_source(event) })
         languages = (
           events.map { |event| event.fetch("language") } +
-          evidence.fetch("observations", []).map { |row| row.dig("scope", "language") }
+          runtime_plan.fetch("documents", []).map { |row| row["language"] }
         ).compact.uniq
         extensions = languages.flat_map do |language|
           Languages.provider_for(language).extensions
@@ -225,11 +228,21 @@ module NilKill
 
       def emit_with_fact_mine(evidence_path, sources)
         binary = fact_mine_binary
-        with_plain_evidence(evidence_path) do |plain_evidence|
+        evidence_digest = JsonIO.parse(evidence_path).fetch("trace_plan_digest")
+        plan_digest = runtime_plan.fetch("plan_digest")
+        unless evidence_digest == plan_digest
+          raise "runtime evidence was collected for trace plan #{evidence_digest.inspect}, " \
+            "but the current plan is #{plan_digest.inspect}"
+        end
+        Tempfile.create(["fact-mine-runtime-plan", ".json"]) do |plan|
+          plan.write(JSON.generate(runtime_plan))
+          plan.flush
           command = [
             binary,
             "runtime-scip",
-            "--runtime-evidence", plain_evidence,
+            "--root", @root,
+            "--trace-plan", plan.path,
+            "--runtime-evidence", evidence_path,
             "--output", @output,
             *sources,
           ]
@@ -240,17 +253,6 @@ module NilKill
           end
         end
         JSON.parse(File.read(@output))
-      end
-
-      def with_plain_evidence(path)
-        return yield path unless JsonIO.gzip?(path)
-
-        Tempfile.create(["nil-kill-runtime-values", ".json"]) do |file|
-          file.binmode
-          file.write(JsonIO.read(path))
-          file.flush
-          yield file.path
-        end
       end
 
       def fact_mine_binary
@@ -264,6 +266,18 @@ module NilKill
         else
           release
         end
+      end
+
+      def runtime_plan
+        @runtime_plan ||= if File.file?(NilKill::TRACE_PLAN_PATH)
+                            EvidenceProtocol.plan
+                          else
+                            generated =
+                              StaticEvidence.build_runtime_evidence_plan(@files, root: @root)
+                            raise ArgumentError, "no source files for a runtime evidence plan" unless generated
+
+                            generated
+                          end
       end
 
       def load_events

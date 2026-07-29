@@ -1,0 +1,16 @@
+{
+  "protocol_version": 1,
+  "producer": {
+    "name": "nil-kill",
+    "version": "1"
+  },
+  "authority": "MODELED_RUNS",
+  "trace_plan_digest": "Wny749Q1hIW2HIvenW+V1fysvBWFtleEzoMyYnYJIjc=",
+  "runs": [
+    {
+      "id": "run-1",
+      "status": "SUCCEEDED"
+    }
+  ],
+  "anchors": []
+}

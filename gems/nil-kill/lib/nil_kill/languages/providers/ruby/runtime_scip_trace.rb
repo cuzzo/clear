@@ -470,15 +470,67 @@ module NilKillRuntimeTrace
   end
 
   def self.runtime_nonproduction_source_path?(path)
-    absolute = File.expand_path(path, ROOT)
-    return false unless absolute.start_with?("#{ROOT}#{File::SEPARATOR}")
-
-    relative = absolute.delete_prefix("#{ROOT}#{File::SEPARATOR}")
-    components = Pathname.new(relative).each_filename.to_a
-    components.any? { |component| %w[test tests spec specs].include?(component) } ||
-      components.last.to_s.match?(/(?:_test|_spec)\.rb\z/)
+    runtime_nonproduction_source_paths.include?(File.expand_path(path, ROOT))
   rescue StandardError
     false
+  end
+
+  def self.runtime_nonproduction_source_paths
+    source_roles_path = ENV["NIL_KILL_SOURCE_ROLES"].to_s
+    cached = @runtime_nonproduction_source_paths
+    return cached[:paths] if cached && cached[:source] == source_roles_path
+
+    paths =
+      if !source_roles_path.empty? && File.file?(source_roles_path)
+        Array(JSON.parse(File.read(source_roles_path))["nonproduction"]).map do |path|
+          File.expand_path(path, ROOT)
+        end
+      else
+        []
+      end
+    @runtime_nonproduction_source_paths = {
+      source: source_roles_path,
+      paths: paths.to_set.freeze,
+    }
+    @runtime_nonproduction_source_paths[:paths]
+  rescue StandardError
+    @runtime_nonproduction_source_paths = {
+      source: source_roles_path,
+      paths: Set.new.freeze,
+    }
+    @runtime_nonproduction_source_paths[:paths]
+  end
+
+  def self.runtime_value_source_location(value)
+    klass = value.is_a?(Module) ? value : value.class
+    return unless klass.is_a?(Module)
+
+    @runtime_value_source_locations ||= {}
+    return @runtime_value_source_locations[klass] if
+      @runtime_value_source_locations.key?(klass)
+
+    name = safe_module_name(klass).to_s
+    location = name.empty? ? nil : Object.const_source_location(name)
+    if !location && name.empty?
+      locations = klass.instance_methods(false).filter_map do |method_name|
+        klass.instance_method(method_name).source_location
+      rescue StandardError
+        nil
+      end
+      location = locations.first
+    end
+    path = location && location.first
+    absolute = path && !path.start_with?("<") ? abs_path(path) : nil
+    @runtime_value_source_locations[klass] =
+      absolute && File.file?(absolute) ? absolute : nil
+  rescue StandardError
+    @runtime_value_source_locations[klass] = nil if defined?(klass) && klass
+    nil
+  end
+
+  def self.runtime_nonproduction_value?(value)
+    path = runtime_value_source_location(value)
+    path && runtime_nonproduction_source_path?(path)
   end
 
   def self.record_runtime_scip_call(tp, receiver_shape: true, deduplicate: false, callsite: nil)
@@ -536,8 +588,12 @@ module NilKillRuntimeTrace
       line: native_source ? native_source.fetch(:line) : (native ? nil : src_line(callee_path, tp.lineno)),
       native: native,
       receiver_type: class_name(tp.self),
+      source_role: (
+        "nonproduction" if callee_path && runtime_nonproduction_source_path?(callee_path)
+      ),
     }.merge(package)
     receiver_domain = receiver_shape ? runtime_value_domain(tp.self) : runtime_type_domain(tp.self)
+    return if runtime_value_domain_empty?(receiver_domain)
 
     key = [
       caller[:class], caller[:method], caller[:kind], caller[:path], caller[:line],
@@ -596,6 +652,7 @@ module NilKillRuntimeTrace
 
     Thread.current[:__nil_kill_runtime_scip] = true
     observed = runtime_value_domain(value)
+    return if runtime_value_domain_empty?(observed)
     @lock.synchronize do
       record = @runtime_calls[key]
       merge_runtime_value_domain!(record[:result_domain] ||= empty_runtime_value_domain, observed) if record
@@ -612,6 +669,7 @@ module NilKillRuntimeTrace
   def self.empty_runtime_value_domain
     {
       types: [],
+      singletons: [],
       elements: [],
       keys: [],
       values: [],
@@ -620,15 +678,24 @@ module NilKillRuntimeTrace
   end
 
   def self.runtime_type_domain(value)
+    return empty_runtime_value_domain if runtime_nonproduction_value?(value)
+
     runtime_type = class_name(value)
     record_type = runtime_record_type_name(value)
     runtime_type = record_type if runtime_type == "T.untyped" && record_type
-    empty_runtime_value_domain.merge(types: [runtime_type])
+    domain = empty_runtime_value_domain.merge(types: [runtime_type])
+    singleton = semantic_value_type_name(value)
+    domain[:singletons] << singleton if singleton
+    domain
   end
 
   def self.runtime_value_domain(value)
+    return empty_runtime_value_domain if runtime_nonproduction_value?(value)
+
     domain = empty_runtime_value_domain
     domain[:types] << class_name(value)
+    singleton = semantic_value_type_name(value)
+    domain[:singletons] << singleton if singleton
     record_key = runtime_record_shape_key(value)
     if record_key
       record_shape = shape_payload(record_key)
@@ -639,16 +706,64 @@ module NilKillRuntimeTrace
     shape = container_shape(value)
     if shape
       if shape[0] == :array
-        domain[:elements].concat(shape[1].to_a)
+        domain[:elements].concat(
+          shape[1].reject { |type| runtime_nonproduction_type_name?(type) }.to_a
+        )
       else
-        domain[:keys].concat(shape[1][0].to_a)
-        domain[:values].concat(shape[1][1].to_a)
+        domain[:keys].concat(
+          shape[1][0].reject { |type| runtime_nonproduction_type_name?(type) }.to_a
+        )
+        domain[:values].concat(
+          shape[1][1].reject { |type| runtime_nonproduction_type_name?(type) }.to_a
+        )
       end
-      domain[:shapes] << shape_payload(collection_type_shape_key(value))
+      production_shape = runtime_production_shape(shape_payload(collection_type_shape_key(value)))
+      domain[:shapes] << production_shape if production_shape
     end
-    %i[types elements keys values].each { |field| domain[field].sort! }
+    %i[types singletons elements keys values].each { |field| domain[field].sort! }
     domain[:shapes].sort_by! { |value_shape| JSON.generate(value_shape) }
     domain
+  end
+
+  def self.runtime_value_domain_empty?(domain)
+    %i[types singletons elements keys values shapes].all? { |field| Array(domain[field]).empty? }
+  end
+
+  def self.runtime_nonproduction_type_name?(name)
+    return false if name.to_s.empty? || name == "T.untyped" ||
+      name.start_with?("AnonymousStruct(")
+
+    constant = name.split("::").reject(&:empty?).reduce(Object) do |scope, part|
+      break unless scope.is_a?(Module) && scope.const_defined?(part, false)
+
+      scope.const_get(part, false)
+    end
+    constant.is_a?(Module) && runtime_nonproduction_value?(constant)
+  rescue StandardError
+    false
+  end
+
+  def self.runtime_production_shape(shape)
+    return shape unless shape.is_a?(Hash)
+
+    kind = shape[:kind] || shape["kind"]
+    name = shape[:name] || shape["name"]
+    return nil if %w[class record].include?(kind) &&
+      runtime_nonproduction_type_name?(name)
+
+    filtered = shape.each_with_object({}) do |(key, value), out|
+      if %w[elements keys values].include?(key.to_s)
+        out[key] = Array(value).filter_map { |member| runtime_production_shape(member) }
+      elsif key.to_s == "members"
+        out[key] = value.each_with_object({}) do |(member_name, member_shape), members|
+          production = runtime_production_shape(member_shape)
+          members[member_name] = production if production
+        end
+      else
+        out[key] = value
+      end
+    end
+    filtered
   end
 
   # A runtime record is an observation about the value itself, rather than a

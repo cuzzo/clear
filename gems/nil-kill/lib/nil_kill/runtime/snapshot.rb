@@ -8,7 +8,7 @@ module NilKill
     class Snapshot
       SCHEMA = "nil-kill.runtime-snapshot.v1"
       MANIFEST = "runtime-snapshot.json.gz"
-      FINGERPRINT_SCHEME = "provider-runtime-evidence-v2"
+      FINGERPRINT_SCHEME = "provider-runtime-evidence-v1"
 
       attr_reader :root, :runtime_dir, :manifest
 

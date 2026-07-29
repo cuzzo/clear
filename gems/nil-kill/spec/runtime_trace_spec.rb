@@ -77,45 +77,74 @@ RSpec.describe "nil-kill runtime trace" do
     require_relative "../lib/nil_kill/runtime_trace"
     instance = RuntimeTraceSpecDouble.new([])
     location = NilKillRuntimeTrace.native_receiver_source_location(instance)
+    Dir.mktmpdir("nil-kill-source-roles") do |dir|
+      roles = File.join(dir, "roles.json")
+      File.write(roles, JSON.generate("nonproduction" => [File.expand_path(__FILE__)]))
+      isolated_env("NIL_KILL_SOURCE_ROLES" => roles) do
+        NilKillRuntimeTrace.instance_variable_set(:@runtime_nonproduction_source_paths, nil)
 
-    expect(location).to include(
-      path: File.expand_path(__FILE__),
-      line: be_positive
-    )
-    expect(NilKillRuntimeTrace.runtime_nonproduction_source_path?(location.fetch(:path))).to be(true)
-    expect(NilKillRuntimeTrace.runtime_nonproduction_source_path?(NilKill::ROOT)).to be(false)
-    NilKillRuntimeTrace.runtime_calls.clear
-    NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id] << {
-      caller: {
-        class: "Worker", method: "run", kind: "instance",
-        path: File.expand_path(__FILE__), line: __LINE__,
-      },
-      callsite: { path: File.expand_path(__FILE__), line: __LINE__ },
-    }
-    tracepoint = Struct.new(:event, :path, :lineno, :defined_class, :method_id, :self_value, keyword_init: true) do
-      def self
-        self_value
+        expect(location).to include(
+          path: File.expand_path(__FILE__),
+          line: be_positive
+        )
+        expect(NilKillRuntimeTrace.runtime_nonproduction_source_path?(location.fetch(:path))).to be(true)
+        expect(NilKillRuntimeTrace.runtime_nonproduction_source_path?(NilKill::ROOT)).to be(false)
+        NilKillRuntimeTrace.runtime_calls.clear
+        NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id] << {
+          caller: {
+            class: "Worker", method: "run", kind: "instance",
+            path: File.expand_path(__FILE__), line: __LINE__,
+          },
+          callsite: { path: File.expand_path(__FILE__), line: __LINE__ },
+        }
+        tracepoint = Struct.new(:event, :path, :lineno, :defined_class, :method_id, :self_value, keyword_init: true) do
+          def self
+            self_value
+          end
+        end.new(
+          event: :c_call,
+          path: "",
+          lineno: 0,
+          defined_class: RuntimeTraceSpecDouble,
+          method_id: :lines,
+          self_value: instance
+        )
+        allow(NilKillRuntimeTrace).to receive(:method_owner)
+          .with(RuntimeTraceSpecDouble).and_return(["RuntimeTraceSpecDouble", "instance"])
+        NilKillRuntimeTrace.record_runtime_scip_call(tracepoint, receiver_shape: false)
+        expect(NilKillRuntimeTrace.runtime_calls).to be_empty
       end
-    end.new(
-      event: :c_call,
-      path: "",
-      lineno: 0,
-      defined_class: RuntimeTraceSpecDouble,
-      method_id: :lines,
-      self_value: instance
-    )
-    allow(NilKillRuntimeTrace).to receive(:method_owner)
-      .with(RuntimeTraceSpecDouble).and_return(["RuntimeTraceSpecDouble", "instance"])
-    NilKillRuntimeTrace.record_runtime_scip_call(tracepoint, receiver_shape: false)
-    event = NilKillRuntimeTrace.runtime_calls.values.fetch(0)
-    expect(event.dig(:callee, :path)).to eq(location.fetch(:path))
-    expect(event.dig(:callee, :package_manager)).not_to eq("ruby")
-    provider = NilKill::Languages.provider_for("ruby")
-    serialized_event = JSON.parse(JSON.generate(event))
-    expect(provider.runtime_scip_event_eligible?(event: serialized_event, root: NilKill::ROOT)).to be(false)
+    end
   ensure
+    NilKillRuntimeTrace.instance_variable_set(:@runtime_nonproduction_source_paths, nil)
     NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id].clear
     NilKillRuntimeTrace.runtime_calls.clear
+  end
+
+  it "removes explicitly nonproduction values from runtime SCIP domains, including containers" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    Dir.mktmpdir("nil-kill-source-role-domain") do |dir|
+      roles = File.join(dir, "roles.json")
+      File.write(roles, JSON.generate("nonproduction" => [File.expand_path(__FILE__)]))
+      isolated_env("NIL_KILL_SOURCE_ROLES" => roles) do
+        NilKillRuntimeTrace.instance_variable_set(:@runtime_nonproduction_source_paths, nil)
+
+        expect(NilKillRuntimeTrace.runtime_value_domain(RuntimeTraceSpecDouble.new([])))
+          .to eq(NilKillRuntimeTrace.empty_runtime_value_domain)
+
+        domain = NilKillRuntimeTrace.runtime_value_domain(
+          [RuntimeTraceSpecDouble.new([]), "production"]
+        )
+        expect(domain.fetch(:types)).to eq(["Array"])
+        expect(domain.fetch(:elements)).to eq(["String"])
+        array_shape = domain.fetch(:shapes).find { |shape| shape.fetch("kind") == "array" }
+        expect(array_shape.fetch("elements")).to eq(
+          [{ "kind" => "class", "name" => "String" }]
+        )
+      end
+    end
+  ensure
+    NilKillRuntimeTrace.instance_variable_set(:@runtime_nonproduction_source_paths, nil)
   end
 
   it "permits an independent branch-coverage child when collect coverage is disabled" do

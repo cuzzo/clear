@@ -200,7 +200,8 @@ Config:
 ```
 
 Ruby collection also writes consumer-compatible plain `runtime.scip.json`,
-compressed `runtime-attestation.json.gz`, `runtime-values.json.gz`, raw
+compressed `runtime-attestation.json.gz`, canonical
+`runtime-evidence.v1.json.gz`, raw
 `*.jsonl.gz` under per-run/per-test directories, independently replaceable
 `shard-evidence/*.json.gz`, and `runtime-snapshot.json.gz` in the runtime
 output directory.
@@ -211,6 +212,30 @@ and emits the SCIP index with `runtime-modeled-world` authority. Language
 providers only trace values and define genuine language semantics; the
 evidence contract, flow propagation, snapshot merge, and SCIP emission are
 language-neutral.
+
+Runtime Big-O evidence has one canonical v1 Protobuf contract at
+`protocol/runtime-evidence/v1/runtime_evidence.proto`. FactMine first emits an
+exact trace plan. NilKill consumes that plan and records a capture status and
+correlated value/target bucket for every requested anchor. FactMine rebuilds
+the plan from the analyzed source, validates both digests and the complete
+anchor set, then joins evidence through exact internal IDs. The collector does
+not infer CFG/DFG relationships or accept the former path/name/line evidence
+shape.
+
+The standalone validation and consumption flow is:
+
+```sh
+fact-mine-rust runtime-plan --root . --output runtime-plan.json <sources...>
+fact-mine-rust runtime-evidence validate \
+  --plan runtime-plan.json \
+  --evidence runtime-evidence.v1.json.gz
+fact-mine-rust runtime-scip \
+  --root . \
+  --trace-plan runtime-plan.json \
+  --runtime-evidence runtime-evidence.v1.json.gz \
+  --output runtime.scip.json \
+  <sources...>
+```
 
 ## FAQ
 

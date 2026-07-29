@@ -31,9 +31,9 @@ use super::normalized_behavior::{
     BlockCallSemantics, CardinalityCallSemantics, CollectionAllocationSemantics,
     NormalizedCallComplexity, NormalizedCallParts, NormalizedCallProjection,
     NormalizedCollectionOperation, NormalizedGeneratedAccessor, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedRuntimeCapabilityGuard, NormalizedRuntimeTruthinessGuard,
-    NormalizedSemanticEffect, NormalizedVisibilityEvent, RuntimeCallResultProjection,
-    RuntimeValueProjection, SyntaxMetadata,
+    NormalizedNilGuardFact, NormalizedRuntimeCapabilityGuard, NormalizedRuntimeSemanticTarget,
+    NormalizedRuntimeTruthinessGuard, NormalizedSemanticEffect, NormalizedVisibilityEvent,
+    RuntimeCallResultProjection, RuntimeValueProjection, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, FunctionDef, StateDeclaration};
 use crate::ast::{self, Node, Span};
@@ -76,6 +76,52 @@ fn runtime_ruby_dependency_descriptor(symbol: &str) -> Option<&str> {
     fields.next()?; // runtime version
     let descriptor = fields.next()?;
     (manager != "ruby").then_some(descriptor)
+}
+
+fn runtime_descriptor_name(value: &str) -> String {
+    if value.chars().enumerate().all(|(index, character)| {
+        character == '_'
+            || character.is_ascii_alphanumeric()
+            || (index > 0 && matches!(character, '!' | '?' | '='))
+    }) && value
+        .chars()
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+    {
+        value.to_string()
+    } else {
+        format!("`{}`", value.replace('`', "``"))
+    }
+}
+
+fn runtime_descriptor_owner(value: &str) -> String {
+    value
+        .split("::")
+        .filter(|part| !part.is_empty())
+        .map(runtime_descriptor_name)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn runtime_value_identity_from_symbol(symbol: &str, suffix: char) -> Option<String> {
+    let (_package, _version, descriptor) =
+        super::normalized_behavior::scip_global_parts(symbol, "nil-kill-runtime", "ruby")?;
+    let descriptor = descriptor.strip_suffix(suffix)?;
+    if descriptor.is_empty() {
+        return None;
+    }
+    Some(
+        descriptor
+            .split('/')
+            .map(|part| {
+                part.strip_prefix('`')
+                    .and_then(|part| part.strip_suffix('`'))
+                    .unwrap_or(part)
+                    .replace("``", "`")
+            })
+            .collect::<Vec<_>>()
+            .join("::"),
+    )
 }
 
 fn ruby_module_function_mode(node: &Node, lines: &[String]) -> bool {
@@ -2020,6 +2066,69 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             "Set" if elements.len() == 1 => Some(self.format_set_type(&elements[0])),
             _ => Some(owner.to_string()),
         }
+    }
+
+    fn runtime_value_type_from_symbol(&self, symbol: &str) -> Option<String> {
+        runtime_value_identity_from_symbol(symbol, '#')
+    }
+
+    fn runtime_value_singleton_from_symbol(&self, symbol: &str) -> Option<String> {
+        runtime_value_identity_from_symbol(symbol, '.')
+    }
+
+    fn runtime_dispatch_owner_matches(&self, owner: &str, receiver_type: &str) -> bool {
+        match owner.rsplit("::").next().unwrap_or(owner) {
+            "Enumerable" => matches!(
+                receiver_type.rsplit("::").next().unwrap_or(receiver_type),
+                "Array" | "Hash" | "Set" | "Range" | "Enumerator"
+            ),
+            "Kernel" => !matches!(
+                receiver_type.rsplit("::").next().unwrap_or(receiver_type),
+                "BasicObject" | "Class" | "Module"
+            ),
+            _ => false,
+        }
+    }
+
+    fn runtime_value_semantic_target(
+        &self,
+        receiver_type: &str,
+        receiver_singleton: Option<&str>,
+        message: &str,
+        environment: &BTreeMap<String, String>,
+    ) -> Option<NormalizedRuntimeSemanticTarget> {
+        let version = environment
+            .get("runtime.version")
+            .map(String::as_str)
+            .unwrap_or("workspace");
+        let build = |owner: &str, kind: &str, receiver_type: &str| {
+            let separator = if kind == "class" { "." } else { "#" };
+            let symbol = format!(
+                "nil-kill-runtime ruby ruby {} {}{}{}().",
+                version,
+                runtime_descriptor_owner(owner),
+                separator,
+                runtime_descriptor_name(message)
+            );
+            let metadata = external_symbol_metadata(&symbol);
+            (external_symbol_call_complexity(&symbol, message).is_some()
+                || metadata.parametric_cost.is_some())
+            .then_some(NormalizedRuntimeSemanticTarget {
+                symbol,
+                owner: owner.to_string(),
+                kind: kind.to_string(),
+                receiver_type: receiver_type.to_string(),
+            })
+        };
+
+        if let Some(singleton) = receiver_singleton {
+            return build(singleton, "class", receiver_type);
+        }
+        build(receiver_type, "instance", receiver_type)
+            // Bare Ruby calls dispatch through Kernel when the concrete owner
+            // has no reviewed stdlib contract. Project declarations have
+            // already been selected before this modeled target is requested.
+            .or_else(|| build("Kernel", "instance", receiver_type))
     }
 
     fn runtime_nil_type_name(&self) -> Option<&'static str> {

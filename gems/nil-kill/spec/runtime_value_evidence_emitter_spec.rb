@@ -1,229 +1,265 @@
 # frozen_string_literal: true
 
-require_relative "spec_helper"
+require "spec_helper"
+require_relative "../lib/nil_kill"
+require "tmpdir"
 
-RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
-  it "serializes observed values and calls without inferring source flow" do
-    Dir.mktmpdir("nil-kill-runtime-values", NilKill::ROOT) do |root|
-      runtime_dir = File.join(root, "runtime")
-      source = File.join(root, "worker.rb")
-      FileUtils.mkdir_p(runtime_dir)
-      File.write(source, "class Worker; def run(rows); rows; end; end\n")
-      File.write(File.join(runtime_dir, "methods-1.jsonl"), JSON.generate({
+RSpec.describe "canonical runtime semantic evidence v1" do
+  def conformance_fixture(name)
+    path = File.join(
+      NilKill::ROOT,
+      "protocol/runtime-evidence/v1/conformance",
+      name
+    )
+    JSON.parse(File.read(path))
+  end
+
+  def anchor(symbol:, kind:, name:, line: 3, enclosing: "fact-mine workspace fixture . Worker#run().")
+    {
+      "symbol" => symbol,
+      "relative_path" => "lib/worker.rb",
+      "range" => {
+        "start_line" => line - 1,
+        "start_character" => 4,
+        "end_line" => line - 1,
+        "end_character" => 8,
+      },
+      "kind" => kind,
+      "enclosing_symbol" => enclosing,
+      "semantic_digest" => "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+      "display_name" => name,
+    }
+  end
+
+  def plan(*requests)
+    value = {
+      "protocol_version" => 1,
+      "producer" => { "name" => "fact-mine-rust", "version" => "1" },
+      "project_root" => "file:///fixture",
+      "documents" => [],
+      "requests" => requests,
+    }
+    message = Factmine::Runtime::V1::TracePlan.decode_json(
+      JSON.generate(value),
+      ignore_unknown_fields: false
+    )
+    message.plan_digest = Digest::SHA256.digest(
+      Factmine::Runtime::V1::TracePlan.encode(message)
+    )
+    JSON.parse(
+      Factmine::Runtime::V1::TracePlan.encode_json(
+        message,
+        preserve_proto_fieldnames: true,
+        emit_defaults: true
+      )
+    )
+  end
+
+  def event(source_role: nil, receiver: "String", truth: nil)
+    value = {
+      "schema_version" => 1,
+      "event" => "runtime_call",
+      "language" => "ruby",
+      "run_id" => "run-1",
+      "caller" => {
         "class" => "Worker",
         "method" => "run",
         "kind" => "instance",
-        "path" => source,
-        "line" => 1,
-        "calls" => 2,
-        "ok_calls" => 2,
-        "params_by_name" => { "rows" => ["Array"] },
-        "param_singleton_types" => { "rows" => ["RowsProvider"] },
-        "param_elem" => { "rows" => ["Row", "T.untyped"] },
-        "param_value_shapes" => {
-          "rows" => [{ "kind" => "record", "name" => "ObservedRows", "members" => {
-            "kind" => { "kind" => "unknown" }
-          } }]
-        },
-        # Raw `*_elem_shapes` are observations of values *inside* the
-        # container.  The emitted value domain must retain that nesting so the
-        # generic FactMine CFG/DFG overlay can project a block parameter back
-        # to the record value.  Emitting this record at the top level instead
-        # describes `rows` itself as a record, which is unsound.
-        "param_elem_shapes" => {
-          "rows" => [{ "kind" => "record", "name" => "ObservedRow", "members" => {
-            "kind" => { "kind" => "unknown" }
-          } }]
-        },
-        "param_kv" => {},
-        "returns" => ["Array"],
-        "return_singleton_types" => ["RowsResultProvider"],
-        "return_elem" => ["Row", "T.untyped"],
-        "return_kv" => [[], []],
-        "return_elem_shapes" => [{ "kind" => "record", "name" => "ReturnedRow", "members" => {
-          "kind" => { "kind" => "unknown" }
-        } }],
-      }) + "\n")
-      event = {
-        "schema_version" => 1,
-        "event" => "runtime_call",
-        "language" => "ruby",
-        "run_id" => "run-1",
-        "caller" => {
-          "class" => "Worker", "method" => "run", "kind" => "instance",
-          "path" => source, "line" => 1,
-        },
-        "callsite" => { "path" => source, "line" => 1 },
-        "callee" => {
-          "owner" => "Array", "name" => "each", "kind" => "instance",
-          "native" => true, "receiver_type" => "Array",
-          "package_manager" => "ruby", "package" => "ruby",
-          "version" => RUBY_VERSION,
-        },
-        "receiver_domain" => {
-          "types" => ["Array"],
-          "elements" => ["Row", "T.untyped"],
-          "shapes" => [{
-            "kind" => "array",
-            "elements" => [{ "kind" => "record", "name" => "ObservedCallRow" }]
-          }],
-        },
-        "result_domain" => {
-          "types" => ["Enumerator", "T.untyped"],
-          "shapes" => [{ "kind" => "record", "name" => "ObservedResult" }],
-        },
-        "result_truths" => [true, false],
-        "count" => 2,
-      }
-
-      result = described_class.emit(
-        root: root,
-        runtime_dir: runtime_dir,
-        events: [event]
-      )
-      evidence = NilKill::Runtime::JsonIO.parse(result.fetch("path"))
-
-      expect(evidence.fetch("schema")).to eq("fact-mine.runtime-value-evidence.v1")
-      expect(evidence.fetch("runs")).to eq(["run-1"])
-      parameter = evidence.fetch("observations").find do |row|
-        row["kind"] == "parameter" && row["slot"] == "rows"
-      end
-      expect(parameter.dig("scope", "function")).to eq("run")
-      expect(parameter.dig("domain", "types")).to eq(["Array"])
-      expect(parameter.dig("domain", "singletons")).to eq(["RowsProvider"])
-      expect(parameter.dig("domain", "elements")).to eq(["ObservedRow", "Row"])
-      expect(parameter.dig("domain", "shapes")).to include(
-        "kind" => "record", "name" => "ObservedRows",
-        "members" => { "kind" => { "kind" => "unknown" } }
-      )
-      expect(parameter.dig("domain", "shapes")).to include(
-        "kind" => "array",
-        "elements" => [{
-          "kind" => "record", "name" => "ObservedRow",
-          "members" => { "kind" => { "kind" => "unknown" } }
-        }]
-      )
-      returned = evidence.fetch("observations").find { |row| row["kind"] == "return" }
-      expect(returned.dig("domain", "types")).to eq(["Array"])
-      expect(returned.dig("domain", "singletons")).to eq(["RowsResultProvider"])
-      expect(returned.dig("domain", "elements")).to eq(["ReturnedRow", "Row"])
-      expect(returned.dig("domain", "shapes")).to include(
-        "kind" => "array",
-        "elements" => [{
-          "kind" => "record", "name" => "ReturnedRow",
-          "members" => { "kind" => { "kind" => "unknown" } }
-        }]
-      )
-      expect(evidence.dig("calls", 0, "targets", 0, "symbol"))
-        .to include("Array#each().")
-      expect(evidence.dig("calls", 0, "receiver_domain")).to include(
-        "types" => ["Array"],
-        "elements" => ["ObservedCallRow", "Row"]
-      )
-      expect(evidence.dig("calls", 0, "result_domain", "types"))
-        .to eq(["Enumerator", "ObservedResult"])
-      expect(evidence.dig("calls", 0, "result_truths")).to eq([false, true])
-
-      # The producer records only observed boundaries. It must not invent a
-      # local assignment, block binding, return edge, or inferred callsite.
-      expect(evidence.keys).to contain_exactly(
-        "schema", "authority", "environment", "runs", "observations", "calls"
-      )
-      expect(evidence.fetch("calls").length).to eq(1)
-    end
-  end
-
-  it "preserves receiver-type and Boolean-result correlation for runtime predicates" do
-    Dir.mktmpdir("nil-kill-runtime-capability", NilKill::ROOT) do |root|
-      runtime_dir = File.join(root, "runtime")
-      source = File.join(root, "worker.rb")
-      FileUtils.mkdir_p(runtime_dir)
-      File.write(source, "class Worker; def label(arm); arm.respond_to?(:detail); end; end\n")
-      event = lambda do |type, truth|
-        {
-          "schema_version" => 1,
-          "event" => "runtime_call",
-          "language" => "ruby",
-          "run_id" => "run-1",
-          "caller" => {
-            "class" => "Worker", "method" => "label", "kind" => "instance",
-            "path" => source, "line" => 1,
-          },
-          "callsite" => { "path" => source, "line" => 1 },
-          "callee" => {
-            "owner" => "Object", "name" => "respond_to?", "kind" => "instance",
-            "native" => true, "receiver_type" => type,
-            "package_manager" => "ruby", "package" => "ruby", "version" => RUBY_VERSION,
-          },
-          "receiver_domain" => { "types" => [type] },
-          "result_domain" => { "types" => [truth ? "TrueClass" : "FalseClass"] },
-          "result_truths" => [truth],
-          "count" => 1,
-        }
-      end
-
-      result = described_class.emit(
-        root: root,
-        runtime_dir: runtime_dir,
-        events: [event.call("DetailArm", true), event.call("FallbackArm", false)]
-      )
-      calls = NilKill::Runtime::JsonIO.parse(result.fetch("path")).fetch("calls")
-
-      expect(calls.map { |call| [call.dig("receiver_domain", "types"), call["result_truths"]] })
-        .to contain_exactly([["DetailArm"], [true]], [["FallbackArm"], [false]])
-    end
-  end
-end
-
-RSpec.describe NilKill::Runtime::EvidenceMerger do
-  it "unions exact singleton identities across independently replaceable shards" do
-    scope = {
-      "language" => "ruby", "path" => "worker.rb",
-      "owner" => "Worker", "function" => "run", "line" => 2,
+        "path" => File.join(NilKill::ROOT, "lib/worker.rb"),
+        "line" => 2,
+      },
+      "callsite" => {
+        "path" => File.join(NilKill::ROOT, "lib/worker.rb"),
+        "line" => 3,
+      },
+      "callee" => {
+        "owner" => receiver,
+        "name" => "size",
+        "kind" => "instance",
+        "path" => nil,
+        "line" => nil,
+        "native" => true,
+        "receiver_type" => receiver,
+        "package_manager" => "ruby",
+        "package" => "ruby",
+        "version" => RUBY_VERSION,
+        "source_role" => source_role,
+      }.compact,
+      "receiver_domain" => {
+        "types" => [receiver],
+        "singletons" => [],
+        "elements" => [],
+        "keys" => [],
+        "values" => [],
+        "shapes" => [],
+      },
+      "result_truths" => truth.nil? ? [] : [truth],
+      "count" => 2,
     }
-    bundle = lambda do |singleton|
+    value
+  end
+
+  def parse(path)
+    JSON.parse(NilKill::Runtime::JsonIO.read(path))
+  end
+
+  it "emits one explicit row per exact plan anchor and correlated execution buckets" do
+    request = {
+      "anchor" => anchor(symbol: "local call-1", kind: "CALL_SELECTOR", name: "size"),
+      "required" => %w[RECEIVER_VALUE CALL_TARGET],
+    }
+    Dir.mktmpdir do |directory|
+      result = NilKill::Runtime::ValueEvidenceEmitter.emit(
+        root: NilKill::ROOT,
+        runtime_dir: directory,
+        events: [event],
+        plan: plan(request)
+      )
+      evidence = parse(result.fetch("path"))
+      expect(File.binread(result.fetch("path"), 2).bytes).to eq([0x1f, 0x8b])
+      expect(evidence.fetch("protocol_version")).to eq(1)
+      expect(evidence.fetch("trace_plan_digest")).to eq(plan(request).fetch("plan_digest"))
+      row = evidence.fetch("anchors").fetch(0)
+      expect(row.fetch("anchor_symbol")).to eq("local call-1")
+      expect(row.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+      bucket = row.fetch("executions").fetch(0)
+      expect(bucket.fetch("count").to_i).to eq(2)
+      expect(bucket.dig("receiver", "alternatives", 0, "value", "type_symbol"))
+        .to end_with(" String#")
+      expect(bucket.dig("target", "symbol")).to end_with(" String#size().")
+      expect(bucket.dig("provenance", "run_id")).to eq("run-1")
+    end
+  end
+
+  it "fails closed instead of guessing between identical selectors on one line" do
+    requests = %w[call-1 call-2].map do |id|
       {
-        "schema" => NilKill::Runtime::ValueEvidenceEmitter::SCHEMA,
-        "authority" => NilKill::Runtime::ScipEmitter::AUTHORITY,
-        "environment" => {},
-        "runs" => [singleton],
-        "observations" => [{
-          "kind" => "parameter", "scope" => scope, "slot" => "provider",
-          "slot_kind" => "",
-          "domain" => {
-            "types" => ["Module"], "singletons" => [singleton],
-            "elements" => [], "keys" => [], "values" => [], "shapes" => [],
-          },
-          "count" => 1,
-        }],
-        "calls" => [{
-          "language" => "ruby",
-          "caller" => scope,
-          "callsite" => {
-            "path" => "worker.rb", "line" => 3, "selector" => "run"
-          },
-          "targets" => [],
-          "receiver_domain" => {
-            "types" => ["Module"], "singletons" => [singleton],
-            "elements" => [], "keys" => [], "values" => [], "shapes" => [],
-          },
-          "count" => 1,
-        }],
+        "anchor" => anchor(symbol: "local #{id}", kind: "CALL_SELECTOR", name: "size"),
+        "required" => %w[RECEIVER_VALUE CALL_TARGET],
       }
     end
-
-    Dir.mktmpdir("nil-kill-singleton-merge", NilKill::ROOT) do |dir|
-      paths = %w[FirstProvider SecondProvider].map do |singleton|
-        path = File.join(dir, "#{singleton}.json.gz")
-        NilKill::Runtime::JsonIO.write(path, JSON.generate(bundle.call(singleton)))
-        path
-      end
-      merged = described_class.merge(paths)
-
-      expect(merged.dig("observations", 0, "domain", "singletons"))
-        .to eq(%w[FirstProvider SecondProvider])
-      expect(merged.fetch("calls").map { |call| call.dig("receiver_domain", "singletons") })
-        .to contain_exactly(["FirstProvider"], ["SecondProvider"])
+    Dir.mktmpdir do |directory|
+      evidence = parse(
+        NilKill::Runtime::ValueEvidenceEmitter.emit(
+          root: NilKill::ROOT,
+          runtime_dir: directory,
+          events: [event],
+          plan: plan(*requests)
+        ).fetch("path")
+      )
+      expect(evidence.fetch("anchors").map { |row| row.dig("capture", "status") })
+        .to eq(%w[PARTIAL PARTIAL])
     end
+  end
+
+  it "retains a test-double target with an explicit non-production source role" do
+    request = {
+      "anchor" => anchor(symbol: "local call-1", kind: "CALL_SELECTOR", name: "size"),
+      "required" => %w[RECEIVER_VALUE CALL_TARGET],
+    }
+    Dir.mktmpdir do |directory|
+      evidence = parse(
+        NilKill::Runtime::ValueEvidenceEmitter.emit(
+          root: NilKill::ROOT,
+          runtime_dir: directory,
+          events: [event(source_role: "nonproduction")],
+          plan: plan(request)
+        ).fetch("path")
+      )
+      expect(evidence.dig("anchors", 0, "executions", 0, "target", "source_role"))
+        .to eq("NON_PRODUCTION")
+    end
+  end
+
+  it "merges replaceable shards by exact anchor and preserves per-run provenance" do
+    request = {
+      "anchor" => anchor(symbol: "local call-1", kind: "CALL_SELECTOR", name: "size"),
+      "required" => %w[RECEIVER_VALUE CALL_TARGET],
+    }
+    Dir.mktmpdir do |directory|
+      paths = %w[run-1 run-2].map do |run_id|
+        raw = event.merge("run_id" => run_id, "count" => 1)
+        NilKill::Runtime::ValueEvidenceEmitter.emit(
+          root: NilKill::ROOT,
+          runtime_dir: directory,
+          output: File.join(directory, "#{run_id}.json.gz"),
+          events: [raw],
+          run_ids: [run_id],
+          plan: plan(request)
+        ).fetch("path")
+      end
+      merged = NilKill::Runtime::EvidenceMerger.merge(paths)
+      expect(merged.fetch("runs").map { |run| run.fetch("id") }).to eq(%w[run-1 run-2])
+      row = merged.fetch("anchors").fetch(0)
+      expect(row.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+      expect(row.dig("capture", "observed_executions")).to eq(2)
+      expect(row.fetch("executions").map { |bucket| bucket.dig("provenance", "run_id") })
+        .to contain_exactly("run-1", "run-2")
+    end
+  end
+
+  it "produces evidence accepted by FactMine's canonical validator" do
+    binary = ENV.fetch(
+      "FACT_MINE_RUST_BINARY",
+      File.join(NilKill::ROOT, "gems/fact-mine/target/debug/fact-mine-rust")
+    )
+    skip "FactMine debug binary is unavailable" unless File.executable?(binary)
+
+    Dir.mktmpdir do |directory|
+      source = File.join(directory, "lib/worker.rb")
+      FileUtils.mkdir_p(File.dirname(source))
+      File.write(source, "class Worker\n  def run(value)\n    value.size\n  end\nend\n")
+      plan_path = File.join(directory, "plan.json")
+      expect(system(binary, "runtime-plan", "--root", directory, "--output", plan_path, source))
+        .to be(true)
+      generated_plan = JSON.parse(File.read(plan_path))
+      raw = event
+      raw["caller"]["path"] = source
+      raw["callsite"]["path"] = source
+      evidence_path = NilKill::Runtime::ValueEvidenceEmitter.emit(
+        root: directory,
+        runtime_dir: directory,
+        events: [raw],
+        plan: generated_plan
+      ).fetch("path")
+      expect(
+        system(
+          binary,
+          "runtime-evidence", "validate",
+          "--plan", plan_path,
+          "--evidence", evidence_path
+        )
+      ).to be(true)
+    end
+  end
+
+  it "uses the generated binding to enforce the shared conformance corpus" do
+    canonical_plan = NilKill::Runtime::EvidenceProtocol.validate_plan!(
+      conformance_fixture("trace-plan.valid.json")
+    )
+    expect(canonical_plan.fetch("requests").length).to eq(1)
+    canonical_evidence = NilKill::Runtime::EvidenceProtocol.validate_evidence!(
+      conformance_fixture("runtime-evidence.valid.json")
+    )
+    expect(canonical_evidence.fetch("anchors").length).to eq(1)
+    expect {
+      NilKill::Runtime::EvidenceProtocol.validate_evidence!(
+        conformance_fixture("runtime-evidence.invalid-unknown-field.json")
+      )
+    }.to raise_error(ArgumentError, /No such field: misspelled_anchors/)
+  end
+
+  it "keeps language semantics out of shared runtime protocol code" do
+    shared = %w[
+      evidence_protocol.rb
+      value_evidence_emitter.rb
+      evidence_merger.rb
+      scip_emitter.rb
+    ].map do |name|
+      File.read(File.join(NilKill::ROOT, "gems/nil-kill/lib/nil_kill/runtime", name))
+    end.join("\n")
+    expect(shared).not_to match(
+      /\b(?:ruby|python|javascript|typescript|php|tracepoint|minitest|rspec)\b/i
+    )
   end
 end

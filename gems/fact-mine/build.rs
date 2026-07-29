@@ -4,6 +4,27 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let protocol_dir = manifest_dir.join("../../protocol/runtime-evidence/v1");
+    let protocol = protocol_dir.join("runtime_evidence.proto");
+    println!("cargo:rerun-if-changed={}", protocol.display());
+    protobuf_codegen::Codegen::new()
+        .pure()
+        .includes([&protocol_dir])
+        .input(&protocol)
+        .cargo_out_dir("runtime_evidence_protocol")
+        .run_from_script();
+    let generated_protocol = PathBuf::from(env::var_os("OUT_DIR").unwrap())
+        .join("runtime_evidence_protocol/runtime_evidence.rs");
+    let embedded_protocol = PathBuf::from(env::var_os("OUT_DIR").unwrap())
+        .join("runtime_evidence_protocol_embedded.rs");
+    let generated_source = fs::read_to_string(&generated_protocol).unwrap();
+    let embedded_source = generated_source
+        .lines()
+        .filter(|line| !line.starts_with("#![") && !line.starts_with("//!"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(embedded_protocol, embedded_source).unwrap();
+
     let summary_dir = manifest_dir.join("config/complexity_summaries");
     println!("cargo:rerun-if-changed={}", summary_dir.display());
 

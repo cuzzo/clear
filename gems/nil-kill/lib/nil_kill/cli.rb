@@ -243,9 +243,19 @@ module NilKill
       default_inner_jobs = [[jobs.to_i, 1].max / shard_jobs, 1].max.to_s
       tracer = File.expand_path("runtime_trace.rb", __dir__)
       rubyopt = (ENV["RUBYOPT"].to_s.split + ["-r#{tracer}"]).join(" ")
+      source_roles_path = File.join(working_runtime_dir, "source-roles.json")
+      File.write(
+        source_roles_path,
+        JSON.generate(
+          "nonproduction" => (
+            workload.tests.keys + workload.support_files.keys
+          ).uniq.sort
+        )
+      )
       base_env = ENV.to_h.merge(
         "NIL_KILL_TRACE" => "1",
         "NIL_KILL_RUNTIME_SCIP" => "1",
+        "NIL_KILL_SOURCE_ROLES" => source_roles_path,
         "NIL_KILL_PROJECT_NAME" => ENV["NIL_KILL_PROJECT_NAME"] || File.basename(ROOT),
         "NIL_KILL_PROJECT_VERSION" => ENV["NIL_KILL_PROJECT_VERSION"] ||
           git_capture("rev-parse", "HEAD")&.strip || "workspace",
@@ -350,7 +360,8 @@ module NilKill
       emitted = with_canonical_snapshot_transaction(extra_paths: transaction_paths) do
         canonical_evidence = Runtime::EvidenceMerger.write(
           effective,
-          File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+          File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT),
+          plan: Runtime::EvidenceProtocol.plan
         )
         result = Runtime::ScipEmitter.emit(
           root: ROOT,

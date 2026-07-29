@@ -29,6 +29,14 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
         "package" => callee.fetch(:package, "ruby"),
         "version" => callee.fetch(:version, RUBY_VERSION),
       },
+      "receiver_domain" => {
+        "types" => [receiver_type],
+        "singletons" => [],
+        "elements" => [],
+        "keys" => [],
+        "values" => [],
+        "shapes" => [],
+      },
       "count" => 1,
     }
   end
@@ -109,8 +117,10 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
         .to include("nil-kill-runtime workspace demo workspace Row#kind().")
       expect(index.dig("_runtimeEvidence", "inferredCallSites")).to be >= 1
       expect(result.fetch("runtime_value_observations")).to be >= 1
-      expect(NilKill::Runtime::JsonIO.parse(result.fetch("runtime_evidence")).fetch("schema"))
-        .to eq("fact-mine.runtime-value-evidence.v1")
+      expect(
+        NilKill::Runtime::JsonIO.parse(result.fetch("runtime_evidence"))
+          .fetch("protocol_version")
+      ).to eq(1)
       expect(NilKill::Runtime::JsonIO.parse(result.fetch("attestation")).fetch("claims")).to include(
         "runtime_scip.authority" => "runtime-modeled-world",
         "runtime.version" => RUBY_VERSION
@@ -176,7 +186,7 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
     end
   end
 
-  it "does not publish test doubles or mocking-framework targets" do
+  it "retains test-double evidence but does not publish it as production SCIP" do
     Dir.mktmpdir("nil-kill-runtime-scip-test-double", NilKill::ROOT) do |root|
       runtime_dir = File.join(root, "runtime")
       source = File.join(root, "lib", "worker.rb")
@@ -227,7 +237,12 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
         "nil-kill-runtime rubygems test-double 1 Renderer#render().",
         "nil-kill-runtime rubygems minitest 1 Renderer#render()."
       )
-      expect(result.fetch("excluded_events")).to eq(2)
+      expect(result.fetch("excluded_events")).to eq(0)
+      evidence = NilKill::Runtime::JsonIO.parse(result.fetch("runtime_evidence"))
+      expect(
+        evidence.fetch("anchors").flat_map { |row| row.fetch("executions") }
+          .map { |bucket| bucket.dig("target", "source_role") }
+      ).to include("NON_PRODUCTION")
     end
   end
 
@@ -277,16 +292,9 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
         callee_path: dependency,
         callee_line: 1
       )
-      evidence = File.join(runtime_dir, "runtime-values.json.gz")
-      NilKill::Runtime::JsonIO.write(evidence, JSON.generate(
-        "schema" => NilKill::Runtime::ValueEvidenceEmitter::SCHEMA,
-        "authority" => NilKill::Runtime::ScipEmitter::AUTHORITY,
-        "observations" => [],
-        "calls" => []
-      ))
-      emitter = described_class.new(root: root, runtime_dir: runtime_dir)
+      emitter = described_class.new(root: root, runtime_dir: runtime_dir, files: [source])
 
-      expect(emitter.send(:runtime_sources, [workspace_event, dependency_event], evidence))
+      expect(emitter.send(:runtime_sources, [workspace_event, dependency_event], nil))
         .to match_array([source, workspace])
     end
   end
@@ -328,8 +336,8 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
       expect(rows).to include(
         # The selector for `+=`/`-=` is the dispatched `+`/`-` token, not
         # the assignment marker. SCIP must therefore annotate one byte.
-        a_hash_including("range" => [1, 8, 9], "symbol" => a_string_including("#`+`()")),
-        a_hash_including("range" => [2, 8, 9], "symbol" => a_string_including("#`-`()")),
+        a_hash_including("range" => [1, 8, 9], "symbol" => a_string_including("Integer#+()")),
+        a_hash_including("range" => [2, 8, 9], "symbol" => a_string_including("Integer#-()")),
         a_hash_including("range" => [3, 8, 9], "symbol" => a_string_including("#`[]`()")),
         a_hash_including("range" => [4, 8, 9], "symbol" => a_string_including("#`[]`()")),
         a_hash_including("range" => [4, 15, 16], "symbol" => a_string_including("#`[]`()")),

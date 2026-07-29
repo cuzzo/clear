@@ -62,6 +62,30 @@ module NilKill
       tmp&.unlink
     end
 
+    # Canonical runtime semantic-evidence demand contract. Unlike the
+    # NilKill instrumentation plan above, this is a public cross-tool wire
+    # format owned and validated by FactMine.
+    def self.build_runtime_evidence_plan(targets = nil, root: NilKill::ROOT)
+      files = Array(targets || NilKill.target_files)
+      return unless files.any?
+
+      tmp = Tempfile.new(["fact-mine-runtime-plan", ".json"])
+      tmp.close
+      binary = Espalier::StaticEvidence::FACT_MINE_RUST_BINARY
+      ok = system(
+        binary,
+        "runtime-plan",
+        "--root", File.expand_path(root),
+        "--output", tmp.path,
+        *files
+      )
+      raise "fact-mine-rust runtime-plan failed with status #{$?.exitstatus}" unless ok
+
+      JSON.parse(File.read(tmp.path))
+    ensure
+      tmp&.unlink
+    end
+
     def self.build(targets = nil, root: NilKill::ROOT, language: nil, vcs: nil, include_annotations: true)
       if defined?(NilKill::SourceIndex)
         ENV["FACT_MINE_NORETURN_METHODS"] = NilKill::SourceIndex.noreturn_methods.to_a.join(",")

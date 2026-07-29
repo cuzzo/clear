@@ -21,6 +21,8 @@
 !/ONE-PAGER.md
 !/package-lock.json
 !/package.json
+!/protocol/
+!/protocol/**
 !/README.md
 !/TODO.md
 !/clear

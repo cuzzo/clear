@@ -142,6 +142,10 @@ module NilKill
               "name" => selector,
               "kind" => callee["kind"].to_s,
               "receiver_type" => callee["receiver_type"].to_s,
+              "source_role" => target_source_role(callee, root),
+              "package_manager" => symbol_word(callee["package_manager"] || "runtime"),
+              "package_name" => symbol_word(callee["package"] || "ruby"),
+              "package_version" => symbol_word(callee["version"] || "workspace"),
             }
             callee_path = callee["path"].to_s
             if callee["native"] != true && !callee_path.empty?
@@ -177,6 +181,8 @@ module NilKill
               "receiver_domain" => normalized_domain_payload(event["receiver_domain"]),
               "result_domain" => normalized_domain_payload(event["result_domain"]),
               "result_truths" => Array(event["result_truths"]).uniq.sort_by { |truth| truth ? 1 : 0 },
+              "receiver_source_role" =>
+                callee["source_role"] == "nonproduction" ? "NON_PRODUCTION" : "UNKNOWN_SOURCE",
               "count" => event["count"].to_i,
             }.compact
           end
@@ -231,6 +237,38 @@ module NilKill
             "nil-kill-runtime #{manager} #{package} #{version} #{owner}#{separator}#{method}()."
           end
 
+          def runtime_type_symbol(type)
+            "nil-kill-runtime ruby ruby #{RUBY_VERSION} #{descriptor_owner(type)}#"
+          end
+
+          def runtime_singleton_symbol(type)
+            "nil-kill-runtime ruby ruby #{RUBY_VERSION} #{descriptor_owner(type)}."
+          end
+
+          def target_source_role(callee, root)
+            package = callee["package"].to_s
+            return "NON_PRODUCTION" if callee["source_role"] == "nonproduction"
+            return "NON_PRODUCTION" if %w[minitest mocha rspec-mocks rr].include?(package)
+            return "STANDARD_LIBRARY" if callee["native"] == true || package == "ruby"
+            return "NON_PRODUCTION" if nonproduction_path?(callee["path"], root)
+            return "PRODUCTION" if callee["package_manager"].to_s == "workspace"
+            return "DEPENDENCY" unless package.empty?
+
+            "UNKNOWN_SOURCE"
+          end
+
+          def nonproduction_path?(path, root)
+            return false if path.to_s.empty?
+
+            absolute = File.expand_path(path, root)
+            relative = Pathname.new(absolute).relative_path_from(Pathname.new(root))
+              .each_filename.to_a
+            %w[test tests spec specs].any? { |component| relative.include?(component) } ||
+              relative.last.to_s.match?(/(?:_test|_spec)\.rb\z/)
+          rescue ArgumentError
+            false
+          end
+
           def symbol_word(value)
             text = value.to_s
             return "." if text.empty?
@@ -247,6 +285,9 @@ module NilKill
           def descriptor_name(value)
             text = value.to_s
             return text if text.match?(/\A[A-Za-z_][A-Za-z0-9_!?=]*\z/)
+            return text if %w[
+              + - * / % ** == === != < <= > >= <=> << >> & | ^ ~ =~ !~ ! +@ -@
+            ].include?(text)
 
             "`#{text.gsub("`", "``")}`"
           end

@@ -3,124 +3,326 @@
 
 module NilKill
   module Runtime
-    # Serializes tracer observations into FactMine's language-neutral runtime
-    # evidence contract. It intentionally performs no source parsing or flow
-    # inference.
+    # Projects raw provider observations onto the exact anchors requested by
+    # FactMine. It performs no source parsing, dispatch inference, or flow
+    # analysis. Every requested anchor receives an explicit capture status.
     class ValueEvidenceEmitter
-      SCHEMA = "fact-mine.runtime-value-evidence.v1"
-      DEFAULT_OUTPUT = "runtime-values.json.gz"
+      DEFAULT_OUTPUT = "runtime-evidence.v1.json.gz"
 
-      def self.emit(root:, runtime_dir:, events:, output: nil, languages: nil, run_ids: nil)
-        new(root: root, runtime_dir: runtime_dir, output: output)
+      def self.emit(root:, runtime_dir:, events:, output: nil, languages: nil, run_ids: nil, plan: nil)
+        new(root: root, runtime_dir: runtime_dir, output: output, plan: plan)
           .emit(events, languages: languages, run_ids: run_ids)
       end
 
-      def initialize(root:, runtime_dir:, output: nil)
+      def initialize(root:, runtime_dir:, output: nil, plan: nil)
         @root = File.expand_path(root)
         @runtime_dir = File.expand_path(runtime_dir)
         @output = File.expand_path(output || File.join(@runtime_dir, DEFAULT_OUTPUT))
+        @plan = EvidenceProtocol.validate_plan!(plan || EvidenceProtocol.plan)
+        @executed_callsites = load_rows("executed-callsites-*.jsonl")
+        @function_entries = load_rows("function-entries-*.jsonl")
       end
 
       def emit(events, languages: nil, run_ids: nil)
-        semantic_events = events.select do |event|
-          Languages.provider_for(event.fetch("language"))
-            .runtime_scip_event_eligible?(event: event, root: @root)
-        end
-        languages = (
-          semantic_events.map { |event| event.fetch("language") } + Array(languages)
-        ).uniq.sort
+        languages = (events.map { |event| event.fetch("language") } + Array(languages))
+          .compact.uniq.sort
         observations = languages.flat_map do |language|
           Languages.provider_for(language).runtime_value_observations(
             runtime_dir: @runtime_dir,
             root: @root
           )
         end
-        calls = observed_calls(semantic_events)
-        environment = languages.each_with_object({}) do |language, claims|
-          Languages.provider_for(language).runtime_scip_environment(root: @root).each do |key, value|
-            key = key.to_s
-            value = value.to_s
-            if claims.key?(key) && claims.fetch(key) != value
-              raise ArgumentError,
-                "runtime evidence environment claim #{key} conflicts across traced languages"
-            end
-            claims[key] = value
-          end
+        decoded_calls = events.map do |event|
+          [
+            event,
+            Languages.provider_for(event.fetch("language"))
+              .runtime_scip_call_evidence(event: event, root: @root),
+          ]
+        end
+        ids = (
+          Array(run_ids).map(&:to_s) +
+          events.map { |event| event["run_id"].to_s }
+        ).reject(&:empty?).uniq.sort
+        ids = ["unidentified-run"] if ids.empty?
+        anchors = @plan.fetch("requests").map do |request|
+          anchor_evidence(request, observations, decoded_calls, ids)
         end
         evidence = {
-          "schema" => SCHEMA,
-          "authority" => ScipEmitter::AUTHORITY,
-          "environment" => environment.sort.to_h,
-          "runs" => (
-            semantic_events.map { |event| event["run_id"].to_s } + Array(run_ids).map(&:to_s)
-          ).reject(&:empty?).uniq.sort,
-          "observations" => observations,
-          "calls" => calls,
+          "protocol_version" => EvidenceProtocol::VERSION,
+          "producer" => {
+            "name" => EvidenceProtocol::PRODUCER,
+            "version" => EvidenceProtocol::PRODUCER_VERSION,
+            "arguments" => ["collect", "runtime-evidence"],
+          },
+          "authority" => EvidenceProtocol::AUTHORITY,
+          "trace_plan_digest" => @plan.fetch("plan_digest"),
+          "environment" => environment(languages),
+          "runs" => ids.map do |id|
+            { "id" => id, "status" => "SUCCEEDED" }
+          end,
+          "anchors" => anchors,
         }
         FileUtils.mkdir_p(File.dirname(@output))
-        write_atomically(@output, JSON.pretty_generate(evidence) + "\n")
+        JsonIO.write(@output, EvidenceProtocol.encode_evidence(evidence))
         {
           "path" => @output,
-          "observations" => observations.length,
-          "calls" => calls.length,
+          "anchors" => anchors.length,
+          "complete_anchors" => anchors.count {
+            |row| row.dig("capture", "status") == "COMPLETE_FOR_RUNS"
+          },
+          "calls" => anchors.count { |row| row["executions"].any? { |bucket| bucket["target"] } },
+          "observations" => anchors.count { |row| row["executions"].any? { |bucket| bucket["value"] } },
         }
       end
 
       private
 
-      def observed_calls(events)
-        decoded = events.map do |event|
-          Languages.provider_for(event.fetch("language"))
-            .runtime_scip_call_evidence(event: event, root: @root)
-        end
-        decoded.group_by do |row|
-          caller = row.fetch("caller")
-          callsite = row.fetch("callsite")
-          [
-            row.fetch("language"),
-            caller["owner"], caller["name"], caller["kind"],
-            caller["path"], caller["line"],
-            callsite["path"], callsite["line"], callsite["range"],
-            callsite["selector"],
-            JSON.generate(row["receiver_domain"] || {}),
-            Array(row["result_truths"]).sort_by { |truth| truth ? 1 : 0 },
-          ]
-        end.map do |_key, rows|
-          first = rows.first
-          caller = first.fetch("caller")
-          callsite = first.fetch("callsite")
-          targets = rows.map { |row| row.fetch("target") }.uniq.sort_by do |target|
-            target.fetch("symbol")
+      def anchor_evidence(request, observations, decoded_calls, run_ids)
+        anchor = request.fetch("anchor")
+        matches, ambiguity =
+          case anchor.fetch("kind")
+          when "FUNCTION_ENTRY"
+            matching_observations(anchor, observations, "parameter")
+          when "FUNCTION_RETURN"
+            matching_observations(anchor, observations, "return")
+          when "STATE_READ", "STATE_WRITE"
+            matching_observations(anchor, observations, "state")
+          else
+            matching_calls(anchor, decoded_calls)
           end
+        executions = matches.filter_map do |match|
+          call_anchor?(anchor) ? call_bucket(match, run_ids.first) : value_bucket(match, run_ids.first)
+        end
+        executions = merge_identical_buckets(executions)
+        status, reason =
+          if ambiguity
+            ["PARTIAL", "provider cannot uniquely correlate this source event to one exact anchor"]
+          elsif executions.empty?
+            if anchor_executed?(anchor)
+              ["NOT_INSTRUMENTED", "anchor executed but the provider did not capture its requested value"]
+            else
+              ["NOT_EXECUTED", "no matching execution in the modeled runs"]
+            end
+          elsif !executions.all? { |bucket| bucket_satisfies?(request, bucket) }
+            ["PARTIAL", "provider did not capture every value requested at this anchor"]
+          else
+            ["COMPLETE_FOR_RUNS", nil]
+          end
+        observed = executions.sum { |bucket| bucket.fetch("count").to_i }
+        {
+          "anchor_symbol" => anchor.fetch("symbol"),
+          "anchor_semantic_digest" => anchor.fetch("semantic_digest"),
+          "capture" => {
+            "status" => status,
+            "run_ids" => run_ids,
+            "observed_executions" => observed,
+            "dropped_executions" => 0,
+            "reason" => reason,
+          }.compact,
+          "executions" => executions,
+        }
+      end
+
+      def matching_observations(anchor, observations, kind)
+        candidates = observations.select do |row|
+          row["kind"] == kind &&
+            canonical_path(row.dig("scope", "path")) == anchor.fetch("relative_path") &&
+            source_line_matches?(anchor, row.dig("scope", "line"))
+        end
+        candidates.select! { |row| row["slot"].to_s == anchor["display_name"].to_s } if
+          %w[parameter state].include?(kind)
+        # A path/range/slot identifies one normalized storage boundary. More
+        # than one provider row at that boundary represents additive runs, not
+        # ambiguous source identity.
+        [candidates, false]
+      end
+
+      def matching_calls(anchor, decoded_calls)
+        candidates = decoded_calls.select do |_event, row|
+          callsite = row.fetch("callsite")
+          canonical_path(callsite.fetch("path")) == anchor.fetch("relative_path") &&
+            source_line_matches?(anchor, callsite.fetch("line")) &&
+            callsite.fetch("selector").to_s == anchor.fetch("display_name").to_s
+        end
+        siblings = @plan.fetch("requests").count do |request|
+          other = request.fetch("anchor")
+          call_anchor?(other) &&
+            other.fetch("relative_path") == anchor.fetch("relative_path") &&
+            other.fetch("display_name") == anchor.fetch("display_name") &&
+            ranges_overlap_line?(other.fetch("range"), anchor.fetch("range").fetch("start_line"))
+        end
+        # A provider may expose only line + selector rather than an exact
+        # column. Never guess between two identical selectors on one line.
+        [candidates, candidates.any? && siblings > 1]
+      end
+
+      def value_bucket(row, run_id)
+        provider = Languages.provider_for(row.dig("scope", "language"))
+        values = EvidenceProtocol.value_set(
+          row.fetch("domain"),
+          count: row.fetch("count", 1),
+          provider: provider,
+          source_role: "UNKNOWN_SOURCE"
+        )
+        return unless values
+
+        {
+          "count" => [row.fetch("count", 1).to_i, 1].max,
+          "value" => values,
+          "provenance" => provenance(run_id, provider),
+        }
+      end
+
+      def call_bucket(pair, default_run_id)
+        event, row = pair
+        provider = Languages.provider_for(event.fetch("language"))
+        receiver = EvidenceProtocol.value_set(
+          row["receiver_domain"],
+          count: row.fetch("count", 1),
+          provider: provider,
+          source_role: row.fetch("receiver_source_role", "UNKNOWN_SOURCE")
+        )
+        return unless receiver
+
+        bucket = {
+          "count" => [row.fetch("count", 1).to_i, 1].max,
+          "receiver" => receiver,
+          "target" => target_payload(row),
+          "provenance" => provenance(
+            event["run_id"].to_s.empty? ? default_run_id : event["run_id"],
+            provider
+          ),
+        }
+        result = EvidenceProtocol.value_set(
+          row["result_domain"],
+          count: row.fetch("count", 1),
+          provider: provider,
+          source_role: "UNKNOWN_SOURCE"
+        )
+        bucket["result"] = result if result
+        truths = Array(row["result_truths"]).uniq
+        bucket["boolean_result"] = truths.first if truths.one?
+        bucket
+      end
+
+      def target_payload(row)
+        target = EvidenceProtocol.target(row)
+        definition = row.dig("target", "definition")
+        return target unless definition
+
+        candidates = @plan.fetch("requests").filter_map do |request|
+          anchor = request.fetch("anchor")
+          next unless %w[FUNCTION_ENTRY FUNCTION_RETURN].include?(anchor.fetch("kind"))
+          next unless canonical_path(definition.fetch("path")) == anchor.fetch("relative_path")
+          next unless source_line_matches?(anchor, definition.fetch("line"))
+
+          anchor
+        end.uniq { |anchor| anchor.fetch("enclosing_symbol") }
+        return target unless candidates.one?
+
+        anchor = candidates.first
+        target.merge(
+          "symbol" => anchor.fetch("enclosing_symbol"),
+          "definition" => {
+            "symbol" => anchor.fetch("enclosing_symbol"),
+            "anchor_symbol" => anchor.fetch("symbol"),
+            "relative_path" => anchor.fetch("relative_path"),
+            "range" => anchor.fetch("range"),
+          }
+        )
+      end
+
+      def provenance(run_id, provider)
+        provider.runtime_evidence_provenance.merge(
+          "run_id" => run_id.to_s.empty? ? "unidentified-run" : run_id.to_s
+        )
+      end
+
+      def merge_identical_buckets(buckets)
+        buckets.group_by { |bucket| JSON.generate(bucket.reject { |key, _| key == "count" }) }
+          .values.map do |rows|
+            rows.first.merge("count" => rows.sum { |row| row.fetch("count").to_i })
+          end
+      end
+
+      def bucket_satisfies?(request, bucket)
+        request.fetch("required").all? do |kind|
           {
-            "language" => first.fetch("language"),
-            "caller" => caller,
-            "callsite" => callsite,
-            "targets" => targets,
-            "receiver_domain" => merged_call_domain(rows, "receiver_domain"),
-            "result_domain" => merged_call_domain(rows, "result_domain"),
-            "result_truths" => rows.flat_map { |row| Array(row["result_truths"]) }
-              .uniq.sort_by { |truth| truth ? 1 : 0 },
-            "count" => rows.sum { |event| event["count"].to_i },
-          }.compact
-        end.sort_by do |call|
-          site = call.fetch("callsite")
-          caller = call.fetch("caller")
-          [call["language"], site["path"], site["line"], caller["name"], site["selector"]]
+            "PARAMETER_VALUE" => "value",
+            "RETURN_VALUE" => "value",
+            "STATE_VALUE" => "value",
+            "RECEIVER_VALUE" => "receiver",
+            "CALL_TARGET" => "target",
+            "RESULT_VALUE" => "result",
+            "COLLECTION_VALUE" => "receiver",
+            "BOOLEAN_RESULT" => "boolean_result",
+          }.fetch(kind).then { |field| bucket.key?(field) }
         end
       end
 
-      def merged_call_domain(rows, field)
-        domains = rows.filter_map { |row| row[field] }
-        return if domains.empty?
-
-        %w[types singletons elements keys values shapes].to_h do |part|
-          [part, domains.flat_map { |domain| Array(domain[part]) }.uniq.sort_by(&:to_s)]
+      def anchor_executed?(anchor)
+        if call_anchor?(anchor)
+          @executed_callsites.any? do |row|
+            canonical_path(row.fetch("path")) == anchor.fetch("relative_path") &&
+              source_line_matches?(anchor, row.fetch("line")) &&
+              row.fetch("selector", "").to_s == anchor.fetch("display_name").to_s
+          end
+        else
+          @function_entries.any? do |row|
+            canonical_path(row.fetch("path")) == anchor.fetch("relative_path") &&
+              source_line_matches?(anchor, row.fetch("line"))
+          end
         end
       end
 
-      def write_atomically(path, contents)
-        JsonIO.write(path, contents)
+      def load_rows(glob)
+        JsonIO.matching(@runtime_dir, glob).flat_map do |path|
+          rows = []
+          JsonIO.foreach(path) do |line|
+            rows << JSON.parse(line)
+          rescue JSON::ParserError
+            next
+          end
+          rows
+        end
+      end
+
+      def environment(languages)
+        claims = {}
+        languages.each do |language|
+          Languages.provider_for(language).runtime_scip_environment(root: @root).each do |key, value|
+            key = key.to_s
+            value = value.to_s
+            if claims.key?(key) && claims.fetch(key) != value
+              raise ArgumentError, "runtime environment claim #{key} conflicts across providers"
+            end
+            claims[key] = value
+          end
+        end
+        claims.sort.map { |key, value| { "key" => key, "value" => value } }
+      end
+
+      def call_anchor?(anchor)
+        !%w[FUNCTION_ENTRY FUNCTION_RETURN STATE_READ STATE_WRITE].include?(anchor.fetch("kind"))
+      end
+
+      def source_line_matches?(anchor, one_based_line)
+        line = one_based_line.to_i - 1
+        range = anchor.fetch("range")
+        range.fetch("start_line") <= line && line <= range.fetch("end_line")
+      end
+
+      def ranges_overlap_line?(range, line)
+        range.fetch("start_line") <= line && line <= range.fetch("end_line")
+      end
+
+      def canonical_path(path)
+        return "" if path.to_s.empty?
+
+        absolute = File.expand_path(path, @root)
+        Pathname.new(absolute).relative_path_from(Pathname.new(@root)).to_s.tr("\\", "/")
+      rescue ArgumentError
+        path.to_s.tr("\\", "/")
       end
     end
   end

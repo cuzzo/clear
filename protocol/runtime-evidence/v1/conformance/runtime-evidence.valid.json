@@ -1,0 +1,35 @@
+{
+  "protocol_version": 1,
+  "producer": {
+    "name": "nil-kill",
+    "version": "1",
+    "arguments": []
+  },
+  "authority": "MODELED_RUNS",
+  "trace_plan_digest": "Wny749Q1hIW2HIvenW+V1fysvBWFtleEzoMyYnYJIjc=",
+  "environment": [],
+  "runs": [
+    {
+      "id": "run-1",
+      "status": "SUCCEEDED",
+      "command_digest": "",
+      "test_ids": []
+    }
+  ],
+  "anchors": [
+    {
+      "anchor_symbol": "local call-1",
+      "anchor_semantic_digest": "fts2DwasrvLMgNuhbPVj8ZnTR9tEQ9oE2gyBc+P55O0=",
+      "capture": {
+        "status": "NOT_EXECUTED",
+        "run_ids": [
+          "run-1"
+        ],
+        "observed_executions": "0",
+        "dropped_executions": "0",
+        "reason": "fixture did not execute anchor"
+      },
+      "executions": []
+    }
+  ]
+}

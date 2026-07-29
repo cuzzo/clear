@@ -37,6 +37,14 @@ pub(crate) struct NormalizedCallProjection {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct NormalizedRuntimeSemanticTarget {
+    pub(crate) symbol: String,
+    pub(crate) owner: String,
+    pub(crate) kind: String,
+    pub(crate) receiver_type: String,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct NormalizedOwner {
     pub(crate) name: String,
     pub(crate) kind: String,
@@ -1847,6 +1855,40 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         _values: &[String],
     ) -> Option<String> {
         (owners.len() == 1).then(|| owners[0].clone())
+    }
+
+    /// Decode a canonical runtime type SCIP symbol into the adapter's native
+    /// normalized type identity. The shared overlay never parses descriptor
+    /// grammars or embeds language type names.
+    fn runtime_value_type_from_symbol(&self, _symbol: &str) -> Option<String> {
+        None
+    }
+
+    /// Decode a canonical singleton/module/class value SCIP symbol into the
+    /// adapter's native normalized singleton identity.
+    fn runtime_value_singleton_from_symbol(&self, _symbol: &str) -> Option<String> {
+        None
+    }
+
+    /// Whether a runtime receiver type can dispatch an implementation owned
+    /// by a normalized library interface or mixin. Concrete language adapters
+    /// own these relationships; the shared overlay never embeds native type
+    /// names.
+    fn runtime_dispatch_owner_matches(&self, _owner: &str, _receiver_type: &str) -> bool {
+        false
+    }
+
+    /// Convert a runtime-proven receiver identity into the language's
+    /// canonical stdlib symbol form. Adapters must return a target only when
+    /// that exact symbol has a reviewed cost or parametric contract.
+    fn runtime_value_semantic_target(
+        &self,
+        _receiver_type: &str,
+        _receiver_singleton: Option<&str>,
+        _message: &str,
+        _environment: &BTreeMap<String, String>,
+    ) -> Option<NormalizedRuntimeSemanticTarget> {
+        None
     }
 
     /// Runtime nominal identities for normalized container/type shapes. These

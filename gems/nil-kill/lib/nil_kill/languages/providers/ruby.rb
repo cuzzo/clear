@@ -85,30 +85,27 @@ module NilKill
           claims
         end
 
-        def runtime_scip_event_eligible?(event:, root:)
-          package = event.dig("callee", "package").to_s
-          return false if %w[minitest mocha rspec-mocks rr].include?(package)
-
-          callee_path = event.dig("callee", "path").to_s
-          return true if callee_path.empty?
-
-          absolute = File.expand_path(callee_path, root)
-          root = File.expand_path(root)
-          return true unless absolute.start_with?("#{root}#{File::SEPARATOR}")
-
-          relative = absolute.delete_prefix("#{root}#{File::SEPARATOR}")
-          components = Pathname.new(relative).each_filename.to_a
-          basename = components.last.to_s
-          !components.any? { |component| %w[test tests spec specs].include?(component) } &&
-            !basename.match?(/(?:_test|_spec)\.rb\z/)
-        end
-
         def runtime_value_observations(runtime_dir:, root:)
           RuntimeValueEvidence.observations(runtime_dir: runtime_dir, root: root)
         end
 
         def runtime_scip_call_evidence(event:, root:)
           RuntimeValueEvidence.call(event: event, root: root)
+        end
+
+        def runtime_evidence_type_symbol(type)
+          RuntimeValueEvidence.runtime_type_symbol(type)
+        end
+
+        def runtime_evidence_singleton_symbol(type)
+          RuntimeValueEvidence.runtime_singleton_symbol(type)
+        end
+
+        def runtime_evidence_provenance
+          {
+            "provider" => "ruby-tracepoint",
+            "provider_version" => "1",
+          }
         end
 
         # Ripper's semantic tree excludes ordinary comments and formatting,

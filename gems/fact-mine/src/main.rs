@@ -270,6 +270,41 @@ fn run() -> Result<()> {
                 println!("{}", rendered);
             }
         }
+        Command::RuntimePlan {
+            files,
+            output,
+            root,
+            language_override,
+        } => {
+            let language_override = language_override
+                .as_deref()
+                .map(Language::parse)
+                .transpose()?;
+            let root = root
+                .unwrap_or(std::env::current_dir().context("failed to determine project root")?);
+            let profile = build_profile(&files, language_override, Profile::TracePlan)?;
+            let plan = fact_mine_rust::runtime_protocol::build_trace_plan(&profile, &files, &root)?;
+            let json = fact_mine_rust::runtime_protocol::to_json(&plan)?;
+            let rendered =
+                serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&json)?)?
+                    + "\n";
+            write_text_artifact(&rendered, output.as_ref())?;
+            eprintln!(
+                "Runtime plan: {} documents, {} exact evidence anchors",
+                plan.documents.len(),
+                plan.requests.len()
+            );
+        }
+        Command::RuntimeEvidenceValidate { plan, evidence } => {
+            let plan = fact_mine_rust::runtime_protocol::read_trace_plan(&plan)?;
+            let evidence = fact_mine_rust::runtime_protocol::read_runtime_evidence(&evidence)?;
+            fact_mine_rust::runtime_protocol::validate_runtime_evidence(&plan, &evidence)?;
+            eprintln!(
+                "Runtime evidence valid: {} runs, {} exact anchors",
+                evidence.runs.len(),
+                evidence.anchors.len()
+            );
+        }
         Command::LuaScip {
             files,
             output,
@@ -295,19 +330,35 @@ fn run() -> Result<()> {
         }
         Command::RuntimeScip {
             files,
+            plan,
             evidence,
             output,
+            root,
             language_override,
         } => {
             let language_override = language_override
                 .as_deref()
                 .map(Language::parse)
                 .transpose()?;
+            let root = root
+                .unwrap_or(std::env::current_dir().context("failed to determine project root")?);
             let mut profile = build_profile(&files, language_override, Profile::Espalier)?;
-            let evidence =
-                fact_mine_rust::runtime_evidence::RuntimeValueEvidence::from_path(&evidence)?;
-            let overlay =
-                fact_mine_rust::runtime_evidence::apply_to_profile(&mut profile, &evidence)?;
+            let plan_profile = build_profile(&files, language_override, Profile::TracePlan)?;
+            let rebuilt = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+                &plan_profile,
+                &files,
+                &root,
+            )?;
+            let supplied_plan = fact_mine_rust::runtime_protocol::read_trace_plan(&plan)?;
+            if supplied_plan.plan_digest != rebuilt.plan.plan_digest {
+                bail!("supplied runtime trace plan does not describe the current source snapshot");
+            }
+            let evidence = fact_mine_rust::runtime_protocol::read_runtime_evidence(&evidence)?;
+            let overlay = fact_mine_rust::runtime_evidence::apply_protocol_to_profile(
+                &mut profile,
+                &rebuilt,
+                &evidence,
+            )?;
             let rendered = serde_json::to_string_pretty(&overlay.index)? + "\n";
             if let Some(output) = output {
                 fs::write(&output, rendered)
@@ -370,6 +421,26 @@ fn write_profile_artifact(
     write_profile_json(output, portable, &mut writer)?;
     writer.write_all(b"\n")?;
     writer.flush()?;
+    Ok(())
+}
+
+fn write_text_artifact(contents: &str, destination: Option<&PathBuf>) -> Result<()> {
+    if let Some(path) = destination {
+        let file = fs::File::create(path)
+            .with_context(|| format!("failed to create {}", path.display()))?;
+        let buffered = BufWriter::new(file);
+        if path.extension().and_then(|extension| extension.to_str()) == Some("gz") {
+            let mut encoder = GzEncoder::new(buffered, Compression::fast());
+            encoder.write_all(contents.as_bytes())?;
+            encoder.finish()?.flush()?;
+        } else {
+            let mut writer = buffered;
+            writer.write_all(contents.as_bytes())?;
+            writer.flush()?;
+        }
+    } else {
+        print!("{contents}");
+    }
     Ok(())
 }
 
@@ -580,9 +651,21 @@ enum Command {
     },
     RuntimeScip {
         files: Vec<PathBuf>,
+        plan: PathBuf,
         evidence: PathBuf,
         output: Option<PathBuf>,
+        root: Option<PathBuf>,
         language_override: Option<String>,
+    },
+    RuntimePlan {
+        files: Vec<PathBuf>,
+        output: Option<PathBuf>,
+        root: Option<PathBuf>,
+        language_override: Option<String>,
+    },
+    RuntimeEvidenceValidate {
+        plan: PathBuf,
+        evidence: PathBuf,
     },
 }
 
@@ -591,9 +674,93 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
     let command = iter.next().unwrap_or_default();
 
     match command.as_str() {
+        "runtime-plan" => {
+            let mut output = None;
+            let mut root = None;
+            let mut language_override = None;
+            let mut files = Vec::new();
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--output" => {
+                        output = Some(PathBuf::from(
+                            iter.next().with_context(|| "--output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--output=") => {
+                        output = Some(PathBuf::from(other.strip_prefix("--output=").unwrap()));
+                    }
+                    "--root" => {
+                        root = Some(PathBuf::from(
+                            iter.next().with_context(|| "--root requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--root=") => {
+                        root = Some(PathBuf::from(other.strip_prefix("--root=").unwrap()));
+                    }
+                    "--language" => {
+                        language_override =
+                            Some(iter.next().with_context(|| "--language requires a value")?);
+                    }
+                    other if other.starts_with("--language=") => {
+                        language_override =
+                            Some(other.strip_prefix("--language=").unwrap().to_string());
+                    }
+                    other if other.starts_with("--") => bail!("unsupported option: {other}"),
+                    path => files.push(PathBuf::from(path)),
+                }
+            }
+            if files.is_empty() {
+                bail!("runtime-plan requires at least one source file");
+            }
+            Ok(Command::RuntimePlan {
+                files,
+                output,
+                root,
+                language_override,
+            })
+        }
+        "runtime-evidence" => {
+            let operation = iter
+                .next()
+                .with_context(|| "runtime-evidence requires an operation; use validate")?;
+            if operation != "validate" {
+                bail!("unsupported runtime-evidence operation {operation:?}; use validate");
+            }
+            let mut plan = None;
+            let mut evidence = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--plan" => {
+                        plan = Some(PathBuf::from(
+                            iter.next().with_context(|| "--plan requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--plan=") => {
+                        plan = Some(PathBuf::from(other.strip_prefix("--plan=").unwrap()));
+                    }
+                    "--evidence" => {
+                        evidence = Some(PathBuf::from(
+                            iter.next().with_context(|| "--evidence requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--evidence=") => {
+                        evidence =
+                            Some(PathBuf::from(other.strip_prefix("--evidence=").unwrap()));
+                    }
+                    other => bail!("unsupported runtime-evidence validate argument: {other}"),
+                }
+            }
+            Ok(Command::RuntimeEvidenceValidate {
+                plan: plan.with_context(|| "runtime-evidence validate requires --plan FILE")?,
+                evidence: evidence
+                    .with_context(|| "runtime-evidence validate requires --evidence FILE")?,
+            })
+        }
         "runtime-scip" => {
             let mut output = None;
+            let mut plan = None;
             let mut evidence = None;
+            let mut root = None;
             let mut language_override = None;
             let mut files = Vec::new();
             while let Some(arg) = iter.next() {
@@ -617,6 +784,24 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                             other.strip_prefix("--runtime-evidence=").unwrap(),
                         ));
                     }
+                    "--trace-plan" => {
+                        plan = Some(PathBuf::from(
+                            iter.next().with_context(|| "--trace-plan requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--trace-plan=") => {
+                        plan = Some(PathBuf::from(
+                            other.strip_prefix("--trace-plan=").unwrap(),
+                        ));
+                    }
+                    "--root" => {
+                        root = Some(PathBuf::from(
+                            iter.next().with_context(|| "--root requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--root=") => {
+                        root = Some(PathBuf::from(other.strip_prefix("--root=").unwrap()));
+                    }
                     "--language" => {
                         language_override =
                             Some(iter.next().with_context(|| "--language requires a value")?);
@@ -634,10 +819,13 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             }
             let evidence =
                 evidence.with_context(|| "runtime-scip requires --runtime-evidence FILE")?;
+            let plan = plan.with_context(|| "runtime-scip requires --trace-plan FILE")?;
             Ok(Command::RuntimeScip {
                 files,
+                plan,
                 evidence,
                 output,
+                root,
                 language_override,
             })
         }
@@ -908,7 +1096,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             })
         }
         other => bail!(
-            "usage: fact-mine-rust {{syntax-facts|profile|call-resolution|runtime-scip|scip-lua}} FILE... (got: {other})"
+            "usage: fact-mine-rust {{syntax-facts|profile|call-resolution|runtime-plan|runtime-evidence|runtime-scip|scip-lua}} FILE... (got: {other})"
         ),
     }
 }
@@ -1018,7 +1206,8 @@ mod tests {
     fn runtime_scip_requires_evidence_and_accepts_language_neutral_sources() {
         let parsed = parse_args(vec![
             "runtime-scip".to_string(),
-            "--runtime-evidence=runtime-values.json".to_string(),
+            "--trace-plan=runtime-plan.json".to_string(),
+            "--runtime-evidence=runtime-evidence.v1.json.gz".to_string(),
             "--output".to_string(),
             "runtime.scip.json".to_string(),
             "one.rb".to_string(),
@@ -1028,16 +1217,20 @@ mod tests {
         match parsed {
             Command::RuntimeScip {
                 files,
+                plan,
                 evidence,
                 output,
+                root,
                 language_override,
             } => {
                 assert_eq!(
                     files,
                     vec![PathBuf::from("one.rb"), PathBuf::from("two.py")]
                 );
-                assert_eq!(evidence, PathBuf::from("runtime-values.json"));
+                assert_eq!(plan, PathBuf::from("runtime-plan.json"));
+                assert_eq!(evidence, PathBuf::from("runtime-evidence.v1.json.gz"));
                 assert_eq!(output, Some(PathBuf::from("runtime.scip.json")));
+                assert_eq!(root, None);
                 assert_eq!(language_override, None);
             }
             _ => panic!("expected runtime SCIP"),

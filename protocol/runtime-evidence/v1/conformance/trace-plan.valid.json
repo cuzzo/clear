@@ -1,0 +1,40 @@
+{
+  "protocol_version": 1,
+  "producer": {
+    "name": "fact-mine-rust",
+    "version": "1",
+    "arguments": []
+  },
+  "project_root": "file:///workspace",
+  "plan_digest": "Wny749Q1hIW2HIvenW+V1fysvBWFtleEzoMyYnYJIjc=",
+  "documents": [
+    {
+      "relative_path": "lib/worker.rb",
+      "language": "ruby",
+      "position_encoding": "UTF8_CODE_UNIT_OFFSET_FROM_LINE_START",
+      "content_sha256": "Qc9nlLpCALg5xTUxVV8POZjfTLsBpNXLC5Tjyl4jlH0="
+    }
+  ],
+  "requests": [
+    {
+      "anchor": {
+        "symbol": "local call-1",
+        "relative_path": "lib/worker.rb",
+        "range": {
+          "start_line": 2,
+          "start_character": 8,
+          "end_line": 2,
+          "end_character": 12
+        },
+        "kind": "CALL_SELECTOR",
+        "enclosing_symbol": "fact-mine workspace fixture . Worker#run().",
+        "semantic_digest": "fts2DwasrvLMgNuhbPVj8ZnTR9tEQ9oE2gyBc+P55O0=",
+        "display_name": "size"
+      },
+      "required": [
+        "RECEIVER_VALUE",
+        "CALL_TARGET"
+      ]
+    }
+  ]
+}

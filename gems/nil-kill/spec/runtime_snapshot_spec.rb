@@ -4,14 +4,22 @@ require_relative "spec_helper"
 require "rbconfig"
 
 RSpec.describe NilKill::Runtime::Snapshot do
+  def semantic_anchor_payload(rows)
+    Marshal.load(Marshal.dump(rows)).each do |row|
+      row.fetch("capture").delete("run_ids")
+      row.fetch("executions").each { |bucket| bucket.fetch("provenance").delete("run_id") }
+    end
+  end
+
   def evidence(calls: [], observations: [], runs: ["run"])
     {
-      "schema" => NilKill::Runtime::ValueEvidenceEmitter::SCHEMA,
-      "authority" => NilKill::Runtime::ScipEmitter::AUTHORITY,
-      "environment" => { "ruby.version" => RUBY_VERSION },
-      "runs" => runs,
-      "observations" => observations,
-      "calls" => calls,
+      "protocol_version" => 1,
+      "producer" => { "name" => "nil-kill", "version" => "1" },
+      "authority" => "MODELED_RUNS",
+      "trace_plan_digest" => "fixture",
+      "environment" => [{ "key" => "ruby.version", "value" => RUBY_VERSION }],
+      "runs" => runs.map { |id| { "id" => id, "status" => "SUCCEEDED" } },
+      "anchors" => observations + calls,
     }
   end
 
@@ -169,9 +177,15 @@ RSpec.describe NilKill::Runtime::Snapshot do
         runtime,
         NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT
       )
+      trace_plan_path = File.join(root, ".nil-kill", "trace-plan.json")
+      full_plan = JSON.parse(File.read(trace_plan_path)).fetch("runtime_evidence")
+      formatter_symbols = full_plan.fetch("requests").filter_map do |request|
+        anchor = request.fetch("anchor")
+        anchor.fetch("symbol") if anchor.fetch("relative_path") == "lib/formatter.rb"
+      end
       full_formatter_observations = NilKill::Runtime::JsonIO.parse(canonical_evidence)
-        .fetch("observations")
-        .select { |row| row.dig("scope", "path") == "lib/formatter.rb" }
+        .fetch("anchors")
+        .select { |row| formatter_symbols.include?(row.fetch("anchor_symbol")) }
       expect(full_formatter_observations).not_to be_empty
 
       stdout, stderr, status = run_collect.call("--fast")
@@ -191,9 +205,10 @@ RSpec.describe NilKill::Runtime::Snapshot do
         "changed_files" => ["lib/calculator.rb"]
       )
       increment_formatter_observations = NilKill::Runtime::JsonIO.parse(canonical_evidence)
-        .fetch("observations")
-        .select { |row| row.dig("scope", "path") == "lib/formatter.rb" }
-      expect(increment_formatter_observations).to eq(full_formatter_observations)
+        .fetch("anchors")
+        .select { |row| formatter_symbols.include?(row.fetch("anchor_symbol")) }
+      expect(semantic_anchor_payload(increment_formatter_observations))
+        .to eq(semantic_anchor_payload(full_formatter_observations))
 
       File.write(source, File.read(source).sub("INCREMENTAL_VERSION = 1", "INCREMENTAL_VERSION = 2"))
       _stdout, stderr, status = run_collect.call("--fast")
@@ -209,8 +224,13 @@ RSpec.describe NilKill::Runtime::Snapshot do
         File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
       )
       expect(final).to include("generation" => 3, "deleted_files" => ["lib/legacy.rb"])
-      expect(evidence.fetch("observations").map { |row| row.dig("scope", "path") }.uniq)
+      final_plan = JSON.parse(File.read(trace_plan_path)).fetch("runtime_evidence")
+      expect(final_plan.fetch("documents").map { |row| row.fetch("relative_path") })
         .not_to include("lib/legacy.rb")
+      expect(evidence.fetch("anchors").map { |row| row.fetch("anchor_symbol") }.sort)
+        .to eq(
+          final_plan.fetch("requests").map { |request| request.dig("anchor", "symbol") }.sort
+        )
       expect(File.file?(unchanged_source)).to be(true)
     end
   end

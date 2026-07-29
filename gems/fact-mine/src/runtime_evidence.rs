@@ -6,18 +6,25 @@
 //! expressions: those would duplicate FactMine's analysis in each tracer.
 
 use anyhow::{bail, Context, Result};
+#[cfg(test)]
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+#[cfg(test)]
 use std::io::Read;
 use std::path::Path;
 
 use crate::profile::{CallRecord, MethodRecord, ProfileOutput};
+use crate::runtime_protocol::{self, runtime_value, AnchorBinding, BuiltTracePlan, CaptureStatus};
 use crate::type_inference::TypeExpr;
 
-pub const SCHEMA: &str = "fact-mine.runtime-value-evidence.v1";
+// Private normalized facts used by the CFG/DFG overlay. This is deliberately
+// not a wire schema: the only public runtime contract is runtime_protocol.
+const INTERNAL_FACTS_SCHEMA: &str = "fact-mine.normalized-runtime-facts";
+#[cfg(test)]
+const SCHEMA: &str = INTERNAL_FACTS_SCHEMA;
 const RUNTIME_RECORD_ACCESSOR_SYMBOL_PREFIX: &str = "fact-mine-runtime runtime-contract v1 Record#";
 
 fn runtime_record_accessor_symbol(member: &str) -> String {
@@ -29,7 +36,7 @@ pub(crate) fn is_runtime_record_accessor_symbol(symbol: &str, member: &str) -> b
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct RuntimeValueEvidence {
+struct RuntimeValueEvidence {
     pub schema: String,
     #[serde(default)]
     pub authority: String,
@@ -44,7 +51,7 @@ pub struct RuntimeValueEvidence {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct MethodLocator {
+struct MethodLocator {
     pub language: String,
     pub path: String,
     #[serde(default)]
@@ -57,7 +64,7 @@ pub struct MethodLocator {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ValueScope {
+struct ValueScope {
     pub language: String,
     #[serde(default)]
     pub path: String,
@@ -67,10 +74,14 @@ pub struct ValueScope {
     pub function: String,
     #[serde(default)]
     pub line: usize,
+    /// FactMine-only exact binding. Runtime collectors never serialize
+    /// normalized profile IDs.
+    #[serde(skip)]
+    pub method_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SourceAnchor {
+struct SourceAnchor {
     pub path: String,
     pub line: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,8 +90,8 @@ pub struct SourceAnchor {
     pub selector: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ValueDomain {
+#[derive(Clone, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+struct ValueDomain {
     #[serde(default)]
     pub types: BTreeSet<String>,
     /// Exact identities of module/class/function singleton values. These are
@@ -98,8 +109,8 @@ pub struct ValueDomain {
     pub shapes: Vec<ValueShape>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ValueShape {
+#[derive(Clone, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+struct ValueShape {
     pub kind: String,
     #[serde(default)]
     pub name: String,
@@ -114,7 +125,7 @@ pub struct ValueShape {
 }
 
 impl ValueDomain {
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.types.is_empty()
             && self.singletons.is_empty()
             && self.elements.is_empty()
@@ -177,7 +188,7 @@ impl ValueShape {
 /// - `collection`: `scope` + `slot`, where `slot_kind` identifies parameter,
 ///   return, state, or another tracer-addressable boundary.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ValueObservation {
+struct ValueObservation {
     pub kind: String,
     pub scope: ValueScope,
     #[serde(default)]
@@ -187,10 +198,13 @@ pub struct ValueObservation {
     pub domain: ValueDomain,
     #[serde(default)]
     pub count: u64,
+    /// FactMine-only exact state-access binding.
+    #[serde(skip)]
+    pub state_access_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SemanticTarget {
+struct SemanticTarget {
     /// Canonical SCIP symbol. Keeping the symbol in evidence means FactMine
     /// never needs to understand a tracer or package manager's identity
     /// grammar.
@@ -207,11 +221,13 @@ pub struct SemanticTarget {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ObservedCall {
+struct ObservedCall {
     pub language: String,
     pub caller: MethodLocator,
     pub callsite: SourceAnchor,
     pub targets: Vec<SemanticTarget>,
+    #[serde(default = "default_true")]
+    pub target_observation_complete: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receiver_domain: Option<ValueDomain>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -223,10 +239,18 @@ pub struct ObservedCall {
     pub result_truths: BTreeSet<bool>,
     #[serde(default)]
     pub count: u64,
+    /// FactMine-only exact call binding regenerated from the validated plan.
+    #[serde(skip)]
+    pub call_id: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl RuntimeValueEvidence {
-    pub fn from_path(path: &Path) -> Result<Self> {
+    #[cfg(test)]
+    fn from_path(path: &Path) -> Result<Self> {
         let bytes = fs::read(path)
             .with_context(|| format!("failed to read runtime evidence {}", path.display()))?;
         let mut json = String::new();
@@ -245,18 +269,16 @@ impl RuntimeValueEvidence {
             .with_context(|| format!("invalid runtime evidence {}", path.display()))
     }
 
-    pub fn from_json(json: &str) -> Result<Self> {
+    #[cfg(test)]
+    fn from_json(json: &str) -> Result<Self> {
         let evidence: Self = serde_json::from_str(json)?;
         evidence.validate()?;
         Ok(evidence)
     }
 
-    pub fn validate(&self) -> Result<()> {
-        if self.schema != SCHEMA {
-            bail!(
-                "unsupported runtime evidence schema {:?}; expected {SCHEMA}",
-                self.schema
-            );
+    fn validate(&self) -> Result<()> {
+        if self.schema != INTERNAL_FACTS_SCHEMA {
+            bail!("invalid normalized runtime facts schema {:?}", self.schema);
         }
         if self.authority.is_empty() {
             bail!("runtime evidence authority must not be empty");
@@ -306,8 +328,16 @@ impl RuntimeValueEvidence {
             if call.callsite.path.is_empty() || call.callsite.line == 0 {
                 bail!("calls[{index}].callsite requires path and positive line");
             }
-            if call.targets.is_empty() {
-                bail!("calls[{index}] must contain at least one semantic target");
+            if call.targets.is_empty()
+                && (call.target_observation_complete
+                    || call
+                        .receiver_domain
+                        .as_ref()
+                        .is_none_or(ValueDomain::is_empty))
+            {
+                bail!(
+                    "calls[{index}] without targets requires an incomplete target observation and a receiver domain"
+                );
             }
             for (target_index, target) in call.targets.iter().enumerate() {
                 if target.symbol.is_empty() || target.name.is_empty() {
@@ -358,11 +388,460 @@ pub struct RuntimeScipOverlay {
     pub stats: OverlayStats,
 }
 
+/// Validate and overlay canonical runtime evidence through FactMine's exact
+/// trace-plan bindings.
+///
+/// The collector supplies only SCIP-like source/value/target identities. This
+/// conversion deliberately introduces normalized profile IDs *after*
+/// validation, from the binding table FactMine regenerated from the current
+/// source snapshot. No path/name/line fallback is available on this path.
+pub fn apply_protocol_to_profile(
+    output: &mut ProfileOutput,
+    built: &BuiltTracePlan,
+    evidence: &runtime_protocol::RuntimeEvidence,
+) -> Result<RuntimeScipOverlay> {
+    runtime_protocol::validate_runtime_evidence(&built.plan, evidence)?;
+    let internal = protocol_evidence(output, built, evidence)?;
+    apply_to_profile(output, &internal)
+}
+
+fn protocol_evidence(
+    output: &ProfileOutput,
+    built: &BuiltTracePlan,
+    evidence: &runtime_protocol::RuntimeEvidence,
+) -> Result<RuntimeValueEvidence> {
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    let calls = output
+        .calls
+        .iter()
+        .map(|call| (call.id.as_str(), call))
+        .collect::<BTreeMap<_, _>>();
+    let accesses = output
+        .state_accesses
+        .iter()
+        .map(|access| (access.id.as_str(), access))
+        .collect::<BTreeMap<_, _>>();
+    let anchor_methods = built
+        .bindings
+        .iter()
+        .filter_map(|(anchor, binding)| {
+            let method_id = match binding {
+                AnchorBinding::Parameter { method_id, .. }
+                | AnchorBinding::Return { method_id } => method_id,
+                AnchorBinding::Call { call_id } => &calls.get(call_id.as_str())?.source,
+                AnchorBinding::State { access_id } => {
+                    &accesses.get(access_id.as_str())?.function_id
+                }
+            };
+            Some((anchor.as_str(), method_id.as_str()))
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut internal = RuntimeValueEvidence {
+        schema: INTERNAL_FACTS_SCHEMA.to_string(),
+        authority: "modeled-runs".to_string(),
+        environment: evidence
+            .environment
+            .iter()
+            .map(|claim| (claim.key.clone(), claim.value.clone()))
+            .collect(),
+        runs: evidence.runs.iter().map(|run| run.id.clone()).collect(),
+        ..RuntimeValueEvidence::default()
+    };
+
+    for row in &evidence.anchors {
+        if row.capture.as_ref().is_none_or(|capture| {
+            capture.status.enum_value_or_default() != CaptureStatus::COMPLETE_FOR_RUNS
+        }) {
+            continue;
+        }
+        let binding = built.bindings.get(&row.anchor_symbol).with_context(|| {
+            format!(
+                "validated anchor {:?} lacks a FactMine binding",
+                row.anchor_symbol
+            )
+        })?;
+        match binding {
+            AnchorBinding::Parameter {
+                method_id,
+                ordinal: _,
+                name,
+            } => {
+                let method = methods.get(method_id.as_str()).with_context(|| {
+                    format!("parameter anchor refers to missing method {method_id:?}")
+                })?;
+                for bucket in &row.executions {
+                    let value = bucket.value.as_ref().with_context(|| {
+                        format!("parameter anchor {:?} lacks its value", row.anchor_symbol)
+                    })?;
+                    internal.observations.push(protocol_observation(
+                        "parameter",
+                        method,
+                        name,
+                        protocol_value_set_domain(value, &method.language)?,
+                        bucket.count,
+                        Some(method_id.clone()),
+                        None,
+                    ));
+                }
+            }
+            AnchorBinding::Return { method_id } => {
+                let method = methods.get(method_id.as_str()).with_context(|| {
+                    format!("return anchor refers to missing method {method_id:?}")
+                })?;
+                for bucket in &row.executions {
+                    let value = bucket.value.as_ref().with_context(|| {
+                        format!("return anchor {:?} lacks its value", row.anchor_symbol)
+                    })?;
+                    internal.observations.push(protocol_observation(
+                        "return",
+                        method,
+                        "",
+                        protocol_value_set_domain(value, &method.language)?,
+                        bucket.count,
+                        Some(method_id.clone()),
+                        None,
+                    ));
+                }
+            }
+            AnchorBinding::State { access_id } => {
+                let access = accesses.get(access_id.as_str()).with_context(|| {
+                    format!("state anchor refers to missing access {access_id:?}")
+                })?;
+                let method = methods.get(access.function_id.as_str()).with_context(|| {
+                    format!(
+                        "state access refers to missing method {:?}",
+                        access.function_id
+                    )
+                })?;
+                for bucket in &row.executions {
+                    let value = bucket.value.as_ref().with_context(|| {
+                        format!("state anchor {:?} lacks its value", row.anchor_symbol)
+                    })?;
+                    internal.observations.push(protocol_observation(
+                        "state",
+                        method,
+                        &access.field,
+                        protocol_value_set_domain(value, &method.language)?,
+                        bucket.count,
+                        Some(method.id.clone()),
+                        Some(access_id.clone()),
+                    ));
+                }
+            }
+            AnchorBinding::Call { call_id } => {
+                let call = calls
+                    .get(call_id.as_str())
+                    .with_context(|| format!("call anchor refers to missing call {call_id:?}"))?;
+                let method = methods
+                    .get(call.source.as_str())
+                    .with_context(|| format!("call refers to missing method {:?}", call.source))?;
+                for bucket in &row.executions {
+                    let target = bucket
+                        .target
+                        .as_ref()
+                        .map(|target| {
+                            protocol_target(
+                                target,
+                                call,
+                                method,
+                                &methods,
+                                &built.bindings,
+                                &anchor_methods,
+                                bucket.receiver.as_ref(),
+                            )
+                        })
+                        .transpose()?
+                        .flatten();
+                    let target_observation_complete = target.is_some();
+                    internal.calls.push(ObservedCall {
+                        language: method.language.clone(),
+                        caller: method_locator(method),
+                        callsite: SourceAnchor {
+                            path: call.path.clone(),
+                            line: call.line,
+                            range: Some(call.span),
+                            selector: call.message.clone(),
+                        },
+                        targets: target.into_iter().collect(),
+                        target_observation_complete,
+                        receiver_domain: bucket
+                            .receiver
+                            .as_ref()
+                            .map(|value| protocol_value_set_domain(value, &method.language))
+                            .transpose()?,
+                        result_domain: bucket
+                            .result
+                            .as_ref()
+                            .map(|value| protocol_value_set_domain(value, &method.language))
+                            .transpose()?,
+                        result_truths: bucket.boolean_result.into_iter().collect(),
+                        count: bucket.count,
+                        call_id: Some(call_id.clone()),
+                    });
+                }
+            }
+        }
+    }
+    Ok(internal)
+}
+
+fn protocol_observation(
+    kind: &str,
+    method: &MethodRecord,
+    slot: &str,
+    domain: ValueDomain,
+    count: u64,
+    method_id: Option<String>,
+    state_access_id: Option<String>,
+) -> ValueObservation {
+    ValueObservation {
+        kind: kind.to_string(),
+        scope: ValueScope {
+            language: method.language.clone(),
+            path: method.path.clone(),
+            owner: method.owner.clone(),
+            function: method.name.clone(),
+            line: method.line,
+            method_id,
+        },
+        slot: slot.to_string(),
+        slot_kind: String::new(),
+        domain,
+        count,
+        state_access_id,
+    }
+}
+
+fn method_locator(method: &MethodRecord) -> MethodLocator {
+    MethodLocator {
+        language: method.language.clone(),
+        path: method.path.clone(),
+        owner: method.owner.clone(),
+        name: method.name.clone(),
+        kind: method.kind.clone(),
+        line: method.line,
+    }
+}
+
+fn protocol_target(
+    target: &runtime_protocol::RuntimeTarget,
+    call: &CallRecord,
+    caller: &MethodRecord,
+    methods: &BTreeMap<&str, &MethodRecord>,
+    bindings: &BTreeMap<String, AnchorBinding>,
+    anchor_methods: &BTreeMap<&str, &str>,
+    receiver: Option<&runtime_protocol::ValueSet>,
+) -> Result<Option<SemanticTarget>> {
+    if target.source_role.enum_value_or_default() == runtime_protocol::SourceRole::NON_PRODUCTION {
+        return Ok(None);
+    }
+    let definition_method = target.definition.as_ref().and_then(|definition| {
+        (!definition.anchor_symbol.is_empty())
+            .then(|| {
+                anchor_methods
+                    .get(definition.anchor_symbol.as_str())
+                    .copied()
+            })
+            .flatten()
+            .or_else(|| {
+                bindings
+                    .get(&definition.anchor_symbol)
+                    .and_then(|binding| match binding {
+                        AnchorBinding::Parameter { method_id, .. }
+                        | AnchorBinding::Return { method_id } => Some(method_id.as_str()),
+                        _ => None,
+                    })
+            })
+            .and_then(|method_id| methods.get(method_id).copied())
+    });
+    let receiver_type = receiver
+        .map(|value| protocol_value_set_domain(value, &caller.language))
+        .transpose()?
+        .and_then(|domain| {
+            let language = crate::syntax::Language::parse(&caller.language).ok()?;
+            let behavior = crate::syntax::normalized_behavior::behavior(language);
+            behavior.runtime_value_domain_type(
+                &domain.types.into_iter().collect::<Vec<_>>(),
+                &domain.elements.into_iter().collect::<Vec<_>>(),
+                &domain.keys.into_iter().collect::<Vec<_>>(),
+                &domain.values.into_iter().collect::<Vec<_>>(),
+            )
+        })
+        .unwrap_or_default();
+    Ok(Some(SemanticTarget {
+        symbol: target.symbol.clone(),
+        owner: definition_method
+            .map(|method| method.owner.clone())
+            .unwrap_or_default(),
+        name: call.message.clone(),
+        kind: definition_method
+            .map(|method| method.kind.clone())
+            .unwrap_or_else(|| {
+                if call.receiver_kind == "type" {
+                    "class".to_string()
+                } else {
+                    "instance".to_string()
+                }
+            }),
+        receiver_type,
+        definition: definition_method.map(method_locator),
+    }))
+}
+
+fn protocol_runtime_type(value: &runtime_protocol::RuntimeValue, language: &str) -> Result<String> {
+    let language = crate::syntax::Language::parse(language)?;
+    let behavior = crate::syntax::normalized_behavior::behavior(language);
+    behavior
+        .runtime_value_type_from_symbol(&value.type_symbol)
+        .with_context(|| {
+            format!(
+                "{language:?} runtime adapter cannot decode type SCIP symbol {:?}",
+                value.type_symbol
+            )
+        })
+}
+
+fn protocol_value_domain(
+    value: &runtime_protocol::RuntimeValue,
+    language: &str,
+) -> Result<ValueDomain> {
+    let owner = protocol_runtime_type(value, language)?;
+    let mut domain = ValueDomain {
+        types: BTreeSet::from([owner.clone()]),
+        singletons: if value.singleton_symbol.is_empty() {
+            BTreeSet::new()
+        } else {
+            let language = crate::syntax::Language::parse(language)?;
+            let behavior = crate::syntax::normalized_behavior::behavior(language);
+            BTreeSet::from([behavior
+                .runtime_value_singleton_from_symbol(&value.singleton_symbol)
+                .with_context(|| {
+                    format!(
+                        "{language:?} runtime adapter cannot decode singleton SCIP symbol {:?}",
+                        value.singleton_symbol
+                    )
+                })?])
+        },
+        ..ValueDomain::default()
+    };
+    match value.shape.as_ref() {
+        Some(runtime_value::Shape::Sequence(shape)) => {
+            merge_protocol_value_set(&mut domain.elements, shape.elements.as_ref(), language)?;
+            domain.shapes.push(ValueShape {
+                kind: "array".to_string(),
+                elements: protocol_value_set_shapes(shape.elements.as_ref(), language)?,
+                ..ValueShape::default()
+            });
+        }
+        Some(runtime_value::Shape::Mapping(shape)) => {
+            for entry in &shape.entries {
+                if let Some(key) = entry.key.as_ref() {
+                    domain.keys.insert(protocol_runtime_type(key, language)?);
+                }
+                if let Some(value) = entry.value.as_ref() {
+                    domain
+                        .values
+                        .insert(protocol_runtime_type(value, language)?);
+                }
+            }
+            domain.shapes.push(ValueShape {
+                kind: "hash".to_string(),
+                ..ValueShape::default()
+            });
+        }
+        Some(runtime_value::Shape::Record(shape)) => {
+            let mut members = BTreeMap::new();
+            for member in &shape.members {
+                let alternatives = protocol_value_set_shapes(member.values.as_ref(), language)?;
+                members.insert(
+                    member.name.clone(),
+                    alternatives.into_iter().next().unwrap_or(ValueShape {
+                        kind: "unknown".to_string(),
+                        ..ValueShape::default()
+                    }),
+                );
+            }
+            domain.shapes.push(ValueShape {
+                kind: "record".to_string(),
+                name: owner,
+                members,
+                ..ValueShape::default()
+            });
+        }
+        Some(runtime_value::Shape::Tuple(shape)) => {
+            let elements = shape
+                .elements
+                .iter()
+                .flat_map(|set| protocol_value_set_shapes(Some(set), language))
+                .flatten()
+                .collect();
+            domain.shapes.push(ValueShape {
+                kind: "tuple".to_string(),
+                elements,
+                ..ValueShape::default()
+            });
+        }
+        None => {}
+    }
+    Ok(domain)
+}
+
+fn protocol_value_set_domain(
+    values: &runtime_protocol::ValueSet,
+    language: &str,
+) -> Result<ValueDomain> {
+    let mut domain = ValueDomain::default();
+    for alternative in &values.alternatives {
+        let value = alternative
+            .value
+            .as_ref()
+            .context("validated runtime value alternative is missing")?;
+        merge_domain(&mut domain, &protocol_value_domain(value, language)?);
+    }
+    Ok(domain)
+}
+
+fn merge_protocol_value_set(
+    destination: &mut BTreeSet<String>,
+    values: Option<&runtime_protocol::ValueSet>,
+    language: &str,
+) -> Result<()> {
+    for weighted in values.into_iter().flat_map(|set| &set.alternatives) {
+        if let Some(value) = weighted.value.as_ref() {
+            destination.insert(protocol_runtime_type(value, language)?);
+        }
+    }
+    Ok(())
+}
+
+fn protocol_value_set_shapes(
+    values: Option<&runtime_protocol::ValueSet>,
+    language: &str,
+) -> Result<Vec<ValueShape>> {
+    values
+        .into_iter()
+        .flat_map(|set| &set.alternatives)
+        .filter_map(|weighted| weighted.value.as_ref())
+        .map(|value| {
+            Ok(ValueShape {
+                kind: "class".to_string(),
+                name: protocol_runtime_type(value, language)?,
+                ..ValueShape::default()
+            })
+        })
+        .collect()
+}
+
 /// Overlay runtime observations on FactMine's normalized source/CFG/DFG facts
 /// and emit the resulting identities as an ordinary runtime-authority SCIP
 /// index. All propagation in this function operates on normalized facts; it
 /// never parses a source-language expression.
-pub fn apply_to_profile(
+fn apply_to_profile(
     output: &mut ProfileOutput,
     evidence: &RuntimeValueEvidence,
 ) -> Result<RuntimeScipOverlay> {
@@ -411,7 +890,20 @@ pub fn apply_to_profile(
             &narrowed_receiver_domains,
             &mut selected,
         );
-        infer_targets(output, &catalog, &narrowed_receiver_domains, &mut selected);
+        infer_targets(
+            output,
+            &method_index,
+            &catalog,
+            &narrowed_receiver_domains,
+            &mut selected,
+        );
+        infer_runtime_stdlib_targets(
+            output,
+            evidence,
+            &method_index,
+            &narrowed_receiver_domains,
+            &mut selected,
+        );
         if receiver_domains == before_domains && selected == before_selected {
             break;
         }
@@ -563,6 +1055,9 @@ impl<'a> MethodIndex<'a> {
     }
 
     fn locate_scope(&self, scope: &ValueScope) -> Vec<&'a MethodRecord> {
+        if let Some(method_id) = scope.method_id.as_deref() {
+            return self.by_id.get(method_id).copied().into_iter().collect();
+        }
         self.methods
             .iter()
             .filter(|method| method.language == scope.language)
@@ -622,6 +1117,10 @@ fn seed_fact_mine_receiver_domains(
             .or_else(|| {
                 (call.receiver_kind == "type" && !call.receiver.is_empty())
                     .then_some(call.receiver.as_str())
+            })
+            .or_else(|| {
+                matches!(call.receiver.as_str(), "" | "self" | "this")
+                    .then_some(method.owner.as_str())
             })
         else {
             continue;
@@ -1480,6 +1979,9 @@ fn match_observed_calls(
 ) -> BTreeMap<String, Vec<SemanticTarget>> {
     let mut selected = BTreeMap::<String, Vec<SemanticTarget>>::new();
     for observed in &evidence.calls {
+        if observed.targets.is_empty() {
+            continue;
+        }
         for call in matched_profile_calls(output, methods, observed) {
             let entry = selected.entry(call.id.clone()).or_default();
             entry.extend(observed.targets.clone());
@@ -1667,6 +2169,13 @@ fn matched_profile_calls<'a>(
     methods: &MethodIndex<'_>,
     observed: &ObservedCall,
 ) -> Vec<&'a CallRecord> {
+    if let Some(call_id) = observed.call_id.as_deref() {
+        return output
+            .calls
+            .iter()
+            .filter(|call| call.id == call_id)
+            .collect();
+    }
     let mut candidates = methods
         .locate(&observed.caller)
         .into_iter()
@@ -1753,12 +2262,29 @@ fn runtime_receiver_domain_compatible(
     static_domain.types.is_empty() || !static_domain.types.is_disjoint(&observed_types)
 }
 
-fn target_catalog(evidence: &RuntimeValueEvidence) -> BTreeMap<String, Vec<SemanticTarget>> {
-    let mut catalog = BTreeMap::<String, Vec<SemanticTarget>>::new();
+#[derive(Clone)]
+struct CatalogTarget {
+    target: SemanticTarget,
+    receiver_domain: Option<ValueDomain>,
+}
+
+fn target_catalog(evidence: &RuntimeValueEvidence) -> BTreeMap<String, Vec<CatalogTarget>> {
+    let mut catalog = BTreeMap::<String, Vec<CatalogTarget>>::new();
     for call in &evidence.calls {
         let entry = catalog.entry(call.callsite.selector.clone()).or_default();
-        entry.extend(call.targets.clone());
-        sort_dedup_targets(entry);
+        entry.extend(call.targets.iter().cloned().map(|target| CatalogTarget {
+            target,
+            receiver_domain: call.receiver_domain.clone(),
+        }));
+        entry.sort_by(|left, right| {
+            left.target
+                .symbol
+                .cmp(&right.target.symbol)
+                .then_with(|| left.receiver_domain.cmp(&right.receiver_domain))
+        });
+        entry.dedup_by(|left, right| {
+            left.target == right.target && left.receiver_domain == right.receiver_domain
+        });
     }
     catalog
 }
@@ -1813,7 +2339,8 @@ fn propagate_call_results(
 
 fn infer_targets(
     output: &ProfileOutput,
-    catalog: &BTreeMap<String, Vec<SemanticTarget>>,
+    methods: &MethodIndex<'_>,
+    catalog: &BTreeMap<String, Vec<CatalogTarget>>,
     receiver_domains: &BTreeMap<String, ValueDomain>,
     selected: &mut BTreeMap<String, Vec<SemanticTarget>>,
 ) {
@@ -1826,7 +2353,9 @@ fn infer_targets(
             .into_iter()
             .flatten()
             .filter(|target| {
-                call.receiver_kind != "type" || target.kind == "class" || target.kind == "static"
+                call.receiver_kind != "type"
+                    || target.target.kind == "class"
+                    || target.target.kind == "static"
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -1834,29 +2363,82 @@ fn infer_targets(
             let owners = catalog_candidates
                 .iter()
                 .filter_map(|target| {
-                    (!target.owner.is_empty())
-                        .then_some(target.owner.as_str())
+                    (!target.target.owner.is_empty())
+                        .then_some(target.target.owner.as_str())
                         .or_else(|| {
-                            (!target.receiver_type.is_empty())
-                                .then_some(target.receiver_type.as_str())
+                            (!target.target.receiver_type.is_empty())
+                                .then_some(target.target.receiver_type.as_str())
                         })
                 })
                 .collect::<BTreeSet<_>>();
             if owners.len() == 1 && !catalog_candidates.is_empty() {
-                selected.insert(call.id.clone(), catalog_candidates);
+                selected.insert(
+                    call.id.clone(),
+                    catalog_candidates
+                        .into_iter()
+                        .map(|candidate| candidate.target)
+                        .collect(),
+                );
             }
             continue;
         };
-        let candidates = catalog_candidates
-            .into_iter()
-            .filter(|target| {
-                domain.types.iter().any(|ty| {
-                    runtime_owner_matches(&target.receiver_type, ty)
-                        || runtime_owner_matches(&target.owner, ty)
+        let behavior = methods
+            .by_id
+            .get(call.source.as_str())
+            .and_then(|method| crate::syntax::Language::parse(&method.language).ok())
+            .map(crate::syntax::normalized_behavior::behavior);
+        let identities = if domain.singletons.is_empty() {
+            domain
+                .types
+                .iter()
+                .map(|identity| (identity.as_str(), false))
+                .collect::<Vec<_>>()
+        } else {
+            domain
+                .singletons
+                .iter()
+                .map(|identity| (identity.as_str(), true))
+                .collect::<Vec<_>>()
+        };
+        let mut candidates = Vec::new();
+        let mut closed = !identities.is_empty();
+        for (identity, singleton) in identities {
+            let mut matching = catalog_candidates
+                .iter()
+                .filter(|candidate| {
+                    if singleton {
+                        return candidate
+                            .receiver_domain
+                            .as_ref()
+                            .is_some_and(|observed| observed.singletons.contains(identity));
+                    }
+                    runtime_owner_matches(&candidate.target.receiver_type, identity)
+                        || runtime_owner_matches(&candidate.target.owner, identity)
+                        || behavior.is_some_and(|behavior| {
+                            behavior
+                                .runtime_dispatch_owner_matches(&candidate.target.owner, identity)
+                        })
+                        || candidate
+                            .receiver_domain
+                            .as_ref()
+                            .is_some_and(|observed| observed.types.contains(identity))
                 })
-            })
-            .collect::<Vec<_>>();
-        if !candidates.is_empty() {
+                .map(|candidate| candidate.target.clone())
+                .collect::<Vec<_>>();
+            if matching.is_empty()
+                && !singleton
+                && runtime_record_type_exposes(domain, identity, &call.message)
+            {
+                matching.push(runtime_record_accessor_target(&call.message));
+            }
+            if matching.is_empty() {
+                closed = false;
+                break;
+            }
+            candidates.extend(matching);
+        }
+        if closed {
+            sort_dedup_targets(&mut candidates);
             selected.insert(call.id.clone(), candidates);
         }
     }
@@ -1940,6 +2522,81 @@ fn infer_runtime_receiver_targets(
             sort_dedup_targets(&mut targets);
             selected.insert(call.id.clone(), targets);
         }
+    }
+}
+
+fn infer_runtime_stdlib_targets(
+    output: &ProfileOutput,
+    evidence: &RuntimeValueEvidence,
+    methods: &MethodIndex<'_>,
+    receiver_domains: &BTreeMap<String, ValueDomain>,
+    selected: &mut BTreeMap<String, Vec<SemanticTarget>>,
+) {
+    for call in &output.calls {
+        if selected.contains_key(&call.id) || call.target.is_some() {
+            continue;
+        }
+        let Some(domain) = receiver_domains.get(&call.id) else {
+            continue;
+        };
+        let Some(method) = methods.by_id.get(call.source.as_str()) else {
+            continue;
+        };
+        let Ok(language) = crate::syntax::Language::parse(&method.language) else {
+            continue;
+        };
+        let behavior = crate::syntax::normalized_behavior::behavior(language);
+        let identities = if domain.singletons.is_empty() {
+            domain
+                .types
+                .iter()
+                .map(|receiver_type| (receiver_type.as_str(), None))
+                .collect::<Vec<_>>()
+        } else {
+            domain
+                .singletons
+                .iter()
+                .map(|singleton| {
+                    let receiver_type = domain
+                        .types
+                        .iter()
+                        .next()
+                        .map(String::as_str)
+                        .unwrap_or("T.untyped");
+                    (receiver_type, Some(singleton.as_str()))
+                })
+                .collect::<Vec<_>>()
+        };
+        if identities.is_empty() {
+            continue;
+        }
+        let targets = identities
+            .into_iter()
+            .map(|(receiver_type, singleton)| {
+                behavior.runtime_value_semantic_target(
+                    receiver_type,
+                    singleton,
+                    &call.message,
+                    &evidence.environment,
+                )
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(targets) = targets else {
+            continue;
+        };
+        let mut targets = targets
+            .into_iter()
+            .map(|target| SemanticTarget {
+                symbol: target.symbol,
+                owner: target.owner,
+                name: call.message.clone(),
+                kind: target.kind,
+                receiver_type: target.receiver_type,
+                definition: None,
+            })
+            .collect::<Vec<_>>();
+        sort_dedup_targets(&mut targets);
+        selected.insert(call.id.clone(), targets);
     }
 }
 
@@ -2337,6 +2994,7 @@ mod tests {
     use super::*;
     use crate::profile::{self, Profile};
     use crate::syntax::{self, Language};
+    use protobuf::{EnumOrUnknown, MessageField};
     use serde_json::json;
     use std::io::Write;
 
@@ -2860,6 +3518,175 @@ end
     }
 
     #[test]
+    fn cfg_dfg_overlay_closes_mixed_generated_records_inside_capability_ternaries() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("source");
+        file.write_all(
+            br#"NativeArm = Struct.new(:kind, :member, :decision_span, :arm_span)
+
+module Worker
+  module_function
+
+  def signature(arm)
+    [
+      arm.kind,
+      (arm.respond_to?(:member) ? arm.member : nil),
+      Array(arm.decision_span).map(&:to_i),
+      Array(arm.respond_to?(:arm_span) ? arm.arm_span : arm.span).map(&:to_i)
+    ]
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        assert_eq!(output.runtime_capability_guards.len(), 2);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "environment": {"runtime.version": "3.2.3"},
+                "observations": [{
+                    "kind": "parameter",
+                    "scope": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "function": "signature", "line": 6
+                    },
+                    "slot": "arm",
+                    "domain": {
+                        "types": ["NativeArm", "AnonymousArm"],
+                        "shapes": [
+                            {
+                                "kind": "record", "name": "NativeArm",
+                                "members": {
+                                    "kind": {"kind": "class", "name": "String"},
+                                    "member": {"kind": "class", "name": "String"},
+                                    "decision_span": {
+                                        "kind": "array",
+                                        "elements": [{"kind": "class", "name": "Integer"}]
+                                    },
+                                    "arm_span": {
+                                        "kind": "array",
+                                        "elements": [{"kind": "class", "name": "Integer"}]
+                                    }
+                                }
+                            },
+                            {
+                                "kind": "record", "name": "AnonymousArm",
+                                "members": {
+                                    "kind": {"kind": "class", "name": "Symbol"},
+                                    "member": {"kind": "class", "name": "String"},
+                                    "decision_span": {
+                                        "kind": "array",
+                                        "elements": [{"kind": "class", "name": "Integer"}]
+                                    },
+                                    "span": {
+                                        "kind": "array",
+                                        "elements": [{"kind": "class", "name": "Integer"}]
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    "count": 2
+                }],
+                "calls": [
+                    {
+                        "language": "ruby",
+                        "caller": {
+                            "language": "ruby", "path": path,
+                            "owner": "Worker", "name": "signature",
+                            "kind": "class", "line": 6
+                        },
+                        "callsite": {"path": path, "line": 9, "selector": "respond_to?"},
+                        "targets": [{
+                            "symbol": "nil-kill-runtime ruby ruby 3.2.3 Kernel#respond_to?().",
+                            "owner": "Kernel", "name": "respond_to?", "kind": "instance",
+                            "receiver_type": "NativeArm"
+                        }],
+                        "receiver_domain": {"types": ["NativeArm"]},
+                        "result_truths": [true],
+                        "count": 1
+                    },
+                    {
+                        "language": "ruby",
+                        "caller": {
+                            "language": "ruby", "path": path,
+                            "owner": "Worker", "name": "signature",
+                            "kind": "class", "line": 6
+                        },
+                        "callsite": {"path": path, "line": 9, "selector": "respond_to?"},
+                        "targets": [{
+                            "symbol": "nil-kill-runtime ruby ruby 3.2.3 Kernel#respond_to?().",
+                            "owner": "Kernel", "name": "respond_to?", "kind": "instance",
+                            "receiver_type": "AnonymousArm"
+                        }],
+                        "receiver_domain": {"types": ["AnonymousArm"]},
+                        "result_truths": [true],
+                        "count": 1
+                    },
+                    {
+                        "language": "ruby",
+                        "caller": {
+                            "language": "ruby", "path": path,
+                            "owner": "Worker", "name": "signature",
+                            "kind": "class", "line": 6
+                        },
+                        "callsite": {"path": path, "line": 11, "selector": "respond_to?"},
+                        "targets": [{
+                            "symbol": "nil-kill-runtime ruby ruby 3.2.3 Kernel#respond_to?().",
+                            "owner": "Kernel", "name": "respond_to?", "kind": "instance",
+                            "receiver_type": "NativeArm"
+                        }],
+                        "receiver_domain": {"types": ["NativeArm"]},
+                        "result_truths": [true],
+                        "count": 1
+                    },
+                    {
+                        "language": "ruby",
+                        "caller": {
+                            "language": "ruby", "path": path,
+                            "owner": "Worker", "name": "signature",
+                            "kind": "class", "line": 6
+                        },
+                        "callsite": {"path": path, "line": 11, "selector": "respond_to?"},
+                        "targets": [{
+                            "symbol": "nil-kill-runtime ruby ruby 3.2.3 Kernel#respond_to?().",
+                            "owner": "Kernel", "name": "respond_to?", "kind": "instance",
+                            "receiver_type": "AnonymousArm"
+                        }],
+                        "receiver_domain": {"types": ["AnonymousArm"]},
+                        "result_truths": [false],
+                        "count": 1
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        for member in ["kind", "member", "decision_span", "arm_span", "span"] {
+            let accessor = output
+                .calls
+                .iter()
+                .find(|call| call.message == member)
+                .unwrap_or_else(|| panic!("{member} accessor"));
+            assert_eq!(
+                accessor.known_time_complexity.as_deref(),
+                Some("O(1)"),
+                "{member} remained unresolved: {accessor:#?}"
+            );
+            assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+        }
+    }
+
+    #[test]
     fn cfg_dfg_overlay_rejects_record_accessors_when_any_observed_type_lacks_the_member() {
         let domain = ValueDomain {
             types: BTreeSet::from(["Left".to_string(), "Right".to_string()]),
@@ -2903,6 +3730,16 @@ end
             .unwrap_err()
             .to_string()
             .contains("empty value domain"));
+
+        let mut evidence = valid_evidence();
+        evidence["calls"][0]["targets"] = json!([]);
+        assert!(RuntimeValueEvidence::from_json(&evidence.to_string())
+            .unwrap_err()
+            .to_string()
+            .contains("without targets"));
+        evidence["calls"][0]["target_observation_complete"] = json!(false);
+        evidence["calls"][0]["receiver_domain"] = json!({"types": ["Worker"]});
+        assert!(RuntimeValueEvidence::from_json(&evidence.to_string()).is_ok());
     }
 
     #[test]
@@ -2977,7 +3814,10 @@ end
         assert_eq!(inferred.known_time_complexity.as_deref(), Some("O(1)"));
         assert_eq!(inferred.known_space_complexity.as_deref(), Some("O(1)"));
         assert_eq!(overlay.stats.observed_call_sites, 1);
-        assert_eq!(overlay.stats.inferred_call_sites, 1);
+        assert!(
+            overlay.stats.inferred_call_sites >= 1,
+            "the generated block-reader target must be inferred"
+        );
     }
 
     #[test]
@@ -4097,6 +4937,149 @@ end
     }
 
     #[test]
+    fn cfg_dfg_overlay_prices_runtime_typed_stdlib_calls_without_a_second_trace() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Worker
+  def run(payload)
+    payload.fetch("kind").to_sym
+  end
+
+  def launch(command)
+    system(command)
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "environment": {"runtime.version": "3.2.3"},
+                "observations": [],
+                "calls": [{
+                    "language": "ruby",
+                    "caller": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "name": "run",
+                        "kind": "instance", "line": 2
+                    },
+                    "callsite": {"path": path, "line": 3, "selector": "fetch"},
+                    "targets": [{
+                        "symbol": "nil-kill-runtime ruby ruby 3.2.3 Hash#fetch().",
+                        "owner": "Hash", "name": "fetch", "kind": "instance",
+                        "receiver_type": "Hash"
+                    }],
+                    "receiver_domain": {"types": ["Hash"]},
+                    "result_domain": {"types": ["String"]},
+                    "count": 1
+                }]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let to_sym = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "to_sym")
+            .expect("String#to_sym");
+        assert_eq!(to_sym.receiver_type.as_deref(), Some("String"));
+        assert_eq!(
+            to_sym.semantic_symbol.as_deref(),
+            Some("nil-kill-runtime ruby ruby 3.2.3 String#to_sym().")
+        );
+        assert_eq!(to_sym.known_time_complexity.as_deref(), Some("O(N)"));
+        assert_eq!(to_sym.known_space_complexity.as_deref(), Some("O(N)"));
+
+        let system = output
+            .calls
+            .iter()
+            .find(|call| call.function == "launch" && call.message == "system")
+            .expect("Kernel#system");
+        assert_eq!(
+            system.semantic_symbol.as_deref(),
+            Some("nil-kill-runtime ruby ruby 3.2.3 Kernel#system().")
+        );
+        assert!(system.known_time_complexity.is_some());
+        assert!(system.known_space_complexity.is_some());
+    }
+
+    #[test]
+    fn cfg_dfg_overlay_uses_language_mixin_ownership_for_runtime_receivers() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Worker
+  def observed(rows)
+    rows.sort_by { |row| row }
+  end
+
+  def run(weights)
+    weights.sort_by { |_, weight| -weight }
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "environment": {"runtime.version": "3.2.3"},
+                "observations": [{
+                    "kind": "parameter",
+                    "scope": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "function": "run", "line": 6
+                    },
+                    "slot": "weights",
+                    "domain": {
+                        "types": ["Hash"], "keys": ["String"], "values": ["Float"]
+                    },
+                    "count": 1
+                }],
+                "calls": [{
+                    "language": "ruby",
+                    "caller": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "name": "observed",
+                        "kind": "instance", "line": 2
+                    },
+                    "callsite": {"path": path, "line": 3, "selector": "sort_by"},
+                    "targets": [{
+                        "symbol": "nil-kill-runtime ruby ruby 3.2.3 Enumerable#sort_by().",
+                        "owner": "Enumerable", "name": "sort_by", "kind": "instance",
+                        "receiver_type": "Array"
+                    }],
+                    "receiver_domain": {"types": ["Array"]},
+                    "count": 1
+                }]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let sort = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "sort_by")
+            .expect("Hash Enumerable#sort_by");
+        assert!(sort.known_time_complexity.is_some());
+        assert!(sort.known_space_complexity.is_some());
+    }
+
+    #[test]
     fn cfg_dfg_overlay_refines_the_bare_subject_of_a_short_circuit_guard() {
         let mut file = tempfile::NamedTempFile::new().expect("source");
         file.write_all(
@@ -4377,6 +5360,86 @@ end
     }
 
     #[test]
+    fn cfg_dfg_overlay_reuses_a_production_target_for_a_test_replaced_call() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Worker
+  def observed
+    File.read("first")
+  end
+
+  def replaced
+    File.read("second")
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [],
+                "calls": [
+                    {
+                        "language": "ruby",
+                        "caller": {
+                            "language": "ruby", "path": path,
+                            "owner": "Worker", "name": "observed",
+                            "kind": "instance", "line": 2
+                        },
+                        "callsite": {"path": path, "line": 3, "selector": "read"},
+                        "targets": [{
+                            "symbol": "nil-kill-runtime ruby ruby 3.2.3 IO.read().",
+                            "owner": "IO", "name": "read", "kind": "class",
+                            "receiver_type": "Class"
+                        }],
+                        "receiver_domain": {
+                            "types": ["Class"], "singletons": ["File"]
+                        },
+                        "count": 1
+                    },
+                    {
+                        "language": "ruby",
+                        "caller": {
+                            "language": "ruby", "path": path,
+                            "owner": "Worker", "name": "replaced",
+                            "kind": "instance", "line": 6
+                        },
+                        "callsite": {"path": path, "line": 7, "selector": "read"},
+                        "targets": [],
+                        "target_observation_complete": false,
+                        "receiver_domain": {
+                            "types": ["Class"], "singletons": ["File"]
+                        },
+                        "count": 1
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let replaced = output
+            .calls
+            .iter()
+            .find(|call| call.function == "replaced" && call.message == "read")
+            .expect("replaced File.read");
+
+        assert_eq!(
+            replaced.semantic_symbol.as_deref(),
+            Some("nil-kill-runtime ruby ruby 3.2.3 IO.read().")
+        );
+        assert_eq!(replaced.known_time_complexity.as_deref(), Some("O(N+C)"));
+        assert_eq!(replaced.known_space_complexity.as_deref(), Some("O(N+S)"));
+    }
+
+    #[test]
     fn cfg_dfg_overlay_propagates_observed_project_returns_through_direct_calls() {
         let mut file = tempfile::NamedTempFile::new().expect("source");
         file.write_all(
@@ -4476,9 +5539,280 @@ end
             owner: "Producer".to_string(),
             function: "build_rows".to_string(),
             line: producer_line,
+            method_id: None,
         });
 
         assert_eq!(located.len(), 1);
         assert_eq!(located[0].dispatch_name, "build_rows");
+    }
+
+    #[test]
+    fn canonical_evidence_joins_only_the_exact_fact_mine_anchor() {
+        let directory = tempfile::tempdir().expect("directory");
+        let file = directory.path().join("worker.rb");
+        std::fs::write(
+            &file,
+            "class Worker\n  def run(left, right)\n    left.size + right.size\n  end\nend\n",
+        )
+        .expect("source");
+        let document = syntax::parse_file(file.clone(), Language::Ruby).expect("parse");
+        let mut overlay_profile = profile::extract(&document, Profile::Espalier);
+        let plan_profile = profile::extract(&document, Profile::TracePlan);
+        let built = runtime_protocol::build_trace_plan_with_bindings(
+            &plan_profile,
+            std::slice::from_ref(&file),
+            directory.path(),
+        )
+        .expect("plan");
+        let selected = built
+            .bindings
+            .iter()
+            .find_map(|(anchor, binding)| match binding {
+                AnchorBinding::Call { call_id }
+                    if overlay_profile
+                        .calls
+                        .iter()
+                        .find(|call| call.id == *call_id)
+                        .is_some_and(|call| call.message == "size" && call.receiver == "left") =>
+                {
+                    Some((anchor.clone(), call_id.clone()))
+                }
+                _ => None,
+            })
+            .expect("left.size anchor");
+        let run_id = "run-1".to_string();
+        let runtime_value = |name: &str| runtime_protocol::RuntimeValue {
+            type_symbol: format!("nil-kill-runtime ruby ruby 3.2.3 {name}#"),
+            source_role: EnumOrUnknown::new(runtime_protocol::SourceRole::PRODUCTION),
+            ..runtime_protocol::RuntimeValue::default()
+        };
+        let runtime_values = |name: &str| runtime_protocol::ValueSet {
+            alternatives: vec![runtime_protocol::WeightedValue {
+                value: MessageField::some(runtime_value(name)),
+                count: 1,
+                ..runtime_protocol::WeightedValue::default()
+            }],
+            ..runtime_protocol::ValueSet::default()
+        };
+        let anchors = built
+            .plan
+            .requests
+            .iter()
+            .map(|request| {
+                let anchor = request.anchor.as_ref().expect("anchor");
+                let selected_anchor = anchor.symbol == selected.0;
+                runtime_protocol::AnchorEvidence {
+                    anchor_symbol: anchor.symbol.clone(),
+                    anchor_semantic_digest: anchor.semantic_digest.clone(),
+                    capture: MessageField::some(runtime_protocol::CaptureSummary {
+                        status: EnumOrUnknown::new(if selected_anchor {
+                            CaptureStatus::COMPLETE_FOR_RUNS
+                        } else {
+                            CaptureStatus::NOT_EXECUTED
+                        }),
+                        run_ids: vec![run_id.clone()],
+                        observed_executions: u64::from(selected_anchor),
+                        ..runtime_protocol::CaptureSummary::default()
+                    }),
+                    executions: selected_anchor
+                        .then(|| runtime_protocol::ExecutionBucket {
+                            count: 1,
+                            receiver: MessageField::some(runtime_values("String")),
+                            target: MessageField::some(runtime_protocol::RuntimeTarget {
+                                symbol: "nil-kill-runtime ruby ruby 3.2.3 String#size()."
+                                    .to_string(),
+                                source_role: EnumOrUnknown::new(
+                                    runtime_protocol::SourceRole::STANDARD_LIBRARY,
+                                ),
+                                package_manager: "ruby".to_string(),
+                                package_name: "ruby".to_string(),
+                                package_version: "3.2.3".to_string(),
+                                ..runtime_protocol::RuntimeTarget::default()
+                            }),
+                            result: MessageField::some(runtime_values("Integer")),
+                            provenance: MessageField::some(runtime_protocol::Provenance {
+                                run_id: run_id.clone(),
+                                provider: "ruby-tracepoint".to_string(),
+                                provider_version: "1".to_string(),
+                                ..runtime_protocol::Provenance::default()
+                            }),
+                            ..runtime_protocol::ExecutionBucket::default()
+                        })
+                        .into_iter()
+                        .collect(),
+                    ..runtime_protocol::AnchorEvidence::default()
+                }
+            })
+            .collect();
+        let evidence = runtime_protocol::RuntimeEvidence {
+            protocol_version: runtime_protocol::PROTOCOL_VERSION,
+            producer: MessageField::some(runtime_protocol::ToolInfo {
+                name: "nil-kill".to_string(),
+                version: "1".to_string(),
+                ..runtime_protocol::ToolInfo::default()
+            }),
+            authority: EnumOrUnknown::new(runtime_protocol::Authority::MODELED_RUNS),
+            trace_plan_digest: built.plan.plan_digest.clone(),
+            runs: vec![runtime_protocol::Run {
+                id: run_id,
+                status: EnumOrUnknown::new(runtime_protocol::RunStatus::SUCCEEDED),
+                ..runtime_protocol::Run::default()
+            }],
+            anchors,
+            ..runtime_protocol::RuntimeEvidence::default()
+        };
+
+        apply_protocol_to_profile(&mut overlay_profile, &built, &evidence).expect("overlay");
+        let selected_call = overlay_profile
+            .calls
+            .iter()
+            .find(|call| call.id == selected.1)
+            .expect("selected call");
+        assert!(selected_call.runtime_evidence_observed);
+        assert_eq!(
+            selected_call.semantic_symbol.as_deref(),
+            Some("nil-kill-runtime ruby ruby 3.2.3 String#size().")
+        );
+        let other = overlay_profile
+            .calls
+            .iter()
+            .find(|call| call.message == "size" && call.receiver == "right")
+            .expect("other same-selector call");
+        assert!(!other.runtime_evidence_observed);
+    }
+
+    #[test]
+    fn canonical_execution_buckets_preserve_receiver_target_correlation() {
+        let directory = tempfile::tempdir().expect("directory");
+        let file = directory.path().join("worker.rb");
+        std::fs::write(
+            &file,
+            "class Worker\n  def run(value)\n    value.size\n  end\nend\n",
+        )
+        .expect("source");
+        let document = syntax::parse_file(file.clone(), Language::Ruby).expect("parse");
+        let profile = profile::extract(&document, Profile::TracePlan);
+        let built = runtime_protocol::build_trace_plan_with_bindings(
+            &profile,
+            std::slice::from_ref(&file),
+            directory.path(),
+        )
+        .expect("plan");
+        let call_anchor = built
+            .bindings
+            .iter()
+            .find_map(|(anchor, binding)| {
+                matches!(binding, AnchorBinding::Call { .. }).then(|| anchor.clone())
+            })
+            .expect("call anchor");
+        let value_set = |name: &str| runtime_protocol::ValueSet {
+            alternatives: vec![runtime_protocol::WeightedValue {
+                value: MessageField::some(runtime_protocol::RuntimeValue {
+                    type_symbol: format!("nil-kill-runtime ruby ruby 3.2.3 {name}#"),
+                    source_role: EnumOrUnknown::new(runtime_protocol::SourceRole::PRODUCTION),
+                    ..runtime_protocol::RuntimeValue::default()
+                }),
+                count: 1,
+                ..runtime_protocol::WeightedValue::default()
+            }],
+            ..runtime_protocol::ValueSet::default()
+        };
+        let bucket = |receiver: &str| runtime_protocol::ExecutionBucket {
+            count: 1,
+            receiver: MessageField::some(value_set(receiver)),
+            target: MessageField::some(runtime_protocol::RuntimeTarget {
+                symbol: format!("nil-kill-runtime ruby ruby 3.2.3 {receiver}#size()."),
+                source_role: EnumOrUnknown::new(runtime_protocol::SourceRole::STANDARD_LIBRARY),
+                package_manager: "ruby".to_string(),
+                package_name: "ruby".to_string(),
+                package_version: "3.2.3".to_string(),
+                ..runtime_protocol::RuntimeTarget::default()
+            }),
+            provenance: MessageField::some(runtime_protocol::Provenance {
+                run_id: "run-1".to_string(),
+                provider: "ruby-tracepoint".to_string(),
+                provider_version: "1".to_string(),
+                ..runtime_protocol::Provenance::default()
+            }),
+            ..runtime_protocol::ExecutionBucket::default()
+        };
+        let anchors = built
+            .plan
+            .requests
+            .iter()
+            .map(|request| {
+                let anchor = request.anchor.as_ref().expect("anchor");
+                let selected = anchor.symbol == call_anchor;
+                runtime_protocol::AnchorEvidence {
+                    anchor_symbol: anchor.symbol.clone(),
+                    anchor_semantic_digest: anchor.semantic_digest.clone(),
+                    capture: MessageField::some(runtime_protocol::CaptureSummary {
+                        status: EnumOrUnknown::new(if selected {
+                            CaptureStatus::COMPLETE_FOR_RUNS
+                        } else {
+                            CaptureStatus::NOT_EXECUTED
+                        }),
+                        run_ids: vec!["run-1".to_string()],
+                        observed_executions: if selected { 2 } else { 0 },
+                        ..runtime_protocol::CaptureSummary::default()
+                    }),
+                    executions: if selected {
+                        vec![bucket("String"), bucket("Array")]
+                    } else {
+                        Vec::new()
+                    },
+                    ..runtime_protocol::AnchorEvidence::default()
+                }
+            })
+            .collect();
+        let evidence = runtime_protocol::RuntimeEvidence {
+            protocol_version: runtime_protocol::PROTOCOL_VERSION,
+            producer: MessageField::some(runtime_protocol::ToolInfo {
+                name: "nil-kill".to_string(),
+                version: "1".to_string(),
+                ..runtime_protocol::ToolInfo::default()
+            }),
+            authority: EnumOrUnknown::new(runtime_protocol::Authority::MODELED_RUNS),
+            trace_plan_digest: built.plan.plan_digest.clone(),
+            runs: vec![runtime_protocol::Run {
+                id: "run-1".to_string(),
+                status: EnumOrUnknown::new(runtime_protocol::RunStatus::SUCCEEDED),
+                ..runtime_protocol::Run::default()
+            }],
+            anchors,
+            ..runtime_protocol::RuntimeEvidence::default()
+        };
+        runtime_protocol::validate_runtime_evidence(&built.plan, &evidence).expect("valid");
+        let facts = protocol_evidence(&profile, &built, &evidence).expect("facts");
+        let correlated = facts
+            .calls
+            .iter()
+            .map(|call| {
+                (
+                    call.receiver_domain
+                        .as_ref()
+                        .expect("receiver")
+                        .types
+                        .iter()
+                        .next()
+                        .expect("type")
+                        .clone(),
+                    call.targets[0].symbol.clone(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            correlated,
+            BTreeSet::from([
+                (
+                    "Array".to_string(),
+                    "nil-kill-runtime ruby ruby 3.2.3 Array#size().".to_string(),
+                ),
+                (
+                    "String".to_string(),
+                    "nil-kill-runtime ruby ruby 3.2.3 String#size().".to_string(),
+                ),
+            ])
+        );
     }
 }

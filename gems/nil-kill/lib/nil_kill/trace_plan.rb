@@ -20,8 +20,10 @@ module NilKill
 
     def write(path)
       files = NilKill.target_files
+      runtime_evidence_plan = nil
       unless files.empty?
         static = StaticEvidence.build_trace_plan(files, root: ROOT)
+        runtime_evidence_plan = StaticEvidence.build_runtime_evidence_plan(files, root: ROOT)
         static.fetch("methods", []).each { |method| add_static_method(method) }
         facts = Hash(static["facts"])
         tlet_types = Array(facts["tlet_sites"]).to_h do |site|
@@ -54,6 +56,9 @@ module NilKill
         "runtime_result_call_sites" => @runtime_result_call_sites,
         "runtime_collection_receiver_sites" => @runtime_collection_receiver_sites,
         "runtime_native_activation_sites" => @runtime_native_activation_sites,
+        # Public FactMine <-> collector contract. The other fields in this
+        # file are private NilKill instrumentation controls.
+        "runtime_evidence" => runtime_evidence_plan,
       }))
     end
 

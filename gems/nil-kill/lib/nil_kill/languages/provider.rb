@@ -109,13 +109,6 @@ module NilKill
         {}
       end
 
-      # Reject runtime identities whose definition belongs to a language-owned
-      # non-production source role (for example, a test double). The shared
-      # emitter deliberately knows nothing about language-specific test paths.
-      def runtime_scip_event_eligible?(event:, root:)
-        true
-      end
-
       # Mechanically decode one tracer-owned call event into the neutral
       # runtime-evidence call shape. Package/symbol grammar and source-language
       # naming conventions belong to the provider.
@@ -129,6 +122,25 @@ module NilKill
       # here, but must not inspect source or infer flow relationships.
       def runtime_value_observations(runtime_dir:, root:)
         []
+      end
+
+      # Language-owned serialization of native runtime identities into
+      # canonical SCIP symbols. Shared protocol code treats these as opaque.
+      def runtime_evidence_type_symbol(type)
+        raise UnsupportedRuntimeTracer,
+          "#{display_name} does not implement runtime type SCIP identities"
+      end
+
+      def runtime_evidence_singleton_symbol(type)
+        raise UnsupportedRuntimeTracer,
+          "#{display_name} does not implement runtime singleton SCIP identities"
+      end
+
+      def runtime_evidence_provenance
+        {
+          "provider" => "#{language}-runtime",
+          "provider_version" => "1",
+        }
       end
 
       # Stable digest of source semantics that can affect runtime evidence.
