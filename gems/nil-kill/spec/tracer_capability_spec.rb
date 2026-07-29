@@ -13,6 +13,45 @@ require_relative "spec_helper"
 RSpec.describe "nil-kill tracer capability matrix" do
   # mini_collect / in_tmp / lib come from MiniCollect (spec/support).
 
+  it "keeps record-shaped Hash lookup results through in-place instrumentation" do
+    in_tmp do |dir|
+      lib(dir, <<~RUBY)
+        NativeArm = Struct.new(:id, :hits)
+
+        class W
+          def merge(source)
+            index = source.each_with_object({}) { |arm, out| out[arm.id] = arm }
+            source.each do |arm|
+              existing = index[arm.id] || index[:missing]
+              existing.hits = existing.hits.to_i + arm.hits.to_i if existing
+            end
+          end
+        end
+      RUBY
+
+      r = mini_collect(
+        dir,
+        "lib.rb",
+        %(require_relative "lib"\narm = NativeArm.new("first", 1)\nW.new.merge([arm])\n),
+        runtime_scip: true,
+        trace_plan_patch: lambda { |plan|
+          plan.fetch("runtime_result_call_sites")[[File.join(dir, "lib.rb"), 7].join("\0")] = true
+        }
+      )
+
+      expect(r[:status]).to be_success, r[:err]
+      lookup = r[:runtime_calls].find do |event|
+        event.dig("callee", "owner") == "Hash" && event.dig("callee", "name") == "[]" &&
+          event.dig("result_domain", "types")&.include?("NativeArm")
+      end
+      expect(lookup).to include(
+        "result_domain" => a_hash_including(
+          "shapes" => include(a_hash_including("kind" => "record", "name" => "NativeArm"))
+        )
+      )
+    end
+  end
+
   # ---- METHOD SHAPES ---------------------------------------------------
 
   it "plain + endless def" do

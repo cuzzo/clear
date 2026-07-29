@@ -2854,6 +2854,7 @@ mod tests {
             unresolved_reason: Some("receiver_requires_corpus_resolution".into()),
             resolution_missing_proof: None,
             empty_domain_cause: None,
+            runtime_evidence_observed: false,
         }
     }
 

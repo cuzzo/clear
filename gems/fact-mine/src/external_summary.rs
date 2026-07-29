@@ -549,6 +549,7 @@ mod tests {
                 "dependency_or_stdlib_symbol_known_cost_unavailable".into(),
             ),
             empty_domain_cause: Some("external_declaration".into()),
+            runtime_evidence_observed: false,
         }
     }
 

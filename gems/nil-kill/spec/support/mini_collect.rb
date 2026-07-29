@@ -36,11 +36,16 @@ module MiniCollect
   # so the tracer's source-wrap recorder never fires while Ruby
   # Coverage still marks bodies executed. The invariant MUST then fail
   # (proving it has teeth, not vacuously green).
-  def mini_collect(dir, lib_rel, driver_src, extra_files: {}, instrument: true)
+  def mini_collect(dir, lib_rel, driver_src, extra_files: {}, instrument: true, runtime_scip: false, trace_plan_patch: nil)
     FileUtils.mkdir_p(NilKill::RUNTIME_DIR)
     snapshot = File.join(NilKill::TMP_DIR, "src-snapshot")
     isolated_env("NIL_KILL_TARGETS" => dir, "NIL_KILL_INSTRUMENTED_ROOT" => nil) do
       NilKill::TracePlan.write(NilKill::TRACE_PLAN_PATH)
+      if trace_plan_patch
+        plan = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH))
+        trace_plan_patch.call(plan)
+        File.write(NilKill::TRACE_PLAN_PATH, JSON.generate(plan))
+      end
       NilKill::SourceInstrumenter.new.run_in_place(snapshot) if instrument
     end
     extra_files.each do |rel, body|
@@ -53,6 +58,7 @@ module MiniCollect
     env = {
       "NIL_KILL_TRACE" => "1",
       "NIL_KILL_TRACE_METHODS" => "0",
+      "NIL_KILL_RUNTIME_SCIP" => runtime_scip ? "1" : nil,
       "NIL_KILL_TMP_DIR" => NilKill::TMP_DIR,
       "NIL_KILL_TARGETS" => dir,
       "RUBYOPT" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "-r#{SUBPROCESS_COVERAGE} -r#{TRACER}" : "-r#{TRACER}",
@@ -74,6 +80,7 @@ module MiniCollect
       status: status, out: out, err: err, dir: dir,
       methods: glob.call("methods"), method_edges: glob.call("method-edges"), structs: glob.call("structs"),
       ivars: glob.call("ivars"), collections: glob.call("collections"),
+      runtime_calls: glob.call("runtime-calls"),
       tlets: glob.call("tlets"), loops: glob.call("loops"), coverage: glob.call("coverage"),
       instr_lib: (File.file?(instr_lib_path) ? File.read(instr_lib_path) : ""),
     }

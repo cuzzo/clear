@@ -824,6 +824,7 @@ mod tests {
             unresolved_reason: None,
             resolution_missing_proof: None,
             empty_domain_cause: None,
+            runtime_evidence_observed: false,
         }
     }
 }

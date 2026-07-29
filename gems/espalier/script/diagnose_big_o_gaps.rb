@@ -116,8 +116,10 @@ call_resolution_category = lambda do |call|
     "modeled_nonproject_call"
   elsif !call["semantic_symbol"].to_s.empty?
     external_category.call(call)
-  else
+  elsif call["runtime_evidence_observed"] == true
     "semantic_identity_missing"
+  else
+    "runtime_callsite_unobserved"
   end
 end
 
@@ -153,7 +155,8 @@ incomplete_ids.each do |method_id|
     next if call["known_time_complexity"] || call["known_space_complexity"]
 
     category = if call["semantic_symbol"].to_s.empty?
-                 "semantic_identity_missing"
+                 call["runtime_evidence_observed"] == true ?
+                   "semantic_identity_missing" : "runtime_callsite_unobserved"
                else
                  external_category.call(call)
                end
@@ -198,6 +201,7 @@ incomplete_ids.each do |method_id|
 end
 
 priority = %w[
+  runtime_callsite_unobserved
   semantic_identity_missing
   callback_cost_missing
   reflective_target_cost_missing

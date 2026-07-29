@@ -589,6 +589,12 @@ pub struct CallRecord {
     /// cases where the retained evidence cannot distinguish them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub empty_domain_cause: Option<String>,
+    /// True when a runtime-evidence event matched this normalized source call.
+    /// This is diagnostic provenance only: it neither closes a candidate set
+    /// nor licenses a cost model.  It lets coverage reports distinguish a
+    /// missing runtime path from a failed semantic join.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub runtime_evidence_observed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
@@ -8552,6 +8558,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 unresolved_reason,
                 resolution_missing_proof: None,
                 empty_domain_cause: None,
+                runtime_evidence_observed: false,
             }
         })
         .collect::<Vec<_>>();
@@ -10470,6 +10477,7 @@ def py_fn(a: int) -> str:
             unresolved_reason: None,
             resolution_missing_proof: None,
             empty_domain_cause: None,
+            runtime_evidence_observed: false,
         });
         output.state_accesses.push(StateAccessRecord {
             id: "edge:state".into(),

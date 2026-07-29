@@ -410,6 +410,7 @@ pub fn apply_to_profile(
         ..OverlayStats::default()
     };
     for call in &mut output.calls {
+        call.runtime_evidence_observed |= observed.contains_key(&call.id);
         let Some(domain) = narrowed_receiver_domains.get(&call.id) else {
             continue;
         };
@@ -3258,6 +3259,7 @@ end
             upcase.semantic_symbol.as_deref(),
             Some("nil-kill-runtime ruby ruby 3.2.3 String#upcase().")
         );
+        assert!(upcase.runtime_evidence_observed);
     }
 
     #[test]
