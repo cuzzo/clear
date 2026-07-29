@@ -10,8 +10,9 @@ module NilKill
       SCHEMA = "fact-mine.runtime-value-evidence.v1"
       DEFAULT_OUTPUT = "runtime-values.json.gz"
 
-      def self.emit(root:, runtime_dir:, events:, output: nil)
-        new(root: root, runtime_dir: runtime_dir, output: output).emit(events)
+      def self.emit(root:, runtime_dir:, events:, output: nil, languages: nil, run_ids: nil)
+        new(root: root, runtime_dir: runtime_dir, output: output)
+          .emit(events, languages: languages, run_ids: run_ids)
       end
 
       def initialize(root:, runtime_dir:, output: nil)
@@ -20,12 +21,14 @@ module NilKill
         @output = File.expand_path(output || File.join(@runtime_dir, DEFAULT_OUTPUT))
       end
 
-      def emit(events)
+      def emit(events, languages: nil, run_ids: nil)
         semantic_events = events.select do |event|
           Languages.provider_for(event.fetch("language"))
             .runtime_scip_event_eligible?(event: event, root: @root)
         end
-        languages = semantic_events.map { |event| event.fetch("language") }.uniq.sort
+        languages = (
+          semantic_events.map { |event| event.fetch("language") } + Array(languages)
+        ).uniq.sort
         observations = languages.flat_map do |language|
           Languages.provider_for(language).runtime_value_observations(
             runtime_dir: @runtime_dir,
@@ -48,8 +51,9 @@ module NilKill
           "schema" => SCHEMA,
           "authority" => ScipEmitter::AUTHORITY,
           "environment" => environment.sort.to_h,
-          "runs" => semantic_events.map { |event| event["run_id"].to_s }
-            .reject(&:empty?).uniq.sort,
+          "runs" => (
+            semantic_events.map { |event| event["run_id"].to_s } + Array(run_ids).map(&:to_s)
+          ).reject(&:empty?).uniq.sort,
           "observations" => observations,
           "calls" => calls,
         }

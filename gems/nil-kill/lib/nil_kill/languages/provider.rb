@@ -138,6 +138,12 @@ module NilKill
         Digest::SHA256.file(path).hexdigest
       end
 
+      # Optional language-owned test discovery/command sharding. Returning nil
+      # preserves the supplied commands as opaque, correctness-first shards.
+      def runtime_test_plan(root:, targets:, commands:)
+        nil
+      end
+
       def return_type_index(root:)
         nil
       end

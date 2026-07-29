@@ -86,14 +86,18 @@ added without changing Nil-kill's analyzer.
 > representative production replay or focused tests over repeatedly collecting
 > an entire suite.
 >
-> After one full collection, `nil-kill collect --fast -- <focused command>`
-> content-hashes the target sources. With no changes it skips the workload
-> entirely. With changes it instruments only changed sources, keeps the raw
-> delta under `runtime/increments/`, replaces changed/observed rows in the
-> compressed canonical snapshot, and regenerates SCIP. Because Ruby dispatch
-> can affect code outside the observed slice, a fast snapshot is explicitly
-> marked `potentially_stale`; periodically run a full collection to re-establish
-> a closed baseline.
+> A full collection recognizes ordinary Minitest/RSpec commands and records
+> each test file as an independently replaceable evidence shard, with a unique
+> run identity and its executed production functions/callsites. Afterwards,
+> `nil-kill collect --fast` semantic-fingerprints production functions, tests,
+> and test support files. Changed tests run themselves; added tests always run;
+> changed functions run every test shard that previously entered them; deleted
+> tests subtract their shard. Every selected test traces all production
+> functions it reaches, including previously unchanged functions. Changes
+> whose impact cannot be closed precisely (shared helpers, function
+> additions/deletions, dependency/runtime changes, or opaque workloads)
+> automatically fall back to every shard. Only a fallback that cannot run is
+> allowed to remain explicitly stale.
 
 Nil-Kill's trace plan omits method boundaries, T.let sites, and state fields
 whose contracts are already strong. Unknown and weak slots are retained
@@ -184,7 +188,9 @@ Config:
 
 Ruby collection also writes consumer-compatible plain `runtime.scip.json`,
 compressed `runtime-attestation.json.gz`, `runtime-values.json.gz`, raw
-`*.jsonl.gz`, and `runtime-snapshot.json.gz` in the runtime output directory.
+`*.jsonl.gz` under per-run/per-test directories, independently replaceable
+`shard-evidence/*.json.gz`, and `runtime-snapshot.json.gz` in the runtime
+output directory.
 Set `NIL_KILL_COMPRESS_EVIDENCE=0` only when plain raw JSONL is needed for
 debugging. NilKill serializes observed calls and values without parsing source
 or inferring flow. FactMine overlays that evidence on its normalized CFG/DFG

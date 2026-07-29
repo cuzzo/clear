@@ -156,85 +156,120 @@ module NilKill
       instrument_source = !@argv.delete("--no-instrument-source")
       instrument_source = true if @argv.delete("--instrument-source")
       commands = collect_commands
-      workload_digest = Digest::SHA256.hexdigest(JSON.generate(commands))
+      if commands.empty? && !fast
+        abort "usage: bundle exec tools/nil-kill collect [--fast] [--commands FILE] [--continue-on-error] -- <command...>"
+      end
+      trace_plan_enabled = ENV["NIL_KILL_TRACE_PLAN"] != "0"
+      TracePlan.write if trace_plan_enabled
+      trace_plan = File.file?(TRACE_PLAN_PATH) ? JSON.parse(File.read(TRACE_PLAN_PATH)) : {}
+      target_files = NilKill.target_files
+      inventory = Runtime::FunctionInventory.build(
+        root: ROOT,
+        files: target_files,
+        trace_plan: trace_plan
+      )
       snapshot = fast && begin
         Runtime::Snapshot.load(root: ROOT, runtime_dir: RUNTIME_DIR)
       rescue ArgumentError => error
         abort "nil-kill: #{error.message}"
       end
-      changes = snapshot&.changes(NilKill.target_files, workload_digest: workload_digest)
-      if fast && changes.fetch("changed_paths").empty? && changes.fetch("deleted_paths").empty?
-        puts "nil-kill: incremental snapshot is current; 0 changed sources, workload skipped"
+      workload =
+        if fast && commands.empty?
+          Runtime::WorkloadPlan.from_h(root: ROOT, value: snapshot.manifest.fetch("workload"))
+        else
+          Runtime::WorkloadPlan.build(
+            root: ROOT,
+            targets: target_files,
+            commands: commands
+          )
+        end
+      selection =
+        if fast
+          snapshot.select_increment(
+            files: target_files,
+            function_inventory: inventory.to_h,
+            workload_plan: workload
+          )
+        else
+          {
+            "selected_shards" => workload.shard_ids,
+            "deleted_shards" => [],
+            "changed_functions" => inventory.functions.keys,
+            "added_functions" => [],
+            "deleted_functions" => [],
+            "changed_tests" => workload.tests.keys,
+            "deleted_tests" => [],
+            "uncertain_closure" => false,
+            "rebuild" => true,
+            "current_hashes" => Runtime::Snapshot.new(root: ROOT, runtime_dir: RUNTIME_DIR)
+              .source_hashes(target_files),
+            "environment" => {},
+            "functions" => inventory.to_h,
+            "workload" => workload.to_h,
+          }
+        end
+      if fast && !selection.fetch("rebuild")
+        puts "nil-kill: incremental snapshot is current; no semantic source/test changes, workload skipped"
         return
+      end
+      selected = workload.shards.select do |shard|
+        selection.fetch("selected_shards").include?(shard.fetch("id"))
       end
       FileUtils.rm_rf(RUNTIME_DIR) unless append || fast
       FileUtils.mkdir_p(RUNTIME_DIR)
       generation = snapshot ? snapshot.manifest.fetch("generation").to_i + 1 : 0
-      working_runtime_dir =
-        if fast
-          File.join(RUNTIME_DIR, "increments", format("%06d", generation))
-        else
-          RUNTIME_DIR
-        end
-      FileUtils.rm_rf(working_runtime_dir) if fast
+      working_runtime_dir = File.join(
+        RUNTIME_DIR,
+        fast ? "increments" : "runs",
+        format("%06d", generation)
+      )
+      FileUtils.rm_rf(working_runtime_dir)
       FileUtils.mkdir_p(working_runtime_dir)
-      collect_files =
-        if fast
-          changes.fetch("changed_paths").map { |path| File.expand_path(path, ROOT) }.select { |path| File.file?(path) }
-        else
-          NilKill.target_files
-        end
-      trace_workload = !fast || collect_files.any?
-      if trace_workload && commands.empty?
-        abort "usage: bundle exec tools/nil-kill collect [--fast] [--commands FILE] [--continue-on-error] -- <command...>"
-      end
-      trace_plan_enabled = ENV["NIL_KILL_TRACE_PLAN"] != "0"
-      TracePlan.write if trace_plan_enabled && trace_workload
       snapshot_dir = File.join(working_runtime_dir, "src-snapshot")
-      instrumented = instrument_source && trace_workload
+      instrumented = instrument_source && selected.any?
       if instrumented
         acquire_inplace_lock!
-        # Sentinel + traps BEFORE the first byte of src is overwritten,
-        # with the full candidate list -> a crash mid-wrap is healed.
-        NilKill.write_inplace_sentinel!(snapshot_dir, collect_files.map { |f| NilKill.rel(f) })
+        NilKill.write_inplace_sentinel!(snapshot_dir, target_files.map { |f| NilKill.rel(f) })
         install_inplace_restore_traps!
-        instrumenter =
-          fast ? SourceInstrumenter.new(runtime_dir: working_runtime_dir) : SourceInstrumenter.new
-        if fast
-          instrumenter.run_in_place(snapshot_dir, files: collect_files)
-        else
-          instrumenter.run_in_place(snapshot_dir)
-        end
+        SourceInstrumenter.new(runtime_dir: working_runtime_dir)
+          .run_in_place(snapshot_dir, files: target_files)
       end
       require "etc"
       jobs = ENV["NK_JOBS"] || ENV["NIL_KILL_JOBS"] || Etc.nprocessors.to_s rescue "4"
       tracer = File.expand_path("runtime_trace.rb", __dir__)
       rubyopt = (ENV["RUBYOPT"].to_s.split + ["-r#{tracer}"]).join(" ")
-      env = ENV.to_h.merge(
+      base_env = ENV.to_h.merge(
         "NIL_KILL_TRACE" => "1",
         "NIL_KILL_RUNTIME_SCIP" => "1",
-        "NIL_KILL_RUN_ID" => ENV["NIL_KILL_RUN_ID"] || SecureRandom.uuid,
         "NIL_KILL_PROJECT_NAME" => ENV["NIL_KILL_PROJECT_NAME"] || File.basename(ROOT),
         "NIL_KILL_PROJECT_VERSION" => ENV["NIL_KILL_PROJECT_VERSION"] ||
           git_capture("rev-parse", "HEAD")&.strip || "workspace",
-        "NIL_KILL_RUNTIME_DIR" => working_runtime_dir,
         "RUBYOPT" => rubyopt,
         "WORKERS" => ENV["WORKERS"] || jobs,
         "NK_JOBS" => ENV["NK_JOBS"] || jobs,
         "NIL_KILL_JOBS" => ENV["NIL_KILL_JOBS"] || jobs
       )
-      if fast
-        env["NIL_KILL_TRACE_SOURCE_SLICE"] = collect_files.map { |path| File.expand_path(path) }
-          .join(File::PATH_SEPARATOR)
-      end
-      # Source-wrap path: targeted TracePoints off by default (the
-      # injected recorder is authoritative). No NIL_KILL_INSTRUMENTED_ROOT
-      # any more -- the wrapped file IS the real src path.
-      env["NIL_KILL_TRACE_METHODS"] ||= "0" if instrumented && trace_plan_enabled
+      base_env["NIL_KILL_TRACE_METHODS"] ||= "0" if instrumented && trace_plan_enabled
       continue = @argv.delete("--continue-on-error")
+      dependency_updates = {}
+      callsite_updates = {}
+      staged_evidence = {}
+      shard_run_ids = {}
       begin
-        commands.each_with_index do |cmd, i|
-          puts "[#{i + 1}/#{commands.size}] NIL_KILL_TRACE=1 RUBYOPT=#{rubyopt.shellescape} #{cmd.shelljoin}"
+        selected.each_with_index do |shard, i|
+          shard_dir = File.join(working_runtime_dir, shard.fetch("id"))
+          FileUtils.mkdir_p(shard_dir)
+          line_map = File.join(working_runtime_dir, ".nk-linemap.json")
+          FileUtils.cp(line_map, File.join(shard_dir, ".nk-linemap.json")) if File.file?(line_map)
+          run_id = "#{generation}:#{shard.fetch("id")}:#{SecureRandom.uuid}"
+          shard_run_ids[shard.fetch("id")] = run_id
+          env = base_env.merge(
+            "NIL_KILL_RUNTIME_DIR" => shard_dir,
+            "NIL_KILL_RUN_ID" => run_id,
+            "NIL_KILL_SHARD_ID" => shard.fetch("id")
+          )
+          cmd = shard.fetch("command")
+          puts "[#{i + 1}/#{selected.size}] NIL_KILL_TRACE=1 RUBYOPT=#{rubyopt.shellescape} #{cmd.shelljoin}"
           ok = system(env, *cmd)
           next if ok || continue
           exit($?&.exitstatus || 1)
@@ -242,57 +277,91 @@ module NilKill
       ensure
         NilKill.restore_inplace_snapshot! if instrumented
       end
-      assert_collect_coverage_produced!(working_runtime_dir) if instrumented
-      compress_runtime_evidence!(working_runtime_dir)
-      emitted =
-        if fast
-          delta = Runtime::ScipEmitter.emit_value_evidence(
-            root: ROOT,
-            runtime_dir: working_runtime_dir
+      selected.each do |shard|
+        shard_id = shard.fetch("id")
+        shard_dir = File.join(working_runtime_dir, shard_id)
+        dependency_updates[shard_id] = dependencies_for_shard(shard_dir, inventory)
+        callsite_updates[shard_id] = callsites_for_shard(shard_dir)
+        assert_incremental_shard_sound!(shard_dir, inventory, dependency_updates[shard_id])
+        compress_runtime_evidence!(shard_dir)
+        staged_evidence[shard_id] = Runtime::ScipEmitter.emit_value_evidence(
+          root: ROOT,
+          runtime_dir: shard_dir,
+          languages: target_files.filter_map { |path| Languages.provider_for_path(path)&.language }.uniq,
+          run_ids: [shard_run_ids.fetch(shard_id)]
+        ).fetch("path")
+      end
+      shard_store = File.join(RUNTIME_DIR, "shard-evidence")
+      FileUtils.mkdir_p(shard_store)
+      current_shards = workload.shard_ids
+      destinations = current_shards.to_h do |shard_id|
+        [shard_id, File.join(shard_store, "#{shard_id}.json.gz")]
+      end
+      effective = current_shards.filter_map do |shard_id|
+        staged_evidence[shard_id] || destinations[shard_id] if
+          staged_evidence[shard_id] || File.file?(destinations[shard_id])
+      end
+      dependencies = fast ? Marshal.load(Marshal.dump(snapshot.manifest.fetch("dependencies", {}))) : {}
+      callsites = fast ? Marshal.load(Marshal.dump(snapshot.manifest.fetch("callsites", {}))) : {}
+      selection.fetch("deleted_shards").each { |shard_id| dependencies.delete(shard_id) }
+      selection.fetch("deleted_shards").each { |shard_id| callsites.delete(shard_id) }
+      dependency_updates.each { |shard_id, keys| dependencies[shard_id] = keys }
+      callsite_updates.each { |shard_id, sites| callsites[shard_id] = sites }
+      transaction_paths = (
+        destinations.values +
+        selection.fetch("deleted_shards").map { |id| File.join(shard_store, "#{id}.json.gz") }
+      ).uniq
+      emitted = with_canonical_snapshot_transaction(extra_paths: transaction_paths) do
+        canonical_evidence = Runtime::EvidenceMerger.write(
+          effective,
+          File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+        )
+        result = Runtime::ScipEmitter.emit(
+          root: ROOT,
+          runtime_dir: working_runtime_dir,
+          output: File.join(RUNTIME_DIR, "runtime.scip.json"),
+          attestation: File.join(RUNTIME_DIR, "runtime-attestation.json.gz"),
+          files: target_files,
+          value_evidence_path: canonical_evidence,
+          environment: selection.fetch("environment").merge(
+            "runtime_scip.snapshot_mode" => fast ? "fast" : "full",
+            "runtime_scip.potentially_stale" => selection.fetch("uncertain_closure").to_s
           )
-          with_canonical_snapshot_transaction do
-            canonical_evidence = snapshot.merge_delta!(
-              delta_evidence_path: delta.fetch("path"),
-              changed_paths: changes.fetch("changed_paths"),
-              deleted_paths: changes.fetch("deleted_paths"),
-              current_hashes: changes.fetch("current_hashes"),
-              environment: changes.fetch("environment"),
-              workload_digest: workload_digest
-            )
-            Runtime::ScipEmitter.emit(
-              root: ROOT,
-              runtime_dir: working_runtime_dir,
-              output: File.join(RUNTIME_DIR, "runtime.scip.json"),
-              attestation: File.join(RUNTIME_DIR, "runtime-attestation.json.gz"),
-              files: NilKill.target_files,
-              value_evidence_path: canonical_evidence,
-              environment: {
-                "runtime_scip.snapshot_mode" => "fast",
-                "runtime_scip.potentially_stale" => "true",
-                "runtime_scip.closure_assumption" =>
-                  "changed and observed source evidence was refreshed; unobserved dynamic effects may be stale",
-              }
-            )
-          end
-        else
-          result = Runtime::ScipEmitter.emit(
-            root: ROOT,
-            runtime_dir: RUNTIME_DIR,
-            files: NilKill.target_files
-          )
-          Runtime::Snapshot.new(root: ROOT, runtime_dir: RUNTIME_DIR).write_full!(
-            files: NilKill.target_files,
-            evidence_path: result.fetch("runtime_evidence"),
-            workload_digest: workload_digest
-          )
-          result
+        )
+        staged_evidence.each do |shard_id, path|
+          Runtime::JsonIO.write(destinations.fetch(shard_id), Runtime::JsonIO.read(path))
         end
+        selection.fetch("deleted_shards").each do |shard_id|
+          path = File.join(shard_store, "#{shard_id}.json.gz")
+          File.delete(path) if File.file?(path)
+        end
+        if fast
+          snapshot.write_incremental!(
+            selection: selection,
+            evidence_path: canonical_evidence,
+            dependencies: dependencies,
+            callsites: callsites
+          )
+        else
+          Runtime::Snapshot.new(root: ROOT, runtime_dir: RUNTIME_DIR).write_full!(
+            files: target_files,
+            evidence_path: canonical_evidence,
+            workload_digest: workload.command_digest,
+            function_inventory: inventory.to_h,
+            workload: workload.to_h,
+            dependencies: dependencies,
+            callsites: callsites
+          )
+        end
+        result
+      end
       write_collect_meta!
       puts "wrote runtime SCIP index to #{emitted.fetch("index")}"
       if fast
         puts "updated compressed canonical snapshot generation #{generation}; " \
-          "#{changes.fetch("changed_paths").length} changed, " \
-          "#{changes.fetch("deleted_paths").length} deleted (potentially stale outside retraced slice)"
+          "#{selection.fetch("changed_functions").length} changed functions, " \
+          "#{selection.fetch("changed_tests").length} changed tests, " \
+          "#{selected.length} traced shards"
       end
     end
 
@@ -358,17 +427,85 @@ module NilKill
       end
     end
 
+    def dependencies_for_shard(runtime_dir, inventory)
+      keys = Set.new
+      entry_files = Runtime::JsonIO.matching(runtime_dir, "function-entries-*.jsonl")
+      entry_files.each do |path|
+        Runtime::JsonIO.foreach(path) do |line|
+          row = JSON.parse(line)
+          key = inventory.key_for_entry(
+            path: row.fetch("path"),
+            owner: row.fetch("owner"),
+            name: row.fetch("name"),
+            kind: row.fetch("kind"),
+            line: row["line"]
+          )
+          keys << key if key
+        rescue JSON::ParserError, KeyError
+          next
+        end
+      end
+      return keys.to_a.sort unless entry_files.empty?
+
+      Runtime::JsonIO.matching(runtime_dir, "coverage-*.jsonl").each do |path|
+        Runtime::JsonIO.foreach(path) do |line|
+          row = JSON.parse(line)
+          keys.merge(inventory.keys_for_coverage(row.fetch("path"), row.fetch("lines", [])))
+        rescue JSON::ParserError, KeyError
+          next
+        end
+      end
+      keys.to_a.sort
+    end
+
+    def callsites_for_shard(runtime_dir)
+      sites = Set.new
+      files = Runtime::JsonIO.matching(runtime_dir, "executed-callsites-*.jsonl")
+      files = Runtime::JsonIO.matching(runtime_dir, "runtime-calls-*.jsonl") if files.empty?
+      files.each do |path|
+        Runtime::JsonIO.foreach(path) do |line|
+          row = JSON.parse(line)
+          callsite = row["callsite"] || row
+          sites << [
+            NilKill.rel(callsite.fetch("path")),
+            callsite.fetch("line").to_i,
+            callsite["selector"].to_s,
+          ]
+        rescue JSON::ParserError, KeyError
+          next
+        end
+      end
+      sites.to_a.sort
+    end
+
+    # Empty runtime values are valid when the shard did not reach a function
+    # for which the trace plan requested values. They are an error only when
+    # demanded, covered functions produced no method observations at all.
+    def assert_incremental_shard_sound!(runtime_dir, inventory, covered_function_keys)
+      demanded = Array(covered_function_keys).any? do |key|
+        inventory.functions.dig(key, "runtime_demand")
+      end
+      return unless demanded
+
+      methods = Runtime::JsonIO.matching(runtime_dir, "methods-*.jsonl")
+      return if methods.sum { |path| File.size(path) }.positive?
+
+      abort "nil-kill: shard #{File.basename(runtime_dir)} covered runtime-demanded " \
+        "functions but produced no method observations; refusing a partial incremental snapshot"
+    end
+
     # A failed FactMine regeneration must not leave the manifest/evidence at a
     # newer generation than the consumer SCIP index. Keep the four canonical
     # files as one recoverable transaction; delta evidence remains available
     # for diagnosis and a retry.
-    def with_canonical_snapshot_transaction
+    def with_canonical_snapshot_transaction(extra_paths: [])
       paths = [
         File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT),
         File.join(RUNTIME_DIR, Runtime::Snapshot::MANIFEST),
         File.join(RUNTIME_DIR, "runtime.scip.json"),
         File.join(RUNTIME_DIR, "runtime-attestation.json.gz"),
-      ]
+        *Array(extra_paths),
+      ].uniq
       before = paths.to_h { |path| [path, File.file?(path) ? Runtime::JsonIO.read(path) : nil] }
       yield
     rescue Exception # rubocop:disable Lint/RescueException -- rollback before preserving exits/signals

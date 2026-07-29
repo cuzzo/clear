@@ -3,14 +3,12 @@
 
 module NilKill
   module Runtime
-    # Owns the canonical runtime-evidence snapshot. Incremental collections
-    # replace every row attributable to a source observed by the delta (plus
-    # changed/deleted sources), then atomically rewrite the complete canonical
-    # evidence file. Delta directories remain as an audit trail.
+    # Owns the canonical runtime-evidence snapshot and the dependency metadata
+    # needed to rebuild it from independently replaceable test shards.
     class Snapshot
       SCHEMA = "nil-kill.runtime-snapshot.v1"
       MANIFEST = "runtime-snapshot.json.gz"
-      FINGERPRINT_SCHEME = "provider-runtime-evidence-v1"
+      FINGERPRINT_SCHEME = "provider-runtime-evidence-v2"
 
       attr_reader :root, :runtime_dir, :manifest
 
@@ -46,31 +44,15 @@ module NilKill
         end
       end
 
-      def changes(files, workload_digest: nil)
-        current = source_hashes(files)
-        previous = manifest.fetch("source_hashes")
-        changed = current.filter_map { |path, digest| path if previous[path] != digest }
-        deleted = previous.keys - current.keys
-        current_environment = runtime_environment(files)
-        environment_changed = current_environment != manifest.fetch("environment", {})
-        workload_changed = workload_digest && workload_digest != manifest["workload_digest"]
-        # Environment changes can alter every dispatch/cost observation. A
-        # different workload with otherwise unchanged source is an explicit
-        # request to extend/refresh coverage, so trace the whole source set.
-        if environment_changed || (workload_changed && changed.empty? && deleted.empty?)
-          changed = current.keys
-        end
-        {
-          "current_hashes" => current,
-          "changed_paths" => changed.sort,
-          "deleted_paths" => deleted.sort,
-          "environment" => current_environment,
-          "environment_changed" => environment_changed,
-          "workload_changed" => !!workload_changed,
-        }
-      end
-
-      def write_full!(files:, evidence_path:, workload_digest: nil)
+      def write_full!(
+        files:,
+        evidence_path:,
+        workload_digest: nil,
+        function_inventory: {},
+        workload: {},
+        dependencies: {},
+        callsites: {}
+      )
         hashes = source_hashes(files)
         environment = runtime_environment(files)
         snapshot_id = identity(
@@ -93,6 +75,10 @@ module NilKill
           "source_hashes" => hashes,
           "environment" => environment,
           "workload_digest" => workload_digest,
+          "functions" => function_inventory,
+          "workload" => workload,
+          "dependencies" => dependencies,
+          "callsites" => callsites,
           "changed_paths" => hashes.keys.sort,
           "deleted_paths" => [],
           "created_at" => Time.now.utc.iso8601,
@@ -100,35 +86,106 @@ module NilKill
         )
       end
 
-      def merge_delta!(
-        delta_evidence_path:,
-        changed_paths:,
-        deleted_paths:,
-        current_hashes:,
-        environment:,
-        workload_digest:
+      def select_increment(
+        files:,
+        function_inventory:,
+        workload_plan:
       )
-        canonical_path = File.join(runtime_dir, ValueEvidenceEmitter::DEFAULT_OUTPUT)
-        baseline = JsonIO.parse(canonical_path)
-        delta = JsonIO.parse(delta_evidence_path)
-        observed = evidence_paths(delta)
-        replaced = (Array(changed_paths) + Array(deleted_paths) + observed).uniq.sort
-        merged = merge_evidence(baseline, delta, replaced)
+        current_hashes = source_hashes(files)
+        previous_hashes = manifest.fetch("source_hashes", {})
+        changed_files = current_hashes.filter_map do |path, fingerprint|
+          path if previous_hashes[path] != fingerprint
+        end
+        deleted_files = previous_hashes.keys - current_hashes.keys
+        current_environment = runtime_environment(files)
+        previous_functions = manifest.fetch("functions", {})
+        current_functions = function_inventory
+        previous_workload = manifest.fetch("workload", {})
+        current_workload = workload_plan.to_h
+        previous_tests = previous_workload.fetch("tests", {})
+        current_tests = current_workload.fetch("tests", {})
+        previous_support = previous_workload.fetch("support_files", {})
+        current_support = current_workload.fetch("support_files", {})
+        changed_tests = current_tests.filter_map do |path, fingerprint|
+          path if previous_tests[path] != fingerprint
+        end
+        deleted_tests = previous_tests.keys - current_tests.keys
+        support_changed = previous_support != current_support
+        added_functions = current_functions.keys - previous_functions.keys
+        deleted_functions = previous_functions.keys - current_functions.keys
+        changed_functions = current_functions.filter_map do |key, function|
+          key if previous_functions[key] &&
+            previous_functions[key]["fingerprint"] != function["fingerprint"]
+        end
+        function_changed_paths = (
+          changed_functions.filter_map { |key| current_functions.dig(key, "path") } +
+          added_functions.filter_map { |key| current_functions.dig(key, "path") } +
+          deleted_functions.filter_map { |key| previous_functions.dig(key, "path") }
+        ).uniq
+        residual_source_changes = (changed_files + deleted_files).uniq - function_changed_paths
+        environment_changed = current_environment != manifest.fetch("environment", {})
+        command_changed = previous_workload["command_digest"] != current_workload["command_digest"]
+        mode_changed = previous_workload["mode"] != current_workload["mode"]
+        current_shards = workload_plan.shards.to_h { |shard| [shard.fetch("id"), shard] }
+        prior_shards = previous_workload.fetch("shards", {})
+        deleted_shards = prior_shards.keys - current_shards.keys
+        selected = changed_tests.filter_map do |path|
+          current_shards.values.find { |shard| shard["test_path"] == path }&.fetch("id")
+        end
+        dependencies = manifest.fetch("dependencies", {})
+        changed_functions.each do |function_key|
+          selected.concat(dependencies.filter_map do |shard_id, keys|
+            shard_id if Array(keys).include?(function_key)
+          end)
+        end
+        uncertain = environment_changed || command_changed || mode_changed ||
+          support_changed || added_functions.any? || deleted_functions.any? ||
+          residual_source_changes.any?
+        opaque_fallback = current_workload["mode"] == "opaque" &&
+          (changed_functions.any? || changed_tests.any? || deleted_tests.any?)
+        fallback_full = uncertain || opaque_fallback
+        selected = current_shards.keys if fallback_full
+        {
+          "selected_shards" => selected.uniq.sort,
+          "deleted_shards" => deleted_shards.sort,
+          "changed_tests" => changed_tests.sort,
+          "deleted_tests" => deleted_tests.sort,
+          "changed_functions" => changed_functions.sort,
+          "added_functions" => added_functions.sort,
+          "deleted_functions" => deleted_functions.sort,
+          "changed_files" => changed_files.sort,
+          "deleted_files" => deleted_files.sort,
+          "residual_source_changes" => residual_source_changes.sort,
+          "support_changed" => support_changed,
+          "environment_changed" => environment_changed,
+          "command_changed" => command_changed,
+          "uncertain_closure" => false,
+          "fallback_full" => fallback_full,
+          "rebuild" => selected.any? || deleted_shards.any? || changed_functions.any? ||
+            added_functions.any? || deleted_functions.any? || fallback_full,
+          "current_hashes" => current_hashes,
+          "environment" => current_environment,
+          "functions" => current_functions,
+          "workload" => current_workload,
+        }
+      end
+
+      def write_incremental!(
+        selection:,
+        evidence_path:,
+        dependencies:,
+        callsites:
+      )
         parent_id = manifest.fetch("snapshot_id")
         generation = manifest.fetch("generation").to_i + 1
-        freshness = {
-          "mode" => "fast",
-          "potentially_stale" => true,
-          "base_full_snapshot_id" => manifest.fetch("base_full_snapshot_id"),
-          "parent_snapshot_id" => parent_id,
-          "generation" => generation,
-          "replaced_paths" => replaced,
-          "reason" =>
-            "dynamic effects outside the retraced/observed source slice are not proven closed",
-        }
-        merged["freshness"] = freshness
-        JsonIO.write(canonical_path, JSON.pretty_generate(merged) + "\n")
-        snapshot_id = identity("fast", current_hashes, parent_id, generation)
+        snapshot_id = identity(
+          "fast",
+          selection.fetch("current_hashes"),
+          selection.fetch("functions"),
+          selection.fetch("workload"),
+          parent_id,
+          generation
+        )
         write_manifest!(
           "schema" => SCHEMA,
           "fingerprint_scheme" => FINGERPRINT_SCHEME,
@@ -137,18 +194,29 @@ module NilKill
           "parent_snapshot_id" => parent_id,
           "generation" => generation,
           "mode" => "fast",
-          "complete" => false,
-          "potentially_stale" => true,
-          "source_hashes" => current_hashes,
-          "environment" => environment,
-          "workload_digest" => workload_digest,
-          "changed_paths" => Array(changed_paths).sort,
-          "deleted_paths" => Array(deleted_paths).sort,
-          "replaced_paths" => replaced,
+          "complete" => !selection.fetch("uncertain_closure"),
+          "potentially_stale" => selection.fetch("uncertain_closure"),
+          "source_hashes" => selection.fetch("current_hashes"),
+          "environment" => selection.fetch("environment"),
+          "workload_digest" => selection.dig("workload", "command_digest"),
+          "functions" => selection.fetch("functions"),
+          "workload" => selection.fetch("workload"),
+          "dependencies" => dependencies,
+          "callsites" => callsites,
+          "changed_functions" => selection.fetch("changed_functions"),
+          "added_functions" => selection.fetch("added_functions"),
+          "deleted_functions" => selection.fetch("deleted_functions"),
+          "changed_tests" => selection.fetch("changed_tests"),
+          "deleted_tests" => selection.fetch("deleted_tests"),
+          "changed_files" => selection.fetch("changed_files"),
+          "deleted_files" => selection.fetch("deleted_files"),
+          "residual_source_changes" => selection.fetch("residual_source_changes"),
+          "selected_shards" => selection.fetch("selected_shards"),
+          "fallback_full" => selection.fetch("fallback_full"),
+          "support_changed" => selection.fetch("support_changed"),
           "created_at" => Time.now.utc.iso8601,
-          "evidence" => relative(canonical_path),
+          "evidence" => relative(evidence_path),
         )
-        canonical_path
       end
 
       private
@@ -164,40 +232,6 @@ module NilKill
           end
           .sort
           .to_h
-      end
-
-      def merge_evidence(baseline, delta, replaced)
-        result = baseline.merge(
-          "environment" => baseline.fetch("environment", {}).merge(delta.fetch("environment", {})).sort.to_h,
-          "runs" => (Array(baseline["runs"]) + Array(delta["runs"])).uniq.sort
-        )
-        result["observations"] = replace_rows(
-          baseline.fetch("observations", []),
-          delta.fetch("observations", []),
-          replaced
-        ) { |row| row.dig("scope", "path").to_s }
-        result["calls"] = replace_rows(
-          baseline.fetch("calls", []),
-          delta.fetch("calls", []),
-          replaced
-        ) do |row|
-          callsite_path = row.dig("callsite", "path").to_s
-          callsite_path.empty? ? row.dig("caller", "path").to_s : callsite_path
-        end
-        result
-      end
-
-      def replace_rows(old_rows, new_rows, replaced)
-        kept = old_rows.reject { |row| replaced.include?(yield(row)) }
-        (kept + new_rows).uniq { |row| JSON.generate(row) }
-      end
-
-      def evidence_paths(evidence)
-        calls = evidence.fetch("calls", []).flat_map do |row|
-          [row.dig("callsite", "path"), row.dig("caller", "path")]
-        end
-        observations = evidence.fetch("observations", []).map { |row| row.dig("scope", "path") }
-        (calls + observations).map(&:to_s).reject(&:empty?).uniq.sort
       end
 
       def write_manifest!(value)

@@ -129,11 +129,83 @@ module NilKill
           super
         end
 
+        def runtime_test_plan(root:, targets:, commands:)
+          return unless commands.one?
+
+          command = commands.first
+          projects = Array(targets).map do |target|
+            absolute = File.expand_path(target, root)
+            directory = File.directory?(absolute) ? absolute : File.dirname(absolute)
+            %w[lib src app].include?(File.basename(directory)) ? File.dirname(directory) : root
+          end.uniq
+          minitest = projects.flat_map { |project| Dir.glob(File.join(project, "test/**/*_test.rb")) }
+            .select { |path| File.file?(path) }.uniq.sort
+          rspec = projects.flat_map { |project| Dir.glob(File.join(project, "spec/**/*_spec.rb")) }
+            .select { |path| File.file?(path) }.uniq.sort
+          kind =
+            if command.any? { |part| File.basename(part.to_s).start_with?("rspec") }
+              :rspec
+            elsif command.join(" ").match?(/(?:test\/.*_test\.rb|_test\.rb|Dir\[.*test)/)
+              :minitest
+            end
+          return unless kind
+
+          entries = kind == :rspec ? rspec : minitest
+          return if entries.empty?
+
+          all_test_ruby = projects.flat_map do |project|
+            %w[test spec].flat_map { |name| Dir.glob(File.join(project, "#{name}/**/*.rb")) }
+          end.select { |path| File.file?(path) }.uniq.sort
+          tests = entries.to_h do |path|
+            [relative_runtime_test_path(path, root), runtime_incremental_fingerprint(path)]
+          end
+          support = (all_test_ruby - entries).to_h do |path|
+            [relative_runtime_test_path(path, root), runtime_incremental_fingerprint(path)]
+          end
+          shards = entries.map do |path|
+            relative = relative_runtime_test_path(path, root)
+            {
+              "id" => "test-#{Digest::SHA256.hexdigest(relative)[0, 16]}",
+              "test_path" => relative,
+              "command" => runtime_test_command(command, path, kind),
+            }
+          end
+          {
+            "mode" => "test_files",
+            "tests" => tests,
+            "support_files" => support,
+            "shards" => shards,
+          }
+        end
+
         def runtime_incremental_syntax_without_locations(node)
           return nil if node.is_a?(Array) && node.length == 2 && node.all? { |part| part.is_a?(Integer) }
           return node.map { |child| runtime_incremental_syntax_without_locations(child) } if node.is_a?(Array)
 
           node
+        end
+
+        def runtime_test_command(command, path, kind)
+          if kind == :rspec
+            executable = command.index { |part| File.basename(part.to_s).start_with?("rspec") }
+            return [*command[0..executable], path]
+          end
+
+          eval_index = command.index("-e")
+          return [*command[0...eval_index], path] if eval_index
+
+          ruby_index = command.index do |part|
+            File.basename(part.to_s).match?(/\Aruby(?:\d+(?:\.\d+)*)?\z/)
+          end
+          return [*command[0..ruby_index], path] if ruby_index
+
+          [RbConfig.ruby, path]
+        end
+
+        def relative_runtime_test_path(path, root)
+          Pathname.new(File.expand_path(path)).relative_path_from(Pathname.new(File.expand_path(root))).to_s
+        rescue ArgumentError
+          path.to_s
         end
 
         def return_type_index(root:)

@@ -179,10 +179,18 @@ RSpec.describe "NilKill coverage hardening" do
       allow(cli).to receive(:assert_collect_coverage_produced!)
       allow(NilKill::TracePlan).to receive(:write)
       allow(NilKill).to receive(:target_files).and_return(["src/app.rb"])
+      inventory = instance_double(
+        NilKill::Runtime::FunctionInventory,
+        functions: {},
+        to_h: {}
+      )
+      allow(NilKill::Runtime::FunctionInventory).to receive(:build).and_return(inventory)
       allow(NilKill).to receive(:write_inplace_sentinel!)
       allow(NilKill).to receive(:restore_inplace_snapshot!)
       instrumenter = instance_double(NilKill::SourceInstrumenter, run_in_place: true)
-      expect(NilKill::SourceInstrumenter).to receive(:new).and_return(instrumenter)
+      expect(NilKill::SourceInstrumenter).to receive(:new)
+        .with(runtime_dir: kind_of(String))
+        .and_return(instrumenter)
       seen_env = []
       allow(cli).to receive(:system) do |env, *cmd|
         seen_env << env

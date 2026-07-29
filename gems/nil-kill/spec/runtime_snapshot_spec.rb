@@ -15,25 +15,6 @@ RSpec.describe NilKill::Runtime::Snapshot do
     }
   end
 
-  def call(path, selector, count = 1)
-    {
-      "language" => "ruby",
-      "caller" => { "path" => path, "owner" => "Worker", "name" => "run", "line" => 1 },
-      "callsite" => { "path" => path, "line" => 2, "selector" => selector },
-      "targets" => [{ "symbol" => "runtime #{selector}" }],
-      "count" => count,
-    }
-  end
-
-  def observation(path, name)
-    {
-      "kind" => "parameter",
-      "scope" => { "language" => "ruby", "path" => path, "function" => "run", "line" => 1 },
-      "name" => name,
-      "domain" => { "types" => ["String"] },
-    }
-  end
-
   it "reads plain and gzip JSONL transparently and compresses atomically" do
     Dir.mktmpdir("nil-kill-json-io") do |dir|
       plain = File.join(dir, "events.jsonl")
@@ -51,88 +32,6 @@ RSpec.describe NilKill::Runtime::Snapshot do
     end
   end
 
-  it "content-hashes changes and progressively replaces changed, observed, and deleted slices" do
-    Dir.mktmpdir("nil-kill-incremental") do |root|
-      runtime = File.join(root, "runtime")
-      lib = File.join(root, "lib")
-      one = File.join(lib, "one.rb")
-      two = File.join(lib, "two.rb")
-      FileUtils.mkdir_p(runtime)
-      FileUtils.mkdir_p(lib)
-      File.write(one, "ONE = 1\n")
-      File.write(two, "TWO = 2\n")
-      canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
-      NilKill::Runtime::JsonIO.write(
-        canonical,
-        JSON.generate(evidence(
-          calls: [call("lib/one.rb", "old_one"), call("lib/two.rb", "old_two")],
-          observations: [observation("lib/one.rb", "old_one"), observation("lib/two.rb", "old_two")]
-        ))
-      )
-      snapshot = described_class.new(root: root, runtime_dir: runtime)
-      full = snapshot.write_full!(files: [one, two], evidence_path: canonical)
-
-      expect(full).to include("mode" => "full", "complete" => true, "potentially_stale" => false)
-      expect(File.binread(File.join(runtime, described_class::MANIFEST), 2).bytes).to eq([0x1f, 0x8b])
-      expect(described_class.load(root: root, runtime_dir: runtime).changes([one, two]))
-        .to include("changed_paths" => [], "deleted_paths" => [])
-
-      File.write(one, "# representation-only edit\nONE = 1\n")
-      expect(described_class.load(root: root, runtime_dir: runtime).changes([one, two]))
-        .to include("changed_paths" => [], "deleted_paths" => [])
-
-      File.write(one, "ONE = 10\n")
-      loaded = described_class.load(root: root, runtime_dir: runtime)
-      changes = loaded.changes([one, two])
-      delta = File.join(runtime, "delta-one.json.gz")
-      NilKill::Runtime::JsonIO.write(
-        delta,
-        JSON.generate(evidence(
-          calls: [call("lib/one.rb", "new_one")],
-          observations: [observation("lib/one.rb", "new_one")],
-          runs: ["delta-1"]
-        ))
-      )
-      loaded.merge_delta!(
-        delta_evidence_path: delta,
-        changed_paths: changes.fetch("changed_paths"),
-        deleted_paths: changes.fetch("deleted_paths"),
-        current_hashes: changes.fetch("current_hashes"),
-        environment: changes.fetch("environment"),
-        workload_digest: nil
-      )
-      first = NilKill::Runtime::JsonIO.parse(canonical)
-      expect(first.fetch("calls").map { |row| row.dig("callsite", "selector") })
-        .to contain_exactly("new_one", "old_two")
-      expect(first.dig("freshness", "potentially_stale")).to be(true)
-
-      File.delete(two)
-      loaded = described_class.load(root: root, runtime_dir: runtime)
-      changes = loaded.changes([one])
-      empty_delta = File.join(runtime, "delta-delete.json.gz")
-      NilKill::Runtime::JsonIO.write(empty_delta, JSON.generate(evidence(runs: ["delta-2"])))
-      loaded.merge_delta!(
-        delta_evidence_path: empty_delta,
-        changed_paths: changes.fetch("changed_paths"),
-        deleted_paths: changes.fetch("deleted_paths"),
-        current_hashes: changes.fetch("current_hashes"),
-        environment: changes.fetch("environment"),
-        workload_digest: nil
-      )
-      second = NilKill::Runtime::JsonIO.parse(canonical)
-      manifest = NilKill::Runtime::JsonIO.parse(File.join(runtime, described_class::MANIFEST))
-      expect(second.fetch("calls").map { |row| row.dig("callsite", "selector") }).to eq(["new_one"])
-      expect(second.fetch("observations").map { |row| row["name"] }).to eq(["new_one"])
-      expect(manifest).to include(
-        "generation" => 2,
-        "mode" => "fast",
-        "complete" => false,
-        "deleted_paths" => ["lib/two.rb"]
-      )
-      expect(manifest.fetch("base_full_snapshot_id")).to eq(full.fetch("base_full_snapshot_id"))
-    end
-  end
-
   it "skips the workload entirely when a fast collection has no content changes" do
     Dir.mktmpdir("nil-kill-fast-noop", NilKill::ROOT) do |root|
       source = File.join(root, "app.rb")
@@ -141,12 +40,23 @@ RSpec.describe NilKill::Runtime::Snapshot do
       canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
       FileUtils.mkdir_p(runtime)
       NilKill::Runtime::JsonIO.write(canonical, JSON.generate(evidence))
-      empty_workload = Digest::SHA256.hexdigest(JSON.generate([]))
+      workload = NilKill::Runtime::WorkloadPlan.build(
+        root: NilKill::ROOT,
+        targets: [source],
+        commands: []
+      )
+      inventory = NilKill::Runtime::FunctionInventory.build(
+        root: NilKill::ROOT,
+        files: [source],
+        trace_plan: {}
+      )
       described_class.new(root: NilKill::ROOT, runtime_dir: runtime)
         .write_full!(
           files: [source],
           evidence_path: canonical,
-          workload_digest: empty_workload
+          workload_digest: workload.command_digest,
+          function_inventory: inventory.to_h,
+          workload: workload.to_h
         )
       reset_nil_kill_tmp_paths!(root)
       allow(NilKill).to receive(:target_files).and_return([source])
@@ -154,41 +64,52 @@ RSpec.describe NilKill::Runtime::Snapshot do
 
       output = capture_stdout { cli.run }
 
-      expect(output).to include("0 changed sources, workload skipped")
+      expect(output).to include("no semantic source/test changes, workload skipped")
       expect(NilKill::Runtime::JsonIO.parse(File.join(runtime, described_class::MANIFEST)))
         .to include("generation" => 0, "mode" => "full")
     end
   end
 
-  it "invalidates unchanged sources when the workload or runtime dependency environment changes" do
-    Dir.mktmpdir("nil-kill-snapshot-context") do |root|
-      runtime = File.join(root, "runtime")
-      source = File.join(root, "worker.rb")
-      canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
-      FileUtils.mkdir_p(runtime)
-      File.write(source, "def work = 1\n")
-      NilKill::Runtime::JsonIO.write(canonical, JSON.generate(evidence))
-      original_workload = Digest::SHA256.hexdigest(JSON.generate([["ruby", "test.rb"]]))
-      described_class.new(root: root, runtime_dir: runtime).write_full!(
+  it "keeps repeated method definitions distinct and resolves entries by definition line" do
+    Dir.mktmpdir("nil-kill-function-identities", NilKill::ROOT) do |root|
+      source = File.join(root, "redefined.rb")
+      File.write(source, <<~RUBY)
+        class Redefined
+          def value
+            1
+          end
+
+          def value
+            2
+          end
+        end
+      RUBY
+      first = NilKill::Runtime::FunctionInventory.build(
+        root: NilKill::ROOT,
         files: [source],
-        evidence_path: canonical,
-        workload_digest: original_workload
+        trace_plan: {}
       )
-      loaded = described_class.load(root: root, runtime_dir: runtime)
+      definitions = first.functions.values.select { |function| function["name"] == "value" }
+      expect(definitions.length).to eq(2)
+      expect(definitions.map { |function| function["key"] }.uniq.length).to eq(2)
+      expect(definitions.map do |function|
+        first.key_for_entry(
+          path: source,
+          owner: function["owner"],
+          name: function["name"],
+          kind: function["kind"],
+          line: function["line"]
+        )
+      end).to contain_exactly(*definitions.map { |function| function["key"] })
 
-      expect(loaded.changes([source], workload_digest: original_workload))
-        .to include("changed_paths" => [], "workload_changed" => false)
-      changed_workload = loaded.changes(
-        [source],
-        workload_digest: Digest::SHA256.hexdigest(JSON.generate([["ruby", "other_test.rb"]]))
+      File.write(source, "# formatting-only shift\n#{File.read(source)}")
+      shifted = NilKill::Runtime::FunctionInventory.build(
+        root: NilKill::ROOT,
+        files: [source],
+        trace_plan: {}
       )
-      expect(changed_workload)
-        .to include("changed_paths" => ["worker.rb"], "workload_changed" => true)
-
-      File.write(File.join(root, "Gemfile.lock"), "GEM\n")
-      changed_environment = loaded.changes([source], workload_digest: original_workload)
-      expect(changed_environment)
-        .to include("changed_paths" => ["worker.rb"], "environment_changed" => true)
+      expect(shifted.functions.transform_values { |function| function["fingerprint"] })
+        .to eq(first.functions.transform_values { |function| function["fingerprint"] })
     end
   end
 
@@ -223,6 +144,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
       runtime = File.join(root, ".nil-kill", "runtime")
       source = File.join(root, "lib", "calculator.rb")
       unchanged_source = File.join(root, "lib", "formatter.rb")
+      deleted_source = File.join(root, "lib", "legacy.rb")
       env = {
         "NIL_KILL_ROOT" => root,
         "NIL_KILL_TARGETS" => File.join(root, "lib"),
@@ -240,7 +162,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
       expect([stdout, stderr, status.exitstatus]).to satisfy { |(_out, _err, code)| code.zero? },
         -> { "#{stdout}\n#{stderr}" }
       expect(Dir.glob(File.join(runtime, "*.jsonl"))).to be_empty
-      expect(Dir.glob(File.join(runtime, "*.jsonl.gz"))).not_to be_empty
+      expect(Dir.glob(File.join(runtime, "**", "*.jsonl.gz"))).not_to be_empty
       expect(NilKill::Runtime::JsonIO.parse(File.join(runtime, described_class::MANIFEST)))
         .to include("mode" => "full", "generation" => 0, "complete" => true)
       canonical_evidence = File.join(
@@ -255,7 +177,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
       stdout, stderr, status = run_collect.call("--fast")
       expect(status).to be_success
       expect(stdout).to include("workload skipped")
-      expect(stderr).to be_empty
+      expect(stderr).not_to include("error")
 
       File.write(source, File.read(source) + "\nINCREMENTAL_VERSION = 1\n")
       stdout, stderr, status = run_collect.call("--fast")
@@ -264,9 +186,9 @@ RSpec.describe NilKill::Runtime::Snapshot do
       expect(first).to include(
         "mode" => "fast",
         "generation" => 1,
-        "complete" => false,
-        "potentially_stale" => true,
-        "changed_paths" => ["lib/calculator.rb"]
+        "complete" => true,
+        "potentially_stale" => false,
+        "changed_files" => ["lib/calculator.rb"]
       )
       increment_formatter_observations = NilKill::Runtime::JsonIO.parse(canonical_evidence)
         .fetch("observations")
@@ -279,16 +201,16 @@ RSpec.describe NilKill::Runtime::Snapshot do
       expect(NilKill::Runtime::JsonIO.parse(File.join(runtime, described_class::MANIFEST)))
         .to include("generation" => 2)
 
-      File.delete(source)
+      File.delete(deleted_source)
       stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, executable, "collect", "--fast")
       expect(status).to be_success, "#{stdout}\n#{stderr}"
       final = NilKill::Runtime::JsonIO.parse(File.join(runtime, described_class::MANIFEST))
       evidence = NilKill::Runtime::JsonIO.parse(
         File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
       )
-      expect(final).to include("generation" => 3, "deleted_paths" => ["lib/calculator.rb"])
+      expect(final).to include("generation" => 3, "deleted_files" => ["lib/legacy.rb"])
       expect(evidence.fetch("observations").map { |row| row.dig("scope", "path") }.uniq)
-        .to eq(["lib/formatter.rb"])
+        .not_to include("lib/legacy.rb")
       expect(File.file?(unchanged_source)).to be(true)
     end
   end

@@ -39,9 +39,9 @@ module NilKill
       # Produce only the language-neutral value-evidence bundle. Incremental
       # collection uses this to merge a delta into the canonical snapshot
       # before running FactMine once over the merged evidence.
-      def self.emit_value_evidence(root:, runtime_dir:, output: nil)
+      def self.emit_value_evidence(root:, runtime_dir:, output: nil, languages: nil, run_ids: nil)
         new(root: root, runtime_dir: runtime_dir)
-          .emit_value_evidence(output: output)
+          .emit_value_evidence(output: output, languages: languages, run_ids: run_ids)
       end
 
       def initialize(
@@ -86,7 +86,9 @@ module NilKill
               events: semantic_events
             )
           end
-        evidence_runs = JsonIO.parse(value_evidence.fetch("path")).fetch("runs", [])
+        parsed_evidence = JsonIO.parse(value_evidence.fetch("path"))
+        evidence_runs = parsed_evidence.fetch("runs", [])
+        evidence_environment = parsed_evidence.fetch("environment", {})
         sources = runtime_sources(semantic_events, value_evidence.fetch("path"))
         index =
           if sources.empty?
@@ -109,7 +111,8 @@ module NilKill
               invalid_events,
               inferred_events,
               excluded_events,
-              evidence_runs
+              evidence_runs,
+              evidence_environment
             )
           ) + "\n"
         )
@@ -127,7 +130,7 @@ module NilKill
         }
       end
 
-      def emit_value_evidence(output: nil)
+      def emit_value_evidence(output: nil, languages: nil, run_ids: nil)
         events, invalid_events = load_events
         semantic_events = events.select do |event|
           Languages.provider_for(event.fetch("language"))
@@ -137,7 +140,9 @@ module NilKill
           root: @root,
           runtime_dir: @runtime_dir,
           events: semantic_events,
-          output: output
+          output: output,
+          languages: languages,
+          run_ids: run_ids
         )
         result.merge(
           "events" => events.length,
@@ -302,7 +307,8 @@ module NilKill
         invalid_events,
         inferred_events,
         excluded_events,
-        evidence_runs
+        evidence_runs,
+        evidence_environment
       )
         claims = {
           "runtime_scip.authority" => AUTHORITY,
@@ -320,7 +326,7 @@ module NilKill
           "runtime_scip.run_ids_sha256" => digest(
             Array(evidence_runs).map(&:to_s).reject(&:empty?).uniq.sort.join("\n")
           ),
-        }.merge(observed_environment(events)).merge(@environment)
+        }.merge(evidence_environment).merge(observed_environment(events)).merge(@environment)
         {
           "schema" => "fact-mine.semantic-environment.v1",
           "claims" => claims.sort.to_h,

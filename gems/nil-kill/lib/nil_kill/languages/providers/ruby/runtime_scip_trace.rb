@@ -9,6 +9,8 @@ module NilKillRuntimeTrace
   @runtime_scip_frames = Hash.new { |hash, thread_id| hash[thread_id] = [] }
   @runtime_scip_native_calls = Hash.new { |hash, thread_id| hash[thread_id] = [] }
   @runtime_scip_native_result_depth = 0
+  @runtime_function_entries = Hash.new(0)
+  @runtime_executed_callsites = Hash.new(0)
   RUNTIME_SCIP_SOURCE_SLICE = ENV.fetch("NIL_KILL_TRACE_SOURCE_SLICE", "")
     .split(File::PATH_SEPARATOR)
     .reject(&:empty?)
@@ -51,6 +53,11 @@ module NilKillRuntimeTrace
   def self.enter_runtime_scip_ruby_call(tp)
     parent = @runtime_scip_frames[Thread.current.object_id].last
     fallback_callsite = parent&.fetch(:callsite, nil)
+    if fallback_callsite && target_path?(fallback_callsite[:path])
+      @runtime_executed_callsites[
+        [fallback_callsite[:path], fallback_callsite[:line], tp.method_id.to_s]
+      ] += 1
+    end
     # A Ruby :line event is emitted for the outer expression of a multiline
     # literal/call, not necessarily for a nested Ruby call inside it.  The
     # demand-driven trace plan is keyed by the nested call's real source line,
@@ -73,6 +80,11 @@ module NilKillRuntimeTrace
                     end
     owner = method_owner(tp.defined_class)
     path = abs_path(tp.path)
+    if owner && target_path?(path)
+      @runtime_function_entries[
+        [path, owner[0], tp.method_id.to_s, owner[1], src_line(path, tp.lineno)]
+      ] += 1
+    end
     @runtime_scip_frames[Thread.current.object_id] << {
       caller: owner && {
         class: owner[0],
@@ -97,6 +109,9 @@ module NilKillRuntimeTrace
   def self.enter_runtime_scip_native_call(tp)
     frame = @runtime_scip_frames[Thread.current.object_id].last
     callsite = runtime_scip_native_callsite(tp, frame&.fetch(:callsite, nil))
+    if callsite && target_path?(callsite[:path])
+      @runtime_executed_callsites[[callsite[:path], callsite[:line], tp.method_id.to_s]] += 1
+    end
     capture_call, capture_result, receiver_shape = runtime_scip_captures_for(callsite)
     observed_call = if capture_call || capture_result || receiver_shape
                       record_runtime_scip_call(
@@ -600,6 +615,28 @@ module NilKillRuntimeTrace
           callee.fetch(:owner), callee.fetch(:name),
         ]
       end.each { |record| file.puts JSON.generate(record) }
+    end
+    File.open(File.join(OUT_DIR, "function-entries-#{pid}.jsonl"), "w") do |file|
+      @runtime_function_entries.sort_by { |key, _count| key.map(&:to_s) }.each do |key, count|
+        file.puts JSON.generate(
+          path: key[0],
+          owner: key[1],
+          name: key[2],
+          kind: key[3],
+          line: key[4],
+          count: count
+        )
+      end
+    end
+    File.open(File.join(OUT_DIR, "executed-callsites-#{pid}.jsonl"), "w") do |file|
+      @runtime_executed_callsites.sort_by { |key, _count| key.map(&:to_s) }.each do |key, count|
+        file.puts JSON.generate(
+          path: key[0],
+          line: key[1],
+          selector: key[2],
+          count: count
+        )
+      end
     end
   end
 end
