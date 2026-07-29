@@ -209,6 +209,34 @@
       },
       {
         "arguments": [
+          ":name",
+          "value"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "mutate",
+        "line": 12,
+        "message": "[]=",
+        "receiver": "target",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "key",
+          "[]"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "shape_hash",
+        "line": 18,
+        "message": "[]=",
+        "receiver": "hash",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
           "name"
         ],
         "block": false,
@@ -1827,6 +1855,12 @@
         "function": "mutate",
         "kind": "hidden_mutation",
         "line": 13
+      },
+      {
+        "detail": "[]=",
+        "function": "mutate",
+        "kind": "hidden_mutation",
+        "line": 12
       },
       {
         "detail": "[]=",

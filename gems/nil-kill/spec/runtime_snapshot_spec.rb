@@ -64,10 +64,17 @@ RSpec.describe NilKill::Runtime::Snapshot do
           evidence_path: canonical,
           workload_digest: workload.command_digest,
           function_inventory: inventory.to_h,
-          workload: workload.to_h
+          workload: workload.to_h,
+          trace_plan_digest: "fixture-plan"
         )
       reset_nil_kill_tmp_paths!(root)
       allow(NilKill).to receive(:target_files).and_return([source])
+      allow(NilKill::TracePlan).to receive(:write) do
+        File.write(
+          NilKill::TRACE_PLAN_PATH,
+          JSON.generate("runtime_evidence" => { "plan_digest" => "fixture-plan" })
+        )
+      end
       cli = NilKill::CLI.new(["collect", "--fast"])
 
       output = capture_stdout { cli.run }
@@ -75,6 +82,111 @@ RSpec.describe NilKill::Runtime::Snapshot do
       expect(output).to include("no semantic source/test changes, workload skipped")
       expect(NilKill::Runtime::JsonIO.parse(File.join(runtime, described_class::MANIFEST)))
         .to include("generation" => 0, "mode" => "full")
+    end
+  end
+
+  it "invalidates a fast snapshot when FactMine changes the runtime trace plan" do
+    Dir.mktmpdir("nil-kill-fast-plan-change", NilKill::ROOT) do |root|
+      source = File.join(root, "app.rb")
+      File.write(source, "def app = 1\n")
+      runtime = File.join(root, "runtime")
+      canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+      FileUtils.mkdir_p(runtime)
+      NilKill::Runtime::JsonIO.write(canonical, JSON.generate(evidence))
+      workload = NilKill::Runtime::WorkloadPlan.build(
+        root: NilKill::ROOT,
+        targets: [source],
+        commands: [[RbConfig.ruby, "-e", "exit 0"]]
+      )
+      inventory = NilKill::Runtime::FunctionInventory.build(
+        root: NilKill::ROOT,
+        files: [source],
+        trace_plan: {}
+      )
+      snapshot = described_class.new(root: NilKill::ROOT, runtime_dir: runtime)
+      snapshot.write_full!(
+        files: [source],
+        evidence_path: canonical,
+        workload_digest: workload.command_digest,
+        function_inventory: inventory.to_h,
+        workload: workload.to_h,
+        trace_plan_digest: "old-plan"
+      )
+
+      selection = snapshot.select_increment(
+        files: [source],
+        function_inventory: inventory.to_h,
+        workload_plan: workload,
+        trace_plan_digest: "new-plan"
+      )
+
+      expect(selection).to include(
+        "trace_plan_changed" => true,
+        "fallback_full" => true,
+        "rebuild" => true
+      )
+      expect(selection.fetch("selected_shards")).to eq(workload.shard_ids)
+    end
+  end
+
+  it "does not turn a source-driven trace plan digest change into a full retrace" do
+    Dir.mktmpdir("nil-kill-fast-source-plan-change", NilKill::ROOT) do |root|
+      source = File.join(root, "app.rb")
+      File.write(source, "def app = 1\n")
+      runtime = File.join(root, "runtime")
+      canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+      FileUtils.mkdir_p(runtime)
+      NilKill::Runtime::JsonIO.write(canonical, JSON.generate(evidence))
+      workload = NilKill::Runtime::WorkloadPlan.from_h(
+        root: NilKill::ROOT,
+        value: {
+          "mode" => "test_files",
+          "command_digest" => "fixture-workload",
+          "tests" => {},
+          "support_files" => {},
+          "shards" => {
+            "fixture-shard" => {
+              "command" => [RbConfig.ruby, "-e", "exit 0"],
+              "test_path" => "test/app_test.rb",
+            },
+          },
+        }
+      )
+      original_inventory = NilKill::Runtime::FunctionInventory.build(
+        root: NilKill::ROOT,
+        files: [source],
+        trace_plan: {}
+      )
+      snapshot = described_class.new(root: NilKill::ROOT, runtime_dir: runtime)
+      snapshot.write_full!(
+        files: [source],
+        evidence_path: canonical,
+        workload_digest: workload.command_digest,
+        function_inventory: original_inventory.to_h,
+        workload: workload.to_h,
+        trace_plan_digest: "old-plan"
+      )
+
+      File.write(source, "def app = 2\n")
+      changed_inventory = NilKill::Runtime::FunctionInventory.build(
+        root: NilKill::ROOT,
+        files: [source],
+        trace_plan: {}
+      )
+      selection = snapshot.select_increment(
+        files: [source],
+        function_inventory: changed_inventory.to_h,
+        workload_plan: workload,
+        trace_plan_digest: "source-updated-plan"
+      )
+
+      expect(selection).to include(
+        "trace_plan_changed" => true,
+        "unexplained_trace_plan_changed" => false,
+        "fallback_full" => false
+      )
+      expect(selection.fetch("changed_functions").length).to eq(1)
+      expect(selection.fetch("selected_shards")).to be_empty
     end
   end
 

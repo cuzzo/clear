@@ -51,7 +51,8 @@ module NilKill
         function_inventory: {},
         workload: {},
         dependencies: {},
-        callsites: {}
+        callsites: {},
+        trace_plan_digest: nil
       )
         hashes = source_hashes(files)
         environment = runtime_environment(files)
@@ -75,6 +76,7 @@ module NilKill
           "source_hashes" => hashes,
           "environment" => environment,
           "workload_digest" => workload_digest,
+          "trace_plan_digest" => trace_plan_digest.to_s,
           "functions" => function_inventory,
           "workload" => workload,
           "dependencies" => dependencies,
@@ -89,7 +91,8 @@ module NilKill
       def select_increment(
         files:,
         function_inventory:,
-        workload_plan:
+        workload_plan:,
+        trace_plan_digest:
       )
         current_hashes = source_hashes(files)
         previous_hashes = manifest.fetch("source_hashes", {})
@@ -126,6 +129,16 @@ module NilKill
         environment_changed = current_environment != manifest.fetch("environment", {})
         command_changed = previous_workload["command_digest"] != current_workload["command_digest"]
         mode_changed = previous_workload["mode"] != current_workload["mode"]
+        trace_plan_changed = manifest.fetch("trace_plan_digest", nil).to_s !=
+          trace_plan_digest.to_s
+        # Source edits necessarily change FactMine's document/anchor digests.
+        # Those changes are handled by function/test selection plus evidence
+        # rebasing, which marks any untouched changed anchor stale. A plan
+        # change with identical sources is different: it means the analyzer's
+        # evidence demand changed and no source dependency identifies the
+        # affected shards, so conservatively refresh all of them.
+        unexplained_trace_plan_changed = trace_plan_changed &&
+          changed_files.empty? && deleted_files.empty?
         current_shards = workload_plan.shards.to_h { |shard| [shard.fetch("id"), shard] }
         prior_shards = previous_workload.fetch("shards", {})
         deleted_shards = prior_shards.keys - current_shards.keys
@@ -139,6 +152,7 @@ module NilKill
           end)
         end
         uncertain = environment_changed || command_changed || mode_changed ||
+          unexplained_trace_plan_changed ||
           support_changed || added_functions.any? || deleted_functions.any? ||
           residual_source_changes.any?
         opaque_fallback = current_workload["mode"] == "opaque" &&
@@ -159,6 +173,8 @@ module NilKill
           "support_changed" => support_changed,
           "environment_changed" => environment_changed,
           "command_changed" => command_changed,
+          "trace_plan_changed" => trace_plan_changed,
+          "unexplained_trace_plan_changed" => unexplained_trace_plan_changed,
           "uncertain_closure" => false,
           "fallback_full" => fallback_full,
           "rebuild" => selected.any? || deleted_shards.any? || changed_functions.any? ||
@@ -167,6 +183,7 @@ module NilKill
           "environment" => current_environment,
           "functions" => current_functions,
           "workload" => current_workload,
+          "trace_plan_digest" => trace_plan_digest.to_s,
         }
       end
 
@@ -199,6 +216,7 @@ module NilKill
           "source_hashes" => selection.fetch("current_hashes"),
           "environment" => selection.fetch("environment"),
           "workload_digest" => selection.dig("workload", "command_digest"),
+          "trace_plan_digest" => selection.fetch("trace_plan_digest"),
           "functions" => selection.fetch("functions"),
           "workload" => selection.fetch("workload"),
           "dependencies" => dependencies,

@@ -763,7 +763,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             .or_else(|| self.block_child(node))
             .and_then(|body| self.normalize_body(body));
         let scope = self.scope(body, None, node);
-        Some(self.wrap(
+        Some(self.wrap_call_iter(
             "ITER",
             vec![Child::Node(Box::new(call)), Child::Node(Box::new(scope))],
             node,
@@ -2296,7 +2296,8 @@ impl<'source> TreeSitterNormalizer<'source> {
             .normalization_adapter
             .statement_wrapped_call_target(node, self.source)
             .unwrap_or(node);
-        let call = self.normalize_call_without_block(call_source, block)?;
+        let mut call = self.normalize_call_without_block(call_source, block)?;
+        self.recover_wrapped_call_arguments(node, call_source, &mut call);
         let args = self.normalize_block_parameters(block);
         let body = block.and_then(|block| {
             self.with_dynamic_scope(block, false, |normalizer| {
@@ -2310,7 +2311,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             })
         });
         let scope = self.scope(body, args, node);
-        Some(self.wrap(
+        Some(self.wrap_call_iter(
             "ITER",
             vec![Child::Node(Box::new(call)), Child::Node(Box::new(scope))],
             node,
@@ -2468,7 +2469,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .normalize_body(body_node)
                 .map(|node| normalizer.normalize_dynamic_scope(node))
         });
-        Some(self.wrap(
+        Some(self.wrap_call_iter(
             "ITER",
             vec![
                 Child::Node(Box::new(call)),
@@ -2484,7 +2485,8 @@ impl<'source> TreeSitterNormalizer<'source> {
     ) -> Option<Node> {
         let block = self.call_block(node);
         let call_source = self.statement_block_call(node)?;
-        let call = self.normalize_call_without_block(call_source, block)?;
+        let mut call = self.normalize_call_without_block(call_source, block)?;
+        self.recover_wrapped_call_arguments(node, call_source, &mut call);
         let args = self.normalize_block_parameters(block);
         let body = block.and_then(|block| {
             self.with_dynamic_scope(block, false, |normalizer| {
@@ -2498,7 +2500,7 @@ impl<'source> TreeSitterNormalizer<'source> {
             })
         });
         let scope = self.scope(body, args, node);
-        Some(self.wrap(
+        Some(self.wrap_call_iter(
             "ITER",
             vec![Child::Node(Box::new(call)), Child::Node(Box::new(scope))],
             node,
@@ -2526,7 +2528,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .map(|node| normalizer.normalize_dynamic_scope(node))
         });
         let scope = self.scope(body, args, node);
-        Some(self.wrap(
+        Some(self.wrap_call_iter(
             "ITER",
             vec![Child::Node(Box::new(call)), Child::Node(Box::new(scope))],
             node,
@@ -3091,7 +3093,7 @@ impl<'source> TreeSitterNormalizer<'source> {
                 .normalize_body(body_node)
                 .map(|node| normalizer.normalize_dynamic_scope(node))
         });
-        Some(self.wrap(
+        Some(self.wrap_call_iter(
             "ITER",
             vec![
                 Child::Node(Box::new(call)),
@@ -4029,6 +4031,20 @@ impl<'source> TreeSitterNormalizer<'source> {
         };
         if self.parser_call_spans.contains(&node_span) && normalized_call(&normalized) {
             self.record_call_origin(node_span, &normalized);
+        }
+        normalized
+    }
+
+    fn wrap_call_iter(
+        &self,
+        node_type: &str,
+        children: Vec<Child>,
+        source: TreeSitterNode<'_>,
+    ) -> Node {
+        let raw_call_span = span(source);
+        let normalized = self.wrap(node_type, children, source);
+        if self.parser_call_spans.contains(&raw_call_span) {
+            self.record_call_origin(raw_call_span, &normalized);
         }
         normalized
     }
@@ -5204,15 +5220,14 @@ impl<'source> TreeSitterNormalizer<'source> {
         &self,
         node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
-        if self.dotted_call(node) {
-            return Some(node);
-        }
-
         let block = self.call_block(node);
         let child_source = self
             .normalization_adapter
             .statement_wrapped_call_target(node, self.source)
             .unwrap_or(node);
+        if self.dotted_call(child_source) {
+            return Some(child_source);
+        }
         let children = self.named_children(child_source);
 
         children.into_iter().find(|child| {
@@ -5563,7 +5578,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         {
             return children
                 .into_iter()
-                .filter_map(|child| self.normalize_node(child))
+                .filter_map(|child| self.normalize_call_argument_node(child))
                 .collect();
         }
         let Some(args) = self
@@ -5615,8 +5630,47 @@ impl<'source> TreeSitterNormalizer<'source> {
 
         children
             .into_iter()
-            .filter_map(|child| self.normalize_node(child))
+            .filter_map(|child| self.normalize_call_argument_node(child))
             .collect()
+    }
+
+    fn normalize_call_argument_node(&mut self, node: TreeSitterNode<'_>) -> Option<Node> {
+        self.normalize_node(node).or_else(|| {
+            self.call_node(node)
+                .then(|| self.normalize_call(node))
+                .flatten()
+        })
+    }
+
+    fn recover_wrapped_call_arguments(
+        &mut self,
+        wrapper: TreeSitterNode<'_>,
+        call_source: TreeSitterNode<'_>,
+        call: &mut Node,
+    ) {
+        let Some(argument_slot) = call.children.get_mut(2) else {
+            return;
+        };
+        if !matches!(argument_slot, Child::Nil) {
+            return;
+        }
+        let mut arguments = self.call_arguments(call_source, None);
+        if arguments.is_empty() && !self.same_ts_node(wrapper, call_source) {
+            arguments = self.call_arguments(wrapper, None);
+        }
+        if arguments.is_empty() {
+            return;
+        }
+        *argument_slot = Child::Node(Box::new(
+            self.wrap(
+                "LIST",
+                arguments
+                    .into_iter()
+                    .map(|node| Child::Node(Box::new(node)))
+                    .collect(),
+                wrapper,
+            ),
+        ));
     }
 
     pub(in crate::ast) fn literal_arguments_from_text(
@@ -5982,11 +6036,16 @@ impl<'source> TreeSitterNormalizer<'source> {
             };
             let receiver = optional_node(self.normalize_node(receiver));
             let args = list_or_nil(right.into_iter().collect(), left, self);
-            return Some(self.wrap(
+            let normalized = self.wrap(
                 "ATTRASGN",
                 vec![receiver, Child::Symbol(writer), args],
                 source,
-            ));
+            );
+            let raw_call_span = span(left);
+            if self.parser_call_spans.contains(&raw_call_span) {
+                self.record_call_origin(raw_call_span, &normalized);
+            }
+            return Some(normalized);
         }
         if self
             .normalization_adapter

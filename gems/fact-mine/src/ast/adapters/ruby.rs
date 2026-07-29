@@ -523,20 +523,23 @@ impl AstNormalizationAdapter for RubyAstAdapter {
         node: TreeSitterNode<'tree>,
         source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        if !matches!(
-            node.kind(),
-            "body_statement" | "block_body" | "statement" | "argument_list"
-        ) {
-            return None;
-        }
-        let raw_named = raw_named_children(node);
-        if raw_named.len() == 1
-            && raw_named[0].kind() == "call"
-            && node_text(node, source) == node_text(raw_named[0], source)
-        {
-            Some(raw_named[0])
-        } else {
-            None
+        let mut target = node;
+        loop {
+            if target.kind() == "call" {
+                return (target != node).then_some(target);
+            }
+            if !matches!(
+                target.kind(),
+                "body_statement" | "block_body" | "statement" | "argument_list"
+            ) {
+                return None;
+            }
+            let raw_named = raw_named_children(target);
+            if raw_named.len() != 1 || node_text(target, source) != node_text(raw_named[0], source)
+            {
+                return None;
+            }
+            target = raw_named[0];
         }
     }
 

@@ -457,8 +457,8 @@
     },
     {
       "argument_count": 0,
-      "complexity_bound_quality": "upper_bound_language_return_contract",
-      "complexity_provenance": "static_call_result_contract",
+      "complexity_bound_quality": "upper_bound_declared_receiver",
+      "complexity_provenance": "language_stdlib_registry",
       "conditional": false,
       "confidence": "partial",
       "consumer_closed_candidate_set": false,
@@ -494,7 +494,8 @@
         19,
         14,
         60
-      ]
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
     },
     {
       "argument_count": 0,

@@ -3467,6 +3467,10 @@ fn apply_static_direct_call_result_contracts(methods: &[MethodRecord], calls: &m
                             })
                     })
                     .or_else(|| {
+                        behavior
+                            .static_argument_dependent_return_type(&call.message, &call.arguments)
+                    })
+                    .or_else(|| {
                         call.implicit_receiver
                             .then(|| behavior.known_return_type(&call.message))
                             .flatten()
@@ -8809,6 +8813,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
         .collect::<Vec<_>>();
     remove_binding_receiver_pseudo_calls(&mut calls);
     propagate_direct_call_result_receiver_types(&mut calls, language, behavior);
+    propagate_callback_argument_parameter_types(&mut calls, document, language, behavior);
     propagate_collection_callback_parameter_types(&mut calls, document, language, behavior);
     calls
 }
@@ -8876,41 +8881,58 @@ fn propagate_direct_call_result_receiver_types(
         let producers = calls
             .iter()
             .filter_map(|call| {
-                let receiver_type = call
+                let producer_receiver_type = call
                     .receiver_type
-                    .clone()
-                    .or_else(|| call.receiver_symbol.clone())
+                    .as_deref()
+                    .or(call.receiver_symbol.as_deref())
                     .or_else(|| {
                         (call.receiver_kind == "type" && !call.receiver.is_empty())
-                            .then(|| call.receiver.clone())
+                            .then_some(call.receiver.as_str())
+                    });
+                let result_type = behavior
+                    .static_argument_dependent_return_type(&call.message, &call.arguments)
+                    .or_else(|| behavior.static_return_type(&call.message, producer_receiver_type))
+                    .or_else(|| {
+                        behavior.propagated_collection_return_type(
+                            &call.message,
+                            producer_receiver_type,
+                        )
                     })?;
                 Some((
                     (call.source.clone(), call.path.clone(), call.span),
-                    (call.message.clone(), receiver_type),
+                    result_type,
                 ))
             })
             .collect::<BTreeMap<_, _>>();
         let mut changed = false;
         for call in calls.iter_mut().filter(|call| call.receiver_type.is_none()) {
-            let Some(receiver_span) = call.receiver_call_span else {
+            let receiver_spans = call
+                .receiver_call_span
+                .into_iter()
+                .chain(call.receiver_definition_call_spans.iter().copied())
+                .collect::<BTreeSet<_>>();
+            if receiver_spans.is_empty() {
                 continue;
-            };
-            let Some((producer_message, producer_receiver_type)) =
-                producers.get(&(call.source.clone(), call.path.clone(), receiver_span))
-            else {
-                continue;
-            };
-            let Some(receiver_type) = behavior
-                .static_return_type(producer_message, Some(producer_receiver_type))
-                .or_else(|| {
-                    behavior.propagated_collection_return_type(
-                        producer_message,
-                        Some(producer_receiver_type),
-                    )
+            }
+            let Some(result_types) = receiver_spans
+                .iter()
+                .map(|span| {
+                    producers
+                        .get(&(call.source.clone(), call.path.clone(), *span))
+                        .cloned()
                 })
+                .collect::<Option<Vec<_>>>()
             else {
                 continue;
             };
+            let result_types = result_types.into_iter().collect::<BTreeSet<_>>();
+            if result_types.len() != 1 {
+                continue;
+            }
+            let receiver_type = result_types
+                .into_iter()
+                .next()
+                .expect("one static producer result type");
             let parsed = TypeExpr::parse(&receiver_type, language);
             let known = behavior.call_complexity(&parsed, &call.message);
             let parametric = known
@@ -8921,7 +8943,7 @@ fn propagate_direct_call_result_receiver_types(
                 .as_deref()
                 .and_then(crate::syntax::parametric_call_complexity);
             call.receiver_type = Some(receiver_type);
-            call.receiver_type_origin = Some("declared_collection_call_result".to_string());
+            call.receiver_type_origin = Some("static_call_result_contract".to_string());
             call.known_time_complexity = known
                 .map(|cost| cost.time.to_string())
                 .or_else(|| parametric_complexity.map(|cost| cost.0.to_string()));
@@ -8946,6 +8968,138 @@ fn propagate_direct_call_result_receiver_types(
         if !changed {
             break;
         }
+    }
+}
+
+fn propagate_callback_argument_parameter_types(
+    calls: &mut [CallRecord],
+    document: &Document,
+    language: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) {
+    let block_calls = document
+        .call_sites
+        .iter()
+        .filter(|site| site.block)
+        .collect::<Vec<_>>();
+    let nodes = document
+        .control_flow_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let places = document
+        .places
+        .iter()
+        .map(|place| (place.id.as_str(), place))
+        .collect::<BTreeMap<_, _>>();
+    let parameter_counts = document.callback_bindings.iter().fold(
+        BTreeMap::<(&str, [usize; 4]), usize>::new(),
+        |mut counts, binding| {
+            counts
+                .entry((binding.node_id.as_str(), binding.span))
+                .and_modify(|count| *count = (*count).max(binding.position + 1))
+                .or_insert(binding.position + 1);
+            counts
+        },
+    );
+    let mut proven = Vec::new();
+    for binding in &document.callback_bindings {
+        let Some(node) = nodes.get(binding.node_id.as_str()) else {
+            continue;
+        };
+        let Some(place) = places.get(binding.place_id.as_str()) else {
+            continue;
+        };
+        let candidates = block_calls
+            .iter()
+            .filter(|site| site.function == binding.function)
+            .filter(|site| span_contains(node.span, site.span))
+            .filter(|site| site.span[0] == node.span[0])
+            .collect::<Vec<_>>();
+        if candidates.len() != 1 {
+            continue;
+        }
+        let site = candidates[0];
+        let outer_calls = calls
+            .iter()
+            .filter(|call| {
+                call.function == site.function
+                    && call.message == site.message
+                    && call.span == site.span
+            })
+            .collect::<Vec<_>>();
+        if outer_calls.len() != 1 {
+            continue;
+        }
+        let outer = outer_calls[0];
+        let parameter_count = parameter_counts
+            .get(&(binding.node_id.as_str(), binding.span))
+            .copied()
+            .unwrap_or(0);
+        let Some(receiver_type) = behavior.callback_argument_parameter_type(
+            &outer.receiver,
+            outer.receiver_type.as_deref(),
+            &outer.message,
+            binding.position,
+            parameter_count,
+            &outer.arguments,
+        ) else {
+            continue;
+        };
+        proven.push((
+            binding.function.as_str(),
+            binding.span,
+            place.name.as_str(),
+            receiver_type,
+        ));
+    }
+
+    for call in calls.iter_mut().filter(|call| call.receiver_type.is_none()) {
+        let receiver_types = proven
+            .iter()
+            .filter(|(function, span, name, _)| {
+                *function == call.function
+                    && *name == call.receiver
+                    && span_contains(*span, call.span)
+            })
+            .map(|(_, _, _, receiver_type)| receiver_type.as_str())
+            .collect::<BTreeSet<_>>();
+        if receiver_types.len() != 1 {
+            continue;
+        }
+        let receiver_type = receiver_types
+            .into_iter()
+            .next()
+            .expect("one callback argument type");
+        let parsed = TypeExpr::parse(receiver_type, language);
+        let known = behavior.call_complexity(&parsed, &call.message);
+        let parametric = known
+            .is_none()
+            .then(|| behavior.parametric_call_cost(&parsed, &call.message))
+            .flatten();
+        let parametric_complexity = parametric
+            .as_deref()
+            .and_then(crate::syntax::parametric_call_complexity);
+        call.receiver_type = Some(receiver_type.to_string());
+        call.receiver_type_origin = Some("callback_argument".to_string());
+        call.known_time_complexity = known
+            .map(|cost| cost.time.to_string())
+            .or_else(|| parametric_complexity.map(|cost| cost.0.to_string()));
+        call.known_space_complexity = known
+            .map(|cost| cost.space.to_string())
+            .or_else(|| parametric_complexity.map(|cost| cost.1.to_string()));
+        call.complexity_provenance = known
+            .map(|_| "language_stdlib_registry".to_string())
+            .or_else(|| {
+                parametric_complexity.map(|_| "parametric_declared_receiver_contract".to_string())
+            });
+        call.complexity_bound_quality = known
+            .map(|_| "upper_bound_declared_receiver".to_string())
+            .or_else(|| {
+                parametric
+                    .as_ref()
+                    .map(|kind| format!("upper_bound_parametric_{kind}"))
+            });
     }
 }
 
@@ -9734,6 +9888,145 @@ end
 
         assert!(unmatched_raw.is_empty());
         assert_eq!(unmatched_normalized, vec![[1, 0, 1, 6]]);
+    }
+
+    #[test]
+    fn ruby_block_calls_retain_exact_raw_call_origins() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"module BlockCallFixture
+  module_function
+  def run(rows, file_coverage, branch_arms)
+    branch_arm_coverage(file_coverage, branch_arms).each_with_object(Hash.new(0)) do |row, out|
+      next if row.covered
+
+      out[row.arm.line] += 1
+    end
+    rows.filter_map do |row|
+      row.to_s if row
+    end
+    rows.map { |row| row.to_s }
+    index = rows.each_with_object(
+      {}
+    ) do |row, out|
+      out[row] = true
+    end
+    index[rows.size] = false
+    buffer = []
+    buffer[rows.size] = true
+    defaults = Hash.new { |hash, key| hash[key] = [] }
+    defaults
+    rows.value = rows.size
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+
+        let output = extract(&document, Profile::Espalier);
+        assert_eq!(
+            output.call_resolution_coverage.raw_calls_not_normalized,
+            0,
+            "{:?}",
+            output
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            0,
+            "{:?}",
+            output
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples
+        );
+        assert!(
+            output.calls.iter().any(|call| call.message == "value="),
+            "attribute writers are executable Ruby calls"
+        );
+        assert!(
+            output
+                .calls
+                .iter()
+                .any(|call| call.receiver == "Hash" && call.message == "new"),
+            "constructor calls nested in block-call arguments must be retained"
+        );
+        assert_eq!(
+            output
+                .calls
+                .iter()
+                .filter(|call| call.message == "each_with_object")
+                .map(|call| call.arguments.len())
+                .collect::<Vec<_>>(),
+            vec![1, 1],
+            "wrapped block-call arguments must be structurally retained without duplication"
+        );
+        let accumulator_writes = output
+            .calls
+            .iter()
+            .filter(|call| call.receiver == "out" && call.message == "[]=")
+            .collect::<Vec<_>>();
+        assert_eq!(accumulator_writes.len(), 1);
+        assert!(accumulator_writes.iter().all(|call| {
+            call.receiver_type
+                .as_deref()
+                .is_some_and(|receiver| receiver.contains("Hash"))
+                && call.receiver_type_origin.as_deref() == Some("callback_argument")
+                && call.known_time_complexity.as_deref() == Some("O(1)")
+                && call.known_space_complexity.as_deref() == Some("O(1)")
+        }));
+        let accumulator_result_write = output
+            .calls
+            .iter()
+            .find(|call| call.receiver == "index" && call.message == "[]=")
+            .expect("writer on an argument-dependent call result");
+        assert_eq!(
+            accumulator_result_write.receiver_type.as_deref(),
+            Some("T::Hash[T.untyped, T.untyped]")
+        );
+        assert_eq!(
+            accumulator_result_write.receiver_type_origin.as_deref(),
+            Some("static_call_result_contract")
+        );
+        assert_eq!(
+            accumulator_result_write.known_time_complexity.as_deref(),
+            Some("O(1)")
+        );
+        let array_write = output
+            .calls
+            .iter()
+            .find(|call| call.receiver == "buffer" && call.message == "[]=")
+            .expect("array writer");
+        assert_eq!(
+            array_write.receiver_type.as_deref(),
+            Some("T::Array[T.untyped]")
+        );
+        assert_eq!(array_write.known_time_complexity.as_deref(), Some("O(N)"));
+        assert_eq!(array_write.known_space_complexity.as_deref(), Some("O(N)"));
+        let default_hash_write = output
+            .calls
+            .iter()
+            .find(|call| call.receiver == "hash" && call.message == "[]=")
+            .expect("Hash default callback writer");
+        assert_eq!(
+            default_hash_write.receiver_type.as_deref(),
+            Some("T::Hash[T.untyped, T.untyped]")
+        );
+        assert_eq!(
+            default_hash_write.receiver_type_origin.as_deref(),
+            Some("callback_argument")
+        );
+        assert_eq!(
+            default_hash_write.known_time_complexity.as_deref(),
+            Some("O(1)")
+        );
     }
 
     #[test]

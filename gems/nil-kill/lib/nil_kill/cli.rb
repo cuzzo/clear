@@ -162,6 +162,7 @@ module NilKill
       trace_plan_enabled = ENV["NIL_KILL_TRACE_PLAN"] != "0"
       TracePlan.write if trace_plan_enabled
       trace_plan = File.file?(TRACE_PLAN_PATH) ? JSON.parse(File.read(TRACE_PLAN_PATH)) : {}
+      trace_plan_digest = trace_plan.dig("runtime_evidence", "plan_digest").to_s
       target_files = NilKill.target_files
       inventory = Runtime::FunctionInventory.build(
         root: ROOT,
@@ -188,7 +189,8 @@ module NilKill
           snapshot.select_increment(
             files: target_files,
             function_inventory: inventory.to_h,
-            workload_plan: workload
+            workload_plan: workload,
+            trace_plan_digest: trace_plan_digest
           )
         else
           {
@@ -206,6 +208,7 @@ module NilKill
             "environment" => {},
             "functions" => inventory.to_h,
             "workload" => workload.to_h,
+            "trace_plan_digest" => trace_plan_digest,
           }
         end
       if fast && !selection.fetch("rebuild")
@@ -397,7 +400,8 @@ module NilKill
             function_inventory: inventory.to_h,
             workload: workload.to_h,
             dependencies: dependencies,
-            callsites: callsites
+            callsites: callsites,
+            trace_plan_digest: trace_plan_digest
           )
         end
         result

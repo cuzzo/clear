@@ -1991,6 +1991,21 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         None
     }
 
+    fn static_argument_dependent_return_type(
+        &self,
+        message: &str,
+        arguments: &[String],
+    ) -> Option<String> {
+        if !matches!(message, "each_with_object" | "inject" | "reduce") {
+            return None;
+        }
+        let mut argument = arguments.first()?.trim();
+        while argument.starts_with('(') && argument.ends_with(')') {
+            argument = argument[1..argument.len() - 1].trim();
+        }
+        self.local_assignment_type_hint(argument)
+    }
+
     fn propagated_collection_return_type(
         &self,
         message: &str,
@@ -2184,6 +2199,38 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             .unwrap_or_default()
     }
 
+    fn callback_argument_parameter_type(
+        &self,
+        receiver: &str,
+        receiver_type: Option<&str>,
+        message: &str,
+        position: usize,
+        parameter_count: usize,
+        arguments: &[String],
+    ) -> Option<String> {
+        let hash_constructor = message == "new"
+            && position == 0
+            && (receiver == "Hash"
+                || receiver_type.is_some_and(|receiver| {
+                    receiver == "Hash"
+                        || receiver.starts_with("T::Hash[")
+                        || receiver.starts_with("Hash[")
+                }));
+        if hash_constructor {
+            return Some(self.untyped_hash_type());
+        }
+        let argument = match message {
+            "each_with_object" if position + 1 == parameter_count => arguments.first(),
+            "inject" | "reduce" if position == 0 => arguments.first(),
+            _ => None,
+        }?;
+        let mut argument = argument.trim();
+        while argument.starts_with('(') && argument.ends_with(')') {
+            argument = argument[1..argument.len() - 1].trim();
+        }
+        self.local_assignment_type_hint(argument)
+    }
+
     fn runtime_call_result_projection(
         &self,
         receiver_type: Option<&str>,
@@ -2263,6 +2310,10 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
 
     fn emit_attribute_assignment_mutation(&self, _node: &Node, field: Option<&str>) -> bool {
         field != Some("[]")
+    }
+
+    fn attribute_assignment_dispatches(&self) -> bool {
+        true
     }
 
     fn preserve_constant_receiver_call(&self, call: &NormalizedCallProjection) -> bool {

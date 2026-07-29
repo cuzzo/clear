@@ -1823,6 +1823,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Project a call result whose type is determined by an argument rather
+    /// than its receiver (for example an accumulator-returning iterator).
+    fn static_argument_dependent_return_type(
+        &self,
+        _message: &str,
+        _arguments: &[String],
+    ) -> Option<String> {
+        None
+    }
+
     fn static_call_return_type(
         &self,
         _node: &Node,
@@ -1925,6 +1935,21 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
             .unwrap_or_default()
     }
 
+    /// Prove the static type of a callback parameter supplied by one call
+    /// argument. The shared profile owns callback-region/DFG joins; adapters
+    /// own native yield order and literal/constructor grammar.
+    fn callback_argument_parameter_type(
+        &self,
+        _receiver: &str,
+        _receiver_type: Option<&str>,
+        _message: &str,
+        _position: usize,
+        _parameter_count: usize,
+        _arguments: &[String],
+    ) -> Option<String> {
+        None
+    }
+
     fn runtime_call_result_projection(
         &self,
         _receiver_type: Option<&str>,
@@ -1958,6 +1983,12 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     fn emit_attribute_assignment_mutation(&self, _node: &Node, _field: Option<&str>) -> bool {
+        false
+    }
+
+    /// Whether attribute/index assignment dispatches an executable setter
+    /// call in this language, rather than being only a storage mutation.
+    fn attribute_assignment_dispatches(&self) -> bool {
         false
     }
 

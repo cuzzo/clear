@@ -131,6 +131,41 @@ RSpec.describe "canonical runtime semantic evidence v1" do
     end
   end
 
+  it "preserves anonymous nested collection shapes in canonical value evidence" do
+    provider = NilKill::Languages.provider_for("ruby")
+    values = NilKill::Runtime::EvidenceProtocol.value_set(
+      {
+        "types" => ["Array"],
+        "elements" => ["Hash"],
+        "shapes" => [{
+          "kind" => "array",
+          "elements" => [{
+            "kind" => "hash",
+            "keys" => [{ "kind" => "class", "name" => "String" }],
+            "values" => [{
+              "kind" => "array",
+              "elements" => [{ "kind" => "class", "name" => "Integer" }],
+            }],
+          }],
+        }],
+      },
+      count: 1,
+      provider: provider
+    )
+
+    array_value = values.dig("alternatives", 0, "value")
+    hash_value = array_value.dig("sequence", "elements", "alternatives", 0, "value")
+    entry = hash_value.dig("mapping", "entries", 0)
+    nested_array = entry.fetch("value")
+    nested_element = nested_array.dig("sequence", "elements", "alternatives", 0, "value")
+
+    expect(array_value.fetch("type_symbol")).to end_with(" Array#")
+    expect(hash_value.fetch("type_symbol")).to end_with(" Hash#")
+    expect(entry.dig("key", "type_symbol")).to end_with(" String#")
+    expect(nested_array.fetch("type_symbol")).to end_with(" Array#")
+    expect(nested_element.fetch("type_symbol")).to end_with(" Integer#")
+  end
+
   it "fails closed instead of guessing between identical selectors on one line" do
     requests = %w[call-1 call-2].map do |id|
       {

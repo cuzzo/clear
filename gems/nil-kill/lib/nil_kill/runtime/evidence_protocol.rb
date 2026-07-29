@@ -132,25 +132,43 @@ module NilKill
         end
         shape ||= Array(domain["shapes"] || domain[:shapes]).first
         shape = Hash(shape || {})
+        shape = shape.merge(
+          "elements" => domain["elements"] || domain[:elements]
+        ) if !shape.key?("elements") && !shape.key?(:elements)
+        shape = shape.merge(
+          "keys" => domain["keys"] || domain[:keys]
+        ) if !shape.key?("keys") && !shape.key?(:keys)
+        shape = shape.merge(
+          "values" => domain["values"] || domain[:values]
+        ) if !shape.key?("values") && !shape.key?(:values)
+        wire_shape(shape, provider, source_role)
+      end
+
+      def wire_shape(shape, provider, source_role)
+        shape = Hash(shape || {})
         kind = (shape["kind"] || shape[:kind]).to_s
         case kind
         when "array", "set"
           values = child_value_set(
-            shape["elements"] || shape[:elements] || domain["elements"] || domain[:elements],
+            shape["elements"] || shape[:elements],
             provider,
             source_role
           )
           values && { "sequence" => { "elements" => values } }
         when "hash"
-          keys = Array(domain["keys"] || domain[:keys])
-          values = Array(domain["values"] || domain[:values])
+          keys = Array(shape["keys"] || shape[:keys])
+          values = Array(shape["values"] || shape[:values])
           entries = keys.product(values).map do |key, child|
+            key_value = runtime_value_from_shape(key, provider, source_role)
+            child_value = runtime_value_from_shape(child, provider, source_role)
+            next unless key_value && child_value
+
             {
-              "key" => simple_runtime_value(key, provider, source_role),
-              "value" => simple_runtime_value(child, provider, source_role),
+              "key" => key_value,
+              "value" => child_value,
               "count" => 1,
             }
-          end
+          end.compact
           entries.any? ? { "mapping" => { "entries" => entries } } : nil
         when "record"
           members = Hash(shape["members"] || shape[:members]).sort.map do |name, child|
@@ -168,20 +186,40 @@ module NilKill
 
       def child_value_set(values, provider, source_role)
         alternatives = Array(values).filter_map do |value|
-          name =
-            if value.is_a?(Hash)
-              value["name"] || value[:name]
-            else
-              value
-            end
-          next if name.to_s.empty?
+          runtime_value = runtime_value_from_shape(value, provider, source_role)
+          next unless runtime_value
 
           {
-            "value" => simple_runtime_value(name, provider, source_role),
+            "value" => runtime_value,
             "count" => 1,
           }
         end
         { "alternatives" => alternatives.uniq } if alternatives.any?
+      end
+
+      def runtime_value_from_shape(value, provider, source_role)
+        return simple_runtime_value(value, provider, source_role) unless value.is_a?(Hash)
+
+        shape = Hash(value)
+        kind = (shape["kind"] || shape[:kind]).to_s
+        name = (shape["name"] || shape[:name]).to_s
+        type =
+          if !name.empty?
+            name
+          else
+            {
+              "array" => "Array",
+              "set" => "Set",
+              "hash" => "Hash",
+              "tuple" => "Array",
+            }[kind]
+          end
+        return if type.to_s.empty?
+
+        runtime_value = simple_runtime_value(type, provider, source_role)
+        nested = wire_shape(shape, provider, source_role)
+        runtime_value.merge!(nested) if nested
+        runtime_value
       end
 
       def simple_runtime_value(type, provider, source_role)

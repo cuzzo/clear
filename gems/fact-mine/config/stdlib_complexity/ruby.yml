@@ -2,6 +2,7 @@
 # rendered Big-O strings: Fact-Mine emits the facts and Espalier owns algebra.
 Array:
   "[]": constant
+  "[]=": linear_materialize
   each: linear_scan
   each_with_index: linear_scan
   each_index: linear_scan
@@ -58,6 +59,7 @@ Array:
   sort_by!: sort
 Hash:
   "[]": constant
+  "[]=": constant
   key?: constant
   has_key?: constant
   include?: constant

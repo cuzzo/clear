@@ -739,18 +739,28 @@ fn protocol_value_domain(
             });
         }
         Some(runtime_value::Shape::Mapping(shape)) => {
+            let mut keys = Vec::new();
+            let mut values = Vec::new();
             for entry in &shape.entries {
                 if let Some(key) = entry.key.as_ref() {
                     domain.keys.insert(protocol_runtime_type(key, language)?);
+                    keys.push(protocol_value_shape(key, language)?);
                 }
                 if let Some(value) = entry.value.as_ref() {
                     domain
                         .values
                         .insert(protocol_runtime_type(value, language)?);
+                    values.push(protocol_value_shape(value, language)?);
                 }
             }
+            keys.sort();
+            keys.dedup();
+            values.sort();
+            values.dedup();
             domain.shapes.push(ValueShape {
                 kind: "hash".to_string(),
+                keys,
+                values,
                 ..ValueShape::default()
             });
         }
@@ -827,14 +837,83 @@ fn protocol_value_set_shapes(
         .into_iter()
         .flat_map(|set| &set.alternatives)
         .filter_map(|weighted| weighted.value.as_ref())
-        .map(|value| {
-            Ok(ValueShape {
-                kind: "class".to_string(),
-                name: protocol_runtime_type(value, language)?,
-                ..ValueShape::default()
-            })
-        })
+        .map(|value| protocol_value_shape(value, language))
         .collect()
+}
+
+fn protocol_value_shape(
+    value: &runtime_protocol::RuntimeValue,
+    language: &str,
+) -> Result<ValueShape> {
+    let name = protocol_runtime_type(value, language)?;
+    Ok(match value.shape.as_ref() {
+        Some(runtime_value::Shape::Sequence(shape)) => ValueShape {
+            kind: "array".to_string(),
+            name,
+            elements: protocol_value_set_shapes(shape.elements.as_ref(), language)?,
+            ..ValueShape::default()
+        },
+        Some(runtime_value::Shape::Mapping(shape)) => {
+            let mut keys = shape
+                .entries
+                .iter()
+                .filter_map(|entry| entry.key.as_ref())
+                .map(|key| protocol_value_shape(key, language))
+                .collect::<Result<Vec<_>>>()?;
+            let mut values = shape
+                .entries
+                .iter()
+                .filter_map(|entry| entry.value.as_ref())
+                .map(|value| protocol_value_shape(value, language))
+                .collect::<Result<Vec<_>>>()?;
+            keys.sort();
+            keys.dedup();
+            values.sort();
+            values.dedup();
+            ValueShape {
+                kind: "hash".to_string(),
+                name,
+                keys,
+                values,
+                ..ValueShape::default()
+            }
+        }
+        Some(runtime_value::Shape::Record(shape)) => {
+            let mut members = BTreeMap::new();
+            for member in &shape.members {
+                let alternatives = protocol_value_set_shapes(member.values.as_ref(), language)?;
+                members.insert(
+                    member.name.clone(),
+                    alternatives.into_iter().next().unwrap_or(ValueShape {
+                        kind: "unknown".to_string(),
+                        ..ValueShape::default()
+                    }),
+                );
+            }
+            ValueShape {
+                kind: "record".to_string(),
+                name,
+                members,
+                ..ValueShape::default()
+            }
+        }
+        Some(runtime_value::Shape::Tuple(shape)) => ValueShape {
+            kind: "tuple".to_string(),
+            name,
+            elements: shape
+                .elements
+                .iter()
+                .flat_map(|set| protocol_value_set_shapes(Some(set), language))
+                .flatten()
+                .collect(),
+            ..ValueShape::default()
+        },
+        None => ValueShape {
+            kind: "class".to_string(),
+            name,
+            ..ValueShape::default()
+        },
+    })
 }
 
 /// Overlay runtime observations on FactMine's normalized source/CFG/DFG facts
@@ -2997,6 +3076,67 @@ mod tests {
     use protobuf::{EnumOrUnknown, MessageField};
     use serde_json::json;
     use std::io::Write;
+
+    #[test]
+    fn canonical_protocol_preserves_nested_collection_shapes() {
+        let runtime_value = |name: &str| runtime_protocol::RuntimeValue {
+            type_symbol: format!("nil-kill-runtime ruby ruby 3.2.3 {name}#"),
+            ..runtime_protocol::RuntimeValue::default()
+        };
+        let integer = runtime_value("Integer");
+        let mut nested_array = runtime_value("Array");
+        nested_array.shape = Some(runtime_value::Shape::Sequence(
+            runtime_protocol::SequenceShape {
+                elements: MessageField::some(runtime_protocol::ValueSet {
+                    alternatives: vec![runtime_protocol::WeightedValue {
+                        value: MessageField::some(integer),
+                        count: 1,
+                        ..runtime_protocol::WeightedValue::default()
+                    }],
+                    ..runtime_protocol::ValueSet::default()
+                }),
+                ..runtime_protocol::SequenceShape::default()
+            },
+        ));
+        let mut hash = runtime_value("Hash");
+        hash.shape = Some(runtime_value::Shape::Mapping(
+            runtime_protocol::MappingShape {
+                entries: vec![runtime_protocol::MappingEntry {
+                    key: MessageField::some(runtime_value("String")),
+                    value: MessageField::some(nested_array),
+                    count: 1,
+                    ..runtime_protocol::MappingEntry::default()
+                }],
+                ..runtime_protocol::MappingShape::default()
+            },
+        ));
+        let mut outer = runtime_value("Array");
+        outer.shape = Some(runtime_value::Shape::Sequence(
+            runtime_protocol::SequenceShape {
+                elements: MessageField::some(runtime_protocol::ValueSet {
+                    alternatives: vec![runtime_protocol::WeightedValue {
+                        value: MessageField::some(hash),
+                        count: 1,
+                        ..runtime_protocol::WeightedValue::default()
+                    }],
+                    ..runtime_protocol::ValueSet::default()
+                }),
+                ..runtime_protocol::SequenceShape::default()
+            },
+        ));
+
+        let domain = protocol_value_domain(&outer, "ruby").expect("canonical value domain");
+        let outer_shape = domain.shapes.first().expect("outer sequence");
+        let hash_shape = outer_shape.elements.first().expect("hash element");
+        let value_shape = hash_shape.values.first().expect("hash value");
+        let integer_shape = value_shape.elements.first().expect("nested array element");
+
+        assert_eq!(outer_shape.kind, "array");
+        assert_eq!(hash_shape.kind, "hash");
+        assert_eq!(hash_shape.keys[0].name, "String");
+        assert_eq!(value_shape.kind, "array");
+        assert_eq!(integer_shape.name, "Integer");
+    }
 
     fn valid_evidence() -> serde_json::Value {
         json!({
@@ -5679,6 +5819,126 @@ end
             .find(|call| call.message == "size" && call.receiver == "right")
             .expect("other same-selector call");
         assert!(!other.runtime_evidence_observed);
+    }
+
+    #[test]
+    fn canonical_parameter_shape_costs_a_callback_hash_writer() {
+        let directory = tempfile::tempdir().expect("directory");
+        let file = directory.path().join("worker.rb");
+        std::fs::write(
+            &file,
+            "class Worker\n  def run(rows)\n    rows.each { |row| row[\"seen\"] = true }\n  end\nend\n",
+        )
+        .expect("source");
+        let document = syntax::parse_file(file.clone(), Language::Ruby).expect("parse");
+        let mut overlay_profile = profile::extract(&document, Profile::Espalier);
+        let plan_profile = profile::extract(&document, Profile::TracePlan);
+        let built = runtime_protocol::build_trace_plan_with_bindings(
+            &plan_profile,
+            std::slice::from_ref(&file),
+            directory.path(),
+        )
+        .expect("plan");
+        let parameter_anchor = built
+            .bindings
+            .iter()
+            .find_map(|(anchor, binding)| match binding {
+                AnchorBinding::Parameter { name, .. } if name == "rows" => Some(anchor.clone()),
+                _ => None,
+            })
+            .expect("rows parameter anchor");
+        let runtime_value = |name: &str| runtime_protocol::RuntimeValue {
+            type_symbol: format!("nil-kill-runtime ruby ruby 3.2.3 {name}#"),
+            source_role: EnumOrUnknown::new(runtime_protocol::SourceRole::PRODUCTION),
+            ..runtime_protocol::RuntimeValue::default()
+        };
+        let mut array = runtime_value("Array");
+        array.shape = Some(runtime_value::Shape::Sequence(
+            runtime_protocol::SequenceShape {
+                elements: MessageField::some(runtime_protocol::ValueSet {
+                    alternatives: vec![runtime_protocol::WeightedValue {
+                        value: MessageField::some(runtime_value("Hash")),
+                        count: 1,
+                        ..runtime_protocol::WeightedValue::default()
+                    }],
+                    ..runtime_protocol::ValueSet::default()
+                }),
+                ..runtime_protocol::SequenceShape::default()
+            },
+        ));
+        let run_id = "run-1".to_string();
+        let anchors = built
+            .plan
+            .requests
+            .iter()
+            .map(|request| {
+                let anchor = request.anchor.as_ref().expect("anchor");
+                let selected = anchor.symbol == parameter_anchor;
+                runtime_protocol::AnchorEvidence {
+                    anchor_symbol: anchor.symbol.clone(),
+                    anchor_semantic_digest: anchor.semantic_digest.clone(),
+                    capture: MessageField::some(runtime_protocol::CaptureSummary {
+                        status: EnumOrUnknown::new(if selected {
+                            CaptureStatus::COMPLETE_FOR_RUNS
+                        } else {
+                            CaptureStatus::NOT_EXECUTED
+                        }),
+                        run_ids: vec![run_id.clone()],
+                        observed_executions: u64::from(selected),
+                        ..runtime_protocol::CaptureSummary::default()
+                    }),
+                    executions: selected
+                        .then(|| runtime_protocol::ExecutionBucket {
+                            count: 1,
+                            value: MessageField::some(runtime_protocol::ValueSet {
+                                alternatives: vec![runtime_protocol::WeightedValue {
+                                    value: MessageField::some(array.clone()),
+                                    count: 1,
+                                    ..runtime_protocol::WeightedValue::default()
+                                }],
+                                ..runtime_protocol::ValueSet::default()
+                            }),
+                            provenance: MessageField::some(runtime_protocol::Provenance {
+                                run_id: run_id.clone(),
+                                provider: "ruby-tracepoint".to_string(),
+                                provider_version: "1".to_string(),
+                                ..runtime_protocol::Provenance::default()
+                            }),
+                            ..runtime_protocol::ExecutionBucket::default()
+                        })
+                        .into_iter()
+                        .collect(),
+                    ..runtime_protocol::AnchorEvidence::default()
+                }
+            })
+            .collect();
+        let evidence = runtime_protocol::RuntimeEvidence {
+            protocol_version: runtime_protocol::PROTOCOL_VERSION,
+            producer: MessageField::some(runtime_protocol::ToolInfo {
+                name: "nil-kill".to_string(),
+                version: "1".to_string(),
+                ..runtime_protocol::ToolInfo::default()
+            }),
+            authority: EnumOrUnknown::new(runtime_protocol::Authority::MODELED_RUNS),
+            trace_plan_digest: built.plan.plan_digest.clone(),
+            runs: vec![runtime_protocol::Run {
+                id: run_id,
+                status: EnumOrUnknown::new(runtime_protocol::RunStatus::SUCCEEDED),
+                ..runtime_protocol::Run::default()
+            }],
+            anchors,
+            ..runtime_protocol::RuntimeEvidence::default()
+        };
+
+        apply_protocol_to_profile(&mut overlay_profile, &built, &evidence).expect("overlay");
+        let writer = overlay_profile
+            .calls
+            .iter()
+            .find(|call| call.receiver == "row" && call.message == "[]=")
+            .expect("callback hash writer");
+        assert_eq!(writer.receiver_type.as_deref(), Some("Hash"));
+        assert_eq!(writer.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(writer.known_space_complexity.as_deref(), Some("O(1)"));
     }
 
     #[test]

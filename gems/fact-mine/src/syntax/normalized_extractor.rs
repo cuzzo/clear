@@ -677,11 +677,15 @@ impl<'a> Extractor<'a> {
                 &receiver_scope,
             );
         }
-        if let Some(receiver) = child_node(node, 0) {
-            self.scan(receiver);
-        }
-        if let Some(args) = child_node(node, 2) {
-            self.scan(args);
+        if self.behavior.attribute_assignment_dispatches() {
+            self.record_call_node(node, false);
+        } else {
+            if let Some(receiver) = child_node(node, 0) {
+                self.scan(receiver);
+            }
+            if let Some(args) = child_node(node, 2) {
+                self.scan(args);
+            }
         }
     }
 
@@ -1874,7 +1878,7 @@ impl<'a> Extractor<'a> {
                     args_node,
                 })
             }
-            "CALL" | "QCALL" => {
+            "CALL" | "QCALL" | "ATTRASGN" => {
                 let receiver_node = child_node(node, 0);
                 let args_node = child_node(node, 2);
                 Some(CallParts {
