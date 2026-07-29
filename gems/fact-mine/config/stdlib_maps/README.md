@@ -19,11 +19,21 @@ or a language-owned probe. The shared join does not interpret keys such as
 runtime artifact digest, target triple, sysroot, or ABI; it merely requires the
 consumer profile to carry every claim required by the bundle. A
 `fact-mine.symbol-bridge.v1` sidecar maps analyzed implementation symbols to
-consumer declaration symbols. This is the common mechanism for declaration-only
-or cross-language runtimes, and the bridge digest is retained in the generated
-summary. Bridge commands run after the producer profile and unrelocated summary
-exist, and may use `{profile}` and `{producer_summary}` in addition to the
-standard manifest substitutions.
+one or more exact consumer declaration symbols. This is the common mechanism
+for declaration-only or cross-language runtimes, and the bridge digest is
+retained in the generated summary. A source identity without a bridge target is
+not published; bridge fan-out is therefore lossless but fail-closed. Bridge
+commands run after the producer profile and unrelocated summary exist, and may
+use `{profile}` and `{producer_summary}` in addition to the standard manifest
+substitutions.
+
+A standard library may be split into independent, bounded manifests (for
+example `core-a`, `collections`, and `io`) instead of one monolithic job.
+Every manifest runs the same source → SCIP → FactMine → soundness gate → exact
+bridge → atomic publication flow, and all generated summaries are discovered
+as a union. This is the intended feedback loop for CRuby now and for CPython
+and a JS engine later: adding a shard is language-owned source/index/bridge
+configuration, not a new shared integration path.
 
 When implementation and consumer source require different SCIP producers, a
 manifest may declare `summary.consumer_indexers`. The generated summary retains

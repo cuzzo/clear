@@ -25,6 +25,27 @@ module Espalier
       "#{to}#{symbol.delete_prefix(from)}"
     end
 
+    # Apply an exact implementation-to-consumer bridge.  A source body may
+    # deliberately implement more than one public declaration (for example a
+    # class method and an equivalent module function), so a bridge value is
+    # one-or-many rather than a lossy one-to-one map.  Keeping this operation
+    # here makes bridges equally available to every producer language; a
+    # language-owned bridge generator need only prove its identities.
+    #
+    # Rows without a bridge target are intentionally omitted.  Publishing a
+    # source identity into a consumer summary would evade the cross-indexer
+    # identity proof that the bridge is meant to establish.
+    def bridge_symbol_rows(rows, symbol_map: nil, prefix_from: nil, prefix_to: nil)
+      rows.flat_map do |symbol, row|
+        targets = if symbol_map
+                    Array(symbol_map[symbol])
+                  else
+                    [relocate_symbol(symbol, from: prefix_from, to: prefix_to)]
+                  end
+        targets.compact.map { |target| [target, row] }
+      end
+    end
+
     def source_method_proven?(method, quality, complexity_facts)
       return false unless method["source_export_eligible"] == true
       return false unless source_proven?(quality, complexity_facts)

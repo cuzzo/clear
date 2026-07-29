@@ -175,18 +175,12 @@ candidate_symbols = Array(profile["calls"]).filter_map do |call|
   }]
 end
 symbols.concat(candidate_symbols)
-symbols = symbols.flat_map do |symbol, row|
-  relocated = if symbol_map
-                Array(symbol_map[symbol])
-              else
-                [Espalier::ComplexitySummary.relocate_symbol(
-                  symbol,
-                  from: metadata[:symbol_prefix_from],
-                  to: metadata[:symbol_prefix_to]
-                )]
-              end
-  relocated.compact.map { |target| [target, row] }
-end
+symbols = Espalier::ComplexitySummary.bridge_symbol_rows(
+  symbols,
+  symbol_map: symbol_map,
+  prefix_from: metadata[:symbol_prefix_from],
+  prefix_to: metadata[:symbol_prefix_to]
+)
 
 # A compiler symbol should identify one declaration. Omit conflicting symbols
 # instead of selecting by order if an index violates that contract; one

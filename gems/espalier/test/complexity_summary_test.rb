@@ -65,6 +65,33 @@ class ComplexitySummaryTest < Minitest::Test
     end
   end
 
+  def test_exact_symbol_bridge_preserves_one_to_many_declaration_identities
+    row = {"time" => "O(1)", "space" => "O(1)"}
+    bridged = Espalier::ComplexitySummary.bridge_symbol_rows(
+      [["implementation Math.exp", row], ["implementation absent", row]],
+      symbol_map: {
+        "implementation Math.exp" => ["runtime Math#exp", "runtime Math.exp"]
+      }
+    )
+
+    assert_equal(
+      [["runtime Math#exp", row], ["runtime Math.exp", row]],
+      bridged
+    )
+  end
+
+  def test_symbol_bridge_and_prefix_relocation_share_one_generic_transform
+    row = {"time" => "O(N)", "space" => "O(1)"}
+    assert_equal(
+      [["consumer pkg fn", row]],
+      Espalier::ComplexitySummary.bridge_symbol_rows(
+        [["producer pkg fn", row]],
+        prefix_from: "producer ",
+        prefix_to: "consumer "
+      )
+    )
+  end
+
   def test_rejects_incomplete_or_manual_model_derived_bounds
     refute Espalier::ComplexitySummary.source_proven?(quality(complete: false), [])
     refute Espalier::ComplexitySummary.source_proven?(quality(space_complete: false), [])
