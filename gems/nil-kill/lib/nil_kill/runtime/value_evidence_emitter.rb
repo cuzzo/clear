@@ -8,7 +8,7 @@ module NilKill
     # inference.
     class ValueEvidenceEmitter
       SCHEMA = "fact-mine.runtime-value-evidence.v1"
-      DEFAULT_OUTPUT = "runtime-values.json"
+      DEFAULT_OUTPUT = "runtime-values.json.gz"
 
       def self.emit(root:, runtime_dir:, events:, output: nil)
         new(root: root, runtime_dir: runtime_dir, output: output).emit(events)
@@ -116,11 +116,7 @@ module NilKill
       end
 
       def write_atomically(path, contents)
-        temporary = "#{path}.#{Process.pid}.tmp"
-        File.write(temporary, contents)
-        File.rename(temporary, path)
-      ensure
-        File.delete(temporary) if temporary && File.exist?(temporary)
+        JsonIO.write(path, contents)
       end
     end
   end

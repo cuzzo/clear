@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "open3"
+require "tempfile"
 
 module NilKill
   module Runtime
@@ -15,26 +16,52 @@ module NilKill
       AUTHORITY_ARGUMENT = "--fact-mine-index-authority=#{AUTHORITY}"
       EVENT_GLOB = "runtime-calls-*.jsonl"
 
-      def self.emit(root:, runtime_dir:, output: nil, attestation: nil, environment: {}, files: nil)
+      def self.emit(
+        root:,
+        runtime_dir:,
+        output: nil,
+        attestation: nil,
+        environment: {},
+        files: nil,
+        value_evidence_path: nil
+      )
         new(
           root: root,
           runtime_dir: runtime_dir,
           output: output,
           attestation: attestation,
           environment: environment,
-          files: files
+          files: files,
+          value_evidence_path: value_evidence_path
         ).emit
       end
 
-      def initialize(root:, runtime_dir:, output: nil, attestation: nil, environment: {}, files: nil)
+      # Produce only the language-neutral value-evidence bundle. Incremental
+      # collection uses this to merge a delta into the canonical snapshot
+      # before running FactMine once over the merged evidence.
+      def self.emit_value_evidence(root:, runtime_dir:, output: nil)
+        new(root: root, runtime_dir: runtime_dir)
+          .emit_value_evidence(output: output)
+      end
+
+      def initialize(
+        root:,
+        runtime_dir:,
+        output: nil,
+        attestation: nil,
+        environment: {},
+        files: nil,
+        value_evidence_path: nil
+      )
         @root = File.expand_path(root)
         @runtime_dir = File.expand_path(runtime_dir)
         @output = File.expand_path(output || File.join(@runtime_dir, "runtime.scip.json"))
         @attestation = File.expand_path(
-          attestation || File.join(@runtime_dir, "runtime-attestation.json")
+          attestation || File.join(@runtime_dir, "runtime-attestation.json.gz")
         )
         @environment = environment.transform_keys(&:to_s).transform_values(&:to_s)
         @files = files
+        @value_evidence_path = value_evidence_path && File.expand_path(value_evidence_path)
       end
 
       def emit
@@ -44,11 +71,22 @@ module NilKill
             .runtime_scip_event_eligible?(event: event, root: @root)
         end
         excluded_events = events.length - semantic_events.length
-        value_evidence = ValueEvidenceEmitter.emit(
-          root: @root,
-          runtime_dir: @runtime_dir,
-          events: semantic_events
-        )
+        value_evidence =
+          if @value_evidence_path
+            parsed = JsonIO.parse(@value_evidence_path)
+            {
+              "path" => @value_evidence_path,
+              "observations" => parsed.fetch("observations", []).length,
+              "calls" => parsed.fetch("calls", []).length,
+            }
+          else
+            ValueEvidenceEmitter.emit(
+              root: @root,
+              runtime_dir: @runtime_dir,
+              events: semantic_events
+            )
+          end
+        evidence_runs = JsonIO.parse(value_evidence.fetch("path")).fetch("runs", [])
         sources = runtime_sources(semantic_events, value_evidence.fetch("path"))
         index =
           if sources.empty?
@@ -70,7 +108,8 @@ module NilKill
               documents,
               invalid_events,
               inferred_events,
-              excluded_events
+              excluded_events,
+              evidence_runs
             )
           ) + "\n"
         )
@@ -86,6 +125,25 @@ module NilKill
           "runtime_evidence" => value_evidence.fetch("path"),
           "runtime_value_observations" => value_evidence.fetch("observations"),
         }
+      end
+
+      def emit_value_evidence(output: nil)
+        events, invalid_events = load_events
+        semantic_events = events.select do |event|
+          Languages.provider_for(event.fetch("language"))
+            .runtime_scip_event_eligible?(event: event, root: @root)
+        end
+        result = ValueEvidenceEmitter.emit(
+          root: @root,
+          runtime_dir: @runtime_dir,
+          events: semantic_events,
+          output: output
+        )
+        result.merge(
+          "events" => events.length,
+          "invalid_events" => invalid_events,
+          "excluded_events" => events.length - semantic_events.length
+        )
       end
 
       private
@@ -115,7 +173,7 @@ module NilKill
       end
 
       def runtime_sources(events, evidence_path)
-        evidence = JSON.parse(File.read(evidence_path))
+        evidence = JsonIO.parse(evidence_path)
         sources = Array(@files).map { |path| File.expand_path(path, @root) }
         if sources.empty?
           sources.concat(events.filter_map { |event| event.dig("callsite", "path") })
@@ -162,19 +220,32 @@ module NilKill
 
       def emit_with_fact_mine(evidence_path, sources)
         binary = fact_mine_binary
-        command = [
-          binary,
-          "runtime-scip",
-          "--runtime-evidence", evidence_path,
-          "--output", @output,
-          *sources,
-        ]
-        stdout, stderr, status = Open3.capture3(*command, chdir: @root)
-        unless status.success?
-          raise "fact-mine runtime-scip failed with status #{status.exitstatus}: " \
-            "#{stderr.strip}#{stdout.empty? ? "" : "\n#{stdout.strip}"}"
+        with_plain_evidence(evidence_path) do |plain_evidence|
+          command = [
+            binary,
+            "runtime-scip",
+            "--runtime-evidence", plain_evidence,
+            "--output", @output,
+            *sources,
+          ]
+          stdout, stderr, status = Open3.capture3(*command, chdir: @root)
+          unless status.success?
+            raise "fact-mine runtime-scip failed with status #{status.exitstatus}: " \
+              "#{stderr.strip}#{stdout.empty? ? "" : "\n#{stdout.strip}"}"
+          end
         end
         JSON.parse(File.read(@output))
+      end
+
+      def with_plain_evidence(path)
+        return yield path unless JsonIO.gzip?(path)
+
+        Tempfile.create(["nil-kill-runtime-values", ".json"]) do |file|
+          file.binmode
+          file.write(JsonIO.read(path))
+          file.flush
+          yield file.path
+        end
       end
 
       def fact_mine_binary
@@ -193,8 +264,8 @@ module NilKill
       def load_events
         events = []
         invalid = 0
-        Dir.glob(File.join(@runtime_dir, EVENT_GLOB)).sort.each do |path|
-          File.foreach(path) do |line|
+        JsonIO.matching(@runtime_dir, EVENT_GLOB).each do |path|
+          JsonIO.foreach(path) do |line|
             event = JSON.parse(line)
             unless valid_event?(event)
               invalid += 1
@@ -230,7 +301,8 @@ module NilKill
         documents,
         invalid_events,
         inferred_events,
-        excluded_events
+        excluded_events,
+        evidence_runs
       )
         claims = {
           "runtime_scip.authority" => AUTHORITY,
@@ -246,7 +318,7 @@ module NilKill
           "runtime_scip.inference" =>
             "FactMine normalized CFG/DFG overlaid with observed runtime value domains",
           "runtime_scip.run_ids_sha256" => digest(
-            events.map { |event| event["run_id"].to_s }.reject(&:empty?).uniq.sort.join("\n")
+            Array(evidence_runs).map(&:to_s).reject(&:empty?).uniq.sort.join("\n")
           ),
         }.merge(observed_environment(events)).merge(@environment)
         {
@@ -280,11 +352,7 @@ module NilKill
       end
 
       def write_atomically(path, contents)
-        temporary = "#{path}.#{Process.pid}.tmp"
-        File.write(temporary, contents)
-        File.rename(temporary, path)
-      ensure
-        File.delete(temporary) if temporary && File.exist?(temporary)
+        JsonIO.write(path, contents)
       end
     end
   end

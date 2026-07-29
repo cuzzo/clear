@@ -8,7 +8,7 @@ module NilKill
       puts "ruby parser: #{Syntax::VERSION}"
       puts "targets: #{NilKill.target_dirs.map { |d| NilKill.rel(d) }.join(File::PATH_SEPARATOR)}"
       puts "excluded targets: #{NilKill.target_exclude_dirs.map { |d| NilKill.rel(d) }.join(File::PATH_SEPARATOR)}" unless NilKill.target_exclude_dirs.empty?
-      puts "runtime traces: #{Dir.glob(File.join(RUNTIME_DIR, "*.jsonl")).size}"
+      puts "runtime traces: #{Runtime::JsonIO.matching(RUNTIME_DIR, "*.jsonl").size}"
       puts "sorbet: #{command_ok?(%w[bundle exec srb --version])}"
       puts "tapioca: #{command_ok?(%w[bundle exec tapioca --version])}"
       puts "rbs-trace: #{gem_ok?("rbs/trace") || gem_ok?("rbs-trace")}"

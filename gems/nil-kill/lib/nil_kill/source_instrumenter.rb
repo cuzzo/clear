@@ -3,7 +3,8 @@
 
 module NilKill
   class SourceInstrumenter
-    def initialize
+    def initialize(runtime_dir: NilKill::RUNTIME_DIR)
+      @runtime_dir = runtime_dir
       @line_offsets = []
       @method_plans_by_file_line = Hash.new { |h, k| h[k] = {} }
       @tracepoint_methods = {}
@@ -38,7 +39,7 @@ module NilKill
     # NilKill::RUNTIME_DIR per example (remove_const/const_set), so a
     # load-time constant would point at a stale tmp dir under isolation.
     def line_map_path
-      File.join(NilKill::RUNTIME_DIR, ".nk-linemap.json")
+      File.join(@runtime_dir, ".nk-linemap.json")
     end
 
     # In-place instrumentation. Snapshot each target whose bytes actually
@@ -56,13 +57,13 @@ module NilKill
     # The instrumented->src line map is still required (the wrapper
     # injects lines, shifting every later one) and is keyed by the REAL
     # ROOT-relative path. Returns the manifest of restored-by rel paths.
-    def run_in_place(snapshot_dir)
+    def run_in_place(snapshot_dir, files: NilKill.target_files)
       FileUtils.mkdir_p(snapshot_dir)
       @line_map = {}
       manifest = []
       @defer_plan_write = true
       begin
-        NilKill.target_files.each do |path|
+        Array(files).each do |path|
           rel = NilKill.rel(path)
           source = File.read(path)
           instrumented, line_map = instrument_file_with_map(path, source: source)

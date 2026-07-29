@@ -3,6 +3,7 @@
 
 require_relative "ruby/sorbet"
 require_relative "ruby/runtime_value_evidence"
+require "ripper"
 
 module NilKill
   module Languages
@@ -108,6 +109,31 @@ module NilKill
 
         def runtime_scip_call_evidence(event:, root:)
           RuntimeValueEvidence.call(event: event, root: root)
+        end
+
+        # Ripper's semantic tree excludes ordinary comments and formatting,
+        # so those edits do not trigger an expensive trace. Preserve magic
+        # comments because they can alter Ruby execution/allocation semantics.
+        # A parse failure falls back to exact bytes: never declare an unknown
+        # edit irrelevant.
+        def runtime_incremental_fingerprint(path)
+          source = File.read(path)
+          syntax = Ripper.sexp(source)
+          return super unless syntax
+
+          magic_comments = source.lines.first(2).grep(/\A\s*#\s*[A-Za-z_][\w-]*\s*:/)
+          Digest::SHA256.hexdigest(
+            JSON.generate([magic_comments, runtime_incremental_syntax_without_locations(syntax)])
+          )
+        rescue StandardError
+          super
+        end
+
+        def runtime_incremental_syntax_without_locations(node)
+          return nil if node.is_a?(Array) && node.length == 2 && node.all? { |part| part.is_a?(Integer) }
+          return node.map { |child| runtime_incremental_syntax_without_locations(child) } if node.is_a?(Array)
+
+          node
         end
 
         def return_type_index(root:)

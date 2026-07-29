@@ -2,6 +2,8 @@
 
 require_relative "spec_helper"
 
+RuntimeTraceSpecDouble = Struct.new(:lines) unless defined?(RuntimeTraceSpecDouble)
+
 RSpec.describe "nil-kill runtime trace" do
   it "keeps workspace source outside the selected targets under workspace identity" do
     require_relative "../lib/nil_kill/runtime_trace"
@@ -39,6 +41,51 @@ RSpec.describe "nil-kill runtime trace" do
       "kind" => { "kind" => "class", "name" => "Symbol" },
       "payload" => { "kind" => "class", "name" => "Integer" }
     )
+  end
+
+  it "attributes a native accessor on a test-defined Struct to its test source" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    instance = RuntimeTraceSpecDouble.new([])
+    location = NilKillRuntimeTrace.native_receiver_source_location(instance)
+
+    expect(location).to include(
+      path: File.expand_path(__FILE__),
+      line: be_positive
+    )
+    expect(NilKillRuntimeTrace.runtime_nonproduction_source_path?(location.fetch(:path))).to be(true)
+    expect(NilKillRuntimeTrace.runtime_nonproduction_source_path?(NilKill::ROOT)).to be(false)
+    NilKillRuntimeTrace.runtime_calls.clear
+    NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id] << {
+      caller: {
+        class: "Worker", method: "run", kind: "instance",
+        path: File.expand_path(__FILE__), line: __LINE__,
+      },
+      callsite: { path: File.expand_path(__FILE__), line: __LINE__ },
+    }
+    tracepoint = Struct.new(:event, :path, :lineno, :defined_class, :method_id, :self_value, keyword_init: true) do
+      def self
+        self_value
+      end
+    end.new(
+      event: :c_call,
+      path: "",
+      lineno: 0,
+      defined_class: RuntimeTraceSpecDouble,
+      method_id: :lines,
+      self_value: instance
+    )
+    allow(NilKillRuntimeTrace).to receive(:method_owner)
+      .with(RuntimeTraceSpecDouble).and_return(["RuntimeTraceSpecDouble", "instance"])
+    NilKillRuntimeTrace.record_runtime_scip_call(tracepoint, receiver_shape: false)
+    event = NilKillRuntimeTrace.runtime_calls.values.fetch(0)
+    expect(event.dig(:callee, :path)).to eq(location.fetch(:path))
+    expect(event.dig(:callee, :package_manager)).not_to eq("ruby")
+    provider = NilKill::Languages.provider_for("ruby")
+    serialized_event = JSON.parse(JSON.generate(event))
+    expect(provider.runtime_scip_event_eligible?(event: serialized_event, root: NilKill::ROOT)).to be(false)
+  ensure
+    NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id].clear
+    NilKillRuntimeTrace.runtime_calls.clear
   end
 
   it "permits an independent branch-coverage child when collect coverage is disabled" do
@@ -118,6 +165,58 @@ RSpec.describe "nil-kill runtime trace" do
       expect(events).to include(a_hash_including(
         "callee" => a_hash_including("owner" => "String", "name" => "to_s", "native" => true),
         "callsite" => a_hash_including("path" => source, "line" => 9)
+      ))
+    end
+  end
+
+  it "uses the Ruby caller source line for a nested multiline call when the outer line is not planned" do
+    Dir.mktmpdir("nil-kill-runtime-ruby-callsite", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.rb")
+      File.write(source, <<~RUBY)
+        class Provider
+          def rule_id
+            :rule
+          end
+        end
+
+        class Worker
+          def run(provider)
+            {
+              rule_id: provider.rule_id
+            }
+          end
+        end
+
+        Worker.new.run(Provider.new)
+      RUBY
+      trace_tmp = File.join(dir, "trace-tmp")
+      FileUtils.mkdir_p(trace_tmp)
+      # Ruby reports the hash's opening line before entering rule_id. The
+      # actual dispatch is line 10, which is the only requested capture.
+      File.write(File.join(trace_tmp, "trace-plan.json"), JSON.generate(
+        "target_dirs" => [dir],
+        "runtime_call_sites" => { [source, 10].join("\0") => true },
+        "runtime_result_call_sites" => {},
+        "runtime_collection_receiver_sites" => {}
+      ))
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_RUNTIME_SCIP" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      events = Dir.glob(File.join(trace_tmp, "runtime", "runtime-calls-*.jsonl"))
+        .flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
+      expect(events).to include(a_hash_including(
+        "callee" => a_hash_including("owner" => "Provider", "name" => "rule_id", "native" => false),
+        "callsite" => a_hash_including("path" => source, "line" => 10)
       ))
     end
   end

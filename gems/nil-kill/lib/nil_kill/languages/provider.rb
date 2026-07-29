@@ -131,6 +131,13 @@ module NilKill
         []
       end
 
+      # Stable digest of source semantics that can affect runtime evidence.
+      # Providers may ignore representation-only edits, but must fall back to
+      # content hashing whenever they cannot prove such an edit irrelevant.
+      def runtime_incremental_fingerprint(path)
+        Digest::SHA256.file(path).hexdigest
+      end
+
       def return_type_index(root:)
         nil
       end

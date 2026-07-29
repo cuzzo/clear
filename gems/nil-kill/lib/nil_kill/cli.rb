@@ -102,7 +102,7 @@ module NilKill
     # with an mtime fallback when git/metadata is unavailable.
     def guard_fresh_runtime!
       return if @argv.delete(STALE_OVERRIDE)
-      runtime = Dir.glob(File.join(RUNTIME_DIR, "*.jsonl"))
+      runtime = Runtime::JsonIO.matching(RUNTIME_DIR, "*.jsonl")
       if runtime.empty?
         abort "nil-kill: NO runtime evidence in #{RUNTIME_DIR}. Inference would be 100% static -- partial and useless.\nCollect FULL evidence first:\n  #{COLLECT_HINT}\n(knowing override: nil-kill infer #{STALE_OVERRIDE})"
       end
@@ -150,24 +150,61 @@ module NilKill
     end
 
     def collect
+      fast = @argv.delete("--fast")
       append = @argv.delete("--append-runtime")
+      abort "nil-kill: --fast and --append-runtime cannot be combined" if fast && append
       instrument_source = !@argv.delete("--no-instrument-source")
       instrument_source = true if @argv.delete("--instrument-source")
       commands = collect_commands
-      abort "usage: bundle exec tools/nil-kill collect [--commands FILE] [--continue-on-error] -- <command...>" if commands.empty?
-      FileUtils.rm_rf(RUNTIME_DIR) unless append
+      workload_digest = Digest::SHA256.hexdigest(JSON.generate(commands))
+      snapshot = fast && begin
+        Runtime::Snapshot.load(root: ROOT, runtime_dir: RUNTIME_DIR)
+      rescue ArgumentError => error
+        abort "nil-kill: #{error.message}"
+      end
+      changes = snapshot&.changes(NilKill.target_files, workload_digest: workload_digest)
+      if fast && changes.fetch("changed_paths").empty? && changes.fetch("deleted_paths").empty?
+        puts "nil-kill: incremental snapshot is current; 0 changed sources, workload skipped"
+        return
+      end
+      FileUtils.rm_rf(RUNTIME_DIR) unless append || fast
       FileUtils.mkdir_p(RUNTIME_DIR)
-      write_collect_meta!
+      generation = snapshot ? snapshot.manifest.fetch("generation").to_i + 1 : 0
+      working_runtime_dir =
+        if fast
+          File.join(RUNTIME_DIR, "increments", format("%06d", generation))
+        else
+          RUNTIME_DIR
+        end
+      FileUtils.rm_rf(working_runtime_dir) if fast
+      FileUtils.mkdir_p(working_runtime_dir)
+      collect_files =
+        if fast
+          changes.fetch("changed_paths").map { |path| File.expand_path(path, ROOT) }.select { |path| File.file?(path) }
+        else
+          NilKill.target_files
+        end
+      trace_workload = !fast || collect_files.any?
+      if trace_workload && commands.empty?
+        abort "usage: bundle exec tools/nil-kill collect [--fast] [--commands FILE] [--continue-on-error] -- <command...>"
+      end
       trace_plan_enabled = ENV["NIL_KILL_TRACE_PLAN"] != "0"
-      TracePlan.write if trace_plan_enabled
-      snapshot_dir = File.join(RUNTIME_DIR, "src-snapshot")
-      if instrument_source
+      TracePlan.write if trace_plan_enabled && trace_workload
+      snapshot_dir = File.join(working_runtime_dir, "src-snapshot")
+      instrumented = instrument_source && trace_workload
+      if instrumented
         acquire_inplace_lock!
         # Sentinel + traps BEFORE the first byte of src is overwritten,
         # with the full candidate list -> a crash mid-wrap is healed.
-        NilKill.write_inplace_sentinel!(snapshot_dir, NilKill.target_files.map { |f| NilKill.rel(f) })
+        NilKill.write_inplace_sentinel!(snapshot_dir, collect_files.map { |f| NilKill.rel(f) })
         install_inplace_restore_traps!
-        SourceInstrumenter.new.run_in_place(snapshot_dir)
+        instrumenter =
+          fast ? SourceInstrumenter.new(runtime_dir: working_runtime_dir) : SourceInstrumenter.new
+        if fast
+          instrumenter.run_in_place(snapshot_dir, files: collect_files)
+        else
+          instrumenter.run_in_place(snapshot_dir)
+        end
       end
       require "etc"
       jobs = ENV["NK_JOBS"] || ENV["NIL_KILL_JOBS"] || Etc.nprocessors.to_s rescue "4"
@@ -180,15 +217,20 @@ module NilKill
         "NIL_KILL_PROJECT_NAME" => ENV["NIL_KILL_PROJECT_NAME"] || File.basename(ROOT),
         "NIL_KILL_PROJECT_VERSION" => ENV["NIL_KILL_PROJECT_VERSION"] ||
           git_capture("rev-parse", "HEAD")&.strip || "workspace",
+        "NIL_KILL_RUNTIME_DIR" => working_runtime_dir,
         "RUBYOPT" => rubyopt,
         "WORKERS" => ENV["WORKERS"] || jobs,
         "NK_JOBS" => ENV["NK_JOBS"] || jobs,
         "NIL_KILL_JOBS" => ENV["NIL_KILL_JOBS"] || jobs
       )
+      if fast
+        env["NIL_KILL_TRACE_SOURCE_SLICE"] = collect_files.map { |path| File.expand_path(path) }
+          .join(File::PATH_SEPARATOR)
+      end
       # Source-wrap path: targeted TracePoints off by default (the
       # injected recorder is authoritative). No NIL_KILL_INSTRUMENTED_ROOT
       # any more -- the wrapped file IS the real src path.
-      env["NIL_KILL_TRACE_METHODS"] ||= "0" if instrument_source && trace_plan_enabled
+      env["NIL_KILL_TRACE_METHODS"] ||= "0" if instrumented && trace_plan_enabled
       continue = @argv.delete("--continue-on-error")
       begin
         commands.each_with_index do |cmd, i|
@@ -198,15 +240,60 @@ module NilKill
           exit($?&.exitstatus || 1)
         end
       ensure
-        NilKill.restore_inplace_snapshot! if instrument_source
+        NilKill.restore_inplace_snapshot! if instrumented
       end
-      assert_collect_coverage_produced! if instrument_source
-      emitted = Runtime::ScipEmitter.emit(
-        root: ROOT,
-        runtime_dir: RUNTIME_DIR,
-        files: NilKill.target_files
-      )
+      assert_collect_coverage_produced!(working_runtime_dir) if instrumented
+      compress_runtime_evidence!(working_runtime_dir)
+      emitted =
+        if fast
+          delta = Runtime::ScipEmitter.emit_value_evidence(
+            root: ROOT,
+            runtime_dir: working_runtime_dir
+          )
+          with_canonical_snapshot_transaction do
+            canonical_evidence = snapshot.merge_delta!(
+              delta_evidence_path: delta.fetch("path"),
+              changed_paths: changes.fetch("changed_paths"),
+              deleted_paths: changes.fetch("deleted_paths"),
+              current_hashes: changes.fetch("current_hashes"),
+              environment: changes.fetch("environment"),
+              workload_digest: workload_digest
+            )
+            Runtime::ScipEmitter.emit(
+              root: ROOT,
+              runtime_dir: working_runtime_dir,
+              output: File.join(RUNTIME_DIR, "runtime.scip.json"),
+              attestation: File.join(RUNTIME_DIR, "runtime-attestation.json.gz"),
+              files: NilKill.target_files,
+              value_evidence_path: canonical_evidence,
+              environment: {
+                "runtime_scip.snapshot_mode" => "fast",
+                "runtime_scip.potentially_stale" => "true",
+                "runtime_scip.closure_assumption" =>
+                  "changed and observed source evidence was refreshed; unobserved dynamic effects may be stale",
+              }
+            )
+          end
+        else
+          result = Runtime::ScipEmitter.emit(
+            root: ROOT,
+            runtime_dir: RUNTIME_DIR,
+            files: NilKill.target_files
+          )
+          Runtime::Snapshot.new(root: ROOT, runtime_dir: RUNTIME_DIR).write_full!(
+            files: NilKill.target_files,
+            evidence_path: result.fetch("runtime_evidence"),
+            workload_digest: workload_digest
+          )
+          result
+        end
+      write_collect_meta!
       puts "wrote runtime SCIP index to #{emitted.fetch("index")}"
+      if fast
+        puts "updated compressed canonical snapshot generation #{generation}; " \
+          "#{changes.fetch("changed_paths").length} changed, " \
+          "#{changes.fetch("deleted_paths").length} deleted (potentially stale outside retraced slice)"
+      end
     end
 
     # A second concurrent `collect` would race in-place writes against
@@ -236,15 +323,15 @@ module NilKill
     # failed to start in the workload; the dead-vs-missed split (unseen
     # vs collect_ran_untraced) then cannot be computed and would silently
     # degrade to "never_run". Make that a hard, loud failure instead.
-    def assert_collect_coverage_produced!
-      cov = Dir.glob(File.join(RUNTIME_DIR, "coverage-*.jsonl"))
-      meth = Dir.glob(File.join(RUNTIME_DIR, "methods-*.jsonl"))
+    def assert_collect_coverage_produced!(runtime_dir = RUNTIME_DIR)
+      cov = Dir.glob(File.join(runtime_dir, "coverage-*.jsonl"))
+      meth = Dir.glob(File.join(runtime_dir, "methods-*.jsonl"))
       cov_bytes = cov.sum { |f| File.size(f) }
       meth_bytes = meth.sum { |f| File.size(f) }
       if cov_bytes.zero? || meth_bytes.zero?
         abort "nil-kill: the traced collect produced NO usable evidence " \
           "(coverage=#{cov_bytes}B, method observations=#{meth_bytes}B in " \
-          "#{NilKill.rel(RUNTIME_DIR)}). Empty .jsonl files exist but hold nothing -- " \
+          "#{NilKill.rel(runtime_dir)}). Empty .jsonl files exist but hold nothing -- " \
           "Coverage failed to start, or an exception escaped instrumented src during " \
           "require and aborted the run before any method returned. The dead-vs-missed " \
           "split cannot be computed. Fix the workload/tracer; do not infer on this collect."
@@ -261,6 +348,38 @@ module NilKill
         "evidence). Aggregate .jsonl is non-empty only because other stages traced " \
         "normally; inference would use partial, misleading evidence. Fix the " \
         "workload/tracer; do not infer on this collect."
+    end
+
+    def compress_runtime_evidence!(runtime_dir)
+      return if ENV["NIL_KILL_COMPRESS_EVIDENCE"] == "0"
+
+      Dir.glob(File.join(runtime_dir, "*.jsonl")).sort.each do |path|
+        Runtime::JsonIO.gzip_file(path)
+      end
+    end
+
+    # A failed FactMine regeneration must not leave the manifest/evidence at a
+    # newer generation than the consumer SCIP index. Keep the four canonical
+    # files as one recoverable transaction; delta evidence remains available
+    # for diagnosis and a retry.
+    def with_canonical_snapshot_transaction
+      paths = [
+        File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT),
+        File.join(RUNTIME_DIR, Runtime::Snapshot::MANIFEST),
+        File.join(RUNTIME_DIR, "runtime.scip.json"),
+        File.join(RUNTIME_DIR, "runtime-attestation.json.gz"),
+      ]
+      before = paths.to_h { |path| [path, File.file?(path) ? Runtime::JsonIO.read(path) : nil] }
+      yield
+    rescue Exception # rubocop:disable Lint/RescueException -- rollback before preserving exits/signals
+      before.each do |path, contents|
+        if contents
+          Runtime::JsonIO.write(path, contents)
+        elsif File.file?(path)
+          File.delete(path)
+        end
+      end
+      raise
     end
 
     def collect_commands
@@ -301,6 +420,7 @@ module NilKill
       puts <<~TEXT
         Usage:
           bundle exec tools/nil-kill collect -- <command...>
+          bundle exec tools/nil-kill collect --fast -- <command...>
           bundle exec tools/nil-kill collect --commands runtime-commands.txt
           bundle exec tools/nil-kill collect --cmd "bundle exec rspec" --cmd "./clear test transpile-tests"
           bundle exec tools/nil-kill collect --glob "lib/**/*.rb" --template "ruby {file}"

@@ -12,7 +12,13 @@ module NilKillRuntimeTrace
          else
            File.expand_path("../../../..", __dir__)
          end
-  OUT_DIR = File.expand_path(File.join(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), "runtime"), ROOT)
+  OUT_DIR = File.expand_path(
+    ENV.fetch(
+      "NIL_KILL_RUNTIME_DIR",
+      File.join(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), "runtime")
+    ),
+    ROOT
+  )
   TRACE_PLAN_PATH = File.expand_path(File.join(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), "trace-plan.json"), ROOT)
   TARGETS = ENV.fetch("NIL_KILL_TARGETS", "src").split(File::PATH_SEPARATOR).map do |path|
     File.expand_path(path, ROOT)

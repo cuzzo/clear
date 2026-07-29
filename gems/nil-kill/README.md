@@ -85,6 +85,15 @@ added without changing Nil-kill's analyzer.
 > [Auto-Type](../auto-type/README.md) before collecting again, then prefer a
 > representative production replay or focused tests over repeatedly collecting
 > an entire suite.
+>
+> After one full collection, `nil-kill collect --fast -- <focused command>`
+> content-hashes the target sources. With no changes it skips the workload
+> entirely. With changes it instruments only changed sources, keeps the raw
+> delta under `runtime/increments/`, replaces changed/observed rows in the
+> compressed canonical snapshot, and regenerates SCIP. Because Ruby dispatch
+> can affect code outside the observed slice, a fast snapshot is explicitly
+> marked `potentially_stale`; periodically run a full collection to re-establish
+> a closed baseline.
 
 Nil-Kill's trace plan omits method boundaries, T.let sites, and state fields
 whose contracts are already strong. Unknown and weak slots are retained
@@ -141,6 +150,7 @@ Here's a list of options for nil-kill:
 ```
 Usage:
   bundle exec tools/nil-kill collect -- <command...>
+  bundle exec tools/nil-kill collect --fast -- <focused command...>
   bundle exec tools/nil-kill collect --commands runtime-commands.txt
   bundle exec tools/nil-kill collect --cmd "bundle exec rspec" --cmd "./clear test transpile-tests"
   bundle exec tools/nil-kill collect --glob "lib/**/*.rb" --template "ruby {file}"
@@ -172,13 +182,16 @@ Config:
   NIL_KILL_TRACE_METHODS=0            disable TracePoint method collection
 ```
 
-Ruby collection also writes `runtime.scip.json` and
-`runtime-attestation.json` in the runtime output directory. NilKill serializes
-observed calls and values into `runtime-values.json` without parsing source or
-inferring flow. FactMine overlays that evidence on its normalized CFG/DFG and
-emits the SCIP index with `runtime-modeled-world` authority. Language providers
-only trace values and define genuine language semantics; the evidence contract,
-flow propagation, and SCIP emission are language-neutral.
+Ruby collection also writes consumer-compatible plain `runtime.scip.json`,
+compressed `runtime-attestation.json.gz`, `runtime-values.json.gz`, raw
+`*.jsonl.gz`, and `runtime-snapshot.json.gz` in the runtime output directory.
+Set `NIL_KILL_COMPRESS_EVIDENCE=0` only when plain raw JSONL is needed for
+debugging. NilKill serializes observed calls and values without parsing source
+or inferring flow. FactMine overlays that evidence on its normalized CFG/DFG
+and emits the SCIP index with `runtime-modeled-world` authority. Language
+providers only trace values and define genuine language semantics; the
+evidence contract, flow propagation, snapshot merge, and SCIP emission are
+language-neutral.
 
 ## FAQ
 

@@ -180,8 +180,8 @@ module NilKill
           end
 
           def each_jsonl(runtime_dir, glob)
-            Dir.glob(File.join(runtime_dir, glob)).sort.each do |path|
-              File.foreach(path) do |line|
+            NilKill::Runtime::JsonIO.matching(runtime_dir, glob).each do |path|
+              NilKill::Runtime::JsonIO.foreach(path) do |line|
                 yield JSON.parse(line)
               rescue JSON::ParserError
                 next

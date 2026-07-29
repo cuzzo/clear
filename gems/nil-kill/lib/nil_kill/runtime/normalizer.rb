@@ -283,9 +283,9 @@ module NilKill
       end
 
       def load_legacy_methods!(store, runtime_dir)
-        files = Dir.glob(File.join(runtime_dir, "methods-*.jsonl"))
+        files = JsonIO.matching(runtime_dir, "methods-*.jsonl")
         files.each do |file|
-          File.foreach(file) do |line|
+          JsonIO.foreach(file) do |line|
             obs = JSON.parse(line) rescue next
             next unless NilKill.target_path?(obs["path"])
             key_str = "#{obs["class"]}\0#{obs["method"]}\0#{obs["kind"]}\0#{obs["path"]}\0#{obs["line"]}"
@@ -369,8 +369,8 @@ module NilKill
 
       def load_legacy_edges!(store, runtime_dir)
         runtime_edges = {}
-        Dir.glob(File.join(runtime_dir, "method-edges-*.jsonl")).each do |file|
-          File.foreach(file) do |line|
+        JsonIO.matching(runtime_dir, "method-edges-*.jsonl").each do |file|
+          JsonIO.foreach(file) do |line|
             obs = JSON.parse(line) rescue next
             c_info = obs["caller"]
             e_info = obs["callee"]
@@ -405,8 +405,8 @@ module NilKill
       end
 
       def load_legacy_tlets!(store, runtime_dir)
-        Dir.glob(File.join(runtime_dir, "tlets-*.jsonl")).each do |file|
-          File.foreach(file) do |line|
+        JsonIO.matching(runtime_dir, "tlets-*.jsonl").each do |file|
+          JsonIO.foreach(file) do |line|
             obs = JSON.parse(line) rescue next
             next unless NilKill.target_path?(obs["path"])
             key = "#{obs["path"]}:#{obs["line"]}"
@@ -418,8 +418,8 @@ module NilKill
       end
 
       def load_legacy_fact_file!(store, runtime_dir, pattern, fact_key, target_filter: true)
-        Dir.glob(File.join(runtime_dir, pattern)).each do |file|
-          File.foreach(file) do |line|
+        JsonIO.matching(runtime_dir, pattern).each do |file|
+          JsonIO.foreach(file) do |line|
             obs = JSON.parse(line) rescue next
             next if target_filter && !NilKill.target_path?(obs["path"])
             store.facts[fact_key] ||= []
@@ -430,8 +430,8 @@ module NilKill
 
       def load_legacy_coverage!(store, runtime_dir)
         cov = Hash.new { |h, k| h[k] = [] }
-        Dir.glob(File.join(runtime_dir, "coverage-*.jsonl")).each do |file|
-          File.foreach(file) do |line|
+        JsonIO.matching(runtime_dir, "coverage-*.jsonl").each do |file|
+          JsonIO.foreach(file) do |line|
             obs = JSON.parse(line) rescue next
             next unless NilKill.target_path?(obs["path"])
             cov[NilKill.rel(obs["path"])].concat(Array(obs["lines"]))

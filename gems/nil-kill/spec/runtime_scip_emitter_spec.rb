@@ -109,9 +109,9 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
         .to include("nil-kill-runtime workspace demo workspace Row#kind().")
       expect(index.dig("_runtimeEvidence", "inferredCallSites")).to be >= 1
       expect(result.fetch("runtime_value_observations")).to be >= 1
-      expect(JSON.parse(File.read(result.fetch("runtime_evidence"))).fetch("schema"))
+      expect(NilKill::Runtime::JsonIO.parse(result.fetch("runtime_evidence")).fetch("schema"))
         .to eq("fact-mine.runtime-value-evidence.v1")
-      expect(JSON.parse(File.read(result.fetch("attestation"))).fetch("claims")).to include(
+      expect(NilKill::Runtime::JsonIO.parse(result.fetch("attestation")).fetch("claims")).to include(
         "runtime_scip.authority" => "runtime-modeled-world",
         "runtime.version" => RUBY_VERSION
       )
@@ -277,8 +277,8 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
         callee_path: dependency,
         callee_line: 1
       )
-      evidence = File.join(runtime_dir, "runtime-values.json")
-      File.write(evidence, JSON.generate(
+      evidence = File.join(runtime_dir, "runtime-values.json.gz")
+      NilKill::Runtime::JsonIO.write(evidence, JSON.generate(
         "schema" => NilKill::Runtime::ValueEvidenceEmitter::SCHEMA,
         "authority" => NilKill::Runtime::ScipEmitter::AUTHORITY,
         "observations" => [],

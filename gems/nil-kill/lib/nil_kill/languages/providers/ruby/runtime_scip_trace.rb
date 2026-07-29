@@ -9,6 +9,11 @@ module NilKillRuntimeTrace
   @runtime_scip_frames = Hash.new { |hash, thread_id| hash[thread_id] = [] }
   @runtime_scip_native_calls = Hash.new { |hash, thread_id| hash[thread_id] = [] }
   @runtime_scip_native_result_depth = 0
+  RUNTIME_SCIP_SOURCE_SLICE = ENV.fetch("NIL_KILL_TRACE_SOURCE_SLICE", "")
+    .split(File::PATH_SEPARATOR)
+    .reject(&:empty?)
+    .map { |path| File.expand_path(path) }
+    .to_set
 
   class << self
     attr_reader :runtime_calls, :runtime_scip_frames, :runtime_scip_native_calls
@@ -45,7 +50,19 @@ module NilKillRuntimeTrace
 
   def self.enter_runtime_scip_ruby_call(tp)
     parent = @runtime_scip_frames[Thread.current.object_id].last
-    callsite = parent&.fetch(:callsite, nil)
+    fallback_callsite = parent&.fetch(:callsite, nil)
+    # A Ruby :line event is emitted for the outer expression of a multiline
+    # literal/call, not necessarily for a nested Ruby call inside it.  The
+    # demand-driven trace plan is keyed by the nested call's real source line,
+    # so treating that stale outer line as authoritative silently drops an
+    # observation FactMine explicitly requested.  Avoid the comparatively
+    # expensive stack lookup on the usual planned path; recover the caller
+    # location only when the current line has no requested capture.
+    callsite = if runtime_scip_captures_for(fallback_callsite).any?
+                 fallback_callsite
+               else
+                 runtime_scip_ruby_callsite(tp, fallback_callsite)
+               end
     capture_call, capture_result, receiver_shape = runtime_scip_captures_for(callsite)
     observed_call = if capture_call || capture_result || receiver_shape
                       record_runtime_scip_call(
@@ -154,6 +171,34 @@ module NilKillRuntimeTrace
     fallback
   end
 
+  # For a :call TracePoint, tp.path/tp.lineno identify the callee's
+  # declaration, not the caller expression.  The callback stack is stable:
+  # this TracePoint handler, the callee frame, then the source caller.  Use
+  # that third frame only as a precision fallback (see
+  # enter_runtime_scip_ruby_call), and reject locations outside the selected
+  # production target just as the native-call path does.
+  def self.runtime_scip_ruby_callsite(tp, fallback)
+    # Stack layout includes this helper, enter_runtime_scip_ruby_call, and
+    # the TracePoint callback before the callee frame. Locate that callee by
+    # TracePoint's declaration location instead of relying on a fixed depth;
+    # recursion and wrappers otherwise make a positional lookup fragile.
+    callee_path = abs_path(tp.path)
+    locations = caller_locations(2, 16)
+    callee_index = locations.index do |candidate|
+      abs_path(candidate.absolute_path || candidate.path) == callee_path &&
+        candidate.lineno == tp.lineno
+    end
+    location = callee_index && locations[callee_index + 1]
+    return fallback unless location
+
+    path = abs_path(location.absolute_path || location.path)
+    return fallback unless target_path?(path)
+
+    { path: path, line: src_line(path, location.lineno) }
+  rescue StandardError
+    fallback
+  end
+
   # Ruby-level call tracing remains useful for project and gem dispatch while
   # this switch gives the feedback loop an explicit, measurable fast tier.
   # A full collect keeps native calls enabled by default; callers that only
@@ -234,6 +279,44 @@ module NilKillRuntimeTrace
     package
   end
 
+  # C-backed accessors generated for a workspace/test class arrive as
+  # :c_call events, so TracePoint gives them no Ruby method path.  Treating
+  # every such method as CRuby incorrectly exports test doubles such as a
+  # Struct reader as `ruby` stdlib symbols.  A named receiver class retains
+  # the source location of its constant declaration; use that provenance only
+  # for identity/role attribution. FactMine still owns the generated-accessor
+  # complexity join.
+  def self.native_receiver_source_location(receiver)
+    klass = receiver.is_a?(Module) ? receiver : receiver.class
+    return unless klass.is_a?(Module)
+
+    @runtime_native_receiver_source_locations ||= {}
+    return @runtime_native_receiver_source_locations[klass] if
+      @runtime_native_receiver_source_locations.key?(klass)
+
+    name = klass.name.to_s
+    location = name.empty? ? nil : Object.const_source_location(name)
+    path = location && location.first
+    absolute = path && !path.start_with?("<") ? abs_path(path) : nil
+    value = absolute && File.file?(absolute) ? { path: absolute, line: location.last.to_i } : nil
+    @runtime_native_receiver_source_locations[klass] = value
+  rescue StandardError
+    @runtime_native_receiver_source_locations[klass] = nil if defined?(klass) && klass
+    nil
+  end
+
+  def self.runtime_nonproduction_source_path?(path)
+    absolute = File.expand_path(path, ROOT)
+    return false unless absolute.start_with?("#{ROOT}#{File::SEPARATOR}")
+
+    relative = absolute.delete_prefix("#{ROOT}#{File::SEPARATOR}")
+    components = Pathname.new(relative).each_filename.to_a
+    components.any? { |component| %w[test tests spec specs].include?(component) } ||
+      components.last.to_s.match?(/(?:_test|_spec)\.rb\z/)
+  rescue StandardError
+    false
+  end
+
   def self.record_runtime_scip_call(tp, receiver_shape: true, deduplicate: false, callsite: nil)
     return if Thread.current[:__nil_kill_runtime_scip] ||
       Thread.current[:__nil_kill_collection_hook]
@@ -254,19 +337,24 @@ module NilKillRuntimeTrace
     callsite ||= frame[:callsite]
     return unless caller && callsite
 
-    raw_callee_path = native ? "" : tp.path.to_s
+    # Keep the trusted CRuby/generated-accessor identity for production
+    # classes. The source-location override exists solely to prevent a test
+    # double with a C-backed accessor from masquerading as CRuby stdlib.
+    native_source = native ? native_receiver_source_location(tp.self) : nil
+    native_source = nil unless native_source && runtime_nonproduction_source_path?(native_source.fetch(:path))
+    raw_callee_path = native ? native_source&.fetch(:path, "").to_s : tp.path.to_s
     # Keep TracePoint's pseudo-file identity long enough for package
     # attribution, then omit it from the declaration locator entirely. It is
     # Ruby-core implementation metadata, not a repository source path.
     virtual_core_path = raw_callee_path.start_with?("<internal:")
-    callee_path = if native || virtual_core_path
+    callee_path = if virtual_core_path
                     nil
                   else
                     abs_path(raw_callee_path)
                   end
     package = runtime_package(
       virtual_core_path ? raw_callee_path : callee_path,
-      native: native
+      native: native && native_source.nil?
     )
     # Sorbet installs validation wrappers under the application's declared
     # owner. TracePoint reports both that wrapper and the underlying method;
@@ -279,7 +367,7 @@ module NilKillRuntimeTrace
       name: tp.method_id.to_s,
       kind: owner[1],
       path: callee_path,
-      line: native ? nil : src_line(callee_path, tp.lineno),
+      line: native_source ? native_source.fetch(:line) : (native ? nil : src_line(callee_path, tp.lineno)),
       native: native,
       receiver_type: class_name(tp.self),
     }.merge(package)
@@ -454,6 +542,10 @@ module NilKillRuntimeTrace
   def self.runtime_scip_captures_for(callsite)
     return [true, true, true] unless callsite
     return callsite[:runtime_scip_captures] if callsite.key?(:runtime_scip_captures)
+    unless RUNTIME_SCIP_SOURCE_SLICE.empty? ||
+        RUNTIME_SCIP_SOURCE_SLICE.include?(File.expand_path(callsite[:path]))
+      return callsite[:runtime_scip_captures] = [false, false, false]
+    end
 
     plan = trace_plan
     return callsite[:runtime_scip_captures] = [true, true, true] unless plan

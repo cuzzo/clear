@@ -74,7 +74,7 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
         runtime_dir: runtime_dir,
         events: [event]
       )
-      evidence = JSON.parse(File.read(result.fetch("path")))
+      evidence = NilKill::Runtime::JsonIO.parse(result.fetch("path"))
 
       expect(evidence.fetch("schema")).to eq("fact-mine.runtime-value-evidence.v1")
       expect(evidence.fetch("runs")).to eq(["run-1"])
@@ -155,7 +155,7 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
         runtime_dir: runtime_dir,
         events: [event.call("DetailArm", true), event.call("FallbackArm", false)]
       )
-      calls = JSON.parse(File.read(result.fetch("path"))).fetch("calls")
+      calls = NilKill::Runtime::JsonIO.parse(result.fetch("path")).fetch("calls")
 
       expect(calls.map { |call| [call.dig("receiver_domain", "types"), call["result_truths"]] })
         .to contain_exactly([["DetailArm"], [true]], [["FallbackArm"], [false]])

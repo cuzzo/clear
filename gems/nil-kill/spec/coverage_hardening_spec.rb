@@ -141,7 +141,9 @@ RSpec.describe "NilKill coverage hardening" do
       expect { cli.send(:guard_fresh_runtime!) }.not_to raise_error
 
       cli = described_class.new([])
+      allow(Dir).to receive(:glob).and_call_original
       allow(Dir).to receive(:glob).with(File.join(NilKill::RUNTIME_DIR, "*.jsonl")).and_return([])
+      allow(Dir).to receive(:glob).with(File.join(NilKill::RUNTIME_DIR, "*.jsonl.gz")).and_return([])
       expect { capture_io { cli.send(:guard_fresh_runtime!) } }.to raise_error(SystemExit)
 
       Dir.mktmpdir do |dir|
@@ -745,6 +747,7 @@ RSpec.describe "NilKill coverage hardening" do
         coverage_owned: false,
         runtime_calls: {},
         runtime_package_by_path: {},
+        runtime_native_receiver_source_locations: {},
         runtime_scip_frames: Hash.new { |hash, thread_id| hash[thread_id] = [] },
         runtime_scip_native_calls: Hash.new { |hash, thread_id| hash[thread_id] = [] },
         runtime_scip_native_result_depth: 0,
