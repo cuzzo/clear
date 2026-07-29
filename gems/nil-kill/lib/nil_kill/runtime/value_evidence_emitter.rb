@@ -39,13 +39,14 @@ module NilKill
               .runtime_scip_call_evidence(event: event, root: @root),
           ]
         end
+        build_lookup_indices(observations, decoded_calls)
         ids = (
           Array(run_ids).map(&:to_s) +
           events.map { |event| event["run_id"].to_s }
         ).reject(&:empty?).uniq.sort
         ids = ["unidentified-run"] if ids.empty?
         anchors = @plan.fetch("requests").map do |request|
-          anchor_evidence(request, observations, decoded_calls, ids)
+          anchor_evidence(request, ids)
         end
         evidence = {
           "protocol_version" => EvidenceProtocol::VERSION,
@@ -77,18 +78,18 @@ module NilKill
 
       private
 
-      def anchor_evidence(request, observations, decoded_calls, run_ids)
+      def anchor_evidence(request, run_ids)
         anchor = request.fetch("anchor")
         matches, ambiguity =
           case anchor.fetch("kind")
           when "FUNCTION_ENTRY"
-            matching_observations(anchor, observations, "parameter")
+            matching_observations(anchor, "parameter")
           when "FUNCTION_RETURN"
-            matching_observations(anchor, observations, "return")
+            matching_observations(anchor, "return")
           when "STATE_READ", "STATE_WRITE"
-            matching_observations(anchor, observations, "state")
+            matching_observations(anchor, "state")
           else
-            matching_calls(anchor, decoded_calls)
+            matching_calls(anchor)
           end
         executions = matches.filter_map do |match|
           call_anchor?(anchor) ? call_bucket(match, run_ids.first) : value_bucket(match, run_ids.first)
@@ -123,12 +124,11 @@ module NilKill
         }
       end
 
-      def matching_observations(anchor, observations, kind)
-        candidates = observations.select do |row|
-          row["kind"] == kind &&
-            canonical_path(row.dig("scope", "path")) == anchor.fetch("relative_path") &&
-            source_line_matches?(anchor, row.dig("scope", "line"))
-        end
+      def matching_observations(anchor, kind)
+        candidates = @observations_by_kind_path.fetch(
+          [kind, anchor.fetch("relative_path")],
+          []
+        ).select { |row| source_line_matches?(anchor, row.dig("scope", "line")) }
         candidates.select! { |row| row["slot"].to_s == anchor["display_name"].to_s } if
           %w[parameter state].include?(kind)
         # A path/range/slot identifies one normalized storage boundary. More
@@ -137,20 +137,15 @@ module NilKill
         [candidates, false]
       end
 
-      def matching_calls(anchor, decoded_calls)
-        candidates = decoded_calls.select do |_event, row|
-          callsite = row.fetch("callsite")
-          canonical_path(callsite.fetch("path")) == anchor.fetch("relative_path") &&
-            source_line_matches?(anchor, callsite.fetch("line")) &&
-            callsite.fetch("selector").to_s == anchor.fetch("display_name").to_s
+      def matching_calls(anchor)
+        key = [anchor.fetch("relative_path"), anchor.fetch("display_name").to_s]
+        candidates = @calls_by_path_selector.fetch(key, []).select do |_event, row|
+          source_line_matches?(anchor, row.dig("callsite", "line"))
         end
-        siblings = @plan.fetch("requests").count do |request|
-          other = request.fetch("anchor")
-          call_anchor?(other) &&
-            other.fetch("relative_path") == anchor.fetch("relative_path") &&
-            other.fetch("display_name") == anchor.fetch("display_name") &&
-            ranges_overlap_line?(other.fetch("range"), anchor.fetch("range").fetch("start_line"))
-        end
+        siblings = @call_anchor_counts.fetch(
+          [*key, anchor.fetch("range").fetch("start_line")],
+          0
+        )
         # A provider may expose only line + selector rather than an exact
         # column. Never guess between two identical selectors on one line.
         [candidates, candidates.any? && siblings > 1]
@@ -262,15 +257,45 @@ module NilKill
 
       def anchor_executed?(anchor)
         if call_anchor?(anchor)
-          @executed_callsites.any? do |row|
-            canonical_path(row.fetch("path")) == anchor.fetch("relative_path") &&
-              source_line_matches?(anchor, row.fetch("line")) &&
-              row.fetch("selector", "").to_s == anchor.fetch("display_name").to_s
-          end
+          @executed_callsites_by_path_selector.fetch(
+            [anchor.fetch("relative_path"), anchor.fetch("display_name").to_s],
+            []
+          ).any? { |line| source_line_matches?(anchor, line) }
         else
-          @function_entries.any? do |row|
-            canonical_path(row.fetch("path")) == anchor.fetch("relative_path") &&
-              source_line_matches?(anchor, row.fetch("line"))
+          @function_entries_by_path.fetch(anchor.fetch("relative_path"), [])
+            .any? { |line| source_line_matches?(anchor, line) }
+        end
+      end
+
+      def build_lookup_indices(observations, decoded_calls)
+        @observations_by_kind_path = observations.group_by do |row|
+          [row.fetch("kind"), canonical_path(row.dig("scope", "path"))]
+        end
+        @calls_by_path_selector = decoded_calls.group_by do |_event, row|
+          callsite = row.fetch("callsite")
+          [canonical_path(callsite.fetch("path")), callsite.fetch("selector").to_s]
+        end
+        @executed_callsites_by_path_selector =
+          @executed_callsites.group_by do |row|
+            [canonical_path(row.fetch("path")), row.fetch("selector", "").to_s]
+          end.transform_values { |rows| rows.map { |row| row.fetch("line") } }
+        @function_entries_by_path =
+          @function_entries.group_by { |row| canonical_path(row.fetch("path")) }
+            .transform_values { |rows| rows.map { |row| row.fetch("line") } }
+        @call_anchor_counts = Hash.new(0)
+        @plan.fetch("requests").each do |request|
+          anchor = request.fetch("anchor")
+          next unless call_anchor?(anchor)
+
+          range = anchor.fetch("range")
+          (range.fetch("start_line")..range.fetch("end_line")).each do |line|
+            @call_anchor_counts[
+              [
+                anchor.fetch("relative_path"),
+                anchor.fetch("display_name").to_s,
+                line,
+              ]
+            ] += 1
           end
         end
       end
@@ -309,10 +334,6 @@ module NilKill
       def source_line_matches?(anchor, one_based_line)
         line = one_based_line.to_i - 1
         range = anchor.fetch("range")
-        range.fetch("start_line") <= line && line <= range.fetch("end_line")
-      end
-
-      def ranges_overlap_line?(range, line)
         range.fetch("start_line") <= line && line <= range.fetch("end_line")
       end
 

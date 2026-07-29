@@ -262,4 +262,53 @@ RSpec.describe "canonical runtime semantic evidence v1" do
       /\b(?:ruby|python|javascript|typescript|php|tracepoint|minitest|rspec)\b/i
     )
   end
+
+  it "makes punctuation-heavy runtime method names canonical SCIP descriptors" do
+    decoder = NilKill::Languages::Providers::Ruby::RuntimeValueEvidence
+    callee = {
+      "package_manager" => "ruby",
+      "package" => "ruby",
+      "version" => RUBY_VERSION,
+      "owner" => "String",
+      "kind" => "instance",
+    }
+    expect(decoder.runtime_symbol(callee, "start_with?"))
+      .to end_with("String#`start_with?`().")
+    expect(decoder.runtime_symbol(callee, "=="))
+      .to end_with("String#`==`().")
+    expect(decoder.runtime_symbol(callee, "+"))
+      .to end_with("String#+().")
+  end
+
+  it "indexes provider rows once instead of rescanning them for every anchor" do
+    requests = 20.times.map do |index|
+      {
+        "anchor" => anchor(
+          symbol: "local call-#{index}",
+          kind: "CALL_SELECTOR",
+          name: "size",
+          line: index + 3
+        ),
+        "required" => %w[RECEIVER_VALUE CALL_TARGET],
+      }
+    end
+    events = 20.times.map do |index|
+      event.tap { |row| row["callsite"] = row.fetch("callsite").merge("line" => index + 3) }
+    end
+    Dir.mktmpdir do |directory|
+      emitter = NilKill::Runtime::ValueEvidenceEmitter.new(
+        root: NilKill::ROOT,
+        runtime_dir: directory,
+        plan: plan(*requests)
+      )
+      path_normalizations = 0
+      original = emitter.method(:canonical_path)
+      emitter.define_singleton_method(:canonical_path) do |path|
+        path_normalizations += 1
+        original.call(path)
+      end
+      emitter.emit(events)
+      expect(path_normalizations).to be <= events.length + 2
+    end
+  end
 end

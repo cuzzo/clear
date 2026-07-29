@@ -284,10 +284,11 @@ module NilKill
 
           def descriptor_name(value)
             text = value.to_s
-            return text if text.match?(/\A[A-Za-z_][A-Za-z0-9_!?=]*\z/)
-            return text if %w[
-              + - * / % ** == === != < <= > >= <=> << >> & | ^ ~ =~ !~ ! +@ -@
-            ].include?(text)
+            # Match SCIP's canonical descriptor escaping exactly. Question
+            # marks, bangs, equality signs, slashes, and most Ruby operators
+            # must be backtick-escaped; only ASCII alphanumerics and these
+            # four punctuation characters are legal bare names.
+            return text if text.match?(/\A[A-Za-z0-9_+$-]+\z/)
 
             "`#{text.gsub("`", "``")}`"
           end
