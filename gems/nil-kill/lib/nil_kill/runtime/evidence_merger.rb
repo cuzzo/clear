@@ -37,7 +37,7 @@ module NilKill
         end.map do |_key, grouped|
           merged = Marshal.load(Marshal.dump(grouped.first))
           merged["count"] = grouped.sum { |row| row["count"].to_i }
-          %w[types elements keys values shapes].each do |field|
+          %w[types singletons elements keys values shapes].each do |field|
             merged["domain"][field] = grouped.flat_map { |row| Array(row.dig("domain", field)) }
               .uniq
           end
@@ -60,7 +60,7 @@ module NilKill
           %w[receiver_domain result_domain].each do |domain_name|
             domains = grouped.filter_map { |row| row[domain_name] }
             next if domains.empty?
-            merged[domain_name] = %w[types elements keys values shapes].to_h do |part|
+            merged[domain_name] = %w[types singletons elements keys values shapes].to_h do |part|
               [part, domains.flat_map { |domain| Array(domain[part]) }.uniq]
             end
           end

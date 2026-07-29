@@ -57,6 +57,10 @@ RSpec.describe "nil-kill runtime trace" do
     expect(left_shape.fetch(:name)).not_to eq(right_shape.fetch(:name))
     expect(left_domain.fetch(:types)).to include(left_shape.fetch(:name))
     expect(right_domain.fetch(:types)).to include(right_shape.fetch(:name))
+    expect(NilKillRuntimeTrace.runtime_type_domain(left).fetch(:types))
+      .to eq([left_shape.fetch(:name)])
+    expect(NilKillRuntimeTrace.runtime_type_domain(right).fetch(:types))
+      .to eq([right_shape.fetch(:name)])
   end
 
   it "preserves an exact module identity separately from its nominal Module type" do

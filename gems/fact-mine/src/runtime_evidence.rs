@@ -553,7 +553,11 @@ impl<'a> MethodIndex<'a> {
         self.methods
             .iter()
             .filter(|method| method.language == scope.language)
-            .filter(|method| scope.function.is_empty() || method.name == scope.function)
+            .filter(|method| {
+                scope.function.is_empty()
+                    || method.name == scope.function
+                    || method.dispatch_name == scope.function
+            })
             .filter(|method| scope.line == 0 || method.line == scope.line)
             .filter(|method| {
                 scope.owner.is_empty()
@@ -3235,14 +3239,77 @@ end
                 .iter()
                 .find(|call| call.function == "run" && call.message == message)
                 .unwrap_or_else(|| panic!("{message} accessor"));
-            let expected =
-                format!("fact-mine-runtime runtime-contract v1 Record#{message}().");
-            assert_eq!(
-                accessor.semantic_symbol.as_deref(),
-                Some(expected.as_str())
-            );
+            let expected = format!("fact-mine-runtime runtime-contract v1 Record#{message}().");
+            assert_eq!(accessor.semantic_symbol.as_deref(), Some(expected.as_str()));
             assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
             assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+        }
+    }
+
+    #[test]
+    fn cfg_dfg_overlay_propagates_a_generated_accessor_result_through_assignment() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Worker
+  def run(rows)
+    rows.map do |wrapper|
+      item = wrapper.item
+      item.kind
+    end
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [{
+                    "kind": "parameter",
+                    "scope": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "function": "run", "line": 2
+                    },
+                    "slot": "rows",
+                    "domain": {
+                        "types": ["Array"], "elements": ["Wrapper"],
+                        "shapes": [{
+                            "kind": "array",
+                            "elements": [{
+                                "kind": "record", "name": "Wrapper",
+                                "members": {
+                                    "item": {
+                                        "kind": "record", "name": "Item",
+                                        "members": {
+                                            "kind": {"kind": "class", "name": "String"}
+                                        }
+                                    }
+                                }
+                            }]
+                        }]
+                    },
+                    "count": 1
+                }],
+                "calls": []
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        for message in ["item", "kind"] {
+            let accessor = output
+                .calls
+                .iter()
+                .find(|call| call.function == "run" && call.message == message)
+                .unwrap_or_else(|| panic!("{message} accessor"));
+            let expected = format!("fact-mine-runtime runtime-contract v1 Record#{message}().");
+            assert_eq!(accessor.semantic_symbol.as_deref(), Some(expected.as_str()));
         }
     }
 
@@ -4104,5 +4171,40 @@ end
             inferred.semantic_symbol.as_deref(),
             Some("nil-kill-runtime workspace demo abc Row#kind().")
         );
+    }
+
+    #[test]
+    fn method_index_matches_runtime_scope_to_a_class_method_dispatch_name() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Producer
+  def self.build_rows
+    []
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let producer_line = output
+            .methods
+            .iter()
+            .find(|method| method.dispatch_name == "build_rows")
+            .expect("producer")
+            .line;
+        let index = MethodIndex::new(&output.methods);
+        let located = index.locate_scope(&ValueScope {
+            language: "ruby".to_string(),
+            path: path.to_string(),
+            owner: "Producer".to_string(),
+            function: "build_rows".to_string(),
+            line: producer_line,
+        });
+
+        assert_eq!(located.len(), 1);
+        assert_eq!(located[0].dispatch_name, "build_rows");
     }
 }

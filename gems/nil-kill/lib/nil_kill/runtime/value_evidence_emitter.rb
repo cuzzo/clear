@@ -114,7 +114,7 @@ module NilKill
         domains = rows.filter_map { |row| row[field] }
         return if domains.empty?
 
-        %w[types elements keys values shapes].to_h do |part|
+        %w[types singletons elements keys values shapes].to_h do |part|
           [part, domains.flat_map { |domain| Array(domain[part]) }.uniq.sort_by(&:to_s)]
         end
       end

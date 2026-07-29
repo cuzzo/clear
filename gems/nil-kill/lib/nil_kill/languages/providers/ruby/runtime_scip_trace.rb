@@ -469,7 +469,10 @@ module NilKillRuntimeTrace
   end
 
   def self.runtime_type_domain(value)
-    empty_runtime_value_domain.merge(types: [class_name(value)])
+    runtime_type = class_name(value)
+    record_type = runtime_record_type_name(value)
+    runtime_type = record_type if runtime_type == "T.untyped" && record_type
+    empty_runtime_value_domain.merge(types: [runtime_type])
   end
 
   def self.runtime_value_domain(value)
@@ -522,18 +525,27 @@ module NilKillRuntimeTrace
     end
     return if members.empty?
 
-    name = class_name(value)
-    if name == "T.untyped"
-      # Anonymous Struct classes all lack a Ruby constant name. Treating every
-      # layout as the same `T.untyped` record makes FactMine intersect unrelated
-      # member sets and blocks generated-accessor proofs. The field schema is a
-      # stable structural runtime identity; it claims no source-level nominal
-      # type and is sufficient for the generic record contract.
-      name = "AnonymousStruct(#{fields.map(&:to_s).join(",")})"
-    end
+    name = runtime_record_type_name(value, fields)
     signature = members.map { |member, shape| "#{member}=#{JSON.generate(shape)}" }.join("\\0")
     key = "record:#{name}:#{signature}".freeze
     remember_shape(key, { kind: "record", name: name, members: members })
+  rescue StandardError
+    nil
+  end
+
+  def self.runtime_record_type_name(value, fields = nil)
+    return unless value.is_a?(Struct)
+
+    name = class_name(value)
+    return name unless name == "T.untyped"
+
+    # Anonymous Struct classes all lack a Ruby constant name. Treating every
+    # layout as the same `T.untyped` record makes FactMine intersect unrelated
+    # member sets and blocks generated-accessor proofs. The field schema is a
+    # stable structural runtime identity; it claims no source-level nominal
+    # type and is sufficient for the generic record contract.
+    fields ||= ORIG_STRUCT_MEMBERS.bind_call(value)
+    "AnonymousStruct(#{fields.map(&:to_s).join(",")})"
   rescue StandardError
     nil
   end

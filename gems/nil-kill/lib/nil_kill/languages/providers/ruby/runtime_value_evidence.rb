@@ -174,8 +174,8 @@ module NilKill
                 "selector" => (callsite["selector"] || callee.fetch("name")).to_s,
               }.compact,
               "target" => target,
-              "receiver_domain" => event["receiver_domain"],
-              "result_domain" => event["result_domain"],
+              "receiver_domain" => normalized_domain_payload(event["receiver_domain"]),
+              "result_domain" => normalized_domain_payload(event["result_domain"]),
               "result_truths" => Array(event["result_truths"]).uniq.sort_by { |truth| truth ? 1 : 0 },
               "count" => event["count"].to_i,
             }.compact
@@ -263,14 +263,65 @@ module NilKill
           end
 
           def domain(types: [], singletons: [], elements: [], keys: [], values: [], shapes: [])
-            {
+            normalized_shapes = Array(shapes).filter_map { |shape| normalize_shape(shape) }.uniq
+            normalized = {
               "types" => strings(types),
               "singletons" => strings(singletons),
               "elements" => strings(elements),
               "keys" => strings(keys),
               "values" => strings(values),
-              "shapes" => Array(shapes).filter_map { |shape| normalize_shape(shape) }.uniq,
+              "shapes" => normalized_shapes,
             }
+            reconcile_record_identities!(normalized)
+            normalized
+          end
+
+          def normalized_domain_payload(payload)
+            return unless payload.is_a?(Hash)
+
+            domain(
+              types: payload["types"] || payload[:types],
+              singletons: payload["singletons"] || payload[:singletons],
+              elements: payload["elements"] || payload[:elements],
+              keys: payload["keys"] || payload[:keys],
+              values: payload["values"] || payload[:values],
+              shapes: payload["shapes"] || payload[:shapes]
+            )
+          end
+
+          # `T.untyped` is NilKill's absence-of-identity marker, not a runtime
+          # alternative. When a value shape supplies an exact record identity,
+          # replace that marker in the corresponding domain position. This is
+          # mechanical schema normalization; CFG/DFG flow remains in FactMine.
+          def reconcile_record_identities!(value_domain)
+            shapes = value_domain.fetch("shapes")
+            reconcile_record_slot!(value_domain, "types", shapes)
+            reconcile_record_slot!(
+              value_domain,
+              "elements",
+              shapes.flat_map { |shape| Array(shape["elements"]) }
+            )
+            reconcile_record_slot!(
+              value_domain,
+              "keys",
+              shapes.flat_map { |shape| Array(shape["keys"]) }
+            )
+            reconcile_record_slot!(
+              value_domain,
+              "values",
+              shapes.flat_map { |shape| Array(shape["values"]) }
+            )
+          end
+
+          def reconcile_record_slot!(value_domain, slot, shapes)
+            return unless value_domain.fetch(slot).include?("T.untyped")
+
+            record_names = Array(shapes).filter_map do |shape|
+              shape["name"].to_s if shape["kind"] == "record" && !shape["name"].to_s.empty?
+            end
+            return if record_names.empty?
+
+            value_domain[slot] = ((value_domain.fetch(slot) - ["T.untyped"]) | record_names).sort
           end
 
           # The recorder stores raw shape samples per container edge.  A

@@ -19,7 +19,7 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
         "ok_calls" => 2,
         "params_by_name" => { "rows" => ["Array"] },
         "param_singleton_types" => { "rows" => ["RowsProvider"] },
-        "param_elem" => { "rows" => ["Row"] },
+        "param_elem" => { "rows" => ["Row", "T.untyped"] },
         "param_value_shapes" => {
           "rows" => [{ "kind" => "record", "name" => "ObservedRows", "members" => {
             "kind" => { "kind" => "unknown" }
@@ -38,7 +38,7 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
         "param_kv" => {},
         "returns" => ["Array"],
         "return_singleton_types" => ["RowsResultProvider"],
-        "return_elem" => ["Row"],
+        "return_elem" => ["Row", "T.untyped"],
         "return_kv" => [[], []],
         "return_elem_shapes" => [{ "kind" => "record", "name" => "ReturnedRow", "members" => {
           "kind" => { "kind" => "unknown" }
@@ -62,10 +62,15 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
         },
         "receiver_domain" => {
           "types" => ["Array"],
-          "elements" => ["Row"],
+          "elements" => ["Row", "T.untyped"],
+          "shapes" => [{
+            "kind" => "array",
+            "elements" => [{ "kind" => "record", "name" => "ObservedCallRow" }]
+          }],
         },
         "result_domain" => {
-          "types" => ["Enumerator"],
+          "types" => ["Enumerator", "T.untyped"],
+          "shapes" => [{ "kind" => "record", "name" => "ObservedResult" }],
         },
         "result_truths" => [true, false],
         "count" => 2,
@@ -86,7 +91,7 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
       expect(parameter.dig("scope", "function")).to eq("run")
       expect(parameter.dig("domain", "types")).to eq(["Array"])
       expect(parameter.dig("domain", "singletons")).to eq(["RowsProvider"])
-      expect(parameter.dig("domain", "elements")).to eq(["Row"])
+      expect(parameter.dig("domain", "elements")).to eq(["ObservedRow", "Row"])
       expect(parameter.dig("domain", "shapes")).to include(
         "kind" => "record", "name" => "ObservedRows",
         "members" => { "kind" => { "kind" => "unknown" } }
@@ -101,6 +106,7 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
       returned = evidence.fetch("observations").find { |row| row["kind"] == "return" }
       expect(returned.dig("domain", "types")).to eq(["Array"])
       expect(returned.dig("domain", "singletons")).to eq(["RowsResultProvider"])
+      expect(returned.dig("domain", "elements")).to eq(["ReturnedRow", "Row"])
       expect(returned.dig("domain", "shapes")).to include(
         "kind" => "array",
         "elements" => [{
@@ -112,9 +118,10 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
         .to include("Array#each().")
       expect(evidence.dig("calls", 0, "receiver_domain")).to include(
         "types" => ["Array"],
-        "elements" => ["Row"]
+        "elements" => ["ObservedCallRow", "Row"]
       )
-      expect(evidence.dig("calls", 0, "result_domain", "types")).to eq(["Enumerator"])
+      expect(evidence.dig("calls", 0, "result_domain", "types"))
+        .to eq(["Enumerator", "ObservedResult"])
       expect(evidence.dig("calls", 0, "result_truths")).to eq([false, true])
 
       # The producer records only observed boundaries. It must not invent a
@@ -164,6 +171,59 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
 
       expect(calls.map { |call| [call.dig("receiver_domain", "types"), call["result_truths"]] })
         .to contain_exactly([["DetailArm"], [true]], [["FallbackArm"], [false]])
+    end
+  end
+end
+
+RSpec.describe NilKill::Runtime::EvidenceMerger do
+  it "unions exact singleton identities across independently replaceable shards" do
+    scope = {
+      "language" => "ruby", "path" => "worker.rb",
+      "owner" => "Worker", "function" => "run", "line" => 2,
+    }
+    bundle = lambda do |singleton|
+      {
+        "schema" => NilKill::Runtime::ValueEvidenceEmitter::SCHEMA,
+        "authority" => NilKill::Runtime::ScipEmitter::AUTHORITY,
+        "environment" => {},
+        "runs" => [singleton],
+        "observations" => [{
+          "kind" => "parameter", "scope" => scope, "slot" => "provider",
+          "slot_kind" => "",
+          "domain" => {
+            "types" => ["Module"], "singletons" => [singleton],
+            "elements" => [], "keys" => [], "values" => [], "shapes" => [],
+          },
+          "count" => 1,
+        }],
+        "calls" => [{
+          "language" => "ruby",
+          "caller" => scope,
+          "callsite" => {
+            "path" => "worker.rb", "line" => 3, "selector" => "run"
+          },
+          "targets" => [],
+          "receiver_domain" => {
+            "types" => ["Module"], "singletons" => [singleton],
+            "elements" => [], "keys" => [], "values" => [], "shapes" => [],
+          },
+          "count" => 1,
+        }],
+      }
+    end
+
+    Dir.mktmpdir("nil-kill-singleton-merge", NilKill::ROOT) do |dir|
+      paths = %w[FirstProvider SecondProvider].map do |singleton|
+        path = File.join(dir, "#{singleton}.json.gz")
+        NilKill::Runtime::JsonIO.write(path, JSON.generate(bundle.call(singleton)))
+        path
+      end
+      merged = described_class.merge(paths)
+
+      expect(merged.dig("observations", 0, "domain", "singletons"))
+        .to eq(%w[FirstProvider SecondProvider])
+      expect(merged.fetch("calls").map { |call| call.dig("receiver_domain", "singletons") })
+        .to contain_exactly(["FirstProvider"], ["SecondProvider"])
     end
   end
 end
