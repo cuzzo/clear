@@ -17,6 +17,11 @@
           "writes": []
         }
       ]
+    },
+    {
+      "boundaries": [],
+      "method": "singleton_method",
+      "statements": []
     }
   ],
   "path_condition": {
@@ -72,9 +77,13 @@
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
       }
     ],
     "control_flow_metrics": [
+      {},
       {}
     ],
     "control_flow_nodes": [
@@ -97,12 +106,24 @@
         "id": "cfg:(top-level)#method_five:stmt:2:3:4",
         "kind": "statement",
         "line": 3
+      },
+      {
+        "id": "cfg:Obj#singleton_method:entry:0:4:8",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:Obj#singleton_method:exit:1:4:37",
+        "kind": "exit",
+        "line": 4
       }
     ],
     "decisions": [],
     "def_use": [],
     "dispatch_sites": [],
     "dominators": [
+      {},
+      {},
       {},
       {},
       {},
@@ -131,11 +152,18 @@
       {},
       {},
       {},
+      {},
+      {},
       {}
     ],
     "local_complexity_scores": [
       {
         "id": "(top-level)#method_five",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "Obj#singleton_method",
         "score": 0.0,
         "signals": {}
       }
@@ -182,6 +210,15 @@
             "writes": []
           }
         ]
+      },
+      {
+        "boundaries": [],
+        "id": "Obj#singleton_method",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "singleton_method",
+        "owner": "Obj",
+        "statements": []
       }
     ],
     "node_effects": [
@@ -196,6 +233,16 @@
       {
         "reads": [],
         "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": [
+          "place:Obj#singleton_method:local:&self"
+        ]
       },
       {
         "reads": [],
@@ -215,7 +262,13 @@
       }
     ],
     "path_conditions": [],
-    "places": [],
+    "places": [
+      {
+        "id": "place:Obj#singleton_method:local:&self",
+        "kind": "local",
+        "name": "&self"
+      }
+    ],
     "predicate_bodies": [],
     "protocol_call_paths": [
       {
@@ -248,6 +301,8 @@
       }
     ],
     "reachability": [
+      {},
+      {},
       {},
       {},
       {},

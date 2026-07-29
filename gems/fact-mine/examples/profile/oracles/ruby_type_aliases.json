@@ -52,6 +52,12 @@
       "receiver": "T",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
+      "selector_span": [
+        4,
+        14,
+        4,
+        24
+      ],
       "source": "fn:a4f16908d1ca0abc",
       "span": [
         4,
@@ -107,6 +113,12 @@
       "receiver": "T",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
+      "selector_span": [
+        5,
+        16,
+        5,
+        26
+      ],
       "source": "fn:a4f16908d1ca0abc",
       "span": [
         5,
@@ -139,6 +151,12 @@
       "receiver": "T",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
+      "selector_span": [
+        6,
+        6,
+        6,
+        9
+      ],
       "source": "fn:a4f16908d1ca0abc",
       "span": [
         6,

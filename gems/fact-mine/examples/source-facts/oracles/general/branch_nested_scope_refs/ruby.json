@@ -897,10 +897,34 @@
         "kind": "fallthrough"
       },
       {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_default"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "continue"
+      },
+      {
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
       },
       {
         "kind": "branch_true"
@@ -947,9 +971,29 @@
         "line": 17
       },
       {
-        "id": "cfg:SourceFactBranchNestedScopeRefs#case_arms:stmt:1:11:4",
+        "id": "cfg:SourceFactBranchNestedScopeRefs#case_arms:stmt:0.case0.0:13:8",
         "kind": "statement",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#case_arms:stmt:0.default.0:15:8",
+        "kind": "statement",
+        "line": 15
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#case_arms:stmt:1:11:4",
+        "kind": "case",
         "line": 11
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#do_block_branch:branch:0.loop.0:21:6",
+        "kind": "branch",
+        "line": 21
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#do_block_branch:continue:0.loop.0.then.0:21:6",
+        "kind": "jump",
+        "line": 21
       },
       {
         "id": "cfg:SourceFactBranchNestedScopeRefs#do_block_branch:entry:0:19:2",
@@ -962,8 +1006,13 @@
         "line": 25
       },
       {
-        "id": "cfg:SourceFactBranchNestedScopeRefs#do_block_branch:stmt:1:20:4",
+        "id": "cfg:SourceFactBranchNestedScopeRefs#do_block_branch:stmt:0.loop.1:23:6",
         "kind": "statement",
+        "line": 23
+      },
+      {
+        "id": "cfg:SourceFactBranchNestedScopeRefs#do_block_branch:stmt:1:20:4",
+        "kind": "loop",
         "line": 20
       },
       {
@@ -1009,6 +1058,7 @@
       {},
       {},
       {},
+      {},
       {}
     ],
     "dispatch_sites": [],
@@ -1025,9 +1075,17 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {}
     ],
     "flow_types": [
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -1068,6 +1126,11 @@
       }
     ],
     "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -1242,6 +1305,28 @@
         "writes": []
       },
       {
+        "reads": [
+          "place:SourceFactBranchNestedScopeRefs#case_arms:local:edge"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchNestedScopeRefs#case_arms:local:edge"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:component"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [],
         "writes": [
           "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:components"
@@ -1253,7 +1338,12 @@
       },
       {
         "reads": [
-          "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:component",
+          "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:component"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
           "place:SourceFactBranchNestedScopeRefs#do_block_branch:local:components"
         ],
         "writes": [
@@ -1481,9 +1571,17 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {}
     ],
     "reaching_definitions": [
+      {},
+      {},
+      {},
       {},
       {},
       {},

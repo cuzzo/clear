@@ -17,9 +17,23 @@
           "to": "cfg:CfgCallbacks#<lambda@10:18>:stmt:1:11:6"
         },
         {
+          "from": "cfg:CfgCallbacks#<lambda@10:18>:stmt:0.callback.0:12:8",
+          "function": "<lambda@10:18>",
+          "kind": "callback_return",
+          "line": 12,
+          "owner": "CfgCallbacks",
+          "span": [
+            12,
+            8,
+            12,
+            24
+          ],
+          "to": "cfg:CfgCallbacks#<lambda@10:18>:exit:2:14:5"
+        },
+        {
           "from": "cfg:CfgCallbacks#<lambda@10:18>:stmt:1:11:6",
           "function": "<lambda@10:18>",
-          "kind": "fallthrough",
+          "kind": "callback_body",
           "line": 11,
           "owner": "CfgCallbacks",
           "span": [
@@ -28,7 +42,7 @@
             13,
             8
           ],
-          "to": "cfg:CfgCallbacks#<lambda@10:18>:exit:2:14:5"
+          "to": "cfg:CfgCallbacks#<lambda@10:18>:stmt:0.callback.0:12:8"
         },
         {
           "from": "cfg:CfgCallbacks#<lambda@11:16>:entry:0:11:16",
@@ -302,11 +316,26 @@
         },
         {
           "function": "<lambda@10:18>",
-          "id": "cfg:CfgCallbacks#<lambda@10:18>:stmt:1:11:6",
+          "id": "cfg:CfgCallbacks#<lambda@10:18>:stmt:0.callback.0:12:8",
           "kind": "statement",
-          "line": 11,
+          "line": 12,
           "owner": "CfgCallbacks",
           "role": "linear_statement",
+          "source": "this.audit(user)",
+          "span": [
+            12,
+            8,
+            12,
+            24
+          ]
+        },
+        {
+          "function": "<lambda@10:18>",
+          "id": "cfg:CfgCallbacks#<lambda@10:18>:stmt:1:11:6",
+          "kind": "callback",
+          "line": 11,
+          "owner": "CfgCallbacks",
+          "role": "callback_region",
           "source": "this.hook(() => { this.audit(user); })",
           "span": [
             11,

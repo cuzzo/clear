@@ -117,6 +117,12 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
+      "selector_span": [
+        4,
+        2,
+        4,
+        8
+      ],
       "source": "fn:50c72744be604cfe",
       "span": [
         4,
@@ -171,6 +177,12 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
+      "selector_span": [
+        6,
+        8,
+        6,
+        14
+      ],
       "source": "fn:50c72744be604cfe",
       "span": [
         6,
@@ -235,6 +247,12 @@
         43
       ],
       "receiver_kind": "value",
+      "selector_span": [
+        6,
+        44,
+        6,
+        51
+      ],
       "source": "fn:50c72744be604cfe",
       "span": [
         6,
@@ -264,6 +282,12 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
+      "selector_span": [
+        8,
+        4,
+        8,
+        11
+      ],
       "source": "fn:5806bc2a76308928",
       "span": [
         8,
@@ -343,6 +367,12 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
+      "selector_span": [
+        12,
+        8,
+        12,
+        14
+      ],
       "source": "fn:50c72744be604cfe",
       "span": [
         12,
@@ -373,6 +403,12 @@
         42
       ],
       "receiver_kind": "value",
+      "selector_span": [
+        12,
+        43,
+        12,
+        47
+      ],
       "source": "fn:50c72744be604cfe",
       "span": [
         12,
@@ -602,7 +638,9 @@
   "fields": [],
   "flow_local_types": [
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
       "line": 9,
@@ -630,7 +668,9 @@
       ]
     },
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
       "line": 9,
@@ -692,6 +732,7 @@
   "methods": [
     {
       "dispatch_name": "build",
+      "generated_declaration": false,
       "id": "fn:5806bc2a76308928",
       "key": [
         "TupleArrayEvidence",
@@ -730,6 +771,7 @@
     },
     {
       "dispatch_name": "consume",
+      "generated_declaration": false,
       "id": "fn:44e64e0b9ace44e0",
       "key": [
         "TupleArrayEvidence",

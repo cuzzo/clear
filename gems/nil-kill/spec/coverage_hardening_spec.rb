@@ -171,6 +171,8 @@ RSpec.describe "NilKill coverage hardening" do
     end
 
     it "runs collect with instrumentation, trace-plan setup, worker env, and cleanup" do
+      previous_shard_jobs = ENV["NIL_KILL_SHARD_JOBS"]
+      ENV["NIL_KILL_SHARD_JOBS"] = "2"
       cli = described_class.new(["collect", "--continue-on-error", "--", "ruby", "-e", "0"])
       allow(cli).to receive(:collect_commands).and_return([["ruby", "-e", "0"], ["ruby", "-e", "1"]])
       allow(cli).to receive(:write_collect_meta!)
@@ -192,10 +194,19 @@ RSpec.describe "NilKill coverage hardening" do
         .with(runtime_dir: kind_of(String))
         .and_return(instrumenter)
       seen_env = []
+      concurrency_lock = Mutex.new
+      active = 0
+      max_active = 0
       allow(cli).to receive(:system) do |env, *cmd|
-        seen_env << env
-        expect(cmd).to eq(["ruby", "-e", seen_env.size == 1 ? "0" : "1"])
-        seen_env.size == 1
+        concurrency_lock.synchronize do
+          seen_env << env
+          active += 1
+          max_active = [max_active, active].max
+        end
+        sleep 0.05
+        cmd == ["ruby", "-e", "0"]
+      ensure
+        concurrency_lock.synchronize { active -= 1 }
       end
 
       expect { capture_io { cli.run } }.to raise_error(SystemExit) do |error|
@@ -208,6 +219,10 @@ RSpec.describe "NilKill coverage hardening" do
       expect(seen_env.first).to include("NIL_KILL_TRACE" => "1")
       expect(seen_env.first["RUBYOPT"]).to include("runtime_trace.rb")
       expect(seen_env.first["NIL_KILL_TRACE_METHODS"]).to eq("0")
+      expect(max_active).to eq(2)
+    ensure
+      previous_shard_jobs.nil? ? ENV.delete("NIL_KILL_SHARD_JOBS") :
+        ENV["NIL_KILL_SHARD_JOBS"] = previous_shard_jobs
     end
 
     it "surfaces focused hash-record actions and doctor dependency probes" do
@@ -760,7 +775,11 @@ RSpec.describe "NilKill coverage hardening" do
         runtime_package_by_path: {},
         runtime_native_receiver_source_locations: {},
         runtime_scip_frames: Hash.new { |hash, thread_id| hash[thread_id] = [] },
+        runtime_scip_external_depth: Hash.new(0),
         runtime_scip_native_calls: Hash.new { |hash, thread_id| hash[thread_id] = [] },
+        runtime_scip_native_call_trace: nil,
+        runtime_scip_native_call_armed: false,
+        runtime_scip_native_selector_filter: nil,
         runtime_scip_native_result_depth: 0,
         runtime_scip_native_result_armed: false,
       }.each do |name, value|
@@ -946,6 +965,186 @@ RSpec.describe "NilKill coverage hardening" do
       expect(described_class.runtime_scip_native_calls[Thread.current.object_id]).to be_empty
     ensure
       FileUtils.rm_f(target_file)
+    end
+
+    it "filters every runtime value demand by the exact call selector" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_selector_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "rows.map(&:to_s).join\n")
+      key = [target_file, 1].join("\0")
+      allow(described_class).to receive(:trace_plan).and_return({
+        "runtime_call_sites" => { key => ["join"] },
+        "runtime_result_call_sites" => { key => ["map"] },
+        "runtime_collection_receiver_sites" => { key => ["map"] },
+      })
+      callsite = { path: target_file, line: 1 }
+
+      expect(described_class.runtime_scip_captures_for(callsite, :map))
+        .to eq([false, true, true])
+      expect(described_class.runtime_scip_captures_for(callsite, :join))
+        .to eq([true, false, false])
+      expect(described_class.runtime_scip_captures_for(callsite, :to_s))
+        .to eq([false, false, false])
+      expect(described_class.runtime_scip_captures_for(callsite))
+        .to eq([true, true, true])
+    ensure
+      FileUtils.rm_f(target_file)
+    end
+
+    it "rejects unframed native events before resolving paths or value domains" do
+      call = FakeTracePoint.new(
+        event: :c_call,
+        path: "/dependency/runtime.rb",
+        lineno: 12,
+        defined_class: String,
+        method_id: :to_s,
+        self_value: "value"
+      )
+      allow(described_class).to receive(:runtime_scip_native_callsite)
+      allow(described_class).to receive(:runtime_scip_captures_for)
+      allow(described_class).to receive(:runtime_value_domain)
+
+      described_class.enter_runtime_scip_native_call(call)
+
+      expect(described_class).not_to have_received(:runtime_scip_native_callsite)
+      expect(described_class).not_to have_received(:runtime_scip_captures_for)
+      expect(described_class).not_to have_received(:runtime_value_domain)
+      expect(described_class.runtime_scip_native_calls[Thread.current.object_id]).to be_empty
+    end
+
+    it "enables native tracing only across selected-source line execution" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_native_window_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "value.to_s\n")
+      described_class.runtime_scip_frames[Thread.current.object_id] << {
+        caller: {
+          class: "Worker", method: "run", kind: "instance",
+          path: target_file, line: 1,
+        },
+        callsite: nil,
+      }
+      native_calls = instance_double(TracePoint, enable: true, disable: true)
+      allow(described_class).to receive(:runtime_scip_native_call_trace).and_return(native_calls)
+      allow(described_class).to receive(:runtime_scip_native_calls_enabled?).and_return(true)
+      allow(described_class).to receive(:runtime_scip_captures_for).and_return([true, false, false])
+
+      described_class.record_runtime_scip_line(FakeTracePoint.new(path: target_file, lineno: 1))
+      expect(native_calls).to have_received(:enable).once
+
+      described_class.record_runtime_scip_line(
+        FakeTracePoint.new(path: "/dependency/runtime.rb", lineno: 1)
+      )
+      expect(native_calls).to have_received(:disable).once
+    ensure
+      FileUtils.rm_f(target_file) if defined?(target_file)
+    end
+
+    it "rejects native selectors outside the active FactMine demand before resolving a callsite" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_native_budget_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "payload.fetch('rows')\n")
+      key = [target_file, 1].join("\0")
+      allow(described_class).to receive(:trace_plan).and_return({
+        "runtime_call_sites" => { key => ["fetch"] },
+        "runtime_result_call_sites" => {},
+        "runtime_collection_receiver_sites" => {},
+        "runtime_native_activation_sites" => { key => ["fetch"] },
+      })
+      described_class.runtime_scip_frames[Thread.current.object_id] << {
+        caller: {
+          class: "Worker", method: "run", kind: "instance",
+          path: target_file, line: 1,
+        },
+        callsite: nil,
+      }
+      native_calls = instance_double(TracePoint, enable: true, disable: true)
+      allow(described_class).to receive(:runtime_scip_native_call_trace).and_return(native_calls)
+      allow(described_class).to receive(:runtime_scip_native_calls_enabled?).and_return(true)
+      allow(described_class).to receive(:runtime_scip_native_callsite)
+
+      described_class.record_runtime_scip_line(
+        FakeTracePoint.new(path: target_file, lineno: 1)
+      )
+      described_class.enter_runtime_scip_native_call(FakeTracePoint.new(
+        event: :c_call,
+        path: target_file,
+        lineno: 1,
+        defined_class: String,
+        method_id: :to_s,
+        self_value: { "rows" => [] }
+      ))
+
+      expect(native_calls).to have_received(:enable).once
+      expect(described_class).not_to have_received(:runtime_scip_native_callsite)
+    ensure
+      FileUtils.rm_f(target_file) if defined?(target_file)
+    end
+
+    it "does not inspect Ruby stacks or allocate frames outside a selected call tree" do
+      call = FakeTracePoint.new(
+        event: :call,
+        path: "/dependency/runtime.rb",
+        lineno: 12,
+        defined_class: String,
+        method_id: :render,
+        self_value: "value"
+      )
+      allow(described_class).to receive(:runtime_scip_ruby_callsite)
+      allow(described_class).to receive(:runtime_scip_captures_for)
+      allow(described_class).to receive(:method_owner)
+
+      described_class.enter_runtime_scip_ruby_call(call)
+
+      expect(described_class).not_to have_received(:runtime_scip_ruby_callsite)
+      expect(described_class).not_to have_received(:runtime_scip_captures_for)
+      expect(described_class).not_to have_received(:method_owner)
+      expect(described_class.runtime_scip_frames[Thread.current.object_id]).to be_empty
+    end
+
+    it "balances an external Ruby subtree below a selected caller without per-call frames" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_external_depth_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "dependency.render\n")
+      frames = described_class.runtime_scip_frames[Thread.current.object_id]
+      frames << {
+        caller: {
+          class: "Worker", method: "run", kind: "instance",
+          path: target_file, line: 1,
+        },
+        callsite: { path: target_file, line: 1 },
+      }
+      allow(described_class).to receive(:runtime_scip_ruby_callsite)
+      allow(described_class).to receive(:runtime_scip_captures_for)
+      allow(described_class).to receive(:method_owner)
+      external = FakeTracePoint.new(
+        event: :call,
+        path: "/dependency/runtime.rb",
+        lineno: 12,
+        defined_class: String,
+        method_id: :render,
+        self_value: "value"
+      )
+
+      described_class.enter_runtime_scip_ruby_call(external)
+
+      expect(frames.length).to eq(1)
+      expect(described_class.instance_variable_get(:@runtime_scip_external_depth)
+        .fetch(Thread.current.object_id)).to eq(1)
+      expect(described_class).not_to have_received(:runtime_scip_ruby_callsite)
+      expect(described_class).not_to have_received(:runtime_scip_captures_for)
+      expect(described_class).not_to have_received(:method_owner)
+      expect(described_class.instance_variable_get(:@runtime_executed_callsites)).to include(
+        [target_file, 1, "render"] => 1
+      )
+
+      described_class.leave_runtime_scip_ruby_call(
+        FakeTracePoint.new(event: :return, path: "/dependency/runtime.rb")
+      )
+      expect(described_class.instance_variable_get(:@runtime_scip_external_depth)
+        .fetch(Thread.current.object_id)).to eq(0)
+      expect(frames.length).to eq(1)
+    ensure
+      FileUtils.rm_f(target_file) if defined?(target_file)
     end
 
     it "records Boolean call-result truth without encoding control flow" do

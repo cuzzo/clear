@@ -326,13 +326,15 @@ RSpec.describe NilKill::SlotCoverage do
 
     expect(summary.fetch("path")).to eq(rel)
     expect(summary.fetch("params")).to include("total" => 4, "strong" => 1, "weak" => 1, "untyped" => 2)
-    expect(summary.fetch("returns")).to include("total" => 3, "strong" => 2, "weak" => 0, "untyped" => 1)
+    # Struct readers are executable generated methods. Until their fields have
+    # a declared type, their two return slots are honestly untyped too.
+    expect(summary.fetch("returns")).to include("total" => 5, "strong" => 2, "weak" => 0, "untyped" => 3)
     expect(summary.fetch("ivars")).to include("total" => 3, "strong" => 1, "weak" => 1, "untyped" => 1)
     expect(summary.fetch("struct_fields")).to include("total" => 5, "strong" => 2, "weak" => 1, "untyped" => 2)
     expect(summary.fetch("arrays")).to include("total" => 3, "strong" => 2, "weak" => 1, "untyped" => 0)
     expect(summary.fetch("hashes")).to include("total" => 2, "strong" => 0, "weak" => 2, "untyped" => 0)
-    expect(summary.fetch("structural")).to include("total" => 15, "strong" => 6, "weak" => 3, "untyped" => 6)
-    expect(summary.fetch("typed_percent")).to eq(40.0)
+    expect(summary.fetch("structural")).to include("total" => 17, "strong" => 6, "weak" => 3, "untyped" => 8)
+    expect(summary.fetch("typed_percent")).to eq(35.3)
   end
 
   it "rolls up totals across files" do

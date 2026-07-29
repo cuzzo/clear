@@ -380,13 +380,25 @@
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
       },
       {
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
       }
     ],
     "control_flow_metrics": [
@@ -405,8 +417,13 @@
         "line": 9
       },
       {
-        "id": "cfg:SourceFactBlockConjunctionDecisions#fallback:stmt:1:5:4",
+        "id": "cfg:SourceFactBlockConjunctionDecisions#fallback:stmt:0.loop.0:6:6",
         "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactBlockConjunctionDecisions#fallback:stmt:1:5:4",
+        "kind": "loop",
         "line": 5
       },
       {
@@ -420,8 +437,13 @@
         "line": 13
       },
       {
-        "id": "cfg:SourceFactBlockConjunctionDecisions#filter_paths:stmt:1:12:4",
+        "id": "cfg:SourceFactBlockConjunctionDecisions#filter_paths:stmt:0.loop.0:12:27",
         "kind": "statement",
+        "line": 12
+      },
+      {
+        "id": "cfg:SourceFactBlockConjunctionDecisions#filter_paths:stmt:1:12:4",
+        "kind": "loop",
         "line": 12
       }
     ],
@@ -462,10 +484,14 @@
     ],
     "def_use": [
       {},
+      {},
+      {},
       {}
     ],
     "dispatch_sites": [],
     "dominators": [
+      {},
+      {},
       {},
       {},
       {},
@@ -500,6 +526,8 @@
       }
     ],
     "liveness": [
+      {},
+      {},
       {},
       {},
       {},
@@ -596,8 +624,13 @@
       },
       {
         "reads": [
-          "place:SourceFactBlockConjunctionDecisions#fallback:local:files",
           "place:SourceFactBlockConjunctionDecisions#fallback:local:rel"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBlockConjunctionDecisions#fallback:local:files"
         ],
         "writes": [
           "place:SourceFactBlockConjunctionDecisions#fallback:local:rel"
@@ -615,8 +648,13 @@
       },
       {
         "reads": [
-          "place:SourceFactBlockConjunctionDecisions#filter_paths:local:hash",
           "place:SourceFactBlockConjunctionDecisions#filter_paths:local:rel"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactBlockConjunctionDecisions#filter_paths:local:hash"
         ],
         "writes": [
           "place:SourceFactBlockConjunctionDecisions#filter_paths:local:_",
@@ -798,6 +836,8 @@
       }
     ],
     "reachability": [
+      {},
+      {},
       {},
       {},
       {},

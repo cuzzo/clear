@@ -45,6 +45,12 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
+      "selector_span": [
+        2,
+        2,
+        2,
+        15
+      ],
       "source": "fn:736040629b8b4788",
       "span": [
         2,
@@ -180,7 +186,9 @@
   ],
   "flow_local_types": [
     {
+      "callback_binding_position": null,
       "complete": false,
+      "definition_call_sources": {},
       "file": "examples/profile/ruby_calculator.rb",
       "function": "add",
       "line": 5,
@@ -199,7 +207,9 @@
       "types": []
     },
     {
+      "callback_binding_position": null,
       "complete": false,
+      "definition_call_sources": {},
       "file": "examples/profile/ruby_calculator.rb",
       "function": "add",
       "line": 5,
@@ -220,7 +230,9 @@
       "types": []
     },
     {
+      "callback_binding_position": null,
       "complete": false,
+      "definition_call_sources": {},
       "file": "examples/profile/ruby_calculator.rb",
       "function": "result",
       "line": 9,
@@ -246,6 +258,7 @@
         "boolean_ops": 1
       },
       "dispatch_name": "add",
+      "generated_declaration": false,
       "id": "fn:e726a8cb5d1043bf",
       "key": [
         "Calculator",
@@ -278,6 +291,7 @@
     },
     {
       "dispatch_name": "result",
+      "generated_declaration": false,
       "id": "fn:e4bc7514d4fff252",
       "key": [
         "Calculator",
@@ -308,6 +322,7 @@
     },
     {
       "dispatch_name": "total",
+      "generated_declaration": true,
       "id": "fn:1fc2156dc148b3bf",
       "key": [
         "Calculator",
@@ -338,6 +353,7 @@
     },
     {
       "dispatch_name": "total=",
+      "generated_declaration": true,
       "id": "fn:9a1c2c9298c4a8f0",
       "key": [
         "Calculator",

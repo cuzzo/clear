@@ -4327,8 +4327,9 @@ end
 
     let output = profile::extract(&document, Profile::TracePlan);
 
-    // `call` plus the `factory: -> { [] }` lambda, extracted as a first-class
-    // method so its complexity resolves like any named function.
+    // `call`, the `factory: -> { [] }` lambda, and the two `Data.define`
+    // readers are all first-class methods so their complexity resolves like
+    // any explicitly declared function.
     let method_names = output
         .methods
         .iter()
@@ -4336,7 +4337,9 @@ end
         .collect::<Vec<_>>();
     assert!(method_names.contains(&"call"));
     assert!(method_names.iter().any(|name| name.starts_with("<lambda@")));
-    assert_eq!(output.methods.len(), 2);
+    assert!(method_names.contains(&"name"));
+    assert!(method_names.contains(&"metadata"));
+    assert_eq!(output.methods.len(), 4);
     assert!(output
         .tlet_sites
         .iter()
@@ -4367,7 +4370,7 @@ end
 
     let merged = profile::merge(vec![output], Profile::TracePlan);
     assert_eq!(merged.tlet_sites.len(), 1);
-    assert_eq!(merged.methods.len(), 2);
+    assert_eq!(merged.methods.len(), 4);
     Ok(())
 }
 

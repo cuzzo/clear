@@ -336,6 +336,11 @@ pub struct ParseRecovery {
 pub struct RuntimeValueCaptureSite {
     pub path: String,
     pub span: [usize; 4],
+    /// Smallest normalized executable region whose first line event is
+    /// guaranteed to precede this capture. Runtime providers may use it to
+    /// activate expensive event sources only while this expression executes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation_span: Option<[usize; 4]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selector: Option<String>,
 }
@@ -1131,6 +1136,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             RuntimeValueCaptureSite {
                 path: path.clone(),
                 span: guard.condition_span,
+                activation_span: runtime_activation_span(document, guard.condition_span),
                 selector: None,
             }
         }));
@@ -1655,7 +1661,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
     apply_injected_state_callback_costs(&output.state_param_origin_records, &mut output.calls);
     if profile == Profile::TracePlan {
-        output.runtime_call_sites = runtime_call_capture_sites(&output.calls);
+        output.runtime_call_sites = runtime_call_capture_sites(&output.calls, Some(document));
     }
     output.call_graph_edges = extract_call_graph_edges(&output.calls);
     output.dispatch_impls = compute_dispatch_impls(&output.owners, &output.methods);
@@ -1667,7 +1673,7 @@ pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut output = merge_local(outputs, profile);
     finalize_project_output(&mut output);
     if profile == Profile::TracePlan {
-        output.runtime_call_sites = runtime_call_capture_sites(&output.calls);
+        refresh_runtime_call_sites(&mut output);
     }
     output.dispatch_impls = compute_dispatch_impls(&output.owners, &output.methods);
     output
@@ -4745,25 +4751,43 @@ fn extract_runtime_value_capture_sites(
 
     let result_sites = result_spans
         .into_iter()
-        .map(|span| RuntimeValueCaptureSite {
-            path: document.file.clone(),
-            span,
-            selector: None,
-        })
+        .flat_map(|span| runtime_value_capture_sites_for_span(document, calls, span))
         .collect();
     let receiver_sites = document
         .call_sites
         .iter()
         .filter(|call| call.block)
-        .map(|call| RuntimeValueCaptureSite {
-            path: document.file.clone(),
-            span: call.span,
-            selector: None,
-        })
+        .flat_map(|call| runtime_value_capture_sites_for_span(document, calls, call.span))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
     (result_sites, receiver_sites)
+}
+
+fn runtime_value_capture_sites_for_span(
+    document: &Document,
+    calls: &[CallRecord],
+    span: [usize; 4],
+) -> Vec<RuntimeValueCaptureSite> {
+    let selectors = calls
+        .iter()
+        .filter(|call| call.path == document.file && call.span == span)
+        .map(|call| call.message.clone())
+        .collect::<BTreeSet<_>>();
+    let selectors = if selectors.is_empty() {
+        vec![None]
+    } else {
+        selectors.into_iter().map(Some).collect()
+    };
+    selectors
+        .into_iter()
+        .map(|selector| RuntimeValueCaptureSite {
+            path: document.file.clone(),
+            span,
+            activation_span: runtime_activation_span(document, span),
+            selector,
+        })
+        .collect()
 }
 
 /// Runtime target observation is only useful when static resolution left the
@@ -4771,7 +4795,10 @@ fn extract_runtime_value_capture_sites(
 /// cost. Keeping that filter in FactMine prevents a tracer from paying a
 /// per-call synchronization cost for facts the static profile has already
 /// proven.
-fn runtime_call_capture_sites(calls: &[CallRecord]) -> Vec<RuntimeValueCaptureSite> {
+fn runtime_call_capture_sites(
+    calls: &[CallRecord],
+    document: Option<&Document>,
+) -> Vec<RuntimeValueCaptureSite> {
     calls
         .iter()
         .filter(|call| {
@@ -4783,11 +4810,117 @@ fn runtime_call_capture_sites(calls: &[CallRecord]) -> Vec<RuntimeValueCaptureSi
         .map(|call| RuntimeValueCaptureSite {
             path: call.path.clone(),
             span: call.span,
+            activation_span: document
+                .and_then(|document| runtime_activation_span(document, call.span)),
             selector: Some(call.message.clone()),
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+/// Recompute runtime target demands after SCIP, semantic environments, and
+/// complexity summaries have enriched the final call set. A trace plan built
+/// from pre-enrichment calls would ask collectors to observe identities and
+/// values that the static pipeline has already proven.
+pub fn refresh_runtime_call_sites(output: &mut ProfileOutput) {
+    let activation_spans = output
+        .runtime_call_sites
+        .iter()
+        .map(|site| {
+            (
+                (site.path.clone(), site.span, site.selector.clone()),
+                site.activation_span,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    output.runtime_call_sites = runtime_call_capture_sites(&output.calls, None);
+    for site in &mut output.runtime_call_sites {
+        site.activation_span = activation_spans
+            .get(&(site.path.clone(), site.span, site.selector.clone()))
+            .copied()
+            .flatten();
+    }
+}
+
+fn runtime_activation_span(document: &Document, capture: [usize; 4]) -> Option<[usize; 4]> {
+    let statements = document
+        .local_methods
+        .iter()
+        .flat_map(|method| &method.statements)
+        .filter(|statement| span_contains(statement.span, capture))
+        .collect::<Vec<_>>();
+    let mut preceding = Vec::new();
+    for method in &document.local_methods {
+        collect_preceding_enclosing_spans(&method.node, capture, &mut preceding);
+    }
+    if let Some(span) = preceding.into_iter().min_by_key(|span| {
+        (
+            span[2].saturating_sub(span[0]),
+            span[3].saturating_sub(span[1]),
+        )
+    }) {
+        return Some(span);
+    }
+
+    if let Some(statement) = statements
+        .iter()
+        .filter(|statement| statement.span[0] < capture[0])
+        .min_by_key(|statement| {
+            (
+                statement.span[2].saturating_sub(statement.span[0]),
+                statement.span[3].saturating_sub(statement.span[1]),
+            )
+        })
+    {
+        return Some(statement.span);
+    }
+    // When a normalized statement starts on the capture line, a provider can
+    // activate there; method/scope ancestors must not shift the generic
+    // execution region to an unrelated earlier line.
+    if !statements.is_empty() {
+        return Some(capture);
+    }
+
+    document
+        .control_flow_nodes
+        .iter()
+        .filter(|node| !matches!(node.kind.as_str(), "entry" | "exit"))
+        .filter(|node| span_contains(node.span, capture))
+        .min_by_key(|node| {
+            (
+                node.span[2].saturating_sub(node.span[0]),
+                node.span[3].saturating_sub(node.span[1]),
+            )
+        })
+        .map(|node| node.span)
+}
+
+fn collect_preceding_enclosing_spans(
+    node: &crate::ast::Node,
+    capture: [usize; 4],
+    spans: &mut Vec<[usize; 4]>,
+) {
+    let node_span = [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ];
+    if !span_contains(node_span, capture) {
+        return;
+    }
+    if node_span[0] < capture[0]
+        && !matches!(
+            node.r#type.as_str(),
+            "SCOPE" | "BLOCK" | "DEFN" | "DEFS" | "CLASS" | "MODULE"
+        )
+    {
+        spans.push(node_span);
+    }
+    for child in node.children.iter().filter_map(crate::ast::node) {
+        collect_preceding_enclosing_spans(child, capture, spans);
+    }
 }
 
 /// Convert adapter-recognized capability predicates into opaque, stable
@@ -4919,9 +5052,7 @@ fn extract_runtime_truthiness_guards(
     fn collect_truthy_subjects(
         condition: &crate::ast::Node,
         behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
-        subjects: &mut Vec<
-            crate::syntax::normalized_behavior::NormalizedRuntimeTruthinessGuard,
-        >,
+        subjects: &mut Vec<crate::syntax::normalized_behavior::NormalizedRuntimeTruthinessGuard>,
     ) {
         if let Some(subject) = behavior.runtime_truthiness_guard(condition) {
             subjects.push(subject);
@@ -9209,13 +9340,12 @@ end
         let output = extract(&documents[0], Profile::TracePlan);
 
         assert!(
-            output
-                .runtime_call_sites
-                .iter()
-                .any(|site| {
-                    site.span[0] == 4 && site.selector.as_deref() == Some("resolve_items")
-                }),
-            "an unresolved call must request runtime target observation"
+            output.runtime_call_sites.iter().any(|site| {
+                site.span[0] == 4
+                    && site.activation_span.map(|span| span[0]) == Some(4)
+                    && site.selector.as_deref() == Some("resolve_items")
+            }),
+            "a single-line unresolved call must activate on its own line"
         );
         assert!(
             output
@@ -9225,19 +9355,80 @@ end
             "a statically costed call must not request runtime target observation"
         );
         assert!(
-            output
-                .runtime_result_call_sites
-                .iter()
-                .any(|site| site.span[0] == 4),
+            output.runtime_result_call_sites.iter().any(|site| {
+                site.span[0] == 4 && site.selector.as_deref() == Some("resolve_items")
+            }),
             "a call that defines a later receiver must request its result"
         );
         assert!(
             output
                 .runtime_collection_receiver_sites
                 .iter()
-                .any(|site| site.span[0] == 5),
+                .any(|site| site.span[0] == 5 && site.selector.as_deref() == Some("map")),
             "a collection callback must retain its receiver element domain"
         );
+    }
+
+    #[test]
+    fn trace_plan_drops_runtime_target_demands_after_static_enrichment() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class RuntimePlanFixture
+  def run(provider)
+    provider.resolve_items
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = extract(&document, Profile::TracePlan);
+        assert_eq!(output.runtime_call_sites.len(), 1);
+
+        let call = output
+            .calls
+            .iter_mut()
+            .find(|call| call.message == "resolve_items")
+            .expect("call");
+        call.known_time_complexity = Some("O(1)".to_string());
+        call.known_space_complexity = Some("O(1)".to_string());
+        refresh_runtime_call_sites(&mut output);
+
+        assert!(output.runtime_call_sites.is_empty());
+    }
+
+    #[test]
+    fn trace_plan_activates_runtime_events_at_the_enclosing_multiline_statement() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class RuntimePlanFixture
+  def run(provider)
+    {
+      items: provider.resolve_items
+    }
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let output = extract(&document, Profile::TracePlan);
+        let site = output
+            .runtime_call_sites
+            .iter()
+            .find(|site| site.selector.as_deref() == Some("resolve_items"))
+            .expect("runtime call site");
+
+        assert_eq!(site.span[0], 4);
+        assert_eq!(site.activation_span.expect("activation span")[0], 3);
     }
 
     #[test]

@@ -122,7 +122,9 @@
   ],
   "flow_local_types": [
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
       "file": "examples/profile/python_sample.py",
       "function": "__init__",
       "line": 9,
@@ -150,12 +152,14 @@
       ]
     },
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
       "file": "examples/profile/python_sample.py",
       "function": "hello",
       "line": 12,
       "name": "name",
-      "node_id": "cfg:Greeter#hello:stmt:1:12:8",
+      "node_id": "cfg:Greeter#hello:return:0:12:8",
       "owner": "Greeter",
       "place_id": "place:Greeter#hello:local:name",
       "reaching_definitions": [
@@ -182,6 +186,7 @@
   "methods": [
     {
       "dispatch_name": "__init__",
+      "generated_declaration": false,
       "id": "fn:36d86df03e91b9f5",
       "key": [
         "Database",
@@ -218,6 +223,7 @@
     },
     {
       "dispatch_name": "__init__",
+      "generated_declaration": false,
       "id": "fn:da9413a4cfff38ee",
       "key": [
         "Greeter",
@@ -255,6 +261,7 @@
     },
     {
       "dispatch_name": "hello",
+      "generated_declaration": false,
       "id": "fn:d8362c17d1674f24",
       "key": [
         "Greeter",

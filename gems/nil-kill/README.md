@@ -86,6 +86,17 @@ added without changing Nil-kill's analyzer.
 > representative production replay or focused tests over repeatedly collecting
 > an entire suite.
 >
+> Big-O runtime-SCIP collection is a more expensive tier than Nil-Kill's type
+> tracing alone. On a representative SlopCop test, the untraced command takes
+> about **0.9s**, ordinary Nil-Kill runtime tracing about **5.3s** (roughly
+> **5x**), and runtime-SCIP value/call tracing about **11s** (roughly **12x**).
+> These are full-collection multipliers, not a claim that every suite has the
+> same event mix. Incremental collection normally selects only affected test
+> shards; when one change selects roughly 10% of the workload, its total
+> tracing work is correspondingly around 90% lower. Independent selected
+> shards run concurrently, bounded by `NIL_KILL_SHARD_JOBS`, so startup costs
+> do not accumulate serially.
+>
 > A full collection recognizes ordinary Minitest/RSpec commands and records
 > each test file as an independently replaceable evidence shard, with a unique
 > run identity and its executed production functions/callsites. Afterwards,
@@ -185,6 +196,7 @@ Config:
   NIL_KILL_ELEMENT_SAMPLE=20          container elements sampled by runtime tracing
   NIL_KILL_TRACE_PLAN=0               disable trace-plan pruning during collect
   NIL_KILL_TRACE_METHODS=0            disable TracePoint method collection
+  NIL_KILL_SHARD_JOBS=4               max independently traced test shards run concurrently
 ```
 
 Ruby collection also writes consumer-compatible plain `runtime.scip.json`,

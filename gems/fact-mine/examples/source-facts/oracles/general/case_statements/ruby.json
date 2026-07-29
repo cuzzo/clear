@@ -371,16 +371,43 @@
         "kind": "fallthrough"
       },
       {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_default"
+      },
+      {
         "kind": "entry"
       },
       {
         "kind": "fallthrough"
       },
       {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_default"
+      },
+      {
         "kind": "entry"
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_default"
       }
     ],
     "control_flow_metrics": [
@@ -400,8 +427,13 @@
         "line": 17
       },
       {
-        "id": "cfg:(top-level)#method_case_no_val:stmt:1:13:2",
+        "id": "cfg:(top-level)#method_case_no_val:stmt:0.case0.0:15:4",
         "kind": "statement",
+        "line": 15
+      },
+      {
+        "id": "cfg:(top-level)#method_case_no_val:stmt:1:13:2",
+        "kind": "case",
         "line": 13
       },
       {
@@ -415,8 +447,13 @@
         "line": 24
       },
       {
-        "id": "cfg:(top-level)#method_case_one_pattern:stmt:1:20:2",
+        "id": "cfg:(top-level)#method_case_one_pattern:stmt:0.case0.0:22:4",
         "kind": "statement",
+        "line": 22
+      },
+      {
+        "id": "cfg:(top-level)#method_case_one_pattern:stmt:1:20:2",
+        "kind": "case",
         "line": 20
       },
       {
@@ -430,8 +467,23 @@
         "line": 10
       },
       {
-        "id": "cfg:(top-level)#method_eight:stmt:1:2:2",
+        "id": "cfg:(top-level)#method_eight:stmt:0.case0.0:4:4",
         "kind": "statement",
+        "line": 4
+      },
+      {
+        "id": "cfg:(top-level)#method_eight:stmt:0.case1.0:6:4",
+        "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:(top-level)#method_eight:stmt:0.default.0:8:4",
+        "kind": "statement",
+        "line": 8
+      },
+      {
+        "id": "cfg:(top-level)#method_eight:stmt:1:2:2",
+        "kind": "case",
         "line": 2
       }
     ],
@@ -461,6 +513,11 @@
     ],
     "dispatch_sites": [],
     "dominators": [
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -506,6 +563,11 @@
       }
     ],
     "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -637,16 +699,26 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:(top-level)#method_case_no_val:local:x"
         ],
-        "writes": []
+        "writes": [
+          "place:(top-level)#method_case_no_val:local:x"
+        ]
       },
       {
         "reads": [],
         "writes": [
           "place:(top-level)#method_case_one_pattern:local:x"
         ]
+      },
+      {
+        "reads": [],
+        "writes": []
       },
       {
         "reads": [],
@@ -663,6 +735,18 @@
         "writes": [
           "place:(top-level)#method_eight:local:x"
         ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
       },
       {
         "reads": [],
@@ -839,6 +923,11 @@
       }
     ],
     "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},

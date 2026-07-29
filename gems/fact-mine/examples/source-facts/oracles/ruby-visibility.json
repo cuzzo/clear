@@ -25,6 +25,18 @@
           ]
         }
       ]
+    },
+    {
+      "boundaries": [],
+      "method": "inline_guard",
+      "statements": [
+        {
+          "co_uses": [],
+          "dependencies": [],
+          "reads": [],
+          "writes": []
+        }
+      ]
     }
   ],
   "path_condition": {
@@ -200,13 +212,35 @@
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
       }
     ],
     "control_flow_metrics": [
       {},
+      {},
       {}
     ],
     "control_flow_nodes": [
+      {
+        "id": "cfg:SourceFactVisibility#inline_guard:entry:0:14:12",
+        "kind": "entry",
+        "line": 14
+      },
+      {
+        "id": "cfg:SourceFactVisibility#inline_guard:exit:2:16:5",
+        "kind": "exit",
+        "line": 16
+      },
+      {
+        "id": "cfg:SourceFactVisibility#inline_guard:stmt:1:15:4",
+        "kind": "statement",
+        "line": 15
+      },
       {
         "id": "cfg:SourceFactVisibility#prepare:entry:0:10:2",
         "kind": "entry",
@@ -247,6 +281,9 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
       {}
     ],
     "flow_types": [],
@@ -279,9 +316,17 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
       {}
     ],
     "local_complexity_scores": [
+      {
+        "id": "SourceFactVisibility#inline_guard",
+        "score": 0.0,
+        "signals": {}
+      },
       {
         "id": "SourceFactVisibility#prepare",
         "score": 0.0,
@@ -294,6 +339,32 @@
       }
     ],
     "local_methods": [
+      {
+        "boundaries": [],
+        "id": "SourceFactVisibility#inline_guard",
+        "line": 14,
+        "local_contract_assignments": {},
+        "name": "inline_guard",
+        "owner": "SourceFactVisibility",
+        "statements": [
+          {
+            "co_uses": [],
+            "dependencies": [],
+            "end_line": 15,
+            "index": 0,
+            "line": 15,
+            "reads": [],
+            "source": "true",
+            "span": [
+              15,
+              4,
+              15,
+              8
+            ],
+            "writes": []
+          }
+        ]
+      },
       {
         "boundaries": [],
         "id": "SourceFactVisibility#prepare",
@@ -350,6 +421,18 @@
       }
     ],
     "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
       {
         "reads": [],
         "writes": [
@@ -459,6 +542,9 @@
       }
     ],
     "reachability": [
+      {},
+      {},
+      {},
       {},
       {},
       {},

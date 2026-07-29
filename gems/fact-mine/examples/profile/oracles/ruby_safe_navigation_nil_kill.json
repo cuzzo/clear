@@ -67,6 +67,12 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
+      "selector_span": [
+        2,
+        2,
+        2,
+        8
+      ],
       "source": "fn:8b060578990b3bc3",
       "span": [
         2,
@@ -153,6 +159,12 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
+      "selector_span": [
+        5,
+        4,
+        5,
+        10
+      ],
       "source": "fn:8b060578990b3bc3",
       "span": [
         5,
@@ -186,6 +198,12 @@
         5
       ],
       "receiver_kind": "value",
+      "selector_span": [
+        9,
+        6,
+        9,
+        13
+      ],
       "source": "fn:8b060578990b3bc3",
       "span": [
         5,
@@ -218,6 +236,12 @@
       "receiver": "T",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
+      "selector_span": [
+        12,
+        6,
+        12,
+        10
+      ],
       "source": "fn:f40acd31cc807dfc",
       "span": [
         12,
@@ -270,6 +294,12 @@
       "receiver_symbol_origin": "unqualified_declared_type",
       "receiver_type": "MatchLoweringFacts",
       "receiver_type_origin": "declared_parameter",
+      "selector_span": [
+        13,
+        33,
+        13,
+        46
+      ],
       "source": "fn:f40acd31cc807dfc",
       "span": [
         13,
@@ -335,6 +365,12 @@
         ]
       ],
       "receiver_kind": "value",
+      "selector_span": [
+        14,
+        27,
+        14,
+        35
+      ],
       "source": "fn:f40acd31cc807dfc",
       "span": [
         14,
@@ -365,6 +401,12 @@
         35
       ],
       "receiver_kind": "value",
+      "selector_span": [
+        14,
+        37,
+        14,
+        41
+      ],
       "source": "fn:f40acd31cc807dfc",
       "span": [
         14,
@@ -398,6 +440,12 @@
         41
       ],
       "receiver_kind": "value",
+      "selector_span": [
+        14,
+        43,
+        14,
+        46
+      ],
       "source": "fn:f40acd31cc807dfc",
       "span": [
         14,
@@ -409,12 +457,16 @@
     },
     {
       "argument_count": 0,
+      "complexity_bound_quality": "upper_bound_language_return_contract",
+      "complexity_provenance": "static_call_result_contract",
       "conditional": false,
       "confidence": "partial",
       "consumer_closed_candidate_set": false,
       "function": "union_match_default_body",
       "id": "edge:9d051e0e28a89598",
       "kind": "external_call",
+      "known_space_complexity": "O(N)",
+      "known_time_complexity": "O(N log N)",
       "line": 14,
       "message": "sort",
       "owner": "MIRLoweringControlFlow",
@@ -428,14 +480,21 @@
         54
       ],
       "receiver_kind": "value",
+      "receiver_type": "T::Array[T.untyped]",
+      "receiver_type_origin": "static_call_result_contract",
+      "selector_span": [
+        14,
+        56,
+        14,
+        60
+      ],
       "source": "fn:f40acd31cc807dfc",
       "span": [
         14,
         19,
         14,
         60
-      ],
-      "unresolved_reason": "receiver_requires_corpus_resolution"
+      ]
     },
     {
       "argument_count": 0,
@@ -481,6 +540,12 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
+      "selector_span": [
+        18,
+        8,
+        18,
+        14
+      ],
       "source": "fn:8b060578990b3bc3",
       "span": [
         18,
@@ -514,6 +579,12 @@
         32
       ],
       "receiver_kind": "value",
+      "selector_span": [
+        18,
+        33,
+        18,
+        40
+      ],
       "source": "fn:8b060578990b3bc3",
       "span": [
         18,
@@ -541,6 +612,12 @@
       "receiver_symbol_origin": "unqualified_declared_type",
       "receiver_type": "String",
       "receiver_type_origin": "declared_parameter",
+      "selector_span": [
+        20,
+        13,
+        20,
+        17
+      ],
       "source": "fn:4c68f8ecd3cbf937",
       "span": [
         20,
@@ -1153,7 +1230,9 @@
   "fields": [],
   "flow_local_types": [
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "missing?",
       "line": 20,
@@ -1181,7 +1260,9 @@
       ]
     },
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 13,
@@ -1209,7 +1290,18 @@
       ]
     },
     {
+      "callback_binding_position": null,
       "complete": false,
+      "definition_call_sources": {
+        "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4": [
+          [
+            13,
+            13,
+            13,
+            47
+          ]
+        ]
+      },
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 14,
@@ -1230,7 +1322,9 @@
       "types": []
     },
     {
+      "callback_binding_position": null,
       "complete": false,
+      "definition_call_sources": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 15,
@@ -1331,6 +1425,7 @@
         "rescues": 2
       },
       "dispatch_name": "union_match_default_body",
+      "generated_declaration": false,
       "id": "fn:f40acd31cc807dfc",
       "key": [
         "MIRLoweringControlFlow",
@@ -1370,6 +1465,7 @@
     },
     {
       "dispatch_name": "missing?",
+      "generated_declaration": false,
       "id": "fn:4c68f8ecd3cbf937",
       "key": [
         "MIRLoweringControlFlow",

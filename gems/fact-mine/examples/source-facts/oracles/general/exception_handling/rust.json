@@ -250,7 +250,7 @@
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "return"
       },
       {
         "kind": "entry"
@@ -290,8 +290,8 @@
         "line": 4
       },
       {
-        "id": "cfg:(top-level)#<lambda@2:18>:stmt:1:3:8",
-        "kind": "statement",
+        "id": "cfg:(top-level)#<lambda@2:18>:return:0:3:8",
+        "kind": "jump",
         "line": 3
       },
       {

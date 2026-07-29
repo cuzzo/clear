@@ -15,6 +15,7 @@ module NilKill
       @runtime_call_sites = {}
       @runtime_result_call_sites = {}
       @runtime_collection_receiver_sites = {}
+      @runtime_native_activation_sites = {}
     end
 
     def write(path)
@@ -52,6 +53,7 @@ module NilKill
         "runtime_call_sites" => @runtime_call_sites,
         "runtime_result_call_sites" => @runtime_result_call_sites,
         "runtime_collection_receiver_sites" => @runtime_collection_receiver_sites,
+        "runtime_native_activation_sites" => @runtime_native_activation_sites,
       }))
     end
 
@@ -121,7 +123,18 @@ module NilKill
       span = Array(site["span"])
       return if path.empty? || span.length != 4
 
+      activation_span = Array(site["activation_span"])
+      activation_span = span unless activation_span.length == 4
+      activation_line = activation_span.values_at(0, 2).map(&:to_i).min
       selector = site["selector"].to_s
+      activation_key = [File.expand_path(path, ROOT), activation_line].join("\0")
+      if selector.empty?
+        @runtime_native_activation_sites[activation_key] = true
+      elsif @runtime_native_activation_sites[activation_key] != true
+        @runtime_native_activation_sites[activation_key] =
+          (Array(@runtime_native_activation_sites[activation_key]) | [selector]).sort
+      end
+
       first_line, last_line = span.values_at(0, 2).map(&:to_i).minmax
       (first_line..last_line).each do |line|
         key = [File.expand_path(path, ROOT), line].join("\0")

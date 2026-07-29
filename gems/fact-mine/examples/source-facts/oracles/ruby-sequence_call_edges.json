@@ -1863,6 +1863,12 @@
         "kind": "fallthrough"
       },
       {
+        "kind": "callback_return"
+      },
+      {
+        "kind": "callback_body"
+      },
+      {
         "kind": "entry"
       },
       {
@@ -1917,8 +1923,18 @@
         "line": 13
       },
       {
-        "id": "cfg:SourceFactSequenceCallEdges#assertion_single_call_argument:stmt:1:9:4",
+        "id": "cfg:SourceFactSequenceCallEdges#assertion_single_call_argument:stmt:0.callback.0:10:6",
         "kind": "statement",
+        "line": 10
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#assertion_single_call_argument:stmt:0.callback.1:11:6",
+        "kind": "statement",
+        "line": 11
+      },
+      {
+        "id": "cfg:SourceFactSequenceCallEdges#assertion_single_call_argument:stmt:1:9:4",
+        "kind": "callback",
         "line": 9
       },
       {
@@ -1984,6 +2000,8 @@
     ],
     "dispatch_sites": [],
     "dominators": [
+      {},
+      {},
       {},
       {},
       {},
@@ -2067,6 +2085,8 @@
       }
     ],
     "liveness": [
+      {},
+      {},
       {},
       {},
       {},
@@ -2543,10 +2563,19 @@
         "reads": [
           "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:coverage",
           "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:dir",
-          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:file",
+          "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:file"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
           "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:path",
           "place:SourceFactSequenceCallEdges#assertion_single_call_argument:local:v"
         ],
+        "writes": []
+      },
+      {
+        "reads": [],
         "writes": []
       },
       {
@@ -2911,6 +2940,8 @@
       }
     ],
     "reachability": [
+      {},
+      {},
       {},
       {},
       {},

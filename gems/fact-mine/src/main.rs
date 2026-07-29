@@ -142,6 +142,9 @@ fn run() -> Result<()> {
                 &mut merged,
                 complexity_summaries.as_slice(),
             )?;
+            if profile == Profile::TracePlan {
+                profile::refresh_runtime_call_sites(&mut merged);
+            }
             if let Some(metrics) = merged.incremental_metrics.as_mut() {
                 metrics.external_enrichment_millis =
                     external_enrichment_started.elapsed().as_millis();

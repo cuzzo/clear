@@ -55,6 +55,7 @@
   "methods": [
     {
       "dispatch_name": "initialize",
+      "generated_declaration": false,
       "id": "fn:d81de45ef5aeaa40",
       "key": [
         "RubyShapes",

@@ -236,6 +236,11 @@ module NilKill
       end
       require "etc"
       jobs = ENV["NK_JOBS"] || ENV["NIL_KILL_JOBS"] || Etc.nprocessors.to_s rescue "4"
+      shard_jobs = ENV.fetch(
+        "NIL_KILL_SHARD_JOBS",
+        [[jobs.to_i, 1].max, [selected.size, 1].max, 4].min.to_s
+      ).to_i.clamp(1, [selected.size, 1].max)
+      default_inner_jobs = [[jobs.to_i, 1].max / shard_jobs, 1].max.to_s
       tracer = File.expand_path("runtime_trace.rb", __dir__)
       rubyopt = (ENV["RUBYOPT"].to_s.split + ["-r#{tracer}"]).join(" ")
       base_env = ENV.to_h.merge(
@@ -245,9 +250,9 @@ module NilKill
         "NIL_KILL_PROJECT_VERSION" => ENV["NIL_KILL_PROJECT_VERSION"] ||
           git_capture("rev-parse", "HEAD")&.strip || "workspace",
         "RUBYOPT" => rubyopt,
-        "WORKERS" => ENV["WORKERS"] || jobs,
-        "NK_JOBS" => ENV["NK_JOBS"] || jobs,
-        "NIL_KILL_JOBS" => ENV["NIL_KILL_JOBS"] || jobs
+        "WORKERS" => ENV["WORKERS"] || default_inner_jobs,
+        "NK_JOBS" => ENV["NK_JOBS"] || default_inner_jobs,
+        "NIL_KILL_JOBS" => ENV["NIL_KILL_JOBS"] || default_inner_jobs
       )
       base_env["NIL_KILL_TRACE_METHODS"] ||= "0" if instrumented && trace_plan_enabled
       continue = @argv.delete("--continue-on-error")
@@ -257,7 +262,7 @@ module NilKill
       shard_run_ids = {}
       failed_shards = []
       begin
-        selected.each_with_index do |shard, i|
+        runs = selected.each_with_index.map do |shard, i|
           shard_dir = File.join(working_runtime_dir, shard.fetch("id"))
           FileUtils.mkdir_p(shard_dir)
           line_map = File.join(working_runtime_dir, ".nk-linemap.json")
@@ -270,13 +275,33 @@ module NilKill
             "NIL_KILL_SHARD_ID" => shard.fetch("id")
           )
           cmd = shard.fetch("command")
-          puts "[#{i + 1}/#{selected.size}] NIL_KILL_TRACE=1 RUBYOPT=#{rubyopt.shellescape} #{cmd.shelljoin}"
-          ok = system(env, *cmd)
-          next if ok
-
-          failed_shards << shard.fetch("id")
-          break unless continue
+          [i, shard.fetch("id"), env, cmd]
         end
+        queue = Queue.new
+        runs.each { |run| queue << run }
+        result_lock = Mutex.new
+        stop = false
+        Array.new(shard_jobs) do
+          Thread.new do
+            loop do
+              break if result_lock.synchronize { stop }
+              run = queue.pop(true)
+              i, shard_id, env, cmd = run
+              result_lock.synchronize do
+                puts "[#{i + 1}/#{selected.size}] NIL_KILL_TRACE=1 " \
+                  "RUBYOPT=#{rubyopt.shellescape} #{cmd.shelljoin}"
+              end
+              next if system(env, *cmd)
+
+              result_lock.synchronize do
+                failed_shards << shard_id
+                stop = true unless continue
+              end
+            rescue ThreadError
+              break
+            end
+          end
+        end.each(&:join)
       ensure
         NilKill.restore_inplace_snapshot! if instrumented
       end

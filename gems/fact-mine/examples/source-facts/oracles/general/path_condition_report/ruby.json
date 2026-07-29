@@ -834,16 +834,10 @@
     "comparisons": [],
     "control_flow_edges": [
       {
-        "kind": "entry"
+        "kind": "branch_false"
       },
       {
-        "kind": "fallthrough"
-      },
-      {
-        "kind": "entry"
-      },
-      {
-        "kind": "fallthrough"
+        "kind": "branch_true"
       },
       {
         "kind": "entry"
@@ -852,16 +846,100 @@
         "kind": "fallthrough"
       },
       {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
         "kind": "entry"
       },
       {
         "kind": "fallthrough"
       },
       {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
         "kind": "entry"
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "entry"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
       }
     ],
     "control_flow_metrics": [
@@ -873,6 +951,11 @@
     ],
     "control_flow_nodes": [
       {
+        "id": "cfg:SourceFactPathConditionReport#duplicate_guard:branch:0.then.0:55:6",
+        "kind": "branch",
+        "line": 55
+      },
+      {
         "id": "cfg:SourceFactPathConditionReport#duplicate_guard:entry:0:53:2",
         "kind": "entry",
         "line": 53
@@ -883,9 +966,24 @@
         "line": 59
       },
       {
-        "id": "cfg:SourceFactPathConditionReport#duplicate_guard:stmt:1:54:4",
+        "id": "cfg:SourceFactPathConditionReport#duplicate_guard:stmt:0.then.0.then.0:56:8",
         "kind": "statement",
+        "line": 56
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#duplicate_guard:stmt:1:54:4",
+        "kind": "branch",
         "line": 54
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#first:branch:0.then.0.then.0:13:8",
+        "kind": "branch",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#first:branch:0.then.0:12:6",
+        "kind": "branch",
+        "line": 12
       },
       {
         "id": "cfg:SourceFactPathConditionReport#first:entry:0:10:2",
@@ -898,9 +996,19 @@
         "line": 23
       },
       {
-        "id": "cfg:SourceFactPathConditionReport#first:stmt:1:11:4",
+        "id": "cfg:SourceFactPathConditionReport#first:stmt:0.then.0.then.0.then.0:14:10",
         "kind": "statement",
+        "line": 14
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#first:stmt:1:11:4",
+        "kind": "branch",
         "line": 11
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#missing_enabled:branch:0.then.0:47:6",
+        "kind": "branch",
+        "line": 47
       },
       {
         "id": "cfg:SourceFactPathConditionReport#missing_enabled:entry:0:45:2",
@@ -913,9 +1021,24 @@
         "line": 51
       },
       {
-        "id": "cfg:SourceFactPathConditionReport#missing_enabled:stmt:1:46:4",
+        "id": "cfg:SourceFactPathConditionReport#missing_enabled:stmt:0.then.0.then.0:48:8",
         "kind": "statement",
+        "line": 48
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#missing_enabled:stmt:1:46:4",
+        "kind": "branch",
         "line": 46
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#second:branch:0.then.0.then.0:28:8",
+        "kind": "branch",
+        "line": 28
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#second:branch:0.then.0:27:6",
+        "kind": "branch",
+        "line": 27
       },
       {
         "id": "cfg:SourceFactPathConditionReport#second:entry:0:25:2",
@@ -928,9 +1051,24 @@
         "line": 33
       },
       {
-        "id": "cfg:SourceFactPathConditionReport#second:stmt:1:26:4",
+        "id": "cfg:SourceFactPathConditionReport#second:stmt:0.then.0.then.0.then.0:29:10",
         "kind": "statement",
+        "line": 29
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#second:stmt:1:26:4",
+        "kind": "branch",
         "line": 26
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#third:branch:0.then.0.then.0:38:8",
+        "kind": "branch",
+        "line": 38
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#third:branch:0.then.0:37:6",
+        "kind": "branch",
+        "line": 37
       },
       {
         "id": "cfg:SourceFactPathConditionReport#third:entry:0:35:2",
@@ -943,13 +1081,26 @@
         "line": 43
       },
       {
-        "id": "cfg:SourceFactPathConditionReport#third:stmt:1:36:4",
+        "id": "cfg:SourceFactPathConditionReport#third:stmt:0.then.0.then.0.then.0:39:10",
         "kind": "statement",
+        "line": 39
+      },
+      {
+        "id": "cfg:SourceFactPathConditionReport#third:stmt:1:36:4",
+        "kind": "branch",
         "line": 36
       }
     ],
     "decisions": [],
     "def_use": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -979,9 +1130,30 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {}
     ],
     "flow_types": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -1050,6 +1222,19 @@
       }
     ],
     "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -1308,6 +1493,12 @@
     ],
     "node_effects": [
       {
+        "reads": [
+          "place:SourceFactPathConditionReport#duplicate_guard:local:user"
+        ],
+        "writes": []
+      },
+      {
         "reads": [],
         "writes": [
           "place:SourceFactPathConditionReport#duplicate_guard:local:user"
@@ -1318,8 +1509,26 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:SourceFactPathConditionReport#duplicate_guard:local:user"
+        ],
+        "writes": [
+          "place:SourceFactPathConditionReport#duplicate_guard:local:user"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#first:local:enabled"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#first:local:feature"
         ],
         "writes": []
       },
@@ -1336,11 +1545,25 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:SourceFactPathConditionReport#first:local:enabled",
           "place:SourceFactPathConditionReport#first:local:feature",
           "place:SourceFactPathConditionReport#first:local:user"
         ],
+        "writes": [
+          "place:SourceFactPathConditionReport#first:local:enabled",
+          "place:SourceFactPathConditionReport#first:local:feature",
+          "place:SourceFactPathConditionReport#first:local:user"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#missing_enabled:local:feature"
+        ],
         "writes": []
       },
       {
@@ -1355,9 +1578,28 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:SourceFactPathConditionReport#missing_enabled:local:feature",
           "place:SourceFactPathConditionReport#missing_enabled:local:user"
+        ],
+        "writes": [
+          "place:SourceFactPathConditionReport#missing_enabled:local:feature",
+          "place:SourceFactPathConditionReport#missing_enabled:local:user"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#second:local:enabled"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#second:local:feature"
         ],
         "writes": []
       },
@@ -1374,10 +1616,30 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:SourceFactPathConditionReport#second:local:enabled",
           "place:SourceFactPathConditionReport#second:local:feature",
           "place:SourceFactPathConditionReport#second:local:user"
+        ],
+        "writes": [
+          "place:SourceFactPathConditionReport#second:local:enabled",
+          "place:SourceFactPathConditionReport#second:local:feature",
+          "place:SourceFactPathConditionReport#second:local:user"
+        ]
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#third:local:enabled"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactPathConditionReport#third:local:feature"
         ],
         "writes": []
       },
@@ -1394,12 +1656,20 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:SourceFactPathConditionReport#third:local:enabled",
           "place:SourceFactPathConditionReport#third:local:feature",
           "place:SourceFactPathConditionReport#third:local:user"
         ],
-        "writes": []
+        "writes": [
+          "place:SourceFactPathConditionReport#third:local:enabled",
+          "place:SourceFactPathConditionReport#third:local:feature",
+          "place:SourceFactPathConditionReport#third:local:user"
+        ]
       }
     ],
     "owners": [
@@ -1701,9 +1971,30 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {}
     ],
     "reaching_definitions": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},

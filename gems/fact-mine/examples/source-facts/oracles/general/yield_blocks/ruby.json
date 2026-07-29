@@ -123,13 +123,16 @@
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "yield_return"
       },
       {
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_exit"
       }
     ],
     "control_flow_metrics": [
@@ -149,7 +152,7 @@
       },
       {
         "id": "cfg:(top-level)#method_three:stmt:1:2:2",
-        "kind": "statement",
+        "kind": "callback",
         "line": 2
       },
       {
@@ -164,7 +167,7 @@
       },
       {
         "id": "cfg:(top-level)#method_with_empty_block:stmt:1:6:2",
-        "kind": "statement",
+        "kind": "loop",
         "line": 6
       }
     ],

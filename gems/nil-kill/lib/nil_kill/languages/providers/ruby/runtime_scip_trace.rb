@@ -7,6 +7,7 @@ module NilKillRuntimeTrace
   @runtime_calls = {}
   @runtime_package_by_path = {}
   @runtime_scip_frames = Hash.new { |hash, thread_id| hash[thread_id] = [] }
+  @runtime_scip_external_depth = Hash.new(0)
   @runtime_scip_native_calls = Hash.new { |hash, thread_id| hash[thread_id] = [] }
   @runtime_scip_native_result_depth = 0
   @runtime_function_entries = Hash.new(0)
@@ -22,9 +23,14 @@ module NilKillRuntimeTrace
   end
 
   def self.record_runtime_scip_line(tp)
-    path = abs_path(tp.path)
-    return unless target_path?(path)
-
+    raw_path = tp.path
+    selected_source = target_path?(raw_path)
+    frame = selected_source ? @runtime_scip_frames[Thread.current.object_id].last : nil
+    if @runtime_scip_native_call_armed && !frame
+      @runtime_scip_native_call_armed = false
+      @runtime_scip_native_selector_filter = nil
+      runtime_scip_native_call_trace.disable
+    end
     # A prior line can arm result capture without executing a native call.
     # Its window ends at the next Ruby line event, unless a native call is
     # still suspended across a yielding callback.
@@ -32,14 +38,31 @@ module NilKillRuntimeTrace
       @runtime_scip_native_result_armed = false
       runtime_scip_native_result_trace.disable
     end
-
-    frame = @runtime_scip_frames[Thread.current.object_id].last
     return unless frame
+
+    path = abs_path(raw_path)
 
     frame[:callsite] = {
       path: path,
       line: src_line(path, tp.lineno),
     }
+    native_activation = if runtime_scip_native_calls_enabled?
+                          runtime_scip_native_activation(frame[:callsite])
+                        end
+    activate_native_calls = !!native_activation
+    @runtime_scip_native_selector_filter =
+      native_activation.is_a?(Array) ? native_activation : nil
+    if @runtime_scip_native_call_armed && !activate_native_calls
+      @runtime_scip_native_call_armed = false
+      runtime_scip_native_call_trace.disable
+    elsif activate_native_calls && !@runtime_scip_native_call_armed
+      # Native calls expose their caller location, but Ruby offers no
+      # target-filtered C-call TracePoint. Scope the expensive listener to the
+      # interval after a selected-source line and disable it at the very next
+      # Ruby line, including a line in a dependency entered by that source.
+      @runtime_scip_native_call_armed = true
+      runtime_scip_native_call_trace.enable
+    end
     _capture_call, capture_result, _receiver_shape = runtime_scip_captures_for(frame[:callsite])
     return unless capture_result && runtime_scip_native_calls_enabled?
 
@@ -50,8 +73,33 @@ module NilKillRuntimeTrace
     runtime_scip_native_result_trace.enable
   end
 
-  def self.enter_runtime_scip_ruby_call(tp)
-    parent = @runtime_scip_frames[Thread.current.object_id].last
+  def self.enter_runtime_scip_ruby_call(tp, selected_target: nil)
+    thread_id = Thread.current.object_id
+    frames = @runtime_scip_frames[thread_id]
+    raw_path = tp.path
+    target = selected_target.nil? ? target_path?(raw_path) : selected_target
+    # Global Ruby call TracePoints also fire throughout Bundler, the test
+    # framework, dependencies, and the VM's Ruby helpers. Outside a selected
+    # production call tree there is no caller identity FactMine could consume.
+    # A single depth counter balances an external subtree below a selected
+    # caller without allocating one sentinel and resolving metadata for every
+    # dependency call in that subtree. Selected callbacks still get a normal
+    # frame and retain the nearest selected caller.
+    unless target
+      return if frames.empty?
+
+      fallback_callsite = frames.last&.fetch(:callsite, nil)
+      if fallback_callsite && target_path?(fallback_callsite[:path])
+        @runtime_executed_callsites[
+          [fallback_callsite[:path], fallback_callsite[:line], tp.method_id.to_s]
+        ] += 1
+      end
+      @runtime_scip_external_depth[thread_id] += 1
+      return
+    end
+
+    path = abs_path(raw_path)
+    parent = frames.last
     fallback_callsite = parent&.fetch(:callsite, nil)
     if fallback_callsite && target_path?(fallback_callsite[:path])
       @runtime_executed_callsites[
@@ -65,12 +113,15 @@ module NilKillRuntimeTrace
     # observation FactMine explicitly requested.  Avoid the comparatively
     # expensive stack lookup on the usual planned path; recover the caller
     # location only when the current line has no requested capture.
-    callsite = if runtime_scip_callsite_captures_selector?(fallback_callsite, tp.method_id)
+    callsite = if fallback_callsite.nil?
+                 nil
+               elsif runtime_scip_callsite_captures_selector?(fallback_callsite, tp.method_id)
                  fallback_callsite
                else
                  runtime_scip_ruby_callsite(tp, fallback_callsite)
                end
-    capture_call, capture_result, receiver_shape = runtime_scip_captures_for(callsite)
+    capture_call, capture_result, receiver_shape =
+      callsite ? runtime_scip_captures_for(callsite, tp.method_id) : [false, false, false]
     observed_call = if capture_call || capture_result || receiver_shape
                       record_runtime_scip_call(
                         tp,
@@ -80,13 +131,12 @@ module NilKillRuntimeTrace
                       )
                     end
     owner = method_owner(tp.defined_class)
-    path = abs_path(tp.path)
-    if owner && target_path?(path)
+    if owner && target
       @runtime_function_entries[
         [path, owner[0], tp.method_id.to_s, owner[1], src_line(path, tp.lineno)]
       ] += 1
     end
-    @runtime_scip_frames[Thread.current.object_id] << {
+    frames << {
       caller: owner && {
         class: owner[0],
         method: tp.method_id.to_s,
@@ -101,7 +151,17 @@ module NilKillRuntimeTrace
   end
 
   def self.leave_runtime_scip_ruby_call(tp)
-    frame = @runtime_scip_frames[Thread.current.object_id].pop
+    thread_id = Thread.current.object_id
+    unless target_path?(tp.path)
+      depth = @runtime_scip_external_depth[thread_id]
+      @runtime_scip_external_depth[thread_id] = depth - 1 if depth.positive?
+      return
+    end
+
+    frames = @runtime_scip_frames[thread_id]
+    return if frames.empty?
+
+    frame = frames.pop
     return unless frame&.fetch(:capture_result, false)
 
     record_runtime_scip_result(frame[:observed_call], tp.return_value)
@@ -109,11 +169,42 @@ module NilKillRuntimeTrace
 
   def self.enter_runtime_scip_native_call(tp)
     frame = @runtime_scip_frames[Thread.current.object_id].last
+    # :c_call is the dominant event stream in a Ruby process. A native call
+    # outside an active selected-source line cannot contribute a source
+    # callsite, receiver, or result to FactMine, so reject it before path
+    # normalization, trace-plan lookup, receiver inspection, or allocation.
+    return unless frame&.fetch(:caller, nil) && frame[:callsite]
+    selector_filter = @runtime_scip_native_selector_filter
+    if selector_filter && !selector_filter.include?(tp.method_id.to_s)
+      if @runtime_scip_native_result_depth.to_i.positive?
+        @runtime_scip_native_calls[Thread.current.object_id] << {
+          observed_call: nil,
+          capture_result: false,
+          defined_class: tp.defined_class,
+          method_id: tp.method_id,
+        }
+      end
+      return
+    end
+
     callsite = runtime_scip_native_callsite(tp, frame&.fetch(:callsite, nil))
+    capture_call, capture_result, receiver_shape =
+      runtime_scip_captures_for(callsite, tp.method_id)
+    unless capture_call || capture_result || receiver_shape
+      if @runtime_scip_native_result_depth.to_i.positive?
+        @runtime_scip_native_calls[Thread.current.object_id] << {
+          observed_call: nil,
+          capture_result: false,
+          defined_class: tp.defined_class,
+          method_id: tp.method_id,
+        }
+      end
+      return
+    end
+
     if callsite && target_path?(callsite[:path])
       @runtime_executed_callsites[[callsite[:path], callsite[:line], tp.method_id.to_s]] += 1
     end
-    capture_call, capture_result, receiver_shape = runtime_scip_captures_for(callsite)
     observed_call = if capture_call || capture_result || receiver_shape
                       record_runtime_scip_call(
                         tp,
@@ -150,13 +241,8 @@ module NilKillRuntimeTrace
     frames = @runtime_scip_native_calls[Thread.current.object_id]
     frame = frames.pop
     return unless frame
-    # Enabling a c_return TracePoint from inside a c_call callback can expose
-    # an in-flight VM housekeeping return for which no c_call frame was
-    # observed. Never pair that return with the demand we just armed: doing so
-    # would assign a nested value to an unrelated source call. A mismatch is
-    # discarded rather than retained: losing one optional observation is safe,
-    # while retaining it can leave c_return tracing enabled process-wide.
-    matched = frame[:method_id] == tp.method_id && frame[:defined_class].equal?(tp.defined_class)
+    matched = frame[:method_id] == tp.method_id &&
+      frame[:defined_class].equal?(tp.defined_class)
 
     record_runtime_scip_result(frame[:observed_call], tp.return_value) if matched && frame[:capture_result]
     return unless frame[:capture_result]
@@ -170,6 +256,12 @@ module NilKillRuntimeTrace
   def self.runtime_scip_native_result_trace
     @runtime_scip_native_result_trace ||= TracePoint.new(:c_return) do |trace|
       leave_runtime_scip_native_call(trace)
+    end
+  end
+
+  def self.runtime_scip_native_call_trace
+    @runtime_scip_native_call_trace ||= TracePoint.new(:c_call) do |trace|
+      enter_runtime_scip_native_call(trace)
     end
   end
 
@@ -429,7 +521,10 @@ module NilKillRuntimeTrace
       language: "ruby",
       run_id: ENV.fetch("NIL_KILL_RUN_ID", ""),
       caller: caller,
-      callsite: callsite,
+      callsite: {
+        path: callsite[:path],
+        line: callsite[:line],
+      },
       callee: callee,
       receiver_domain: receiver_domain,
       result_truths: [],
@@ -575,12 +670,12 @@ module NilKillRuntimeTrace
   # A valid new plan is an authority to elide unnecessary values. A missing
   # field means an older plan, so preserve exhaustive collection until the
   # next collect regenerates it rather than silently dropping evidence.
-  def self.runtime_scip_result_capture?(callsite)
-    runtime_scip_value_capture?("runtime_result_call_sites", callsite)
+  def self.runtime_scip_result_capture?(callsite, selector = nil)
+    runtime_scip_value_capture?("runtime_result_call_sites", callsite, selector)
   end
 
-  def self.runtime_scip_call_capture?(callsite)
-    runtime_scip_value_capture?("runtime_call_sites", callsite)
+  def self.runtime_scip_call_capture?(callsite, selector = nil)
+    runtime_scip_value_capture?("runtime_call_sites", callsite, selector)
   end
 
   def self.runtime_scip_callsite_captures_selector?(callsite, selector)
@@ -595,37 +690,57 @@ module NilKillRuntimeTrace
     value == true || Array(value).include?(selector.to_s)
   end
 
-  def self.runtime_scip_receiver_shape_capture?(callsite)
-    runtime_scip_value_capture?("runtime_collection_receiver_sites", callsite)
+  def self.runtime_scip_receiver_shape_capture?(callsite, selector = nil)
+    runtime_scip_value_capture?("runtime_collection_receiver_sites", callsite, selector)
+  end
+
+  def self.runtime_scip_native_activation(callsite)
+    plan = trace_plan
+    return true unless plan
+
+    sites = plan["runtime_native_activation_sites"]
+    return true unless sites
+
+    sites[[callsite[:path], callsite[:line]].join("\0")]
+  end
+
+  def self.runtime_scip_native_activation?(callsite)
+    !!runtime_scip_native_activation(callsite)
   end
 
   # The active source line can produce many native TracePoint events. Resolve
   # all three generic demands together and memoize them on that line anchor so
   # the hot path performs neither repeated plan parsing nor string allocation.
-  def self.runtime_scip_captures_for(callsite)
+  def self.runtime_scip_captures_for(callsite, selector = nil)
     return [true, true, true] unless callsite
-    return callsite[:runtime_scip_captures] if callsite.key?(:runtime_scip_captures)
+    cache = (callsite[:runtime_scip_capture_cache] ||= {})
+    cache_key = selector&.to_s
+    return cache[cache_key] if cache.key?(cache_key)
     unless RUNTIME_SCIP_SOURCE_SLICE.empty? ||
         RUNTIME_SCIP_SOURCE_SLICE.include?(File.expand_path(callsite[:path]))
-      return callsite[:runtime_scip_captures] = [false, false, false]
+      return cache[cache_key] = [false, false, false]
     end
 
     plan = trace_plan
-    return callsite[:runtime_scip_captures] = [true, true, true] unless plan
+    return cache[cache_key] = [true, true, true] unless plan
 
     key = [callsite[:path], callsite[:line]].join("\0")
-    callsite[:runtime_scip_captures] = %w[
+    cache[cache_key] = %w[
       runtime_call_sites
       runtime_result_call_sites
       runtime_collection_receiver_sites
     ].map do |field|
       sites = plan[field]
       value = sites && sites[key]
-      sites.nil? || value == true || (field == "runtime_call_sites" && !Array(value).empty?)
+      sites.nil? || value == true || if selector
+                                       Array(value).include?(selector.to_s)
+                                     else
+                                       !Array(value).empty?
+                                     end
     end
   end
 
-  def self.runtime_scip_value_capture?(field, callsite)
+  def self.runtime_scip_value_capture?(field, callsite, selector = nil)
     plan = trace_plan
     return true unless plan
     sites = plan[field]
@@ -633,22 +748,33 @@ module NilKillRuntimeTrace
     return false unless callsite
 
     value = sites[[callsite[:path], callsite[:line]].join("\0")]
-    value == true || (field == "runtime_call_sites" && !Array(value).empty?)
+    value == true || if selector
+                       Array(value).include?(selector.to_s)
+                     else
+                       !Array(value).empty?
+                     end
   end
 
   def self.install_runtime_scip_trace
-    events = %i[line call return]
-    events << :c_call if runtime_scip_native_calls_enabled?
-    TracePoint.new(*events) do |trace|
+    TracePoint.new(:line, :call, :return) do |trace|
+      thread_id = Thread.current.object_id
+      frames = @runtime_scip_frames[thread_id]
       case trace.event
       when :line
+        next if frames.empty? &&
+          !@runtime_scip_native_call_armed &&
+          !@runtime_scip_native_result_armed
+
         record_runtime_scip_line(trace)
       when :call
-        enter_runtime_scip_ruby_call(trace)
+        selected_target = target_path?(trace.path)
+        next if frames.empty? && !selected_target
+
+        enter_runtime_scip_ruby_call(trace, selected_target: selected_target)
       when :return
+        next if frames.empty? && !@runtime_scip_external_depth[thread_id].positive?
+
         leave_runtime_scip_ruby_call(trace)
-      when :c_call
-        enter_runtime_scip_native_call(trace)
       end
     end.enable
   end

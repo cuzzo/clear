@@ -142,7 +142,9 @@
   ],
   "flow_local_types": [
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
       "file": "examples/profile/typescript_sample.ts",
       "function": "constructor",
       "line": 10,
@@ -170,12 +172,14 @@
       ]
     },
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
       "file": "examples/profile/typescript_sample.ts",
       "function": "hello",
       "line": 14,
       "name": "name",
-      "node_id": "cfg:Greeter#hello:stmt:1:14:8",
+      "node_id": "cfg:Greeter#hello:return:0:14:8",
       "owner": "Greeter",
       "place_id": "place:Greeter#hello:local:name",
       "reaching_definitions": [
@@ -202,6 +206,7 @@
   "methods": [
     {
       "dispatch_name": "constructor",
+      "generated_declaration": false,
       "id": "fn:f7ea68c88fbece5a",
       "key": [
         "Greeter",
@@ -238,6 +243,7 @@
     },
     {
       "dispatch_name": "hello",
+      "generated_declaration": false,
       "id": "fn:1eacf03142d5eb15",
       "key": [
         "Greeter",

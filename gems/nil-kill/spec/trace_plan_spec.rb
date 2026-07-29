@@ -166,9 +166,12 @@ RSpec.describe NilKill::TracePlan do
     call_sites = plan.instance_variable_get(:@runtime_call_sites)
     result_sites = plan.instance_variable_get(:@runtime_result_call_sites)
     receiver_sites = plan.instance_variable_get(:@runtime_collection_receiver_sites)
+    activation_sites = plan.instance_variable_get(:@runtime_native_activation_sites)
 
     plan.send(:add_runtime_value_site, call_sites, {
-      "path" => path, "span" => [12, 4, 14, 8], "selector" => "resolve_items"
+      "path" => path, "span" => [12, 4, 14, 8],
+      "activation_span" => [10, 2, 14, 8],
+      "selector" => "resolve_items"
     })
     plan.send(:add_runtime_value_site, result_sites, {
       "path" => path, "span" => [12, 4, 14, 8]
@@ -188,6 +191,11 @@ RSpec.describe NilKill::TracePlan do
       [path, 14].join("\0") => true
     )
     expect(receiver_sites).to eq([path, 13].join("\0") => true)
+    expect(activation_sites).to eq(
+      [path, 10].join("\0") => ["resolve_items"],
+      [path, 12].join("\0") => true,
+      [path, 13].join("\0") => true
+    )
   end
 
   it "unions selectors when several unresolved calls share a source line" do
@@ -204,6 +212,26 @@ RSpec.describe NilKill::TracePlan do
 
     expect(call_sites).to eq(
       [path, 12].join("\0") => %w[first second]
+    )
+    expect(plan.instance_variable_get(:@runtime_native_activation_sites)).to eq(
+      [path, 12].join("\0") => %w[first second]
+    )
+  end
+
+  it "keeps a native window open when one selector represents two same-line calls" do
+    plan = described_class.new
+    path = File.expand_path("src/runtime_worker.rb", NilKill::ROOT)
+    call_sites = plan.instance_variable_get(:@runtime_call_sites)
+
+    plan.send(:add_runtime_value_site, call_sites, {
+      "path" => path, "span" => [12, 2, 12, 10], "selector" => "fetch"
+    })
+    plan.send(:add_runtime_value_site, call_sites, {
+      "path" => path, "span" => [12, 12, 12, 21], "selector" => "fetch"
+    })
+
+    expect(plan.instance_variable_get(:@runtime_native_activation_sites)).to eq(
+      [path, 12].join("\0") => ["fetch"]
     )
   end
 
