@@ -74,9 +74,11 @@ if metadata[:symbol_map]
     abort "unsupported symbol bridge schema: #{bridge['schema'].inspect}"
   end
   symbol_map = bridge.fetch("symbols")
-  unless symbol_map.is_a?(Hash) &&
-      symbol_map.all? { |key, value| !key.to_s.empty? && !value.to_s.empty? }
-    abort "symbol bridge symbols must map non-empty producer symbols to non-empty consumer symbols"
+  unless symbol_map.is_a?(Hash) && symbol_map.all? { |key, value|
+      targets = value.is_a?(Array) ? value : [value]
+      !key.to_s.empty? && !targets.empty? && targets.all? { |target| !target.to_s.empty? }
+    }
+    abort "symbol bridge symbols must map non-empty producer symbols to one or more non-empty consumer symbols"
   end
   symbol_map_sha256 = "sha256:#{Digest::SHA256.hexdigest(symbol_map_bytes)}"
 end
@@ -173,17 +175,17 @@ candidate_symbols = Array(profile["calls"]).filter_map do |call|
   }]
 end
 symbols.concat(candidate_symbols)
-symbols = symbols.filter_map do |symbol, row|
+symbols = symbols.flat_map do |symbol, row|
   relocated = if symbol_map
-                symbol_map[symbol]
+                Array(symbol_map[symbol])
               else
-                Espalier::ComplexitySummary.relocate_symbol(
+                [Espalier::ComplexitySummary.relocate_symbol(
                   symbol,
                   from: metadata[:symbol_prefix_from],
                   to: metadata[:symbol_prefix_to]
-                )
+                )]
               end
-  relocated && [relocated, row]
+  relocated.compact.map { |target| [target, row] }
 end
 
 # A compiler symbol should identify one declaration. Omit conflicting symbols

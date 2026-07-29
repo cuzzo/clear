@@ -45,9 +45,8 @@ languages:
     indexer_patch: php/scip-php-exact-version.patch
     required_fix: Generated summaries must preserve and compose PHP weak-coercion callback costs and Zend allocator-state costs before C implementation symbols can be bridged to scip-php builtin declarations.
   ruby:
-    status: blocked
-    blocker: project_scoped_core_symbols
-    required_fix: scip-ruby must emit core classes and methods under a stable runtime package and version instead of the consumer project's gem/workspace identity; a CRuby producer must then preserve native callback and VM-state costs.
+    status: bundled
+    manifest: ruby-3.2.3.yml
   scala:
     status: blocked
     blocker: fact_mine_language_adapter_missing

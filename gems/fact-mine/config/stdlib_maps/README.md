@@ -42,6 +42,7 @@ Current publishable mappings:
 | C# | .NET 10.0.10 CoreLib collections/string/array | scip-dotnet 0.2.14 | 316 |
 | Kotlin | Kotlin/JVM 2.2.0 stdlib | semanticdb-kotlinc 0.6.0 + patch | 85 |
 | C++ | libstdc++ 13.3.0 selected C++17/C++20 surfaces | scip-clang 0.4.0 | 772 unique |
+| Ruby | CRuby 3.2.3 core-A native surface | scip-clang 0.4.0 → nil-kill-runtime 2 | 6 |
 
 The checked-in exact-symbol consumers prove that the generated data changes
 the final function result, not merely call metadata:
@@ -84,13 +85,13 @@ The remaining SCIP languages are deliberately fail-closed:
   remain parametric. Publishing the apparent native helper cost would silently
   discard those executable paths, so PHP remains fail-closed until generated
   summaries can carry and compose those runtime cost parameters.
-- Ruby is blocked one stage earlier. scip-ruby 0.4.7 emits core identities such
-  as `scip-ruby gem probe workspace String#`, where `probe` is the consumer
-  project rather than a Ruby runtime package. Relocating that prefix in the
-  consumer would also relocate project declarations and is therefore unsafe.
-  scip-ruby must first give core classes a stable, versioned runtime identity;
-  a CRuby producer can then use the cross-indexer bridge, subject to the same
-  callback and VM-state cost preservation required for PHP.
+- Ruby has a pinned CRuby 3.2.3 producer that indexes native bodies with
+  `scip-clang` and bridges only `rb_define_*` registrations to NilKill's
+  versioned `nil-kill-runtime ruby ruby 3.2.3` identities. The initial
+  core-A shard exports six source-proven rows. It is deliberately small:
+  unproved native calls, callback paths, and VM-state-sensitive bodies remain
+  absent rather than being replaced by a manual Ruby YAML model. Additional
+  CRuby shards use the same manifest-driven producer and bridge.
 - The SCIP ecosystem also includes Scala through scip-java, Visual Basic
   through scip-dotnet, and Dart through scip-dart. They were previously absent
   from the inventory. FactMine does not yet have syntax/CFG/DFG adapters for

@@ -1,0 +1,50 @@
+schema: fact-mine.stdlib-map.v1
+language: c
+
+source:
+  revision: cruby-3.2.3
+  git:
+    repository: https://github.com/ruby/ruby.git
+    commit: 52bb2ac0a6971d0391efa2275f7a66bff319087c
+  include:
+    - "{array,dir,enum,error,file,hash,io,math,numeric,string}.c"
+
+index:
+  command:
+    - ruby
+    - "{manifest_dir}/ruby/index_cruby.rb"
+    - "{source_root}"
+    - "{index}"
+  working_directory: "{source_root}"
+  output: cruby.scip
+  expected:
+    tool: scip-clang
+    version: "0.4.0"
+
+compatibility:
+  command:
+    - ruby
+    - "{manifest_dir}/ruby/semantic_environment.rb"
+    - "{source_root}"
+    - "{environment}"
+    - 3.2.3
+  working_directory: "{source_root}"
+
+soundness:
+  minimum_export_eligible_methods: 100
+
+summary:
+  corpus: cruby-core-3.2.3-core-a
+  output: ../complexity_summaries/ruby-cruby.3.2.3-core-a.json.gz
+  minimum_symbols: 1
+  consumer_indexers: ["nil-kill-runtime@2"]
+  symbol_bridge:
+    command:
+      - ruby
+      - "{manifest_dir}/ruby/build_symbol_bridge.rb"
+      - "{producer_summary}"
+      - "{profile}"
+      - "{source_root}"
+      - "{symbol_bridge}"
+      - 3.2.3
+    working_directory: "{source_root}"
