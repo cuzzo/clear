@@ -6,6 +6,7 @@
 
 require "json"
 require "optparse"
+require "pathname"
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "espalier"
@@ -24,19 +25,33 @@ abort "--source-root is required" unless options[:source_root]
 profile = JSON.parse(File.read(ARGV.fetch(0)))
 source_root = options.fetch(:source_root)
 repositories = options.fetch(:repositories)
+absolute_profile_path = lambda do |path|
+  path = path.to_s
+  Pathname.new(path).absolute? ? path : File.expand_path(path, source_root)
+end
 if repositories.empty?
   repositories = Array(profile["methods"]).filter_map do |method|
-    path = method.fetch("path")
+    path = absolute_profile_path.call(method.fetch("path"))
     path.delete_prefix("#{source_root}/").split("/", 2).first if path.start_with?("#{source_root}/")
   end.uniq.sort
 end
 focus = options[:focus] || repositories.find { |name| name.downcase.delete("-") == "javapoet" } || repositories.first
 
-def evidence_for(profile, prefix)
-  methods = Array(profile["methods"]).select { |row| row.fetch("path").start_with?(prefix) }
+def evidence_for(profile, prefix, source_root)
+  absolute_profile_path = lambda do |path|
+    path = path.to_s
+    Pathname.new(path).absolute? ? path : File.expand_path(path, source_root)
+  end
+  methods = Array(profile["methods"]).select do |row|
+    absolute_profile_path.call(row.fetch("path")).start_with?(prefix)
+  end
   method_ids = methods.to_h { |row| [row.fetch("id"), true] }
   paths = methods.map { |row| row.fetch("path") }.uniq
-  select_path = ->(rows) { Array(rows).select { |row| row.fetch("path", "").start_with?(prefix) } }
+  select_path = lambda do |rows|
+    Array(rows).select do |row|
+      absolute_profile_path.call(row.fetch("path", "")).start_with?(prefix)
+    end
+  end
   {
     "root" => prefix,
     "files" => paths.map { |path| { "path" => path, "source_role" => "production" } },
@@ -56,7 +71,7 @@ end
 
 qualities_by_repository = repositories.to_h do |repository|
   prefix = File.join(source_root, repository, "")
-  modules = Espalier::StaticEvidence.project_modules(evidence_for(profile, prefix))
+  modules = Espalier::StaticEvidence.project_modules(evidence_for(profile, prefix, source_root))
   qualities = Espalier::Aggregator.new.aggregate(modules).flat_map do |mod|
     Array(mod[:functions]).map { |function| function.fetch(:quality_metrics, {}) }
   end

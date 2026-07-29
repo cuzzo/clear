@@ -7,6 +7,7 @@
 
 require "json"
 require "optparse"
+require "pathname"
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "espalier"
@@ -38,6 +39,10 @@ abort "--source-root is required" unless options[:source_root]
 
 profile = JSON.parse(File.read(ARGV.fetch(0)))
 source_root = options.fetch(:source_root)
+absolute_profile_path = lambda do |path|
+  path = path.to_s
+  Pathname.new(path).absolute? ? path : File.expand_path(path, source_root)
+end
 prefixes =
   if options[:repositories].empty?
     ["#{source_root}/"]
@@ -45,8 +50,7 @@ prefixes =
     options[:repositories].map { |repository| "#{File.join(source_root, repository)}/" }
   end
 in_scope = lambda do |row|
-  path = row.fetch("path", "")
-  prefixes.any? { |prefix| path.start_with?(prefix) }
+  prefixes.any? { |prefix| absolute_profile_path.call(row.fetch("path", "")).start_with?(prefix) }
 end
 select_path = ->(rows) { Array(rows).select(&in_scope) }
 methods = select_path.call(profile["methods"])

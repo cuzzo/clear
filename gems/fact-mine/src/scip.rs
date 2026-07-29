@@ -5283,6 +5283,10 @@ void run_dependent() {
             call.complexity_assumptions,
             vec![RUNTIME_MODELED_ASSUMPTION]
         );
+        assert_eq!(
+            call.unresolved_reason.as_deref(),
+            Some("runtime_modeled_project_candidate_set_requires_summary")
+        );
     }
 
     #[test]

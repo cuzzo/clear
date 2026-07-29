@@ -3466,6 +3466,57 @@ end
 }
 
 #[test]
+fn ruby_generated_record_contract_accepts_portable_scip_nested_owner_identity() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"module Demo
+  Node = Struct.new(:kind)
+
+  def self.label(node)
+    node.kind
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let mut output = profile::extract(&document, Profile::Espalier);
+    let index = json!({
+        "metadata": {
+            "toolInfo": {
+                "name": "nil-kill-runtime",
+                "version": "1",
+                "arguments": ["--fact-mine-index-authority=runtime-modeled-world"]
+            },
+            "textDocumentEncoding": 1
+        },
+        "documents": [{
+            "relativePath": tmp.path().file_name().unwrap().to_string_lossy(),
+            "language": "ruby",
+            "occurrences": [{
+                "range": [4, 9, 13],
+                "symbol": "nil-kill-runtime workspace demo 1 Demo/Node#kind().",
+                "symbolRoles": 0
+            }]
+        }]
+    });
+    fact_mine_rust::scip::apply_json(&mut output, &index.to_string())?;
+    let accessor = output
+        .calls
+        .iter()
+        .find(|call| call.function == "self.label" && call.message == "kind")
+        .context("missing generated record reader")?;
+
+    assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        accessor.complexity_provenance.as_deref(),
+        Some("generated_callable_declaration")
+    );
+    Ok(())
+}
+
+#[test]
 fn go_top_level_calls_retain_declared_parameter_receiver_types() -> Result<()> {
     use std::io::Write;
 

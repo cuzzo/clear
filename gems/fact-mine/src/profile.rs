@@ -7708,7 +7708,12 @@ fn owner_type_name(value: &str) -> &str {
         match character {
             '<' => generic_depth += 1,
             '>' => generic_depth = generic_depth.saturating_sub(1),
-            ':' | '.' if generic_depth == 0 => leaf_start = index + character.len_utf8(),
+            // SCIP symbol owners use `/` between nested declarations, while
+            // source adapters commonly retain the language spelling (`::`,
+            // `.`, or `:`).  Owner comparison is shared identity plumbing,
+            // so normalize the portable SCIP separator here instead of
+            // teaching individual language adapters about one another.
+            ':' | '.' | '/' if generic_depth == 0 => leaf_start = index + character.len_utf8(),
             _ => {}
         }
     }
@@ -9021,6 +9026,18 @@ pub(crate) mod tests {
         assert!(!owner_name_matches(
             "CallbackListBase",
             "CallbackListBase< ReturnType (Args...), PoliciesType >::Node"
+        ));
+    }
+
+    #[test]
+    fn owner_name_matching_accepts_portable_scip_nested_owner_separator() {
+        assert!(owner_name_matches(
+            "SlopCop::CoverageData::Dataset",
+            "SlopCop/CoverageData/Dataset"
+        ));
+        assert!(!owner_name_matches(
+            "SlopCop::CoverageData::Dataset",
+            "SlopCop/CoverageData/FileCoverage"
         ));
     }
 
