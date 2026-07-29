@@ -1319,6 +1319,11 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             // OptionParser evaluates its configuration DSL once while
             // constructing the parser.
             (Some("OptionParser"), "new") => BlockCallSemantics::Once,
+            // Resource-scope callbacks receive one opened resource or run
+            // once under a temporary process-wide directory. They are not
+            // collection iterations, regardless of the size of the path or
+            // command arguments.
+            (Some("Dir"), "chdir") | (Some("IO"), "popen") => BlockCallSemantics::Once,
             _ if message == "fetch" && matches!(receiver_type, Some(TypeExpr::Hash { .. })) => {
                 BlockCallSemantics::Once
             }
@@ -1340,6 +1345,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         match (owner.as_str(), message) {
             ("Hash" | "ENV", "fetch") => BlockCallSemantics::Once,
             ("Hash", "new") => BlockCallSemantics::Deferred,
+            ("Dir", "chdir") | ("IO", "popen") => BlockCallSemantics::Once,
             _ => BlockCallSemantics::Unknown,
         }
     }

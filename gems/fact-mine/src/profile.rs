@@ -336,6 +336,8 @@ pub struct ParseRecovery {
 pub struct RuntimeValueCaptureSite {
     pub path: String,
     pub span: [usize; 4],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
 }
 
 /// A normalized predicate whose true and false branches respectively prove
@@ -1129,6 +1131,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             RuntimeValueCaptureSite {
                 path: path.clone(),
                 span: guard.condition_span,
+                selector: None,
             }
         }));
         runtime_result_call_sites.sort();
@@ -4745,6 +4748,7 @@ fn extract_runtime_value_capture_sites(
         .map(|span| RuntimeValueCaptureSite {
             path: document.file.clone(),
             span,
+            selector: None,
         })
         .collect();
     let receiver_sites = document
@@ -4754,6 +4758,7 @@ fn extract_runtime_value_capture_sites(
         .map(|call| RuntimeValueCaptureSite {
             path: document.file.clone(),
             span: call.span,
+            selector: None,
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -4778,6 +4783,7 @@ fn runtime_call_capture_sites(calls: &[CallRecord]) -> Vec<RuntimeValueCaptureSi
         .map(|call| RuntimeValueCaptureSite {
             path: call.path.clone(),
             span: call.span,
+            selector: Some(call.message.clone()),
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -9182,7 +9188,9 @@ end
             output
                 .runtime_call_sites
                 .iter()
-                .any(|site| site.span[0] == 4),
+                .any(|site| {
+                    site.span[0] == 4 && site.selector.as_deref() == Some("resolve_items")
+                }),
             "an unresolved call must request runtime target observation"
         );
         assert!(

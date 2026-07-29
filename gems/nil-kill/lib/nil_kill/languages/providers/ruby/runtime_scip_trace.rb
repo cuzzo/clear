@@ -65,7 +65,7 @@ module NilKillRuntimeTrace
     # observation FactMine explicitly requested.  Avoid the comparatively
     # expensive stack lookup on the usual planned path; recover the caller
     # location only when the current line has no requested capture.
-    callsite = if runtime_scip_captures_for(fallback_callsite).any?
+    callsite = if runtime_scip_callsite_captures_selector?(fallback_callsite, tp.method_id)
                  fallback_callsite
                else
                  runtime_scip_ruby_callsite(tp, fallback_callsite)
@@ -76,6 +76,7 @@ module NilKillRuntimeTrace
                         tp,
                         receiver_shape: receiver_shape,
                         deduplicate: !capture_result && !receiver_shape,
+                        callsite: callsite,
                       )
                     end
     owner = method_owner(tp.defined_class)
@@ -547,6 +548,18 @@ module NilKillRuntimeTrace
     runtime_scip_value_capture?("runtime_call_sites", callsite)
   end
 
+  def self.runtime_scip_callsite_captures_selector?(callsite, selector)
+    return false unless callsite
+
+    plan = trace_plan
+    return true unless plan
+    sites = plan["runtime_call_sites"]
+    return true unless sites
+
+    value = sites[[callsite[:path], callsite[:line]].join("\0")]
+    value == true || Array(value).include?(selector.to_s)
+  end
+
   def self.runtime_scip_receiver_shape_capture?(callsite)
     runtime_scip_value_capture?("runtime_collection_receiver_sites", callsite)
   end
@@ -572,7 +585,8 @@ module NilKillRuntimeTrace
       runtime_collection_receiver_sites
     ].map do |field|
       sites = plan[field]
-      sites.nil? || sites[key] == true
+      value = sites && sites[key]
+      sites.nil? || value == true || (field == "runtime_call_sites" && !Array(value).empty?)
     end
   end
 
@@ -583,7 +597,8 @@ module NilKillRuntimeTrace
     return true unless sites
     return false unless callsite
 
-    sites[[callsite[:path], callsite[:line]].join("\0")] == true
+    value = sites[[callsite[:path], callsite[:line]].join("\0")]
+    value == true || (field == "runtime_call_sites" && !Array(value).empty?)
   end
 
   def self.install_runtime_scip_trace

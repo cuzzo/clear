@@ -3979,6 +3979,38 @@ end
     }
 
     #[test]
+    fn ruby_resource_scope_blocks_execute_once_instead_of_iterating() {
+        let rows = ruby_facts(
+            r#"
+class Scanner
+  def files(repo, command)
+    paths = Dir.chdir(repo) { Dir["**/*"] }
+    text = IO.popen(command) { |io| io.read }
+    [paths, text]
+  end
+end
+"#,
+        );
+        let row = rows.iter().find(|row| row.function == "files").unwrap();
+
+        for message in ["chdir", "popen"] {
+            assert!(
+                row.iterations
+                    .iter()
+                    .all(|iteration| iteration.message.as_deref() != Some(message)),
+                "{message} is an exactly-once resource callback, not an input-sized iteration"
+            );
+            assert_eq!(
+                row.call_contexts
+                    .iter()
+                    .find(|call| call.message == message)
+                    .map(|call| call.execution_multiplicity.as_str()),
+                Some("O(1)")
+            );
+        }
+    }
+
+    #[test]
     fn normalized_worklists_collapse_only_with_visited_set_evidence() {
         let rows = ruby_facts(
             r#"

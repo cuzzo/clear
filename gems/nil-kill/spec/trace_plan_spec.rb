@@ -168,7 +168,7 @@ RSpec.describe NilKill::TracePlan do
     receiver_sites = plan.instance_variable_get(:@runtime_collection_receiver_sites)
 
     plan.send(:add_runtime_value_site, call_sites, {
-      "path" => path, "span" => [12, 4, 14, 8]
+      "path" => path, "span" => [12, 4, 14, 8], "selector" => "resolve_items"
     })
     plan.send(:add_runtime_value_site, result_sites, {
       "path" => path, "span" => [12, 4, 14, 8]
@@ -178,9 +178,9 @@ RSpec.describe NilKill::TracePlan do
     })
 
     expect(call_sites).to include(
-      [path, 12].join("\0") => true,
-      [path, 13].join("\0") => true,
-      [path, 14].join("\0") => true
+      [path, 12].join("\0") => ["resolve_items"],
+      [path, 13].join("\0") => ["resolve_items"],
+      [path, 14].join("\0") => ["resolve_items"]
     )
     expect(result_sites).to include(
       [path, 12].join("\0") => true,
@@ -188,6 +188,23 @@ RSpec.describe NilKill::TracePlan do
       [path, 14].join("\0") => true
     )
     expect(receiver_sites).to eq([path, 13].join("\0") => true)
+  end
+
+  it "unions selectors when several unresolved calls share a source line" do
+    plan = described_class.new
+    path = File.expand_path("src/runtime_worker.rb", NilKill::ROOT)
+    call_sites = plan.instance_variable_get(:@runtime_call_sites)
+
+    plan.send(:add_runtime_value_site, call_sites, {
+      "path" => path, "span" => [12, 2, 12, 10], "selector" => "first"
+    })
+    plan.send(:add_runtime_value_site, call_sites, {
+      "path" => path, "span" => [12, 12, 12, 21], "selector" => "second"
+    })
+
+    expect(call_sites).to eq(
+      [path, 12].join("\0") => %w[first second]
+    )
   end
 
   it "builds its purpose-specific evidence without exporting full CFG/DFG facts" do

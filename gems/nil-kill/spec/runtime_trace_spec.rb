@@ -221,6 +221,64 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
+  it "does not attribute a nested Ruby call to another planned line in the outer expression" do
+    Dir.mktmpdir("nil-kill-runtime-ruby-selector-callsite", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.rb")
+      File.write(source, <<~RUBY)
+        class Provider
+          def rule_id
+            :rule
+          end
+        end
+
+        class Worker
+          def run(provider)
+            {
+              inspected: provider.inspect,
+              rule_id: provider.rule_id
+            }
+          end
+        end
+
+        Worker.new.run(Provider.new)
+      RUBY
+      trace_tmp = File.join(dir, "trace-tmp")
+      FileUtils.mkdir_p(trace_tmp)
+      File.write(File.join(trace_tmp, "trace-plan.json"), JSON.generate(
+        "target_dirs" => [dir],
+        "runtime_call_sites" => {
+          [source, 9].join("\0") => ["inspect"],
+          [source, 10].join("\0") => ["rule_id"],
+        },
+        "runtime_result_call_sites" => {},
+        "runtime_collection_receiver_sites" => {}
+      ))
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_RUNTIME_SCIP" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      events = Dir.glob(File.join(trace_tmp, "runtime", "runtime-calls-*.jsonl"))
+        .flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
+      expect(events).to include(a_hash_including(
+        "callee" => a_hash_including("owner" => "Provider", "name" => "rule_id"),
+        "callsite" => a_hash_including("path" => source, "line" => 10)
+      ))
+      expect(events).not_to include(a_hash_including(
+        "callee" => a_hash_including("owner" => "Provider", "name" => "rule_id"),
+        "callsite" => a_hash_including("path" => source, "line" => 9)
+      ))
+    end
+  end
+
   it "records native predicate truth separately for each observed receiver type" do
     Dir.mktmpdir("nil-kill-runtime-capability-truth", NilKill::ROOT) do |dir|
       source = File.join(dir, "capability.rb")

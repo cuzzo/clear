@@ -121,9 +121,15 @@ module NilKill
       span = Array(site["span"])
       return if path.empty? || span.length != 4
 
+      selector = site["selector"].to_s
       first_line, last_line = span.values_at(0, 2).map(&:to_i).minmax
       (first_line..last_line).each do |line|
-        index[[File.expand_path(path, ROOT), line].join("\0")] = true
+        key = [File.expand_path(path, ROOT), line].join("\0")
+        if selector.empty?
+          index[key] = true
+        elsif index[key] != true
+          index[key] = (Array(index[key]) | [selector]).sort
+        end
       end
     end
 
