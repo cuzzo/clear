@@ -71,10 +71,40 @@ pub(crate) struct NormalizedVisibilityEvent {
     pub(crate) target_names: Vec<String>,
 }
 
+/// A language-owned declaration macro that creates a fixed-cost accessor.
+/// The shared pass handles visibility, source export, and call-target joining;
+/// adapters merely recognize their native declaration syntax and provide the
+/// declaration witness consumed by `generated_callable_complexity`.
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedGeneratedAccessor {
+    pub(crate) name: String,
+    pub(crate) params: Vec<String>,
+    pub(crate) declaration_source: String,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct NormalizedNilGuardFact {
     pub(crate) local: String,
     pub(crate) non_nil_when_true: bool,
+}
+
+/// A language-owned predicate that proves whether a receiver supports one
+/// selector on either outgoing branch.  The shared profile and runtime overlay
+/// own CFG placement, evidence joining, and domain filtering; adapters only
+/// recognize their native predicate syntax.
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedRuntimeCapabilityGuard {
+    pub(crate) subject: String,
+    pub(crate) member: String,
+}
+
+/// A language-owned recognition of a bare value used as a branch condition.
+/// The adapter owns the source spelling and truthiness semantics; FactMine
+/// applies the resulting branch-local runtime-domain refinement through CFG
+/// reaching definitions.
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedRuntimeTruthinessGuard {
+    pub(crate) subject: String,
 }
 
 /// A language-owned interpretation of one already-normalized nullable
@@ -1025,6 +1055,31 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         Vec::new()
     }
 
+    /// Candidate declaration owners for an explicit type/module receiver whose
+    /// source language permits lexical constant lookup. The adapter owns the
+    /// namespace syntax and lookup order; the shared resolver only joins an
+    /// exact, unique project declaration.
+    fn relative_type_receiver_candidates(&self, _receiver: &str, _owner: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Interpret a native capability predicate (for example Ruby
+    /// `value.respond_to?(:member)`) on an already-normalized condition node.
+    /// Returning `None` keeps both runtime alternatives intact.
+    fn runtime_capability_guard(
+        &self,
+        _condition: &Node,
+    ) -> Option<NormalizedRuntimeCapabilityGuard> {
+        None
+    }
+
+    fn runtime_truthiness_guard(
+        &self,
+        _condition: &Node,
+    ) -> Option<NormalizedRuntimeTruthinessGuard> {
+        None
+    }
+
     /// Lexical symbols searched after implicit owner and inheritance lookup
     /// failed. This models languages where unqualified lookup continues into
     /// enclosing lexical scopes.
@@ -1250,6 +1305,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// the language boundary while the normalized call identity is still
     /// available; CFG consumers receive only the contract fact.
     fn nullable_call_result_contract(&self, _node: &Node) -> Option<&'static str> {
+        None
+    }
+
+    /// Return operands of a native short-circuit expression whose value is
+    /// exactly one of those operands. The generic CFG records the resulting
+    /// producer set and joins it through reaching definitions; adapters own
+    /// whether their source operator has that value-preserving meaning.
+    fn value_preserving_call_result_operands<'a>(&self, _node: &'a Node) -> Option<Vec<&'a Node>> {
         None
     }
 
@@ -2335,6 +2398,18 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// Returned as (call message, reader?, writer?) tuples.
     fn accessor_declaration_methods(&self) -> &'static [(&'static str, bool, bool)] {
         &[]
+    }
+
+    /// Generated accessors whose declaration cannot be expressed by the
+    /// generic `attr_reader`/`attr_writer` shape.  This keeps macro syntax in
+    /// the language adapter while reusing the common generated-declaration
+    /// interface used by Ruby readers, Java/Kotlin properties, and similar
+    /// constructs.
+    fn generated_accessor_declarations(
+        &self,
+        _call: &CallSite,
+    ) -> Vec<NormalizedGeneratedAccessor> {
+        Vec::new()
     }
 
     fn protocol_read_label_from_state(&self, receiver: &str, field: &str) -> Option<String> {

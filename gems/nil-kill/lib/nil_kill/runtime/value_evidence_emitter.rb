@@ -78,6 +78,8 @@ module NilKill
             caller["path"], caller["line"],
             callsite["path"], callsite["line"], callsite["range"],
             callsite["selector"],
+            JSON.generate(row["receiver_domain"] || {}),
+            Array(row["result_truths"]).sort_by { |truth| truth ? 1 : 0 },
           ]
         end.map do |_key, rows|
           first = rows.first
@@ -93,6 +95,8 @@ module NilKill
             "targets" => targets,
             "receiver_domain" => merged_call_domain(rows, "receiver_domain"),
             "result_domain" => merged_call_domain(rows, "result_domain"),
+            "result_truths" => rows.flat_map { |row| Array(row["result_truths"]) }
+              .uniq.sort_by { |truth| truth ? 1 : 0 },
             "count" => rows.sum { |event| event["count"].to_i },
           }.compact
         end.sort_by do |call|

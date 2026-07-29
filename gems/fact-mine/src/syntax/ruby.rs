@@ -29,8 +29,9 @@ use super::normalized_behavior::{
     configured_stdlib_call_identity, eliminable_guard_from_call, matching_paren_index,
     method_parameter_type_key, BlockCallSemantics, CardinalityCallSemantics,
     CollectionAllocationSemantics, NormalizedCallComplexity, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedVisibilityEvent,
+    NormalizedCallProjection, NormalizedCollectionOperation, NormalizedGeneratedAccessor,
+    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedRuntimeCapabilityGuard,
+    NormalizedRuntimeTruthinessGuard, NormalizedSemanticEffect, NormalizedVisibilityEvent,
     RuntimeCallResultProjection, RuntimeValueProjection, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, FunctionDef, StateDeclaration};
@@ -46,13 +47,22 @@ fn scip_ruby_descriptor(symbol: &str) -> Option<&str> {
         return fields.next();
     }
 
+    runtime_ruby_core_descriptor(symbol)
+}
+
+// NilKill uses this identity only for code that Ruby itself owns: native core
+// methods and standard-library source that does not belong to a loaded gem or
+// workspace.  Unlike scip-ruby's project-scoped package identity, it is a
+// provenance guarantee, so an as-yet-unmodelled descriptor is still a stdlib
+// cost gap rather than a missing declaration in the consumer project.
+fn runtime_ruby_core_descriptor(symbol: &str) -> Option<&str> {
     let rest = symbol.strip_prefix("nil-kill-runtime ")?;
     let mut fields = rest.splitn(4, ' ');
     let manager = fields.next()?;
     let package = fields.next()?;
     fields.next()?; // runtime version
     let descriptor = fields.next()?;
-    // Native Ruby frames are deliberately distinct from project and gem
+    // Runtime core frames are deliberately distinct from project and gem
     // frames. Only the former may consume the Ruby stdlib registry.
     (manager == "ruby" && package == "ruby").then_some(descriptor)
 }
@@ -253,7 +263,9 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
         .unwrap_or_default()
         .trim_matches('`')
         .to_string();
-    if ruby_stdlib_descriptor(descriptor, &message) {
+    if runtime_ruby_core_descriptor(symbol).is_some()
+        || ruby_stdlib_descriptor(descriptor, &message)
+    {
         let owner = ruby_descriptor_owner(descriptor).unwrap_or_default();
         super::ExternalSymbolMetadata {
             scope: "stdlib",
@@ -582,6 +594,31 @@ fn ruby_generated_reader_names(source: &str) -> BTreeSet<String> {
     BTreeSet::new()
 }
 
+fn ruby_generated_struct_reader_names(source: &str) -> BTreeSet<String> {
+    let source = source.trim();
+    let arguments = ["Struct.new(", "Data.define("]
+        .iter()
+        .find_map(|prefix| source.strip_prefix(prefix))
+        .and_then(|rest| rest.strip_suffix(')'));
+    let Some(arguments) = arguments else {
+        return BTreeSet::new();
+    };
+    split_top_level_params_local(arguments)
+        .into_iter()
+        .filter_map(|argument| {
+            let name = argument
+                .trim()
+                .trim_start_matches(':')
+                .trim_matches(['\'', '"']);
+            (!name.is_empty()
+                && name
+                    .chars()
+                    .all(|character| character.is_alphanumeric() || character == '_'))
+            .then(|| name.to_string())
+        })
+        .collect()
+}
+
 fn ruby_identifier_in(source: &str, identifier: &str) -> bool {
     source.match_indices(identifier).any(|(start, _)| {
         let before = source[..start].chars().next_back();
@@ -898,6 +935,9 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         if receiver == "ENV" {
             return Some("Hash".to_string());
         }
+        if ruby_word_array_literal(receiver) {
+            return Some("T::Array[String]".to_string());
+        }
         if receiver.starts_with('[') {
             return Some("T::Array[T.untyped]".to_string());
         }
@@ -942,7 +982,8 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         source: &str,
         name: &str,
     ) -> Option<NormalizedCallComplexity> {
-        let generated_reader = ruby_generated_reader_names(source).contains(name);
+        let generated_reader = ruby_generated_reader_names(source).contains(name)
+            || ruby_generated_struct_reader_names(source).contains(name);
         generated_reader.then_some(NormalizedCallComplexity {
             time: "O(1)",
             space: "O(1)",
@@ -966,6 +1007,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             return false;
         }
         scip_ruby_descriptor(symbol)
+            .or_else(|| runtime_ruby_dependency_descriptor(symbol))
             .and_then(ruby_descriptor_parts)
             .map(|(_, member)| {
                 member
@@ -1043,6 +1085,114 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             })
     }
 
+    fn relative_type_receiver_candidates(&self, receiver: &str, owner: &str) -> Vec<String> {
+        let receiver = receiver.trim().trim_start_matches("::");
+        if receiver.is_empty() || !self.receiver_is_type_reference(receiver) {
+            return Vec::new();
+        }
+
+        let mut candidates = Vec::new();
+        let scopes = owner
+            .split("::")
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        for length in (0..=scopes.len()).rev() {
+            let candidate = if length == 0 {
+                receiver.to_string()
+            } else {
+                format!("{}::{receiver}", scopes[..length].join("::"))
+            };
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+        candidates
+    }
+
+    fn runtime_capability_guard(
+        &self,
+        condition: &Node,
+    ) -> Option<NormalizedRuntimeCapabilityGuard> {
+        if !matches!(condition.r#type.as_str(), "CALL" | "QCALL") {
+            return None;
+        }
+        let receiver = condition.children.first().and_then(ast::node)?;
+        let message = match condition.children.get(1)? {
+            ast::Child::String(value) | ast::Child::Symbol(value) => value,
+            _ => return None,
+        };
+        if message != "respond_to?" {
+            return None;
+        }
+        let arguments = condition.children.get(2).and_then(ast::node)?;
+        let argument = arguments.children.iter().find_map(ast::node)?;
+        let member = ast::normalize_text(&argument.text)
+            .trim()
+            .trim_start_matches(':')
+            .trim_matches(['\'', '"'])
+            .to_string();
+        let subject = ast::normalize_text(&receiver.text).trim().to_string();
+        (!subject.is_empty() && !member.is_empty())
+            .then_some(NormalizedRuntimeCapabilityGuard { subject, member })
+    }
+
+    fn runtime_truthiness_guard(
+        &self,
+        condition: &Node,
+    ) -> Option<NormalizedRuntimeTruthinessGuard> {
+        // FactMine subsequently requires a matching CFG local place and
+        // reaching definition, so a bare method spelling cannot gain a
+        // refinement from this syntactic recognition alone. That lets this
+        // adapter accept Ripper's normalized local-reference node without
+        // teaching shared CFG code Ruby's node vocabulary.
+        let subject = ast::normalize_text(&condition.text).trim().to_string();
+        (!subject.is_empty()
+            && subject
+                .chars()
+                .all(|character| character == '_' || character.is_ascii_alphanumeric()))
+        .then_some(NormalizedRuntimeTruthinessGuard { subject })
+    }
+
+    fn call_access_span(&self, node: &Node, computed_span: Option<Span>, full_span: Span) -> Span {
+        // Ruby normalizes an explicit receiver call as
+        // `CALL(receiver, message, arguments)`, but a bare function call as
+        // `FCALL(message, arguments)` (and a no-argument bare call as
+        // `VCALL(message)`).  The selector is therefore not at one fixed
+        // child position.  Returning the source span of the selector keeps
+        // runtime SCIP occurrences distinct from their nested argument calls.
+        let message_child = match node.r#type.as_str() {
+            "CALL" | "QCALL" => node.children.get(1),
+            "FCALL" | "VCALL" => node.children.first(),
+            _ => None,
+        };
+        let message = match message_child {
+            Some(ast::Child::String(value) | ast::Child::Symbol(value)) => value.as_str(),
+            _ => return computed_span.unwrap_or(full_span),
+        };
+        let Some(offset) = node.text.rfind(message) else {
+            return computed_span.unwrap_or(full_span);
+        };
+        let prefix = &node.text[..offset];
+        let line_offset = prefix.bytes().filter(|byte| *byte == b'\n').count();
+        let column = prefix
+            .rsplit_once('\n')
+            .map(|(_, line)| line.len())
+            .unwrap_or_else(|| full_span[1] + prefix.len());
+        let line = full_span[0] + line_offset;
+        [line, column, line, column + message.len()]
+    }
+
+    fn value_preserving_call_result_operands<'a>(&self, node: &'a Node) -> Option<Vec<&'a Node>> {
+        matches!(node.r#type.as_str(), "OR" | "AND")
+            .then(|| {
+                node.children
+                    .iter()
+                    .filter_map(ast::node)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|operands| operands.len() >= 2)
+    }
+
     fn constructor_dispatch_name(
         &self,
         receiver: &str,
@@ -1088,10 +1238,11 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     // CFG-SPECIFIC END
 
     // TYPE-INFERENCE-SPECIFIC: Ruby's normalized LIST/ARRAY vocabulary is
-    // also used for call arguments. Only bracket-delimited nodes represent
-    // source array literals and are eligible for tuple-shape facts.
+    // also used for call arguments. Only bracket-delimited nodes and Ruby's
+    // word-array literals represent source array literals and are eligible
+    // for tuple-shape facts.
     fn array_literal_node(&self, node: &Node) -> bool {
-        node.text.trim_start().starts_with('[')
+        ruby_array_literal(node.text.trim_start())
     }
 
     fn collection_allocation_semantics(&self, message: &str) -> CollectionAllocationSemantics {
@@ -1254,6 +1405,17 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         message == "new"
     }
 
+    fn suppress_call_site(&self, _node: &Node, call: &NormalizedCallProjection) -> bool {
+        // These are Ruby lexical pseudo-constants. Ripper represents them as
+        // VCALL nodes, but evaluating them performs no method dispatch; if we
+        // retained them as `self.__FILE__()` calls they would manufacture a
+        // semantic-identity gap in every enclosing function.
+        matches!(
+            call.message.as_str(),
+            "__FILE__" | "__LINE__" | "__ENCODING__"
+        )
+    }
+
     fn collection_parameter_type(&self, type_name: &str) -> bool {
         ["Array", "Hash", "Set", "Enumerable"]
             .iter()
@@ -1318,6 +1480,11 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn literal_receiver_type(&self, node: &Node) -> Option<TypeExpr> {
+        if ruby_word_array_literal(node.text.trim_start()) {
+            return Some(TypeExpr::Array(Box::new(TypeExpr::Primitive(
+                "String".to_string(),
+            ))));
+        }
         match node.r#type.as_str() {
             "ARRAY" | "LIST" | "ZLIST" => Some(TypeExpr::Array(Box::new(TypeExpr::Untyped))),
             "HASH" => Some(TypeExpr::Hash {
@@ -1333,7 +1500,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         &self,
         node: &Node,
         owner: &str,
-        _in_method: bool,
+        in_method: bool,
     ) -> Option<StateDeclaration> {
         if node.r#type != "IASGN" {
             return None;
@@ -1343,26 +1510,35 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             _ => None,
         })?;
         let value = node.children.get(1).and_then(ast::node)?;
-        if !matches!(value.r#type.as_str(), "CALL" | "QCALL") {
-            return None;
-        }
-        let receiver = value.children.first().and_then(ast::node)?;
-        let message = value.children.get(1).and_then(|child| match child {
-            ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.as_str()),
-            _ => None,
-        })?;
-        if receiver.text != "T" || message != "let" {
-            return None;
-        }
-        let arguments = value.children.get(2).and_then(ast::node)?;
-        let declared_type = arguments
-            .children
-            .iter()
-            .filter_map(ast::node)
-            .nth(1)?
-            .text
-            .trim()
-            .to_string();
+        let declared_type = if matches!(value.r#type.as_str(), "CALL" | "QCALL") {
+            let receiver = value.children.first().and_then(ast::node)?;
+            let message = value.children.get(1).and_then(|child| match child {
+                ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.as_str()),
+                _ => None,
+            })?;
+            if receiver.text != "T" || message != "let" {
+                return None;
+            }
+            let arguments = value.children.get(2).and_then(ast::node)?;
+            arguments
+                .children
+                .iter()
+                .filter_map(ast::node)
+                .nth(1)?
+                .text
+                .trim()
+                .to_string()
+        } else {
+            // A class/module-body ivar literal is a declaration just as much
+            // as a typed `T.let`: Ruby executes it once while defining the
+            // owner, before any method can observe the field. Do not infer
+            // from ordinary method assignments, where a later write can
+            // legitimately change the field's type.
+            if in_method {
+                return None;
+            }
+            self.literal_receiver_type(value)?.to_sorbet_string()
+        };
         if declared_type.is_empty() || declared_type == "T.untyped" {
             return None;
         }
@@ -1614,6 +1790,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     fn known_return_type(&self, name: &str) -> Option<String> {
         match name {
             "puts" | "print" | "warn" => Some("NilClass".to_string()),
+            // Kernel#Array can invoke a user conversion hook, so its *cost*
+            // remains parametric. Ruby nevertheless guarantees that a
+            // successful conversion returns an Array, which is sufficient for
+            // FactMine's generic direct-call-result join to type a following
+            // receiver without reconstructing Ruby flow in a tracer.
+            "Array" => Some("T::Array[T.untyped]".to_string()),
             "to_s" | "to_str" | "inspect" => Some("String".to_string()),
             "to_i" | "size" | "length" | "count" | "hash" => Some("Integer".to_string()),
             "to_f" => Some("Float".to_string()),
@@ -2030,6 +2212,39 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         ]
     }
 
+    fn generated_accessor_declarations(&self, call: &CallSite) -> Vec<NormalizedGeneratedAccessor> {
+        if !matches!(
+            call.receiver.as_str(),
+            "Struct" | "::Struct" | "Data" | "::Data"
+        ) || !matches!(call.message.as_str(), "new" | "define")
+        {
+            return Vec::new();
+        }
+        let constructor = if call.message == "new" {
+            "Struct.new"
+        } else {
+            "Data.define"
+        };
+        call.arguments
+            .iter()
+            .filter_map(|argument| {
+                let name = argument
+                    .trim()
+                    .trim_start_matches(':')
+                    .trim_matches(['\'', '"']);
+                (!name.is_empty()
+                    && name
+                        .chars()
+                        .all(|character| character.is_alphanumeric() || character == '_'))
+                .then(|| NormalizedGeneratedAccessor {
+                    name: name.to_string(),
+                    params: Vec::new(),
+                    declaration_source: format!("{constructor}(:{name})"),
+                })
+            })
+            .collect()
+    }
+
     fn visibility_events_from_calls(
         &self,
         calls: &[super::CallSite],
@@ -2188,6 +2403,18 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             Vec::new()
         }
     }
+}
+
+/// Ruby has two syntactically distinct array-literal families.  Tree-sitter's
+/// normalized node kind for `%w[...]` is not stable across parser versions, so
+/// the Ruby adapter owns this source-syntax check instead of making shared
+/// inference depend on a Ruby node kind.
+fn ruby_array_literal(text: &str) -> bool {
+    text.starts_with('[') || ruby_word_array_literal(text)
+}
+
+fn ruby_word_array_literal(text: &str) -> bool {
+    text.starts_with("%w[") || text.starts_with("%W[")
 }
 
 fn signature_component(signature: &str, marker: &str) -> Option<String> {
@@ -2690,6 +2917,12 @@ mod tests {
     fn ruby_behavior_edge_cases() {
         let behavior = RubyNormalizedBehavior;
 
+        assert!(behavior.scip_occurrence_matches_call(
+            "nil-kill-runtime workspace slopcop workspace SlopCop/CoverageData/Dataset#`[]`().",
+            "[",
+            "[]"
+        ));
+
         assert_eq!(
             behavior.collection_allocation_semantics("map"),
             CollectionAllocationSemantics::PreservesReceiver
@@ -3112,6 +3345,36 @@ mod tests {
                 text: text.to_string(),
             }
         }
+
+        // A literal class-body ivar is a stable state declaration. Before
+        // this regression test it was discarded unless wrapped in `T.let`,
+        // leaving `@cache[key]` without a Hash receiver identity.
+        let cache_initializer = Node {
+            r#type: "IASGN".to_string(),
+            children: vec![
+                Child::String("@cache".to_string()),
+                Child::Node(Box::new(node("HASH", "{}"))),
+            ],
+            first_lineno: 12,
+            first_column: 0,
+            last_lineno: 12,
+            last_column: 11,
+            text: "@cache = {}".to_string(),
+        };
+        let cache_declaration = behavior
+            .state_declaration_from_node(&cache_initializer, "Demo", false)
+            .expect("class-body literal ivar declaration");
+        assert_eq!(cache_declaration.field, "@cache");
+        assert_eq!(
+            cache_declaration.r#type.as_deref(),
+            Some("T::Hash[T.untyped, T.untyped]")
+        );
+        assert!(
+            behavior
+                .state_declaration_from_node(&cache_initializer, "Demo", true)
+                .is_none(),
+            "a method assignment is not a sound field type declaration"
+        );
 
         // static_return_type string chars and lines
         assert_eq!(
@@ -3628,6 +3891,13 @@ mod tests {
         );
         assert_eq!(external_symbol_metadata(length).scope, "stdlib");
         assert_eq!(external_symbol_metadata(runtime_length).scope, "stdlib");
+        let unmodelled_runtime_core =
+            external_symbol_metadata("nil-kill-runtime ruby ruby 3.2.3 Math.exp().");
+        assert_eq!(unmodelled_runtime_core.scope, "stdlib");
+        assert_eq!(
+            unmodelled_runtime_core.missing_cost_kind,
+            "stdlib_cost_model_missing"
+        );
         assert_eq!(
             external_symbol_metadata(generated).scope,
             "project_declaration"
@@ -3668,6 +3938,8 @@ mod tests {
             ("attr_accessor(:value, :other)", "value="),
             ("const :value, String", "value"),
             ("prop :value, String", "value"),
+            ("Struct.new(:value, :other)", "value"),
+            ("Data.define(:value, :other)", "other"),
         ] {
             assert!(
                 behavior
@@ -3681,6 +3953,7 @@ mod tests {
             ("attr_reader :value", "value="),
             ("const :other_value, String", "value"),
             ("property :value", "value"),
+            ("Struct.new(:other_value)", "value"),
         ] {
             assert!(
                 behavior

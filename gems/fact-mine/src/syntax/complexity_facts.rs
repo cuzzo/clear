@@ -3777,6 +3777,7 @@ class Index
     [].sort
     {}.keys
     "value".split
+    %w[if unless].include?("if")
   end
 end
 "#,
@@ -3815,6 +3816,36 @@ end
             !matches!(call.message.as_str(), "sort" | "keys" | "split")
                 || call.known_time_complexity.is_some()
         }));
+        assert!(literals.call_contexts.iter().any(|call| {
+            call.message == "include?"
+                && call.known_time_complexity.as_deref() == Some("O(N)")
+                && call.known_space_complexity.as_deref() == Some("O(1)")
+        }));
+    }
+
+    #[test]
+    fn declarative_owner_block_methods_receive_normalized_complexity_facts() {
+        let source = r#"
+module CoverageData
+Dataset = Struct.new(:files) do
+  def empty?
+    files.empty?
+  end
+end
+end
+"#;
+        let mut file = tempfile::Builder::new().suffix(".rb").tempfile().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby).unwrap();
+        let rows = facts(&document);
+        let row = rows
+            .iter()
+            .find(|row| row.function == "empty?")
+            .expect("method declared in a Struct block");
+        assert!(row
+            .call_contexts
+            .iter()
+            .any(|call| call.message == "empty?"));
     }
 
     #[test]

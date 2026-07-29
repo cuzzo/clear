@@ -3,6 +3,268 @@
 require_relative "spec_helper"
 
 RSpec.describe "nil-kill runtime trace" do
+  it "keeps workspace source outside the selected targets under workspace identity" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    source = File.join(NilKill::ROOT, "tools", "vopr_coverage.rb")
+    cache = NilKillRuntimeTrace.instance_variable_get(:@runtime_package_by_path)
+    cache.clear
+
+    expect(NilKillRuntimeTrace.runtime_package(source, native: false)).to eq(
+      package_manager: "workspace",
+      package: File.basename(NilKill::ROOT),
+      version: "workspace"
+    )
+    expect(NilKillRuntimeTrace.runtime_package("<internal:warning>", native: false)).to eq(
+      package_manager: "ruby",
+      package: "ruby",
+      version: RUBY_VERSION
+    )
+  ensure
+    cache&.clear
+  end
+
+  it "serializes Struct members as a runtime record shape without dispatching an override" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    record_class = Struct.new(:kind, :payload)
+    record_class.class_eval do
+      def members
+        raise "NilKill must use Struct's native member reader"
+      end
+    end
+
+    domain = NilKillRuntimeTrace.runtime_value_domain(record_class.new(:ok, 1))
+    record = domain.fetch(:shapes).find { |shape| shape.fetch(:kind) == "record" }
+
+    expect(record.fetch(:members)).to include(
+      "kind" => { "kind" => "class", "name" => "Symbol" },
+      "payload" => { "kind" => "class", "name" => "Integer" }
+    )
+  end
+
+  it "permits an independent branch-coverage child when collect coverage is disabled" do
+    Dir.mktmpdir("nil-kill-runtime-coverage-opt-out", NilKill::ROOT) do |dir|
+      source = File.join(dir, "covered.rb")
+      File.write(source, "result = ENV.fetch(\"NIL_KILL_BRANCH_FIXTURE\") == \"1\" ? :yes : :no\n")
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      trace_tmp = File.join(dir, "trace-tmp")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "0",
+        "NIL_KILL_COLLECT_COVERAGE" => "0",
+        "NIL_KILL_BRANCH_FIXTURE" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+      script = <<~RUBY
+        require "coverage"
+        Coverage.start(branches: true)
+        load ARGV.fetch(0)
+        branches = Coverage.result.fetch(File.expand_path(ARGV.fetch(0))).fetch(:branches)
+        abort "missing branch coverage" if branches.empty?
+      RUBY
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", "-e", script, source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+    end
+  end
+
+  it "uses the native TracePoint source line when a multiline hash has no intervening line event" do
+    Dir.mktmpdir("nil-kill-runtime-native-callsite", NilKill::ROOT) do |dir|
+      source = File.join(dir, "sample.rb")
+      File.write(source, <<~RUBY)
+        class Worker
+          def helper
+            :helper
+          end
+
+          def run(value)
+            {
+              first: helper,
+              second: value.to_s
+            }
+          end
+        end
+
+        Worker.new.run("value")
+      RUBY
+      trace_tmp = File.join(dir, "trace-tmp")
+      FileUtils.mkdir_p(trace_tmp)
+      # Ruby emits a line event for the first hash entry, then native calls
+      # whose own TracePoint lines are each entry. Only the second entry is a
+      # FactMine demand, so using the stale frame line loses `String#to_s`.
+      File.write(File.join(trace_tmp, "trace-plan.json"), JSON.generate(
+        "target_dirs" => [dir],
+        "runtime_call_sites" => { [source, 9].join("\0") => true },
+        "runtime_result_call_sites" => {},
+        "runtime_collection_receiver_sites" => {}
+      ))
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_RUNTIME_SCIP" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      events = Dir.glob(File.join(trace_tmp, "runtime", "runtime-calls-*.jsonl"))
+        .flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
+      expect(events).to include(a_hash_including(
+        "callee" => a_hash_including("owner" => "String", "name" => "to_s", "native" => true),
+        "callsite" => a_hash_including("path" => source, "line" => 9)
+      ))
+    end
+  end
+
+  it "records native predicate truth separately for each observed receiver type" do
+    Dir.mktmpdir("nil-kill-runtime-capability-truth", NilKill::ROOT) do |dir|
+      source = File.join(dir, "capability.rb")
+      File.write(source, <<~RUBY)
+        DetailArm = Struct.new(:detail)
+        FallbackArm = Struct.new(:fallback)
+
+        class Worker
+          def label(arm)
+            arm.respond_to?(:detail) ? arm.detail : arm.fallback
+          end
+        end
+
+        worker = Worker.new
+        worker.label(DetailArm.new("detail"))
+        worker.label(FallbackArm.new("fallback"))
+      RUBY
+      trace_tmp = File.join(dir, "trace-tmp")
+      FileUtils.mkdir_p(trace_tmp)
+      File.write(File.join(trace_tmp, "trace-plan.json"), JSON.generate(
+        "target_dirs" => [dir],
+        "runtime_call_sites" => {},
+        "runtime_result_call_sites" => { [source, 6].join("\0") => true },
+        "runtime_collection_receiver_sites" => {}
+      ))
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_RUNTIME_SCIP" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      events = Dir.glob(File.join(trace_tmp, "runtime", "runtime-calls-*.jsonl"))
+        .flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
+        .select { |event| event.dig("callee", "name") == "respond_to?" }
+      expect(events.map { |event| [event.dig("receiver_domain", "types"), event["result_truths"]] })
+        .to contain_exactly([["DetailArm"], [true]], [["FallbackArm"], [false]])
+    end
+  end
+
+  it "keeps a native block call's result separate from nested callback returns" do
+    Dir.mktmpdir("nil-kill-runtime-native-result", NilKill::ROOT) do |dir|
+      source = File.join(dir, "native_result.rb")
+      File.write(source, <<~RUBY)
+        class Worker
+          def run(values)
+            values.select do |value|
+              value.to_s
+            end.map do |value|
+              value
+            end
+          end
+        end
+
+        Worker.new.run([:one, :two])
+      RUBY
+      trace_tmp = File.join(dir, "trace-tmp")
+      FileUtils.mkdir_p(trace_tmp)
+      File.write(File.join(trace_tmp, "trace-plan.json"), JSON.generate(
+        "target_dirs" => [dir],
+        "runtime_call_sites" => {},
+        "runtime_result_call_sites" => { [source, 3].join("\0") => true },
+        "runtime_collection_receiver_sites" => {}
+      ))
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_RUNTIME_SCIP" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      events = Dir.glob(File.join(trace_tmp, "runtime", "runtime-calls-*.jsonl"))
+        .flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
+      select = events.find do |event|
+        event.dig("callee", "owner") == "Array" && event.dig("callee", "name") == "select"
+      end
+      expect(select.dig("result_domain", "types")).to eq(["Array"])
+      expect(select.dig("result_domain", "elements")).to eq(["Symbol"])
+    end
+  end
+
+  it "unions result domains from same-line native calls with the same selector" do
+    Dir.mktmpdir("nil-kill-runtime-same-line-result", NilKill::ROOT) do |dir|
+      source = File.join(dir, "same_line_result.rb")
+      File.write(source, <<~RUBY)
+        Row = Struct.new(:name)
+
+        class Worker
+          def run(index)
+            value = index[:left] || index[:right]; value.name
+          end
+        end
+
+        Worker.new.run(right: Row.new("right"))
+      RUBY
+      trace_tmp = File.join(dir, "trace-tmp")
+      FileUtils.mkdir_p(trace_tmp)
+      File.write(File.join(trace_tmp, "trace-plan.json"), JSON.generate(
+        "target_dirs" => [dir],
+        "runtime_call_sites" => {},
+        "runtime_result_call_sites" => { [source, 5].join("\0") => true },
+        "runtime_collection_receiver_sites" => {}
+      ))
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_RUNTIME_SCIP" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      events = Dir.glob(File.join(trace_tmp, "runtime", "runtime-calls-*.jsonl"))
+        .flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
+      lookup = events.find do |event|
+        event.dig("callsite", "path") == source &&
+          event.dig("callsite", "line") == 5 &&
+          event.dig("callee", "owner") == "Hash" &&
+          event.dig("callee", "name") == "[]"
+      end
+      expect(lookup.dig("result_domain", "types")).to contain_exactly("NilClass", "Row")
+      expect(lookup.dig("result_domain", "shapes")).to include(
+        a_hash_including("kind" => "record", "name" => "Row")
+      )
+    end
+  end
+
   it "does not re-enter source return or raise recording while collection hooks are disabled" do
     require_relative "../lib/nil_kill/runtime_trace"
     rt = NilKillRuntimeTrace
@@ -94,6 +356,22 @@ RSpec.describe "nil-kill runtime trace" do
         end
 
         Worker.new.call(["a", "b"])
+
+        class ValueConsumer
+          def label(value)
+            value.name
+          end
+        end
+
+        ValueConsumer.new.label(Pair.new("sample", []))
+
+        class ListConsumer
+          def labels(values)
+            values.map(&:name)
+          end
+        end
+
+        ListConsumer.new.labels([Pair.new("nested", [])])
       RUBY
 
       trace_tmp = File.join(dir, "trace-tmp")
@@ -117,6 +395,18 @@ RSpec.describe "nil-kill runtime trace" do
 
       expect(method_events).to include(a_hash_including("class" => "Worker", "method" => "call", "returns" => include("String")))
       expect(method_events).to include(a_hash_including("class" => "Worker", "method" => "call", "param_elem" => a_hash_including("values" => include("String"))))
+      expect(method_events).to include(a_hash_including(
+        "class" => "ValueConsumer", "method" => "label",
+        "param_value_shapes" => a_hash_including("value" => include(
+          a_hash_including("kind" => "record", "name" => "Pair", "members" => a_hash_including("name" => a_hash_including("kind" => "class", "name" => "String")))
+        ))
+      ))
+      expect(method_events).to include(a_hash_including(
+        "class" => "ListConsumer", "method" => "labels",
+        "param_elem_shapes" => a_hash_including("values" => include(
+          a_hash_including("kind" => "record", "name" => "Pair", "members" => a_hash_including("name" => a_hash_including("kind" => "class", "name" => "String")))
+        ))
+      ))
       expect(tlet_events).to include(a_hash_including("classes" => include("String")))
       expect(struct_events).to include(a_hash_including("class" => "Pair", "field" => "name", "classes" => include("String")))
     end

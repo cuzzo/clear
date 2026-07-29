@@ -30,7 +30,9 @@ RSpec.describe "in-place instrumentation lifecycle" do
     a = File.join(dir, "a.rb")
     untouched = File.join(dir, "untouched.rb")
     File.write(untouched, "VALUE = 1\n")
+    File.chmod(0o755, a)
     pristine = File.read(a)
+    pristine_mode = File.stat(a).mode & 0o7777
     snap = File.join(NilKill::TMP_DIR, "src-snapshot")
     manifest = nil
     isolated_env("NIL_KILL_TARGETS" => dir, "NIL_KILL_INSTRUMENTED_ROOT" => nil) do
@@ -55,6 +57,7 @@ RSpec.describe "in-place instrumentation lifecycle" do
 
     expect(NilKill.restore_inplace_snapshot!).to be(true)
     expect(File.read(a)).to eq(pristine)
+    expect(File.stat(a).mode & 0o7777).to eq(pristine_mode)
     expect(File.file?(NilKill.inplace_sentinel_path)).to be(false)
     # idempotent: a second restore (ensure + trap + next-run all call it)
     expect(NilKill.restore_inplace_snapshot!).to be(false)

@@ -70,7 +70,13 @@ module NilKill
 
           snap = File.join(snapshot_dir, rel)
           FileUtils.mkdir_p(File.dirname(snap))
+          # `restore_inplace_snapshot!` replaces the target through a fresh
+          # temporary file.  Preserve the original mode on the snapshot so a
+          # collect/restore round trip cannot silently turn executable Ruby
+          # entrypoints into ordinary, non-executable files.
+          source_mode = File.stat(path).mode & 0o7777
           File.binwrite(snap, source.b)
+          File.chmod(source_mode, snap)
           File.binwrite(path, instrumented.b)
           @line_map[rel] = line_map if line_map
           manifest << rel

@@ -91,6 +91,11 @@ pub struct NodeEffect {
     /// receiver text or guessing its return type in the CFG layer.
     #[serde(default)]
     pub write_call_sources: BTreeMap<String, Span>,
+    /// A sound producer set for a value-preserving expression such as a
+    /// language-owned short-circuit selection. Every span may produce the
+    /// assigned value; consumers must join all of them rather than choose one.
+    #[serde(default)]
+    pub write_call_source_sets: BTreeMap<String, Vec<Span>>,
     /// Reviewed exact call-result contracts keyed by their target place.
     /// This is not inferred from identifiers downstream of the adapter.
     #[serde(default)]

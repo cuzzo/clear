@@ -80,6 +80,9 @@ module NilKill
       tmp = "#{dest}.nk-restore-#{Process.pid}"
       begin
         File.binwrite(tmp, File.binread(snap))
+        # The snapshot carries the pristine file mode.  `binwrite` creates a
+        # fresh 0644 temp file, so apply it before the atomic replacement.
+        File.chmod(File.stat(snap).mode & 0o7777, tmp)
         File.rename(tmp, dest)
       rescue StandardError
         File.delete(tmp) if File.file?(tmp)

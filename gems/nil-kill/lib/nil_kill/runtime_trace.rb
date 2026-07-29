@@ -61,6 +61,11 @@ module NilKillRuntimeTrace
   # HERE, in the class body, BEFORE install_collection_hook (line
   # ~1611) prepends -> the pristine C method, hook-free.
   ORIG_HASH_STORE = ::Hash.instance_method(:[]=)
+  # A traced Struct may override #[] for domain-specific lookup (for example,
+  # a coverage dataset that accepts a path). Field sampling must use Struct's
+  # generated reader directly, never the application override.
+  ORIG_STRUCT_FETCH = ::Struct.instance_method(:[])
+  ORIG_STRUCT_MEMBERS = ::Struct.instance_method(:members)
 
   # Set semantics via Hash keys -- identical dedup to ::Set (also
   # Hash-backed: same eql?/hash). Every dump sorts, so insertion order
@@ -437,6 +442,14 @@ module NilKillRuntimeTrace
   end
 
   def self.collection_type_shape_key_full(value, depth = 3)
+    # A sampled collection element may itself be a fixed-field record. Keep
+    # that structural observation under the collection shape so FactMine's
+    # generic callback projection sees the record at the block binding. This
+    # is observation only: the Ruby collector never follows source flow or
+    # assigns a call cost.
+    record_shape = runtime_record_shape_key(value)
+    return record_shape if record_shape
+
     return class_shape_key(value) unless depth.positive?
     case value
     when Array
@@ -468,6 +481,9 @@ module NilKillRuntimeTrace
   end
 
   def self.nested_collection_shape(value)
+    record_shape = runtime_record_shape_key(value)
+    return record_shape if record_shape
+
     collection_type_shape_key(value) if collection_value?(value)
   end
 
@@ -957,9 +973,11 @@ module NilKillRuntimeTrace
       param_traces_raised: Hash.new { |h, k| h[k] = NKTally.new },
       param_elem: Hash.new { |h, k| h[k] = NKSet.new },
       param_kv: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
+      param_value_shapes: Hash.new { |h, k| h[k] = NKSet.new },
       param_elem_shapes: Hash.new { |h, k| h[k] = NKSet.new },
       param_kv_shapes: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
       returns: NKSet.new,
+      return_value_shapes: NKSet.new,
       return_elem: NKSet.new,
       return_kv: [NKSet.new, NKSet.new],
       return_elem_shapes: NKSet.new,
@@ -1029,6 +1047,8 @@ module NilKillRuntimeTrace
           name = @sym_s[name]
           b[:params_by_name][name] << cls
           b[:param_sites][name]["#{ctx[:prefix]}:#{cls}"] += 1
+          record = runtime_record_shape_key(value)
+          b[:param_value_shapes][name] << record if record
           shape = container_shape(value)
           if shape
             if shape[0] == :array
@@ -1065,8 +1085,10 @@ module NilKillRuntimeTrace
         b[:ok_calls] += 1 if b
         return value unless ctx[:sample_method] && sample_return?(ctx[:plan])
 
-        b[:returns] << class_name(value)
-        shape = container_shape(value)
+          b[:returns] << class_name(value)
+          record = runtime_record_shape_key(value)
+          b[:return_value_shapes] << record if record
+          shape = container_shape(value)
         if shape
           if shape[0] == :array
             b[:return_elem].merge(shape[1])
@@ -1128,6 +1150,7 @@ module NilKillRuntimeTrace
         param_traces: Hash.new { |h, k| h[k] = NKTally.new },
         param_elem: Hash.new { |h, k| h[k] = NKSet.new },
         param_kv: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
+        param_value_shapes: Hash.new { |h, k| h[k] = NKSet.new },
         param_elem_shapes: Hash.new { |h, k| h[k] = NKSet.new },
         param_kv_shapes: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
         callsite: nil,
@@ -1149,6 +1172,8 @@ module NilKillRuntimeTrace
           cls = class_name(value)
           frame[:params][name.to_s] << cls
           frame[:param_sites][name.to_s][site_key(frame[:method_site], cls)] += 1
+          record = runtime_record_shape_key(value)
+          frame[:param_value_shapes][name.to_s] << record if record
           if TRACE_PARAM_CLASSES.include?(cls)
             trace_key = trace_key(frame[:trace], cls)
             frame[:param_traces][name.to_s][trace_key] += 1 if trace_key
@@ -1196,6 +1221,8 @@ module NilKillRuntimeTrace
         b[:returns] << class_name(value) if sample_return?(frame && frame[:plan])
         next_shape = sample_return?(frame && frame[:plan])
         return unless next_shape
+        record = runtime_record_shape_key(value)
+        b[:return_value_shapes] << record if record
         shape = container_shape(value)
         if shape
           if shape[0] == :array
@@ -1276,6 +1303,7 @@ module NilKillRuntimeTrace
       end
     end
     frame[:param_elem].each { |name, classes| bucket[:param_elem][name].merge(classes) }
+    frame[:param_value_shapes].each { |name, shapes| bucket[:param_value_shapes][name].merge(shapes) }
     frame[:param_elem_shapes].each { |name, shapes| bucket[:param_elem_shapes][name].merge(shapes) }
     frame[:param_kv].each do |name, kv|
       bucket[:param_kv][name][0].merge(kv[0])
@@ -1296,6 +1324,7 @@ module NilKillRuntimeTrace
       traces.each { |trace, count| bucket[:param_traces][name][trace] += count }
     end
     frame[:param_elem].each { |name, classes| bucket[:param_elem][name].merge(classes) }
+    frame[:param_value_shapes].each { |name, shapes| bucket[:param_value_shapes][name].merge(shapes) }
     frame[:param_elem_shapes].each { |name, shapes| bucket[:param_elem_shapes][name].merge(shapes) }
     frame[:param_kv].each do |name, kv|
       bucket[:param_kv][name][0].merge(kv[0])
@@ -1729,7 +1758,7 @@ module NilKillRuntimeTrace
   def self.record_struct_instance(instance, fields)
     class_name = safe_module_name(instance.class) || "AnonymousStruct"
     fields.each do |field|
-      record_struct_field(instance.class, class_name, field, instance[field])
+      record_struct_field(instance.class, class_name, field, ORIG_STRUCT_FETCH.bind_call(instance, field))
     end
   end
 
@@ -1888,9 +1917,11 @@ module NilKillRuntimeTrace
           param_traces_raised: dump_hash_counts(rec[:param_traces_raised]),
           param_elem: rec[:param_elem].transform_values { |set| set.to_a.sort },
           param_kv: rec[:param_kv].transform_values { |kv| [kv[0].to_a.sort, kv[1].to_a.sort] },
+          param_value_shapes: rec[:param_value_shapes].transform_values { |set| set.to_a.sort.map { |shape| shape_payload(shape) } },
           param_elem_shapes: rec[:param_elem_shapes].transform_values { |set| set.to_a.sort.map { |shape| shape_payload(shape) } },
           param_kv_shapes: rec[:param_kv_shapes].transform_values { |kv| [kv[0].to_a.sort.map { |shape| shape_payload(shape) }, kv[1].to_a.sort.map { |shape| shape_payload(shape) }] },
           returns: rec[:returns].to_a.sort,
+          return_value_shapes: rec[:return_value_shapes].to_a.sort.map { |shape| shape_payload(shape) },
           return_elem: rec[:return_elem].to_a.sort,
           return_kv: [rec[:return_kv][0].to_a.sort, rec[:return_kv][1].to_a.sort],
           return_elem_shapes: rec[:return_elem_shapes].to_a.sort.map { |shape| shape_payload(shape) },
@@ -1963,6 +1994,14 @@ module NilKillRuntimeTrace
   # record) from a workload-input gap (just not exercised here) --
   # instead of comparing against a stale aggregate SimpleCov.
   def self.start_coverage!
+    # SCIP-only rapid feedback needs runtime value evidence, not Ruby's line
+    # coverage. Opting out also lets a workload spawn an independent Coverage
+    # session (for example, to create a branch-coverage fixture) without
+    # colliding with this tracer's process-wide Coverage configuration.
+    if ENV["NIL_KILL_COLLECT_COVERAGE"] == "0"
+      @coverage_owned = false
+      return
+    end
     require "coverage"
     if Coverage.respond_to?(:running?) && Coverage.running?
       @coverage_owned = ENV["NIL_KILL_SHARED_COVERAGE"] == "1"

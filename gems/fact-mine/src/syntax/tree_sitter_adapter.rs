@@ -155,6 +155,7 @@ fn parse_normalized_file(
         call_sites: facts.call_sites,
         normalization_call_origins,
         call_raw_origin_projections,
+        call_selector_projections: facts.call_selector_projections,
         call_receiver_projections: facts.call_receiver_projections,
         state_declarations: facts.state_declarations,
         state_reads: facts.state_reads,

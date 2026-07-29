@@ -795,6 +795,7 @@ mod tests {
             lexical_symbol: None,
             lexical_symbol_origin: None,
             receiver_call_span: None,
+            selector_span: None,
             receiver_definition_call_spans: Vec::new(),
             receiver_symbol: None,
             receiver_type: None,

@@ -208,6 +208,65 @@ fn cpp_relative_scoped_call_searches_enclosing_namespaces_across_files() -> Resu
 }
 
 #[test]
+fn ruby_relative_module_receiver_resolves_across_nested_files() -> Result<()> {
+    let output = extract_project(
+        &[
+            (
+                "helper.rb",
+                r#"module App
+  module Constraints
+    module FactHelper
+      module_function
+
+      def render(value)
+        value
+      end
+    end
+  end
+end
+"#,
+            ),
+            (
+                "provider.rb",
+                r#"module App
+  module Constraints
+    module Provider
+      module_function
+
+      def run(value)
+        FactHelper.render(value)
+      end
+    end
+  end
+end
+"#,
+            ),
+        ],
+        Language::Ruby,
+    )?;
+    let target = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "App::Constraints::FactHelper" && method.name == "render")
+        .context("missing nested Ruby module function")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "render")
+        .context("missing nested Ruby module receiver call")?;
+    assert_eq!(
+        call.receiver_symbol.as_deref(),
+        Some("App::Constraints::FactHelper")
+    );
+    assert_eq!(
+        call.receiver_symbol_origin.as_deref(),
+        Some("adapter_relative_type_receiver_lookup")
+    );
+    assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
+    Ok(())
+}
+
+#[test]
 fn python_explicit_import_resolves_an_exact_project_lexical_target() -> Result<()> {
     let output = extract_project(
         &[

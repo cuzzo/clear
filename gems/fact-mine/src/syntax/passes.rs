@@ -205,7 +205,7 @@ fn synthesize_accessor_functions(
         return;
     }
 
-    let existing = facts
+    let mut existing = facts
         .function_defs
         .iter()
         .map(|function| (function.owner.clone(), function.name.clone()))
@@ -213,42 +213,53 @@ fn synthesize_accessor_functions(
 
     let mut synthesized = Vec::new();
     for call in &facts.call_sites {
-        let Some((_, reader, writer)) = declarations
+        let mut generated = Vec::new();
+        if let Some((_, reader, writer)) = declarations
             .iter()
             .find(|(message, _, _)| *message == call.message)
-        else {
-            continue;
-        };
-        if !(call.receiver.is_empty() || call.receiver == "self") {
-            continue;
+        {
+            if call.receiver.is_empty() || call.receiver == "self" {
+                for argument in &call.arguments {
+                    let name = argument
+                        .trim()
+                        .trim_start_matches(':')
+                        .trim_matches(|c| c == '"' || c == '\'');
+                    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                        continue;
+                    }
+                    let declaration_source = format!("{} :{name}", call.message);
+                    if *reader {
+                        generated.push(super::normalized_behavior::NormalizedGeneratedAccessor {
+                            name: name.to_string(),
+                            params: Vec::new(),
+                            declaration_source: declaration_source.clone(),
+                        });
+                    }
+                    if *writer {
+                        generated.push(super::normalized_behavior::NormalizedGeneratedAccessor {
+                            name: format!("{name}="),
+                            params: vec!["value".to_string()],
+                            declaration_source,
+                        });
+                    }
+                }
+            }
         }
-        for argument in &call.arguments {
-            let name = argument
-                .trim()
-                .trim_start_matches(':')
-                .trim_matches(|c| c == '"' || c == '\'');
-            if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        generated.extend(behavior.generated_accessor_declarations(call));
+        for generated_accessor in generated {
+            let key = (call.owner.clone(), generated_accessor.name.clone());
+            if !existing.insert(key) {
                 continue;
             }
-            let mut emit = |method_name: String, params: Vec<String>| {
-                if existing.contains(&(call.owner.clone(), method_name.clone())) {
-                    return;
-                }
-                synthesized.push(super::FunctionDef::synthetic_accessor(
-                    call.file.clone(),
-                    method_name,
-                    call.owner.clone(),
-                    call.line,
-                    call.span,
-                    params.clone(),
-                ));
-            };
-            if *reader {
-                emit(name.to_string(), Vec::new());
-            }
-            if *writer {
-                emit(format!("{name}="), vec!["value".to_string()]);
-            }
+            synthesized.push(super::FunctionDef::synthetic_accessor(
+                call.file.clone(),
+                generated_accessor.name,
+                call.owner.clone(),
+                call.line,
+                call.span,
+                generated_accessor.params,
+                generated_accessor.declaration_source,
+            ));
         }
     }
     facts.function_defs.extend(synthesized);

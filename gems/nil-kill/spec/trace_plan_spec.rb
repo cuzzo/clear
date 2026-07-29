@@ -160,7 +160,37 @@ RSpec.describe NilKill::TracePlan do
     expect(fields[["Payload", "unknown"].join("\0")]).to be(true)
   end
 
-  it "builds its purpose-specific evidence without full CFG/DFG facts" do
+  it "turns FactMine runtime-value ranges into opaque TracePoint lookup keys" do
+    plan = described_class.new
+    path = File.expand_path("src/runtime_worker.rb", NilKill::ROOT)
+    call_sites = plan.instance_variable_get(:@runtime_call_sites)
+    result_sites = plan.instance_variable_get(:@runtime_result_call_sites)
+    receiver_sites = plan.instance_variable_get(:@runtime_collection_receiver_sites)
+
+    plan.send(:add_runtime_value_site, call_sites, {
+      "path" => path, "span" => [12, 4, 14, 8]
+    })
+    plan.send(:add_runtime_value_site, result_sites, {
+      "path" => path, "span" => [12, 4, 14, 8]
+    })
+    plan.send(:add_runtime_value_site, receiver_sites, {
+      "path" => path, "span" => [13, 2, 13, 20]
+    })
+
+    expect(call_sites).to include(
+      [path, 12].join("\0") => true,
+      [path, 13].join("\0") => true,
+      [path, 14].join("\0") => true
+    )
+    expect(result_sites).to include(
+      [path, 12].join("\0") => true,
+      [path, 13].join("\0") => true,
+      [path, 14].join("\0") => true
+    )
+    expect(receiver_sites).to eq([path, 13].join("\0") => true)
+  end
+
+  it "builds its purpose-specific evidence without exporting full CFG/DFG facts" do
     Dir.mktmpdir("nil-kill-trace-plan-profile", NilKill::ROOT) do |dir|
       path = File.join(dir, "worker.rb")
       File.write(path, <<~RUBY)
@@ -200,6 +230,29 @@ RSpec.describe NilKill::TracePlan do
         "declared_type" => "T::Array[String]"
       ))
       expect(evidence.dig("facts", "flow_local_types")).to be_nil
+    end
+  end
+
+  it "asks FactMine for result and callback receiver evidence only at demanded sites" do
+    Dir.mktmpdir("nil-kill-runtime-value-plan", NilKill::ROOT) do |dir|
+      path = File.join(dir, "worker.rb")
+      File.write(path, <<~RUBY)
+        class Worker
+          def call(payload)
+            rows = payload.resolve_rows
+            rows.map { |row| row.to_s }
+          end
+        end
+      RUBY
+
+      evidence = NilKill::StaticEvidence.build_trace_plan([path], root: dir)
+      call_sites = evidence.dig("facts", "runtime_call_sites")
+      result_sites = evidence.dig("facts", "runtime_result_call_sites")
+      receiver_sites = evidence.dig("facts", "runtime_collection_receiver_sites")
+
+      expect(call_sites.map { |site| [site["path"], site.fetch("span").first] }).to include([path, 3])
+      expect(result_sites.map { |site| [site["path"], site.fetch("span").first] }).to include([path, 3])
+      expect(receiver_sites.map { |site| [site["path"], site.fetch("span").first] }).to include([path, 4])
     end
   end
 end

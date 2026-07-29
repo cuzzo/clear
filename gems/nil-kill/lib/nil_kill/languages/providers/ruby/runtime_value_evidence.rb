@@ -16,6 +16,9 @@ module NilKill
             each_jsonl(runtime_dir, "methods-*.jsonl") do |method|
               scope = method_scope(method, root)
               method.fetch("params_by_name", {}).each do |name, types|
+                key_shapes, value_shapes = key_value_shapes(
+                  method.fetch("param_kv_shapes", {}).fetch(name, [])
+                )
                 rows << observation(
                   "parameter",
                   scope,
@@ -25,8 +28,13 @@ module NilKill
                     elements: method.fetch("param_elem", {}).fetch(name, []),
                     keys: method.fetch("param_kv", {}).fetch(name, [[], []])[0],
                     values: method.fetch("param_kv", {}).fetch(name, [[], []])[1],
-                    shapes: method.fetch("param_elem_shapes", {}).fetch(name, []) +
-                      Array(method.fetch("param_kv_shapes", {}).fetch(name, [])).flatten(1)
+                    shapes: method.fetch("param_value_shapes", {}).fetch(name, []) +
+                      container_shapes(
+                        types: types,
+                        element_shapes: method.fetch("param_elem_shapes", {}).fetch(name, []),
+                        key_shapes: key_shapes,
+                        value_shapes: value_shapes
+                      )
                   ),
                   method["calls"]
                 )
@@ -43,8 +51,13 @@ module NilKill
                     elements: method["return_elem"],
                     keys: method.fetch("return_kv", [[], []])[0],
                     values: method.fetch("return_kv", [[], []])[1],
-                    shapes: Array(method["return_elem_shapes"]) +
-                      Array(method.fetch("return_kv_shapes", [])).flatten(1)
+                    shapes: Array(method["return_value_shapes"]) +
+                      container_shapes(
+                        types: method["returns"],
+                        element_shapes: method["return_elem_shapes"],
+                        key_shapes: key_value_shapes(method.fetch("return_kv_shapes", []))[0],
+                        value_shapes: key_value_shapes(method.fetch("return_kv_shapes", []))[1]
+                      )
                   ),
                   method["ok_calls"]
                 )
@@ -101,9 +114,12 @@ module NilKill
                   elements: collection["elem_classes"],
                   keys: collection["key_classes"],
                   values: collection["value_classes"],
-                  shapes: Array(collection["elem_shapes"]) +
-                    Array(collection["key_shapes"]) +
-                    Array(collection["value_shapes"])
+                  shapes: container_shapes(
+                    kinds: [collection["kind"]],
+                    element_shapes: collection["elem_shapes"],
+                    key_shapes: collection["key_shapes"],
+                    value_shapes: collection["value_shapes"]
+                  )
                 ),
                 collection["calls"],
                 slot_kind: collection["owner_kind"]
@@ -158,6 +174,7 @@ module NilKill
               "target" => target,
               "receiver_domain" => event["receiver_domain"],
               "result_domain" => event["result_domain"],
+              "result_truths" => Array(event["result_truths"]).uniq.sort_by { |truth| truth ? 1 : 0 },
               "count" => event["count"].to_i,
             }.compact
           end
@@ -251,6 +268,35 @@ module NilKill
               "values" => strings(values),
               "shapes" => Array(shapes).filter_map { |shape| normalize_shape(shape) }.uniq,
             }
+          end
+
+          # The recorder stores raw shape samples per container edge.  A
+          # `param_elem_shapes` record describes an element of `items`, not
+          # `items` itself.  Preserve that ownership at the schema boundary:
+          # FactMine's language-neutral CFG/DFG can then project `Array<T>`
+          # through `each` without Ruby duplicating source-flow inference.
+          def container_shapes(types: [], kinds: [], element_shapes: [], key_shapes: [], value_shapes: [])
+            element_shapes = Array(element_shapes)
+            key_shapes = Array(key_shapes)
+            value_shapes = Array(value_shapes)
+            (Array(types) + Array(kinds)).map(&:to_s).uniq.filter_map do |type|
+              case type.downcase
+              when "array"
+                { "kind" => "array", "elements" => element_shapes } unless element_shapes.empty?
+              when "set"
+                { "kind" => "set", "elements" => element_shapes } unless element_shapes.empty?
+              when "hash"
+                if key_shapes.empty? && value_shapes.empty?
+                  next
+                end
+                { "kind" => "hash", "keys" => key_shapes, "values" => value_shapes }
+              end
+            end
+          end
+
+          def key_value_shapes(value)
+            values = Array(value)
+            [Array(values[0]), Array(values[1])]
           end
 
           def strings(values)

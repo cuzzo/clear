@@ -347,6 +347,24 @@ class StaticEvidenceTest < Minitest::Test
     )
   end
 
+  def test_generated_declarations_are_available_to_fact_mine_but_excluded_from_production_metrics
+    evidence = {
+      "methods" => [
+        { "id" => "authored", "name" => "render", "owner" => "Report", "kind" => "instance", "path" => "lib/report.rb", "line" => 1, "language" => "ruby" },
+        { "id" => "reader", "name" => "title", "owner" => "Report", "kind" => "instance", "path" => "lib/report.rb", "line" => 2, "language" => "ruby", "generated_declaration" => true }
+      ],
+      "fields" => [],
+      "facts" => { "calls" => [], "state_accesses" => [], "complexity_facts" => [], "struct_declarations" => [] }
+    }
+
+    assert_equal(
+      { "authored" => "production", "reader" => "generated" },
+      Espalier::StaticEvidence.method_source_roles(evidence.fetch("methods"))
+    )
+    methods = Espalier::StaticEvidence.project_modules(evidence).fetch(0).fetch(:methods)
+    assert_equal ["render"], methods.map { |method| method[:name] }
+  end
+
   def test_project_modules_prefers_a_primary_owner_over_an_extension_and_never_gives_protocols_state
     evidence = {
       "owners" => [

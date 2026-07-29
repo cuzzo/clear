@@ -54,7 +54,7 @@ pub struct Boundary {
 }
 
 const OWNER_TYPES: &[&str] = &["CLASS", "MODULE"];
-const METHOD_TYPES: &[&str] = &["DEFN", "DEFS", "LAMBDA"];
+const METHOD_TYPES: &[&str] = &["DEFN", "DEFS", "DEF", "LAMBDA"];
 const SKIP_NESTED_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA"];
 const LOCAL_READ_TYPES: &[&str] = &["LVAR", "DVAR", "IVAR", "CVAR"];
 const LOCAL_WRITE_TYPES: &[&str] = &["LASGN", "DASGN", "IASGN", "CVASGN"];
@@ -119,6 +119,23 @@ pub(crate) fn local_methods_from_normalized(
         behavior,
     );
     let mut methods = detector.scan(root);
+    // Normalized extraction already establishes every executable declaration
+    // and its lexical owner. Structural traversal above intentionally avoids
+    // treating arbitrary nested definitions as owner members, but declarative
+    // owners (for example a language macro that opens a record body) can
+    // validly contain an extracted method beneath a non-owner node. Reconcile
+    // the traversal with that declaration inventory by exact normalized span.
+    // This is language-neutral: adapters establish the function definition;
+    // local flow only recovers its CFG/DFG summary.
+    for function in functions {
+        if methods.iter().any(|method| method.span == function.span) {
+            continue;
+        }
+        let Some(node) = method_node_for_span(root, function.span) else {
+            continue;
+        };
+        methods.push(detector.method_summary(node, None));
+    }
     sort_method_summaries(&mut methods);
     methods
 }
@@ -193,6 +210,26 @@ fn node_for_span(node: &Node, span: Span) -> Option<&Node> {
         .iter()
         .filter_map(ast::node)
         .find_map(|child| node_for_span(child, span))
+}
+
+/// Several normalized container nodes intentionally retain the exact source
+/// span of the declaration they wrap. For executable-method recovery, prefer
+/// the method node itself over an enclosing `SCOPE` with the same span.
+fn method_node_for_span(node: &Node, span: Span) -> Option<&Node> {
+    if [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ] == span
+        && METHOD_TYPES.contains(&node.r#type.as_str())
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .filter_map(ast::node)
+        .find_map(|child| method_node_for_span(child, span))
 }
 
 fn contains_contract_condition(node: &Node) -> bool {

@@ -305,6 +305,11 @@ pub struct Document {
     /// `normalization_call_origins` but not here.
     #[serde(default)]
     pub call_raw_origin_projections: Vec<CallRawOriginProjection>,
+    /// Exact selector span for each normalized call. Enclosing call spans may
+    /// include a multiline callback body, while SCIP references must anchor
+    /// the callable selector itself.
+    #[serde(default)]
+    pub call_selector_projections: Vec<CallSelectorProjection>,
     #[serde(default)]
     pub call_receiver_projections: Vec<CallReceiverProjection>,
     #[serde(default)]
@@ -492,6 +497,7 @@ impl FunctionDef {
         line: usize,
         span: Span,
         params: Vec<String>,
+        declaration_source: String,
     ) -> Self {
         Self {
             file,
@@ -502,7 +508,10 @@ impl FunctionDef {
             span,
             body: RawNode {
                 kind: "SYNTHETIC_ACCESSOR".to_string(),
-                text: String::new(),
+                // Preserve the language-owned declaration witness. The
+                // shared profile never interprets it; the adapter's
+                // generated-callable contract does.
+                text: declaration_source,
                 span,
                 named: false,
                 field_name: None,
@@ -572,6 +581,15 @@ pub struct CallRawOriginProjection {
 pub struct CallReceiverProjection {
     pub outer_span: Span,
     pub receiver_call_span: Span,
+}
+
+/// The callable selector emitted for a normalized semantic call. This stays
+/// separate from `CallSite::span`: the latter describes the full invocation
+/// for CFG/complexity analysis and may include a block body.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CallSelectorProjection {
+    pub call_span: Span,
+    pub selector_span: Span,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

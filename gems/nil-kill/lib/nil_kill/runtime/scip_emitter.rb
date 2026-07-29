@@ -124,6 +124,15 @@ module NilKill
             File.expand_path(path, @root) unless path.empty?
           end)
         end
+        # A runtime call can cross from the selected product source into a
+        # sibling workspace implementation (for example `tools/`). Its exact
+        # declaration identity is already attested by the runtime event, but
+        # FactMine cannot emit a definition occurrence or later export a
+        # source summary unless that declaration file is part of this source
+        # set. Include only workspace-owned files under this root: dependency
+        # implementations remain external, and event eligibility has already
+        # rejected test/mocking sources.
+        sources.concat(events.filter_map { |event| workspace_callee_source(event) })
         languages = (
           events.map { |event| event.fetch("language") } +
           evidence.fetch("observations", []).map { |row| row.dig("scope", "language") }
@@ -135,6 +144,20 @@ module NilKill
           .select { |path| File.file?(path) }
           .select { |path| extensions.include?(File.extname(path)) }
           .uniq.sort
+      end
+
+      def workspace_callee_source(event)
+        callee = event.fetch("callee", {})
+        return unless callee["package_manager"].to_s == "workspace"
+
+        path = callee["path"].to_s
+        return if path.empty?
+
+        absolute = File.expand_path(path, @root)
+        return unless absolute.start_with?("#{@root}#{File::SEPARATOR}")
+        return unless File.file?(absolute)
+
+        absolute
       end
 
       def emit_with_fact_mine(evidence_path, sources)

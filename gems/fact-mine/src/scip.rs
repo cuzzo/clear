@@ -702,6 +702,15 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
     // symbol parsing and declaration syntax, then apply the generic unique
     // project join.
     crate::profile::reapply_generated_callable_costs(output);
+    // A runtime type domain can close a generated project declaration even
+    // when no compiler symbol exists.  The shared candidate join is safe only
+    // for one exact, language-owned generated contract.
+    crate::profile::reapply_runtime_generated_candidate_costs(output);
+    // The closed candidate join above can promote one generated declaration
+    // to an exact project target. Re-run the exact-target contract so its
+    // canonical declaration cost replaces the intermediate candidate-max
+    // annotation.
+    crate::profile::reapply_generated_callable_costs(output);
     // Runtime SCIP can likewise be the first source of a generated record
     // reader's receiver identity. Re-run the same normalized declaration
     // contract after semantic identities are imported.
@@ -881,6 +890,12 @@ fn runtime_external_candidate_upper_bound(
 ) -> Result<Option<(String, String, Vec<String>)>> {
     if symbols.is_empty() {
         return Ok(None);
+    }
+    if symbols
+        .iter()
+        .all(|symbol| crate::runtime_evidence::is_runtime_record_accessor_symbol(symbol, message))
+    {
+        return Ok(Some(("O(1)".to_string(), "O(1)".to_string(), Vec::new())));
     }
     let mut costs = Vec::new();
     for symbol in symbols {
@@ -2780,6 +2795,7 @@ mod tests {
             params: Vec::new(),
             callback_params: Vec::new(),
             source_export_eligible: true,
+            generated_declaration: false,
             raw_source: String::new(),
             normalized_source: String::new(),
             untraceable_params: Vec::new(),
@@ -2809,6 +2825,7 @@ mod tests {
             lexical_symbol: None,
             lexical_symbol_origin: None,
             receiver_call_span: None,
+            selector_span: None,
             receiver_definition_call_spans: Vec::new(),
             receiver_symbol: None,
             receiver_type: None,

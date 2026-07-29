@@ -212,6 +212,25 @@ pub struct ProfileOutput {
     pub state_accesses: Vec<StateAccessRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub complexity_facts: Vec<syntax::complexity_facts::MethodComplexityFacts>,
+    /// Minimal, generic data-demand plan for runtime value collection. It is
+    /// emitted by TracePlan so tracers can avoid collecting values FactMine's
+    /// CFG/DFG will never consume.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_call_sites: Vec<RuntimeValueCaptureSite>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_result_call_sites: Vec<RuntimeValueCaptureSite>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_collection_receiver_sites: Vec<RuntimeValueCaptureSite>,
+    /// Branch-local runtime capability predicates emitted from normalized
+    /// syntax.  A tracer reports only the predicate's observed Boolean result;
+    /// the generic runtime overlay applies the branch and CFG/DFG relation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_capability_guards: Vec<RuntimeCapabilityGuard>,
+    /// Branch-local proof that a simple value condition has reached its
+    /// truthy path. Adapters recognize native syntax; the runtime overlay
+    /// joins it only through exact CFG reaching definitions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_truthiness_guards: Vec<RuntimeTruthinessGuard>,
     // NilKill-only fields
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flow_local_types: Vec<serde_json::Value>,
@@ -308,6 +327,41 @@ impl InputCoverage {
 pub struct ParseRecovery {
     pub path: String,
     pub spans: Vec<[usize; 4]>,
+}
+
+/// A language-neutral source range for which a runtime tracer needs a value
+/// domain. FactMine owns the semantic demand; a tracer merely matches this
+/// anchor to execution and serializes a generic runtime observation.
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct RuntimeValueCaptureSite {
+    pub path: String,
+    pub span: [usize; 4],
+}
+
+/// A normalized predicate whose true and false branches respectively prove
+/// that `subject` does or does not support `member`. The predicate call ID is
+/// the semantic anchor used to join a tracer's Boolean observation; no
+/// runtime provider needs to encode source-language control flow.
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct RuntimeCapabilityGuard {
+    pub source: String,
+    pub subject: String,
+    pub member: String,
+    pub condition_call_id: String,
+    pub condition_span: [usize; 4],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_available_span: Option<[usize; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_unavailable_span: Option<[usize; 4]>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct RuntimeTruthinessGuard {
+    pub source: String,
+    pub subject: String,
+    pub condition_span: [usize; 4],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truthy_span: Option<[usize; 4]>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -456,6 +510,10 @@ pub struct CallRecord {
     /// Exact normalized span of a direct call used as this call's receiver.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receiver_call_span: Option<[usize; 4]>,
+    /// Exact callable selector span, retained independently from the full
+    /// invocation span when a callback body makes that invocation multiline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_span: Option<[usize; 4]>,
     /// Exact producer call spans for every reaching definition of a local
     /// receiver. Empty means at least one definition was not a direct call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -733,6 +791,11 @@ pub struct MethodRecord {
     /// parser call inside that body reached normalized call evidence.
     #[serde(default)]
     pub source_export_eligible: bool,
+    /// A callable manufactured by a source declaration macro. It participates
+    /// in target and cost resolution but is not an independently authored
+    /// production function for coverage denominators.
+    #[serde(default)]
+    pub generated_declaration: bool,
     /// Exact source covered by the parser's function span. Consumers that need
     /// function bodies must use this projection rather than re-parsing files.
     pub raw_source: String,
@@ -998,7 +1061,11 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
     if trace_plan {
         let mut struct_declarations = extract_struct_declarations(document, &language, &path);
         let mut tlet_sites = Vec::new();
-        if let Ok((root, _)) = crate::ast::parse(std::path::Path::new(&path)) {
+        let mut runtime_capability_guards = Vec::new();
+        let mut runtime_truthiness_guards = Vec::new();
+        if let Ok((root, _)) =
+            crate::ast::parse_with_language(std::path::Path::new(&path), document.language)
+        {
             let behavior = crate::syntax::normalized_behavior::behavior(document.language);
             collect_struct_declarations(
                 &root,
@@ -1022,6 +1089,12 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
                 &mut Vec::new(),
                 &mut ivar_tlet_types,
             );
+            // Capability syntax is adapter-owned, but the branch relation and
+            // later runtime join belong to FactMine. Retain only the opaque
+            // predicate anchors in the trace plan.
+            let calls = extract_calls(document, &language, &path);
+            runtime_capability_guards = extract_runtime_capability_guards(&root, behavior, &calls);
+            runtime_truthiness_guards = extract_runtime_truthiness_guards(&root, behavior, &calls);
             state_type_records.extend(ivar_tlet_types.into_iter().map(
                 |((owner, field), declared_type)| {
                     let field = field.trim_start_matches('@').to_string();
@@ -1039,6 +1112,21 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
                 },
             ));
         }
+        // Runtime value collection is demand-driven. These are the only two
+        // cases where the generic overlay consumes a container shape or a
+        // call result; all other runtime calls need just their receiver type.
+        let calls = extract_calls(document, &language, &path);
+        let flow_local_types = extract_flow_local_types(document);
+        let (mut runtime_result_call_sites, runtime_collection_receiver_sites) =
+            extract_runtime_value_capture_sites(document, &flow_local_types, &calls);
+        runtime_result_call_sites.extend(runtime_capability_guards.iter().map(|guard| {
+            RuntimeValueCaptureSite {
+                path: path.clone(),
+                span: guard.condition_span,
+            }
+        }));
+        runtime_result_call_sites.sort();
+        runtime_result_call_sites.dedup();
         return LocalFactShard::new(
             profile,
             ProfileOutput {
@@ -1050,7 +1138,13 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
                 signatures,
                 type_definitions,
                 declaration_type_pressures,
+                calls,
                 tlet_sites,
+                runtime_call_sites: Vec::new(),
+                runtime_result_call_sites,
+                runtime_collection_receiver_sites,
+                runtime_capability_guards,
+                runtime_truthiness_guards,
                 ..ProfileOutput::default()
             },
         );
@@ -1059,7 +1153,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
     let mut hash_shapes = extract_hash_shapes(&lines, &language, &path);
     let mut array_shapes = extract_array_shapes(&lines, &language, &path);
 
-    let root_node = crate::ast::parse(std::path::Path::new(&path))
+    let root_node = crate::ast::parse_with_language(std::path::Path::new(&path), document.language)
         .ok()
         .map(|(r, _)| r);
     if let Some(ref root) = root_node {
@@ -1086,6 +1180,14 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
     let calls = extract_calls(document, &language, &path);
     let state_accesses = extract_state_accesses(document, &language, &path);
     let complexity_facts = syntax::complexity_facts::facts(document);
+    let runtime_capability_guards = root_node
+        .as_ref()
+        .map(|root| extract_runtime_capability_guards(root, behavior, &calls))
+        .unwrap_or_default();
+    let runtime_truthiness_guards = root_node
+        .as_ref()
+        .map(|root| extract_runtime_truthiness_guards(root, behavior, &calls))
+        .unwrap_or_default();
 
     let mut tlet_sites = Vec::new();
     let mut dead_nil_checks = Vec::new();
@@ -1446,6 +1548,11 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             call_resolution_coverage,
             state_accesses,
             complexity_facts,
+            runtime_call_sites: Vec::new(),
+            runtime_result_call_sites: Vec::new(),
+            runtime_collection_receiver_sites: Vec::new(),
+            runtime_capability_guards,
+            runtime_truthiness_guards,
             flow_local_types,
             type_dependencies,
             collection_index_lookups,
@@ -1530,6 +1637,7 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         &output.methods,
         &mut output.calls,
     );
+    reapply_generated_callable_costs(&mut output);
     apply_merged_preprocessor_definition_costs(
         &output.preprocessor_definition_costs,
         &output.methods,
@@ -1537,6 +1645,9 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
     );
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
     apply_injected_state_callback_costs(&output.state_param_origin_records, &mut output.calls);
+    if profile == Profile::TracePlan {
+        output.runtime_call_sites = runtime_call_capture_sites(&output.calls);
+    }
     output.call_graph_edges = extract_call_graph_edges(&output.calls);
     output.dispatch_impls = compute_dispatch_impls(&output.owners, &output.methods);
     output
@@ -1546,6 +1657,9 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
 pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut output = merge_local(outputs, profile);
     finalize_project_output(&mut output);
+    if profile == Profile::TracePlan {
+        output.runtime_call_sites = runtime_call_capture_sites(&output.calls);
+    }
     output.dispatch_impls = compute_dispatch_impls(&output.owners, &output.methods);
     output
 }
@@ -1574,6 +1688,11 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut preprocessor_definition_costs = Vec::new();
     let mut state_accesses = Vec::new();
     let mut complexity_facts = Vec::new();
+    let mut runtime_call_sites = Vec::new();
+    let mut runtime_result_call_sites = Vec::new();
+    let mut runtime_collection_receiver_sites = Vec::new();
+    let mut runtime_capability_guards = Vec::new();
+    let mut runtime_truthiness_guards = Vec::new();
     let mut flow_local_types = Vec::new();
     let mut type_dependencies = Vec::new();
     let mut collection_index_lookups = Vec::new();
@@ -1666,6 +1785,13 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         preprocessor_definition_costs.extend(output.preprocessor_definition_costs);
         state_accesses.extend(output.state_accesses);
         complexity_facts.extend(output.complexity_facts);
+        if trace_plan {
+            runtime_call_sites.extend(output.runtime_call_sites);
+            runtime_result_call_sites.extend(output.runtime_result_call_sites);
+            runtime_collection_receiver_sites.extend(output.runtime_collection_receiver_sites);
+        }
+        runtime_capability_guards.extend(output.runtime_capability_guards);
+        runtime_truthiness_guards.extend(output.runtime_truthiness_guards);
         if nil_kill || trace_plan {
             tlet_sites.extend(output.tlet_sites);
         }
@@ -1748,6 +1874,11 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         },
         state_accesses,
         complexity_facts,
+        runtime_call_sites,
+        runtime_result_call_sites,
+        runtime_collection_receiver_sites,
+        runtime_capability_guards,
+        runtime_truthiness_guards,
         flow_local_types,
         type_dependencies,
         collection_index_lookups,
@@ -1847,6 +1978,7 @@ fn finalize_project_output(output: &mut ProfileOutput) {
         &output.methods,
         &mut output.calls,
     );
+    reapply_generated_callable_costs(output);
     apply_merged_preprocessor_definition_costs(
         &output.preprocessor_definition_costs,
         &output.methods,
@@ -2092,10 +2224,11 @@ fn apply_generated_record_costs(
                     .fields
                     .iter()
                     .any(|field| field == &call.message)
-                    || declaration
-                        .constant_operations
-                        .iter()
-                        .any(|operation| operation == &call.message)
+                    || (call.receiver_kind == "type"
+                        && declaration
+                            .constant_operations
+                            .iter()
+                            .any(|operation| operation == &call.message))
             })
             .map(|declaration| declaration.class.as_str())
             .collect::<BTreeSet<_>>();
@@ -2138,6 +2271,45 @@ pub(crate) fn reapply_generated_record_costs(output: &mut ProfileOutput) {
 }
 
 pub(crate) fn reapply_generated_callable_costs(output: &mut ProfileOutput) {
+    let methods_by_id = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    // A resolver may already have proved the exact project target before a
+    // runtime/compiler symbol is available. Generated declarations are
+    // complete language-owned contracts, so preserve that stronger exact
+    // proof rather than requiring a second external-symbol-shaped join.
+    for call in output.calls.iter_mut().filter(|call| call.target.is_some()) {
+        let Some(method) = call
+            .target
+            .as_deref()
+            .and_then(|target| methods_by_id.get(target).copied())
+        else {
+            continue;
+        };
+        if !method.generated_declaration {
+            continue;
+        }
+        let Some(complexity) =
+            crate::syntax::normalized_behavior::behavior_for_name(&method.language).and_then(
+                |behavior| behavior.generated_callable_complexity(&method.raw_source, &method.name),
+            )
+        else {
+            continue;
+        };
+        call.known_time_complexity = Some(complexity.time.to_string());
+        call.known_space_complexity = Some(complexity.space.to_string());
+        call.complexity_provenance = Some("generated_callable_declaration".to_string());
+        call.complexity_bound_quality =
+            Some("upper_bound_normalized_declaration_contract".to_string());
+        call.complexity_candidates = vec![method.id.clone()];
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
+
     let source_languages = output
         .methods
         .iter()
@@ -2188,6 +2360,105 @@ pub(crate) fn reapply_generated_callable_costs(output: &mut ProfileOutput) {
         call.complexity_provenance = Some("generated_callable_declaration".to_string());
         call.complexity_bound_quality =
             Some("upper_bound_normalized_declaration_contract".to_string());
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
+}
+
+/// Runtime evidence can close an otherwise unknown receiver to exact project
+/// declarations without furnishing compiler symbols. Keep the runtime-world
+/// boundary intact for ordinary bodies, but a language-owned generated
+/// declaration (reader/property/accessor) is already a complete normalized
+/// contract. Join a closed set only when *every* project alternative carries
+/// the same generated contract; no language-specific identity parsing occurs
+/// here.
+pub(crate) fn reapply_runtime_generated_candidate_costs(output: &mut ProfileOutput) {
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    for call in output.calls.iter_mut().filter(|call| {
+        call.target.is_none()
+            && call.consumer_closed_candidate_set
+            && !call.candidate_targets.is_empty()
+            && matches!(
+                call.candidate_reason.as_deref(),
+                Some("runtime_modeled_observed_candidate_set")
+                    | Some("runtime_modeled_mixed_candidate_set")
+            )
+    }) {
+        let candidate_methods = call
+            .candidate_targets
+            .iter()
+            .filter_map(|id| methods.get(id.as_str()).copied())
+            .collect::<Vec<_>>();
+        if candidate_methods.len() != call.candidate_targets.len() {
+            continue;
+        }
+        let complexities = candidate_methods
+            .iter()
+            .filter_map(|method| {
+                crate::syntax::normalized_behavior::behavior_for_name(&method.language)
+                    .and_then(|behavior| {
+                        behavior.generated_callable_complexity(&method.raw_source, &method.name)
+                    })
+                    .map(|complexity| (complexity.time.to_string(), complexity.space.to_string()))
+            })
+            .collect::<Vec<_>>();
+        if complexities.len() != candidate_methods.len() {
+            continue;
+        }
+        let Some((time, space)) = complexities.first().cloned() else {
+            continue;
+        };
+        if complexities
+            .iter()
+            .any(|complexity| complexity != &(time.clone(), space.clone()))
+        {
+            continue;
+        }
+
+        let mixed = call.candidate_reason.as_deref() == Some("runtime_modeled_mixed_candidate_set");
+        if mixed {
+            // The external side has already supplied a conservative upper
+            // bound. Generated accessor contracts are O(1), so retaining that
+            // existing bound is conservative for the full closed union.
+            if time != "O(1)"
+                || space != "O(1)"
+                || call.known_time_complexity.is_none()
+                || call.known_space_complexity.is_none()
+            {
+                continue;
+            }
+            call.complexity_provenance = Some(
+                "runtime_scip_modeled:mixed_project_external_candidate_max+generated_accessor"
+                    .to_string(),
+            );
+            call.complexity_bound_quality = Some("upper_bound_closed_candidate_max".to_string());
+        } else {
+            call.known_time_complexity = Some(time);
+            call.known_space_complexity = Some(space);
+            call.complexity_provenance =
+                Some("generated_callable_declaration_candidate_max".to_string());
+            call.complexity_bound_quality = Some("upper_bound_closed_candidate_max".to_string());
+        }
+        // A closed mixed set retains an external alternative even if its
+        // project-owned side happens to contain one generated declaration.
+        // Its max-bound is sound, but naming that declaration as the exact
+        // target would falsely erase the observed external member of the
+        // domain.
+        if !mixed && candidate_methods.len() == 1 {
+            let method = candidate_methods[0];
+            call.target = Some(method.id.clone());
+            call.kind = "resolved_call".to_string();
+            call.target_provenance = Some("runtime_unique_generated_declaration".to_string());
+            call.external_symbol_scope = None;
+            call.candidate_targets.clear();
+            call.candidate_reason = None;
+        }
         call.complexity_missing_kind = None;
         call.unresolved_reason = None;
         call.resolution_missing_proof = None;
@@ -2998,6 +3269,7 @@ fn resolve_project_calls(
     calls: &mut [CallRecord],
 ) {
     apply_merged_alias_costs(methods, type_definitions, calls);
+    apply_static_direct_call_result_contracts(methods, calls);
     let source_languages = methods
         .iter()
         .map(|method| (method.id.as_str(), method.language.as_str()))
@@ -3103,6 +3375,7 @@ fn resolve_project_calls(
 
     resolve_same_namespace_static_calls(methods, calls);
     resolve_same_namespace_declared_receiver_calls(methods, calls, &by_dispatch);
+    resolve_relative_type_receiver_calls(methods, calls, &source_languages);
 
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
         let Some(owner) = call.receiver_symbol.as_deref() else {
@@ -3145,6 +3418,207 @@ fn resolve_project_calls(
     for call in calls.iter_mut().filter(|call| call.target.is_some()) {
         call.candidate_targets.clear();
         call.candidate_reason = None;
+    }
+}
+
+/// Reuse an adapter's language-guaranteed return contract for a direct call
+/// that is immediately consumed as another call's receiver. This is the
+/// static counterpart to runtime result evidence: the shared join correlates
+/// normalized spans and CFG/DFG producer sets, while each adapter alone owns
+/// which native calls have a guaranteed return type. It never guesses a
+/// project method's return type or attempts to interpret source text.
+fn apply_static_direct_call_result_contracts(methods: &[MethodRecord], calls: &mut [CallRecord]) {
+    let source_languages = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+
+    loop {
+        let static_returns = calls
+            .iter()
+            .filter_map(|call| {
+                let language = source_languages.get(call.source.as_str()).copied()?;
+                let behavior = crate::syntax::normalized_behavior::behavior_for_name(language)?;
+                let receiver_type = call.receiver_type.as_deref();
+                let return_type = call
+                    .implicit_receiver
+                    .then(|| behavior.known_return_type(&call.message))
+                    .flatten()
+                    .or_else(|| behavior.static_return_type(&call.message, receiver_type))
+                    .or_else(|| {
+                        behavior.propagated_collection_return_type(&call.message, receiver_type)
+                    })?;
+                Some((
+                    (call.source.as_str(), call.path.as_str(), call.span),
+                    return_type,
+                ))
+            })
+            .fold(
+                BTreeMap::<(&str, &str, [usize; 4]), BTreeSet<String>>::new(),
+                |mut rows, (key, return_type)| {
+                    rows.entry(key).or_default().insert(return_type);
+                    rows
+                },
+            );
+        let mut updates = Vec::new();
+        for (index, call) in calls.iter().enumerate().filter(|(_, call)| {
+            call.receiver_type.is_none()
+                && (call.known_time_complexity.is_none() || call.known_space_complexity.is_none())
+        }) {
+            let receiver_spans = call
+                .receiver_call_span
+                .into_iter()
+                .chain(call.receiver_definition_call_spans.iter().copied())
+                .collect::<BTreeSet<_>>();
+            if receiver_spans.is_empty() {
+                continue;
+            }
+            let return_types = receiver_spans
+                .iter()
+                .map(|span| static_returns.get(&(call.source.as_str(), call.path.as_str(), *span)))
+                .collect::<Option<Vec<_>>>();
+            let Some(return_types) = return_types else {
+                continue;
+            };
+            let distinct = return_types
+                .into_iter()
+                .filter(|types| types.len() == 1)
+                .flat_map(|types| types.iter().cloned())
+                .collect::<BTreeSet<_>>();
+            if distinct.len() != 1 {
+                continue;
+            }
+            let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+                continue;
+            };
+            let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language)
+            else {
+                continue;
+            };
+            let receiver_type = distinct.into_iter().next().expect("one static return type");
+            let normalized = TypeExpr::parse(&receiver_type, language);
+            let complexity = behavior.call_complexity(&normalized, &call.message);
+            let parametric = complexity
+                .is_none()
+                .then(|| {
+                    behavior
+                        .parametric_call_cost(&normalized, &call.message)
+                        .and_then(|kind| crate::syntax::parametric_call_complexity(&kind))
+                })
+                .flatten();
+            updates.push((index, receiver_type, complexity, parametric));
+        }
+        if updates.is_empty() {
+            break;
+        }
+        for (index, receiver_type, complexity, parametric) in updates {
+            let call = &mut calls[index];
+            call.receiver_type = Some(receiver_type);
+            call.receiver_type_origin = Some("static_call_result_contract".to_string());
+            if let Some(complexity) = complexity {
+                call.known_time_complexity = Some(complexity.time.to_string());
+                call.known_space_complexity = Some(complexity.space.to_string());
+                call.complexity_provenance = Some("static_call_result_contract".to_string());
+                call.complexity_bound_quality =
+                    Some("upper_bound_language_return_contract".to_string());
+                call.complexity_missing_kind = None;
+                call.unresolved_reason = None;
+                call.resolution_missing_proof = None;
+                call.empty_domain_cause = None;
+            } else if let Some((time, space)) = parametric {
+                call.callback_receiver = true;
+                call.known_time_complexity = Some(time.to_string());
+                call.known_space_complexity = Some(space.to_string());
+                call.complexity_provenance = Some("static_call_result_contract".to_string());
+                call.complexity_bound_quality =
+                    Some("upper_bound_language_return_contract".to_string());
+                call.complexity_missing_kind = None;
+                call.unresolved_reason = None;
+                call.resolution_missing_proof = None;
+                call.empty_domain_cause = None;
+            }
+        }
+    }
+}
+
+/// Join adapter-owned lexical type/module receiver candidates against exact
+/// project declarations. The language adapter supplies the candidate order;
+/// this shared resolver never invents a namespace and accepts a target only
+/// when the resulting declaration set is unique.
+fn resolve_relative_type_receiver_calls(
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+    source_languages: &BTreeMap<&str, &str>,
+) {
+    let mut by_owner_dispatch = BTreeMap::<(&str, &str, &str), Vec<&MethodRecord>>::new();
+    for method in methods {
+        by_owner_dispatch
+            .entry((
+                method.owner.as_str(),
+                method.dispatch_name.as_str(),
+                method.kind.as_str(),
+            ))
+            .or_default()
+            .push(method);
+    }
+    for call in calls.iter_mut().filter(|call| {
+        call.target.is_none()
+            && call.receiver_kind == "type"
+            && call.receiver_symbol.is_none()
+            && !call.receiver.is_empty()
+    }) {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language) else {
+            continue;
+        };
+        let dispatch = if call.constructor_target.is_some() {
+            "instance"
+        } else {
+            "class"
+        };
+        let message = call
+            .constructor_target
+            .as_deref()
+            .unwrap_or(call.message.as_str());
+        let mut resolved = None;
+        for owner in behavior.relative_type_receiver_candidates(&call.receiver, &call.owner) {
+            let candidates = by_owner_dispatch
+                .get(&(owner.as_str(), message, dispatch))
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|method| method.language == language)
+                .collect::<Vec<_>>();
+            if !candidates.is_empty() {
+                resolved = Some((owner, candidates));
+                break;
+            }
+        }
+        let Some((owner, candidates)) = resolved else {
+            continue;
+        };
+        call.receiver_symbol = Some(owner);
+        call.receiver_symbol_origin = Some("adapter_relative_type_receiver_lookup".to_string());
+        if let Some(candidate) = unique_call_candidate(&candidates, call, Some(language)) {
+            call.target = Some(candidate.id.clone());
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+        } else {
+            call.candidate_targets = candidates
+                .iter()
+                .map(|candidate| candidate.id.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            call.candidate_reason = Some("relative_type_receiver_candidate_set".to_string());
+            call.unresolved_reason =
+                Some("closed_project_candidate_set_requires_summary".to_string());
+            call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+        }
     }
 }
 
@@ -4146,10 +4620,19 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
             let definition_call_sources = reaching
                 .iter()
                 .filter_map(|definition| {
-                    effects
-                        .get(definition.as_str())
-                        .and_then(|effect| effect.write_call_sources.get(&fact.place_id))
-                        .map(|span| (definition.clone(), *span))
+                    let effect = effects.get(definition.as_str())?;
+                    effect
+                        .write_call_source_sets
+                        .get(&fact.place_id)
+                        .cloned()
+                        .or_else(|| {
+                            effect
+                                .write_call_sources
+                                .get(&fact.place_id)
+                                .copied()
+                                .map(|span| vec![span])
+                        })
+                        .map(|spans| (definition.clone(), spans))
                 })
                 .collect::<BTreeMap<_, _>>();
             Some(json!({
@@ -4208,6 +4691,220 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
         }));
     }
     rows
+}
+
+/// Reduce normalized CFG/DFG facts to the opaque source anchors a runtime
+/// collector needs. This deliberately carries no source-language expression
+/// or flow rule: the collector only records a value when this plan says that
+/// FactMine will consume it.
+fn extract_runtime_value_capture_sites(
+    document: &Document,
+    flow_local_types: &[serde_json::Value],
+    calls: &[CallRecord],
+) -> (Vec<RuntimeValueCaptureSite>, Vec<RuntimeValueCaptureSite>) {
+    let mut result_spans = BTreeSet::new();
+    for row in flow_local_types {
+        for span in row
+            .get("definition_call_sources")
+            .and_then(serde_json::Value::as_object)
+            .into_iter()
+            .flat_map(|sources| sources.values())
+            .flat_map(|value| {
+                serde_json::from_value::<Vec<[usize; 4]>>(value.clone())
+                    .ok()
+                    .or_else(|| {
+                        serde_json::from_value::<[usize; 4]>(value.clone())
+                            .ok()
+                            .map(|span| vec![span])
+                    })
+                    .unwrap_or_default()
+            })
+        {
+            result_spans.insert(span);
+        }
+    }
+    // Direct chained calls have no named local definition, but the normalized
+    // receiver projection proves that their result is immediately consumed.
+    // Named receivers are already covered by the CFG/DFG definition sources
+    // above; duplicating every receiver-definition projection here would make
+    // the runtime plan pay for the same evidence twice.
+    for call in calls {
+        if let Some(span) = call.receiver_call_span {
+            result_spans.insert(span);
+        }
+    }
+
+    let result_sites = result_spans
+        .into_iter()
+        .map(|span| RuntimeValueCaptureSite {
+            path: document.file.clone(),
+            span,
+        })
+        .collect();
+    let receiver_sites = document
+        .call_sites
+        .iter()
+        .filter(|call| call.block)
+        .map(|call| RuntimeValueCaptureSite {
+            path: document.file.clone(),
+            span: call.span,
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    (result_sites, receiver_sites)
+}
+
+/// Runtime target observation is only useful when static resolution left the
+/// normalized call without an exact target, semantic identity, or intrinsic
+/// cost. Keeping that filter in FactMine prevents a tracer from paying a
+/// per-call synchronization cost for facts the static profile has already
+/// proven.
+fn runtime_call_capture_sites(calls: &[CallRecord]) -> Vec<RuntimeValueCaptureSite> {
+    calls
+        .iter()
+        .filter(|call| {
+            call.target.is_none()
+                && call.semantic_symbol.is_none()
+                && call.known_time_complexity.is_none()
+                && call.known_space_complexity.is_none()
+        })
+        .map(|call| RuntimeValueCaptureSite {
+            path: call.path.clone(),
+            span: call.span,
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Convert adapter-recognized capability predicates into opaque, stable
+/// profile facts. This walker deliberately knows only the normalized `IF` /
+/// `UNLESS` child layout; native predicate spelling remains behind the
+/// `NormalizedLanguageBehavior` boundary.
+fn extract_runtime_capability_guards(
+    root: &crate::ast::Node,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    calls: &[CallRecord],
+) -> Vec<RuntimeCapabilityGuard> {
+    fn normalized_span(node: &crate::ast::Node) -> [usize; 4] {
+        [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ]
+    }
+
+    fn visit(
+        node: &crate::ast::Node,
+        behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+        calls: &[CallRecord],
+        guards: &mut BTreeSet<RuntimeCapabilityGuard>,
+    ) {
+        if matches!(node.r#type.as_str(), "IF" | "UNLESS") {
+            if let Some(condition) = node.children.first().and_then(crate::ast::node) {
+                if let Some(capability) = behavior.runtime_capability_guard(condition) {
+                    let condition_span = normalized_span(condition);
+                    let true_span = node
+                        .children
+                        .get(1)
+                        .and_then(crate::ast::node)
+                        .map(normalized_span);
+                    let false_span = node
+                        .children
+                        .get(2)
+                        .and_then(crate::ast::node)
+                        .map(normalized_span);
+                    let (member_available_span, member_unavailable_span) =
+                        if node.r#type == "UNLESS" {
+                            (false_span, true_span)
+                        } else {
+                            (true_span, false_span)
+                        };
+                    for condition_call in calls.iter().filter(|call| {
+                        call.span == condition_span && call.receiver == capability.subject
+                    }) {
+                        guards.insert(RuntimeCapabilityGuard {
+                            source: condition_call.source.clone(),
+                            subject: capability.subject.clone(),
+                            member: capability.member.clone(),
+                            condition_call_id: condition_call.id.clone(),
+                            condition_span,
+                            member_available_span,
+                            member_unavailable_span,
+                        });
+                    }
+                }
+            }
+        }
+        for child in node.children.iter().filter_map(crate::ast::node) {
+            visit(child, behavior, calls, guards);
+        }
+    }
+
+    let mut guards = BTreeSet::new();
+    visit(root, behavior, calls, &mut guards);
+    guards.into_iter().collect()
+}
+
+/// Extract adapter-recognized bare-value branch conditions into an opaque,
+/// language-neutral CFG fact. The adapter decides which source condition has
+/// native truthiness semantics; this shared pass associates it only with the
+/// exact enclosing method and selected truthy branch span.
+fn extract_runtime_truthiness_guards(
+    root: &crate::ast::Node,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    calls: &[CallRecord],
+) -> Vec<RuntimeTruthinessGuard> {
+    fn normalized_span(node: &crate::ast::Node) -> [usize; 4] {
+        [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ]
+    }
+
+    fn visit(
+        node: &crate::ast::Node,
+        behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+        calls: &[CallRecord],
+        guards: &mut BTreeSet<RuntimeTruthinessGuard>,
+    ) {
+        if matches!(node.r#type.as_str(), "IF" | "UNLESS") {
+            if let Some(condition) = node.children.first().and_then(crate::ast::node) {
+                if let Some(truthiness) = behavior.runtime_truthiness_guard(condition) {
+                    let body_span = node
+                        .children
+                        .get(if node.r#type == "UNLESS" { 2 } else { 1 })
+                        .and_then(crate::ast::node)
+                        .map(normalized_span);
+                    let node_span = normalized_span(node);
+                    let sources = calls
+                        .iter()
+                        .filter(|call| span_contains(node_span, call.span))
+                        .map(|call| call.source.clone())
+                        .collect::<BTreeSet<_>>();
+                    for source in sources {
+                        guards.insert(RuntimeTruthinessGuard {
+                            source,
+                            subject: truthiness.subject.clone(),
+                            condition_span: normalized_span(condition),
+                            truthy_span: body_span,
+                        });
+                    }
+                }
+            }
+        }
+        for child in node.children.iter().filter_map(crate::ast::node) {
+            visit(child, behavior, calls, guards);
+        }
+    }
+
+    let mut guards = BTreeSet::new();
+    visit(root, behavior, calls, &mut guards);
+    guards.into_iter().collect()
 }
 
 fn extract_type_dependencies(
@@ -4690,6 +5387,7 @@ fn extract_methods(
                 callback_params: fn_def.callback_params.clone(),
                 source_export_eligible: fn_def.source_export_eligible
                     && behavior.source_body_implicit_work_is_modeled(&raw_source, &template_types),
+                generated_declaration: fn_def.body.kind == "SYNTHETIC_ACCESSOR",
                 raw_source,
                 normalized_source,
                 untraceable_params: behavior.untraceable_profile_parameters(
@@ -7144,6 +7842,11 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
         .iter()
         .map(|projection| (projection.outer_span, projection.receiver_call_span))
         .collect::<BTreeMap<_, _>>();
+    let selector_spans = document
+        .call_selector_projections
+        .iter()
+        .map(|projection| (projection.call_span, projection.selector_span))
+        .collect::<BTreeMap<_, _>>();
     let mut calls = document
         .call_sites
         .iter()
@@ -7741,6 +8444,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     }),
                 lexical_symbol_origin,
                 receiver_call_span: receiver_call_spans.get(&call.span).copied(),
+                selector_span: selector_spans.get(&call.span).copied(),
                 receiver_definition_call_spans: if receiver_is_type {
                     Vec::new()
                 } else {
@@ -8213,6 +8917,7 @@ pub(crate) mod tests {
             }],
             normalization_call_origins: Vec::new(),
             call_raw_origin_projections: Vec::new(),
+            call_selector_projections: Vec::new(),
             state_declarations: vec![syntax::StateDeclaration {
                 field: "@name".to_string(),
                 owner: "Greeter".to_string(),
@@ -8425,6 +9130,218 @@ pub(crate) mod tests {
         let output = extract(&document, Profile::Espalier);
         assert_eq!(output.methods.len(), 1);
         assert!(!output.methods[0].source_export_eligible);
+    }
+
+    #[test]
+    fn trace_plan_exports_only_cfg_dfg_value_capture_demands() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class RuntimePlanFixture
+  def run(rows)
+    ignored = ["items"].fetch(0)
+    selected = rows.resolve_items
+    selected.map { |row| row.to_s }
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let documents = syntax::parse_files(&[file.path().to_path_buf()], Language::Ruby)
+            .expect("parse Ruby source");
+
+        let output = extract(&documents[0], Profile::TracePlan);
+
+        assert!(
+            output
+                .runtime_call_sites
+                .iter()
+                .any(|site| site.span[0] == 4),
+            "an unresolved call must request runtime target observation"
+        );
+        assert!(
+            output
+                .runtime_call_sites
+                .iter()
+                .all(|site| site.span[0] != 3),
+            "a statically costed call must not request runtime target observation"
+        );
+        assert!(
+            output
+                .runtime_result_call_sites
+                .iter()
+                .any(|site| site.span[0] == 4),
+            "a call that defines a later receiver must request its result"
+        );
+        assert!(
+            output
+                .runtime_collection_receiver_sites
+                .iter()
+                .any(|site| site.span[0] == 5),
+            "a collection callback must retain its receiver element domain"
+        );
+    }
+
+    #[test]
+    fn generated_record_reader_targets_have_constant_cost_without_runtime_evidence() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"Index = Struct.new(:facts, keyword_init: true)
+class Index
+  def file_default(key)
+    facts[key]
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+
+        let mut output = extract(&document, Profile::Espalier);
+        let reader_id = output
+            .methods
+            .iter()
+            .find(|method| method.name == "facts" && method.generated_declaration)
+            .expect("synthetic reader declaration")
+            .id
+            .clone();
+        let reader = output
+            .calls
+            .iter_mut()
+            .find(|call| call.function == "file_default" && call.message == "facts")
+            .expect("generated reader call");
+        reader.target = Some(reader_id);
+        reader.kind = "resolved_call".to_string();
+        reader.known_time_complexity = None;
+        reader.known_space_complexity = None;
+
+        reapply_generated_callable_costs(&mut output);
+
+        let reader = output
+            .calls
+            .iter()
+            .find(|call| call.function == "file_default" && call.message == "facts")
+            .expect("generated reader call");
+        assert_eq!(reader.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(reader.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(
+            reader.complexity_provenance.as_deref(),
+            Some("generated_callable_declaration")
+        );
+    }
+
+    #[test]
+    fn generated_record_constructor_contract_does_not_price_instance_index_methods() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"Widget = Struct.new(:value)
+class Widget
+  def [](key)
+    key.to_s
+  end
+end
+
+class Caller
+  def run(widget)
+    widget[:key]
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+
+        let mut output = extract(&document, Profile::Espalier);
+        let index = output
+            .calls
+            .iter_mut()
+            .find(|call| call.function == "run" && call.message == "[]")
+            .expect("instance index call");
+        index.receiver_type = Some("Widget".to_string());
+        index.known_time_complexity = None;
+        index.known_space_complexity = None;
+
+        reapply_generated_record_costs(&mut output);
+
+        let index = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "[]")
+            .expect("instance index call");
+        assert!(index.known_time_complexity.is_none());
+        assert!(index.known_space_complexity.is_none());
+    }
+
+    #[test]
+    fn static_receiver_contracts_close_literal_and_direct_call_chains() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class Sample
+  def word_member?
+    %w[while until for].include?("while")
+  end
+
+  def converted_empty?(value)
+    Array(value).empty?
+  end
+
+  def rendered_empty?(value)
+    value.to_s.empty?
+  end
+
+  def source_file
+    File.expand_path(__FILE__)
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+
+        let output = extract(&document, Profile::Espalier);
+        let word = output
+            .calls
+            .iter()
+            .find(|call| call.function == "word_member?" && call.message == "include?")
+            .expect("word-array membership call");
+        assert_eq!(word.known_time_complexity.as_deref(), Some("O(N)"));
+        assert_eq!(word.known_space_complexity.as_deref(), Some("O(1)"));
+        assert!(
+            !output.calls.iter().any(|call| call.message == "__FILE__"),
+            "Ruby's lexical __FILE__ pseudo-constant must not be normalized as self.__FILE__()"
+        );
+
+        for (function, receiver_type) in [
+            ("converted_empty?", "T::Array[T.untyped]"),
+            ("rendered_empty?", "String"),
+        ] {
+            let call = output
+                .calls
+                .iter()
+                .find(|call| call.function == function && call.message == "empty?")
+                .unwrap_or_else(|| panic!("{function} chained empty? call"));
+            assert_eq!(call.receiver_type.as_deref(), Some(receiver_type));
+            assert_eq!(
+                call.receiver_type_origin.as_deref(),
+                Some("static_call_result_contract")
+            );
+            assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+            assert_eq!(call.known_space_complexity.as_deref(), Some("O(1)"));
+        }
     }
 
     #[test]
@@ -9529,6 +10446,7 @@ def py_fn(a: int) -> str:
             lexical_symbol: None,
             lexical_symbol_origin: None,
             receiver_call_span: None,
+            selector_span: None,
             receiver_definition_call_spans: Vec::new(),
             receiver_symbol: None,
             receiver_type: None,

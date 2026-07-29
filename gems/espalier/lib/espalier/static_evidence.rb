@@ -83,6 +83,10 @@ module Espalier
       end.to_set
       raw_methods.each do |m|
         next unless allowed_roles.include?(role_for.call(m["path"]))
+        # Macro-generated accessors remain in the FactMine profile so their
+        # declaration contract can price callers, but they are not authored
+        # production functions and must not inflate a completion denominator.
+        next if m["generated_declaration"] == true
         overload_key = [m["path"].to_s, m["owner"].to_s, m["name"].to_s, m["kind"].to_s]
         # TypeScript overload signatures are declarations immediately followed
         # by a concrete implementation. Reporting both as executable methods
@@ -382,7 +386,10 @@ module Espalier
     # test callable by source span.
     def self.method_source_roles(methods)
       rows = Array(methods)
-      roles = rows.to_h { |method| [method.fetch("id").to_s, source_role(method["path"])] }
+      roles = rows.to_h do |method|
+        role = method["generated_declaration"] == true ? "generated" : source_role(method["path"])
+        [method.fetch("id").to_s, role]
+      end
       test_spans_by_path = Hash.new { |hash, path| hash[path] = [] }
 
       rows.each do |method|

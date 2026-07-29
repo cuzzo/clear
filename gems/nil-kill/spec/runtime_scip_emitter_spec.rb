@@ -231,19 +231,46 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
     end
   end
 
-  it "derives analysis inputs from caller evidence instead of dependency implementations" do
+  it "includes trusted workspace declarations but excludes dependency implementations" do
     Dir.mktmpdir("nil-kill-runtime-scip-sources", NilKill::ROOT) do |root|
       runtime_dir = File.join(root, "runtime")
       source = File.join(root, "worker.rb")
+      workspace = File.join(root, "tools", "workspace_helper.rb")
       dependency = File.join(root, "vendor", "dependency.rb")
+      FileUtils.mkdir_p(File.dirname(workspace))
       FileUtils.mkdir_p(File.dirname(dependency))
       FileUtils.mkdir_p(runtime_dir)
-      File.write(source, "def run; dependency.call; end\n")
+      File.write(source, <<~RUBY)
+        class Worker
+          def run
+            WorkspaceHelper.workspace_call
+          end
+        end
+      RUBY
+      File.write(workspace, <<~RUBY)
+        module WorkspaceHelper
+          def self.workspace_call
+          end
+        end
+      RUBY
       File.write(dependency, "def call; end\n")
-      event = runtime_event(
+      workspace_event = runtime_event(
         source: source,
-        caller: { owner: "Object", name: "run", line: 1 },
-        line: 1,
+        caller: { owner: "Worker", name: "run", line: 2 },
+        line: 3,
+        owner: "WorkspaceHelper",
+        name: "workspace_call",
+        native: false,
+        callee_path: workspace,
+        callee_line: 1,
+        package_manager: "workspace",
+        package: "demo",
+        version: "workspace"
+      )
+      dependency_event = runtime_event(
+        source: source,
+        caller: { owner: "Worker", name: "run", line: 2 },
+        line: 3,
         owner: "Dependency",
         name: "call",
         native: false,
@@ -259,7 +286,8 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
       ))
       emitter = described_class.new(root: root, runtime_dir: runtime_dir)
 
-      expect(emitter.send(:runtime_sources, [event], evidence)).to eq([source])
+      expect(emitter.send(:runtime_sources, [workspace_event, dependency_event], evidence))
+        .to match_array([source, workspace])
     end
   end
 
@@ -298,8 +326,10 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
       rows = occurrences(JSON.parse(File.read(result.fetch("index"))))
 
       expect(rows).to include(
-        a_hash_including("range" => [1, 8, 10], "symbol" => a_string_including("#`+`()")),
-        a_hash_including("range" => [2, 8, 10], "symbol" => a_string_including("#`-`()")),
+        # The selector for `+=`/`-=` is the dispatched `+`/`-` token, not
+        # the assignment marker. SCIP must therefore annotate one byte.
+        a_hash_including("range" => [1, 8, 9], "symbol" => a_string_including("#`+`()")),
+        a_hash_including("range" => [2, 8, 9], "symbol" => a_string_including("#`-`()")),
         a_hash_including("range" => [3, 8, 9], "symbol" => a_string_including("#`[]`()")),
         a_hash_including("range" => [4, 8, 9], "symbol" => a_string_including("#`[]`()")),
         a_hash_including("range" => [4, 15, 16], "symbol" => a_string_including("#`[]`()")),

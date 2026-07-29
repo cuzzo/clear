@@ -341,6 +341,8 @@ module NilKill
           NIL_KILL_ELEMENT_SAMPLE=20          container elements sampled by runtime tracing
           NIL_KILL_TRACE_PLAN=0               disable trace-plan pruning during collect
           NIL_KILL_TRACE_METHODS=0            disable TracePoint method collection
+          NIL_KILL_RUNTIME_SCIP_NATIVE=0      Ruby-call-only SCIP evidence for rapid feedback
+          NIL_KILL_COLLECT_COVERAGE=0         disable Ruby line coverage for SCIP-only rapid feedback
           NIL_KILL_SLOT_TYPE_OVERRIDES=file   opt-in JSON field/ivar type override rules
       TEXT
     end

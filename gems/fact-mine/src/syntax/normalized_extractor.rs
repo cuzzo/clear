@@ -21,6 +21,7 @@ pub(crate) struct NormalizedFacts {
     /// parser origin is joined later by the tree-sitter adapter; this pass
     /// never guesses a raw parser identity from a normalized span.
     pub(crate) call_node_projections: Vec<CallNodeProjection>,
+    pub(crate) call_selector_projections: Vec<super::CallSelectorProjection>,
     pub(crate) call_receiver_projections: Vec<super::CallReceiverProjection>,
     pub(crate) state_declarations: Vec<StateDeclaration>,
     pub(crate) state_reads: Vec<StateRead>,
@@ -134,6 +135,10 @@ impl<'a> Extractor<'a> {
             )
         });
         self.facts.call_node_projections.dedup();
+        self.facts
+            .call_selector_projections
+            .sort_by_key(|projection| (projection.call_span, projection.selector_span));
+        self.facts.call_selector_projections.dedup();
         self.facts.semantic_effect_sites.sort_by_key(effect_key);
         self.facts
     }
@@ -882,6 +887,14 @@ impl<'a> Extractor<'a> {
         );
         if self.seen_calls.insert(key) {
             self.record_call_node_projection(node, call.span);
+            if projected.access_span != call.span {
+                self.facts
+                    .call_selector_projections
+                    .push(super::CallSelectorProjection {
+                        call_span: call.span,
+                        selector_span: projected.access_span,
+                    });
+            }
             if let Some(receiver_call_span) = receiver_call_span {
                 self.facts
                     .call_receiver_projections
@@ -923,6 +936,7 @@ impl<'a> Extractor<'a> {
         conditional: bool,
         block: bool,
     ) {
+        let selector_span = projected.access_span;
         let call = CallSite {
             receiver: self.behavior.clean_receiver(&projected.receiver),
             message: self.behavior.clean_identifier(&projected.message),
@@ -946,6 +960,14 @@ impl<'a> Extractor<'a> {
         );
         if self.seen_calls.insert(key) {
             self.record_call_node_projection(node, call.span);
+            if selector_span != call.span {
+                self.facts
+                    .call_selector_projections
+                    .push(super::CallSelectorProjection {
+                        call_span: call.span,
+                        selector_span,
+                    });
+            }
             self.record_call_receiver_projection(node, call.span);
             self.facts.call_sites.push(call);
         }
@@ -989,6 +1011,16 @@ impl<'a> Extractor<'a> {
             {
                 return Some(projection.emitted_call_span);
             }
+        }
+        // `ITER` is a normalized wrapper around the call that owns its
+        // callback region.  It is transparent for receiver-result flow:
+        // in `source.select { ... }.map { ... }`, the outer receiver is the
+        // result of the inner `select`, not the callback body.  This is a
+        // property of the normalized IR, rather than a language-specific
+        // source rule.
+        if node.r#type == "ITER" {
+            return child_node(node, 0)
+                .and_then(|call| self.direct_emitted_receiver_call_span(call));
         }
         let children = child_nodes(node);
         if children.len() != 1 {

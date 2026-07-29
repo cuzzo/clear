@@ -12,6 +12,9 @@ module NilKill
       @tlets = {}
       @struct_fields = {}
       @state_write_site_owners = {}
+      @runtime_call_sites = {}
+      @runtime_result_call_sites = {}
+      @runtime_collection_receiver_sites = {}
     end
 
     def write(path)
@@ -25,6 +28,9 @@ module NilKill
           [[File.expand_path(site["path"], ROOT), site["line"].to_i], site["type"]]
         end
         Array(facts["struct_declarations"]).each { |decl| add_struct_decl(decl) }
+        Array(facts["runtime_call_sites"]).each { |site| add_runtime_value_site(@runtime_call_sites, site) }
+        Array(facts["runtime_result_call_sites"]).each { |site| add_runtime_value_site(@runtime_result_call_sites, site) }
+        Array(facts["runtime_collection_receiver_sites"]).each { |site| add_runtime_value_site(@runtime_collection_receiver_sites, site) }
         static.fetch("fields", []).each { |field| add_static_field(field, tlet_types) }
         Array(facts["state_type_records"]).each { |field| add_static_state_type(field) }
         # Flow-derived state records are intentionally conservative and may
@@ -43,6 +49,9 @@ module NilKill
         "tlets" => @tlets,
         "struct_fields" => @struct_fields,
         "state_write_sites" => state_write_sites,
+        "runtime_call_sites" => @runtime_call_sites,
+        "runtime_result_call_sites" => @runtime_result_call_sites,
+        "runtime_collection_receiver_sites" => @runtime_collection_receiver_sites,
       }))
     end
 
@@ -101,6 +110,21 @@ module NilKill
       type = site["type"]
       return if NilKill.strong_trace_type?(type)
       @tlets[[File.expand_path(site["path"], ROOT), site["line"]].join("\0")] = true
+    end
+
+    # FactMine has already chosen these semantic source ranges. TracePoint
+    # exposes a line (not a source AST), so expand only the selected range's
+    # lines into opaque lookup keys. No Ruby syntax or flow interpretation
+    # belongs in this adapter.
+    def add_runtime_value_site(index, site)
+      path = site["path"].to_s
+      span = Array(site["span"])
+      return if path.empty? || span.length != 4
+
+      first_line, last_line = span.values_at(0, 2).map(&:to_i).minmax
+      (first_line..last_line).each do |line|
+        index[[File.expand_path(path, ROOT), line].join("\0")] = true
+      end
     end
 
     def add_struct_decl(decl)

@@ -16,14 +16,15 @@ module NilKill
   class StaticEvidence
     TRACE_PLAN_FACT_KEYS = %w[
       tlet_sites struct_declarations state_type_records type_definitions
+      runtime_call_sites runtime_result_call_sites runtime_collection_receiver_sites
     ].freeze
 
-    # Runtime trace planning needs only enforceable declarations and T.let
-    # sites. Asking Espalier to construct the complete NilKill evidence bundle
-    # also computes CFG/DFG, protocols, shapes, aliases, call graphs, and
-    # pressure inputs that TracePlan immediately discards. Keep this narrow
-    # profile explicit so adding a new runtime-elision fact requires updating
-    # both this contract and its parity oracle.
+    # Runtime trace planning needs enforceable declarations plus FactMine's
+    # compact, language-neutral value-demand plan. It deliberately does not
+    # export full CFG/DFG, protocol, shape, alias, call-graph, or pressure
+    # facts; the collector only receives opaque source anchors selected by
+    # FactMine. Keep this narrow profile explicit so a new collection demand
+    # updates both this contract and its parity oracle.
     def self.build_trace_plan(targets = nil, root: NilKill::ROOT)
       files = Array(targets || NilKill.target_files)
       return { "methods" => [], "fields" => [], "facts" => {} } if files.empty?

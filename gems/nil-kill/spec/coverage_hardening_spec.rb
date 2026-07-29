@@ -71,6 +71,7 @@ RSpec.describe "NilKill coverage hardening" do
     it "prints help for help and exits on unknown commands" do
       out, = capture_io { described_class.new(["help"]).run }
       expect(out).to include("bundle exec tools/nil-kill collect")
+      expect(out).to include("NIL_KILL_COLLECT_COVERAGE=0")
 
       expect do
         capture_io { described_class.new(["unknown"]).run }
@@ -711,6 +712,7 @@ RSpec.describe "NilKill coverage hardening" do
   describe NilKillRuntimeTrace do
     def reset_runtime_trace_state!
       FileUtils.rm_f(described_class::TRACE_PLAN_PATH)
+      Thread.current[:__nil_kill_runtime_scip_identity_samples] = nil
       {
         methods: {},
         tlets: {},
@@ -745,6 +747,8 @@ RSpec.describe "NilKill coverage hardening" do
         runtime_package_by_path: {},
         runtime_scip_frames: Hash.new { |hash, thread_id| hash[thread_id] = [] },
         runtime_scip_native_calls: Hash.new { |hash, thread_id| hash[thread_id] = [] },
+        runtime_scip_native_result_depth: 0,
+        runtime_scip_native_result_armed: false,
       }.each do |name, value|
         described_class.instance_variable_set(:"@#{name}", value)
       end
@@ -786,6 +790,11 @@ RSpec.describe "NilKill coverage hardening" do
       owner = Class.new
       allow(described_class).to receive(:method_owner)
         .with(owner).and_return(["Hash", "instance"])
+      # This is a direct unit invocation, not a real c_call event. Keep the
+      # dynamic TracePoint disabled so unrelated RSpec C returns cannot pair
+      # with the synthetic pending call before the explicit c_return below.
+      allow(described_class).to receive(:runtime_scip_native_result_trace)
+        .and_return(instance_double(TracePoint, enable: true, disable: true))
       call = FakeTracePoint.new(
         event: :c_call,
         path: target_file,
@@ -796,7 +805,12 @@ RSpec.describe "NilKill coverage hardening" do
       )
       described_class.enter_runtime_scip_native_call(call)
       described_class.leave_runtime_scip_native_call(
-        FakeTracePoint.new(event: :c_return, return_value: [Object.new])
+        FakeTracePoint.new(
+          event: :c_return,
+          defined_class: owner,
+          method_id: :fetch,
+          return_value: [Object.new]
+        )
       )
 
       record = described_class.runtime_calls.values.fetch(0)
@@ -807,6 +821,208 @@ RSpec.describe "NilKill coverage hardening" do
       expect(record.dig(:result_domain, :elements)).not_to be_empty
     ensure
       FileUtils.rm_f(target_file)
+    end
+
+    it "keeps TracePoint internal Ruby paths out of the workspace declaration set" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_internal_path_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "warn('runtime')\n")
+      described_class.runtime_scip_frames[Thread.current.object_id] << {
+        caller: {
+          class: "Worker", method: "run", kind: "instance",
+          path: target_file, line: 1,
+        },
+        callsite: { path: target_file, line: 1 },
+      }
+      owner = Class.new
+      allow(described_class).to receive(:method_owner)
+        .with(owner).and_return(["Kernel", "instance"])
+
+      described_class.record_runtime_scip_call(
+        FakeTracePoint.new(
+          event: :call,
+          path: "<internal:warning>",
+          lineno: 1,
+          defined_class: owner,
+          method_id: :warn,
+          self_value: Object.new
+        ),
+        receiver_shape: false
+      )
+
+      record = described_class.runtime_calls.values.fetch(0)
+      expect(record.dig(:callee, :path)).to be_nil
+      expect(record.dig(:callee, :package_manager)).to eq("ruby")
+      expect(record.dig(:callee, :package)).to eq("ruby")
+    ensure
+      FileUtils.rm_f(target_file)
+    end
+
+    it "does not pay for a value domain that FactMine's trace plan will not consume" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_selective_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "rows.each { |row| row.to_s }\n")
+      allow(described_class).to receive(:trace_plan).and_return({
+        "runtime_call_sites" => { [target_file, 1].join("\0") => true },
+        "runtime_result_call_sites" => {},
+        "runtime_collection_receiver_sites" => {},
+      })
+      described_class.runtime_scip_frames[Thread.current.object_id] << {
+        caller: {
+          class: "Worker", method: "run", kind: "instance",
+          path: target_file, line: 1,
+        },
+        callsite: { path: target_file, line: 1 },
+      }
+      owner = Class.new
+      allow(described_class).to receive(:method_owner)
+        .with(owner).and_return(["Hash", "instance"])
+      call = FakeTracePoint.new(
+        event: :c_call,
+        path: target_file,
+        lineno: 1,
+        defined_class: owner,
+        method_id: :fetch,
+        self_value: { "rows" => [Object.new] }
+      )
+
+      described_class.enter_runtime_scip_native_call(call)
+      described_class.enter_runtime_scip_native_call(call)
+
+      record = described_class.runtime_calls.values.fetch(0)
+      expect(record.dig(:receiver_domain, :types)).to eq(["Hash"])
+      expect(record.dig(:receiver_domain, :keys)).to eq([])
+      expect(record).not_to have_key(:result_domain)
+      expect(record[:count]).to eq(1), "one identity sample is sufficient for the generic overlay"
+      expect(described_class.runtime_scip_native_calls[Thread.current.object_id]).to be_empty
+    ensure
+      FileUtils.rm_f(target_file)
+    end
+
+    it "records Boolean call-result truth without encoding control flow" do
+      key = [:runtime_capability_truth, Process.pid]
+      described_class.runtime_calls[key] = {
+        receiver_domain: described_class.empty_runtime_value_domain,
+        count: 1,
+      }
+
+      described_class.record_runtime_scip_result(key, true)
+
+      record = described_class.runtime_calls.fetch(key)
+      expect(record.fetch(:result_truths)).to eq([true])
+      expect(record.dig(:result_domain, :types)).to eq(["TrueClass"])
+    ensure
+      described_class.runtime_calls.delete(key) if defined?(key)
+    end
+
+    it "does not pair an unframed native return with the requested call result" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_result_pairing_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "payload.fetch('rows', [])\n")
+      described_class.runtime_scip_frames[Thread.current.object_id] << {
+        caller: {
+          class: "Worker", method: "run", kind: "instance",
+          path: target_file, line: 1,
+        },
+        callsite: { path: target_file, line: 1 },
+      }
+      fetch_owner = Class.new
+      stray_owner = Class.new
+      allow(described_class).to receive(:method_owner)
+        .with(fetch_owner).and_return(["Hash", "instance"])
+      allow(described_class).to receive(:runtime_scip_native_result_trace)
+        .and_return(instance_double(TracePoint, enable: true, disable: true))
+
+      described_class.enter_runtime_scip_native_call(FakeTracePoint.new(
+        event: :c_call,
+        path: target_file,
+        lineno: 1,
+        defined_class: fetch_owner,
+        method_id: :fetch,
+        self_value: { "rows" => [:row] }
+      ))
+      described_class.leave_runtime_scip_native_call(FakeTracePoint.new(
+        event: :c_return,
+        defined_class: stray_owner,
+        method_id: :to_s,
+        return_value: "stray"
+      ))
+      described_class.leave_runtime_scip_native_call(FakeTracePoint.new(
+        event: :c_return,
+        defined_class: fetch_owner,
+        method_id: :fetch,
+        return_value: [:row]
+      ))
+
+      record = described_class.runtime_calls.values.fetch(0)
+      expect(record).not_to have_key(:result_domain)
+      expect(described_class.runtime_scip_native_calls[Thread.current.object_id]).to be_empty
+      expect(described_class.instance_variable_get(:@runtime_scip_native_result_depth)).to eq(0)
+    ensure
+      FileUtils.rm_f(target_file) if defined?(target_file)
+    end
+
+    it "self-heals a stale native-return frame instead of leaving result tracing enabled" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_result_stale_frame_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "payload.fetch('rows', [])\n")
+      described_class.runtime_scip_frames[Thread.current.object_id] << {
+        caller: {
+          class: "Worker", method: "run", kind: "instance",
+          path: target_file, line: 1,
+        },
+        callsite: { path: target_file, line: 1 },
+      }
+      fetch_owner = Class.new
+      stale_owner = Class.new
+      allow(described_class).to receive(:method_owner)
+        .with(fetch_owner).and_return(["Hash", "instance"])
+      native_returns = instance_double(TracePoint, enable: true, disable: true)
+      allow(described_class).to receive(:runtime_scip_native_result_trace).and_return(native_returns)
+
+      described_class.enter_runtime_scip_native_call(FakeTracePoint.new(
+        event: :c_call,
+        path: target_file,
+        lineno: 1,
+        defined_class: fetch_owner,
+        method_id: :fetch,
+        self_value: { "rows" => [:row] }
+      ))
+      described_class.runtime_scip_native_calls[Thread.current.object_id] << {
+        observed_call: nil,
+        capture_result: true,
+        defined_class: stale_owner,
+        method_id: :to_s,
+      }
+      described_class.instance_variable_set(:@runtime_scip_native_result_depth, 2)
+
+      described_class.leave_runtime_scip_native_call(FakeTracePoint.new(
+        event: :c_return,
+        defined_class: fetch_owner,
+        method_id: :fetch,
+        return_value: [:row]
+      ))
+      described_class.leave_runtime_scip_native_call(FakeTracePoint.new(
+        event: :c_return,
+        defined_class: fetch_owner,
+        method_id: :fetch,
+        return_value: [:row]
+      ))
+
+      expect(described_class.runtime_scip_native_calls[Thread.current.object_id]).to be_empty
+      expect(described_class.instance_variable_get(:@runtime_scip_native_result_depth)).to eq(0)
+      expect(native_returns).to have_received(:disable)
+    ensure
+      FileUtils.rm_f(target_file) if defined?(target_file)
+    end
+
+    it "offers a Ruby-call-only runtime SCIP tier for rapid feedback" do
+      previous = ENV["NIL_KILL_RUNTIME_SCIP_NATIVE"]
+      ENV["NIL_KILL_RUNTIME_SCIP_NATIVE"] = "0"
+
+      expect(described_class.runtime_scip_native_calls_enabled?).to be(false)
+    ensure
+      previous.nil? ? ENV.delete("NIL_KILL_RUNTIME_SCIP_NATIVE") : ENV["NIL_KILL_RUNTIME_SCIP_NATIVE"] = previous
     end
 
     def binding_for_forced_args(args)
@@ -1097,6 +1313,27 @@ RSpec.describe "NilKill coverage hardening" do
         data_class.new("Ada", { "id" => 1 })
         expect(described_class.structs.keys.map { |key| key[0] }).to include("AnonymousData")
       end
+    ensure
+      FileUtils.rm_f(target_file)
+    end
+
+    it "samples Struct fields through the native reader when the app overrides #[]" do
+      target_file = File.join(described_class::TARGETS.first, "struct_reader_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "# trace target\n")
+      dataset_class = Struct.new(:path, :files, keyword_init: true) do
+        def [](file)
+          files.fetch(File.expand_path(file))
+        end
+      end
+      dataset_class.instance_variable_set(:@__nil_kill_struct_path, target_file)
+      dataset_class.instance_variable_set(:@__nil_kill_struct_line, 10)
+
+      described_class.attach_struct(dataset_class)
+
+      expect do
+        dataset_class.new(path: "/tmp/coverage.json", files: {})
+      end.not_to raise_error
     ensure
       FileUtils.rm_f(target_file)
     end

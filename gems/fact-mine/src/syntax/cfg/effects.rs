@@ -28,6 +28,7 @@ struct RawEffect {
     write_value_hints: BTreeMap<String, String>,
     write_sources: BTreeMap<String, String>,
     write_call_sources: BTreeMap<String, Span>,
+    write_call_source_sets: BTreeMap<String, Vec<Span>>,
     write_nullable_contracts: BTreeMap<String, String>,
     callback_bindings: Vec<String>,
     return_state_hint: Option<String>,
@@ -118,6 +119,7 @@ pub(crate) fn extract(
                         target,
                         &mut raw,
                         behavior.function_value_calls_are_local_reads(),
+                        Some(behavior),
                     );
                     for (name, producer_span) in raw.write_call_sources.clone() {
                         let contract = [
@@ -342,6 +344,11 @@ pub(crate) fn extract(
                 .into_iter()
                 .map(|(target, producer_span)| (id_for(&target), producer_span))
                 .collect(),
+            write_call_source_sets: raw
+                .write_call_source_sets
+                .into_iter()
+                .map(|(target, producer_spans)| (id_for(&target), producer_spans))
+                .collect(),
             write_nullable_contracts: raw
                 .write_nullable_contracts
                 .into_iter()
@@ -481,7 +488,7 @@ fn effect_target<'a>(node: &'a Node, role: &str, profile: &ControlFlowProfile) -
 fn collect_control_bindings(node: &Node, role: &str, effect: &mut RawEffect) {
     if role == "for_loop" && node.r#type == "FOR" {
         if let Some(target) = node.children.first().and_then(ast::node) {
-            collect(target, effect, false);
+            collect(target, effect, false, None);
         }
         return;
     }
@@ -507,7 +514,7 @@ fn collect_scope_bindings(scope: Option<&Node>, effect: &mut RawEffect) {
                 effect.callback_bindings.push(name);
             }
         }
-        collect(args, effect, false);
+        collect(args, effect, false, None);
     }
 }
 
@@ -537,7 +544,12 @@ fn collect_nested_bindings(node: &Node, effect: &mut RawEffect) {
     }
 }
 
-fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_reads: bool) {
+fn collect(
+    node: &Node,
+    effect: &mut RawEffect,
+    function_value_calls_are_local_reads: bool,
+    behavior: Option<&dyn NormalizedLanguageBehavior>,
+) {
     if NESTED_SCOPE_TYPES.contains(&node.r#type.as_str()) {
         return;
     }
@@ -562,10 +574,14 @@ fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_r
                     }
                 } else if let Some(source) = direct_read_name(rhs) {
                     effect.write_sources.insert(name, source);
-                } else if let Some(producer_span) = direct_call_result_span(rhs) {
-                    effect.write_call_sources.insert(name, producer_span);
+                } else if let Some(producer_spans) = call_result_source_spans(rhs, behavior) {
+                    if producer_spans.len() == 1 {
+                        effect.write_call_sources.insert(name, producer_spans[0]);
+                    } else {
+                        effect.write_call_source_sets.insert(name, producer_spans);
+                    }
                 }
-                collect(rhs, effect, function_value_calls_are_local_reads);
+                collect(rhs, effect, function_value_calls_are_local_reads, behavior);
             }
         } else {
             effect.complete = false;
@@ -593,7 +609,12 @@ fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_r
         effect.unknown_call = true;
     }
     for child in node.children.iter().filter_map(ast::node) {
-        collect(child, effect, function_value_calls_are_local_reads);
+        collect(
+            child,
+            effect,
+            function_value_calls_are_local_reads,
+            behavior,
+        );
     }
 }
 
@@ -681,6 +702,26 @@ fn direct_call_result_span(node: &Node) -> Option<Span> {
         ]),
         _ => None,
     }
+}
+
+/// Return all direct call producers of a value-preserving assignment. The
+/// shared CFG understands direct calls and transparent grouping; an adapter
+/// explicitly vouches for any native compound expression whose result is one
+/// of its operands.
+fn call_result_source_spans(
+    node: &Node,
+    behavior: Option<&dyn NormalizedLanguageBehavior>,
+) -> Option<Vec<Span>> {
+    if let Some(span) = direct_call_result_span(node) {
+        return Some(vec![span]);
+    }
+    let operands = behavior?.value_preserving_call_result_operands(node)?;
+    let mut spans = BTreeSet::new();
+    for operand in operands {
+        let operand_spans = call_result_source_spans(operand, behavior)?;
+        spans.extend(operand_spans);
+    }
+    (!spans.is_empty()).then(|| spans.into_iter().collect())
 }
 
 fn direct_call_result_node(node: &Node) -> Option<&Node> {
@@ -866,12 +907,12 @@ mod tests {
             text: "callback()".to_string(),
         };
         let mut enabled = RawEffect::default();
-        collect(&call, &mut enabled, true);
+        collect(&call, &mut enabled, true, None);
         assert!(enabled.reads.contains("callback"));
         assert!(enabled.unknown_call);
 
         let mut disabled = RawEffect::default();
-        collect(&call, &mut disabled, false);
+        collect(&call, &mut disabled, false, None);
         assert!(disabled.reads.is_empty());
         assert!(disabled.unknown_call);
     }
