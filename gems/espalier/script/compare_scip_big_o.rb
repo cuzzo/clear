@@ -6,6 +6,7 @@
 
 require "json"
 require "optparse"
+require "pathname"
 require "set"
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
@@ -23,11 +24,28 @@ baseline_profile = JSON.parse(File.read(ARGV[0]))
 scip_profile = JSON.parse(File.read(ARGV[1]))
 source_root = options[:source_root]
 
+def absolute_profile_path(path, source_root)
+  text = path.to_s
+  return text unless source_root && !Pathname.new(text).absolute?
+
+  File.expand_path(text, source_root)
+end
+
+def under_profile_prefix?(path, prefix, source_root)
+  absolute_profile_path(path, source_root).start_with?(prefix)
+end
+
 def evidence_for(profile, prefix, source_root)
-  methods = Array(profile["methods"]).select { |row| row.fetch("path").start_with?(prefix) }
+  methods = Array(profile["methods"]).select do |row|
+    under_profile_prefix?(row.fetch("path"), prefix, source_root)
+  end
   method_ids = methods.to_h { |row| [row.fetch("id"), true] }
   paths = methods.map { |row| row.fetch("path") }.uniq
-  select_path = ->(rows) { Array(rows).select { |row| row.fetch("path", "").start_with?(prefix) } }
+  select_path = lambda do |rows|
+    Array(rows).select do |row|
+      under_profile_prefix?(row.fetch("path", ""), prefix, source_root)
+    end
+  end
   {
     "root" => source_root,
     "input_coverage" => profile["input_coverage"],
@@ -120,7 +138,8 @@ repositories = options[:repositories]
 if repositories.empty?
   abort "--source-root is required when repositories are not explicit" unless source_root
   repositories = paths.filter_map do |path|
-    path.delete_prefix("#{source_root}/").split("/", 2).first if path.start_with?("#{source_root}/")
+    absolute = absolute_profile_path(path, source_root)
+    absolute.delete_prefix("#{source_root}/").split("/", 2).first if absolute.start_with?("#{source_root}/")
   end.uniq.sort
 end
 prefixes = repositories.to_h do |repository|
