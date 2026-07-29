@@ -336,10 +336,12 @@ module NilKillRuntimeTrace
   def self.record_runtime_scip_call(tp, receiver_shape: true, deduplicate: false, callsite: nil)
     return if Thread.current[:__nil_kill_runtime_scip] ||
       Thread.current[:__nil_kill_collection_hook]
-    # Existing NilKill recorders also use this mutex. Metadata discovery may
-    # execute instrumented Ruby (or raise through an instrumented rescue path),
-    # so never enter this recorder while the current thread owns that lock.
-    return if @lock.respond_to?(:owned?) && @lock.owned?
+    # Existing NilKill recorders also use this mutex. When this thread already
+    # owns it, the shared evidence maps are protected, but trying to acquire it
+    # again would deadlock. The runtime-SCIP recursion guard below prevents
+    # metadata discovery from re-entering this recorder, so merge directly
+    # under the lock already held instead of dropping the demanded call.
+    lock_owned = @lock.respond_to?(:owned?) && @lock.owned?
 
     Thread.current[:__nil_kill_runtime_scip] = true
     owner = method_owner(tp.defined_class)
@@ -403,21 +405,12 @@ module NilKillRuntimeTrace
     seen = Thread.current[:__nil_kill_runtime_scip_identity_samples] ||= {}
     return key if deduplicate && seen[key]
 
-    @lock.synchronize do
-      record = (@runtime_calls[key] ||= {
-        schema_version: 1,
-        event: "runtime_call",
-        language: "ruby",
-        run_id: ENV.fetch("NIL_KILL_RUN_ID", ""),
-        caller: caller,
-        callsite: callsite,
-        callee: callee,
-        receiver_domain: receiver_domain,
-        result_truths: [],
-        count: 0,
-      })
-      merge_runtime_value_domain!(record[:receiver_domain], receiver_domain)
-      record[:count] += 1
+    if lock_owned
+      merge_runtime_scip_call!(key, caller, callsite, callee, receiver_domain)
+    else
+      @lock.synchronize do
+        merge_runtime_scip_call!(key, caller, callsite, callee, receiver_domain)
+      end
     end
     seen[key] = true if deduplicate
     key
@@ -427,6 +420,23 @@ module NilKillRuntimeTrace
     nil
   ensure
     Thread.current[:__nil_kill_runtime_scip] = nil
+  end
+
+  def self.merge_runtime_scip_call!(key, caller, callsite, callee, receiver_domain)
+    record = (@runtime_calls[key] ||= {
+      schema_version: 1,
+      event: "runtime_call",
+      language: "ruby",
+      run_id: ENV.fetch("NIL_KILL_RUN_ID", ""),
+      caller: caller,
+      callsite: callsite,
+      callee: callee,
+      receiver_domain: receiver_domain,
+      result_truths: [],
+      count: 0,
+    })
+    merge_runtime_value_domain!(record[:receiver_domain], receiver_domain)
+    record[:count] += 1
   end
 
   def self.record_runtime_scip_result(key, value)
@@ -466,7 +476,12 @@ module NilKillRuntimeTrace
     domain = empty_runtime_value_domain
     domain[:types] << class_name(value)
     record_key = runtime_record_shape_key(value)
-    domain[:shapes] << shape_payload(record_key) if record_key
+    if record_key
+      record_shape = shape_payload(record_key)
+      domain[:shapes] << record_shape
+      record_name = record_shape[:name] || record_shape["name"]
+      domain[:types] = [record_name] if record_name && domain[:types] == ["T.untyped"]
+    end
     shape = container_shape(value)
     if shape
       if shape[0] == :array
@@ -508,6 +523,14 @@ module NilKillRuntimeTrace
     return if members.empty?
 
     name = class_name(value)
+    if name == "T.untyped"
+      # Anonymous Struct classes all lack a Ruby constant name. Treating every
+      # layout as the same `T.untyped` record makes FactMine intersect unrelated
+      # member sets and blocks generated-accessor proofs. The field schema is a
+      # stable structural runtime identity; it claims no source-level nominal
+      # type and is sufficient for the generic record contract.
+      name = "AnonymousStruct(#{fields.map(&:to_s).join(",")})"
+    end
     signature = members.map { |member, shape| "#{member}=#{JSON.generate(shape)}" }.join("\\0")
     key = "record:#{name}:#{signature}".freeze
     remember_shape(key, { kind: "record", name: name, members: members })

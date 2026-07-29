@@ -837,6 +837,41 @@ RSpec.describe "NilKill coverage hardening" do
       FileUtils.rm_f(target_file)
     end
 
+    it "does not drop a demanded call while another NilKill recorder owns the mutex" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_nested_recorder_unit.rb")
+      FileUtils.mkdir_p(File.dirname(target_file))
+      File.write(target_file, "row.value\n")
+      described_class.runtime_scip_frames[Thread.current.object_id] << {
+        caller: {
+          class: "Worker", method: "run", kind: "instance",
+          path: target_file, line: 1,
+        },
+        callsite: { path: target_file, line: 1 },
+      }
+      owner = Class.new
+      allow(described_class).to receive(:method_owner)
+        .with(owner).and_return(["Row", "instance"])
+      call = FakeTracePoint.new(
+        event: :call,
+        path: target_file,
+        lineno: 1,
+        defined_class: owner,
+        method_id: :value,
+        self_value: Object.new
+      )
+
+      described_class.lock.synchronize do
+        described_class.record_runtime_scip_call(call, receiver_shape: false)
+      end
+
+      expect(described_class.runtime_calls.values).to include(a_hash_including(
+        callee: a_hash_including(owner: "Row", name: "value"),
+        callsite: a_hash_including(path: target_file, line: 1)
+      ))
+    ensure
+      FileUtils.rm_f(target_file)
+    end
+
     it "keeps TracePoint internal Ruby paths out of the workspace declaration set" do
       target_file = File.join(described_class::TARGETS.first, "runtime_internal_path_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))

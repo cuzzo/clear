@@ -4886,7 +4886,9 @@ fn extract_runtime_truthiness_guards(
     ) {
         if matches!(node.r#type.as_str(), "IF" | "UNLESS") {
             if let Some(condition) = node.children.first().and_then(crate::ast::node) {
-                if let Some(truthiness) = behavior.runtime_truthiness_guard(condition) {
+                let mut truthy_subjects = Vec::new();
+                collect_truthy_subjects(condition, behavior, &mut truthy_subjects);
+                for truthiness in truthy_subjects {
                     let body_span = node
                         .children
                         .get(if node.r#type == "UNLESS" { 2 } else { 1 })
@@ -4911,6 +4913,28 @@ fn extract_runtime_truthiness_guards(
         }
         for child in node.children.iter().filter_map(crate::ast::node) {
             visit(child, behavior, calls, guards);
+        }
+    }
+
+    fn collect_truthy_subjects(
+        condition: &crate::ast::Node,
+        behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+        subjects: &mut Vec<
+            crate::syntax::normalized_behavior::NormalizedRuntimeTruthinessGuard,
+        >,
+    ) {
+        if let Some(subject) = behavior.runtime_truthiness_guard(condition) {
+            subjects.push(subject);
+            return;
+        }
+        // A true normalized conjunction proves every operand truthy. An OR,
+        // negation, comparison, or arbitrary call does not. This is a generic
+        // Boolean fact over normalized AST roles; adapters still decide which
+        // leaf spellings carry native truthiness semantics.
+        if condition.r#type == "AND" {
+            for child in condition.children.iter().filter_map(crate::ast::node) {
+                collect_truthy_subjects(child, behavior, subjects);
+            }
         }
     }
 

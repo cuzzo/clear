@@ -244,11 +244,22 @@ category_rows = root_causes.values.flat_map(&:to_a).uniq.sort.to_h do |category|
       functions: symbol_calls.map { |call| call["source"] }.uniq.length
     }
   end.sort_by { |row| [-row[:functions], -row[:calls], row[:symbol].to_s] }.first(15)
+  call_examples = rows.first(options[:examples]).map do |call|
+    {
+      path: call["path"],
+      line: call["line"],
+      receiver: call["receiver"],
+      message: call["message"],
+      semantic_symbol: call["semantic_symbol"],
+      unresolved_reason: call["unresolved_reason"]
+    }
+  end
   [category, {
     affected_incomplete_functions: affected.length,
     direct_incomplete_functions: direct.length,
     direct_call_sites: rows.length,
     top_symbols: top_symbols,
+    call_examples: call_examples,
     examples: (direct.empty? ? affected : direct).first(options[:examples]).map(&location)
   }]
 end

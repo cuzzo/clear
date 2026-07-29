@@ -18,6 +18,7 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
         "calls" => 2,
         "ok_calls" => 2,
         "params_by_name" => { "rows" => ["Array"] },
+        "param_singleton_types" => { "rows" => ["RowsProvider"] },
         "param_elem" => { "rows" => ["Row"] },
         "param_value_shapes" => {
           "rows" => [{ "kind" => "record", "name" => "ObservedRows", "members" => {
@@ -36,6 +37,7 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
         },
         "param_kv" => {},
         "returns" => ["Array"],
+        "return_singleton_types" => ["RowsResultProvider"],
         "return_elem" => ["Row"],
         "return_kv" => [[], []],
         "return_elem_shapes" => [{ "kind" => "record", "name" => "ReturnedRow", "members" => {
@@ -83,6 +85,7 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
       end
       expect(parameter.dig("scope", "function")).to eq("run")
       expect(parameter.dig("domain", "types")).to eq(["Array"])
+      expect(parameter.dig("domain", "singletons")).to eq(["RowsProvider"])
       expect(parameter.dig("domain", "elements")).to eq(["Row"])
       expect(parameter.dig("domain", "shapes")).to include(
         "kind" => "record", "name" => "ObservedRows",
@@ -96,6 +99,8 @@ RSpec.describe NilKill::Runtime::ValueEvidenceEmitter do
         }]
       )
       returned = evidence.fetch("observations").find { |row| row["kind"] == "return" }
+      expect(returned.dig("domain", "types")).to eq(["Array"])
+      expect(returned.dig("domain", "singletons")).to eq(["RowsResultProvider"])
       expect(returned.dig("domain", "shapes")).to include(
         "kind" => "array",
         "elements" => [{

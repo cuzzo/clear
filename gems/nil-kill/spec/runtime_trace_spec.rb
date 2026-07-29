@@ -43,6 +43,32 @@ RSpec.describe "nil-kill runtime trace" do
     )
   end
 
+  it "gives anonymous Struct layouts distinct record identities instead of merging T.untyped" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    left = Struct.new(:arm).new("left")
+    right = Struct.new(:file).new("right")
+
+    left_domain = NilKillRuntimeTrace.runtime_value_domain(left)
+    right_domain = NilKillRuntimeTrace.runtime_value_domain(right)
+    left_shape = left_domain.fetch(:shapes).find { |shape| shape.fetch(:kind) == "record" }
+    right_shape = right_domain.fetch(:shapes).find { |shape| shape.fetch(:kind) == "record" }
+
+    expect(left_shape.fetch(:name)).not_to eq("T.untyped")
+    expect(left_shape.fetch(:name)).not_to eq(right_shape.fetch(:name))
+    expect(left_domain.fetch(:types)).to include(left_shape.fetch(:name))
+    expect(right_domain.fetch(:types)).to include(right_shape.fetch(:name))
+  end
+
+  it "preserves an exact module identity separately from its nominal Module type" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    provider = Module.new
+    stub_const("RuntimeTraceSemanticProvider", provider)
+
+    expect(NilKillRuntimeTrace.class_name(provider)).to eq("Module")
+    expect(NilKillRuntimeTrace.semantic_value_type_name(provider))
+      .to eq("RuntimeTraceSemanticProvider")
+  end
+
   it "attributes a native accessor on a test-defined Struct to its test source" do
     require_relative "../lib/nil_kill/runtime_trace"
     instance = RuntimeTraceSpecDouble.new([])

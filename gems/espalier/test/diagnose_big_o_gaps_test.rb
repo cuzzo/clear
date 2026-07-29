@@ -71,6 +71,17 @@ class DiagnoseBigOGapsTest < Minitest::Test
       unobserved = JSON.parse(unobserved_output)
       assert_equal 1, unobserved.dig("call_resolution", "runtime_callsite_unobserved", "calls")
       assert_nil unobserved.dig("call_resolution", "semantic_identity_missing")
+      assert_includes(
+        unobserved.dig("root_cause_categories", "runtime_callsite_unobserved", "call_examples"),
+        {
+          "path" => "repository/lib/worker.rb",
+          "line" => 3,
+          "receiver" => "value",
+          "message" => "unmodeled",
+          "semantic_symbol" => nil,
+          "unresolved_reason" => "receiver_requires_corpus_resolution"
+        }
+      )
 
       profile.fetch("calls").first["runtime_evidence_observed"] = true
       File.write(profile_path, JSON.generate(profile))

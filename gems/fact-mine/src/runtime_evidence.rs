@@ -81,6 +81,11 @@ pub struct SourceAnchor {
 pub struct ValueDomain {
     #[serde(default)]
     pub types: BTreeSet<String>,
+    /// Exact identities of module/class/function singleton values. These are
+    /// refinements of a nominal runtime type such as `Module`, not additional
+    /// union alternatives.
+    #[serde(default)]
+    pub singletons: BTreeSet<String>,
     #[serde(default)]
     pub elements: BTreeSet<String>,
     #[serde(default)]
@@ -109,6 +114,7 @@ pub struct ValueShape {
 impl ValueDomain {
     pub fn is_empty(&self) -> bool {
         self.types.is_empty()
+            && self.singletons.is_empty()
             && self.elements.is_empty()
             && self.keys.is_empty()
             && self.values.is_empty()
@@ -119,6 +125,7 @@ impl ValueDomain {
         for value in self
             .types
             .iter()
+            .chain(&self.singletons)
             .chain(&self.elements)
             .chain(&self.keys)
             .chain(&self.values)
@@ -1787,7 +1794,7 @@ fn infer_runtime_receiver_targets(
         let Some(domain) = receiver_domains.get(&call.id) else {
             continue;
         };
-        if domain.types.is_empty() {
+        if domain.types.is_empty() && domain.singletons.is_empty() {
             continue;
         }
         let Some(caller) = methods.by_id.get(call.source.as_str()) else {
@@ -1795,14 +1802,35 @@ fn infer_runtime_receiver_targets(
         };
         let mut targets = Vec::new();
         let mut closed = true;
-        for runtime_type in &domain.types {
+        let runtime_identities = if domain.singletons.is_empty() {
+            domain
+                .types
+                .iter()
+                .map(|identity| (identity, false))
+                .collect::<Vec<_>>()
+        } else {
+            domain
+                .singletons
+                .iter()
+                .map(|identity| (identity, true))
+                .collect::<Vec<_>>()
+        };
+        for (runtime_type, singleton) in runtime_identities {
             let mut type_targets = methods
                 .methods
                 .iter()
                 .filter(|method| method.language == caller.language)
-                .filter(|method| method.name == call.message)
+                .filter(|method| {
+                    method.name == call.message || method.dispatch_name == call.message
+                })
                 .filter(|method| runtime_owner_matches(&method.owner, runtime_type))
-                .filter(|method| project_method_kind_matches_call(method, call))
+                .filter(|method| {
+                    if singleton {
+                        matches!(method.kind.as_str(), "class" | "static")
+                    } else {
+                        project_method_kind_matches_call(method, call)
+                    }
+                })
                 .map(runtime_project_semantic_target)
                 .collect::<Vec<_>>();
             // A language-neutral `record` shape is a second closed target
@@ -2192,6 +2220,7 @@ fn domain_from_type_expr(
 
 fn merge_domain(target: &mut ValueDomain, source: &ValueDomain) {
     target.types.extend(source.types.iter().cloned());
+    target.singletons.extend(source.singletons.iter().cloned());
     target.elements.extend(source.elements.iter().cloned());
     target.keys.extend(source.keys.iter().cloned());
     target.values.extend(source.values.iter().cloned());
@@ -3148,6 +3177,76 @@ end
     }
 
     #[test]
+    fn cfg_dfg_overlay_reaches_a_fixed_point_through_nested_generated_accessors() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Worker
+  def run(rows)
+    rows.map { |row| row.arm.function }
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [{
+                    "kind": "parameter",
+                    "scope": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "function": "run", "line": 2
+                    },
+                    "slot": "rows",
+                    "domain": {
+                        "types": ["Array"], "elements": ["ArmCoverage"],
+                        "shapes": [{
+                            "kind": "array",
+                            "elements": [{
+                                "kind": "record", "name": "ArmCoverage",
+                                "members": {
+                                    "arm": {
+                                        "kind": "record", "name": "T.untyped",
+                                        "members": {
+                                            "function": {"kind": "class", "name": "String"}
+                                        }
+                                    }
+                                }
+                            }]
+                        }]
+                    },
+                    "count": 1
+                }],
+                "calls": []
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        for message in ["arm", "function"] {
+            let accessor = output
+                .calls
+                .iter()
+                .find(|call| call.function == "run" && call.message == message)
+                .unwrap_or_else(|| panic!("{message} accessor"));
+            let expected =
+                format!("fact-mine-runtime runtime-contract v1 Record#{message}().");
+            assert_eq!(
+                accessor.semantic_symbol.as_deref(),
+                Some(expected.as_str())
+            );
+            assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+            assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+        }
+    }
+
+    #[test]
     fn cfg_dfg_overlay_joins_value_preserving_alternative_call_results() {
         let mut file = tempfile::NamedTempFile::new().expect("source");
         file.write_all(
@@ -3657,6 +3756,70 @@ end
     }
 
     #[test]
+    fn cfg_dfg_overlay_refines_the_bare_subject_of_a_short_circuit_guard() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Worker
+  def run(existing)
+    if existing && existing.active?
+      existing.hits
+    end
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        assert!(
+            output
+                .runtime_truthiness_guards
+                .iter()
+                .any(|guard| guard.subject == "existing"),
+            "the true branch of `a && b` proves the bare left subject truthy"
+        );
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [{
+                    "kind": "parameter",
+                    "scope": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "function": "run", "line": 2
+                    },
+                    "slot": "existing",
+                    "domain": {
+                        "types": ["NilClass", "Row"],
+                        "shapes": [{
+                            "kind": "record", "name": "Row",
+                            "members": {
+                                "active?": {"kind": "class", "name": "TrueClass"},
+                                "hits": {"kind": "class", "name": "Integer"}
+                            }
+                        }]
+                    },
+                    "count": 2
+                }],
+                "calls": []
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let hits = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "hits")
+            .expect("truthy branch accessor");
+        assert_eq!(hits.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(hits.known_space_complexity.as_deref(), Some("O(1)"));
+    }
+
+    #[test]
     fn cfg_dfg_overlay_uses_fact_mine_proven_receiver_types() {
         let mut file = tempfile::NamedTempFile::new().expect("source");
         file.write_all(
@@ -3770,6 +3933,105 @@ end
         assert_eq!(
             inferred.semantic_symbol.as_deref(),
             Some("nil-kill-runtime workspace demo abc Renderer#render().")
+        );
+    }
+
+    #[test]
+    fn cfg_dfg_overlay_closes_provider_dispatch_from_exact_runtime_module_identities() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"module FirstProvider
+  def self.rule_id_for
+    "first"
+  end
+end
+
+module SecondProvider
+  def self.rule_id_for
+    "second"
+  end
+end
+
+class Worker
+  def run(provider)
+    provider.rule_id_for
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let run_line = output
+            .methods
+            .iter()
+            .find(|method| method.owner == "Worker" && method.name == "run")
+            .expect("run method")
+            .line;
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [{
+                    "kind": "parameter",
+                    "scope": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "function": "run", "line": run_line
+                    },
+                    "slot": "provider",
+                    "domain": {
+                        "types": ["Module"],
+                        "singletons": ["FirstProvider", "SecondProvider"]
+                    },
+                    "count": 2
+                }],
+                "calls": []
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        let methods = MethodIndex::new(&output.methods);
+        let seeded = observed_receiver_domains(&output, &evidence, &methods);
+        let provider_call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "rule_id_for")
+            .expect("provider call before overlay");
+        assert_eq!(
+            seeded
+                .get(&provider_call.id)
+                .map(|domain| domain.singletons.clone()),
+            Some(BTreeSet::from([
+                "FirstProvider".to_string(),
+                "SecondProvider".to_string()
+            ]))
+        );
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let dispatch = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "rule_id_for")
+            .expect("provider dispatch");
+
+        assert!(
+            dispatch.consumer_closed_candidate_set,
+            "provider dispatch remained open: {dispatch:#?}"
+        );
+        assert_eq!(dispatch.candidate_targets.len(), 2);
+        assert_eq!(
+            dispatch
+                .candidate_targets
+                .iter()
+                .filter_map(|target| output
+                    .methods
+                    .iter()
+                    .find(|method| method.id == *target)
+                    .map(|method| method.owner.as_str()))
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["FirstProvider", "SecondProvider"])
         );
     }
 

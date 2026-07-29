@@ -25,6 +25,7 @@ module NilKill
                   name,
                   domain(
                     types: types,
+                    singletons: method.fetch("param_singleton_types", {}).fetch(name, []),
                     elements: method.fetch("param_elem", {}).fetch(name, []),
                     keys: method.fetch("param_kv", {}).fetch(name, [[], []])[0],
                     values: method.fetch("param_kv", {}).fetch(name, [[], []])[1],
@@ -48,6 +49,7 @@ module NilKill
                   "",
                   domain(
                     types: method["returns"],
+                    singletons: method["return_singleton_types"],
                     elements: method["return_elem"],
                     keys: method.fetch("return_kv", [[], []])[0],
                     values: method.fetch("return_kv", [[], []])[1],
@@ -260,9 +262,10 @@ module NilKill
             }
           end
 
-          def domain(types: [], elements: [], keys: [], values: [], shapes: [])
+          def domain(types: [], singletons: [], elements: [], keys: [], values: [], shapes: [])
             {
               "types" => strings(types),
+              "singletons" => strings(singletons),
               "elements" => strings(elements),
               "keys" => strings(keys),
               "values" => strings(values),
@@ -336,7 +339,7 @@ module NilKill
               first = Marshal.load(Marshal.dump(duplicates.first))
               domain = first.fetch("domain")
               duplicates.drop(1).each do |row|
-                %w[types elements keys values shapes].each do |field|
+                %w[types singletons elements keys values shapes].each do |field|
                   domain[field] = (Array(domain[field]) | Array(row.dig("domain", field)))
                 end
                 first["count"] += row["count"].to_i

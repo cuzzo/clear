@@ -322,6 +322,17 @@ module NilKillRuntimeTrace
     @cls_name[cls] = (safe_module_name(cls) || "T.untyped")
   end
 
+  # Keep NilKill's nominal type samples (`Module` / `Class`) intact for its
+  # ordinary type inference, while separately preserving the singleton
+  # identity needed by semantic consumers. A module used as a strategy or
+  # provider dispatches its singleton methods through its constant identity;
+  # collapsing it to `Module` makes every such call permanently open.
+  def self.semantic_value_type_name(value)
+    return unless value.is_a?(Module)
+
+    safe_module_name(value)
+  end
+
   # Memoized constant-per-callsite context, or false if `path` is not
   # a target (negative cached too). Anchors bucket on @methods[key]
   # via method_bucket so racing first-calls still share one bucket.
@@ -969,6 +980,7 @@ module NilKillRuntimeTrace
       ok_calls: 0,
       raised_calls: 0,
       params_by_name: Hash.new { |h, k| h[k] = NKSet.new },
+      param_singleton_types: Hash.new { |h, k| h[k] = NKSet.new },
       params_ok: Hash.new { |h, k| h[k] = NKSet.new },
       params_raised: Hash.new { |h, k| h[k] = NKSet.new },
       param_sites: Hash.new { |h, k| h[k] = NKTally.new },
@@ -983,6 +995,7 @@ module NilKillRuntimeTrace
       param_elem_shapes: Hash.new { |h, k| h[k] = NKSet.new },
       param_kv_shapes: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
       returns: NKSet.new,
+      return_singleton_types: NKSet.new,
       return_value_shapes: NKSet.new,
       return_elem: NKSet.new,
       return_kv: [NKSet.new, NKSet.new],
@@ -1052,6 +1065,8 @@ module NilKillRuntimeTrace
           cls = class_name(value)
           name = @sym_s[name]
           b[:params_by_name][name] << cls
+          singleton_type = semantic_value_type_name(value)
+          b[:param_singleton_types][name] << singleton_type if singleton_type
           b[:param_sites][name]["#{ctx[:prefix]}:#{cls}"] += 1
           record = runtime_record_shape_key(value)
           b[:param_value_shapes][name] << record if record
@@ -1092,6 +1107,8 @@ module NilKillRuntimeTrace
         return value unless ctx[:sample_method] && sample_return?(ctx[:plan])
 
           b[:returns] << class_name(value)
+          singleton_type = semantic_value_type_name(value)
+          b[:return_singleton_types] << singleton_type if singleton_type
           record = runtime_record_shape_key(value)
           b[:return_value_shapes] << record if record
           shape = container_shape(value)
@@ -1152,6 +1169,7 @@ module NilKillRuntimeTrace
         frame_method: meta[:frame_method],
         plan: method_plan,
         params: Hash.new { |h, k| h[k] = NKSet.new },
+        param_singleton_types: Hash.new { |h, k| h[k] = NKSet.new },
         param_sites: Hash.new { |h, k| h[k] = NKTally.new },
         param_traces: Hash.new { |h, k| h[k] = NKTally.new },
         param_elem: Hash.new { |h, k| h[k] = NKSet.new },
@@ -1177,6 +1195,8 @@ module NilKillRuntimeTrace
           value = binding.local_variable_get(name) rescue nil unless meta[:forced_values]&.key?(name.to_s)
           cls = class_name(value)
           frame[:params][name.to_s] << cls
+          singleton_type = semantic_value_type_name(value)
+          frame[:param_singleton_types][name.to_s] << singleton_type if singleton_type
           frame[:param_sites][name.to_s][site_key(frame[:method_site], cls)] += 1
           record = runtime_record_shape_key(value)
           frame[:param_value_shapes][name.to_s] << record if record
@@ -1227,6 +1247,8 @@ module NilKillRuntimeTrace
         b[:returns] << class_name(value) if sample_return?(frame && frame[:plan])
         next_shape = sample_return?(frame && frame[:plan])
         return unless next_shape
+        singleton_type = semantic_value_type_name(value)
+        b[:return_singleton_types] << singleton_type if singleton_type
         record = runtime_record_shape_key(value)
         b[:return_value_shapes] << record if record
         shape = container_shape(value)
@@ -1294,6 +1316,9 @@ module NilKillRuntimeTrace
       target = outcome == :ok ? bucket[:params_ok] : bucket[:params_raised]
       target[name].merge(classes)
     end
+    frame[:param_singleton_types].each do |name, types|
+      bucket[:param_singleton_types][name].merge(types)
+    end
     frame[:param_sites].each do |name, sites|
       sites.each do |site, count|
         bucket[:param_sites][name][site] += count
@@ -1323,6 +1348,9 @@ module NilKillRuntimeTrace
 
   def self.commit_params_observed(bucket, frame)
     frame[:params].each { |name, classes| bucket[:params_by_name][name].merge(classes) }
+    frame[:param_singleton_types].each do |name, types|
+      bucket[:param_singleton_types][name].merge(types)
+    end
     frame[:param_sites].each do |name, sites|
       sites.each { |site, count| bucket[:param_sites][name][site] += count }
     end
@@ -1913,6 +1941,7 @@ module NilKillRuntimeTrace
           ok_calls: rec[:ok_calls],
           raised_calls: rec[:raised_calls],
           params_by_name: rec[:params_by_name].transform_values { |set| set.to_a.sort },
+          param_singleton_types: rec[:param_singleton_types].transform_values { |set| set.to_a.sort },
           params_ok: rec[:params_ok].transform_values { |set| set.to_a.sort },
           params_raised: rec[:params_raised].transform_values { |set| set.to_a.sort },
           param_sites: dump_hash_counts(rec[:param_sites]),
@@ -1927,6 +1956,7 @@ module NilKillRuntimeTrace
           param_elem_shapes: rec[:param_elem_shapes].transform_values { |set| set.to_a.sort.map { |shape| shape_payload(shape) } },
           param_kv_shapes: rec[:param_kv_shapes].transform_values { |kv| [kv[0].to_a.sort.map { |shape| shape_payload(shape) }, kv[1].to_a.sort.map { |shape| shape_payload(shape) }] },
           returns: rec[:returns].to_a.sort,
+          return_singleton_types: rec[:return_singleton_types].to_a.sort,
           return_value_shapes: rec[:return_value_shapes].to_a.sort.map { |shape| shape_payload(shape) },
           return_elem: rec[:return_elem].to_a.sort,
           return_kv: [rec[:return_kv][0].to_a.sort, rec[:return_kv][1].to_a.sort],
