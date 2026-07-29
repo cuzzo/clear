@@ -1580,14 +1580,13 @@ fn matched_profile_calls<'a>(
     if let Some(range) = observed.callsite.range {
         candidates.retain(|call| zero_based(call.span) == range);
     } else {
-        let same_line = candidates
-            .iter()
-            .copied()
-            .filter(|call| call.line == observed.callsite.line)
-            .collect::<Vec<_>>();
-        if !same_line.is_empty() {
-            candidates = same_line;
-        }
+        // A caller match alone is not enough: native/runtime implementation
+        // frames can report a selector at the active source line even when
+        // that selector is not spelled there. Joining it to another call in
+        // the same method (which merely shares the selector) corrupts the
+        // CFG/DFG value domain. Keep the runtime source anchor exact; the
+        // source-anchor fallback below handles genuinely synthetic callers.
+        candidates.retain(|call| call.line == observed.callsite.line);
     }
     if !candidates.is_empty() {
         return candidates;
@@ -2376,6 +2375,106 @@ end
             accessor.semantic_symbol.as_deref(),
             Some("fact-mine-runtime runtime-contract v1 Record#kind().")
         );
+    }
+
+    #[test]
+    fn cfg_dfg_overlay_projects_observed_iterator_receiver_shapes_into_ruby_callbacks() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Worker
+  def labels(rows)
+    rows.each do |row|
+      row.kind.upcase
+    end
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "calls": [{
+                    "language": "ruby",
+                    "caller": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "name": "labels",
+                        "kind": "instance", "line": 2
+                    },
+                    "callsite": {"path": path, "line": 3, "selector": "each"},
+                    "targets": [{
+                        "symbol": "nil-kill-runtime ruby ruby 3.2.3 Array#each().",
+                        "owner": "Array", "name": "each", "kind": "instance",
+                        "receiver_type": "Array"
+                    }],
+                    "receiver_domain": {
+                        "types": ["Array"], "elements": ["ObservedRow"],
+                        "shapes": [{
+                            "kind": "array",
+                            "elements": [{
+                                "kind": "record", "name": "ObservedRow",
+                                "members": {"kind": {"kind": "class", "name": "String"}}
+                            }]
+                        }]
+                    },
+                    "count": 1
+                }, {
+                    // Ruby's C-backed `sort_by` may internally enumerate the
+                    // receiver. TracePoint attributes that native `each` to
+                    // the active source line even though no `each` call is
+                    // spelled there. It must not be joined to the earlier
+                    // source `rows.each` merely because the selector matches.
+                    "language": "ruby",
+                    "caller": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "name": "labels",
+                        "kind": "instance", "line": 2
+                    },
+                    "callsite": {"path": path, "line": 4, "selector": "each"},
+                    "targets": [{
+                        "symbol": "nil-kill-runtime ruby ruby 3.2.3 Array#each().",
+                        "owner": "Array", "name": "each", "kind": "instance",
+                        "receiver_type": "Array"
+                    }],
+                    "receiver_domain": {
+                        "types": ["Array"], "elements": ["UnrelatedRow"],
+                        "shapes": [{
+                            "kind": "array",
+                            "elements": [{
+                                "kind": "record", "name": "UnrelatedRow",
+                                "members": {"other": {"kind": "class", "name": "String"}}
+                            }]
+                        }]
+                    },
+                    "count": 1
+                }]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let accessor = output
+            .calls
+            .iter()
+            .find(|call| call.function == "labels" && call.message == "kind")
+            .expect("record accessor");
+        assert_eq!(accessor.receiver_type.as_deref(), Some("ObservedRow"));
+        assert_eq!(
+            accessor.semantic_symbol.as_deref(),
+            Some("fact-mine-runtime runtime-contract v1 Record#kind().")
+        );
+        let upcase = output
+            .calls
+            .iter()
+            .find(|call| call.function == "labels" && call.message == "upcase")
+            .expect("record member operation");
+        assert_eq!(upcase.receiver_type.as_deref(), Some("String"));
     }
 
     #[test]
