@@ -219,6 +219,20 @@ module NilKill
         )
       end
 
+      def mark_stale!(reason:, selection:)
+        write_manifest!(
+          manifest.merge(
+            "complete" => false,
+            "potentially_stale" => true,
+            "stale_reason" => reason.to_s,
+            "attempted_changed_functions" => selection.fetch("changed_functions", []),
+            "attempted_changed_tests" => selection.fetch("changed_tests", []),
+            "attempted_selected_shards" => selection.fetch("selected_shards", []),
+            "stale_at" => Time.now.utc.iso8601
+          )
+        )
+      end
+
       private
 
       def runtime_environment(files)

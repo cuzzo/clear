@@ -198,10 +198,13 @@ RSpec.describe "NilKill coverage hardening" do
         seen_env.size == 1
       end
 
-      capture_io { cli.run }
+      expect { capture_io { cli.run } }.to raise_error(SystemExit) do |error|
+        expect(error.status).to eq(1)
+      end
 
       expect(NilKill::TracePlan).to have_received(:write)
       expect(NilKill).to have_received(:restore_inplace_snapshot!)
+      expect(seen_env.length).to eq(2)
       expect(seen_env.first).to include("NIL_KILL_TRACE" => "1")
       expect(seen_env.first["RUBYOPT"]).to include("runtime_trace.rb")
       expect(seen_env.first["NIL_KILL_TRACE_METHODS"]).to eq("0")

@@ -255,6 +255,7 @@ module NilKill
       callsite_updates = {}
       staged_evidence = {}
       shard_run_ids = {}
+      failed_shards = []
       begin
         selected.each_with_index do |shard, i|
           shard_dir = File.join(working_runtime_dir, shard.fetch("id"))
@@ -271,11 +272,21 @@ module NilKill
           cmd = shard.fetch("command")
           puts "[#{i + 1}/#{selected.size}] NIL_KILL_TRACE=1 RUBYOPT=#{rubyopt.shellescape} #{cmd.shelljoin}"
           ok = system(env, *cmd)
-          next if ok || continue
-          exit($?&.exitstatus || 1)
+          next if ok
+
+          failed_shards << shard.fetch("id")
+          break unless continue
         end
       ensure
         NilKill.restore_inplace_snapshot! if instrumented
+      end
+      if failed_shards.any?
+        snapshot&.mark_stale!(
+          reason: "required trace shard(s) failed: #{failed_shards.join(", ")}",
+          selection: selection
+        )
+        abort "nil-kill: required trace shard(s) failed; canonical evidence was not replaced: " \
+          "#{failed_shards.join(", ")}"
       end
       selected.each do |shard|
         shard_id = shard.fetch("id")

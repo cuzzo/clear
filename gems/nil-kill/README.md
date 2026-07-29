@@ -97,7 +97,8 @@ added without changing Nil-kill's analyzer.
 > whose impact cannot be closed precisely (shared helpers, function
 > additions/deletions, dependency/runtime changes, or opaque workloads)
 > automatically fall back to every shard. Only a fallback that cannot run is
-> allowed to remain explicitly stale.
+> allowed to remain explicitly stale; failed shards never replace canonical
+> evidence, including under `--continue-on-error`.
 
 Nil-Kill's trace plan omits method boundaries, T.let sites, and state fields
 whose contracts are already strong. Unknown and weak slots are retained

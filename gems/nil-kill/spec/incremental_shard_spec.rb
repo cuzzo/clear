@@ -20,9 +20,10 @@ RSpec.describe "NilKill incremental test shards" do
       }
       loader = "Dir[#{File.join(root, "test", "*_test.rb").inspect}].sort.each { |file| require file }"
       workload = [RbConfig.ruby, "-I", File.join(root, "lib"), "-e", loader]
-      collect = lambda do |fast: false|
+      collect = lambda do |fast: false, continue_on_error: false|
         args = [RbConfig.ruby, executable, "collect"]
         args << "--fast" if fast
+        args << "--continue-on-error" if continue_on_error
         Open3.capture3(env, *args, "--", *workload)
       end
       manifest_path = File.join(runtime, NilKill::Runtime::Snapshot::MANIFEST)
@@ -96,6 +97,31 @@ RSpec.describe "NilKill incremental test shards" do
       expect(manifest.call).to include(
         "support_changed" => true,
         "fallback_full" => true,
+        "potentially_stale" => false
+      )
+
+      double_test = File.join(root, "test", "double_test.rb")
+      passing_double_test = File.read(double_test)
+      canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+      canonical_before_failure = Digest::SHA256.file(canonical).hexdigest
+      File.write(double_test, passing_double_test.sub("assert_equal 8", "raise \"trace failure\""))
+      File.write(File.join(root, "test", "test_helper.rb"), "SHARD_HELPER_VERSION = 2\n")
+      stdout, stderr, status = collect.call(fast: true, continue_on_error: true)
+      expect(status).not_to be_success
+      expect("#{stdout}\n#{stderr}").to include("canonical evidence was not replaced")
+      expect(manifest.call).to include(
+        "complete" => false,
+        "potentially_stale" => true
+      )
+      expect(manifest.call.fetch("stale_reason")).to include("required trace shard")
+      expect(Digest::SHA256.file(canonical).hexdigest).to eq(canonical_before_failure)
+
+      File.write(double_test, passing_double_test)
+      stdout, stderr, status = collect.call(fast: true)
+      expect(status).to be_success, "#{stdout}\n#{stderr}"
+      expect(stdout).to include("3 traced shards")
+      expect(manifest.call).to include(
+        "complete" => true,
         "potentially_stale" => false
       )
 
