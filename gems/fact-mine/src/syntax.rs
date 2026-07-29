@@ -139,6 +139,15 @@ pub(crate) fn parametric_call_complexity(kind: &str) -> Option<(&'static str, &'
         "callback_linear" => Some(("O(N*C)", "O(N*S)")),
         "callback_sort" => Some(("O(N log N*C)", "O(N+S)")),
         "reflective_once" => Some(("O(R)", "O(S)")),
+        // A native dynamic-language primitive has a concrete scan/materialize
+        // phase after exactly one user-overridable coercion (for example
+        // String#to_str or File#to_path).  These are language-neutral algebra
+        // atoms, not Ruby-specific behavior.
+        "coercive_linear_scan" => Some(("O(N+C)", "O(S)")),
+        "coercive_linear_materialize" => Some(("O(N+C)", "O(N+S)")),
+        // A loader executes the selected program body.  `R` is its open
+        // target cost; `N` covers lookup/path processing done by the loader.
+        "loader_once" => Some(("O(N+R)", "O(N+S)")),
         _ => None,
     }
 }
@@ -895,6 +904,22 @@ mod tests {
                     .iter()
                     .any(|call| call.span == origin.normalized_call_span)
         }));
+    }
+
+    #[test]
+    fn parametric_contract_algebra_keeps_coercion_and_loader_work_symbolic() {
+        assert_eq!(
+            parametric_call_complexity("coercive_linear_scan"),
+            Some(("O(N+C)", "O(S)"))
+        );
+        assert_eq!(
+            parametric_call_complexity("coercive_linear_materialize"),
+            Some(("O(N+C)", "O(N+S)"))
+        );
+        assert_eq!(
+            parametric_call_complexity("loader_once"),
+            Some(("O(N+R)", "O(N+S)"))
+        );
     }
 
     #[test]

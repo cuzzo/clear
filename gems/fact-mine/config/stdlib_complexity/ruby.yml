@@ -325,6 +325,9 @@ SemanticSymbol:
   'JSON.generate().': linear_materialize
   'JSON.pretty_generate().': linear_materialize
   'Psych.safe_load().': linear_materialize
+  # Onigmo is a backtracking engine.  `match?` has an exponential worst case
+  # in the pattern/input pair and linear engine stack space.
+  'Regexp#match?().': exponential
 ExternalLatency:
   "File.exist?": linear_scan
   "File.read": linear_materialize
@@ -364,6 +367,20 @@ ExternalLatency:
   "Kernel.warn": linear_scan
   "Kernel.exit": constant
   "Kernel.system": linear_scan
+ExternalLatencyParametric:
+  # Native path APIs invoke Ruby's to_path before their bounded byte/path
+  # work.  C is that single coercion callback and N is the path/output size.
+  "File.realpath": coercive_linear_materialize
+  "File.executable?": coercive_linear_scan
+  "File.absolute_path?": coercive_linear_scan
+  "IO.read": coercive_linear_materialize
+  # A runtime receiver may have converged to IO or StringIO.  Both perform
+  # the same bounded coercion/read/materialization work, so the generic SCIP
+  # candidate join can retain the contract instead of dropping an otherwise
+  # complete observed IO.read callsite.
+  "StringIO.read": coercive_linear_materialize
+  "Dir.[]": coercive_linear_materialize
+  "Dir.chdir": coercive_linear_scan
 SemanticSymbolParametricCost:
   'Class#new().': reflective_once
   'Proc0#call().': callback_once
@@ -382,6 +399,16 @@ SemanticSymbolParametricCost:
   'Kernel#inspect().': reflective_once
   'Kernel#Array().': reflective_once
   'Kernel#Hash().': reflective_once
+  # `require` selects and executes an arbitrary loader/body.  This is an open
+  # reflective target rather than a fabricated constant-time loader bound.
+  'Kernel#require().': loader_once
+  # CRuby's Exception#message uses rb_funcallv(exc, :to_s, ...).
+  'Exception#message().': callback_once
+  # Get_Double may call Numeric#to_f; a later runtime type proof can narrow
+  # Float to O(1), but the unspecialized source contract remains symbolic.
+  'Math.exp().': callback_once
+  # reg_operand calls to_str once before rb_reg_quote scans and materializes.
+  'Regexp.escape().': coercive_linear_materialize
   'Kernel#loop().': callback_linear
   'Range#each().': callback_linear
   'Array#each().': callback_linear
@@ -405,6 +432,8 @@ SemanticSymbolParametricCost:
   'Enumerable#map().': callback_linear
   'Enumerable#each().': callback_linear
   'Enumerable#each_with_object().': callback_linear
+  # each_slice drives #each and yields slices to an arbitrary block.
+  'Enumerable#each_slice().': callback_linear
   'Enumerable#select().': callback_linear
   'Enumerable#reduce().': callback_linear
   'Enumerable#group_by().': callback_linear
@@ -449,6 +478,7 @@ Namespace:
   Regexp: declaration
   Set: declaration
   String: declaration
+  StringIO: declaration
   Symbol: declaration
   T: declaration
   Time: declaration

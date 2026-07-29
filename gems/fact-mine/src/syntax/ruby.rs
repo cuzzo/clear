@@ -24,6 +24,7 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 
 use super::normalized_behavior::{
     configured_collection_operation, configured_external_latency_bound,
+    configured_external_latency_parametric_cost,
     configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
     configured_stdlib_call_identity, eliminable_guard_from_call, matching_paren_index,
@@ -220,6 +221,19 @@ pub(crate) fn external_symbol_call_complexity(
             assumption: None,
         });
     }
+    if let Some(kind) = configured_external_latency_parametric_cost("ruby", &owner, message) {
+        let (time, space) = super::parametric_call_complexity(&kind)?;
+        return Some(ExternalCallComplexity {
+            time,
+            space,
+            provenance: "ruby_external_effect_parametric_registry",
+            bound_quality: "upper_bound_external_latency_excluded_parametric",
+            candidates: Vec::new(),
+            assumption: Some(format!(
+                "computational Big-O only; filesystem, process, stream, or terminal latency is excluded; `{kind}` remains symbolic"
+            )),
+        });
+    }
     let complexity = configured_external_latency_bound("ruby", &owner, message)?;
     Some(ExternalCallComplexity {
         time: complexity.time,
@@ -272,7 +286,10 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
             missing_cost_kind: configured_semantic_symbol_kind("ruby", descriptor)
                 .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
             parametric_cost: configured_semantic_symbol_parametric_cost("ruby", descriptor)
-                .or_else(|| ruby_family_parametric_cost(&owner, &message)),
+                .or_else(|| ruby_family_parametric_cost(&owner, &message))
+                .or_else(|| {
+                    configured_external_latency_parametric_cost("ruby", &owner, &message)
+                }),
         }
     } else {
         super::ExternalSymbolMetadata {
@@ -3979,5 +3996,67 @@ mod tests {
             comparable.parametric_cost.as_deref(),
             Some("reflective_once")
         );
+    }
+
+    #[test]
+    fn cruby_runtime_effect_and_callback_contracts_cover_the_native_surface() {
+        // NilKill emits core frames under its runtime identity.  These calls
+        // must use the same reviewed contracts as SCIP-Ruby core symbols;
+        // otherwise the ExternalLatency section is dead data for Ruby.
+        let read = external_symbol_call_complexity(
+            "nil-kill-runtime ruby ruby 3.2.3 IO#read().",
+            "read",
+        )
+        .expect("IO.read should use the external-latency contract");
+        assert_eq!((read.time, read.space), ("O(N+C)", "O(N+S)"));
+        assert_eq!(
+            read.bound_quality,
+            "upper_bound_external_latency_excluded_parametric"
+        );
+        let stringio_read = external_symbol_call_complexity(
+            "nil-kill-runtime ruby ruby 3.2.3 StringIO#read().",
+            "read",
+        )
+        .expect("StringIO#read must converge with a runtime IO#read candidate");
+        assert_eq!(
+            (stringio_read.time, stringio_read.space),
+            (read.time, read.space)
+        );
+
+        for (symbol, message) in [
+            ("nil-kill-runtime ruby ruby 3.2.3 File.realpath().", "realpath"),
+            ("nil-kill-runtime ruby ruby 3.2.3 File.executable?().", "executable?"),
+            ("nil-kill-runtime ruby ruby 3.2.3 File.absolute_path?().", "absolute_path?"),
+            ("nil-kill-runtime ruby ruby 3.2.3 Dir.`[]`().", "[]"),
+            ("nil-kill-runtime ruby ruby 3.2.3 Dir.chdir().", "chdir"),
+        ] {
+            let cost = external_symbol_call_complexity(symbol, message)
+                .unwrap_or_else(|| panic!("missing external contract for {symbol}"));
+            assert_eq!(
+                cost.bound_quality,
+                "upper_bound_external_latency_excluded_parametric"
+            );
+        }
+
+        for (symbol, kind) in [
+            ("nil-kill-runtime ruby ruby 3.2.3 Exception#message().", "callback_once"),
+            ("nil-kill-runtime ruby ruby 3.2.3 Enumerable#each_slice().", "callback_linear"),
+            ("nil-kill-runtime ruby ruby 3.2.3 Kernel#require().", "loader_once"),
+            ("nil-kill-runtime ruby ruby 3.2.3 Math.exp().", "callback_once"),
+            ("nil-kill-runtime ruby ruby 3.2.3 Regexp.escape().", "coercive_linear_materialize"),
+        ] {
+            assert_eq!(
+                external_symbol_metadata(symbol).parametric_cost.as_deref(),
+                Some(kind),
+                "missing parametric contract for {symbol}"
+            );
+        }
+
+        let match_p = external_symbol_call_complexity(
+            "nil-kill-runtime ruby ruby 3.2.3 Regexp#match?().",
+            "match?",
+        )
+        .expect("Regexp#match? should carry the regex-engine worst-case bound");
+        assert_eq!((match_p.time, match_p.space), ("O(2^N)", "O(N)"));
     }
 }

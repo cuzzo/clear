@@ -77,7 +77,10 @@ def function_rows(profile, prefixes, source_root)
         next unless method
 
         quality = function.fetch(:quality_metrics, {})
-        key = [mod[:file], function[:span], mod[:module], function[:name]]
+        # A reopenable Ruby module can span several files. `mod[:file]` is an
+        # aggregate container choice and may change with profile ordering;
+        # method identity must instead use the FactMine declaration path.
+        key = [method.fetch("path"), function[:span], mod[:module], function[:name]]
         rows[key] = {
           repository: repository,
           file: mod[:file],

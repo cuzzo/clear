@@ -934,6 +934,23 @@ pub(crate) fn configured_external_latency_bound(
         .map(NormalizedCollectionOperation::complexity)
 }
 
+/// Resolve a parameterized external-effect contract.  This is the companion
+/// to `ExternalLatency`: the bytes/path work is bounded while device latency
+/// remains excluded, but a dynamic-language API may first invoke a coercion
+/// hook such as Ruby's `to_path`.  Keeping the parameter here preserves both
+/// facts without putting a Ruby special case in the shared SCIP importer.
+pub(crate) fn configured_external_latency_parametric_cost(
+    language: &str,
+    owner: &str,
+    message: &str,
+) -> Option<String> {
+    let operations = stdlib_operations(language)?;
+    operations
+        .get("ExternalLatencyParametric")?
+        .get(&format!("{}.{}", owner.trim(), message))
+        .cloned()
+}
+
 /// Computational model for a reviewed runtime spelling when the selected
 /// compiler configuration has no SCIP occurrence (typically an inactive
 /// preprocessor branch). The adapter must expose the modeled-world assumption
