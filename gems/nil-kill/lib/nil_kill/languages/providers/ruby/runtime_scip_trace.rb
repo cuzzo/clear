@@ -46,8 +46,12 @@ module NilKillRuntimeTrace
       path: path,
       line: src_line(path, tp.lineno),
     }
+    arm_runtime_scip_native_callsite(frame[:callsite])
+  end
+
+  def self.arm_runtime_scip_native_callsite(callsite)
     native_activation = if runtime_scip_native_calls_enabled?
-                          runtime_scip_native_activation(frame[:callsite])
+                          runtime_scip_native_activation(callsite)
                         end
     activate_native_calls = !!native_activation
     @runtime_scip_native_selector_filter =
@@ -63,7 +67,7 @@ module NilKillRuntimeTrace
       @runtime_scip_native_call_armed = true
       runtime_scip_native_call_trace.enable
     end
-    _capture_call, capture_result, _receiver_shape = runtime_scip_captures_for(frame[:callsite])
+    _capture_call, capture_result, _receiver_shape = runtime_scip_captures_for(callsite)
     return unless capture_result && runtime_scip_native_calls_enabled?
 
     # Enable c_return before the requested c_call starts. Enabling it from
@@ -88,12 +92,36 @@ module NilKillRuntimeTrace
     unless target
       return if frames.empty?
 
-      fallback_callsite = frames.last&.fetch(:callsite, nil)
-      if fallback_callsite && target_path?(fallback_callsite[:path])
-        @runtime_executed_callsites[
-          [fallback_callsite[:path], fallback_callsite[:line], tp.method_id.to_s]
-        ] += 1
+      selected_frame = frames.last
+      external_depth = selected_frame.fetch(:runtime_scip_external_depth, 0)
+      fallback_callsite = selected_frame.fetch(:callsite, nil)
+      if external_depth.zero? && fallback_callsite
+        callsite = if runtime_scip_callsite_captures_selector?(fallback_callsite, tp.method_id)
+                     fallback_callsite
+                   else
+                     runtime_scip_ruby_callsite(tp, fallback_callsite)
+                   end
+        capture_call, capture_result, receiver_shape =
+          runtime_scip_captures_for(callsite, tp.method_id)
+        observed_call = if capture_call || capture_result || receiver_shape
+                          record_runtime_scip_call(
+                            tp,
+                            receiver_shape: receiver_shape,
+                            deduplicate: !capture_result && !receiver_shape,
+                            callsite: callsite,
+                          )
+                        end
+        selected_frame[:runtime_scip_external_call] = {
+          observed_call: observed_call,
+          capture_result: capture_result && !observed_call.nil?,
+        }
+        if callsite && target_path?(callsite[:path])
+          @runtime_executed_callsites[
+            [callsite[:path], callsite[:line], tp.method_id.to_s]
+          ] += 1
+        end
       end
+      selected_frame[:runtime_scip_external_depth] = external_depth + 1
       @runtime_scip_external_depth[thread_id] += 1
       return
     end
@@ -155,6 +183,17 @@ module NilKillRuntimeTrace
     unless target_path?(tp.path)
       depth = @runtime_scip_external_depth[thread_id]
       @runtime_scip_external_depth[thread_id] = depth - 1 if depth.positive?
+      selected_frame = @runtime_scip_frames[thread_id].last
+      frame_depth = selected_frame&.fetch(:runtime_scip_external_depth, 0).to_i
+      if frame_depth.positive?
+        selected_frame[:runtime_scip_external_depth] = frame_depth - 1
+        if frame_depth == 1
+          external_call = selected_frame.delete(:runtime_scip_external_call)
+          if external_call&.fetch(:capture_result, false)
+            record_runtime_scip_result(external_call[:observed_call], tp.return_value)
+          end
+        end
+      end
       return
     end
 
@@ -162,9 +201,16 @@ module NilKillRuntimeTrace
     return if frames.empty?
 
     frame = frames.pop
-    return unless frame&.fetch(:capture_result, false)
+    if frame&.fetch(:capture_result, false)
+      record_runtime_scip_result(frame[:observed_call], tp.return_value)
+    end
 
-    record_runtime_scip_result(frame[:observed_call], tp.return_value)
+    # Ruby emits no second :line event when evaluation resumes after a nested
+    # Ruby call in the middle of one expression. Restore the parent's exact
+    # native selector window here so calls in the remainder of that expression
+    # are neither lost nor attributed to the callee's last source line.
+    parent_callsite = frames.last&.fetch(:callsite, nil)
+    arm_runtime_scip_native_callsite(parent_callsite) if parent_callsite
   end
 
   def self.enter_runtime_scip_native_call(tp)
