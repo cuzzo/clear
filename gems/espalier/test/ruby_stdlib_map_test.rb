@@ -33,6 +33,14 @@ class RubyStdlibMapTest < Minitest::Test
     "ruby",
     "semantic_environment.rb"
   )
+  MANIFEST = File.join(ROOT, "fact-mine", "config", "stdlib_maps", "ruby-3.2.3.yml")
+
+  def test_cruby_core_a_profiles_the_indexed_regexp_implementation_surface
+    manifest = YAML.safe_load(File.read(MANIFEST))
+    includes = manifest.fetch("source").fetch("include")
+
+    assert_includes includes, "{array,dir,enum,error,file,hash,io,math,numeric,re,string}.c"
+  end
 
   def test_cruby_registration_bridge_preserves_exact_aliases_and_rejects_unproven_bodies
     Dir.mktmpdir do |directory|
