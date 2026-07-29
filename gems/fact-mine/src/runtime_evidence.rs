@@ -421,7 +421,14 @@ pub fn apply_to_profile(
         }
     }
 
-    let index = build_scip_index(output, evidence, &selected, &method_index, &mut stats)?;
+    let index = build_scip_index(
+        output,
+        evidence,
+        &observed,
+        &selected,
+        &method_index,
+        &mut stats,
+    )?;
     if !selected.is_empty() {
         crate::scip::apply_json(output, &serde_json::to_string(&index)?)?;
     }
@@ -1874,6 +1881,7 @@ fn runtime_project_method_symbol(method_id: &str) -> String {
 fn build_scip_index(
     output: &ProfileOutput,
     evidence: &RuntimeValueEvidence,
+    observed: &BTreeMap<String, Vec<SemanticTarget>>,
     selected: &BTreeMap<String, Vec<SemanticTarget>>,
     methods: &MethodIndex<'_>,
     stats: &mut OverlayStats,
@@ -1889,6 +1897,22 @@ fn build_scip_index(
         .iter()
         .map(|call| (call.id.as_str(), call))
         .collect::<BTreeMap<_, _>>();
+    // An observed runtime target can be weaker than an exact static project
+    // target, in which case the consumer correctly retains the static target.
+    // Preserve the independently useful coverage provenance nonetheless so
+    // downstream diagnostics do not misclassify that source callsite as
+    // unexecuted. These anchors are emitted only after the generic normalized
+    // caller/callsite join above, never directly from tracer frames.
+    let observed_call_sites = observed
+        .keys()
+        .filter_map(|call_id| calls.get(call_id.as_str()).copied())
+        .map(|call| {
+            json!({
+                "relativePath": normalized_document_path(&call.path),
+                "range": compact_range(zero_based(call.span))
+            })
+        })
+        .collect::<Vec<_>>();
 
     for (call_id, targets) in selected {
         let Some(call) = calls.get(call_id.as_str()).copied() else {
@@ -1971,6 +1995,7 @@ fn build_scip_index(
             "schema": evidence.schema,
             "runs": evidence.runs,
             "observedCallSites": stats.observed_call_sites,
+            "observedCallsiteAnchors": observed_call_sites,
             "inferredCallSites": stats.inferred_call_sites,
             "typedReceivers": stats.typed_receivers,
             "emittedOccurrences": stats.emitted_occurrences
@@ -3478,7 +3503,7 @@ end
         )
         .expect("evidence");
 
-        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let overlay = apply_to_profile(&mut output, &evidence).expect("overlay");
         let array = output
             .calls
             .iter()
@@ -3488,6 +3513,12 @@ end
         assert_eq!(
             array.semantic_symbol.as_deref(),
             Some("nil-kill-runtime ruby ruby 3.2.3 Kernel#Array().")
+        );
+        assert_eq!(
+            overlay.index["_runtimeEvidence"]["observedCallsiteAnchors"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
         );
     }
 

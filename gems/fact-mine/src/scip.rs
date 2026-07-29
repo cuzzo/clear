@@ -33,6 +33,26 @@ struct Index {
     metadata: Option<Metadata>,
     #[serde(default)]
     documents: Vec<Document>,
+    /// FactMine's runtime-SCIP envelope carries normalized, exact source
+    /// anchors separately from SCIP semantic occurrences. An observed runtime
+    /// target may lose to a stronger static project target, but that must not
+    /// erase the fact that the source callsite executed.
+    #[serde(rename = "_runtimeEvidence", default)]
+    runtime_evidence: RuntimeEvidence,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeEvidence {
+    #[serde(default, alias = "observedCallsiteAnchors")]
+    observed_callsite_anchors: Vec<ObservedCallsiteAnchor>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ObservedCallsiteAnchor {
+    #[serde(default, alias = "relativePath")]
+    relative_path: String,
+    #[serde(default)]
+    range: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -259,6 +279,9 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
 
 fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportStats> {
     let authority = index_authority(&index)?;
+    let runtime_observed_callsite_anchors = (authority == IndexAuthority::RuntimeModeled)
+        .then(|| runtime_observed_callsite_anchors(&index))
+        .unwrap_or_default();
     for information in index
         .documents
         .iter_mut()
@@ -334,6 +357,9 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
             stats.unmatched_calls += 1;
             continue;
         };
+        call.runtime_evidence_observed |= runtime_observed_callsite_anchors
+            .get(&document.relative_path)
+            .is_some_and(|anchors| anchors.contains(&zero_based_span(call.span)));
         let source = fs::read_to_string(&call.path).unwrap_or_default();
         let Some(selected) = select_call_occurrences(call, document, &source, language) else {
             stats.unmatched_calls += 1;
@@ -760,6 +786,37 @@ fn index_authority(index: &Index) -> Result<IndexAuthority> {
             declared.into_iter().collect::<Vec<_>>().join(", ")
         )
     }
+}
+
+fn runtime_observed_callsite_anchors(index: &Index) -> BTreeMap<String, BTreeSet<[usize; 4]>> {
+    let mut anchors = BTreeMap::<String, BTreeSet<[usize; 4]>>::new();
+    for anchor in &index.runtime_evidence.observed_callsite_anchors {
+        if anchor.relative_path.is_empty() {
+            continue;
+        }
+        let occurrence = Occurrence {
+            range: anchor.range.clone(),
+            typed_range: None,
+            symbol: String::new(),
+            symbol_roles: 0,
+        };
+        if let Some(span) = occurrence.span() {
+            anchors
+                .entry(anchor.relative_path.clone())
+                .or_default()
+                .insert(span);
+        }
+    }
+    anchors
+}
+
+fn zero_based_span(span: [usize; 4]) -> [usize; 4] {
+    [
+        span[0].saturating_sub(1),
+        span[1],
+        span[2].saturating_sub(1),
+        span[3],
+    ]
 }
 
 fn apply_runtime_modeled_candidates(
@@ -1263,6 +1320,7 @@ fn index_from_protobuf(index: scip::types::Index) -> Result<Index> {
     Ok(Index {
         metadata,
         documents,
+        runtime_evidence: RuntimeEvidence::default(),
     })
 }
 
@@ -5225,6 +5283,64 @@ void run_dependent() {
             call.complexity_assumptions,
             vec![RUNTIME_MODELED_ASSUMPTION]
         );
+    }
+
+    #[test]
+    fn runtime_modeled_scip_preserves_observed_anchor_when_static_target_outranks_it() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let declaration = "  def callee; 1; end";
+        let caller = "  def caller; callee; end";
+        fs::write(&path, format!("class Demo\n{declaration}\n{caller}\nend\n")).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "nil-kill-runtime workspace demo abc Demo#callee().";
+        let declaration_column = declaration.find("callee").unwrap();
+        let call_column = caller.find("callee").unwrap();
+        let runtime_call_span = [3, call_column, 3, call_column + "callee;".len()];
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "2",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "symbols": [{"symbol": symbol}],
+                "occurrences": [
+                    {"range": [1, declaration_column, declaration_column + 6], "symbol": symbol, "symbolRoles": 1},
+                    {"range": [2, call_column, call_column + 6], "symbol": symbol, "symbolRoles": 0}
+                ]
+            }],
+            "_runtimeEvidence": {
+                "observedCallsiteAnchors": [{
+                    "relativePath": "demo.rb",
+                    "range": [2, call_column, call_column + "callee;".len()]
+                }]
+            }
+        });
+        let mut callee = method("callee", &path, "callee", [2, 2, 2, declaration.len()]);
+        let mut caller_method = method("caller", &path, "caller", [3, 2, 3, caller.len()]);
+        callee.language = "ruby".into();
+        caller_method.language = "ruby".into();
+        let mut static_call = call("caller", &path, "callee", runtime_call_span);
+        static_call.owner = "Demo".into();
+        static_call.function = "caller".into();
+        static_call.kind = "internal_call".into();
+        static_call.target = Some("callee".into());
+        let mut output = ProfileOutput::default();
+        output.methods = vec![callee, caller_method];
+        output.calls = vec![static_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.target.as_deref(), Some("callee"));
+        assert!(call.semantic_symbol.is_none());
+        assert!(call.runtime_evidence_observed);
     }
 
     #[test]
