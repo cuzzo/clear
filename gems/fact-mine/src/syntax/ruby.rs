@@ -24,16 +24,16 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 
 use super::normalized_behavior::{
     configured_collection_operation, configured_external_latency_bound,
-    configured_external_latency_parametric_cost,
-    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
-    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    configured_stdlib_call_identity, eliminable_guard_from_call, matching_paren_index,
-    method_parameter_type_key, BlockCallSemantics, CardinalityCallSemantics,
-    CollectionAllocationSemantics, NormalizedCallComplexity, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedCollectionOperation, NormalizedGeneratedAccessor,
-    NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedRuntimeCapabilityGuard,
-    NormalizedRuntimeTruthinessGuard, NormalizedSemanticEffect, NormalizedVisibilityEvent,
-    RuntimeCallResultProjection, RuntimeValueProjection, SyntaxMetadata,
+    configured_external_latency_parametric_cost, configured_intrinsic_call_complexity,
+    configured_semantic_symbol_call_complexity, configured_semantic_symbol_kind,
+    configured_semantic_symbol_parametric_cost, configured_stdlib_call_identity,
+    eliminable_guard_from_call, matching_paren_index, method_parameter_type_key,
+    BlockCallSemantics, CardinalityCallSemantics, CollectionAllocationSemantics,
+    NormalizedCallComplexity, NormalizedCallParts, NormalizedCallProjection,
+    NormalizedCollectionOperation, NormalizedGeneratedAccessor, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedRuntimeCapabilityGuard, NormalizedRuntimeTruthinessGuard,
+    NormalizedSemanticEffect, NormalizedVisibilityEvent, RuntimeCallResultProjection,
+    RuntimeValueProjection, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, FunctionDef, StateDeclaration};
 use crate::ast::{self, Node, Span};
@@ -287,9 +287,7 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
                 .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
             parametric_cost: configured_semantic_symbol_parametric_cost("ruby", descriptor)
                 .or_else(|| ruby_family_parametric_cost(&owner, &message))
-                .or_else(|| {
-                    configured_external_latency_parametric_cost("ruby", &owner, &message)
-                }),
+                .or_else(|| configured_external_latency_parametric_cost("ruby", &owner, &message)),
         }
     } else {
         super::ExternalSymbolMetadata {
@@ -533,34 +531,11 @@ const RUBY_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
 
 // CFG-SPECIFIC START: Ruby control-flow vocabulary.
 const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
-    iterator_messages: &[
-        "all",
-        "any",
-        "collect",
-        "detect",
-        "downto",
-        "each",
-        "each_cons",
-        "each_entry",
-        "each_key",
-        "each_pair",
-        "each_slice",
-        "each_value",
-        "filter_map",
-        "find",
-        "find_all",
-        "flat_map",
-        "inject",
-        "loop",
-        "map",
-        "none",
-        "reduce",
-        "reject",
-        "select",
-        "step",
-        "times",
-        "upto",
-    ],
+    // CFG and complexity projection must agree on which blocks can execute
+    // once per collection element. A second hand-maintained subset silently
+    // modeled methods such as each_line/each_with_object/sort_by as one-shot
+    // callbacks and broke loop-carried reaching definitions.
+    iterator_messages: RUBY_ITERATION_METHODS,
     ignored_callback_body_sources: &["do end", "{}"],
 };
 // CFG-SPECIFIC END
@@ -1208,6 +1183,21 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
                     .collect::<Vec<_>>()
             })
             .filter(|operands| operands.len() >= 2)
+    }
+
+    fn nullable_call_result_contract(&self, node: &Node) -> Option<&'static str> {
+        let ("CALL" | "QCALL", Some(receiver), Some(message)) = (
+            node.r#type.as_str(),
+            node.children.first().and_then(ast::node),
+            node.children.get(1).and_then(|child| match child {
+                ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.as_str()),
+                _ => None,
+            }),
+        ) else {
+            return None;
+        };
+        (message == "new" && self.receiver_is_type_reference(receiver.text.trim()))
+            .then_some("non_null_declared_type")
     }
 
     fn constructor_dispatch_name(
@@ -4009,11 +3999,9 @@ mod tests {
         // NilKill emits core frames under its runtime identity.  These calls
         // must use the same reviewed contracts as SCIP-Ruby core symbols;
         // otherwise the ExternalLatency section is dead data for Ruby.
-        let read = external_symbol_call_complexity(
-            "nil-kill-runtime ruby ruby 3.2.3 IO#read().",
-            "read",
-        )
-        .expect("IO.read should use the external-latency contract");
+        let read =
+            external_symbol_call_complexity("nil-kill-runtime ruby ruby 3.2.3 IO#read().", "read")
+                .expect("IO.read should use the external-latency contract");
         assert_eq!((read.time, read.space), ("O(N+C)", "O(N+S)"));
         assert_eq!(
             read.bound_quality,
@@ -4030,9 +4018,18 @@ mod tests {
         );
 
         for (symbol, message) in [
-            ("nil-kill-runtime ruby ruby 3.2.3 File.realpath().", "realpath"),
-            ("nil-kill-runtime ruby ruby 3.2.3 File.executable?().", "executable?"),
-            ("nil-kill-runtime ruby ruby 3.2.3 File.absolute_path?().", "absolute_path?"),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 File.realpath().",
+                "realpath",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 File.executable?().",
+                "executable?",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 File.absolute_path?().",
+                "absolute_path?",
+            ),
             ("nil-kill-runtime ruby ruby 3.2.3 Dir.`[]`().", "[]"),
             ("nil-kill-runtime ruby ruby 3.2.3 Dir.chdir().", "chdir"),
         ] {
@@ -4045,11 +4042,26 @@ mod tests {
         }
 
         for (symbol, kind) in [
-            ("nil-kill-runtime ruby ruby 3.2.3 Exception#message().", "callback_once"),
-            ("nil-kill-runtime ruby ruby 3.2.3 Enumerable#each_slice().", "callback_linear"),
-            ("nil-kill-runtime ruby ruby 3.2.3 Kernel#require().", "loader_once"),
-            ("nil-kill-runtime ruby ruby 3.2.3 Math.exp().", "callback_once"),
-            ("nil-kill-runtime ruby ruby 3.2.3 Regexp.escape().", "coercive_linear_materialize"),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Exception#message().",
+                "callback_once",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Enumerable#each_slice().",
+                "callback_linear",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Kernel#require().",
+                "loader_once",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Math.exp().",
+                "callback_once",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Regexp.escape().",
+                "coercive_linear_materialize",
+            ),
         ] {
             assert_eq!(
                 external_symbol_metadata(symbol).parametric_cost.as_deref(),

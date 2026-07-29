@@ -6,10 +6,12 @@
 //! expressions: those would duplicate FactMine's analysis in each tracer.
 
 use anyhow::{bail, Context, Result};
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 use crate::profile::{CallRecord, MethodRecord, ProfileOutput};
@@ -225,8 +227,20 @@ pub struct ObservedCall {
 
 impl RuntimeValueEvidence {
     pub fn from_path(path: &Path) -> Result<Self> {
-        let json = fs::read_to_string(path)
+        let bytes = fs::read(path)
             .with_context(|| format!("failed to read runtime evidence {}", path.display()))?;
+        let mut json = String::new();
+        if bytes.starts_with(&[0x1f, 0x8b]) {
+            GzDecoder::new(bytes.as_slice())
+                .read_to_string(&mut json)
+                .with_context(|| {
+                    format!("failed to decompress runtime evidence {}", path.display())
+                })?;
+        } else {
+            json = String::from_utf8(bytes).with_context(|| {
+                format!("runtime evidence {} is not valid UTF-8", path.display())
+            })?;
+        }
         Self::from_json(&json)
             .with_context(|| format!("invalid runtime evidence {}", path.display()))
     }
@@ -407,7 +421,6 @@ pub fn apply_to_profile(
     let narrowed_receiver_domains =
         runtime_truthiness_narrowed_domains(output, &method_index, &capability_narrowed);
     infer_runtime_record_accessors(output, &narrowed_receiver_domains, &mut selected);
-
     let mut stats = OverlayStats {
         observed_call_sites: observed.len(),
         inferred_call_sites: selected
@@ -930,6 +943,14 @@ fn seed_collection_callback_nodes(
             continue;
         }
         let iteration_span = normalized_iteration_span(output, method, call);
+        let nested_iteration_spans = iteration_span
+            .map(|outer| {
+                normalized_iteration_spans(output, method)
+                    .into_iter()
+                    .filter(|inner| *inner != outer && span_contains(outer, *inner))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let mut callback_points = points
             .iter()
             .filter(|point| {
@@ -938,7 +959,10 @@ fn seed_collection_callback_nodes(
                     && point.callback_binding_position.is_some()
                     && iteration_span
                         .map(|span| {
-                            span_contains_line(span, point.span[0]) && point.span[2] <= span[2]
+                            span_contains(span, point.span)
+                                && !nested_iteration_spans
+                                    .iter()
+                                    .any(|nested| span_contains(*nested, point.span))
                         })
                         .unwrap_or(point.span[0] == call.line)
             })
@@ -967,6 +991,34 @@ fn seed_collection_callback_nodes(
                     .or_default(),
                 &callback_domain,
             );
+            // A callback parameter is a fresh definition for its normalized
+            // callback region. Compound CFG nodes can contain multiple
+            // chained callbacks, so seed same-named uses in this exact region
+            // instead of conflating sibling bindings through one place.
+            for use_point in points.iter().filter(|use_point| {
+                use_point.source == point.source
+                    && use_point.name == point.name
+                    && span_contains(point.span, use_point.span)
+                    && !points.iter().any(|shadow| {
+                        shadow.source == point.source
+                            && shadow.name == point.name
+                            && shadow.callback_binding_position.is_some()
+                            && shadow.span != point.span
+                            && span_contains(point.span, shadow.span)
+                            && span_contains(shadow.span, use_point.span)
+                    })
+            }) {
+                merge_domain(
+                    node_domains
+                        .entry((
+                            use_point.source.clone(),
+                            use_point.node_id.clone(),
+                            use_point.place_id.clone(),
+                        ))
+                        .or_default(),
+                    &callback_domain,
+                );
+            }
         }
     }
 }
@@ -998,6 +1050,21 @@ fn normalized_iteration_span(
                 span[3].saturating_sub(span[1]),
             )
         })
+}
+
+fn normalized_iteration_spans(output: &ProfileOutput, method: &MethodRecord) -> Vec<[usize; 4]> {
+    output
+        .complexity_facts
+        .iter()
+        .filter(|fact| {
+            path_matches(&fact.path, &method.path)
+                && fact.owner == method.owner
+                && fact.function == method.name
+                && fact.line == method.line
+        })
+        .flat_map(|fact| &fact.iterations)
+        .map(|iteration| iteration.span)
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1094,9 +1161,10 @@ fn call_result_domain(
     let receiver_domain = receiver_domains.get(&call.id)?;
     if selected.get(&call.id).is_some_and(|targets| {
         !targets.is_empty()
-            && targets
-                .iter()
-                .all(|target| is_runtime_record_accessor_symbol(&target.symbol, &call.message))
+            && targets.iter().all(|target| {
+                is_runtime_record_accessor_symbol(&target.symbol, &call.message)
+                    || runtime_target_is_generated_accessor(target, &call.message, methods)
+            })
     }) {
         if let Some(domain) = runtime_record_accessor_result_domain(receiver_domain, &call.message)
         {
@@ -1129,6 +1197,22 @@ fn call_result_domain(
         })?;
     let domain = domain_from_type_source(&result_type, &method.language);
     (!domain.is_empty()).then_some(domain)
+}
+
+fn runtime_target_is_generated_accessor(
+    target: &SemanticTarget,
+    message: &str,
+    methods: &MethodIndex<'_>,
+) -> bool {
+    let Some(definition) = &target.definition else {
+        return false;
+    };
+    let candidates = methods.locate(definition);
+    !candidates.is_empty()
+        && candidates.iter().all(|method| {
+            method.generated_declaration
+                && (method.name == message || method.dispatch_name == message)
+        })
 }
 
 // Generated readers are not universally observable as runtime call events
@@ -2314,6 +2398,26 @@ mod tests {
     }
 
     #[test]
+    fn reads_gzip_runtime_evidence_emitted_by_default_collects() {
+        let file = tempfile::Builder::new()
+            .suffix(".json.gz")
+            .tempfile()
+            .expect("compressed evidence");
+        let mut encoder = flate2::write::GzEncoder::new(
+            file.reopen().expect("writer"),
+            flate2::Compression::fast(),
+        );
+        encoder
+            .write_all(valid_evidence().to_string().as_bytes())
+            .expect("write evidence");
+        encoder.finish().expect("finish gzip");
+
+        let evidence = RuntimeValueEvidence::from_path(file.path()).expect("read gzip evidence");
+        assert_eq!(evidence.authority, "runtime-modeled-world");
+        assert_eq!(evidence.calls[0].targets[0].owner, "Row");
+    }
+
+    #[test]
     fn cfg_dfg_overlay_exports_shared_runtime_record_accessors_as_portable_scip() {
         let mut file = tempfile::NamedTempFile::new().expect("source");
         file.write_all(
@@ -3181,6 +3285,85 @@ end
     }
 
     #[test]
+    fn cfg_dfg_overlay_binds_each_chained_iterator_to_its_own_callback_scope() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Worker
+  def run(rows)
+    rows.map do |row|
+      build(row)
+    end.sort_by do |row|
+      row.kind
+    end
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [],
+                "calls": [{
+                    "language": "ruby",
+                    "caller": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "name": "run",
+                        "kind": "instance", "line": 2
+                    },
+                    "callsite": {"path": path, "line": 3, "selector": "map"},
+                    "targets": [{
+                        "symbol": "nil-kill-runtime ruby ruby 3.2.3 Enumerable#map().",
+                        "owner": "Enumerable", "name": "map", "kind": "instance",
+                        "receiver_type": "Array"
+                    }],
+                    "receiver_domain": {
+                        "types": ["Array"], "elements": ["Hash"],
+                        "shapes": [{
+                            "kind": "array",
+                            "elements": [{"kind": "hash"}]
+                        }]
+                    },
+                    "result_domain": {
+                        "types": ["Array"], "elements": ["AnonymousResult"],
+                        "shapes": [{
+                            "kind": "array",
+                            "elements": [{
+                                "kind": "record", "name": "AnonymousResult",
+                                "members": {
+                                    "kind": {"kind": "class", "name": "String"}
+                                }
+                            }]
+                        }]
+                    },
+                    "count": 1
+                }]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let accessor = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "kind")
+            .expect("outer iterator callback accessor");
+        assert_eq!(
+            accessor.semantic_symbol.as_deref(),
+            Some("fact-mine-runtime runtime-contract v1 Record#kind()."),
+            "the outer sort callback must receive the mapped anonymous record domain"
+        );
+        assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+    }
+
+    #[test]
     fn cfg_dfg_overlay_reaches_a_fixed_point_through_nested_generated_accessors() {
         let mut file = tempfile::NamedTempFile::new().expect("source");
         file.write_all(
@@ -3303,6 +3486,97 @@ end
 
         apply_to_profile(&mut output, &evidence).expect("overlay");
         for message in ["item", "kind"] {
+            let accessor = output
+                .calls
+                .iter()
+                .find(|call| call.function == "run" && call.message == message)
+                .unwrap_or_else(|| panic!("{message} accessor"));
+            let expected = format!("fact-mine-runtime runtime-contract v1 Record#{message}().");
+            assert_eq!(accessor.semantic_symbol.as_deref(), Some(expected.as_str()));
+        }
+    }
+
+    #[test]
+    fn cfg_dfg_overlay_propagates_nested_record_accessors_after_a_callback_guard() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"RowCoverage = Struct.new(:row, :covered)
+
+class Worker
+  def run(rows)
+    rows.filter_map do |row_cov|
+      next if row_cov.covered
+      row = row_cov.row
+      row.kind
+    end
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [],
+                "calls": [{
+                    "language": "ruby",
+                    "caller": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "name": "run",
+                        "kind": "instance", "line": 4
+                    },
+                    "callsite": {"path": path, "line": 5, "selector": "filter_map"},
+                    "targets": [{
+                        "symbol": "nil-kill-runtime ruby ruby 3.2.3 Enumerable#filter_map().",
+                        "owner": "Enumerable", "name": "filter_map", "kind": "instance",
+                        "receiver_type": "Array"
+                    }],
+                    "receiver_domain": {
+                        "types": ["Array"], "elements": ["RowCoverage", "AnonymousCoverage"],
+                        "shapes": [{
+                            "kind": "array",
+                            "elements": [
+                                {
+                                    "kind": "record", "name": "RowCoverage",
+                                    "members": {
+                                        "covered": {"kind": "class", "name": "FalseClass"},
+                                        "row": {
+                                            "kind": "record", "name": "Row",
+                                            "members": {
+                                                "kind": {"kind": "class", "name": "String"}
+                                            }
+                                        }
+                                    }
+                                },
+                                {
+                                    "kind": "record", "name": "AnonymousCoverage",
+                                    "members": {
+                                        "covered": {"kind": "class", "name": "FalseClass"},
+                                        "row": {
+                                            "kind": "record", "name": "Row",
+                                            "members": {
+                                                "kind": {"kind": "class", "name": "String"}
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }]
+                    },
+                    "count": 1
+                }]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        for message in ["covered", "row", "kind"] {
             let accessor = output
                 .calls
                 .iter()

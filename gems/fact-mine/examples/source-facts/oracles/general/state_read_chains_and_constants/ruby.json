@@ -652,10 +652,13 @@
         "kind": "entry"
       },
       {
-        "kind": "callback_return"
+        "kind": "loop_backedge"
       },
       {
-        "kind": "callback_body"
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
       },
       {
         "kind": "entry"
@@ -736,13 +739,13 @@
         "line": 22
       },
       {
-        "id": "cfg:SourceFactStateReadChainsAndConstants#helper_result:stmt:0.callback.0:20:6",
+        "id": "cfg:SourceFactStateReadChainsAndConstants#helper_result:stmt:0.loop.0:20:6",
         "kind": "statement",
         "line": 20
       },
       {
         "id": "cfg:SourceFactStateReadChainsAndConstants#helper_result:stmt:1:19:4",
-        "kind": "callback",
+        "kind": "loop",
         "line": 19
       },
       {

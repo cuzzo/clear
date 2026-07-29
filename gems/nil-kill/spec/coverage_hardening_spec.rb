@@ -1229,7 +1229,7 @@ RSpec.describe "NilKill coverage hardening" do
       described_class.runtime_calls.delete(key) if defined?(key)
     end
 
-    it "does not pair an unframed native return with the requested call result" do
+    it "does not let an unframed native return consume the requested call result" do
       target_file = File.join(described_class::TARGETS.first, "runtime_result_pairing_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "payload.fetch('rows', [])\n")
@@ -1269,14 +1269,15 @@ RSpec.describe "NilKill coverage hardening" do
       ))
 
       record = described_class.runtime_calls.values.fetch(0)
-      expect(record).not_to have_key(:result_domain)
+      expect(record.dig(:result_domain, :types)).to eq(["Array"])
+      expect(record.dig(:result_domain, :elements)).to eq(["Symbol"])
       expect(described_class.runtime_scip_native_calls[Thread.current.object_id]).to be_empty
       expect(described_class.instance_variable_get(:@runtime_scip_native_result_depth)).to eq(0)
     ensure
       FileUtils.rm_f(target_file) if defined?(target_file)
     end
 
-    it "self-heals a stale native-return frame instead of leaving result tracing enabled" do
+    it "preserves LIFO native-return pairing without scanning past a nested sentinel" do
       target_file = File.join(described_class::TARGETS.first, "runtime_result_stale_frame_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "payload.fetch('rows', [])\n")
@@ -1304,17 +1305,26 @@ RSpec.describe "NilKill coverage hardening" do
       ))
       described_class.runtime_scip_native_calls[Thread.current.object_id] << {
         observed_call: nil,
-        capture_result: true,
+        capture_result: false,
         defined_class: stale_owner,
         method_id: :to_s,
       }
-      described_class.instance_variable_set(:@runtime_scip_native_result_depth, 2)
 
+      # An out-of-order/unframed return must not search through and consume the
+      # suspended outer fetch frame.
       described_class.leave_runtime_scip_native_call(FakeTracePoint.new(
         event: :c_return,
         defined_class: fetch_owner,
         method_id: :fetch,
         return_value: [:row]
+      ))
+      expect(described_class.runtime_scip_native_calls[Thread.current.object_id].length).to eq(2)
+
+      described_class.leave_runtime_scip_native_call(FakeTracePoint.new(
+        event: :c_return,
+        defined_class: stale_owner,
+        method_id: :to_s,
+        return_value: "nested"
       ))
       described_class.leave_runtime_scip_native_call(FakeTracePoint.new(
         event: :c_return,
@@ -1325,7 +1335,6 @@ RSpec.describe "NilKill coverage hardening" do
 
       expect(described_class.runtime_scip_native_calls[Thread.current.object_id]).to be_empty
       expect(described_class.instance_variable_get(:@runtime_scip_native_result_depth)).to eq(0)
-      expect(native_returns).to have_received(:disable)
     ensure
       FileUtils.rm_f(target_file) if defined?(target_file)
     end

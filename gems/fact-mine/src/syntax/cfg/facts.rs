@@ -67,6 +67,11 @@ pub struct CallbackBindingFact {
     pub owner: String,
     pub place_id: String,
     pub position: usize,
+    /// Exact callback/iterator region that owns this positional binding.
+    /// Several nested callbacks can be normalized into one compound CFG node;
+    /// the region keeps their independent position-zero parameters distinct.
+    #[serde(default)]
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

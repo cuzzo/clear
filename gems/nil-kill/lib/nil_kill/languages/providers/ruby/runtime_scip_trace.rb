@@ -56,7 +56,9 @@ module NilKillRuntimeTrace
     activate_native_calls = !!native_activation
     @runtime_scip_native_selector_filter =
       native_activation.is_a?(Array) ? native_activation : nil
-    if @runtime_scip_native_call_armed && !activate_native_calls
+    if @runtime_scip_native_call_armed &&
+       !activate_native_calls &&
+       !@runtime_scip_native_result_depth.to_i.positive?
       @runtime_scip_native_call_armed = false
       runtime_scip_native_call_trace.disable
     elsif activate_native_calls && !@runtime_scip_native_call_armed
@@ -285,12 +287,20 @@ module NilKillRuntimeTrace
 
   def self.leave_runtime_scip_native_call(tp)
     frames = @runtime_scip_native_calls[Thread.current.object_id]
-    frame = frames.pop
-    return unless frame
-    matched = frame[:method_id] == tp.method_id &&
+    frame = frames.last
+    # Some VM-generated C returns (notably Struct construction) have no
+    # corresponding c_call event. They must not consume the outer requested
+    # frame that is still suspended across the callback. Traced C calls are
+    # strictly nested and every nested event gets a sentinel while a requested
+    # result is in flight, so only the top frame can be a valid match. Keeping
+    # this check O(1) also prevents unmatched VM events from turning a hot
+    # c_return stream into repeated scans of a retained stack.
+    return unless frame &&
+      frame[:method_id] == tp.method_id &&
       frame[:defined_class].equal?(tp.defined_class)
 
-    record_runtime_scip_result(frame[:observed_call], tp.return_value) if matched && frame[:capture_result]
+    frames.pop
+    record_runtime_scip_result(frame[:observed_call], tp.return_value) if frame[:capture_result]
     return unless frame[:capture_result]
 
     @runtime_scip_native_result_depth -= 1

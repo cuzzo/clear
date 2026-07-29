@@ -3456,9 +3456,21 @@ fn apply_static_direct_call_result_contracts(methods: &[MethodRecord], calls: &m
                 let behavior = crate::syntax::normalized_behavior::behavior_for_name(language)?;
                 let receiver_type = call.receiver_type.as_deref();
                 let return_type = call
-                    .implicit_receiver
-                    .then(|| behavior.known_return_type(&call.message))
-                    .flatten()
+                    .constructor_target
+                    .as_ref()
+                    .and_then(|_| {
+                        call.receiver_symbol
+                            .clone()
+                            .or_else(|| call.receiver_type.clone())
+                            .or_else(|| {
+                                (call.receiver_kind == "type").then(|| call.receiver.clone())
+                            })
+                    })
+                    .or_else(|| {
+                        call.implicit_receiver
+                            .then(|| behavior.known_return_type(&call.message))
+                            .flatten()
+                    })
                     .or_else(|| behavior.static_return_type(&call.message, receiver_type))
                     .or_else(|| {
                         behavior.propagated_collection_return_type(&call.message, receiver_type)
@@ -3477,7 +3489,7 @@ fn apply_static_direct_call_result_contracts(methods: &[MethodRecord], calls: &m
             );
         let mut updates = Vec::new();
         for (index, call) in calls.iter().enumerate().filter(|(_, call)| {
-            call.receiver_type.is_none()
+            (call.receiver_type.is_none() || !call.receiver_definition_call_spans.is_empty())
                 && (call.known_time_complexity.is_none() || call.known_space_complexity.is_none())
         }) {
             let receiver_spans = call
@@ -3521,6 +3533,12 @@ fn apply_static_direct_call_result_contracts(methods: &[MethodRecord], calls: &m
                         .and_then(|kind| crate::syntax::parametric_call_complexity(&kind))
                 })
                 .flatten();
+            if call.receiver_type.as_deref() == Some(receiver_type.as_str())
+                && complexity.is_none()
+                && parametric.is_none()
+            {
+                continue;
+            }
             updates.push((index, receiver_type, complexity, parametric));
         }
         if updates.is_empty() {
@@ -4606,20 +4624,19 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
         .iter()
         .map(|effect| (effect.node_id.as_str(), effect))
         .collect::<BTreeMap<_, _>>();
-    let callback_positions = document
-        .callback_bindings
-        .iter()
-        .map(|binding| {
-            (
-                (binding.node_id.as_str(), binding.place_id.as_str()),
-                binding.position,
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
+    let callback_bindings = document.callback_bindings.iter().fold(
+        BTreeMap::<(&str, &str), Vec<_>>::new(),
+        |mut rows, binding| {
+            rows.entry((binding.node_id.as_str(), binding.place_id.as_str()))
+                .or_default()
+                .push(binding);
+            rows
+        },
+    );
     let mut rows = document
         .flow_types
         .iter()
-        .filter_map(|fact| {
+        .flat_map(|fact| {
             let place = places.get(fact.place_id.as_str())?;
             let node = nodes.get(fact.node_id.as_str())?;
             let resolved_types = fact
@@ -4650,33 +4667,69 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
                         .map(|spans| (definition.clone(), spans))
                 })
                 .collect::<BTreeMap<_, _>>();
-            Some(json!({
-                "file": document.file,
-                "function": fact.function,
-                "owner": fact.owner,
-                "name": place.name,
-                "place_id": fact.place_id,
-                "node_id": fact.node_id,
-                "line": node.line,
-                "span": node.span,
-                "types": fact.types,
-                "resolved_types": resolved_types,
-                "complete": fact.complete,
-                "reaching_definitions": reaching,
-                "definition_call_sources": definition_call_sources,
-                "callback_binding_position": callback_positions
-                    .get(&(fact.node_id.as_str(), fact.place_id.as_str())),
+            let bindings = callback_bindings
+                .get(&(fact.node_id.as_str(), fact.place_id.as_str()))
+                .cloned()
+                .unwrap_or_default();
+            let rows = if bindings.is_empty() {
+                vec![(fact.node_id.clone(), node.span, None)]
+            } else {
+                bindings
+                    .into_iter()
+                    .map(|binding| {
+                        (
+                            format!(
+                                "{}:callback-binding:{}:{}:{}:{}",
+                                binding.node_id,
+                                binding.span[0],
+                                binding.span[1],
+                                binding.position,
+                                place.name
+                            ),
+                            binding.span,
+                            Some(binding.position),
+                        )
+                    })
+                    .collect()
+            };
+            Some(rows.into_iter().map(move |(node_id, span, position)| {
+                let callback_definition = position.is_some();
+                json!({
+                    "file": document.file,
+                    "function": fact.function,
+                    "owner": fact.owner,
+                    "name": place.name,
+                    "place_id": fact.place_id,
+                    "node_id": node_id,
+                    "line": span[0],
+                    "span": span,
+                    "types": fact.types,
+                    "resolved_types": resolved_types,
+                    "complete": fact.complete,
+                    // A callback parameter is a fresh definition for its
+                    // normalized callback region. Reusing the enclosing CFG
+                    // node's reaching set leaks an earlier same-named local
+                    // or a sibling callback binding into this scope.
+                    "reaching_definitions": if callback_definition {
+                        Vec::<String>::new()
+                    } else {
+                        reaching.clone()
+                    },
+                    "definition_call_sources": if callback_definition {
+                        BTreeMap::<String, Vec<[usize; 4]>>::new()
+                    } else {
+                        definition_call_sources.clone()
+                    },
+                    "callback_binding_position": position,
+                })
             }))
         })
+        .flatten()
         .collect::<Vec<_>>();
-    let existing = rows
+    let existing = document
+        .flow_types
         .iter()
-        .filter_map(|row| {
-            Some((
-                row["node_id"].as_str()?.to_string(),
-                row["place_id"].as_str()?.to_string(),
-            ))
-        })
+        .map(|flow| (flow.node_id.clone(), flow.place_id.clone()))
         .collect::<BTreeSet<_>>();
     for binding in &document.callback_bindings {
         if existing.contains(&(binding.node_id.clone(), binding.place_id.clone())) {
@@ -4685,18 +4738,25 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
         let Some(place) = places.get(binding.place_id.as_str()) else {
             continue;
         };
-        let Some(node) = nodes.get(binding.node_id.as_str()) else {
+        if !nodes.contains_key(binding.node_id.as_str()) {
             continue;
-        };
+        }
         rows.push(json!({
             "file": document.file,
             "function": binding.function,
             "owner": binding.owner,
             "name": place.name,
             "place_id": binding.place_id,
-            "node_id": binding.node_id,
-            "line": node.line,
-            "span": node.span,
+            "node_id": format!(
+                "{}:callback-binding:{}:{}:{}:{}",
+                binding.node_id,
+                binding.span[0],
+                binding.span[1],
+                binding.position,
+                place.name
+            ),
+            "line": binding.span[0],
+            "span": binding.span,
             "types": [],
             "resolved_types": [],
             "complete": false,
@@ -7782,18 +7842,37 @@ fn reaching_call_result_spans(
             if reaching.definitions.is_empty() {
                 continue;
             }
-            let mut spans = BTreeSet::new();
-            let complete = reaching.definitions.iter().all(|definition| {
-                document
-                    .node_effects
-                    .iter()
-                    .find(|definition_effect| definition_effect.node_id == *definition)
-                    .and_then(|definition_effect| {
-                        definition_effect.write_call_sources.get(*place_id)
-                    })
-                    .map(|span| spans.insert(*span))
-                    .is_some()
+            let non_null_at_read = document.nullable_states.iter().any(|state| {
+                state.node_id == node.id
+                    && state.place_id == **place_id
+                    && state.complete
+                    && state.state == "definitely_non_null"
             });
+            let mut spans = BTreeSet::new();
+            let complete = reaching
+                .definitions
+                .iter()
+                .filter(|definition| {
+                    !non_null_at_read
+                        || !document.node_effects.iter().any(|effect| {
+                            effect.node_id == **definition
+                                && effect
+                                    .write_value_hints
+                                    .get(*place_id)
+                                    .is_some_and(|value| value == "nil" || value == "null")
+                        })
+                })
+                .all(|definition| {
+                    document
+                        .node_effects
+                        .iter()
+                        .find(|definition_effect| definition_effect.node_id == *definition)
+                        .and_then(|definition_effect| {
+                            definition_effect.write_call_sources.get(*place_id)
+                        })
+                        .map(|span| spans.insert(*span))
+                        .is_some()
+                });
             if complete && !spans.is_empty() {
                 proven_sets.insert(spans.into_iter().collect::<Vec<_>>());
             }

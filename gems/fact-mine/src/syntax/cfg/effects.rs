@@ -30,11 +30,18 @@ struct RawEffect {
     write_call_sources: BTreeMap<String, Span>,
     write_call_source_sets: BTreeMap<String, Vec<Span>>,
     write_nullable_contracts: BTreeMap<String, String>,
-    callback_bindings: Vec<String>,
+    callback_bindings: Vec<RawCallbackBinding>,
     return_state_hint: Option<String>,
     unknown_call: bool,
     complete: bool,
     unknown_reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct RawCallbackBinding {
+    name: String,
+    position: usize,
+    span: Span,
 }
 
 impl RawEffect {
@@ -306,14 +313,15 @@ pub(crate) fn extract(
                     format!("place:{}#{}:unknown:{}", node.owner, node.function, name)
                 })
         };
-        for (position, name) in raw.callback_bindings.iter().enumerate() {
+        for binding in &raw.callback_bindings {
             facts.callback_bindings.push(CallbackBindingFact {
                 node_id: node.id.clone(),
                 file: node.file.clone(),
                 function: node.function.clone(),
                 owner: node.owner.clone(),
-                place_id: id_for(name),
-                position,
+                place_id: id_for(&binding.name),
+                position: binding.position,
+                span: binding.span,
             });
         }
         facts.effects.push(NodeEffect {
@@ -377,6 +385,14 @@ fn apply_normalized_local_contract(
     effect: &mut RawEffect,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
+    // Compound CFG nodes deliberately summarize their control expression,
+    // while the assignments in their bodies have their own child nodes.
+    // A local-flow statement may span the whole compound expression and list
+    // nested writes; treating one of those as a write on the loop/branch node
+    // kills the real reaching definitions at the next iteration.
+    if node.role != "linear_statement" {
+        return;
+    }
     let Some(statement) = method
         .statements
         .iter()
@@ -509,9 +525,20 @@ fn collect_scope_bindings(scope: Option<&Node>, effect: &mut RawEffect) {
     if let Some(args) = args {
         let mut names = Vec::new();
         collect_binding_names(args, &mut names);
-        for name in names {
-            if !effect.callback_bindings.contains(&name) {
-                effect.callback_bindings.push(name);
+        let span = [
+            scope.first_lineno,
+            scope.first_column,
+            scope.last_lineno,
+            scope.last_column,
+        ];
+        for (position, name) in names.into_iter().enumerate() {
+            let binding = RawCallbackBinding {
+                name,
+                position,
+                span,
+            };
+            if !effect.callback_bindings.contains(&binding) {
+                effect.callback_bindings.push(binding);
             }
         }
         collect(args, effect, false, None);
@@ -535,8 +562,16 @@ fn collect_nested_bindings(node: &Node, effect: &mut RawEffect) {
         return;
     }
     match node.r#type.as_str() {
-        "ITER" => collect_scope_bindings(node.children.get(1).and_then(ast::node), effect),
-        "LAMBDA" => collect_scope_bindings(node.children.first().and_then(ast::node), effect),
+        // Nested callbacks can share one compound CFG node. Retain their
+        // exact regions and restart positions for each scope:
+        // `rows.map { |row| ... }.sort_by { |result| ... }` has two position
+        // zero bindings, not one two-argument callback.
+        "ITER" => {
+            collect_scope_bindings(node.children.get(1).and_then(ast::node), effect);
+        }
+        "LAMBDA" => {
+            collect_scope_bindings(node.children.first().and_then(ast::node), effect);
+        }
         _ => {}
     }
     for child in node.children.iter().filter_map(ast::node) {

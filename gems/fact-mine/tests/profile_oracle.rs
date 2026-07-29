@@ -3416,6 +3416,107 @@ end
 }
 
 #[test]
+fn ruby_truthy_loop_carried_record_value_preserves_generated_reader_identity() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"Node = Struct.new(:kind)
+
+def labels(text)
+  current = nil
+  labels = []
+  text.each_line do |line|
+    current = Node.new(:sample) if line.start_with?("node:")
+    labels << current.kind if current && current.kind
+  end
+  labels
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let accessors = output
+        .calls
+        .iter()
+        .filter(|call| call.function == "labels" && call.message == "kind")
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        accessors.len(),
+        2,
+        "both the short-circuit predicate and guarded body reader must be normalized"
+    );
+    for accessor in accessors {
+        assert_eq!(
+            accessor.receiver_symbol.as_deref(),
+            Some("Node"),
+            "the truthiness guard must exclude the initial nil definition while retaining the loop-carried constructor definition"
+        );
+        assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(
+            accessor.complexity_provenance.as_deref(),
+            Some("generated_record_contract")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn ruby_chained_iterators_keep_callback_bindings_in_their_own_cfg_nodes() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"def ordered(rows)
+  rows.map { |row| row }.sort_by { |result| result.kind }
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let callback_rows = output
+        .flow_local_types
+        .iter()
+        .filter(|row| row["function"] == "ordered" && !row["callback_binding_position"].is_null())
+        .collect::<Vec<_>>();
+    let bindings = callback_rows
+        .iter()
+        .map(|row| {
+            (
+                row["node_id"].as_str().unwrap_or_default(),
+                row["name"].as_str().unwrap_or_default(),
+                row["callback_binding_position"].as_u64(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(bindings.len(), 2, "each iterator owns exactly one binding");
+    assert_eq!(
+        bindings
+            .iter()
+            .map(|(_, name, position)| (*name, *position))
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([("result", Some(0)), ("row", Some(0))])
+    );
+    assert_ne!(
+        bindings[0].0, bindings[1].0,
+        "nested iterator bindings must have distinct CFG identities"
+    );
+    assert!(
+        callback_rows.iter().all(|row| {
+            row["reaching_definitions"]
+                .as_array()
+                .is_some_and(Vec::is_empty)
+                && row["definition_call_sources"]
+                    .as_object()
+                    .is_some_and(serde_json::Map::is_empty)
+        }),
+        "each callback parameter must be a fresh definition, not inherit a sibling local's reaching set"
+    );
+    Ok(())
+}
+
+#[test]
 fn ruby_generated_record_contract_accepts_runtime_scip_receiver_identity() -> Result<()> {
     let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
     fs::write(

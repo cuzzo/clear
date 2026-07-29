@@ -402,6 +402,62 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
+  it "captures a hash map result after generated-record constructors run in its block" do
+    Dir.mktmpdir("nil-kill-runtime-hash-map-result", NilKill::ROOT) do |dir|
+      source = File.join(dir, "hash_map_result.rb")
+      File.write(source, <<~RUBY)
+        Blast = Struct.new(:file, :score)
+
+        class Worker
+          def run(rows)
+            rows.map do |file, row|
+              Blast.new(file, row.fetch(:score))
+            end.sort_by { |blast| -blast.score }
+          end
+        end
+
+        Worker.new.run("sample.rb" => {score: 1.0})
+      RUBY
+      trace_tmp = File.join(dir, "trace-tmp")
+      FileUtils.mkdir_p(trace_tmp)
+      File.write(File.join(trace_tmp, "trace-plan.json"), JSON.generate(
+        "target_dirs" => [dir],
+        "runtime_call_sites" => {},
+        "runtime_result_call_sites" => { [source, 5].join("\0") => ["map"] },
+        "runtime_collection_receiver_sites" => {},
+        "runtime_native_activation_sites" => { [source, 5].join("\0") => ["map", "sort_by"] }
+      ))
+      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      env = {
+        "NIL_KILL_TRACE" => "1",
+        "NIL_KILL_TRACE_METHODS" => "1",
+        "NIL_KILL_RUNTIME_SCIP" => "1",
+        "NIL_KILL_TMP_DIR" => trace_tmp,
+        "NIL_KILL_TARGETS" => dir,
+        "RUBYOPT" => "-r#{tracer}",
+      }
+
+      _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
+
+      expect(status).to be_success, err
+      events = Dir.glob(File.join(trace_tmp, "runtime", "runtime-calls-*.jsonl"))
+        .flat_map { |path| File.readlines(path, chomp: true).map { |line| JSON.parse(line) } }
+      map = events.find do |event|
+        event.dig("callsite", "path") == source &&
+          event.dig("callsite", "line") == 5 &&
+          event.dig("callee", "name") == "map"
+      end
+      expect(map.dig("result_domain", "types")).to eq(["Array"])
+      expect(map.dig("result_domain", "elements")).to eq(["Blast"])
+      expect(map.dig("result_domain", "shapes")).to include(
+        a_hash_including(
+          "kind" => "array",
+          "elements" => include(a_hash_including("kind" => "record", "name" => "Blast"))
+        )
+      )
+    end
+  end
+
   it "unions result domains from same-line native calls with the same selector" do
     Dir.mktmpdir("nil-kill-runtime-same-line-result", NilKill::ROOT) do |dir|
       source = File.join(dir, "same_line_result.rb")
