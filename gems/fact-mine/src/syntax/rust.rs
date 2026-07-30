@@ -793,6 +793,18 @@ fn is_simple_name(name: &str) -> bool {
 mod tests {
 
     #[test]
+    fn rust_digest_update_is_priced_by_its_input() {
+        let behavior = RustNormalizedBehavior;
+        assert_eq!(
+            behavior.collection_operation(
+                &crate::type_inference::TypeExpr::Primitive("Sha256".to_string()),
+                "update"
+            ),
+            Some(super::super::normalized_behavior::NormalizedCollectionOperation::LinearArgument)
+        );
+    }
+
+    #[test]
     fn rust_signatures_name_their_parameter_types() {
         let source = "fn helper(a: &str, b: &mut Vec<String>) {}\n";
         let mut file = tempfile::Builder::new().suffix(".rs").tempfile().unwrap();
