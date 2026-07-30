@@ -997,49 +997,6 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         }
     }
 
-    fn untraceable_profile_parameters(
-        &self,
-        signature: &str,
-        parameters: &[String],
-    ) -> Vec<String> {
-        parameters
-            .iter()
-            .filter(|parameter| {
-                let bytes = signature.as_bytes();
-                let mut position = 0;
-                while let Some(index) = signature[position..].find(parameter.as_str()) {
-                    let absolute = position + index;
-                    position = absolute + parameter.len();
-                    let identifier_after =
-                        bytes.get(absolute + parameter.len()).is_some_and(|byte| {
-                            let character = *byte as char;
-                            character.is_alphanumeric() || character == '_'
-                        });
-                    if identifier_after {
-                        continue;
-                    }
-                    let sigil = bytes.get(absolute.wrapping_sub(1)).copied();
-                    let prefix_is_boundary = |offset: usize| {
-                        bytes.get(offset).is_none_or(|byte| {
-                            let character = *byte as char;
-                            !character.is_alphanumeric() && character != '_'
-                        })
-                    };
-                    if sigil == Some(b'*')
-                        && (bytes.get(absolute.wrapping_sub(2)) == Some(&b'*')
-                            && prefix_is_boundary(absolute.wrapping_sub(3))
-                            || prefix_is_boundary(absolute.wrapping_sub(2)))
-                        || sigil == Some(b'&') && prefix_is_boundary(absolute.wrapping_sub(2))
-                    {
-                        return true;
-                    }
-                }
-                false
-            })
-            .cloned()
-            .collect()
-    }
-
     fn profile_type_system(&self) -> &'static str {
         "sorbet"
     }

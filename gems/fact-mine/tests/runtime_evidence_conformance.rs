@@ -98,6 +98,8 @@ struct Expectation {
     excluded_target_owner_prefix: Option<String>,
     source_role: Option<String>,
     result_type: Option<String>,
+    #[serde(default)]
+    result_types: Vec<String>,
     result_element_type: Option<String>,
     result_shape: Option<String>,
     boolean_result: Option<bool>,
@@ -595,6 +597,16 @@ fn evidence_for_catalog(
                 let complete_kind =
                     |kind: EvidenceKind| complete_kind_names.contains(format!("{kind:?}").as_str());
                 let alternative_count = receiver_names.len().max(target_owners.len());
+                let result_names = if expected.result_types.is_empty() {
+                    vec![expected.result_type.as_deref().unwrap_or("Object")]
+                } else {
+                    expected
+                        .result_types
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                };
+                let alternative_count = alternative_count.max(result_names.len());
                 assert!(
                     receiver_names.len() == 1 || receiver_names.len() == alternative_count,
                     "{} receiver alternatives do not align with targets",
@@ -603,6 +615,11 @@ fn evidence_for_catalog(
                 assert!(
                     target_owners.len() == 1 || target_owners.len() == alternative_count,
                     "{} target alternatives do not align with receivers",
+                    case.id
+                );
+                assert!(
+                    result_names.len() == 1 || result_names.len() == alternative_count,
+                    "{} result alternatives do not align with receivers and targets",
                     case.id
                 );
                 let mut executions = (0..alternative_count)
@@ -614,7 +631,7 @@ fn evidence_for_catalog(
                             shaped_value_set(shape, SourceRole::PRODUCTION)
                         } else {
                             value_set(
-                                expected.result_type.as_deref().unwrap_or("Object"),
+                                result_names[index.min(result_names.len() - 1)],
                                 expected.result_element_type.as_deref(),
                                 SourceRole::PRODUCTION,
                             )

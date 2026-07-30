@@ -28,8 +28,14 @@ module NilKill
           "selector" => anchor.fetch("display_name").to_s,
           "selector_line" => anchor.dig("range", "start_line"),
           "range" => range,
+          "capture_result" => Array(request["required"]).include?("RESULT_VALUE"),
         }
       end
+      runtime_execution_anchors
+        .select { |anchor| anchor.fetch("capture_result") }
+        .each do |anchor|
+          @runtime_execution_anchors_by_path[anchor.fetch("path")] << anchor
+        end
       # The opaque plan key (path, any line in the execution range, selector)
       # uniquely binds the overwhelming majority of runtime events. A provider
       # may report a multiline call at its receiver line rather than its
@@ -244,18 +250,20 @@ module NilKill
 
         symbol = anchor.fetch("symbol")
         selector = anchor.fetch("selector")
+        capture_result = anchor.fetch("capture_result", false)
         insertions[start_offset] << [
           1,
           -end_offset,
           symbol,
           "(begin; NilKillRuntimeTrace.begin_runtime_anchor_execution(" \
-            "#{symbol.inspect}, #{selector.inspect}); "
+            "#{symbol.inspect}, #{selector.inspect}); " \
+            "#{capture_result ? "NilKillRuntimeTrace.record_runtime_anchor_result(#{symbol.inspect}, (" : ""}"
         ]
         insertions[end_offset] << [
           0,
           -start_offset,
           symbol,
-          "; ensure; NilKillRuntimeTrace.end_runtime_anchor_execution(" \
+          "#{capture_result ? "))" : ""}; ensure; NilKillRuntimeTrace.end_runtime_anchor_execution(" \
             "#{symbol.inspect}); end)"
         ]
       end

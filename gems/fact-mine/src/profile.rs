@@ -4840,6 +4840,23 @@ fn extract_runtime_value_capture_sites(
             result_spans.insert(span);
         }
     }
+    // A callback or other compound expression may normalize to one CFG node
+    // even though it contains `value = call(); consume(value)`. Reaching
+    // definitions describe the state on entry to that node, so the ordinary
+    // cross-node reduction above cannot see this intra-node producer. The
+    // normalized effect already records both the exact producer span and the
+    // fact that the written place is read in the same node; retain that
+    // demand without teaching the runtime collector source-flow semantics.
+    for effect in &document.node_effects {
+        for read in &effect.reads {
+            if let Some(span) = effect.write_call_sources.get(read) {
+                result_spans.insert(*span);
+            }
+            if let Some(spans) = effect.write_call_source_sets.get(read) {
+                result_spans.extend(spans.iter().copied());
+            }
+        }
+    }
     // Direct chained calls have no named local definition, but the normalized
     // receiver projection proves that their result is immediately consumed.
     // Named receivers are already covered by the CFG/DFG definition sources
@@ -9686,6 +9703,38 @@ end
                 .iter()
                 .any(|site| site.span[0] == 5 && site.selector.as_deref() == Some("map")),
             "a collection callback must retain its receiver element domain"
+        );
+    }
+
+    #[test]
+    fn trace_plan_retains_intra_callback_call_result_demands() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class RuntimePlanFixture
+  def run(rows)
+    rows.filter_map do |row|
+      fact = row[:fact]
+      fact.normalize
+      fact
+    end
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+
+        let output = extract(&document, Profile::TracePlan);
+
+        assert!(
+            output.runtime_result_call_sites.iter().any(|site| {
+                site.span[0] == 4 && site.selector.as_deref() == Some("[]")
+            }),
+            "a call result written and consumed inside one normalized callback node must be requested"
         );
     }
 

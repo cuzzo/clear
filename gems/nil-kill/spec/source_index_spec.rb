@@ -184,7 +184,7 @@ RSpec.describe NilKill::SourceIndex do
     end
   end
 
-  it "records splat / double-splat / block params as untraceable (def-side, not sig-side)" do
+  it "keeps splat / double-splat / block params traceable by their local bindings" do
     Dir.mktmpdir("nil-kill-untraceable") do |dir|
       path = File.join(dir, "sample.rb")
       File.write(path, <<~RUBY)
@@ -207,11 +207,11 @@ RSpec.describe NilKill::SourceIndex do
 
       expect(idx.methods).to include(a_hash_including(
         "method" => "lift",
-        "untraceable_params" => ["type_kwargs"]
+        "untraceable_params" => []
       ))
       expect(idx.methods).to include(a_hash_including(
         "method" => "each_item",
-        "untraceable_params" => contain_exactly("items", "blk")
+        "untraceable_params" => []
       ))
     end
   end

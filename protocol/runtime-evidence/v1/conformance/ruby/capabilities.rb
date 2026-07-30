@@ -3,6 +3,7 @@
 require "open3"
 require "optparse"
 require "ostruct"
+require "json"
 require "set"
 require "sorbet-runtime"
 
@@ -37,12 +38,14 @@ module RuntimeEvidenceConformance
     end
 
     def normalize
-      @payload.to_s.upcase
+      [@payload.to_s.upcase]
     end
   end
 
   Generated = Struct.new(:payload, :count)
   GeneratedStatus = Struct.new(:decision_line)
+  ProductionArm = Struct.new(:line)
+  ProductionArmCoverage = Struct.new(:arm, :covered)
   class TypedGenerated < T::Struct
     const :payload, Object
   end
@@ -66,9 +69,23 @@ module RuntimeEvidenceConformance
     end
   end
 
+  class NestedLoader
+    def load(values)
+      values.map { |value| value.normalize }
+    end
+  end
+
   class Raiser
     def fail!
       raise "expected conformance exception"
+    end
+  end
+
+  class InternalRescuer
+    def recover
+      raise "internally rescued"
+    rescue RuntimeError
+      Value.new(:recovered)
     end
   end
 
@@ -286,7 +303,8 @@ module RuntimeEvidenceConformance
     end
 
     def alternative_target(receiver)
-      receiver.normalize
+      result = receiver.normalize
+      result.to_s
     end
 
     def container_shape(source)
@@ -359,6 +377,30 @@ module RuntimeEvidenceConformance
 
     def uncaught_exception_flow(receiver)
       receiver.fail!
+    end
+
+    def internally_rescued_result(receiver)
+      value = receiver.recover
+      value.normalize
+    end
+
+    def rescued_native_exception_then_result(values)
+      begin
+        missing = values.fetch(99)
+        missing.normalize
+      rescue IndexError
+        # A demanded native result may have no value. Its missing c_return
+        # must not poison a later demanded result in the same process.
+      end
+      mapped = values.map { |value| value.normalize }
+      mapped.first
+    end
+
+    def nonlocal_callback_exit_then_result(values)
+      stopped = values.each { |_value| break :stopped }
+      stopped.to_s
+      mapped = values.map { |value| value.normalize }
+      mapped.first
     end
 
     def replaced_dispatch(receiver)
@@ -451,6 +493,74 @@ module RuntimeEvidenceConformance
     def repeated_short_circuit_env
       ENV["NIL_KILL_CONFORMANCE_VALUE"] &&
         !ENV["NIL_KILL_CONFORMANCE_VALUE"].empty?
+    end
+
+    def splat_boundary(*args)
+      args.length
+    end
+
+    def keyword_splat_boundary(**kwargs)
+      kwargs.keys
+    end
+
+    def all_parameter_kinds(
+      required,
+      optional = :optional_default,
+      *rest,
+      keyword:,
+      optional_keyword: :keyword_default,
+      **keyword_rest,
+      &callback
+    )
+      [
+        required,
+        optional,
+        rest,
+        keyword,
+        optional_keyword,
+        keyword_rest,
+        callback
+      ].map(&:class)
+    end
+
+    def nested_project_result_flow(loader, values)
+      loaded = loader.load(values)
+      loaded.first
+    end
+
+    def stdlib_json_result_flow(payload)
+      parsed = JSON.parse(payload)
+      parsed.fetch("value")
+    end
+
+    def constructor_callback_result_flow(klass, value)
+      created = klass.new(value).tap { |instance| instance.normalize }
+      created.normalize
+    end
+
+    def iterator_nested_project_result_flow(values)
+      normalized = values.map { |value| nested_result_builder(value) }
+      normalized.first
+    end
+
+    def nested_result_builder(value)
+      { payload: value.normalize }
+    end
+
+    def callback_generated_accessor_result(coverages)
+      index = coverages.each_with_object({}) do |coverage, out|
+        out[coverage.arm.line] = coverage.covered
+      end
+      index.keys
+    end
+
+    def callback_index_result(rows)
+      facts = rows.filter_map do |row|
+        fact = row[:verification_fact]
+        fact.normalize
+        fact
+      end
+      facts.first
     end
   end
 end

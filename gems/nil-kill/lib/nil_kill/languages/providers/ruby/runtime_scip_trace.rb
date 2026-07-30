@@ -90,6 +90,39 @@ module NilKillRuntimeTrace
     nil
   end
 
+  def self.record_runtime_anchor_result(symbol, value)
+    return value if Thread.current[:__nil_kill_collection_hook]
+
+    observed = runtime_value_domain(value)
+    return value if runtime_value_domain_empty?(observed)
+
+    key_stacks =
+      Thread.current[:__nil_kill_runtime_scip_result_keys] || {}
+    key = key_stacks[symbol.to_s]&.pop
+    return value unless key
+
+    @lock.synchronize do
+      record = @runtime_calls[key]
+      if record
+        merge_runtime_value_domain!(
+          record[:result_domain] ||= empty_runtime_value_domain,
+          observed
+        )
+        if value == true || value == false
+          record[:result_truths] = Array(record[:result_truths]) | [value]
+        end
+      end
+    end
+    execution = @runtime_anchor_execution_stack[Thread.current.object_id]
+      .reverse
+      .find { |entry| entry.fetch(:symbol) == symbol.to_s }
+    execution[:result_recorded] = true if execution
+    value
+  rescue StandardError
+    # Result capture is observational and must never alter user execution.
+    value
+  end
+
   RUNTIME_ANCHOR_MARKER_METHODS = %i[
     begin_runtime_anchor_execution
     end_runtime_anchor_execution
@@ -121,7 +154,14 @@ module NilKillRuntimeTrace
 
     stack = @runtime_anchor_execution_stack[Thread.current.object_id]
     index = stack.rindex { |entry| entry.fetch(:symbol) == symbol }
-    stack.delete_at(index) if index
+    if index
+      execution = stack.delete_at(index)
+      unless execution[:result_recorded]
+        key_stacks =
+          Thread.current[:__nil_kill_runtime_scip_result_keys] || {}
+        key_stacks[symbol]&.pop
+      end
+    end
     true
   end
 
@@ -400,7 +440,7 @@ module NilKillRuntimeTrace
     return if frames.empty?
 
     frame = frames.pop
-    if frame&.fetch(:capture_result, false) && !frame[:raised]
+    if frame&.fetch(:capture_result, false) && !frame[:source_raised]
       record_runtime_scip_result(frame[:observed_call], tp.return_value)
     end
 
@@ -412,16 +452,44 @@ module NilKillRuntimeTrace
     arm_runtime_scip_native_callsite(parent_callsite) if parent_callsite
   end
 
-  def self.record_runtime_scip_raise
+  def self.record_runtime_scip_raise(tp)
     thread_id = Thread.current.object_id
-    frame = @runtime_scip_frames[thread_id].last
-    return unless frame
-
-    if @runtime_scip_external_depth[thread_id].positive?
-      frame[:runtime_scip_external_call][:raised] = true if frame[:runtime_scip_external_call]
-    else
-      frame[:raised] = true
+    native_frame = @runtime_scip_native_calls[Thread.current.object_id].last
+    if native_frame &&
+       native_frame[:method_id] == tp.method_id &&
+       native_frame[:defined_class].equal?(tp.defined_class)
+      # CRuby emits c_return with a synthetic nil return value after some
+      # native methods raise. Retain the frame only to balance that event.
+      native_frame[:raised] = true
     end
+
+    # Dependency source is not instrumented, so a raise observed anywhere in
+    # that opaque Ruby call makes its result incomplete. This deliberately
+    # favors sound under-claiming when the dependency rescues internally.
+    if @runtime_scip_external_depth[thread_id].positive?
+      selected_frame = @runtime_scip_frames[thread_id].last
+      external_call = selected_frame&.fetch(:runtime_scip_external_call, nil)
+      external_call[:raised] = true if external_call
+    end
+  end
+
+  def self.mark_runtime_scip_source_method_raise(owner, method_id, kind, path, line)
+    frame = @runtime_scip_frames[Thread.current.object_id].reverse.find do |candidate|
+      caller = candidate[:caller]
+      caller &&
+        caller[:class] == owner.to_s &&
+        caller[:method] == method_id.to_s &&
+        caller[:kind] == kind.to_s &&
+        caller[:path] == abs_path(path) &&
+        caller[:line].to_i == line.to_i
+    end
+    # The injected source wrapper runs only when the exception escapes this
+    # method. Unlike TracePoint :raise, it does not fire for an exception
+    # rescued inside the method, so it can distinguish a synthetic nil
+    # :return from a real nil result without source-flow inference here.
+    frame[:source_raised] = true if frame
+  rescue StandardError
+    nil
   end
 
   def self.enter_runtime_scip_native_call(tp)
@@ -519,7 +587,9 @@ module NilKillRuntimeTrace
       frame[:defined_class].equal?(tp.defined_class)
 
     frames.pop
-    record_runtime_scip_result(frame[:observed_call], tp.return_value) if frame[:capture_result]
+    if frame[:capture_result] && !frame[:raised]
+      record_runtime_scip_result(frame[:observed_call], tp.return_value)
+    end
     return unless frame[:capture_result]
 
     @runtime_scip_native_result_depth -= 1
@@ -995,6 +1065,13 @@ module NilKillRuntimeTrace
       result_truths: [],
       count: 0,
     })
+    anchor_symbol = callsite[:anchor_symbol].to_s
+    if runtime_source_result_anchors.include?(anchor_symbol)
+      key_stacks =
+        Thread.current[:__nil_kill_runtime_scip_result_keys] ||=
+          Hash.new { |hash, symbol| hash[symbol] = [] }
+      key_stacks[anchor_symbol] << key
+    end
     merge_runtime_value_domain!(record[:receiver_domain], receiver_domain)
     record[:count] += 1
   end
@@ -1008,6 +1085,13 @@ module NilKillRuntimeTrace
     return if runtime_value_domain_empty?(observed)
     @lock.synchronize do
       record = @runtime_calls[key]
+      # Selected source expressions requested by FactMine are wrapped at their
+      # exact opaque execution range. That value is authoritative: CRuby's
+      # TracePoint return_value can be a synthetic nil after raise or break.
+      # Keep TracePoint results only for calls outside that source surface.
+      anchor_symbol = record&.dig(:callsite, :anchor_symbol).to_s
+      return if runtime_source_result_anchors.include?(anchor_symbol)
+
       merge_runtime_value_domain!(record[:result_domain] ||= empty_runtime_value_domain, observed) if record
       if record && (value == true || value == false)
         record[:result_truths] = Array(record[:result_truths]) | [value]
@@ -1205,6 +1289,18 @@ module NilKillRuntimeTrace
     runtime_scip_value_capture?("runtime_result_call_sites", callsite, selector)
   end
 
+  def self.runtime_source_result_anchors
+    @runtime_source_result_anchors ||= Array(
+      trace_plan&.dig("runtime_evidence", "requests")
+    ).filter_map do |request|
+      anchor = request["anchor"]
+      next unless anchor.is_a?(Hash)
+      next unless Array(request["required"]).include?("RESULT_VALUE")
+
+      anchor["symbol"].to_s
+    end.to_set.freeze
+  end
+
   def self.runtime_scip_call_capture?(callsite, selector = nil)
     runtime_scip_value_capture?("runtime_call_sites", callsite, selector)
   end
@@ -1342,7 +1438,7 @@ module NilKillRuntimeTrace
       when :raise
         next if frames.empty?
 
-        record_runtime_scip_raise
+        record_runtime_scip_raise(trace)
       end
     end.enable
   end

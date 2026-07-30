@@ -1137,6 +1137,8 @@ module NilKillRuntimeTrace
     ctx = site_ctx(owner, method_id, kind, path, line)
     return unless ctx
 
+    mark_runtime_scip_source_method_raise(owner, method_id, kind, path, line)
+
     b = ctx[:bucket]
     @lock.synchronize do
       frame = pop_frame_for_key(ctx[:key])

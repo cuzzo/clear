@@ -103,6 +103,9 @@ rescue RuntimeError
   # The function-return anchor must fail closed: the function entered but did
   # not produce a return value.
 end
+subject.internally_rescued_result(RuntimeEvidenceConformance::InternalRescuer.new)
+subject.rescued_native_exception_then_result([left, right])
+subject.nonlocal_callback_exit_then_result([left, right])
 subject.replaced_dispatch(RuntimeEvidenceConformance::TestDispatcher.new)
 subject.anonymous_replaced_dispatch(RuntimeEvidenceConformance.anonymous_dispatcher)
 subject.mixed_anonymous_dispatch(RuntimeEvidenceConformance::ProductionDispatcher.new)
@@ -146,3 +149,25 @@ ENV["NIL_KILL_CONFORMANCE_VALUE"] = "value"
 subject.repeated_short_circuit_env
 ENV.delete("NIL_KILL_CONFORMANCE_VALUE")
 subject.repeated_short_circuit_env
+subject.splat_boundary(left, right)
+subject.keyword_splat_boundary(left: left, right: right)
+subject.all_parameter_kinds(
+  left,
+  right,
+  :rest,
+  keyword: left,
+  optional_keyword: right,
+  extra: :keyword_rest
+) { :callback }
+subject.nested_project_result_flow(
+  RuntimeEvidenceConformance::NestedLoader.new,
+  [left, right]
+)
+subject.stdlib_json_result_flow('{"value":"runtime-evidence"}')
+subject.constructor_callback_result_flow(RuntimeEvidenceConformance::Value, :callback)
+subject.iterator_nested_project_result_flow([left, right])
+production_arm = RuntimeEvidenceConformance::ProductionArm.new(7)
+production_coverage =
+  RuntimeEvidenceConformance::ProductionArmCoverage.new(production_arm, true)
+subject.callback_generated_accessor_result([production_coverage])
+subject.callback_index_result([{ verification_fact: left }])

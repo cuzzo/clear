@@ -399,6 +399,24 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       if expected["result_type"]
         expect(type_names(first["result"])).to include(expected.fetch("result_type"))
       end
+      if expected["result_types"]
+        receiver_types = expected.fetch("receiver_types")
+        target_owners = expected.fetch("target_owners")
+        result_types = expected.fetch("result_types")
+        expect(receiver_types.length).to eq(target_owners.length)
+        expect(receiver_types.length).to eq(result_types.length)
+        receiver_types.each_index do |index|
+          raw = matching_raw.find do |event|
+            event.dig("callee", "owner") == target_owners.fetch(index) &&
+              Array(event.dig("receiver_domain", "types"))
+                .include?(receiver_types.fetch(index))
+          end
+          expect(raw).not_to be_nil,
+            "#{test_case.fetch("id")} lost receiver/target correlation at #{index}"
+          expect(Array(raw.dig("result_domain", "types")))
+            .to include(result_types.fetch(index))
+        end
+      end
       if expected["result_element_type"]
         elements = first.dig(
           "result", "alternatives", 0, "value", "sequence", "elements"

@@ -708,16 +708,19 @@ cases:
       source_role: PRODUCTION
 
   - id: alternative_dynamic_targets
-    capabilities: [dynamic-dispatch, alternative-receivers, alternative-targets, repeated-execution]
+    capabilities: [dynamic-dispatch, alternative-receivers, alternative-targets, alternative-results, correlated-execution-buckets, repeated-execution]
     anchor: { method: alternative_target, selector: normalize, occurrence: 1 }
     expect:
-      required: [RECEIVER_VALUE, CALL_TARGET]
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
       receiver_types:
         - RuntimeEvidenceConformance::Value
         - RuntimeEvidenceConformance::AlternateValue
       target_owners:
         - RuntimeEvidenceConformance::Value
         - RuntimeEvidenceConformance::AlternateValue
+      result_types:
+        - String
+        - Array
       target_name: normalize
       observed_executions: 2
 
@@ -862,6 +865,62 @@ cases:
       required: [RECEIVER_VALUE, CALL_TARGET]
       receiver_type: RuntimeEvidenceConformance::Raiser
       target_owner: RuntimeEvidenceConformance::Raiser
+
+  - id: internally_rescued_project_result
+    capabilities: [exception, internally-rescued-exception, ruby-call, project-call, result-flow]
+    anchor: { method: internally_rescued_result, selector: recover, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: RuntimeEvidenceConformance::InternalRescuer
+      target_owner: RuntimeEvidenceConformance::InternalRescuer
+      target_name: recover
+      result_type: RuntimeEvidenceConformance::Value
+      source_role: PRODUCTION
+
+  - id: native_exception_missing_result
+    capabilities: [exception, native-call, non-returning-call, partial-result, per-kind-completeness]
+    anchor: { method: rescued_native_exception_then_result, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      allowed_status: PARTIAL
+      complete_kinds: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: fetch
+      source_role: STANDARD_LIBRARY
+
+  - id: native_result_after_rescued_exception
+    capabilities: [exception, native-call, native-yield, callback, result-flow, result-stack-recovery]
+    anchor: { method: rescued_native_exception_then_result, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      source_role: STANDARD_LIBRARY
+
+  - id: nonlocal_callback_exit_result
+    capabilities: [native-call, native-yield, callback, nonlocal-exit, result-flow]
+    anchor: { method: nonlocal_callback_exit_then_result, selector: each, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: each
+      result_type: Symbol
+      source_role: STANDARD_LIBRARY
+
+  - id: native_result_after_nonlocal_callback_exit
+    capabilities: [native-call, native-yield, callback, nonlocal-exit, result-flow, result-stack-recovery]
+    anchor: { method: nonlocal_callback_exit_then_result, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      source_role: STANDARD_LIBRARY
 
   - id: nonproduction_target
     capabilities: [dynamic-dispatch, test-replacement, nonproduction-provenance]
@@ -1187,6 +1246,119 @@ cases:
     expect:
       required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
 
+  - id: splat_parameter_body
+    capabilities: [function-entry, splat-parameter, native-call]
+    anchor: { method: splat_boundary, selector: length, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: length
+      source_role: STANDARD_LIBRARY
+
+  - id: keyword_splat_parameter_body
+    capabilities: [function-entry, keyword-splat-parameter, native-call]
+    anchor: { method: keyword_splat_boundary, selector: keys, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: keys
+      source_role: STANDARD_LIBRARY
+
+  - id: complete_parameter_kind_matrix
+    capabilities: [function-entry, required-parameter, optional-parameter, splat-parameter, keyword-parameter, optional-keyword-parameter, keyword-splat-parameter, block-parameter]
+    anchor: { method: all_parameter_kinds, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      source_role: STANDARD_LIBRARY
+
+  - id: selected_project_nested_result
+    capabilities: [ruby-call, project-call, selected-callee, nested-callback, result-flow]
+    anchor: { method: nested_project_result_flow, selector: load, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: RuntimeEvidenceConformance::NestedLoader
+      target_owner: RuntimeEvidenceConformance::NestedLoader
+      target_name: load
+      result_type: Array
+      source_role: PRODUCTION
+
+  - id: standard_library_ruby_result
+    capabilities: [ruby-call, standard-library, module-method, result-flow]
+    anchor: { method: stdlib_json_result_flow, selector: parse, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Module
+      target_owner: JSON
+      target_name: parse
+      result_type: Hash
+
+  - id: constructor_with_callback_result
+    capabilities: [constructor, native-call, callback, chained-call, result-flow]
+    anchor: { method: constructor_callback_result_flow, selector: new, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Class
+      result_type: RuntimeEvidenceConformance::Value
+
+  - id: iterator_with_nested_project_callback_result
+    capabilities: [native-call, native-yield, callback, project-call, result-flow, collection-value]
+    anchor: { method: iterator_nested_project_result_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      result_element_type: Hash
+      source_role: STANDARD_LIBRARY
+
+  - id: callback_generated_outer_accessor_result
+    capabilities: [native-call, native-yield, callback, generated-accessor, nested-receiver, result-flow]
+    anchor: { method: callback_generated_accessor_result, selector: arm, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: RuntimeEvidenceConformance::ProductionArmCoverage
+      result_type: RuntimeEvidenceConformance::ProductionArm
+
+  - id: callback_each_with_object_result
+    capabilities: [native-call, native-yield, callback, generated-accessor, result-flow, collection-value]
+    anchor: { method: callback_generated_accessor_result, selector: each_with_object, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Enumerable
+      target_name: each_with_object
+      result_type: Hash
+      source_role: STANDARD_LIBRARY
+
+  - id: callback_hash_index_result
+    capabilities: [native-call, native-yield, callback, index-read, result-flow]
+    anchor: { method: callback_index_result, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      result_type: RuntimeEvidenceConformance::Value
+      source_role: STANDARD_LIBRARY
+
+  - id: callback_filter_map_result
+    capabilities: [native-call, native-yield, callback, index-read, result-flow, collection-value]
+    anchor: { method: callback_index_result, selector: filter_map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Enumerable
+      target_name: filter_map
+      result_type: Array
+      result_element_type: RuntimeEvidenceConformance::Value
+      source_role: STANDARD_LIBRARY
+
 boundary_cases:
   - id: parameter_value
     capabilities: [function-entry, parameter-value]
@@ -1212,6 +1384,14 @@ boundary_cases:
     evidence_kind: RETURN_VALUE
     expected_type: NilClass
 
+  - id: rescued_function_return_value
+    capabilities: [function-return, return-value, internally-rescued-exception]
+    method: exception_flow
+    display_name: return
+    anchor_kind: FUNCTION_RETURN
+    evidence_kind: RETURN_VALUE
+    expected_type: Symbol
+
   - id: state_write_value
     capabilities: [state-write, state-value]
     method: state_flow
@@ -1219,6 +1399,78 @@ boundary_cases:
     anchor_kind: STATE_WRITE
     evidence_kind: STATE_VALUE
     expected_type: RuntimeEvidenceConformance::Value
+
+  - id: splat_parameter_value
+    capabilities: [function-entry, parameter-value, splat-parameter]
+    method: splat_boundary
+    display_name: args
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Array
+
+  - id: keyword_splat_parameter_value
+    capabilities: [function-entry, parameter-value, keyword-splat-parameter]
+    method: keyword_splat_boundary
+    display_name: kwargs
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Hash
+
+  - id: required_parameter_kind
+    capabilities: [function-entry, parameter-value, required-parameter]
+    method: all_parameter_kinds
+    display_name: required
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: optional_parameter_kind
+    capabilities: [function-entry, parameter-value, optional-parameter]
+    method: all_parameter_kinds
+    display_name: optional
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: rest_parameter_kind
+    capabilities: [function-entry, parameter-value, splat-parameter]
+    method: all_parameter_kinds
+    display_name: rest
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Array
+
+  - id: required_keyword_parameter_kind
+    capabilities: [function-entry, parameter-value, keyword-parameter]
+    method: all_parameter_kinds
+    display_name: keyword
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: optional_keyword_parameter_kind
+    capabilities: [function-entry, parameter-value, optional-keyword-parameter]
+    method: all_parameter_kinds
+    display_name: optional_keyword
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: keyword_rest_parameter_kind
+    capabilities: [function-entry, parameter-value, keyword-splat-parameter]
+    method: all_parameter_kinds
+    display_name: keyword_rest
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Hash
+
+  - id: block_parameter_kind
+    capabilities: [function-entry, parameter-value, block-parameter]
+    method: all_parameter_kinds
+    display_name: callback
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Proc
 
   - id: uncaught_function_return
     capabilities: [function-return, exception, non-returning-call, failed-return]
