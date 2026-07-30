@@ -7,6 +7,7 @@ module NilKillRuntimeTrace
   @runtime_calls = {}
   @runtime_package_by_path = {}
   @runtime_scip_frames = Hash.new { |hash, thread_id| hash[thread_id] = [] }
+  @runtime_scip_callsites_by_path = {}
   @runtime_scip_external_depth = Hash.new(0)
   @runtime_scip_native_calls = Hash.new { |hash, thread_id| hash[thread_id] = [] }
   @runtime_scip_native_result_depth = 0
@@ -277,11 +278,20 @@ module NilKillRuntimeTrace
 
     path = abs_path(raw_path)
 
-    frame[:callsite] = {
-      path: path,
-      line: src_line(path, tp.lineno),
-    }
+    frame[:callsite] = runtime_scip_callsite(path, src_line(path, tp.lineno))
     arm_runtime_scip_native_callsite(frame[:callsite])
+  end
+
+  # One shared callsite anchor per (path, line). Allocating a fresh Hash per
+  # :line event also gave every event a fresh, empty
+  # `runtime_scip_capture_cache`, so the plan-demand memo on that anchor never
+  # hit and every native call on the line rebuilt its string plan keys and
+  # re-read the plan. The anchor is a pure function of (path, line) and callers
+  # only ever read it or `merge` a copy, so sharing it is what makes that
+  # documented memo real.
+  def self.runtime_scip_callsite(path, line)
+    lines = (@runtime_scip_callsites_by_path[path] ||= {})
+    lines[line] ||= { path: path, line: line }
   end
 
   def self.arm_runtime_scip_native_callsite(callsite)
@@ -1292,13 +1302,32 @@ module NilKillRuntimeTrace
     shape_payload(class_shape_key(value))
   end
 
+  # After the first few executions of a callsite an observation adds no new
+  # alternative, yet every merge rebuilt the field with a union, a re-sort, and a
+  # JSON.generate per Hash member. Only rebuild when an alternative is genuinely
+  # new. Domains are always stored unique and sorted by the same key, so
+  # re-merging existing alternatives is exactly the identity and the emitted
+  # evidence is unchanged.
   def self.merge_runtime_value_domain!(target, source)
     source.each do |field, values|
-      target[field] = (Array(target[field]) | Array(values)).sort_by do |item|
-        item.is_a?(Hash) ? JSON.generate(item) : item.to_s
+      values = Array(values)
+      current = target[field]
+      if current.nil?
+        target[field] = sort_runtime_domain_values(values.uniq)
+        next
       end
+      next if values.empty?
+
+      added = values.reject { |item| current.include?(item) }
+      next if added.empty?
+
+      target[field] = sort_runtime_domain_values(current | added)
     end
     target
+  end
+
+  def self.sort_runtime_domain_values(values)
+    values.sort_by { |item| item.is_a?(Hash) ? JSON.generate(item) : item.to_s }
   end
 
   # A valid new plan is an authority to elide unnecessary values. A missing
