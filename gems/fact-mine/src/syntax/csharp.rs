@@ -391,6 +391,28 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         csharp_declared_local_type(source, name)
     }
 
+    fn syntax_metadata(
+        &self,
+        source: &str,
+        functions: &[crate::syntax::FunctionDef],
+    ) -> super::normalized_behavior::SyntaxMetadata {
+        super::normalized_behavior::SyntaxMetadata {
+            method_param_types:
+                super::normalized_behavior::method_param_types_from_signatures(
+                    self, source, functions,
+                ),
+            method_local_types:
+                super::normalized_behavior::method_local_types_from_declarations(
+                    self, source, functions,
+                ),
+            ..super::normalized_behavior::SyntaxMetadata::default()
+        }
+    }
+
+    fn complexity_uses_syntax_local_types(&self) -> bool {
+        true
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("csharp")
     }

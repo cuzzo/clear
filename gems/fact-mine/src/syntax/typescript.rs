@@ -230,6 +230,29 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
 
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
         super::normalized_behavior::type_after_local_colon(source, name)
+            .or_else(|| typescript_literal_local_type(source, name))
+    }
+
+    fn syntax_metadata(
+        &self,
+        source: &str,
+        functions: &[crate::syntax::FunctionDef],
+    ) -> super::normalized_behavior::SyntaxMetadata {
+        super::normalized_behavior::SyntaxMetadata {
+            method_param_types:
+                super::normalized_behavior::method_param_types_from_signatures(
+                    self, source, functions,
+                ),
+            method_local_types:
+                super::normalized_behavior::method_local_types_from_declarations(
+                    self, source, functions,
+                ),
+            ..super::normalized_behavior::SyntaxMetadata::default()
+        }
+    }
+
+    fn complexity_uses_syntax_local_types(&self) -> bool {
+        true
     }
 
     fn stdlib_language(&self) -> Option<&'static str> {
@@ -954,4 +977,30 @@ mod tests {
             .state_declaration_from_node(&in_method_decl_none, "MyClass", true)
             .is_none());
     }
+}
+
+/// The primitive a local's initializer literal denotes, for a local with no
+/// annotation. A non-literal initializer is left unresolved.
+fn typescript_literal_local_type(source: &str, name: &str) -> Option<String> {
+    let index = source.match_indices(name).find_map(|(index, _)| {
+        let before = source[..index].chars().next_back();
+        let after = source[index + name.len()..].chars().next();
+        let boundary = |character: Option<char>| {
+            character.is_none_or(|character| !character.is_alphanumeric() && character != '_')
+        };
+        (boundary(before) && boundary(after)).then_some(index)
+    })?;
+    let rest = source[index + name.len()..].trim_start();
+    let initializer = rest.strip_prefix('=')?.trim_start();
+    let first = initializer.chars().next()?;
+    if first == '"' || first == '\'' || first == '`' {
+        return Some("string".to_string());
+    }
+    if first.is_ascii_digit() {
+        return Some("number".to_string());
+    }
+    if initializer.starts_with("true") || initializer.starts_with("false") {
+        return Some("boolean".to_string());
+    }
+    None
 }

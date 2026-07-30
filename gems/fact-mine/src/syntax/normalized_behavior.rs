@@ -2574,6 +2574,67 @@ pub(crate) fn usable_declared_local_type(type_name: &str) -> Option<String> {
 
 /// Shared parser for declarations whose type precedes the local name, such
 /// as Java/C#/C++ `final Service client = ...`. Languages opt in explicitly.
+/// Declared types of a function's locals, asked of the language that owns the
+/// declaration syntax. A name declared with conflicting types is omitted rather
+/// than guessed.
+pub(crate) fn method_local_types_from_declarations<B: NormalizedLanguageBehavior + ?Sized>(
+    behavior: &B,
+    source: &str,
+    functions: &[crate::syntax::FunctionDef],
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let lines = source.lines().collect::<Vec<_>>();
+    functions
+        .iter()
+        .filter_map(|function| {
+            let start = function.span[0].saturating_sub(1).min(lines.len());
+            let end = function.span[2].min(lines.len());
+            let mut candidates = BTreeMap::<String, BTreeSet<String>>::new();
+            for line in lines.get(start..end)? {
+                for name in assigned_local_names(line) {
+                    if let Some(declared) = behavior.declared_local_type(line, &name) {
+                        candidates.entry(name).or_default().insert(declared);
+                    }
+                }
+            }
+            let stable = candidates
+                .into_iter()
+                .filter_map(|(name, types)| {
+                    (types.len() == 1).then(|| (name, types.into_iter().next().unwrap()))
+                })
+                .collect::<BTreeMap<_, _>>();
+            (!stable.is_empty()).then_some((
+                format!("{}\0{}\0{}", function.owner, function.name, function.line),
+                stable,
+            ))
+        })
+        .collect()
+}
+
+/// Identifiers bound by an assignment on this line: the token before `=`,
+/// ignoring comparisons and compound operators.
+fn assigned_local_names(line: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let bytes = line.as_bytes();
+    for (index, _) in line.match_indices('=') {
+        let next = bytes.get(index + 1).copied();
+        let previous = index.checked_sub(1).and_then(|i| bytes.get(i).copied());
+        if next == Some(b'=') || previous == Some(b'=') || previous == Some(b'!')
+            || previous == Some(b'<') || previous == Some(b'>')
+        {
+            continue;
+        }
+        let head = line[..index].trim_end().trim_end_matches(':');
+        let name = head
+            .rsplit(|character: char| !character.is_alphanumeric() && character != '_')
+            .next()
+            .unwrap_or_default();
+        if !name.is_empty() && !name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
 pub(crate) fn type_before_local_name(source: &str, name: &str) -> Option<String> {
     let name_start = source.match_indices(name).find_map(|(index, _)| {
         let before = source[..index].chars().next_back();
