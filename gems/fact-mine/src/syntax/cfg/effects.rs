@@ -29,6 +29,7 @@ struct RawEffect {
     write_sources: BTreeMap<String, String>,
     write_call_sources: BTreeMap<String, Span>,
     write_call_source_sets: BTreeMap<String, Vec<Span>>,
+    write_sequence_projections: BTreeMap<String, usize>,
     write_nullable_contracts: BTreeMap<String, String>,
     callback_bindings: Vec<RawCallbackBinding>,
     return_state_hint: Option<String>,
@@ -357,6 +358,11 @@ pub(crate) fn extract(
                 .into_iter()
                 .map(|(target, producer_spans)| (id_for(&target), producer_spans))
                 .collect(),
+            write_sequence_projections: raw
+                .write_sequence_projections
+                .into_iter()
+                .map(|(target, position)| (id_for(&target), position))
+                .collect(),
             write_nullable_contracts: raw
                 .write_nullable_contracts
                 .into_iter()
@@ -586,6 +592,53 @@ fn collect(
     behavior: Option<&dyn NormalizedLanguageBehavior>,
 ) {
     if NESTED_SCOPE_TYPES.contains(&node.r#type.as_str()) {
+        return;
+    }
+    // MASGN is a normalized AST contract shared by adapters: child zero is
+    // the produced value and child one is the ordered target list. Preserve
+    // the positional projection alongside the ordinary call-result edge so
+    // the generic CFG/DFG overlay can type each destructured binding.
+    if node.r#type == "MASGN" {
+        let value = node.children.first().and_then(ast::node);
+        let targets = node
+            .children
+            .get(1)
+            .and_then(ast::node)
+            .into_iter()
+            .flat_map(|list| list.children.iter().filter_map(ast::node))
+            .collect::<Vec<_>>();
+        let producer_spans = value.and_then(|value| call_result_source_spans(value, behavior));
+        for (position, target) in targets.into_iter().enumerate() {
+            let Some(name) = node_name(target) else {
+                effect.complete = false;
+                effect
+                    .unknown_reasons
+                    .push("MASGN target has no normalized name".to_string());
+                continue;
+            };
+            effect.writes.insert(name.clone());
+            effect.record_place(name.clone(), place_kind_for_node(&target.r#type));
+            if let Some(producer_spans) = producer_spans.as_ref() {
+                if producer_spans.len() == 1 {
+                    effect
+                        .write_call_sources
+                        .insert(name.clone(), producer_spans[0]);
+                } else if !producer_spans.is_empty() {
+                    effect
+                        .write_call_source_sets
+                        .insert(name.clone(), producer_spans.clone());
+                }
+                effect.write_sequence_projections.insert(name, position);
+            }
+        }
+        if let Some(value) = value {
+            collect(
+                value,
+                effect,
+                function_value_calls_are_local_reads,
+                behavior,
+            );
+        }
         return;
     }
     if WRITE_TYPES.contains(&node.r#type.as_str()) {

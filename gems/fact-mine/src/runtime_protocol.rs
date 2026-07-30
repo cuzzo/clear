@@ -162,7 +162,7 @@ pub fn build_trace_plan_with_bindings(
     {
         let relative_path = normalized_plan_path(&method.path, &path_lookup);
         let span = method.span.unwrap_or([method.line, 0, method.line, 0]);
-        let enclosing_symbol = plan_method_symbol(method);
+        let enclosing_symbol = plan_method_symbol(method, &relative_path);
         let method_anchor_id = stable_id(&format!(
             "{}\0{}\0{}\0{}",
             relative_path, method.owner, method.name, method.kind
@@ -242,7 +242,7 @@ pub fn build_trace_plan_with_bindings(
         required.sort_by_key(|kind| kind.value());
         required.dedup();
         let selector_span = call.selector_span.unwrap_or(call.span);
-        let enclosing_symbol = plan_method_symbol(method);
+        let enclosing_symbol = plan_method_symbol(method, &relative_path);
         let ordinal = call_ordinals.get(call.id.as_str()).copied().unwrap_or(0);
         let method_anchor_id = stable_id(&format!(
             "{}\0{}\0{}\0{}",
@@ -298,7 +298,7 @@ pub fn build_trace_plan_with_bindings(
             &relative_path,
             access.span,
             AnchorKind::STATE_WRITE,
-            &plan_method_symbol(method),
+            &plan_method_symbol(method, &relative_path),
             &format!(
                 "{}\0state\0{ordinal}\0{}",
                 method.normalized_source, access.field
@@ -375,13 +375,13 @@ fn plan_anchor(
     }
 }
 
-fn plan_method_symbol(method: &crate::profile::MethodRecord) -> String {
+fn plan_method_symbol(method: &crate::profile::MethodRecord, relative_path: &str) -> String {
     method.semantic_symbol.clone().unwrap_or_else(|| {
         format!(
             "fact-mine workspace project . Method#{}().",
             stable_id(&format!(
                 "{}\0{}\0{}\0{}",
-                method.path, method.owner, method.name, method.kind
+                relative_path, method.owner, method.name, method.kind
             ))
         )
     })
@@ -1574,5 +1574,29 @@ mod tests {
             call.range.as_ref().expect("range").start_line + 1
         );
         assert_ne!(second.plan_digest, first.plan_digest);
+    }
+
+    #[test]
+    fn trace_plan_enclosing_symbols_ignore_absolute_profile_path_form() {
+        let directory = tempfile::tempdir().expect("directory");
+        let source = directory.path().join("worker.rb");
+        fs::write(&source, "class Worker\n  def run\n    1\n  end\nend\n").expect("source");
+        let document =
+            crate::syntax::parse_file(source, crate::syntax::Language::Ruby).expect("parse");
+        let profile = crate::profile::extract(&document, crate::profile::Profile::TracePlan);
+        let mut relative = profile
+            .methods
+            .iter()
+            .find(|method| method.name == "run")
+            .expect("method")
+            .clone();
+        relative.path = "gems/demo/lib/worker.rb".to_string();
+        let mut absolute = relative.clone();
+        absolute.path = "/checkout/gems/demo/lib/worker.rb".to_string();
+
+        assert_eq!(
+            plan_method_symbol(&relative, "gems/demo/lib/worker.rb"),
+            plan_method_symbol(&absolute, "gems/demo/lib/worker.rb")
+        );
     }
 }

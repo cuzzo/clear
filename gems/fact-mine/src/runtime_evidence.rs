@@ -51,6 +51,15 @@ struct RuntimeValueEvidence {
     pub observations: Vec<ValueObservation>,
     #[serde(default)]
     pub calls: Vec<ObservedCall>,
+    /// Runtime dispatch facts whose exact normalized callsite is not known.
+    ///
+    /// A correlation group can still prove that a receiver type and selector
+    /// dispatched to a particular semantic target even when a native tracer
+    /// cannot distinguish two same-line source calls. FactMine may use that
+    /// fact as a target catalog entry, but only its CFG/DFG may join it back
+    /// to a normalized call.
+    #[serde(default)]
+    pub target_catalog: Vec<RuntimeTargetObservation>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -247,6 +256,14 @@ struct ObservedCall {
     pub call_id: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+struct RuntimeTargetObservation {
+    pub language: String,
+    pub selector: String,
+    pub targets: Vec<SemanticTarget>,
+    pub receiver_domain: ValueDomain,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -336,10 +353,15 @@ impl RuntimeValueEvidence {
                     || call
                         .receiver_domain
                         .as_ref()
-                        .is_none_or(ValueDomain::is_empty))
+                        .is_none_or(ValueDomain::is_empty)
+                        && call
+                            .result_domain
+                            .as_ref()
+                            .is_none_or(ValueDomain::is_empty)
+                        && call.result_truths.is_empty())
             {
                 bail!(
-                    "calls[{index}] without targets requires an incomplete target observation and a receiver domain"
+                    "calls[{index}] without targets requires an incomplete target observation and exact receiver/result evidence"
                 );
             }
             for (target_index, target) in call.targets.iter().enumerate() {
@@ -363,6 +385,35 @@ impl RuntimeValueEvidence {
                 domain.validate(&format!("calls[{index}].result_domain"))?;
                 if domain.is_empty() {
                     bail!("calls[{index}].result_domain must not be empty");
+                }
+            }
+        }
+        for (index, observation) in self.target_catalog.iter().enumerate() {
+            if observation.language.is_empty() || observation.selector.is_empty() {
+                bail!("target_catalog[{index}] requires a language and selector");
+            }
+            if observation.targets.is_empty() || observation.receiver_domain.is_empty() {
+                bail!("target_catalog[{index}] requires targets and a receiver domain");
+            }
+            observation
+                .receiver_domain
+                .validate(&format!("target_catalog[{index}].receiver_domain"))?;
+            for (target_index, target) in observation.targets.iter().enumerate() {
+                if target.symbol.is_empty() || target.name.is_empty() {
+                    bail!(
+                        "target_catalog[{index}].targets[{target_index}] requires symbol and name"
+                    );
+                }
+                if target.name != observation.selector {
+                    bail!(
+                        "target_catalog[{index}].targets[{target_index}] selector does not match"
+                    );
+                }
+                if let Some(definition) = &target.definition {
+                    validate_method(
+                        definition,
+                        &format!("target_catalog[{index}].targets[{target_index}].definition"),
+                    )?;
                 }
             }
         }
@@ -559,7 +610,7 @@ fn protocol_evidence(
                     .get(call.source.as_str())
                     .with_context(|| format!("call refers to missing method {:?}", call.source))?;
                 for bucket in &row.executions {
-                    internal.calls.push(protocol_call_observation(
+                    if let Some(observation) = protocol_call_observation(
                         call,
                         method,
                         call_id,
@@ -568,7 +619,9 @@ fn protocol_evidence(
                         &methods,
                         &built.bindings,
                         &anchor_methods,
-                    )?);
+                    )? {
+                        internal.calls.push(observation);
+                    }
                 }
             }
         }
@@ -618,6 +671,40 @@ fn protocol_evidence(
             );
         }
         for bucket in &correlation.executions {
+            // Candidate ownership is intentionally unresolved here. The
+            // receiver/selector/target dispatch fact itself is nevertheless
+            // exact and can seed FactMine's generic target catalog. Only the
+            // normalized CFG/DFG overlay below may connect this catalog fact
+            // to one or more source calls.
+            if complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
+                && complete.contains(&EvidenceKind::CALL_TARGET.value())
+            {
+                let (_, _, representative_call, representative_method) = candidates[0];
+                if let (Some(receiver), Some(target)) =
+                    (bucket.receiver.as_ref(), bucket.target.as_ref())
+                {
+                    let receiver_domain =
+                        protocol_value_set_domain(receiver, &representative_method.language)?;
+                    if !receiver_domain.is_empty() {
+                        if let Some(target) = protocol_target(
+                            target,
+                            representative_call,
+                            representative_method,
+                            &methods,
+                            &built.bindings,
+                            &anchor_methods,
+                            Some(receiver),
+                        )? {
+                            internal.target_catalog.push(RuntimeTargetObservation {
+                                language: representative_method.language.clone(),
+                                selector: representative_call.message.clone(),
+                                targets: vec![target],
+                                receiver_domain,
+                            });
+                        }
+                    }
+                }
+            }
             let resolved = protocol_correlation_candidates(&candidates, bucket, &points)?;
             for (anchor, call_id, call, method) in resolved {
                 let candidate_complete = complete
@@ -629,7 +716,7 @@ fn protocol_evidence(
                 if candidate_complete.is_empty() {
                     continue;
                 }
-                internal.calls.push(protocol_call_observation(
+                if let Some(observation) = protocol_call_observation(
                     call,
                     method,
                     call_id,
@@ -638,7 +725,9 @@ fn protocol_evidence(
                     &methods,
                     &built.bindings,
                     &anchor_methods,
-                )?);
+                )? {
+                    internal.calls.push(observation);
+                }
             }
         }
     }
@@ -654,7 +743,7 @@ fn protocol_call_observation(
     methods: &BTreeMap<&str, &MethodRecord>,
     bindings: &BTreeMap<String, AnchorBinding>,
     anchor_methods: &BTreeMap<&str, &str>,
-) -> Result<ObservedCall> {
+) -> Result<Option<ObservedCall>> {
     let target = if complete.contains(&EvidenceKind::CALL_TARGET.value()) {
         bucket
             .target
@@ -679,7 +768,46 @@ fn protocol_call_observation(
     // production target (for example, a test double). Keep the receiver
     // evidence, but do not close production dispatch with the filtered target.
     let target_observation_complete = target.is_some();
-    Ok(ObservedCall {
+    let receiver_domain = if complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
+        || complete.contains(&EvidenceKind::COLLECTION_VALUE.value())
+    {
+        bucket
+            .receiver
+            .as_ref()
+            .map(|value| protocol_value_set_domain(value, &method.language))
+            .transpose()?
+            .filter(|domain| !domain.is_empty())
+    } else {
+        None
+    };
+    let result_domain = if complete.contains(&EvidenceKind::RESULT_VALUE.value()) {
+        bucket
+            .result
+            .as_ref()
+            .map(|value| protocol_value_set_domain(value, &method.language))
+            .transpose()?
+            .filter(|domain| !domain.is_empty())
+    } else {
+        None
+    };
+    let result_truths = if complete.contains(&EvidenceKind::BOOLEAN_RESULT.value()) {
+        bucket.boolean_result.into_iter().collect()
+    } else {
+        BTreeSet::new()
+    };
+    // A canonical bucket can be complete for a requested field yet contain
+    // no usable production fact after provenance filtering (for example, a
+    // test-double target with no captured receiver/result). Preserve no
+    // synthetic call row: the exact anchor remains represented by its
+    // capture status, and an empty normalized row cannot inform CFG/DFG.
+    if target.is_none()
+        && receiver_domain.is_none()
+        && result_domain.is_none()
+        && result_truths.is_empty()
+    {
+        return Ok(None);
+    }
+    Ok(Some(ObservedCall {
         language: method.language.clone(),
         caller: method_locator(method),
         callsite: SourceAnchor {
@@ -690,34 +818,12 @@ fn protocol_call_observation(
         },
         targets: target.into_iter().collect(),
         target_observation_complete,
-        receiver_domain: if complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
-            || complete.contains(&EvidenceKind::COLLECTION_VALUE.value())
-        {
-            bucket
-                .receiver
-                .as_ref()
-                .map(|value| protocol_value_set_domain(value, &method.language))
-                .transpose()?
-        } else {
-            None
-        },
-        result_domain: if complete.contains(&EvidenceKind::RESULT_VALUE.value()) {
-            bucket
-                .result
-                .as_ref()
-                .map(|value| protocol_value_set_domain(value, &method.language))
-                .transpose()?
-        } else {
-            None
-        },
-        result_truths: if complete.contains(&EvidenceKind::BOOLEAN_RESULT.value()) {
-            bucket.boolean_result.into_iter().collect()
-        } else {
-            BTreeSet::new()
-        },
+        receiver_domain,
+        result_domain,
+        result_truths,
         count: bucket.count,
         call_id: Some(call_id.to_string()),
-    })
+    }))
 }
 
 fn protocol_correlation_candidates<'a>(
@@ -1470,6 +1576,7 @@ struct FlowPoint {
     place_id: String,
     reaching_definitions: Vec<String>,
     definition_call_sources: BTreeMap<String, Vec<[usize; 4]>>,
+    definition_sequence_projections: BTreeMap<String, usize>,
     callback_binding_position: Option<usize>,
     static_domain: ValueDomain,
     span: [usize; 4],
@@ -1646,47 +1753,66 @@ fn flow_points(output: &ProfileOutput, methods: &MethodIndex<'_>) -> Vec<FlowPoi
             } else {
                 return None;
             };
+            let reaching_definitions = flow["reaching_definitions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            let definition_sequence_projections =
+                serde_json::from_value::<BTreeMap<String, usize>>(
+                    flow["definition_sequence_projections"].clone(),
+                )
+                .unwrap_or_default();
+            let mut static_domain = ValueDomain::default();
+            for value in flow["resolved_types"].as_array().into_iter().flatten() {
+                if let Ok(value) = serde_json::from_value::<TypeExpr>(value.clone()) {
+                    merge_domain(
+                        &mut static_domain,
+                        &domain_from_type_expr_source_language(&value, &method.language),
+                    );
+                }
+            }
+            if static_domain.is_empty() {
+                for hint in flow["types"].as_array().into_iter().flatten() {
+                    if let Some(hint) = hint.as_str() {
+                        merge_domain(
+                            &mut static_domain,
+                            &domain_from_type_source(hint, &method.language),
+                        );
+                    }
+                }
+            }
+            let projections = reaching_definitions
+                .iter()
+                .filter_map(|definition| definition_sequence_projections.get(definition))
+                .copied()
+                .collect::<BTreeSet<_>>();
+            if !reaching_definitions.is_empty()
+                && definition_sequence_projections.len() == reaching_definitions.len()
+                && projections.len() == 1
+            {
+                static_domain = sequence_position_domain(
+                    &static_domain,
+                    *projections.iter().next().expect("one sequence projection"),
+                );
+            }
             Some(FlowPoint {
                 source: method.id.clone(),
                 name: name.to_string(),
                 node_id: node_id.to_string(),
                 place_id: place_id.to_string(),
-                reaching_definitions: flow["reaching_definitions"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect(),
+                reaching_definitions,
                 definition_call_sources: serde_json::from_value(
                     flow["definition_call_sources"].clone(),
                 )
                 .unwrap_or_default(),
+                definition_sequence_projections,
                 callback_binding_position: flow["callback_binding_position"]
                     .as_u64()
                     .map(|position| position as usize),
-                static_domain: {
-                    let mut domain = ValueDomain::default();
-                    for value in flow["resolved_types"].as_array().into_iter().flatten() {
-                        if let Ok(value) = serde_json::from_value::<TypeExpr>(value.clone()) {
-                            merge_domain(
-                                &mut domain,
-                                &domain_from_type_expr_source_language(&value, &method.language),
-                            );
-                        }
-                    }
-                    if domain.is_empty() {
-                        for hint in flow["types"].as_array().into_iter().flatten() {
-                            if let Some(hint) = hint.as_str() {
-                                merge_domain(
-                                    &mut domain,
-                                    &domain_from_type_source(hint, &method.language),
-                                );
-                            }
-                        }
-                    }
-                    domain
-                },
+                static_domain,
                 span,
             })
         })
@@ -1935,6 +2061,14 @@ fn seed_call_result_definitions(
             let Some(domain) = joined_domain(&domain_refs) else {
                 continue;
             };
+            let domain = point
+                .definition_sequence_projections
+                .get(definition)
+                .map(|position| sequence_position_domain(&domain, *position))
+                .unwrap_or(domain);
+            if domain.is_empty() {
+                continue;
+            }
             merge_domain(
                 node_domains
                     .entry((
@@ -1947,6 +2081,29 @@ fn seed_call_result_definitions(
             );
         }
     }
+}
+
+fn sequence_position_domain(sequence: &ValueDomain, position: usize) -> ValueDomain {
+    let mut projected = collection_element_domain(sequence);
+    for shape in &sequence.shapes {
+        if shape.kind != "tuple" {
+            continue;
+        }
+        let Some(element) = shape.elements.get(position) else {
+            continue;
+        };
+        merge_domain(&mut projected, &value_shape_domain(element));
+    }
+    projected
+}
+
+fn value_shape_domain(shape: &ValueShape) -> ValueDomain {
+    let mut domain = ValueDomain::default();
+    if !shape.name.is_empty() {
+        domain.types.insert(shape.name.clone());
+    }
+    domain.shapes.push(shape.clone());
+    domain
 }
 
 fn call_result_domain(
@@ -1984,7 +2141,16 @@ fn call_result_domain(
         return Some(domain);
     }
 
-    let receiver_domain = receiver_domains.get(&call.id)?;
+    let method = methods.by_id.get(call.source.as_str())?;
+    let language = crate::syntax::Language::parse(&method.language).ok()?;
+    let behavior = crate::syntax::normalized_behavior::behavior(language);
+    let Some(receiver_domain) = receiver_domains.get(&call.id) else {
+        let result_type = behavior
+            .static_return_type(&call.message, None)
+            .or_else(|| behavior.known_return_type(&call.message))?;
+        let domain = domain_from_type_source(&result_type, &method.language);
+        return (!domain.is_empty()).then_some(domain);
+    };
     if selected.get(&call.id).is_some_and(|targets| {
         !targets.is_empty()
             && targets.iter().all(|target| {
@@ -1997,9 +2163,6 @@ fn call_result_domain(
             return Some(domain);
         }
     }
-    let method = methods.by_id.get(call.source.as_str())?;
-    let language = crate::syntax::Language::parse(&method.language).ok()?;
-    let behavior = crate::syntax::normalized_behavior::behavior(language);
     let receiver_type = behavior.runtime_value_domain_type(
         &receiver_domain.types.iter().cloned().collect::<Vec<_>>(),
         &receiver_domain.elements.iter().cloned().collect::<Vec<_>>(),
@@ -2613,6 +2776,28 @@ fn target_catalog(evidence: &RuntimeValueEvidence) -> BTreeMap<String, Vec<Catal
             left.target == right.target && left.receiver_domain == right.receiver_domain
         });
     }
+    for observation in &evidence.target_catalog {
+        let entry = catalog.entry(observation.selector.clone()).or_default();
+        entry.extend(
+            observation
+                .targets
+                .iter()
+                .cloned()
+                .map(|target| CatalogTarget {
+                    target,
+                    receiver_domain: Some(observation.receiver_domain.clone()),
+                }),
+        );
+        entry.sort_by(|left, right| {
+            left.target
+                .symbol
+                .cmp(&right.target.symbol)
+                .then_with(|| left.receiver_domain.cmp(&right.receiver_domain))
+        });
+        entry.dedup_by(|left, right| {
+            left.target == right.target && left.receiver_domain == right.receiver_domain
+        });
+    }
     catalog
 }
 
@@ -2655,7 +2840,13 @@ fn propagate_call_results(
                 producer_domains.get(&(call.source.clone(), call.path.clone(), span))
             })
             .collect::<Vec<_>>();
-        if let Some(domain) = joined_domain(&domains) {
+        if let Some(mut domain) = joined_domain(&domains) {
+            if let Some(position) = call.receiver_definition_sequence_projection {
+                domain = sequence_position_domain(&domain, position);
+            }
+            if domain.is_empty() {
+                continue;
+            }
             merge_domain(
                 receiver_domains.entry(call.id.clone()).or_default(),
                 &domain,
@@ -4214,6 +4405,19 @@ end
         evidence["calls"][0]["target_observation_complete"] = json!(false);
         evidence["calls"][0]["receiver_domain"] = json!({"types": ["Worker"]});
         assert!(RuntimeValueEvidence::from_json(&evidence.to_string()).is_ok());
+
+        let mut evidence = valid_evidence();
+        evidence["calls"][0]["targets"] = json!([]);
+        evidence["calls"][0]["target_observation_complete"] = json!(false);
+        evidence["calls"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("receiver_domain");
+        evidence["calls"][0]["result_domain"] = json!({"types": ["String"]});
+        assert!(
+            RuntimeValueEvidence::from_json(&evidence.to_string()).is_ok(),
+            "an exact result observation remains useful without inventing a receiver or target"
+        );
     }
 
     #[test]
@@ -6163,6 +6367,94 @@ end
     }
 
     #[test]
+    fn canonical_call_normalization_keeps_exact_results_and_drops_empty_filtered_buckets() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(b"class Worker\n  def run(value)\n    value.to_s\n  end\nend\n")
+            .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let output = profile::extract(&document, Profile::Espalier);
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.message == "to_s")
+            .expect("call");
+        let method = output
+            .methods
+            .iter()
+            .find(|method| method.id == call.source)
+            .expect("method");
+        let methods = output
+            .methods
+            .iter()
+            .map(|method| (method.id.as_str(), method))
+            .collect::<BTreeMap<_, _>>();
+        let bindings = BTreeMap::new();
+        let anchor_methods = BTreeMap::new();
+        let filtered_target = runtime_protocol::ExecutionBucket {
+            count: 1,
+            target: MessageField::some(runtime_protocol::RuntimeTarget {
+                symbol: "nil-kill-runtime ruby minitest 5 Mock#to_s().".to_string(),
+                source_role: EnumOrUnknown::new(runtime_protocol::SourceRole::NON_PRODUCTION),
+                ..runtime_protocol::RuntimeTarget::default()
+            }),
+            ..runtime_protocol::ExecutionBucket::default()
+        };
+        assert!(
+            protocol_call_observation(
+                call,
+                method,
+                &call.id,
+                &filtered_target,
+                &BTreeSet::from([EvidenceKind::CALL_TARGET.value()]),
+                &methods,
+                &bindings,
+                &anchor_methods,
+            )
+            .expect("filtered target")
+            .is_none(),
+            "a filtered test-double target with no value fact must not become an empty call row"
+        );
+
+        let result_only = runtime_protocol::ExecutionBucket {
+            count: 1,
+            result: MessageField::some(runtime_protocol::ValueSet {
+                alternatives: vec![runtime_protocol::WeightedValue {
+                    value: MessageField::some(runtime_protocol::RuntimeValue {
+                        type_symbol: "nil-kill-runtime ruby ruby 3.2.3 String#".to_string(),
+                        source_role: EnumOrUnknown::new(
+                            runtime_protocol::SourceRole::STANDARD_LIBRARY,
+                        ),
+                        ..runtime_protocol::RuntimeValue::default()
+                    }),
+                    count: 1,
+                    ..runtime_protocol::WeightedValue::default()
+                }],
+                ..runtime_protocol::ValueSet::default()
+            }),
+            ..runtime_protocol::ExecutionBucket::default()
+        };
+        let observation = protocol_call_observation(
+            call,
+            method,
+            &call.id,
+            &result_only,
+            &BTreeSet::from([EvidenceKind::RESULT_VALUE.value()]),
+            &methods,
+            &bindings,
+            &anchor_methods,
+        )
+        .expect("result-only observation")
+        .expect("useful exact result");
+        assert!(observation.targets.is_empty());
+        assert!(observation.receiver_domain.is_none());
+        assert_eq!(
+            observation.result_domain.expect("result domain").types,
+            BTreeSet::from(["String".to_string()])
+        );
+    }
+
+    #[test]
     fn canonical_candidate_group_uses_fact_mine_dfg_to_join_shared_receivers() {
         let directory = tempfile::tempdir().expect("directory");
         let file = directory.path().join("worker.rb");
@@ -6329,6 +6621,251 @@ end
 
         assert_eq!(calls.len(), 2);
         assert!(!correlation_calls_share_reaching_value(&calls, &points));
+    }
+
+    #[test]
+    fn canonical_candidate_group_seeds_dispatch_catalog_for_cfg_dfg_inference() {
+        let directory = tempfile::tempdir().expect("directory");
+        let file = directory.path().join("worker.rb");
+        std::fs::write(
+            &file,
+            "class Worker\n  def run(left, right)\n    left.to_s + right.to_s\n  end\nend\n",
+        )
+        .expect("source");
+        let document = syntax::parse_file(file.clone(), Language::Ruby).expect("parse");
+        let mut overlay_profile = profile::extract(&document, Profile::Espalier);
+        let plan_profile = profile::extract(&document, Profile::TracePlan);
+        let built = runtime_protocol::build_trace_plan_with_bindings(
+            &plan_profile,
+            std::slice::from_ref(&file),
+            directory.path(),
+        )
+        .expect("plan");
+        let candidates = built
+            .bindings
+            .iter()
+            .filter_map(|(anchor, binding)| match binding {
+                AnchorBinding::Call { call_id }
+                    if overlay_profile
+                        .calls
+                        .iter()
+                        .find(|call| call.id == *call_id)
+                        .is_some_and(|call| call.message == "to_s") =>
+                {
+                    Some(anchor.clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(candidates.len(), 2);
+        let run_id = "run-1".to_string();
+        let runtime_values = runtime_protocol::ValueSet {
+            alternatives: vec![runtime_protocol::WeightedValue {
+                value: MessageField::some(runtime_protocol::RuntimeValue {
+                    type_symbol: "nil-kill-runtime ruby ruby 3.2.3 String#".to_string(),
+                    source_role: EnumOrUnknown::new(runtime_protocol::SourceRole::PRODUCTION),
+                    ..runtime_protocol::RuntimeValue::default()
+                }),
+                count: 1,
+                ..runtime_protocol::WeightedValue::default()
+            }],
+            ..runtime_protocol::ValueSet::default()
+        };
+        let anchors = built
+            .plan
+            .requests
+            .iter()
+            .map(|request| {
+                let anchor = request.anchor.as_ref().expect("anchor");
+                let candidate = candidates.contains(&anchor.symbol);
+                let parameter = matches!(
+                    built.bindings.get(&anchor.symbol),
+                    Some(AnchorBinding::Parameter { .. })
+                );
+                runtime_protocol::AnchorEvidence {
+                    anchor_symbol: anchor.symbol.clone(),
+                    anchor_semantic_digest: anchor.semantic_digest.clone(),
+                    capture: MessageField::some(runtime_protocol::CaptureSummary {
+                        status: EnumOrUnknown::new(if candidate {
+                            CaptureStatus::PARTIAL
+                        } else if parameter {
+                            CaptureStatus::COMPLETE_FOR_RUNS
+                        } else {
+                            CaptureStatus::NOT_EXECUTED
+                        }),
+                        run_ids: vec![run_id.clone()],
+                        observed_executions: u64::from(parameter),
+                        reason: candidate
+                            .then(|| "execution is represented by a candidate group".to_string())
+                            .unwrap_or_default(),
+                        complete_kinds: if candidate {
+                            Vec::new()
+                        } else {
+                            request.required.clone()
+                        },
+                        ..runtime_protocol::CaptureSummary::default()
+                    }),
+                    executions: parameter
+                        .then(|| runtime_protocol::ExecutionBucket {
+                            count: 1,
+                            value: MessageField::some(runtime_values.clone()),
+                            provenance: MessageField::some(runtime_protocol::Provenance {
+                                run_id: run_id.clone(),
+                                provider: "ruby-tracepoint".to_string(),
+                                provider_version: "1".to_string(),
+                                ..runtime_protocol::Provenance::default()
+                            }),
+                            ..runtime_protocol::ExecutionBucket::default()
+                        })
+                        .into_iter()
+                        .collect(),
+                    ..runtime_protocol::AnchorEvidence::default()
+                }
+            })
+            .collect();
+        let evidence = runtime_protocol::RuntimeEvidence {
+            protocol_version: runtime_protocol::PROTOCOL_VERSION,
+            producer: MessageField::some(runtime_protocol::ToolInfo {
+                name: "nil-kill".to_string(),
+                version: "1".to_string(),
+                ..runtime_protocol::ToolInfo::default()
+            }),
+            authority: EnumOrUnknown::new(runtime_protocol::Authority::MODELED_RUNS),
+            trace_plan_digest: built.plan.plan_digest.clone(),
+            runs: vec![runtime_protocol::Run {
+                id: run_id.clone(),
+                status: EnumOrUnknown::new(runtime_protocol::RunStatus::SUCCEEDED),
+                ..runtime_protocol::Run::default()
+            }],
+            anchors,
+            correlations: vec![runtime_protocol::CorrelationEvidence {
+                group_id: "distinct-parameter-to-s".to_string(),
+                candidate_anchor_symbols: candidates,
+                capture: MessageField::some(runtime_protocol::CaptureSummary {
+                    status: EnumOrUnknown::new(CaptureStatus::COMPLETE_FOR_RUNS),
+                    run_ids: vec![run_id.clone()],
+                    observed_executions: 2,
+                    complete_kinds: vec![
+                        EnumOrUnknown::new(EvidenceKind::RECEIVER_VALUE),
+                        EnumOrUnknown::new(EvidenceKind::CALL_TARGET),
+                    ],
+                    ..runtime_protocol::CaptureSummary::default()
+                }),
+                executions: vec![runtime_protocol::ExecutionBucket {
+                    count: 2,
+                    receiver: MessageField::some(runtime_values),
+                    target: MessageField::some(runtime_protocol::RuntimeTarget {
+                        symbol: "nil-kill-runtime ruby ruby 3.2.3 String#to_s().".to_string(),
+                        source_role: EnumOrUnknown::new(
+                            runtime_protocol::SourceRole::STANDARD_LIBRARY,
+                        ),
+                        package_manager: "ruby".to_string(),
+                        package_name: "ruby".to_string(),
+                        package_version: "3.2.3".to_string(),
+                        ..runtime_protocol::RuntimeTarget::default()
+                    }),
+                    provenance: MessageField::some(runtime_protocol::Provenance {
+                        run_id,
+                        provider: "ruby-tracepoint".to_string(),
+                        provider_version: "1".to_string(),
+                        ..runtime_protocol::Provenance::default()
+                    }),
+                    ..runtime_protocol::ExecutionBucket::default()
+                }],
+                ..runtime_protocol::CorrelationEvidence::default()
+            }],
+            ..runtime_protocol::RuntimeEvidence::default()
+        };
+
+        apply_protocol_to_profile(&mut overlay_profile, &built, &evidence).expect("overlay");
+        let calls = overlay_profile
+            .calls
+            .iter()
+            .filter(|call| call.message == "to_s")
+            .collect::<Vec<_>>();
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|call| {
+            call.receiver_type.as_deref() == Some("String")
+                && call.semantic_symbol.as_deref()
+                    == Some("nil-kill-runtime ruby ruby 3.2.3 String#to_s().")
+                && !call.runtime_evidence_observed
+        }));
+    }
+
+    #[test]
+    fn cfg_dfg_projects_call_results_through_destructured_assignments() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            b"class Worker\n  def run(spec)\n    left, right = spec.to_s.split(\":\", 2)\n    left.to_s + right.to_s\n  end\nend\n",
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let target = |name: &str, receiver_type: &str| {
+            json!({
+                "symbol": format!(
+                    "nil-kill-runtime ruby ruby 3.2.3 {receiver_type}#{name}()."
+                ),
+                "owner": receiver_type,
+                "name": name,
+                "kind": "instance",
+                "receiver_type": receiver_type
+            })
+        };
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [{
+                    "kind": "parameter",
+                    "scope": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "function": "run", "line": 2
+                    },
+                    "slot": "spec",
+                    "domain": {"types": ["String"]},
+                    "count": 1
+                }],
+                "target_catalog": [
+                    {
+                        "language": "ruby",
+                        "selector": "to_s",
+                        "targets": [target("to_s", "String")],
+                        "receiver_domain": {"types": ["String"]}
+                    },
+                    {
+                        "language": "ruby",
+                        "selector": "split",
+                        "targets": [target("split", "String")],
+                        "receiver_domain": {"types": ["String"]}
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let destructured_calls = output
+            .calls
+            .iter()
+            .filter(|call| {
+                call.line == 4
+                    && call.message == "to_s"
+                    && matches!(call.receiver.as_str(), "left" | "right")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(destructured_calls.len(), 2);
+        assert!(
+            destructured_calls.iter().all(|call| {
+                call.receiver_type.as_deref() == Some("String")
+                    && call.semantic_symbol.as_deref()
+                        == Some("nil-kill-runtime ruby ruby 3.2.3 String#to_s().")
+            }),
+            "{destructured_calls:#?}"
+        );
     }
 
     #[test]

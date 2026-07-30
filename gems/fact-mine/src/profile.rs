@@ -525,6 +525,12 @@ pub struct CallRecord {
     /// receiver. Empty means at least one definition was not a direct call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub receiver_definition_call_spans: Vec<[usize; 4]>,
+    /// Shared normalized CFG/DFG projection applied to every reaching
+    /// call-result definition. This is populated for destructured bindings
+    /// such as `left, right = values()` only when every reaching definition
+    /// selects the same sequence position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_definition_sequence_projection: Option<usize>,
     /// Adapter-proven canonical receiver type for cross-file resolution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receiver_symbol: Option<String>,
@@ -3526,7 +3532,15 @@ fn apply_static_direct_call_result_contracts(methods: &[MethodRecord], calls: &m
             else {
                 continue;
             };
-            let receiver_type = distinct.into_iter().next().expect("one static return type");
+            let mut receiver_type = distinct.into_iter().next().expect("one static return type");
+            if call.receiver_definition_sequence_projection.is_some() {
+                let Some(projected) =
+                    projected_sequence_result_type(behavior, &receiver_type, language)
+                else {
+                    continue;
+                };
+                receiver_type = projected;
+            }
             let normalized = TypeExpr::parse(&receiver_type, language);
             let complexity = behavior.call_complexity(&normalized, &call.message);
             let parametric = complexity
@@ -4671,6 +4685,17 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
                         .map(|spans| (definition.clone(), spans))
                 })
                 .collect::<BTreeMap<_, _>>();
+            let definition_sequence_projections = reaching
+                .iter()
+                .filter_map(|definition| {
+                    let effect = effects.get(definition.as_str())?;
+                    effect
+                        .write_sequence_projections
+                        .get(&fact.place_id)
+                        .copied()
+                        .map(|position| (definition.clone(), position))
+                })
+                .collect::<BTreeMap<_, _>>();
             let bindings = callback_bindings
                 .get(&(fact.node_id.as_str(), fact.place_id.as_str()))
                 .cloned()
@@ -4724,6 +4749,11 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
                     } else {
                         definition_call_sources.clone()
                     },
+                    "definition_sequence_projections": if callback_definition {
+                        BTreeMap::<String, usize>::new()
+                    } else {
+                        definition_sequence_projections.clone()
+                    },
                     "callback_binding_position": position,
                 })
             }))
@@ -4766,6 +4796,7 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
             "complete": false,
             "reaching_definitions": [],
             "definition_call_sources": {},
+            "definition_sequence_projections": {},
             "callback_binding_position": binding.position,
         }));
     }
@@ -7745,6 +7776,15 @@ fn collection_element_type(type_name: &str, language: &str) -> Option<String> {
     }
 }
 
+fn projected_sequence_result_type(
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    type_name: &str,
+    language: &str,
+) -> Option<String> {
+    collection_element_type(type_name, language)
+        .or_else(|| behavior.indexed_collection_result_type(type_name))
+}
+
 fn indexed_receiver_type(
     document: &Document,
     behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
@@ -7791,12 +7831,12 @@ fn inferred_collection_element_receiver_type(
         .or(Some(element_type))
 }
 
-fn reaching_call_result_spans(
+fn reaching_call_results(
     document: &Document,
     function: &str,
     receiver: &str,
     call_span: [usize; 4],
-) -> Vec<[usize; 4]> {
+) -> (Vec<[usize; 4]>, Option<usize>) {
     let place_ids = document
         .places
         .iter()
@@ -7804,7 +7844,7 @@ fn reaching_call_result_spans(
         .map(|place| place.id.as_str())
         .collect::<BTreeSet<_>>();
     if place_ids.is_empty() {
-        return Vec::new();
+        return (Vec::new(), None);
     }
 
     let mut candidates = document
@@ -7853,6 +7893,9 @@ fn reaching_call_result_spans(
                     && state.state == "definitely_non_null"
             });
             let mut spans = BTreeSet::new();
+            let mut projections = BTreeSet::new();
+            let mut projected_definitions = 0usize;
+            let mut considered_definitions = 0usize;
             let complete = reaching
                 .definitions
                 .iter()
@@ -7867,18 +7910,37 @@ fn reaching_call_result_spans(
                         })
                 })
                 .all(|definition| {
+                    considered_definitions += 1;
                     document
                         .node_effects
                         .iter()
                         .find(|definition_effect| definition_effect.node_id == *definition)
                         .and_then(|definition_effect| {
+                            if let Some(position) = definition_effect
+                                .write_sequence_projections
+                                .get(*place_id)
+                                .copied()
+                            {
+                                projected_definitions += 1;
+                                projections.insert(position);
+                            }
                             definition_effect.write_call_sources.get(*place_id)
                         })
                         .map(|span| spans.insert(*span))
                         .is_some()
                 });
             if complete && !spans.is_empty() {
-                proven_sets.insert(spans.into_iter().collect::<Vec<_>>());
+                let projection = if projected_definitions == 0 {
+                    Some(None)
+                } else if projected_definitions == considered_definitions && projections.len() == 1
+                {
+                    Some(projections.into_iter().next())
+                } else {
+                    None
+                };
+                if let Some(projection) = projection {
+                    proven_sets.insert((spans.into_iter().collect::<Vec<_>>(), projection));
+                }
             }
         }
         if !proven_sets.is_empty() {
@@ -8649,6 +8711,12 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             } else {
                 Some("receiver_requires_corpus_resolution".to_string())
             };
+            let (receiver_definition_call_spans, receiver_definition_sequence_projection) =
+                if receiver_is_type {
+                    (Vec::new(), None)
+                } else {
+                    reaching_call_results(document, &call.function, &call.receiver, call.span)
+                };
             CallRecord {
                 id: stable_id(
                     "edge",
@@ -8700,11 +8768,8 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 lexical_symbol_origin,
                 receiver_call_span: receiver_call_spans.get(&call.span).copied(),
                 selector_span: selector_spans.get(&call.span).copied(),
-                receiver_definition_call_spans: if receiver_is_type {
-                    Vec::new()
-                } else {
-                    reaching_call_result_spans(document, &call.function, &call.receiver, call.span)
-                },
+                receiver_definition_call_spans,
+                receiver_definition_sequence_projection,
                 receiver_symbol,
                 receiver_type: instance_receiver_type
                     .or_else(|| self_receiver_symbol.as_ref().map(|_| call.owner.clone())),
@@ -8929,10 +8994,18 @@ fn propagate_direct_call_result_receiver_types(
             if result_types.len() != 1 {
                 continue;
             }
-            let receiver_type = result_types
+            let mut receiver_type = result_types
                 .into_iter()
                 .next()
                 .expect("one static producer result type");
+            if call.receiver_definition_sequence_projection.is_some() {
+                let Some(projected) =
+                    projected_sequence_result_type(behavior, &receiver_type, language)
+                else {
+                    continue;
+                };
+                receiver_type = projected;
+            }
             let parsed = TypeExpr::parse(&receiver_type, language);
             let known = behavior.call_complexity(&parsed, &call.message);
             let parametric = known
@@ -11107,6 +11180,7 @@ def py_fn(a: int) -> str:
             receiver_call_span: None,
             selector_span: None,
             receiver_definition_call_spans: Vec::new(),
+            receiver_definition_sequence_projection: None,
             receiver_symbol: None,
             receiver_type: None,
             receiver_type_origin: None,

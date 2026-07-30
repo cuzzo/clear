@@ -797,6 +797,7 @@ mod tests {
             receiver_call_span: None,
             selector_span: None,
             receiver_definition_call_spans: Vec::new(),
+            receiver_definition_sequence_projection: None,
             receiver_symbol: None,
             receiver_type: None,
             receiver_type_origin: None,

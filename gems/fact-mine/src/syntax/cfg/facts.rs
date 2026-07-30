@@ -101,6 +101,11 @@ pub struct NodeEffect {
     /// assigned value; consumers must join all of them rather than choose one.
     #[serde(default)]
     pub write_call_source_sets: BTreeMap<String, Vec<Span>>,
+    /// Positional projection for a normalized destructuring write. The call
+    /// source identifies the producer; this index identifies which sequence
+    /// value reaches the written place.
+    #[serde(default)]
+    pub write_sequence_projections: BTreeMap<String, usize>,
     /// Reviewed exact call-result contracts keyed by their target place.
     /// This is not inferred from identifiers downstream of the adapter.
     #[serde(default)]

@@ -282,6 +282,7 @@ fn run() -> Result<()> {
                 .transpose()?;
             let root = root
                 .unwrap_or(std::env::current_dir().context("failed to determine project root")?);
+            let files = canonical_runtime_sources(&files, &root)?;
             let profile = build_profile(&files, language_override, Profile::TracePlan)?;
             let plan = fact_mine_rust::runtime_protocol::build_trace_plan(&profile, &files, &root)?;
             let json = fact_mine_rust::runtime_protocol::to_json(&plan)?;
@@ -342,6 +343,7 @@ fn run() -> Result<()> {
                 .transpose()?;
             let root = root
                 .unwrap_or(std::env::current_dir().context("failed to determine project root")?);
+            let files = canonical_runtime_sources(&files, &root)?;
             let mut profile = build_profile(&files, language_override, Profile::Espalier)?;
             let supplied_plan = fact_mine_rust::runtime_protocol::read_trace_plan(&plan)?;
             // Runtime discovery may add workspace callees to the analysis
@@ -499,6 +501,22 @@ fn build_profile(
         parse_recoveries,
     };
     Ok(output)
+}
+
+fn canonical_runtime_sources(files: &[PathBuf], root: &std::path::Path) -> Result<Vec<PathBuf>> {
+    files
+        .iter()
+        .map(|file| {
+            let source = if file.is_absolute() {
+                file.clone()
+            } else {
+                root.join(file)
+            };
+            source.canonicalize().with_context(|| {
+                format!("failed to canonicalize runtime source {}", file.display())
+            })
+        })
+        .collect()
 }
 
 fn rebuild_supplied_runtime_plan(
@@ -1290,6 +1308,45 @@ mod tests {
         assert_eq!(rebuilt.plan.documents.len(), 1);
         assert_eq!(rebuilt.plan.documents[0].relative_path, "planned.rb");
         assert!(discovered.exists());
+    }
+
+    #[test]
+    fn runtime_commands_canonicalize_relative_sources_before_binding_calls() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let source = directory.path().join("worker.rb");
+        std::fs::write(
+            &source,
+            "class Worker\n  def run(value)\n    value.size\n  end\nend\n",
+        )
+        .expect("source");
+        let files = canonical_runtime_sources(&[PathBuf::from("worker.rb")], directory.path())
+            .expect("canonical runtime sources");
+        assert_eq!(
+            files,
+            vec![source.canonicalize().expect("canonical source")]
+        );
+
+        let plan_profile =
+            build_profile(&files, None, Profile::TracePlan).expect("trace-plan profile");
+        let built = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+            &plan_profile,
+            &files,
+            directory.path(),
+        )
+        .expect("plan");
+        let overlay_profile =
+            build_profile(&files, None, Profile::Espalier).expect("overlay profile");
+        let overlay_call_ids = overlay_profile
+            .calls
+            .iter()
+            .map(|call| call.id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(built.bindings.values().all(|binding| match binding {
+            fact_mine_rust::runtime_protocol::AnchorBinding::Call { call_id } =>
+                overlay_call_ids.contains(call_id.as_str()),
+            _ => true,
+        }));
     }
 
     #[test]
