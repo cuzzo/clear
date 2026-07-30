@@ -239,6 +239,38 @@ module Espalier
       multiply(reduced, callable)
     end
 
+    # A bound is read, not solved. Beyond a couple of terms the symbols stop
+    # carrying meaning, so a sum renders as its largest term: terms of a lesser
+    # shape are already dominated by it, and same-shaped siblings past the
+    # second are reported as a count. The stored bound keeps every term.
+    def collapse_bound(text)
+      body = text.to_s.strip
+      return body unless body.start_with?("O(") && body.end_with?(")")
+
+      terms = body[2..-2].split(" + ")
+      return body if terms.length < 2
+
+      shape = term_shape(terms.first)
+      leading = terms.take_while { |term| term_shape(term) == shape }
+      return "O(#{leading.join(' + ')})" if leading.length < 3
+
+      "O(#{terms.first}##{leading.length})"
+    end
+
+    # Two terms have the same shape when they grow the same way, whatever they
+    # grow over: the exponents present, not the symbols carrying them.
+    def term_shape(term)
+      factors, logarithms = term.split(" ", 2)
+      exponents = lambda do |text, pattern|
+        text.to_s.split("*").filter_map do |part|
+          next nil if part.empty? || part == "1"
+
+          part[pattern, 1]&.to_i || 1
+        end.sort.reverse
+      end
+      [exponents.call(factors, /\^(\d+)\z/), exponents.call(logarithms, /\)\^(\d+)\z/)]
+    end
+
     def render(expression)
       return nil unless expression
 

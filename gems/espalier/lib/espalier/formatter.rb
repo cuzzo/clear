@@ -171,10 +171,16 @@ module Espalier
       metrics = fn[:quality_metrics] || fn["quality_metrics"]
       return nil unless metrics.is_a?(Hash)
 
-      time = metrics[:big_o] || metrics["big_o"]
-      space = metrics[:big_o_space] || metrics["big_o_space"] || "O(1)"
-      known_time = metrics[:big_o_known_component] || metrics["big_o_known_component"] || time
-      known_space = metrics[:big_o_space_known_component] || metrics["big_o_space_known_component"] || space
+      time = Espalier::SymbolicComplexity.collapse_bound(metrics[:big_o] || metrics["big_o"])
+      space = Espalier::SymbolicComplexity.collapse_bound(
+        metrics[:big_o_space] || metrics["big_o_space"] || "O(1)"
+      )
+      known_time = Espalier::SymbolicComplexity.collapse_bound(
+        metrics[:big_o_known_component] || metrics["big_o_known_component"] || time
+      )
+      known_space = Espalier::SymbolicComplexity.collapse_bound(
+        metrics[:big_o_space_known_component] || metrics["big_o_space_known_component"] || space
+      )
       time_complete = metrics.key?(:big_o_complete) ? metrics[:big_o_complete] : metrics["big_o_complete"]
       space_complete = metrics.key?(:big_o_space_complete) ? metrics[:big_o_space_complete] : metrics["big_o_space_complete"]
       return nil if time.to_s.empty?
