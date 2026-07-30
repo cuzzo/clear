@@ -217,7 +217,6 @@ fn observation_kind(kind: AnchorKind) -> Option<&'static str> {
 
 pub struct Join<'a> {
     root: &'a Path,
-    plan: &'a TracePlan,
     trace: &'a Trace,
     observations_by_kind_path: HashMap<(String, String), Vec<usize>>,
     calls_by_path_selector: HashMap<(String, String), Vec<usize>>,
@@ -226,6 +225,9 @@ pub struct Join<'a> {
     exact_counts: HashMap<String, i64>,
     entries_by_path: HashMap<String, Vec<i64>>,
     covered_by_path: HashMap<String, HashSet<i64>>,
+    // Function boundaries indexed by file. Resolving a target used to scan
+    // every request, which is quadratic in the plan and was most of the join.
+    function_anchors_by_path: HashMap<String, Vec<&'a runtime_protocol::SourceAnchor>>,
 }
 
 impl<'a> Join<'a> {
@@ -274,10 +276,26 @@ impl<'a> Join<'a> {
                 .or_default()
                 .extend(row.lines.iter().copied());
         }
+        let mut function_anchors_by_path: HashMap<String, Vec<&runtime_protocol::SourceAnchor>> =
+            HashMap::new();
+        for request in &plan.requests {
+            let Some(anchor) = request.anchor.as_ref() else {
+                continue;
+            };
+            if matches!(
+                anchor.kind.enum_value_or_default(),
+                AnchorKind::FUNCTION_ENTRY | AnchorKind::FUNCTION_RETURN
+            ) {
+                function_anchors_by_path
+                    .entry(anchor.relative_path.clone())
+                    .or_default()
+                    .push(anchor);
+            }
+        }
         Self {
             root,
-            plan,
             trace,
+            function_anchors_by_path,
             observations_by_kind_path,
             calls_by_path_selector,
             executed_by_path_selector,
@@ -585,19 +603,7 @@ impl Join<'_> {
 
         let mut seen: Vec<&str> = Vec::new();
         let mut candidates: Vec<&runtime_protocol::SourceAnchor> = Vec::new();
-        for request in &self.plan.requests {
-            let Some(anchor) = request.anchor.as_ref() else {
-                continue;
-            };
-            if !matches!(
-                anchor.kind.enum_value_or_default(),
-                AnchorKind::FUNCTION_ENTRY | AnchorKind::FUNCTION_RETURN
-            ) {
-                continue;
-            }
-            if anchor.relative_path != path {
-                continue;
-            }
+        for anchor in self.function_anchors_by_path.get(&path).into_iter().flatten() {
             if !anchor.range.as_ref().is_some_and(|r| line_in_range(r, line)) {
                 continue;
             }
@@ -777,6 +783,25 @@ pub fn build_evidence(root: &Path, plan: &TracePlan, trace: &Trace) -> Result<St
     let canonical = runtime_protocol::parse_runtime_evidence_json(&serde_json::to_string(&evidence)?)
         .context("joined evidence is not canonical ProtoJSON")?;
     runtime_protocol::to_json_with_defaults(&canonical)
+}
+
+/// Write a document where the collector expects it, gzipped when named so.
+pub fn write_json(path: &Path, contents: &str) -> Result<()> {
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    if path.extension().is_some_and(|ext| ext == "gz") {
+        let file = std::fs::File::create(path)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        encoder.write_all(contents.as_bytes())?;
+        encoder.finish()?;
+    } else {
+        std::fs::write(path, contents)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// A stable summary of what the trace covers, keyed by capture status.

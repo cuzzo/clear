@@ -296,17 +296,34 @@ fn run() -> Result<()> {
                 plan.requests.len()
             );
         }
-        Command::RuntimeTrace { plan, trace, root } => {
+        Command::RuntimeTrace {
+            plan,
+            traces,
+            output,
+            root,
+        } => {
+            // The plan is parsed and digest-checked once however many traces are
+            // joined; paying that per shard cost more than the join itself.
             let plan = fact_mine_rust::runtime_trace::read_plan(&plan)?;
-            let trace = fact_mine_rust::runtime_trace::read_trace(&trace)?;
             let root = std::fs::canonicalize(&root).unwrap_or(root);
-            let evidence = fact_mine_rust::runtime_trace::build_evidence(&root, &plan, &trace)?;
-            println!("{evidence}");
+            let mut joined = 0usize;
+            for path in &traces {
+                let trace = fact_mine_rust::runtime_trace::read_trace(path)?;
+                let evidence =
+                    fact_mine_rust::runtime_trace::build_evidence(&root, &plan, &trace)?;
+                match (&output, traces.len()) {
+                    (Some(target), _) => fact_mine_rust::runtime_trace::write_json(target, &evidence)?,
+                    (None, 1) => println!("{evidence}"),
+                    (None, _) => {
+                        let target = path.with_file_name("runtime-evidence.v1.json.gz");
+                        fact_mine_rust::runtime_trace::write_json(&target, &evidence)?;
+                    }
+                }
+                joined += 1;
+            }
             eprintln!(
-                "Runtime trace joined: {} anchors, {} observations, {} calls",
-                plan.requests.len(),
-                trace.observations.len(),
-                trace.calls.len()
+                "Runtime trace joined: {} anchors over {joined} trace(s)",
+                plan.requests.len()
             );
         }
         Command::RuntimeEvidenceValidate { plan, evidence } => {
@@ -718,7 +735,8 @@ enum Command {
     },
     RuntimeTrace {
         plan: PathBuf,
-        trace: PathBuf,
+        traces: Vec<PathBuf>,
+        output: Option<PathBuf>,
         root: PathBuf,
     },
 }
@@ -775,7 +793,8 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
         }
         "runtime-trace" => {
             let mut plan = None;
-            let mut trace = None;
+            let mut traces: Vec<PathBuf> = Vec::new();
+            let mut output = None;
             let mut root = None;
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
@@ -788,15 +807,23 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                         plan = Some(PathBuf::from(other.strip_prefix("--plan=").unwrap()));
                     }
                     "--runtime-trace" => {
-                        trace = Some(PathBuf::from(
+                        traces.push(PathBuf::from(
                             iter.next()
                                 .with_context(|| "--runtime-trace requires a value")?,
                         ));
                     }
                     other if other.starts_with("--runtime-trace=") => {
-                        trace = Some(PathBuf::from(
+                        traces.push(PathBuf::from(
                             other.strip_prefix("--runtime-trace=").unwrap(),
                         ));
+                    }
+                    "--output" => {
+                        output = Some(PathBuf::from(
+                            iter.next().with_context(|| "--output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--output=") => {
+                        output = Some(PathBuf::from(other.strip_prefix("--output=").unwrap()));
                     }
                     "--root" => {
                         root = Some(PathBuf::from(
@@ -809,9 +836,16 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                     other => bail!("unsupported runtime-trace argument: {other}"),
                 }
             }
+            if traces.is_empty() {
+                bail!("runtime-trace requires at least one --runtime-trace FILE");
+            }
+            if output.is_some() && traces.len() > 1 {
+                bail!("--output names one file; joining several traces writes each beside its own");
+            }
             Ok(Command::RuntimeTrace {
                 plan: plan.with_context(|| "runtime-trace requires --plan FILE")?,
-                trace: trace.with_context(|| "runtime-trace requires --runtime-trace FILE")?,
+                traces,
+                output,
                 root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }

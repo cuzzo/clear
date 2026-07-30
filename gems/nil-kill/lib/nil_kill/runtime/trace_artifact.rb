@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "open3"
+
 module NilKill
   module Runtime
     # The single, language-neutral artifact a trace run produces.
@@ -101,6 +103,19 @@ module NilKill
         truths = Array(row["result_truths"]).uniq
         bucket["boolean_result"] = truths.first if truths.length == 1
         bucket
+      end
+
+      # The join is FactMine's: it owns the plan, and doing it in Ruby cost more
+      # than the traced run it was joining.
+      def self.join(root:, trace:, output:)
+        binary = NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY
+        _out, err, status = Open3.capture3(
+          binary, "runtime-trace", "--plan", NilKill::TRACE_PLAN_PATH,
+          "--runtime-trace", trace, "--root", root.to_s, "--output", output
+        )
+        raise "fact-mine runtime-trace failed: #{err}" unless status.success?
+
+        output
       end
 
       def self.jsonl(runtime_dir, pattern)
