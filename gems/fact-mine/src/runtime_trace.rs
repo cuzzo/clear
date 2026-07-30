@@ -897,6 +897,9 @@ pub fn merge_evidence(documents: &[serde_json::Value]) -> Result<serde_json::Val
         let mut capture = serde_json::Map::new();
         capture.insert("status".into(), serde_json::json!(status));
         capture.insert("run_ids".into(), serde_json::json!(run_ids));
+        // uint64 is a string in ProtoJSON. Emitting it as one keeps the merged
+        // document canonical by construction, so it does not have to be parsed
+        // back through the protocol and reprinted just to fix the encoding.
         capture.insert("observed_executions".into(), serde_json::json!(observed));
         capture.insert("dropped_executions".into(), serde_json::json!(dropped));
         let reason = merged_reason(&captures, status);
@@ -1095,4 +1098,523 @@ pub fn summarize(root: &Path, plan: &TracePlan, trace: &Trace) -> Result<BTreeMa
         *counts.entry(status).or_insert(0) += 1;
     }
     Ok(counts)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use protobuf::MessageField;
+
+    fn range(start: u32, end: u32) -> runtime_protocol::SourceRange {
+        let mut r = runtime_protocol::SourceRange::new();
+        r.start_line = start;
+        r.end_line = end;
+        r
+    }
+
+    fn anchor(
+        symbol: &str,
+        path: &str,
+        name: &str,
+        kind: AnchorKind,
+        lines: (u32, u32),
+    ) -> runtime_protocol::SourceAnchor {
+        let mut a = runtime_protocol::SourceAnchor::new();
+        a.symbol = symbol.to_string();
+        a.relative_path = path.to_string();
+        a.display_name = name.to_string();
+        a.kind = protobuf::EnumOrUnknown::new(kind);
+        a.semantic_digest = vec![1, 2, 3];
+        a.enclosing_symbol = format!("enclosing/{symbol}");
+        a.range = MessageField::some(range(lines.0, lines.1));
+        a
+    }
+
+    fn request(
+        anchor: runtime_protocol::SourceAnchor,
+        required: &[runtime_protocol::EvidenceKind],
+    ) -> runtime_protocol::EvidenceRequest {
+        let mut r = runtime_protocol::EvidenceRequest::new();
+        r.anchor = MessageField::some(anchor);
+        r.required = required
+            .iter()
+            .map(|kind| protobuf::EnumOrUnknown::new(*kind))
+            .collect();
+        r
+    }
+
+    fn plan_of(requests: Vec<runtime_protocol::EvidenceRequest>) -> TracePlan {
+        let mut plan = TracePlan::new();
+        plan.requests = requests;
+        plan
+    }
+
+    fn trace_of(json: serde_json::Value) -> Trace {
+        serde_json::from_value(json).expect("trace fixture")
+    }
+
+    fn value_bucket(kind: &str) -> serde_json::Value {
+        serde_json::json!({
+            "count": 1,
+            "value": { "alternatives": [{ "value": { "type_symbol": kind }, "count": 1 }] },
+            "provenance": { "run_id": "", "provider": "p", "provider_version": "1" }
+        })
+    }
+
+    fn call_bucket(with_result: bool) -> serde_json::Value {
+        let mut bucket = serde_json::json!({
+            "count": 2,
+            "receiver": { "alternatives": [{ "value": { "type_symbol": "String" }, "count": 1 }] },
+            "target": { "symbol": "T" },
+            "provenance": { "run_id": "r1", "provider": "p", "provider_version": "1" }
+        });
+        if with_result {
+            bucket["result"] = serde_json::json!({ "alternatives": [] });
+        }
+        bucket
+    }
+
+    // --- path and range -----------------------------------------------------
+
+    #[test]
+    fn canonical_path_is_relative_to_the_analyzed_root() {
+        let root = Path::new("/repo");
+        assert_eq!(canonical_path(root, "/repo/lib/a.rb"), "lib/a.rb");
+        assert_eq!(canonical_path(root, "lib/a.rb"), "lib/a.rb");
+        assert_eq!(canonical_path(root, ""), "");
+    }
+
+    #[test]
+    fn a_path_outside_the_root_keeps_its_own_identity() {
+        assert_eq!(canonical_path(Path::new("/repo"), "/other/x.rb"), "/other/x.rb");
+    }
+
+    #[test]
+    fn a_range_is_matched_against_one_based_lines() {
+        // The plan is zero-based; collectors report the line a human would.
+        let r = range(4, 6);
+        assert!(!line_in_range(&r, 4));
+        assert!(line_in_range(&r, 5));
+        assert!(line_in_range(&r, 7));
+        assert!(!line_in_range(&r, 8));
+    }
+
+    #[test]
+    fn only_boundary_anchors_are_satisfied_by_observations() {
+        assert_eq!(observation_kind(AnchorKind::FUNCTION_ENTRY), Some("parameter"));
+        assert_eq!(observation_kind(AnchorKind::FUNCTION_RETURN), Some("return"));
+        assert_eq!(observation_kind(AnchorKind::STATE_WRITE), Some("state"));
+        assert_eq!(observation_kind(AnchorKind::CALL_SELECTOR), None);
+        assert!(is_call_anchor(AnchorKind::CALL_SELECTOR));
+        assert!(!is_call_anchor(AnchorKind::FUNCTION_ENTRY));
+    }
+
+    // --- what a match contributes -------------------------------------------
+
+    #[test]
+    fn a_domain_with_no_named_type_contributes_nothing() {
+        assert!(!has_types(&serde_json::json!({ "types": [] })));
+        assert!(!has_types(&serde_json::json!({ "types": [""] })));
+        assert!(!has_types(&serde_json::json!({})));
+        assert!(has_types(&serde_json::json!({ "types": ["String"] })));
+    }
+
+    #[test]
+    fn bucket_fields_are_reported_by_presence_not_by_nulls() {
+        let bucket = serde_json::json!({ "receiver": {}, "result": serde_json::Value::Null });
+        assert!(bucket_has(&bucket, "receiver"));
+        assert!(!bucket_has(&bucket, "result"));
+        assert!(!bucket_has(&bucket, "target"));
+    }
+
+    #[test]
+    fn every_requested_kind_maps_to_the_field_that_satisfies_it() {
+        assert_eq!(evidence_field("PARAMETER_VALUE"), Some("value"));
+        assert_eq!(evidence_field("RETURN_VALUE"), Some("value"));
+        assert_eq!(evidence_field("STATE_VALUE"), Some("value"));
+        assert_eq!(evidence_field("RECEIVER_VALUE"), Some("receiver"));
+        assert_eq!(evidence_field("COLLECTION_VALUE"), Some("receiver"));
+        assert_eq!(evidence_field("CALL_TARGET"), Some("target"));
+        assert_eq!(evidence_field("RESULT_VALUE"), Some("result"));
+        assert_eq!(evidence_field("BOOLEAN_RESULT"), Some("boolean_result"));
+        assert_eq!(evidence_field("NOT_A_KIND"), None);
+    }
+
+    // --- matching -----------------------------------------------------------
+
+    #[test]
+    fn a_parameter_anchor_matches_only_its_own_slot() {
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "observations": [
+                { "kind": "parameter", "slot": "value", "count": 1,
+                  "scope": { "path": "lib/a.rb", "line": 5 },
+                  "domain": { "types": ["String"] }, "bucket": value_bucket("String") },
+                { "kind": "parameter", "slot": "other", "count": 1,
+                  "scope": { "path": "lib/a.rb", "line": 5 },
+                  "domain": { "types": ["Integer"] }, "bucket": value_bucket("Integer") }
+            ]
+        }));
+        let plan = plan_of(vec![]);
+        let join = Join::new(Path::new("/repo"), &plan, &trace);
+        let a = anchor("s", "lib/a.rb", "value", AnchorKind::FUNCTION_ENTRY, (4, 4));
+        assert_eq!(join.matching_observations(&a, "parameter"), vec![0]);
+    }
+
+    #[test]
+    fn exact_anchor_identity_beats_the_collectors_reported_line() {
+        // A multiline call may be reported at its receiver line while the plan
+        // anchors the selector line. The exact binding already proved which
+        // planned anchor ran, so it wins.
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "calls": [
+                { "row": { "callsite": { "path": "lib/a.rb", "line": 99, "selector": "map",
+                                          "anchor_symbol": "s" }, "count": 1 },
+                  "bucket": call_bucket(false) },
+                { "row": { "callsite": { "path": "lib/a.rb", "line": 5, "selector": "map",
+                                          "anchor_symbol": "" }, "count": 1 },
+                  "bucket": call_bucket(false) }
+            ]
+        }));
+        let plan = plan_of(vec![]);
+        let join = Join::new(Path::new("/repo"), &plan, &trace);
+        let a = anchor("s", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4));
+        let (matched, ambiguous) = join.matching_calls(&a);
+        assert_eq!(matched, vec![0], "the exactly-bound call, not the line match");
+        assert!(!ambiguous);
+    }
+
+    #[test]
+    fn without_an_exact_binding_only_unbound_calls_on_the_line_match() {
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "calls": [
+                { "row": { "callsite": { "path": "lib/a.rb", "line": 5, "selector": "map",
+                                          "anchor_symbol": "someone-elses" }, "count": 1 },
+                  "bucket": call_bucket(false) },
+                { "row": { "callsite": { "path": "lib/a.rb", "line": 5, "selector": "map",
+                                          "anchor_symbol": "" }, "count": 1 },
+                  "bucket": call_bucket(false) }
+            ]
+        }));
+        let plan = plan_of(vec![]);
+        let join = Join::new(Path::new("/repo"), &plan, &trace);
+        let a = anchor("s", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4));
+        assert_eq!(join.matching_calls(&a).0, vec![1]);
+    }
+
+    // --- executed vs captured ----------------------------------------------
+
+    #[test]
+    fn a_return_anchor_with_no_observation_did_not_execute() {
+        // A conforming collector reports every returned value, including null
+        // and false, so absence means the boundary was never reached -- not
+        // that it ran uncaptured.
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "function_entries": [{ "path": "lib/a.rb", "line": 5 }]
+        }));
+        let plan = plan_of(vec![]);
+        let join = Join::new(Path::new("/repo"), &plan, &trace);
+        let a = anchor("s", "lib/a.rb", "return", AnchorKind::FUNCTION_RETURN, (4, 4));
+        assert!(!join.anchor_executed(&a, false));
+    }
+
+    #[test]
+    fn an_entry_anchor_whose_function_ran_is_executed() {
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "function_entries": [{ "path": "lib/a.rb", "line": 5 }]
+        }));
+        let plan = plan_of(vec![]);
+        let join = Join::new(Path::new("/repo"), &plan, &trace);
+        let a = anchor("s", "lib/a.rb", "value", AnchorKind::FUNCTION_ENTRY, (4, 4));
+        assert!(join.anchor_executed(&a, false));
+    }
+
+    #[test]
+    fn an_exact_execution_range_is_proven_by_the_marker_alone() {
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "exact_anchor_executions": [{ "symbol": "s", "count": 3 }],
+            "executed_callsites": [{ "path": "lib/a.rb", "line": 5, "selector": "map" }]
+        }));
+        let plan = plan_of(vec![]);
+        let join = Join::new(Path::new("/repo"), &plan, &trace);
+        let a = anchor("s", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4));
+        assert!(join.anchor_executed(&a, true));
+        assert_eq!(join.exact_count("s"), 3);
+        let other = anchor("t", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4));
+        assert!(!join.anchor_executed(&other, true), "a different marker is not this one");
+        assert!(join.anchor_executed(&other, false), "but the callsite did run");
+    }
+
+    #[test]
+    fn coverage_alone_only_fails_closed() {
+        // Line coverage cannot prove which same-line call ran, so it may say
+        // "executed but uncaptured" and never "this anchor ran".
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "coverage": [{ "path": "lib/a.rb", "lines": [5] }]
+        }));
+        let plan = plan_of(vec![]);
+        let join = Join::new(Path::new("/repo"), &plan, &trace);
+        let a = anchor("s", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4));
+        assert!(join.anchor_executed(&a, false));
+    }
+
+    // --- whole-anchor outcomes ---------------------------------------------
+
+    fn statuses(plan: &TracePlan, trace: &Trace) -> Vec<(String, String, i64)> {
+        let join = Join::new(Path::new("/repo"), plan, trace);
+        let runs = vec!["run-1".to_string()];
+        plan.requests
+            .iter()
+            .map(|request| {
+                let a = request.anchor.as_ref().unwrap();
+                let row = join.evaluate(request, a, &runs).unwrap();
+                (
+                    a.symbol.clone(),
+                    row["capture"]["status"].as_str().unwrap().to_string(),
+                    row["capture"]["observed_executions"].as_i64().unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_anchor_nothing_ran_is_not_executed_and_complete_for_every_kind() {
+        let plan = plan_of(vec![request(
+            anchor("s", "lib/a.rb", "value", AnchorKind::FUNCTION_ENTRY, (4, 4)),
+            &[runtime_protocol::EvidenceKind::PARAMETER_VALUE],
+        )]);
+        let trace = trace_of(serde_json::json!({ "trace_version": 1 }));
+        assert_eq!(statuses(&plan, &trace), vec![("s".into(), "NOT_EXECUTED".into(), 0)]);
+    }
+
+    #[test]
+    fn an_anchor_that_ran_without_a_captured_value_is_not_instrumented() {
+        let plan = plan_of(vec![request(
+            anchor("s", "lib/a.rb", "value", AnchorKind::FUNCTION_ENTRY, (4, 4)),
+            &[runtime_protocol::EvidenceKind::PARAMETER_VALUE],
+        )]);
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "function_entries": [{ "path": "lib/a.rb", "line": 5 }]
+        }));
+        assert_eq!(statuses(&plan, &trace)[0].1, "NOT_INSTRUMENTED");
+    }
+
+    #[test]
+    fn a_kind_no_bucket_carries_makes_the_capture_partial() {
+        let plan = plan_of(vec![request(
+            anchor("s", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4)),
+            &[
+                runtime_protocol::EvidenceKind::RECEIVER_VALUE,
+                runtime_protocol::EvidenceKind::RESULT_VALUE,
+            ],
+        )]);
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "calls": [{ "row": { "callsite": { "path": "lib/a.rb", "line": 5, "selector": "map",
+                                                "anchor_symbol": "" }, "count": 2 },
+                        "bucket": call_bucket(false) }]
+        }));
+        let rows = statuses(&plan, &trace);
+        assert_eq!(rows[0].1, "PARTIAL", "no result was captured");
+        assert_eq!(rows[0].2, 2);
+    }
+
+    #[test]
+    fn a_capture_carrying_every_requested_kind_is_complete() {
+        let plan = plan_of(vec![request(
+            anchor("s", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4)),
+            &[runtime_protocol::EvidenceKind::RECEIVER_VALUE],
+        )]);
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "calls": [{ "row": { "callsite": { "path": "lib/a.rb", "line": 5, "selector": "map",
+                                                "anchor_symbol": "" }, "count": 2 },
+                        "bucket": call_bucket(true) }]
+        }));
+        assert_eq!(statuses(&plan, &trace)[0], ("s".into(), "COMPLETE_FOR_RUNS".into(), 2));
+    }
+
+    #[test]
+    fn a_match_that_captured_nothing_is_not_an_execution() {
+        // The collector saw the call but recorded no value for it, so there is
+        // no bucket and the anchor must not read as executed-and-captured.
+        let plan = plan_of(vec![request(
+            anchor("s", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4)),
+            &[runtime_protocol::EvidenceKind::RECEIVER_VALUE],
+        )]);
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "calls": [{ "row": { "callsite": { "path": "lib/a.rb", "line": 5, "selector": "map",
+                                                "anchor_symbol": "" }, "count": 2 } }]
+        }));
+        assert_eq!(statuses(&plan, &trace)[0].1, "NOT_EXECUTED");
+    }
+
+    #[test]
+    fn one_representative_bucket_regains_the_markers_exact_count() {
+        let plan = plan_of(vec![request(
+            anchor("s", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4)),
+            &[runtime_protocol::EvidenceKind::RECEIVER_VALUE],
+        )]);
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "exact_anchor_executions": [{ "symbol": "s", "count": 9 }],
+            "calls": [{ "row": { "callsite": { "path": "lib/a.rb", "line": 5, "selector": "map",
+                                                "anchor_symbol": "" }, "count": 2 },
+                        "bucket": call_bucket(true) }]
+        }));
+        assert_eq!(statuses(&plan, &trace)[0].2, 9);
+    }
+
+    // --- emission -----------------------------------------------------------
+
+    #[test]
+    fn an_entry_absence_would_already_imply_is_left_out() {
+        let vacuous = serde_json::json!({
+            "capture": { "status": "NOT_EXECUTED" }, "executions": []
+        });
+        let ran = serde_json::json!({
+            "capture": { "status": "COMPLETE_FOR_RUNS" }, "executions": [{ "count": 1 }]
+        });
+        let uncaptured = serde_json::json!({
+            "capture": { "status": "NOT_INSTRUMENTED" }, "executions": []
+        });
+        assert!(is_vacuous(&vacuous));
+        assert!(!is_vacuous(&ran));
+        assert!(!is_vacuous(&uncaptured), "NOT_INSTRUMENTED is not implied by absence");
+    }
+
+    #[test]
+    fn bytes_are_encoded_as_standard_base64() {
+        assert_eq!(base64_standard(b""), "");
+        assert_eq!(base64_standard(b"f"), "Zg==");
+        assert_eq!(base64_standard(b"fo"), "Zm8=");
+        assert_eq!(base64_standard(b"foo"), "Zm9v");
+        assert_eq!(base64_standard(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_standard(&[251, 255, 190]), "+/++");
+    }
+
+    // --- merging ------------------------------------------------------------
+
+    #[test]
+    fn buckets_differing_only_in_count_are_one_observation() {
+        let a = serde_json::json!({ "count": 2, "receiver": "R" });
+        let b = serde_json::json!({ "count": 3, "receiver": "R" });
+        let c = serde_json::json!({ "count": 1, "receiver": "S" });
+        let merged = merge_buckets(&[&a, &b, &c]);
+        assert_eq!(merged.len(), 2);
+        let total: i64 = merged.iter().map(bucket_count).sum();
+        assert_eq!(total, 6);
+    }
+
+    #[test]
+    fn the_worst_status_any_shard_saw_wins() {
+        let complete = serde_json::json!({ "status": "COMPLETE_FOR_RUNS" });
+        let partial = serde_json::json!({ "status": "PARTIAL" });
+        let stale = serde_json::json!({ "status": "STALE" });
+        let failed = serde_json::json!({ "status": "FAILED_CAPTURE" });
+        let bucket = serde_json::json!({ "count": 1 });
+        assert_eq!(merged_status(&[&complete], &[&bucket]), "COMPLETE_FOR_RUNS");
+        assert_eq!(merged_status(&[&complete, &partial], &[&bucket]), "PARTIAL");
+        assert_eq!(merged_status(&[&partial, &stale], &[&bucket]), "STALE");
+        assert_eq!(merged_status(&[&stale, &failed], &[&bucket]), "FAILED_CAPTURE");
+        assert_eq!(merged_status(&[&complete], &[]), "NOT_EXECUTED");
+    }
+
+    #[test]
+    fn a_merged_reason_explains_only_the_shards_that_fell_short() {
+        let complete = serde_json::json!({ "status": "COMPLETE_FOR_RUNS", "reason": "fine" });
+        let partial = serde_json::json!({ "status": "PARTIAL", "reason": "missing result" });
+        assert_eq!(merged_reason(&[&complete], "COMPLETE_FOR_RUNS"), "");
+        assert_eq!(merged_reason(&[&complete, &partial], "PARTIAL"), "missing result");
+    }
+
+    #[test]
+    fn merging_unions_anchors_sums_counts_and_intersects_complete_kinds() {
+        let left = serde_json::json!({
+            "producer": { "name": "nil-kill" },
+            "trace_plan_digest": "d",
+            "runs": [{ "id": "r1" }],
+            "environment": [{ "key": "ruby", "value": "3.2.3" }],
+            "anchors": [{
+                "anchor_symbol": "a", "anchor_semantic_digest": "AQID",
+                "capture": { "status": "COMPLETE_FOR_RUNS", "run_ids": ["r1"],
+                             "dropped_executions": 0,
+                             "complete_kinds": ["RECEIVER_VALUE", "CALL_TARGET"] },
+                "executions": [{ "count": 2, "receiver": "R" }]
+            }]
+        });
+        let right = serde_json::json!({
+            "producer": { "name": "nil-kill" },
+            "trace_plan_digest": "d",
+            "runs": [{ "id": "r2" }],
+            "environment": [{ "key": "ruby", "value": "3.2.3" }],
+            "anchors": [
+                { "anchor_symbol": "a", "anchor_semantic_digest": "AQID",
+                  "capture": { "status": "PARTIAL", "run_ids": ["r2"],
+                               "dropped_executions": 1,
+                               "complete_kinds": ["RECEIVER_VALUE"] },
+                  "executions": [{ "count": 3, "receiver": "R" }] },
+                { "anchor_symbol": "b", "anchor_semantic_digest": "AQID",
+                  "capture": { "status": "COMPLETE_FOR_RUNS", "run_ids": ["r2"],
+                               "dropped_executions": 0, "complete_kinds": [] },
+                  "executions": [{ "count": 1, "receiver": "S" }] }
+            ]
+        });
+        let merged = merge_evidence(&[left, right]).expect("merge");
+        let anchors = merged["anchors"].as_array().unwrap();
+        assert_eq!(anchors.len(), 2, "a shard contributes what it observed");
+
+        let a = anchors.iter().find(|x| x["anchor_symbol"] == "a").unwrap();
+        assert_eq!(a["capture"]["status"], "PARTIAL");
+        assert_eq!(a["capture"]["observed_executions"], 5, "counts add");
+        assert_eq!(a["capture"]["dropped_executions"], 1);
+        assert_eq!(a["capture"]["run_ids"], serde_json::json!(["r1", "r2"]));
+        assert_eq!(
+            a["capture"]["complete_kinds"],
+            serde_json::json!(["RECEIVER_VALUE"]),
+            "a kind is complete only where every shard found it so"
+        );
+        assert_eq!(a["executions"].as_array().unwrap().len(), 1, "identical buckets fuse");
+        assert_eq!(merged["environment"].as_array().unwrap().len(), 1);
+        assert_eq!(merged["runs"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn merging_rejects_a_shard_that_repeats_an_anchor() {
+        let broken = serde_json::json!({
+            "anchors": [
+                { "anchor_symbol": "a", "capture": {}, "executions": [] },
+                { "anchor_symbol": "a", "capture": {}, "executions": [] }
+            ]
+        });
+        assert!(merge_evidence(&[broken]).is_err());
+    }
+
+    #[test]
+    fn merging_rejects_conflicting_environment_claims() {
+        let mk = |version: &str| {
+            serde_json::json!({
+                "environment": [{ "key": "ruby", "value": version }],
+                "anchors": [], "runs": []
+            })
+        };
+        assert!(merge_evidence(&[mk("3.2.3"), mk("3.3.0")]).is_err());
+    }
+
+    #[test]
+    fn counts_are_read_whether_the_producer_wrote_them_as_numbers_or_strings() {
+        // ProtoJSON writes uint64 as a string; serde_json fixtures use numbers.
+        assert_eq!(bucket_count(&serde_json::json!({ "count": 4 })), 4);
+        assert_eq!(bucket_count(&serde_json::json!({ "count": "4" })), 4);
+        assert_eq!(bucket_count(&serde_json::json!({})), 1);
+    }
 }

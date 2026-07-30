@@ -1495,14 +1495,17 @@ mod tests {
             "runtime-evidence.invalid-unknown-field.json"
         ))
         .is_err());
-        let missing = parse_runtime_evidence_json(&conformance_fixture(
-            "runtime-evidence.invalid-missing-anchor.json",
+        // Absence is a claim the plan can read -- that anchor did not execute --
+        // but evidence for an anchor the plan never requested is about nothing,
+        // and stays a hard error.
+        let unknown = parse_runtime_evidence_json(&conformance_fixture(
+            "runtime-evidence.invalid-unknown-anchor.json",
         ))
         .expect("schema-valid semantic failure");
-        assert!(validate_runtime_evidence(&plan, &missing)
+        assert!(validate_runtime_evidence(&plan, &unknown)
             .unwrap_err()
             .to_string()
-            .contains("omits requested anchors"));
+            .contains("unknown plan anchor"));
     }
 
     #[test]
@@ -1526,16 +1529,23 @@ mod tests {
         }
     }
 
+    // Evidence is sparse: an anchor with no entry was not executed in these
+    // runs, which is the same claim an explicit NOT_EXECUTED entry made at the
+    // cost of making every shard's document scale with the plan. What evidence
+    // must never do is name an anchor twice, or one the plan never requested.
     #[test]
-    fn evidence_must_cover_every_requested_anchor_exactly_once() {
+    fn evidence_may_omit_an_anchor_that_did_not_execute() {
         let plan = plan();
         let mut bundle = evidence(&plan);
         bundle.anchors.clear();
-        assert!(validate_runtime_evidence(&plan, &bundle)
-            .unwrap_err()
-            .to_string()
-            .contains("omits requested anchors"));
+        validate_runtime_evidence(&plan, &bundle)
+            .expect("absence means the anchor did not execute");
+    }
 
+    #[test]
+    fn evidence_must_not_report_an_anchor_twice() {
+        let plan = plan();
+        let mut bundle = evidence(&plan);
         let row = evidence(&plan).anchors.remove(0);
         bundle.anchors = vec![row.clone(), row];
         assert!(validate_runtime_evidence(&plan, &bundle)
