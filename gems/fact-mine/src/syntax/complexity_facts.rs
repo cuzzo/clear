@@ -640,6 +640,10 @@ fn fact_for_method(
     // A loop binding has the element type of what it iterates. Without it the
     // element is untyped, so no library bound resolves for a call on it and the
     // whole loop body is priced conservatively.
+    // An argument has its parameter's declared type. A collection a helper
+    // fills through an out parameter is otherwise untyped at the caller, so
+    // nothing prices the elements it later iterates.
+    collect_argument_parameter_types(node, document, language, &mut augmented_parameter_types);
     collect_iteration_element_types(
         node,
         &mut augmented_parameter_types,
@@ -2915,6 +2919,70 @@ fn iterator_message(node: &Node) -> Option<&str> {
         .first()
         .and_then(ast::node)
         .and_then(direct_call_message)
+}
+
+/// Whether a collection type leaves its element unknown, as a bare constructor
+/// does.
+fn untyped_element(type_expr: &TypeExpr) -> bool {
+    match type_expr {
+        TypeExpr::Array(element) | TypeExpr::Set(element) => {
+            matches!(**element, TypeExpr::Untyped)
+        }
+        TypeExpr::Hash { value, .. } => matches!(**value, TypeExpr::Untyped),
+        _ => false,
+    }
+}
+
+fn collect_argument_parameter_types(
+    node: &Node,
+    document: &Document,
+    language: &str,
+    types: &mut BTreeMap<String, TypeExpr>,
+) {
+    let mut signatures = BTreeMap::<&str, (&Vec<String>, &BTreeMap<String, String>)>::new();
+    for definition in &document.function_defs {
+        let key = method_parameter_type_key(&definition.owner, &definition.name, definition.line);
+        if let Some(declared) = document.method_param_types.get(&key) {
+            signatures.insert(definition.name.as_str(), (&definition.params, declared));
+        }
+    }
+    fn walk(
+        node: &Node,
+        signatures: &BTreeMap<&str, (&Vec<String>, &BTreeMap<String, String>)>,
+        language: &str,
+        types: &mut BTreeMap<String, TypeExpr>,
+    ) {
+        if let Some(message) = direct_call_message(node) {
+            if let Some((params, declared)) = signatures.get(message) {
+                for (index, argument) in call_argument_nodes(node).into_iter().enumerate() {
+                    let Some(parameter) = params.get(index) else {
+                        break;
+                    };
+                    let Some(declared_type) = declared.get(parameter) else {
+                        continue;
+                    };
+                    let names = local_names(argument);
+                    if names.len() != 1 {
+                        continue;
+                    }
+                    let name = names.into_iter().next().unwrap_or_default();
+                    let declared = TypeExpr::parse(declared_type, language);
+                    // A constructor names the container but not what it holds,
+                    // so a declaration that names both is the better answer.
+                    let replace = types
+                        .get(&name)
+                        .is_none_or(|existing| untyped_element(existing) && !untyped_element(&declared));
+                    if replace {
+                        types.insert(name, declared);
+                    }
+                }
+            }
+        }
+        for child in child_nodes(node) {
+            walk(child, signatures, language, types);
+        }
+    }
+    walk(node, &signatures, language, types);
 }
 
 fn collect_iteration_element_types(
