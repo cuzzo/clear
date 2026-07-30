@@ -125,6 +125,11 @@ message CaptureSummary {
   uint64 observed_executions = 3;
   uint64 dropped_executions = 4;
   string reason = 5;
+  // Evidence completeness is field-specific. A provider may capture every
+  // receiver and target while being unable to capture a return value. The
+  // aggregate status remains useful for diagnostics, while this closed set
+  // lets consumers soundly use the complete portions of a partial anchor.
+  repeated EvidenceKind complete_kinds = 6;
 }
 
 enum SourceRole {

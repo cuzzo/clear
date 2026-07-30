@@ -221,8 +221,10 @@ pub fn apply_environment_files(
     let mut applied = 0;
     for path in paths {
         let path = path.as_ref();
-        let source = fs::read_to_string(path)
+        let bytes = fs::read(path)
             .with_context(|| format!("failed to read semantic environment {}", path.display()))?;
+        let source = decode(path, &bytes)
+            .with_context(|| format!("failed to decode semantic environment {}", path.display()))?;
         let environment: SemanticEnvironmentFile = serde_json::from_str(&source)
             .with_context(|| format!("failed to parse semantic environment {}", path.display()))?;
         validate_environment(&environment)
@@ -860,6 +862,26 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("conflicting semantic environment claim runtime"));
+    }
+
+    #[test]
+    fn reads_gzip_semantic_environment_by_content() {
+        let json = serde_json::json!({
+            "schema": ENVIRONMENT_SCHEMA_V1,
+            "claims": {"runtime": "ruby-3.2.3"}
+        });
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(json.to_string().as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(file.path(), compressed).unwrap();
+        let mut output = ProfileOutput::default();
+
+        assert_eq!(
+            apply_environment_files(&mut output, &[file.path()]).unwrap(),
+            1
+        );
+        assert_eq!(output.semantic_environment["runtime"], "ruby-3.2.3");
     }
 
     #[test]

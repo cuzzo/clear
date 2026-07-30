@@ -137,7 +137,11 @@ module NilKill
               "dropped_executions" => captures.sum {
                 |capture| capture.fetch("dropped_executions", 0).to_i
               },
-              "reason" => captures.filter_map { |capture| capture["reason"] }.uniq.sort.join("; "),
+              "reason" => merged_reason(captures, executions),
+              "complete_kinds" => captures
+                .map { |capture| Array(capture["complete_kinds"]) }
+                .reduce { |complete, kinds| complete & kinds }
+                .to_a.sort,
             }.reject { |key, value| key == "reason" && value.empty? },
             "executions" => merge_buckets(executions),
           }
@@ -159,6 +163,17 @@ module NilKill
         return "NOT_EXECUTED" if executions.empty?
 
         "COMPLETE_FOR_RUNS"
+      end
+
+      def merged_reason(captures, executions)
+        status = merged_status(captures, executions)
+        return "" if status == "COMPLETE_FOR_RUNS"
+
+        relevant = captures.reject do |capture|
+          %w[COMPLETE_FOR_RUNS NOT_EXECUTED].include?(capture.fetch("status"))
+        end
+        relevant = captures if relevant.empty?
+        relevant.filter_map { |capture| capture["reason"] }.uniq.sort.join("; ")
       end
 
       def unique!(values, label)

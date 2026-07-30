@@ -132,15 +132,23 @@ module NilKill
       activation_span = span unless activation_span.length == 4
       activation_line = activation_span.values_at(0, 2).map(&:to_i).min
       selector = site["selector"].to_s
-      activation_key = [File.expand_path(path, ROOT), activation_line].join("\0")
-      if selector.empty?
-        @runtime_native_activation_sites[activation_key] = true
-      elsif @runtime_native_activation_sites[activation_key] != true
-        @runtime_native_activation_sites[activation_key] =
-          (Array(@runtime_native_activation_sites[activation_key]) | [selector]).sort
+      first_line, last_line = span.values_at(0, 2).map(&:to_i).minmax
+      # FactMine may select an enclosing line to arm a native call before a
+      # multiline expression begins. Ruby then emits later :line events inside
+      # that expression. Retain the same explicit selector window on every
+      # capture-span line so those events do not disarm the requested capture.
+      # This is a direct span-to-instrumentation projection; NilKill performs no
+      # source, CFG, or DFG inference here.
+      ([activation_line] + (first_line..last_line).to_a).uniq.each do |line|
+        activation_key = [File.expand_path(path, ROOT), line].join("\0")
+        if selector.empty?
+          @runtime_native_activation_sites[activation_key] = true
+        elsif @runtime_native_activation_sites[activation_key] != true
+          @runtime_native_activation_sites[activation_key] =
+            (Array(@runtime_native_activation_sites[activation_key]) | [selector]).sort
+        end
       end
 
-      first_line, last_line = span.values_at(0, 2).map(&:to_i).minmax
       (first_line..last_line).each do |line|
         key = [File.expand_path(path, ROOT), line].join("\0")
         if selector.empty?

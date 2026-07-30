@@ -559,7 +559,13 @@ module NilKillRuntimeTrace
     # classes. The source-location override exists solely to prevent a test
     # double with a C-backed accessor from masquerading as CRuby stdlib.
     native_source = native ? native_receiver_source_location(tp.self) : nil
-    native_source = nil unless native_source && runtime_nonproduction_source_path?(native_source.fetch(:path))
+    receiver_class = tp.self.is_a?(Module) ? tp.self : tp.self.class
+    # A C event on a directly generated workspace method (Struct accessors
+    # are the common case) has no method source_location, but its defining
+    # class does. Preserve that declaration provenance. Do not apply the
+    # receiver's source to inherited CRuby methods such as Array#each on a
+    # project subclass: TracePoint's defined_class is authoritative there.
+    native_source = nil unless native_source && tp.defined_class.equal?(receiver_class)
     raw_callee_path = native ? native_source&.fetch(:path, "").to_s : tp.path.to_s
     # Keep TracePoint's pseudo-file identity long enough for package
     # attribution, then omit it from the declaration locator entirely. It is

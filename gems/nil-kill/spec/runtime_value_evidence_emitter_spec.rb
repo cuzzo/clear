@@ -122,12 +122,35 @@ RSpec.describe "canonical runtime semantic evidence v1" do
       row = evidence.fetch("anchors").fetch(0)
       expect(row.fetch("anchor_symbol")).to eq("local call-1")
       expect(row.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+      expect(row.dig("capture", "complete_kinds"))
+        .to contain_exactly("RECEIVER_VALUE", "CALL_TARGET")
       bucket = row.fetch("executions").fetch(0)
       expect(bucket.fetch("count").to_i).to eq(2)
       expect(bucket.dig("receiver", "alternatives", 0, "value", "type_symbol"))
         .to end_with(" String#")
       expect(bucket.dig("target", "symbol")).to end_with(" String#size().")
       expect(bucket.dig("provenance", "run_id")).to eq("run-1")
+    end
+  end
+
+  it "reports field-level completeness when result capture is partial" do
+    request = {
+      "anchor" => anchor(symbol: "local call-1", kind: "CALL_SELECTOR", name: "size"),
+      "required" => %w[RECEIVER_VALUE CALL_TARGET RESULT_VALUE],
+    }
+    Dir.mktmpdir do |directory|
+      evidence = parse(
+        NilKill::Runtime::ValueEvidenceEmitter.emit(
+          root: NilKill::ROOT,
+          runtime_dir: directory,
+          events: [event],
+          plan: plan(request)
+        ).fetch("path")
+      )
+      capture = evidence.dig("anchors", 0, "capture")
+      expect(capture.fetch("status")).to eq("PARTIAL")
+      expect(capture.fetch("complete_kinds"))
+        .to contain_exactly("RECEIVER_VALUE", "CALL_TARGET")
     end
   end
 
@@ -184,6 +207,8 @@ RSpec.describe "canonical runtime semantic evidence v1" do
       )
       expect(evidence.fetch("anchors").map { |row| row.dig("capture", "status") })
         .to eq(%w[PARTIAL PARTIAL])
+      expect(evidence.fetch("anchors").map { |row| row.dig("capture", "complete_kinds") })
+        .to eq([[], []])
     end
   end
 
@@ -227,9 +252,46 @@ RSpec.describe "canonical runtime semantic evidence v1" do
       expect(merged.fetch("runs").map { |run| run.fetch("id") }).to eq(%w[run-1 run-2])
       row = merged.fetch("anchors").fetch(0)
       expect(row.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+      expect(row.dig("capture", "complete_kinds"))
+        .to contain_exactly("RECEIVER_VALUE", "CALL_TARGET")
       expect(row.dig("capture", "observed_executions")).to eq(2)
       expect(row.fetch("executions").map { |bucket| bucket.dig("provenance", "run_id") })
         .to contain_exactly("run-1", "run-2")
+    end
+  end
+
+  it "intersects field completeness across replaceable run shards" do
+    request = {
+      "anchor" => anchor(symbol: "local call-1", kind: "CALL_SELECTOR", name: "size"),
+      "required" => %w[RECEIVER_VALUE CALL_TARGET RESULT_VALUE],
+    }
+    Dir.mktmpdir do |directory|
+      empty = NilKill::Runtime::ValueEvidenceEmitter.emit(
+        root: NilKill::ROOT,
+        runtime_dir: directory,
+        output: File.join(directory, "empty.json.gz"),
+        events: [],
+        run_ids: ["run-empty"],
+        plan: plan(request)
+      ).fetch("path")
+      observed = NilKill::Runtime::ValueEvidenceEmitter.emit(
+        root: NilKill::ROOT,
+        runtime_dir: directory,
+        output: File.join(directory, "observed.json.gz"),
+        events: [event],
+        run_ids: ["run-1"],
+        plan: plan(request)
+      ).fetch("path")
+
+      capture = NilKill::Runtime::EvidenceMerger
+        .merge([empty, observed]).dig("anchors", 0, "capture")
+
+      expect(capture.fetch("status")).to eq("PARTIAL")
+      expect(capture.fetch("complete_kinds"))
+        .to contain_exactly("RECEIVER_VALUE", "CALL_TARGET")
+      expect(capture.fetch("reason")).to eq(
+        "provider did not capture every value requested at this anchor"
+      )
     end
   end
 

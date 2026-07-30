@@ -729,46 +729,53 @@ fn validate_anchor_evidence(
         .iter()
         .filter_map(|kind| kind.enum_value().ok().map(|kind| kind.value()))
         .collect::<BTreeSet<_>>();
+    let complete = capture
+        .complete_kinds
+        .iter()
+        .map(|kind| {
+            kind.enum_value().map(|kind| kind.value()).map_err(|value| {
+                anyhow::anyhow!("anchors[{index}] has unknown complete kind {value}")
+            })
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
+    if complete.contains(&EvidenceKind::EVIDENCE_KIND_UNSPECIFIED.value()) {
+        bail!("anchors[{index}] complete_kinds must be explicit");
+    }
+    if complete.len() != capture.complete_kinds.len() {
+        bail!("anchors[{index}] contains duplicate complete_kinds");
+    }
+    if !complete.iter().all(|kind| required.contains(kind)) {
+        bail!("anchors[{index}] completes evidence that the trace plan did not request");
+    }
+    if status == CaptureStatus::COMPLETE_FOR_RUNS && complete != required {
+        bail!("anchors[{index}] COMPLETE_FOR_RUNS must complete every requested evidence kind");
+    }
     for (bucket_index, bucket) in evidence.executions.iter().enumerate() {
         if bucket.count == 0 {
             bail!("anchors[{index}].executions[{bucket_index}].count must be positive");
         }
-        let require_complete = status == CaptureStatus::COMPLETE_FOR_RUNS;
-        if require_complete
-            && (required.contains(&EvidenceKind::RECEIVER_VALUE.value())
-                || required.contains(&EvidenceKind::COLLECTION_VALUE.value()))
+        if (complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
+            || complete.contains(&EvidenceKind::COLLECTION_VALUE.value()))
             && bucket.receiver.is_none()
         {
             bail!("anchors[{index}].executions[{bucket_index}] lacks required receiver");
         }
-        if require_complete
-            && required.contains(&EvidenceKind::CALL_TARGET.value())
-            && bucket.target.is_none()
-        {
+        if complete.contains(&EvidenceKind::CALL_TARGET.value()) && bucket.target.is_none() {
             bail!("anchors[{index}].executions[{bucket_index}] lacks required target");
         }
-        if require_complete
-            && required.contains(&EvidenceKind::RESULT_VALUE.value())
-            && bucket.result.is_none()
-        {
+        if complete.contains(&EvidenceKind::RESULT_VALUE.value()) && bucket.result.is_none() {
             bail!("anchors[{index}].executions[{bucket_index}] lacks required result");
         }
-        if require_complete
-            && required.contains(&EvidenceKind::BOOLEAN_RESULT.value())
+        if complete.contains(&EvidenceKind::BOOLEAN_RESULT.value())
             && bucket.boolean_result.is_none()
         {
             bail!("anchors[{index}].executions[{bucket_index}] lacks required Boolean result");
         }
-        if required.iter().any(|kind| {
-            matches!(
-                *kind,
-                value
-                    if value == EvidenceKind::PARAMETER_VALUE.value()
-                        || value == EvidenceKind::RETURN_VALUE.value()
-                        || value == EvidenceKind::STATE_VALUE.value()
-            )
-        }) && require_complete
-            && bucket.value.is_none()
+        if complete.iter().any(|kind| {
+            *kind == EvidenceKind::PARAMETER_VALUE.value()
+                || *kind == EvidenceKind::RETURN_VALUE.value()
+                || *kind == EvidenceKind::STATE_VALUE.value()
+        }) && bucket.value.is_none()
         {
             bail!("anchors[{index}].executions[{bucket_index}] lacks required boundary value");
         }
@@ -808,12 +815,18 @@ fn validate_anchor_evidence(
         if !capture_runs.contains(provenance.run_id.as_str()) {
             bail!("anchors[{index}].executions[{bucket_index}] provenance run is outside capture runs");
         }
-        if status == CaptureStatus::COMPLETE_FOR_RUNS
-            && (bucket.receiver.as_ref().is_some_and(value_set_is_truncated)
-                || bucket.result.as_ref().is_some_and(value_set_is_truncated)
-                || bucket.value.as_ref().is_some_and(value_set_is_truncated))
+        if ((complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
+            || complete.contains(&EvidenceKind::COLLECTION_VALUE.value()))
+            && bucket.receiver.as_ref().is_some_and(value_set_is_truncated))
+            || (complete.contains(&EvidenceKind::RESULT_VALUE.value())
+                && bucket.result.as_ref().is_some_and(value_set_is_truncated))
+            || (complete.iter().any(|kind| {
+                *kind == EvidenceKind::PARAMETER_VALUE.value()
+                    || *kind == EvidenceKind::RETURN_VALUE.value()
+                    || *kind == EvidenceKind::STATE_VALUE.value()
+            }) && bucket.value.as_ref().is_some_and(value_set_is_truncated))
         {
-            bail!("anchors[{index}] complete capture cannot contain truncated required values");
+            bail!("anchors[{index}] complete evidence kind cannot contain truncated values");
         }
     }
     Ok(())
@@ -1142,6 +1155,7 @@ mod tests {
                     status: EnumOrUnknown::new(CaptureStatus::COMPLETE_FOR_RUNS),
                     run_ids: vec!["run-1".to_string()],
                     observed_executions: 1,
+                    complete_kinds: request.required.clone(),
                     ..CaptureSummary::default()
                 }),
                 executions: vec![ExecutionBucket {
@@ -1302,6 +1316,7 @@ mod tests {
             capture: MessageField::some(CaptureSummary {
                 status: EnumOrUnknown::new(CaptureStatus::NOT_EXECUTED),
                 run_ids: vec!["run-1".to_string()],
+                complete_kinds: plan.requests[0].required.clone(),
                 ..CaptureSummary::default()
             }),
             ..AnchorEvidence::default()

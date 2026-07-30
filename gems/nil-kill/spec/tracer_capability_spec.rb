@@ -44,6 +44,7 @@ RSpec.describe "nil-kill tracer capability matrix" do
         event.dig("callee", "owner") == "Hash" && event.dig("callee", "name") == "[]" &&
           event.dig("result_domain", "types")&.include?("NativeArm")
       end
+      expect(lookup).not_to be_nil, JSON.pretty_generate(r[:runtime_calls])
       expect(lookup).to include(
         "result_domain" => a_hash_including(
           "shapes" => include(a_hash_including("kind" => "record", "name" => "NativeArm"))

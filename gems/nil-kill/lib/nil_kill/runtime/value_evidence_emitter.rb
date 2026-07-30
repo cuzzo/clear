@@ -95,16 +95,31 @@ module NilKill
           call_anchor?(anchor) ? call_bucket(match, run_ids.first) : value_bucket(match, run_ids.first)
         end
         executions = merge_identical_buckets(executions)
+        requested = request.fetch("required")
+        executed_without_capture = executions.empty? && anchor_executed?(anchor)
+        complete_kinds =
+          if ambiguity || executed_without_capture
+            []
+          elsif executions.empty?
+            # No execution in a modeled run is a complete (empty) observation
+            # for every requested field.
+            requested
+          else
+            requested.select do |kind|
+              field = evidence_field(kind)
+              executions.all? { |bucket| bucket.key?(field) }
+            end
+          end
         status, reason =
           if ambiguity
             ["PARTIAL", "provider cannot uniquely correlate this source event to one exact anchor"]
           elsif executions.empty?
-            if anchor_executed?(anchor)
+            if executed_without_capture
               ["NOT_INSTRUMENTED", "anchor executed but the provider did not capture its requested value"]
             else
               ["NOT_EXECUTED", "no matching execution in the modeled runs"]
             end
-          elsif !executions.all? { |bucket| bucket_satisfies?(request, bucket) }
+          elsif complete_kinds.sort != requested.sort
             ["PARTIAL", "provider did not capture every value requested at this anchor"]
           else
             ["COMPLETE_FOR_RUNS", nil]
@@ -119,6 +134,7 @@ module NilKill
             "observed_executions" => observed,
             "dropped_executions" => 0,
             "reason" => reason,
+            "complete_kinds" => complete_kinds,
           }.compact,
           "executions" => executions,
         }
@@ -240,19 +256,17 @@ module NilKill
           end
       end
 
-      def bucket_satisfies?(request, bucket)
-        request.fetch("required").all? do |kind|
-          {
-            "PARAMETER_VALUE" => "value",
-            "RETURN_VALUE" => "value",
-            "STATE_VALUE" => "value",
-            "RECEIVER_VALUE" => "receiver",
-            "CALL_TARGET" => "target",
-            "RESULT_VALUE" => "result",
-            "COLLECTION_VALUE" => "receiver",
-            "BOOLEAN_RESULT" => "boolean_result",
-          }.fetch(kind).then { |field| bucket.key?(field) }
-        end
+      def evidence_field(kind)
+        {
+          "PARAMETER_VALUE" => "value",
+          "RETURN_VALUE" => "value",
+          "STATE_VALUE" => "value",
+          "RECEIVER_VALUE" => "receiver",
+          "CALL_TARGET" => "target",
+          "RESULT_VALUE" => "result",
+          "COLLECTION_VALUE" => "receiver",
+          "BOOLEAN_RESULT" => "boolean_result",
+        }.fetch(kind)
       end
 
       def anchor_executed?(anchor)

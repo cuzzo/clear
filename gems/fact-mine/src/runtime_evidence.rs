@@ -8,6 +8,7 @@
 use anyhow::{bail, Context, Result};
 #[cfg(test)]
 use flate2::read::GzDecoder;
+use protobuf::Enum;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +18,9 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::profile::{CallRecord, MethodRecord, ProfileOutput};
-use crate::runtime_protocol::{self, runtime_value, AnchorBinding, BuiltTracePlan, CaptureStatus};
+#[cfg(test)]
+use crate::runtime_protocol::CaptureStatus;
+use crate::runtime_protocol::{self, runtime_value, AnchorBinding, BuiltTracePlan, EvidenceKind};
 use crate::type_inference::TypeExpr;
 
 // Private normalized facts used by the CFG/DFG overlay. This is deliberately
@@ -454,9 +457,15 @@ fn protocol_evidence(
     };
 
     for row in &evidence.anchors {
-        if row.capture.as_ref().is_none_or(|capture| {
-            capture.status.enum_value_or_default() != CaptureStatus::COMPLETE_FOR_RUNS
-        }) {
+        let Some(capture) = row.capture.as_ref() else {
+            continue;
+        };
+        let complete = capture
+            .complete_kinds
+            .iter()
+            .filter_map(|kind| kind.enum_value().ok().map(|kind| kind.value()))
+            .collect::<BTreeSet<_>>();
+        if complete.is_empty() {
             continue;
         }
         let binding = built.bindings.get(&row.anchor_symbol).with_context(|| {
@@ -471,6 +480,9 @@ fn protocol_evidence(
                 ordinal: _,
                 name,
             } => {
+                if !complete.contains(&EvidenceKind::PARAMETER_VALUE.value()) {
+                    continue;
+                }
                 let method = methods.get(method_id.as_str()).with_context(|| {
                     format!("parameter anchor refers to missing method {method_id:?}")
                 })?;
@@ -490,6 +502,9 @@ fn protocol_evidence(
                 }
             }
             AnchorBinding::Return { method_id } => {
+                if !complete.contains(&EvidenceKind::RETURN_VALUE.value()) {
+                    continue;
+                }
                 let method = methods.get(method_id.as_str()).with_context(|| {
                     format!("return anchor refers to missing method {method_id:?}")
                 })?;
@@ -509,6 +524,9 @@ fn protocol_evidence(
                 }
             }
             AnchorBinding::State { access_id } => {
+                if !complete.contains(&EvidenceKind::STATE_VALUE.value()) {
+                    continue;
+                }
                 let access = accesses.get(access_id.as_str()).with_context(|| {
                     format!("state anchor refers to missing access {access_id:?}")
                 })?;
@@ -541,22 +559,30 @@ fn protocol_evidence(
                     .get(call.source.as_str())
                     .with_context(|| format!("call refers to missing method {:?}", call.source))?;
                 for bucket in &row.executions {
-                    let target = bucket
-                        .target
-                        .as_ref()
-                        .map(|target| {
-                            protocol_target(
-                                target,
-                                call,
-                                method,
-                                &methods,
-                                &built.bindings,
-                                &anchor_methods,
-                                bucket.receiver.as_ref(),
-                            )
-                        })
-                        .transpose()?
-                        .flatten();
+                    let target = if complete.contains(&EvidenceKind::CALL_TARGET.value()) {
+                        bucket
+                            .target
+                            .as_ref()
+                            .map(|target| {
+                                protocol_target(
+                                    target,
+                                    call,
+                                    method,
+                                    &methods,
+                                    &built.bindings,
+                                    &anchor_methods,
+                                    bucket.receiver.as_ref(),
+                                )
+                            })
+                            .transpose()?
+                            .flatten()
+                    } else {
+                        None
+                    };
+                    // A completely captured runtime target may still be unusable
+                    // as a production target (for example, a test double). Keep
+                    // the receiver evidence, but do not claim that the filtered
+                    // target set closes production dispatch.
                     let target_observation_complete = target.is_some();
                     internal.calls.push(ObservedCall {
                         language: method.language.clone(),
@@ -569,17 +595,31 @@ fn protocol_evidence(
                         },
                         targets: target.into_iter().collect(),
                         target_observation_complete,
-                        receiver_domain: bucket
-                            .receiver
-                            .as_ref()
-                            .map(|value| protocol_value_set_domain(value, &method.language))
-                            .transpose()?,
-                        result_domain: bucket
-                            .result
-                            .as_ref()
-                            .map(|value| protocol_value_set_domain(value, &method.language))
-                            .transpose()?,
-                        result_truths: bucket.boolean_result.into_iter().collect(),
+                        receiver_domain: if complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
+                            || complete.contains(&EvidenceKind::COLLECTION_VALUE.value())
+                        {
+                            bucket
+                                .receiver
+                                .as_ref()
+                                .map(|value| protocol_value_set_domain(value, &method.language))
+                                .transpose()?
+                        } else {
+                            None
+                        },
+                        result_domain: if complete.contains(&EvidenceKind::RESULT_VALUE.value()) {
+                            bucket
+                                .result
+                                .as_ref()
+                                .map(|value| protocol_value_set_domain(value, &method.language))
+                                .transpose()?
+                        } else {
+                            None
+                        },
+                        result_truths: if complete.contains(&EvidenceKind::BOOLEAN_RESULT.value()) {
+                            bucket.boolean_result.into_iter().collect()
+                        } else {
+                            BTreeSet::new()
+                        },
                         count: bucket.count,
                         call_id: Some(call_id.clone()),
                     });
@@ -5687,7 +5727,7 @@ end
     }
 
     #[test]
-    fn canonical_evidence_joins_only_the_exact_fact_mine_anchor() {
+    fn canonical_partial_evidence_joins_complete_fields_only_to_the_exact_anchor() {
         let directory = tempfile::tempdir().expect("directory");
         let file = directory.path().join("worker.rb");
         std::fs::write(
@@ -5746,12 +5786,20 @@ end
                     anchor_semantic_digest: anchor.semantic_digest.clone(),
                     capture: MessageField::some(runtime_protocol::CaptureSummary {
                         status: EnumOrUnknown::new(if selected_anchor {
-                            CaptureStatus::COMPLETE_FOR_RUNS
+                            CaptureStatus::PARTIAL
                         } else {
                             CaptureStatus::NOT_EXECUTED
                         }),
                         run_ids: vec![run_id.clone()],
                         observed_executions: u64::from(selected_anchor),
+                        complete_kinds: if selected_anchor {
+                            vec![
+                                EnumOrUnknown::new(EvidenceKind::RECEIVER_VALUE),
+                                EnumOrUnknown::new(EvidenceKind::CALL_TARGET),
+                            ]
+                        } else {
+                            request.required.clone()
+                        },
                         ..runtime_protocol::CaptureSummary::default()
                     }),
                     executions: selected_anchor
@@ -5769,7 +5817,6 @@ end
                                 package_version: "3.2.3".to_string(),
                                 ..runtime_protocol::RuntimeTarget::default()
                             }),
-                            result: MessageField::some(runtime_values("Integer")),
                             provenance: MessageField::some(runtime_protocol::Provenance {
                                 run_id: run_id.clone(),
                                 provider: "ruby-tracepoint".to_string(),
@@ -5885,6 +5932,7 @@ end
                         }),
                         run_ids: vec![run_id.clone()],
                         observed_executions: u64::from(selected),
+                        complete_kinds: request.required.clone(),
                         ..runtime_protocol::CaptureSummary::default()
                     }),
                     executions: selected
@@ -6014,6 +6062,7 @@ end
                         }),
                         run_ids: vec!["run-1".to_string()],
                         observed_executions: if selected { 2 } else { 0 },
+                        complete_kinds: request.required.clone(),
                         ..runtime_protocol::CaptureSummary::default()
                     }),
                     executions: if selected {

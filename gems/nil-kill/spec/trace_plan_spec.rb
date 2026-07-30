@@ -194,7 +194,8 @@ RSpec.describe NilKill::TracePlan do
     expect(activation_sites).to eq(
       [path, 10].join("\0") => ["resolve_items"],
       [path, 12].join("\0") => true,
-      [path, 13].join("\0") => true
+      [path, 13].join("\0") => true,
+      [path, 14].join("\0") => true
     )
   end
 

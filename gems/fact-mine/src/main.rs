@@ -343,13 +343,13 @@ fn run() -> Result<()> {
             let root = root
                 .unwrap_or(std::env::current_dir().context("failed to determine project root")?);
             let mut profile = build_profile(&files, language_override, Profile::Espalier)?;
-            let plan_profile = build_profile(&files, language_override, Profile::TracePlan)?;
-            let rebuilt = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
-                &plan_profile,
-                &files,
-                &root,
-            )?;
             let supplied_plan = fact_mine_rust::runtime_protocol::read_trace_plan(&plan)?;
+            // Runtime discovery may add workspace callees to the analysis
+            // corpus after collection. Those files are useful declaration
+            // context, but were never evidence anchors and therefore must not
+            // alter the trace-plan digest. Rebuild anchor bindings from the
+            // exact document set named by the validated plan.
+            let rebuilt = rebuild_supplied_runtime_plan(&supplied_plan, &root, language_override)?;
             if supplied_plan.plan_digest != rebuilt.plan.plan_digest {
                 bail!("supplied runtime trace plan does not describe the current source snapshot");
             }
@@ -499,6 +499,24 @@ fn build_profile(
         parse_recoveries,
     };
     Ok(output)
+}
+
+fn rebuild_supplied_runtime_plan(
+    supplied: &fact_mine_rust::runtime_protocol::TracePlan,
+    root: &std::path::Path,
+    language_override: Option<Language>,
+) -> Result<fact_mine_rust::runtime_protocol::BuiltTracePlan> {
+    let plan_files = supplied
+        .documents
+        .iter()
+        .map(|document| root.join(&document.relative_path))
+        .collect::<Vec<_>>();
+    let plan_profile = build_profile(&plan_files, language_override, Profile::TracePlan)?;
+    fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+        &plan_profile,
+        &plan_files,
+        root,
+    )
 }
 
 fn build_requested_profile(
@@ -1236,6 +1254,42 @@ mod tests {
             _ => panic!("expected runtime SCIP"),
         }
         assert!(parse_args(vec!["runtime-scip".to_string(), "one.rb".to_string()]).is_err());
+    }
+
+    #[test]
+    fn runtime_scip_rebuilds_anchor_bindings_from_plan_documents_not_discovered_callees() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let planned = directory.path().join("planned.rb");
+        let discovered = directory.path().join("discovered.rb");
+        std::fs::write(
+            &planned,
+            "class Planned\n  def run(value)\n    value.size\n  end\nend\n",
+        )
+        .expect("planned source");
+        std::fs::write(
+            &discovered,
+            "class Discovered\n  def helper\n    1\n  end\nend\n",
+        )
+        .expect("discovered source");
+        let planned_profile =
+            build_profile(std::slice::from_ref(&planned), None, Profile::TracePlan)
+                .expect("planned profile");
+        let supplied = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+            &planned_profile,
+            std::slice::from_ref(&planned),
+            directory.path(),
+        )
+        .expect("supplied plan");
+
+        // `discovered` exists and may participate in the full analysis
+        // corpus, but only `planned` owns evidence anchors.
+        let rebuilt =
+            rebuild_supplied_runtime_plan(&supplied.plan, directory.path(), None).expect("rebuild");
+
+        assert_eq!(rebuilt.plan.plan_digest, supplied.plan.plan_digest);
+        assert_eq!(rebuilt.plan.documents.len(), 1);
+        assert_eq!(rebuilt.plan.documents[0].relative_path, "planned.rb");
+        assert!(discovered.exists());
     }
 
     #[test]

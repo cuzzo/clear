@@ -9717,6 +9717,46 @@ end
     }
 
     #[test]
+    fn generated_mutable_record_writers_have_constant_cost_but_data_has_no_writer() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"MutableRow = Struct.new(:value)
+ImmutableRow = Data.define(:value)
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+        let output = extract(&document, Profile::Espalier);
+
+        let writer = output
+            .methods
+            .iter()
+            .find(|method| method.name == "value=")
+            .unwrap_or_else(|| {
+                panic!(
+                    "synthetic Struct writer declaration; generated={:?}",
+                    output
+                        .methods
+                        .iter()
+                        .filter(|method| method.generated_declaration)
+                        .map(|method| (&method.owner, &method.name))
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert!(writer.owner.ends_with("::MutableRow"));
+        assert!(writer.generated_declaration);
+        assert_eq!(writer.params, vec!["value"]);
+        assert!(!output
+            .methods
+            .iter()
+            .any(|method| method.owner.ends_with("::ImmutableRow") && method.name == "value="));
+    }
+
+    #[test]
     fn generated_record_constructor_contract_does_not_price_instance_index_methods() {
         let mut file = tempfile::Builder::new()
             .suffix(".rb")

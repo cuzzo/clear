@@ -256,16 +256,7 @@ module NilKill
       end
 
       def fact_mine_binary
-        return File.expand_path(ENV.fetch("FACT_MINE_RUST_BINARY")) if ENV["FACT_MINE_RUST_BINARY"]
-
-        release = File.join(NilKill::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
-        debug = File.join(NilKill::ROOT, "gems", "fact-mine", "target", "debug", "fact-mine-rust")
-        if File.executable?(debug) &&
-            (!File.executable?(release) || File.mtime(debug) > File.mtime(release))
-          debug
-        else
-          release
-        end
+        Espalier::StaticEvidence::FACT_MINE_RUST_BINARY
       end
 
       def runtime_plan

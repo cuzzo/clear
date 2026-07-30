@@ -19,10 +19,25 @@ module Espalier
   # Static, language-neutral evidence for Espalier. Uses the Rust FactMine
   # binary exclusively for fact extraction.
   class StaticEvidence
-    FACT_MINE_RUST_BINARY = ENV.fetch(
-      "FACT_MINE_RUST_BINARY",
-      File.join(Espalier::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
-    ).freeze
+    FACT_MINE_RUST_BINARY = begin
+      configured = ENV["FACT_MINE_RUST_BINARY"]
+      if configured
+        File.expand_path(configured)
+      else
+        candidates = %w[release debug].map do |profile|
+          File.join(
+            Espalier::ROOT,
+            "gems",
+            "fact-mine",
+            "target",
+            profile,
+            "fact-mine-rust"
+          )
+        end
+        candidates.select { |path| File.executable?(path) }
+          .max_by { |path| File.mtime(path) } || candidates.first
+      end
+    end.freeze
 
     def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [], semantic_environments: [], complexity_summaries: [])
       new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations, scip_indexes: scip_indexes, semantic_environments: semantic_environments, complexity_summaries: complexity_summaries).build

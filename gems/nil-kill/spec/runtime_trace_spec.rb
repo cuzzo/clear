@@ -121,6 +121,52 @@ RSpec.describe "nil-kill runtime trace" do
     NilKillRuntimeTrace.runtime_calls.clear
   end
 
+  it "attributes a directly generated native Struct accessor to its workspace declaration" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    instance = RuntimeTraceSpecDouble.new([])
+    NilKillRuntimeTrace.runtime_calls.clear
+    NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id] << {
+      caller: {
+        class: "Worker", method: "run", kind: "instance",
+        path: File.expand_path(__FILE__), line: __LINE__,
+      },
+      callsite: { path: File.expand_path(__FILE__), line: __LINE__ },
+    }
+    tracepoint = Struct.new(
+      :event, :path, :lineno, :defined_class, :method_id, :self_value,
+      keyword_init: true
+    ) do
+      def self
+        self_value
+      end
+    end.new(
+      event: :c_call,
+      path: "",
+      lineno: 0,
+      defined_class: RuntimeTraceSpecDouble,
+      method_id: :lines,
+      self_value: instance
+    )
+    allow(NilKillRuntimeTrace).to receive(:method_owner)
+      .with(RuntimeTraceSpecDouble).and_return(["RuntimeTraceSpecDouble", "instance"])
+    allow(NilKillRuntimeTrace).to receive(:target_path?)
+      .with(File.expand_path(__FILE__)).and_return(true)
+    NilKillRuntimeTrace.instance_variable_get(:@runtime_package_by_path)
+      .delete(File.expand_path(__FILE__))
+
+    NilKillRuntimeTrace.record_runtime_scip_call(tracepoint, receiver_shape: false)
+
+    callee = NilKillRuntimeTrace.runtime_calls.values.fetch(0).fetch(:callee)
+    expect(callee).to include(
+      path: File.expand_path(__FILE__),
+      package_manager: "workspace",
+      native: true
+    )
+  ensure
+    NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id].clear
+    NilKillRuntimeTrace.runtime_calls.clear
+  end
+
   it "removes explicitly nonproduction values from runtime SCIP domains, including containers" do
     require_relative "../lib/nil_kill/runtime_trace"
     Dir.mktmpdir("nil-kill-source-role-domain") do |dir|

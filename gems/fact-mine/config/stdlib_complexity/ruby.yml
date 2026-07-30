@@ -237,6 +237,7 @@ File:
 Regexp:
   source: constant
   match: linear_scan
+  match?: exponential
   last_match: constant
 MatchData:
   begin: constant
@@ -329,7 +330,7 @@ SemanticSymbol:
   'Psych.safe_load().': linear_materialize
   # Onigmo is a backtracking engine.  `match?` has an exponential worst case
   # in the pattern/input pair and linear engine stack space.
-  'Regexp#match?().': exponential
+  'Regexp#`match?`().': exponential
 ExternalLatency:
   "File.exist?": linear_scan
   "File.read": linear_materialize

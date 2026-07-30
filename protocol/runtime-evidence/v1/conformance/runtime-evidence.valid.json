@@ -25,9 +25,13 @@
         "run_ids": [
           "run-1"
         ],
-        "observed_executions": "0",
-        "dropped_executions": "0",
-        "reason": "fixture did not execute anchor"
+      "observed_executions": "0",
+      "dropped_executions": "0",
+      "reason": "fixture did not execute anchor",
+      "complete_kinds": [
+        "RECEIVER_VALUE",
+        "CALL_TARGET"
+      ]
       },
       "executions": []
     }

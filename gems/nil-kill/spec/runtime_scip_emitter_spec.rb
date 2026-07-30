@@ -3,6 +3,13 @@
 require_relative "spec_helper"
 
 RSpec.describe NilKill::Runtime::ScipEmitter do
+  it "uses the exact same FactMine executable as trace planning" do
+    emitter = described_class.new(root: NilKill::ROOT, runtime_dir: NilKill::RUNTIME_DIR)
+
+    expect(emitter.send(:fact_mine_binary))
+      .to eq(Espalier::StaticEvidence::FACT_MINE_RUST_BINARY)
+  end
+
   def runtime_event(source:, caller:, line:, owner:, name:, receiver_type: owner, **callee)
     {
       "schema_version" => 1,

@@ -632,29 +632,38 @@ fn ruby_generated_reader_names(source: &str) -> BTreeSet<String> {
     BTreeSet::new()
 }
 
-fn ruby_generated_struct_reader_names(source: &str) -> BTreeSet<String> {
+fn ruby_generated_record_accessor_names(source: &str) -> BTreeSet<String> {
     let source = source.trim();
-    let arguments = ["Struct.new(", "Data.define("]
+    let declaration = ["Struct.new(", "Data.define("]
         .iter()
-        .find_map(|prefix| source.strip_prefix(prefix))
-        .and_then(|rest| rest.strip_suffix(')'));
-    let Some(arguments) = arguments else {
+        .find_map(|prefix| source.strip_prefix(prefix).map(|rest| (*prefix, rest)));
+    let Some((prefix, rest)) = declaration else {
         return BTreeSet::new();
     };
-    split_top_level_params_local(arguments)
-        .into_iter()
-        .filter_map(|argument| {
+    let Some(arguments) = rest.strip_suffix(')') else {
+        return BTreeSet::new();
+    };
+    let mutable = prefix == "Struct.new(";
+    split_top_level_params_local(arguments).into_iter().fold(
+        BTreeSet::new(),
+        |mut names, argument| {
             let name = argument
                 .trim()
                 .trim_start_matches(':')
                 .trim_matches(['\'', '"']);
-            (!name.is_empty()
+            if !name.is_empty()
                 && name
                     .chars()
-                    .all(|character| character.is_alphanumeric() || character == '_'))
-            .then(|| name.to_string())
-        })
-        .collect()
+                    .all(|character| character.is_alphanumeric() || character == '_')
+            {
+                names.insert(name.to_string());
+                if mutable {
+                    names.insert(format!("{name}="));
+                }
+            }
+            names
+        },
+    )
 }
 
 fn ruby_identifier_in(source: &str, identifier: &str) -> bool {
@@ -1021,7 +1030,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         name: &str,
     ) -> Option<NormalizedCallComplexity> {
         let generated_reader = ruby_generated_reader_names(source).contains(name)
-            || ruby_generated_struct_reader_names(source).contains(name);
+            || ruby_generated_record_accessor_names(source).contains(name);
         generated_reader.then_some(NormalizedCallComplexity {
             time: "O(1)",
             space: "O(1)",
@@ -2398,22 +2407,34 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         } else {
             "Data.define"
         };
+        let mutable = matches!(call.receiver.as_str(), "Struct" | "::Struct");
         call.arguments
             .iter()
-            .filter_map(|argument| {
+            .flat_map(|argument| {
                 let name = argument
                     .trim()
                     .trim_start_matches(':')
                     .trim_matches(['\'', '"']);
-                (!name.is_empty()
+                let valid = !name.is_empty()
                     && name
                         .chars()
-                        .all(|character| character.is_alphanumeric() || character == '_'))
-                .then(|| NormalizedGeneratedAccessor {
+                        .all(|character| character.is_alphanumeric() || character == '_');
+                if !valid {
+                    return Vec::new();
+                }
+                let mut accessors = vec![NormalizedGeneratedAccessor {
                     name: name.to_string(),
                     params: Vec::new(),
                     declaration_source: format!("{constructor}(:{name})"),
-                })
+                }];
+                if mutable {
+                    accessors.push(NormalizedGeneratedAccessor {
+                        name: format!("{name}="),
+                        params: vec!["value".to_string()],
+                        declaration_source: format!("{constructor}(:{name})"),
+                    });
+                }
+                accessors
             })
             .collect()
     }
@@ -4112,6 +4133,7 @@ mod tests {
             ("const :value, String", "value"),
             ("prop :value, String", "value"),
             ("Struct.new(:value, :other)", "value"),
+            ("Struct.new(:value, :other)", "value="),
             ("Data.define(:value, :other)", "other"),
         ] {
             assert!(
@@ -4127,6 +4149,7 @@ mod tests {
             ("const :other_value, String", "value"),
             ("property :value", "value"),
             ("Struct.new(:other_value)", "value"),
+            ("Data.define(:value)", "value="),
         ] {
             assert!(
                 behavior
@@ -4231,7 +4254,7 @@ mod tests {
         }
 
         let match_p = external_symbol_call_complexity(
-            "nil-kill-runtime ruby ruby 3.2.3 Regexp#match?().",
+            "nil-kill-runtime ruby ruby 3.2.3 Regexp#`match?`().",
             "match?",
         )
         .expect("Regexp#match? should carry the regex-engine worst-case bound");
