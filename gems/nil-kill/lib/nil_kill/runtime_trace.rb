@@ -2151,7 +2151,11 @@ module NilKillRuntimeTrace
         )
       end
     end
-    dump_runtime_scip_calls(pid) if respond_to?(:dump_runtime_scip_calls)
+    if native_scip_requested?
+      dump_native_runtime_scip(pid)
+    elsif respond_to?(:dump_runtime_scip_calls)
+      dump_runtime_scip_calls(pid)
+    end
     File.open(File.join(OUT_DIR, "tlets-#{pid}.jsonl"), "w") do |file|
       @tlets.each do |(path, line), rec|
         file.puts JSON.generate(path: path, line: line, calls: rec[:calls], classes: rec[:classes].to_a.sort)
@@ -2338,6 +2342,7 @@ module NilKillRuntimeTrace
 end
 
 require_relative "languages/providers/ruby/runtime_scip_trace"
+require_relative "languages/providers/ruby/runtime_scip_native"
 
 if ENV["NIL_KILL_TRACE"] == "1"
   NilKillRuntimeTrace.start_coverage!
@@ -2350,7 +2355,11 @@ if ENV["NIL_KILL_TRACE"] == "1"
     TracePoint.new(:raise) { |tp| NilKillRuntimeTrace.record_raise(tp) }.enable
   end
   if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
-    NilKillRuntimeTrace.install_runtime_scip_trace
+    if NilKillRuntimeTrace.native_scip_requested?
+      NilKillRuntimeTrace.install_native_runtime_scip_trace
+    else
+      NilKillRuntimeTrace.install_runtime_scip_trace
+    end
   end
   begin
     require "sorbet-runtime"

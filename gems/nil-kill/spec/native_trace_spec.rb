@@ -1,0 +1,322 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+# The native collector is loaded directly from ext/ so this spec runs against the
+# built object without a gemspec/extension install step.
+NATIVE_EXT = File.expand_path("../ext/nil_kill_trace", __dir__)
+NATIVE_AVAILABLE = File.exist?(File.join(NATIVE_EXT, "nil_kill_trace.so"))
+
+if NATIVE_AVAILABLE
+  $LOAD_PATH.unshift(NATIVE_EXT) unless $LOAD_PATH.include?(NATIVE_EXT)
+  require "nil_kill_trace"
+end
+
+RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
+  # Fixture lives in a real file so the collector sees genuine iseq paths; a
+  # heredoc eval would carry an "(eval)" path and exercise nothing.
+  FIXTURE_ROOT = File.expand_path("fixtures/native_trace", __dir__)
+  FIXTURE = File.join(FIXTURE_ROOT, "subject.rb")
+
+  before(:all) do
+    FileUtils.mkdir_p(FIXTURE_ROOT)
+    File.write(FIXTURE, <<~RUBY)
+      module NativeTraceSubject
+        def self.scalar(value)
+          value.positive?
+        end
+
+        def self.container(rows)
+          rows.length
+        end
+
+        def self.two_selectors(text)
+          text.upcase
+          text.strip
+        end
+
+        def self.untracked(value)
+          value.to_s
+        end
+      end
+    RUBY
+    load FIXTURE
+  end
+
+  after(:all) { FileUtils.rm_rf(FIXTURE_ROOT) }
+
+  # Anchor keys are "<path>\1<line>\1<selector>" -- the collector only records a
+  # callsite the plan named, so each example declares exactly what it demands.
+  def anchor_key(line, selector)
+    "#{FIXTURE}#{line}#{selector}"
+  end
+
+  def line_of(pattern)
+    File.readlines(FIXTURE).index { |line| line.include?(pattern) } + 1
+  end
+
+  # Stands in for NilKillRuntimeTrace.runtime_value_domain so the extension can be
+  # exercised without loading the whole tracer.
+  before do
+    NilKillTraceNative.value_domain_owner = Object.new.tap do |owner|
+      owner.define_singleton_method(:native_callee_identity) do |defined_class, method_id|
+        name = defined_class.respond_to?(:name) ? defined_class.name : nil
+        [name, "instance", nil, nil]
+      end
+      owner.define_singleton_method(:runtime_value_domain) do |value|
+        elements = value.is_a?(Enumerable) ? value.map { |item| item.class.name }.uniq : []
+        { types: [value.class.name], singletons: [], elements: elements,
+          keys: [], values: [], shapes: [] }
+      end
+    end
+  end
+
+  def trace(anchors)
+    NilKillTraceNative.reset
+    NilKillTraceNative.configure([FIXTURE_ROOT], anchors)
+    NilKillTraceNative.start
+    yield
+  ensure
+    NilKillTraceNative.stop
+  end
+
+  def rows_for(selector)
+    NilKillTraceNative.records.select { |row| row.dig(:callee, :name) == selector }
+  end
+
+  it "records a demanded native call with its caller, callsite and receiver type" do
+    line = line_of("value.positive?")
+    trace(anchor_key(line, "positive?") => "anchor-scalar") do
+      NativeTraceSubject.scalar(7)
+    end
+
+    row = rows_for("positive?").fetch(0)
+    expect(row.dig(:caller, :class)).to eq("NativeTraceSubject")
+    expect(row.dig(:caller, :method)).to eq("scalar")
+    expect(row.dig(:caller, :kind)).to eq("class")
+    expect(row.dig(:callsite, :path)).to eq(FIXTURE)
+    expect(row.dig(:callsite, :line)).to eq(line)
+    expect(row.dig(:callsite, :selector)).to eq("positive?")
+    expect(row.dig(:callee, :owner)).to eq("Numeric")
+    expect(row.dig(:callee, :native)).to be(true)
+    expect(row.dig(:callee, :receiver_type)).to eq("Integer")
+    expect(row.fetch(:receiver_types)).to eq(["Integer"])
+    expect(row.fetch(:count)).to eq(1)
+  end
+
+  it "ignores a callsite the plan did not demand" do
+    trace(anchor_key(line_of("value.positive?"), "positive?") => "anchor-scalar") do
+      NativeTraceSubject.scalar(1)
+      NativeTraceSubject.untracked(1)
+    end
+
+    expect(rows_for("to_s")).to be_empty
+    expect(rows_for("positive?").length).to eq(1)
+  end
+
+  it "counts repeated executions once per callsite" do
+    trace(anchor_key(line_of("value.positive?"), "positive?") => "anchor-scalar") do
+      NativeTraceSubject.scalar(1)
+      NativeTraceSubject.scalar(2)
+    end
+
+    rows = rows_for("positive?")
+    expect(rows.length).to eq(1)
+    expect(rows.fetch(0).fetch(:count)).to eq(2)
+    expect(rows.fetch(0).fetch(:receiver_types)).to eq(["Integer"])
+  end
+
+  # Integer#positive? dispatches to Numeric (a C method) while Float#positive? is
+  # a Ruby method on Float. One callsite therefore has two correlated
+  # receiver->target alternatives, and the protocol forbids flattening them into
+  # one bucket. This also pins that a Ruby-implemented dependency callee is
+  # observed at all, which only :call reports.
+  it "keeps distinct receiver-target alternatives for one callsite separate" do
+    trace(anchor_key(line_of("value.positive?"), "positive?") => "anchor-scalar") do
+      NativeTraceSubject.scalar(1)
+      NativeTraceSubject.scalar(3.5)
+    end
+
+    rows = rows_for("positive?")
+    expect(rows.length).to eq(2)
+    integer = rows.find { |row| row.fetch(:receiver_types) == ["Integer"] }
+    float = rows.find { |row| row.fetch(:receiver_types) == ["Float"] }
+    expect(integer.dig(:callee, :owner)).to eq("Numeric")
+    expect(integer.dig(:callee, :native)).to be(true)
+    expect(float.dig(:callee, :owner)).to eq("Float")
+    expect(float.dig(:callee, :native)).to be(false)
+    expect(rows.map { |row| row.dig(:callsite, :line) }.uniq.length).to eq(1)
+  end
+
+  it "separates two demanded selectors on distinct lines of one method" do
+    upcase_line = line_of("text.upcase")
+    strip_line = line_of("text.strip")
+    trace(
+      anchor_key(upcase_line, "upcase") => "anchor-upcase",
+      anchor_key(strip_line, "strip") => "anchor-strip"
+    ) { NativeTraceSubject.two_selectors(" hi ") }
+
+    expect(rows_for("upcase").fetch(0).dig(:callsite, :line)).to eq(upcase_line)
+    expect(rows_for("strip").fetch(0).dig(:callsite, :line)).to eq(strip_line)
+  end
+
+  it "records both observed boolean results for one predicate callsite" do
+    trace(anchor_key(line_of("value.positive?"), "positive?") => "anchor-scalar") do
+      NativeTraceSubject.scalar(1)
+      NativeTraceSubject.scalar(-1)
+    end
+
+    expect(rows_for("positive?").fetch(0).fetch(:result_truths)).to contain_exactly(true, false)
+  end
+
+  it "delegates a container receiver to the Ruby value-domain implementation" do
+    trace(anchor_key(line_of("rows.length"), "length") => "anchor-container") do
+      NativeTraceSubject.container([1, 2, 3])
+    end
+
+    row = rows_for("length").fetch(0)
+    expect(row.fetch(:receiver_types)).to eq(["Array"])
+    indices = row.fetch(:receiver_domain_indices)
+    expect(indices.length).to eq(1)
+    domain = NilKillTraceNative.domains.fetch(indices.fetch(0))
+    expect(domain.fetch(:types)).to eq(["Array"])
+    expect(domain.fetch(:elements)).not_to be_empty
+  end
+
+  it "observes nothing while stopped" do
+    NilKillTraceNative.reset
+    NilKillTraceNative.configure([FIXTURE_ROOT],
+                                 anchor_key(line_of("value.positive?"), "positive?") => "a")
+    NativeTraceSubject.scalar(1)
+    expect(NilKillTraceNative.records).to be_empty
+  end
+
+  it "leaves the traced program's own behaviour unchanged" do
+    result = nil
+    trace(anchor_key(line_of("value.positive?"), "positive?") => "anchor-scalar") do
+      result = NativeTraceSubject.scalar(5)
+    end
+    expect(result).to be(true)
+  end
+
+  it "survives a raise inside a traced frame without leaking stack depth" do
+    line = line_of("value.positive?")
+    trace(anchor_key(line, "positive?") => "anchor-scalar") do
+      10.times do
+        begin
+          NativeTraceSubject.scalar(nil)
+        rescue NoMethodError
+          nil
+        end
+      end
+      NativeTraceSubject.scalar(1)
+    end
+
+    expect(rows_for("positive?").fetch(0).fetch(:count)).to eq(1)
+  end
+
+  it "records calls made from other threads" do
+    trace(anchor_key(line_of("value.positive?"), "positive?") => "anchor-scalar") do
+      [1, 2].map { |v| Thread.new { NativeTraceSubject.scalar(v) } }.each(&:join)
+    end
+
+    expect(rows_for("positive?").fetch(0).fetch(:count)).to eq(2)
+  end
+
+  it "reports event counts and clears them on reset" do
+    trace(anchor_key(line_of("value.positive?"), "positive?") => "anchor-scalar") do
+      NativeTraceSubject.scalar(1)
+    end
+    expect(NilKillTraceNative.stats.fetch(:c_call)).to be > 0
+
+    NilKillTraceNative.reset
+    expect(NilKillTraceNative.stats.fetch(:c_call)).to eq(0)
+    expect(NilKillTraceNative.stats.fetch(:records)).to eq(0)
+  end
+  it "tallies executed callsites by path, line and selector" do
+    line = line_of("value.positive?")
+    trace(anchor_key(line, "positive?") => "anchor-scalar") do
+      NativeTraceSubject.scalar(1)
+      NativeTraceSubject.scalar(2)
+    end
+
+    expect(NilKillTraceNative.executed_callsites)
+      .to include([FIXTURE, line, "positive?", 2])
+  end
+
+  it "tallies function entries for analyzed methods that ran" do
+    trace(anchor_key(line_of("value.positive?"), "positive?") => "anchor-scalar") do
+      NativeTraceSubject.scalar(1)
+      NativeTraceSubject.scalar(2)
+      NativeTraceSubject.container([1])
+    end
+
+    entries = NilKillTraceNative.function_entries
+    scalar = entries.find { |row| row[2] == "scalar" }
+    container = entries.find { |row| row[2] == "container" }
+    expect(scalar).to eq([FIXTURE, "NativeTraceSubject", "scalar", line_of("def self.scalar"), 2])
+    expect(container.fetch(4)).to eq(1)
+  end
+
+  it "clears the tallies on reset" do
+    trace(anchor_key(line_of("value.positive?"), "positive?") => "anchor-scalar") do
+      NativeTraceSubject.scalar(1)
+    end
+    NilKillTraceNative.reset
+    expect(NilKillTraceNative.executed_callsites).to be_empty
+    expect(NilKillTraceNative.function_entries).to be_empty
+  end
+
+  it "records the analyzed function's own return under selector return" do
+    # A FUNCTION_RETURN anchor spans the whole method, as the plan emits it, so
+    # whichever line the :return event reports is inside the demand.
+    span = (line_of("def self.scalar")..line_of("value.positive?") + 1)
+    demand = span.to_h { |line| [anchor_key(line, "return"), "anchor-return"] }
+    trace(demand) { NativeTraceSubject.scalar(1) }
+
+    row = NilKillTraceNative.records.find { |r| r.dig(:callsite, :selector) == "return" }
+    expect(row).not_to be_nil
+    expect(span).to cover(row.dig(:callsite, :line))
+    expect(row.fetch(:result_truths)).to eq([true])
+  end
+
+  it "records the result type domain of a demanded call" do
+    trace(anchor_key(line_of("rows.length"), "length") => "anchor-container") do
+      NativeTraceSubject.container([1, 2])
+    end
+
+    row = rows_for("length").fetch(0)
+    expect(row.fetch(:result_types)).to eq(["Integer"])
+  end
+
+  it "observes a call whose callee is also analyzed source" do
+    File.write(File.join(FIXTURE_ROOT, "inner.rb"), <<~RUBY)
+      module NativeTraceInner
+        def self.outer(value)
+          inner(value)
+        end
+
+        def self.inner(value)
+          value
+        end
+      end
+    RUBY
+    load File.join(FIXTURE_ROOT, "inner.rb")
+    inner_path = File.join(FIXTURE_ROOT, "inner.rb")
+    key = "#{inner_path}\u00013\u0001inner"
+
+    NilKillTraceNative.reset
+    NilKillTraceNative.configure([FIXTURE_ROOT], key => "anchor-internal")
+    NilKillTraceNative.start
+    NativeTraceInner.outer(5)
+    NilKillTraceNative.stop
+
+    row = NilKillTraceNative.records.find { |r| r.dig(:callee, :name) == "inner" }
+    expect(row).not_to be_nil
+    expect(row.dig(:callsite, :selector)).to eq("inner")
+    expect(row.dig(:caller, :method)).to eq("outer")
+    expect(row.dig(:callee, :native)).to be(false)
+    expect(row.fetch(:result_types)).to eq(["Integer"])
+  end
+
+end
