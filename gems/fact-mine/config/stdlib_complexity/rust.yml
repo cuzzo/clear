@@ -329,6 +329,15 @@ Ord:
   max: constant
 ToString:
   to_string: linear_materialize
+Sha256:
+  update: linear_argument
+  finalize: constant
+  new: constant
+Sha512:
+  update: linear_argument
+  finalize: constant
+  new: constant
+
 SemanticSymbol:
   'iter/sources/once/once().': constant
   'str/converts/from_utf8().': linear_scan
@@ -431,8 +440,8 @@ SemanticSymbol:
   # anyhow context attachment stores the value; it does not walk the chain.
   'context/impl#[`Result<T, E>`][`Context<T, E>`]context().': constant
   'context/impl#[`Option<T>`][`Context<T, Infallible>`]context().': constant
-  # a digest absorbs every input byte.
-  'digest/impl#[D][Digest]update().': linear_materialize
+  # a digest absorbs every input byte: the cost is the input's, not the digest's.
+  'digest/impl#[D][Digest]update().': linear_argument
 SemanticSymbolParametricCost:
   'borrow/impl#[`Cow<''_, B>`]into_owned().': reflective_once
   'cmp/min().': reflective_once
