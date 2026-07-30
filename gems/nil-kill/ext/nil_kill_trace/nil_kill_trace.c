@@ -70,7 +70,8 @@ typedef struct call_record {
 
 static st_table *path_cache;     // path VALUE identity -> 1 analyzed / 2 not
 static st_table *identities;      // defined_class identity -> selector -> packed identity
-static st_table *demand;         // path -> selector -> line: demanded coordinates
+static st_table *demand;
+static st_table *demand_in_file;  // path -> selector: demanded somewhere in the file         // path -> selector -> line: demanded coordinates
 static st_table *records;        // record identity -> call_record_t*
 static st_table *thread_states;  // thread VALUE -> thread_state_t*
 static st_table *callsite_hits;  // path -> line -> selector -> count
@@ -169,6 +170,35 @@ static void bump(st_table *table, st_data_t key) {
     st_insert(table, key, count + 1);
 }
 
+// Ruby emits no :line event for the continuation lines of a multiline call, and
+// a :call event reports the callee's definition line rather than the caller's.
+// So when a selector the plan wants in this file is not demanded at the frame's
+// last known line, ask the VM for the caller's real line. rb_profile_frames
+// fills a plain int array and allocates nothing, and this only runs for
+// selectors the plan actually requests in the file.
+static int demanded_in_file(ID path, ID selector) {
+    st_table *by_selector = nested_lookup(demand_in_file, (st_data_t)path);
+    if (!by_selector) return 0;
+    st_data_t found;
+    return st_lookup(by_selector, (st_data_t)selector, &found);
+}
+
+// Mirrors the Ruby collector's callsite recovery: the interesting frame is the
+// nearest one whose path is the analyzed file, not simply the next frame up,
+// because a collector-installed wrapper sits in between.
+static int caller_line_from_vm(ID want_path) {
+    VALUE frames[16];
+    int lines[16];
+    int count = rb_profile_frames(0, 16, frames, lines);
+    for (int i = 0; i < count; i++) {
+        if (lines[i] <= 0) continue;
+        VALUE path = rb_profile_frame_path(frames[i]);
+        if (!RB_TYPE_P(path, T_STRING)) continue;
+        if (rb_intern_str(path) == want_path) return lines[i];
+    }
+    return 0;
+}
+
 static int demanded(ID path, int line, ID selector) {
     st_table *by_selector = nested_lookup(demand, (st_data_t)path);
     if (!by_selector) return 0;
@@ -255,7 +285,12 @@ static call_record_t *observed_record(frame_t *frame, rb_trace_arg_t *arg, int n
     VALUE method = rb_tracearg_method_id(arg);
     if (NIL_P(method)) return NULL;
     ID selector = SYM2ID(method);
-    if (!demanded(frame->path, frame->line, selector)) return NULL;
+    if (!demanded(frame->path, frame->line, selector)) {
+        if (!demanded_in_file(frame->path, selector)) return NULL;
+        int line = caller_line_from_vm(frame->path);
+        if (!line || !demanded(frame->path, line, selector)) return NULL;
+        frame->line = line;
+    }
 
     VALUE defined = rb_tracearg_defined_class(arg);
     int class_method = 0;
@@ -491,6 +526,7 @@ static VALUE nk_configure(VALUE self, VALUE roots, VALUE anchor_map) {
         rb_ary_push(roots_ary, rb_obj_freeze(rb_String(RARRAY_AREF(roots, i))));
     }
     st_clear(demand);
+    st_clear(demand_in_file);
     VALUE keys = rb_funcall(anchor_map, rb_intern("keys"), 0);
     for (long i = 0; i < RARRAY_LEN(keys); i++) {
         VALUE parts = rb_str_split(RARRAY_AREF(keys, i), "\1");
@@ -500,6 +536,7 @@ static VALUE nk_configure(VALUE self, VALUE roots, VALUE anchor_map) {
         ID selector = rb_intern_str(RARRAY_AREF(parts, 2));
         st_insert(nested(nested(demand, (st_data_t)path), (st_data_t)selector),
                   (st_data_t)line, 1);
+        st_insert(nested(demand_in_file, (st_data_t)path), (st_data_t)selector, 1);
     }
     return Qtrue;
 }
@@ -753,6 +790,7 @@ void Init_nil_kill_trace(void) {
     path_cache = st_init_numtable();
     demand = st_init_numtable();
     identities = st_init_numtable();
+    demand_in_file = st_init_numtable();
     records = st_init_numtable();
     thread_states = st_init_numtable();
     callsite_hits = st_init_numtable();
