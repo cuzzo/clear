@@ -60,7 +60,7 @@ String:
   starts_with: linear_scan
   substr: linear_materialize
   assign: linear_materialize
-  append: linear_materialize
+  append: linear_argument
   clear: linear_scan
   resize: linear_materialize
   reserve: linear_materialize

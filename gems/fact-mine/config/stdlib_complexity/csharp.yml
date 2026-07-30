@@ -20,7 +20,7 @@ Hash:
 Set:
   Add: constant
   Remove: linear_scan
-  Contains: linear_scan
+  Contains: constant
   Count: constant
   ToArray: linear_materialize
 String:
