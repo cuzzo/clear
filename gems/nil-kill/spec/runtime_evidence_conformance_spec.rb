@@ -25,24 +25,28 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
 
   def run_collector_oracle
     dir = Dir.mktmpdir("nk-runtime-conformance", NilKill::ROOT)
+    production_dir = File.join(dir, "production")
     source = catalog.fetch("fixture").fetch("source")
-    lib(dir, fixture(source), File.basename(source))
+    lib(production_dir, fixture(source), File.basename(source))
     catalog.dig("fixture", "support").each do |support|
       relative = support.sub(%r{\Aruby/}, "")
       lib(dir, fixture(support), relative)
     end
+    driver = fixture(catalog.fetch("fixture").fetch("driver"))
+      .sub('require_relative "capabilities"', 'require_relative "production/capabilities"')
     result = mini_collect(
       dir,
-      File.basename(source),
-      fixture(catalog.fetch("fixture").fetch("driver")),
-      runtime_scip: true
+      File.join("production", File.basename(source)),
+      driver,
+      runtime_scip: true,
+      targets: production_dir
     )
     plan = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH)).fetch("runtime_evidence")
     # The production collector restores the source snapshot after the traced
     # process. The mini harness intentionally leaves its throwaway source
     # wrapped for instrumentation assertions, so restore it here before the
     # end-to-end FactMine snapshot check.
-    File.write(File.join(dir, File.basename(source)), fixture(source))
+    File.write(File.join(production_dir, File.basename(source)), fixture(source))
     catalog.dig("fixture", "support").each do |support|
       relative = support.sub(%r{\Aruby/}, "")
       File.write(File.join(dir, relative), fixture(support))
@@ -55,7 +59,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     )
     result.merge(
       fixture_root: dir,
-      source: File.join(dir, File.basename(source)),
+      source: File.join(production_dir, File.basename(source)),
       runtime_dir: NilKill::RUNTIME_DIR,
       support: catalog.dig("fixture", "support").map do |support|
         File.join(dir, support.sub(%r{\Aruby/}, ""))
@@ -73,6 +77,24 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     events = raw_events.select do |event|
       event.dig("caller", "method") == anchor.fetch("method") &&
         event.dig("callee", "name") == anchor.fetch("selector")
+    end
+    exact_symbols = events.filter_map do |event|
+      symbol = event.dig("callsite", "anchor_symbol").to_s
+      symbol unless symbol.empty?
+    end.uniq
+    unless exact_symbols.empty?
+      exact = plan.fetch("requests").select do |request|
+        exact_symbols.include?(request.dig("anchor", "symbol"))
+      end
+      return exact.sort_by do |request|
+        range = request.fetch("anchor").fetch("range")
+        [
+          range.fetch("start_line"),
+          range.fetch("start_character"),
+          range.fetch("end_line"),
+          range.fetch("end_character"),
+        ]
+      end
     end
     if events.empty?
       selector_requests = plan.fetch("requests").select do |request|
@@ -108,7 +130,13 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
 
   def selected_request(result, anchor)
     matches = anchor_requests(result.fetch(:plan), result.fetch(:runtime_calls), anchor)
-    matches.fetch(anchor.fetch("occurrence").to_i - 1)
+    matches.fetch(anchor.fetch("occurrence").to_i - 1) do
+      raise(
+        "no planned occurrence #{anchor.fetch('occurrence')} for " \
+        "#{anchor.fetch('method')}##{anchor.fetch('selector')}; " \
+        "matching requests=#{matches.map { |request| request.fetch('anchor') }}"
+      )
+    end
   end
 
   def type_names(value_set)
@@ -140,6 +168,8 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       "ambiguous-anchor",
       "exact-execution-range",
       "nested-receiver",
+      "multiline-call",
+      "nested-argument",
       "assignment",
       "destructuring",
       "short-circuit-assignment",
@@ -149,7 +179,10 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       "callback",
       "yield",
       "block-parameter",
+      "block-local",
       "dynamic-dispatch",
+      "alternative-targets",
+      "safe-navigation",
       "test-replacement",
       "container-shape",
       "exception",
@@ -195,6 +228,11 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       .to contain_exactly(*matrix.fetch("anchor_kinds"))
     expect(matrix.fetch("request_contracts").values.flatten.uniq)
       .to match_array(matrix.fetch("evidence_kinds"))
+    planned = matrix.fetch("planner_anchor_kinds")
+    reserved = matrix.fetch("reserved_anchor_kinds")
+    expect(planned & reserved.keys).to be_empty
+    expect(planned | reserved.keys).to match_array(matrix.fetch("anchor_kinds"))
+    expect(reserved.values).to all(satisfy { |reason| !reason.to_s.empty? })
   end
 
   it "negative control: cannot pass if an executed planned call has no raw event" do
@@ -225,6 +263,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       expect(row.dig("capture", "status")).to eq(expected_status),
         "#{test_case.fetch("id")}: #{row.dig("capture", "reason")}\n" \
         "request=#{JSON.generate(request)}\n" \
+        "evidence=#{JSON.generate(row)}\n" \
         "events=#{JSON.generate(@collector.fetch(:runtime_calls).select { |event|
           event.dig("caller", "method") == test_case.dig("anchor", "method")
         })}"
@@ -244,7 +283,10 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       end
       if expected["observed_executions"]
         expect(row.dig("capture", "observed_executions"))
-          .to satisfy { |count| count.to_i == expected.fetch("observed_executions") }
+          .to(
+            satisfy { |count| count.to_i == expected.fetch("observed_executions") },
+            "#{test_case.fetch('id')} observed the wrong execution count"
+          )
       end
       expect(row.fetch("executions")).not_to be_empty
       row.fetch("executions").each do |bucket|
@@ -271,8 +313,22 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       if expected["receiver_type"]
         expect(type_names(first["receiver"])).to include(expected.fetch("receiver_type"))
       end
+      if expected["receiver_types"]
+        observed = row.fetch("executions").flat_map { |bucket| type_names(bucket["receiver"]) }
+        expect(observed).to include(*expected.fetch("receiver_types"))
+      end
       if expected["result_type"]
         expect(type_names(first["result"])).to include(expected.fetch("result_type"))
+      end
+      if expected["result_element_type"]
+        elements = first.dig(
+          "result", "alternatives", 0, "value", "sequence", "elements"
+        )
+        expect(type_names(elements)).to include(expected.fetch("result_element_type"))
+      end
+      if expected["result_shape"]
+        expect(first.dig("result", "alternatives", 0, "value"))
+          .to have_key(expected.fetch("result_shape"))
       end
       if expected["target_owner"]
         expect(matching_raw.map { |event| event.dig("callee", "owner") })
@@ -287,12 +343,32 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
           end).to be(true)
         end
       end
+      if expected["target_owners"]
+        observed = matching_raw.map { |event| event.dig("callee", "owner") }
+        expect(observed).to include(*expected.fetch("target_owners"))
+        observed_targets = row.fetch("executions").filter_map do |bucket|
+          bucket["target"]
+        end
+        identities = observed_targets.map do |target|
+          definition_anchor = target.dig("definition", "anchor_symbol").to_s
+          if definition_anchor.empty?
+            target.fetch("symbol")
+          else
+            expect(@collector.fetch(:plan).fetch("requests").any? do |candidate|
+              candidate.dig("anchor", "symbol") == definition_anchor
+            end).to be(true)
+            definition_anchor
+          end
+        end
+        expect(identities.uniq.length).to be >= expected.fetch("target_owners").length
+      end
       if expected["excluded_target_owner"]
         excluded = expected.fetch("excluded_target_owner")
         excluded_raw = matching_raw.select do |event|
           event.dig("callee", "owner") == excluded
         end
-        expect(excluded_raw).not_to be_empty
+        expect(excluded_raw).not_to be_empty,
+          "#{test_case.fetch("id")} did not preserve its nonproduction replacement"
         expect(row.fetch("executions").filter_map { |bucket|
           bucket["target"] if bucket.dig("target", "source_role") == "NON_PRODUCTION"
         }).not_to be_empty

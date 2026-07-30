@@ -26,6 +26,8 @@ struct Catalog {
 #[derive(Debug, Deserialize)]
 struct WireMatrix {
     anchor_kinds: Vec<String>,
+    planner_anchor_kinds: Vec<String>,
+    reserved_anchor_kinds: BTreeMap<String, String>,
     evidence_kinds: Vec<String>,
     capture_statuses: Vec<String>,
     source_roles: Vec<String>,
@@ -69,13 +71,19 @@ struct Expectation {
     #[serde(default)]
     correlation: bool,
     receiver_type: Option<String>,
+    #[serde(default)]
+    receiver_types: Vec<String>,
     target_owner: Option<String>,
+    #[serde(default)]
+    target_owners: Vec<String>,
     target_name: Option<String>,
     excluded_target_owner: Option<String>,
     source_role: Option<String>,
     result_type: Option<String>,
     result_element_type: Option<String>,
+    result_shape: Option<String>,
     boolean_result: Option<bool>,
+    observed_executions: Option<u64>,
     #[serde(default)]
     factmine_infers: Vec<InferredExpectation>,
 }
@@ -473,17 +481,35 @@ fn evidence_for_catalog(
                 exact.get(&anchor.symbol)
             {
                 let expected = &case.expect;
-                let receiver_name = expected
-                    .receiver_type
-                    .as_deref()
-                    .or(expected.target_owner.as_deref())
-                    .unwrap_or("Object");
-                let owner = expected.target_owner.as_deref().unwrap_or(receiver_name);
+                let receiver_names = if expected.receiver_types.is_empty() {
+                    vec![expected
+                        .receiver_type
+                        .as_deref()
+                        .or(expected.target_owner.as_deref())
+                        .unwrap_or("Object")]
+                } else {
+                    expected
+                        .receiver_types
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                };
+                let target_owners = if expected.target_owners.is_empty() {
+                    vec![expected
+                        .target_owner
+                        .as_deref()
+                        .unwrap_or(receiver_names[0])]
+                } else {
+                    expected
+                        .target_owners
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                };
                 let target_name = expected
                     .target_name
                     .as_deref()
                     .unwrap_or(&anchor.display_name);
-                let source_role = role(expected.source_role.as_deref(), Some(owner));
                 let required = request
                     .required
                     .iter()
@@ -505,36 +531,61 @@ fn evidence_for_catalog(
                 };
                 let complete_kind =
                     |kind: EvidenceKind| complete_kind_names.contains(format!("{kind:?}").as_str());
-                let mut bucket = ExecutionBucket {
-                    count: 1,
-                    receiver: (complete_kind(EvidenceKind::RECEIVER_VALUE)
-                        || complete_kind(EvidenceKind::COLLECTION_VALUE))
-                    .then(|| value_set(receiver_name, None, source_role))
-                    .into(),
-                    target: complete_kind(EvidenceKind::CALL_TARGET)
-                        .then(|| target(owner, target_name, source_role))
-                        .into(),
-                    result: complete_kind(EvidenceKind::RESULT_VALUE)
-                        .then(|| {
+                let alternative_count = receiver_names.len().max(target_owners.len());
+                assert!(
+                    receiver_names.len() == 1 || receiver_names.len() == alternative_count,
+                    "{} receiver alternatives do not align with targets",
+                    case.id
+                );
+                assert!(
+                    target_owners.len() == 1 || target_owners.len() == alternative_count,
+                    "{} target alternatives do not align with receivers",
+                    case.id
+                );
+                let mut executions = (0..alternative_count)
+                    .map(|index| {
+                        let receiver_name = receiver_names[index.min(receiver_names.len() - 1)];
+                        let owner = target_owners[index.min(target_owners.len() - 1)];
+                        let source_role = role(expected.source_role.as_deref(), Some(owner));
+                        let result = if let Some(shape) = expected.result_shape.as_deref() {
+                            shaped_value_set(shape, SourceRole::PRODUCTION)
+                        } else {
                             value_set(
                                 expected.result_type.as_deref().unwrap_or("Object"),
                                 expected.result_element_type.as_deref(),
                                 SourceRole::PRODUCTION,
                             )
-                        })
-                        .into(),
-                    provenance: MessageField::some(Provenance {
-                        run_id: "oracle-run".to_string(),
-                        provider: "canonical-conformance".to_string(),
-                        provider_version: "1".to_string(),
-                        ..Provenance::default()
-                    }),
-                    ..ExecutionBucket::default()
-                };
-                if complete_kind(EvidenceKind::BOOLEAN_RESULT) {
-                    bucket.boolean_result = Some(expected.boolean_result.unwrap_or(false));
-                }
-                let mut executions = vec![bucket];
+                        };
+                        let mut bucket = ExecutionBucket {
+                            count: if alternative_count == 1 {
+                                expected.observed_executions.unwrap_or(1)
+                            } else {
+                                1
+                            },
+                            receiver: (complete_kind(EvidenceKind::RECEIVER_VALUE)
+                                || complete_kind(EvidenceKind::COLLECTION_VALUE))
+                            .then(|| value_set(receiver_name, None, source_role))
+                            .into(),
+                            target: complete_kind(EvidenceKind::CALL_TARGET)
+                                .then(|| target(owner, target_name, source_role))
+                                .into(),
+                            result: complete_kind(EvidenceKind::RESULT_VALUE)
+                                .then_some(result)
+                                .into(),
+                            provenance: MessageField::some(Provenance {
+                                run_id: "oracle-run".to_string(),
+                                provider: "canonical-conformance".to_string(),
+                                provider_version: "1".to_string(),
+                                ..Provenance::default()
+                            }),
+                            ..ExecutionBucket::default()
+                        };
+                        if complete_kind(EvidenceKind::BOOLEAN_RESULT) {
+                            bucket.boolean_result = Some(expected.boolean_result.unwrap_or(false));
+                        }
+                        bucket
+                    })
+                    .collect::<Vec<_>>();
                 if let Some(excluded_owner) = expected.excluded_target_owner.as_deref() {
                     executions.push(ExecutionBucket {
                         count: 1,
@@ -804,7 +855,7 @@ fn assert_validation_error(
 
 #[test]
 fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
-    let catalog = load_catalog();
+    let (catalog, _source, _output, built) = built_fixture();
     let capabilities = catalog
         .cases
         .iter()
@@ -892,6 +943,44 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
             "BRANCH_PREDICATE",
         ]
     );
+    let planned = built
+        .plan
+        .requests
+        .iter()
+        .filter_map(|request| request.anchor.as_ref())
+        .filter_map(|anchor| anchor.kind.enum_value().ok())
+        .map(|kind| format!("{kind:?}"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        planned,
+        catalog
+            .wire_matrix
+            .planner_anchor_kinds
+            .iter()
+            .cloned()
+            .collect(),
+        "the real FactMine planner surface must equal its executable contract"
+    );
+    let reserved = catalog
+        .wire_matrix
+        .reserved_anchor_kinds
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert!(
+        reserved.intersection(&planned).next().is_none(),
+        "a planner kind cannot remain declared reserved"
+    );
+    assert_eq!(
+        reserved.union(&planned).cloned().collect::<BTreeSet<_>>(),
+        catalog.wire_matrix.anchor_kinds.iter().cloned().collect(),
+        "every wire anchor kind must be executable or explicitly reserved"
+    );
+    assert!(catalog
+        .wire_matrix
+        .reserved_anchor_kinds
+        .values()
+        .all(|reason| !reason.trim().is_empty()));
     assert_eq!(
         catalog.wire_matrix.evidence_kinds,
         [
@@ -1043,31 +1132,36 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
             );
             let anchor = request.anchor.as_ref().unwrap();
             let at_anchor = occurrence_symbols_at_anchor(&overlay.index, anchor);
-            if let (Some(owner), Some(name)) = (
-                expected.target_owner.as_deref(),
-                expected.target_name.as_deref(),
-            ) {
-                let expected_suffix =
-                    format!("{}#{}().", owner.replace("::", "/"), descriptor_name(name));
-                if expected.source_role.as_deref() == Some("NON_PRODUCTION") {
-                    assert!(
-                        !at_anchor
-                            .iter()
-                            .any(|symbol| symbol.ends_with(&expected_suffix)),
-                        "{} published nonproduction target {} at its callsite",
-                        case.id,
-                        expected_suffix
-                    );
-                } else {
-                    assert!(
-                        at_anchor
-                            .iter()
-                            .any(|symbol| symbol.ends_with(&expected_suffix)),
-                        "{} did not join target {} at its callsite; emitted {:?}",
-                        case.id,
-                        expected_suffix,
-                        at_anchor
-                    );
+            let expected_owners = expected
+                .target_owner
+                .iter()
+                .map(String::as_str)
+                .chain(expected.target_owners.iter().map(String::as_str))
+                .collect::<Vec<_>>();
+            if let Some(name) = expected.target_name.as_deref() {
+                for owner in expected_owners {
+                    let expected_suffix =
+                        format!("{}#{}().", owner.replace("::", "/"), descriptor_name(name));
+                    if expected.source_role.as_deref() == Some("NON_PRODUCTION") {
+                        assert!(
+                            !at_anchor
+                                .iter()
+                                .any(|symbol| symbol.ends_with(&expected_suffix)),
+                            "{} published nonproduction target {} at its callsite",
+                            case.id,
+                            expected_suffix
+                        );
+                    } else {
+                        assert!(
+                            at_anchor
+                                .iter()
+                                .any(|symbol| symbol.ends_with(&expected_suffix)),
+                            "{} did not join target {} at its callsite; emitted {:?}",
+                            case.id,
+                            expected_suffix,
+                            at_anchor
+                        );
+                    }
                 }
             }
             if let Some(excluded) = expected.excluded_target_owner.as_deref() {
@@ -1180,7 +1274,15 @@ fn shared_negative_controls_fail_closed_at_the_protocol_boundary() {
     exercised.insert("incomplete-kind-without-field");
 
     let mut evidence = canonical.clone();
-    evidence.anchors[0]
+    evidence
+        .anchors
+        .iter_mut()
+        .find(|row| {
+            row.capture.as_ref().is_some_and(|capture| {
+                capture.status.enum_value_or_default() == CaptureStatus::COMPLETE_FOR_RUNS
+            }) && !row.executions.is_empty()
+        })
+        .expect("canonical complete execution")
         .capture
         .as_mut()
         .unwrap()
@@ -1311,8 +1413,17 @@ fn every_capture_status_is_executable_and_noncomplete_statuses_require_reasons()
             other => panic!("unknown catalog status {other}"),
         };
         let mut evidence = canonical.clone();
+        let row_index = evidence
+            .anchors
+            .iter()
+            .position(|row| {
+                row.capture.as_ref().is_some_and(|capture| {
+                    capture.status.enum_value_or_default() == CaptureStatus::COMPLETE_FOR_RUNS
+                }) && !row.executions.is_empty()
+            })
+            .expect("canonical complete execution");
         {
-            let row = &mut evidence.anchors[0];
+            let row = &mut evidence.anchors[row_index];
             let capture = row.capture.as_mut().unwrap();
             capture.status = EnumOrUnknown::new(status);
             if status == CaptureStatus::COMPLETE_FOR_RUNS {
@@ -1330,7 +1441,12 @@ fn every_capture_status_is_executable_and_noncomplete_statuses_require_reasons()
         exercised.insert(status_name.as_str());
 
         if status != CaptureStatus::COMPLETE_FOR_RUNS {
-            evidence.anchors[0].capture.as_mut().unwrap().reason.clear();
+            evidence.anchors[row_index]
+                .capture
+                .as_mut()
+                .unwrap()
+                .reason
+                .clear();
             assert_validation_error(&built.plan, &evidence, "requires a precise reason");
         }
     }

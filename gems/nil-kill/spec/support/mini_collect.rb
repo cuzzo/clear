@@ -36,10 +36,10 @@ module MiniCollect
   # so the tracer's source-wrap recorder never fires while Ruby
   # Coverage still marks bodies executed. The invariant MUST then fail
   # (proving it has teeth, not vacuously green).
-  def mini_collect(dir, lib_rel, driver_src, extra_files: {}, instrument: true, runtime_scip: false, trace_plan_patch: nil)
+  def mini_collect(dir, lib_rel, driver_src, extra_files: {}, instrument: true, runtime_scip: false, trace_plan_patch: nil, targets: dir)
     FileUtils.mkdir_p(NilKill::RUNTIME_DIR)
     snapshot = File.join(NilKill::TMP_DIR, "src-snapshot")
-    isolated_env("NIL_KILL_TARGETS" => dir, "NIL_KILL_INSTRUMENTED_ROOT" => nil) do
+    isolated_env("NIL_KILL_TARGETS" => targets, "NIL_KILL_INSTRUMENTED_ROOT" => nil) do
       NilKill::TracePlan.write(NilKill::TRACE_PLAN_PATH)
       if trace_plan_patch
         plan = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH))
@@ -60,7 +60,7 @@ module MiniCollect
       "NIL_KILL_TRACE_METHODS" => "0",
       "NIL_KILL_RUNTIME_SCIP" => runtime_scip ? "1" : nil,
       "NIL_KILL_TMP_DIR" => NilKill::TMP_DIR,
-      "NIL_KILL_TARGETS" => dir,
+      "NIL_KILL_TARGETS" => targets,
       "RUBYOPT" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "-r#{SUBPROCESS_COVERAGE} -r#{TRACER}" : "-r#{TRACER}",
       "NIL_KILL_SUBPROCESS_COVERAGE_CHILD" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "1" : nil,
       "NIL_KILL_SHARED_COVERAGE" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "1" : nil,

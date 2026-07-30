@@ -12,6 +12,7 @@ module NilKill
       @loop_sites = @trace_plan.fetch("loop_sites", {})
       @state_write_sites = @trace_plan.fetch("state_write_sites", {})
       @runtime_execution_anchors_by_path = Hash.new { |hash, path| hash[path] = [] }
+      runtime_execution_anchors = []
       Array(@trace_plan.dig("runtime_evidence", "requests")).each do |request|
         anchor = request["anchor"]
         range = request["execution_range"]
@@ -21,12 +22,36 @@ module NilKill
         ].include?(anchor["kind"])
 
         path = File.expand_path(anchor.fetch("relative_path"), ROOT)
-        @runtime_execution_anchors_by_path[path] << {
+        runtime_execution_anchors << {
+          "path" => path,
           "symbol" => anchor.fetch("symbol"),
           "selector" => anchor.fetch("display_name").to_s,
+          "selector_line" => anchor.dig("range", "start_line"),
           "range" => range,
         }
       end
+      # The opaque plan key (path, any line in the execution range, selector)
+      # uniquely binds the overwhelming majority of runtime events. A provider
+      # may report a multiline call at its receiver line rather than its
+      # selector line. Expression bracketing is needed only when one key names
+      # multiple anchors, such as two calls to the same method on one line.
+      runtime_execution_anchors
+        .each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |anchor, groups|
+          range = anchor.fetch("range")
+          (range.fetch("start_line").to_i..range.fetch("end_line").to_i).each do |line|
+            groups[[anchor.fetch("path"), line, anchor.fetch("selector")]] << anchor
+          end
+        end
+        .each_value do |anchors|
+          next unless anchors.length > 1
+
+          anchors.uniq { |anchor| anchor.fetch("symbol") }.each do |anchor|
+            selected = @runtime_execution_anchors_by_path[anchor.fetch("path")]
+            selected << anchor unless selected.any? {
+              |candidate| candidate.fetch("symbol") == anchor.fetch("symbol")
+            }
+          end
+        end
       @plan_dirty = false
       @defer_plan_write = false
       @trace_plan.fetch("methods", {}).each do |raw_key, plan|

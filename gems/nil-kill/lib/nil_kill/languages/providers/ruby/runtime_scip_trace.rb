@@ -14,6 +14,7 @@ module NilKillRuntimeTrace
   @runtime_executed_callsites = Hash.new(0)
   @runtime_exact_anchor_executions = Hash.new(0)
   @runtime_anchor_execution_stack = Hash.new { |hash, thread_id| hash[thread_id] = [] }
+  @runtime_anchor_marker_depth = Hash.new(0)
   @runtime_generated_wrapper_methods = Set.new
   # Collector-installed wrappers may be the Ruby frame observed by
   # TracePoint even though the workload invoked the wrapped method. Preserve
@@ -38,19 +39,56 @@ module NilKillRuntimeTrace
   # a matching TracePoint call with the symbol. It performs no source lookup,
   # receiver inference, dispatch resolution, or flow analysis.
   def self.begin_runtime_anchor_execution(symbol, selector)
-    @runtime_exact_anchor_executions[symbol.to_s] += 1
-    @runtime_anchor_execution_stack[Thread.current.object_id] << {
-      symbol: symbol.to_s,
-      selector: selector.to_s,
-    }
     true
   end
 
-  def self.end_runtime_anchor_execution(symbol)
-    stack = @runtime_anchor_execution_stack[Thread.current.object_id]
-    index = stack.rindex { |entry| entry.fetch(:symbol) == symbol.to_s }
-    stack.delete_at(index) if index
+  def self.end_runtime_anchor_execution(_symbol)
     nil
+  end
+
+  RUNTIME_ANCHOR_MARKER_METHODS = %i[
+    begin_runtime_anchor_execution
+    end_runtime_anchor_execution
+  ].freeze
+  RUNTIME_ANCHOR_MARKER_PATH = __FILE__.freeze
+
+  # Marker methods intentionally have inert bodies. Consume their literal
+  # arguments inside the active Ruby TracePoint callback, where Ruby suppresses
+  # nested tracing. Otherwise the marker's own Hash/Thread operations become
+  # native events in the demand window they are controlling.
+  def self.record_runtime_anchor_marker_call(tp)
+    return false unless tp.path == RUNTIME_ANCHOR_MARKER_PATH
+    return false unless RUNTIME_ANCHOR_MARKER_METHODS.include?(tp.method_id)
+
+    thread_id = Thread.current.object_id
+    @runtime_anchor_marker_depth[thread_id] += 1
+    symbol = tp.binding.local_variable_get(
+      tp.method_id == :begin_runtime_anchor_execution ? :symbol : :_symbol
+    ).to_s
+    if tp.method_id == :begin_runtime_anchor_execution
+      selector = tp.binding.local_variable_get(:selector).to_s
+      @runtime_exact_anchor_executions[symbol] += 1
+      @runtime_anchor_execution_stack[thread_id] << {
+        symbol: symbol,
+        selector: selector,
+      }
+      return true
+    end
+
+    stack = @runtime_anchor_execution_stack[Thread.current.object_id]
+    index = stack.rindex { |entry| entry.fetch(:symbol) == symbol }
+    stack.delete_at(index) if index
+    true
+  end
+
+  def self.record_runtime_anchor_marker_return(tp)
+    return false unless tp.path == RUNTIME_ANCHOR_MARKER_PATH
+    return false unless RUNTIME_ANCHOR_MARKER_METHODS.include?(tp.method_id)
+
+    thread_id = Thread.current.object_id
+    depth = @runtime_anchor_marker_depth[thread_id]
+    @runtime_anchor_marker_depth[thread_id] = depth - 1 if depth.positive?
+    true
   end
 
   def self.runtime_exact_anchor_callsite(callsite, selector)
@@ -59,9 +97,48 @@ module NilKillRuntimeTrace
     entry = @runtime_anchor_execution_stack[Thread.current.object_id]
       .reverse_each
       .find { |candidate| candidate.fetch(:selector) == selector.to_s }
-    return callsite unless entry
+    return callsite.merge(anchor_symbol: entry.fetch(:symbol)) if entry
 
-    callsite.merge(anchor_symbol: entry.fetch(:symbol))
+    symbol = runtime_evidence_anchor_by_callsite[
+      [abs_path(callsite[:path]), callsite[:line].to_i, selector.to_s]
+    ]
+    return callsite unless symbol
+
+    @runtime_exact_anchor_executions[symbol] += 1
+    callsite.merge(anchor_symbol: symbol)
+  end
+
+  # Bind unique events directly from FactMine's opaque trace-plan coordinates.
+  # NilKill neither parses the expression nor resolves flow here. Duplicate
+  # keys are deliberately omitted and are disambiguated by the expression
+  # execution markers installed by the language adapter.
+  def self.runtime_evidence_anchor_by_callsite
+    @runtime_evidence_anchor_by_callsite ||= begin
+      grouped = Array(trace_plan&.dig("runtime_evidence", "requests")).each_with_object(
+        Hash.new { |hash, key| hash[key] = [] }
+      ) do |request, by_callsite|
+        anchor = request["anchor"]
+        next unless anchor.is_a?(Hash)
+        next unless %w[
+          CALL_SELECTOR COLLECTION_OPERATION BRANCH_PREDICATE
+        ].include?(anchor["kind"])
+
+        range = request["execution_range"]
+        next unless range.is_a?(Hash)
+
+        (range.fetch("start_line").to_i..range.fetch("end_line").to_i).each do |line|
+          key = [
+            abs_path(anchor.fetch("relative_path")),
+            line + 1,
+            anchor.fetch("display_name").to_s,
+          ]
+          by_callsite[key] << anchor.fetch("symbol").to_s
+        end
+      end
+      grouped.each_with_object({}) do |(key, symbols), unique|
+        unique[key] = symbols.first if symbols.length == 1
+      end.freeze
+    end
   end
 
   def self.record_runtime_scip_line(tp)
@@ -1079,17 +1156,20 @@ module NilKillRuntimeTrace
       frames = @runtime_scip_frames[thread_id]
       case trace.event
       when :line
+        next if @runtime_anchor_marker_depth[thread_id].positive?
         next if frames.empty? &&
           !@runtime_scip_native_call_armed &&
           !@runtime_scip_native_result_armed
 
         record_runtime_scip_line(trace)
       when :call
+        next if record_runtime_anchor_marker_call(trace)
         selected_target = target_path?(trace.path)
         next if frames.empty? && !selected_target
 
         enter_runtime_scip_ruby_call(trace, selected_target: selected_target)
       when :return
+        next if record_runtime_anchor_marker_return(trace)
         next if frames.empty? && !@runtime_scip_external_depth[thread_id].positive?
 
         leave_runtime_scip_ruby_call(trace)

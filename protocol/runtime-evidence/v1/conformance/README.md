@@ -50,6 +50,15 @@ Every anchor kind has a closed set of legal evidence kinds in
 `wire_matrix.request_contracts`. FactMine rejects incompatible requests before
 collection begins.
 
+The wire enum deliberately reserves `STATE_READ` and `CALLBACK_ENTRY`, but the
+v1 FactMine planner does not emit them: state values are requested at writes,
+and callback parameter flow is derived by FactMine from call/collection
+evidence. `wire_matrix.planner_anchor_kinds` is the executable planner surface;
+`reserved_anchor_kinds` records the exact non-emission contract. A future
+planner change must move a kind between those sets and add a real collector
+fixture in the same commit. This prevents a protocol enum from being mistaken
+for a silently unsupported collector request.
+
 ## Completeness semantics
 
 - `COMPLETE_FOR_RUNS` means every requested kind is present in every

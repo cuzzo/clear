@@ -9,6 +9,16 @@ wire_matrix:
     - CALLBACK_ENTRY
     - COLLECTION_OPERATION
     - BRANCH_PREDICATE
+  planner_anchor_kinds:
+    - FUNCTION_ENTRY
+    - FUNCTION_RETURN
+    - CALL_SELECTOR
+    - STATE_WRITE
+    - COLLECTION_OPERATION
+    - BRANCH_PREDICATE
+  reserved_anchor_kinds:
+    STATE_READ: FactMine currently propagates state from observed writes and does not request read capture.
+    CALLBACK_ENTRY: FactMine currently derives callback parameter flow from collection/call evidence and does not request callback-entry capture.
   evidence_kinds:
     - PARAMETER_VALUE
     - RETURN_VALUE
@@ -113,6 +123,24 @@ cases:
       receiver_type: RuntimeEvidenceConformance::Value
       target_owner: RuntimeEvidenceConformance::Value
 
+  - id: multiline_receiver
+    capabilities: [multiline-call, nested-receiver, chained-call, exact-execution-range]
+    anchor: { method: multiline_receiver, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: nested_argument
+    capabilities: [nested-argument, result-flow, exact-execution-range]
+    anchor: { method: nested_argument, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
   - id: assignment_result_flow
     capabilities: [assignment, result, cfg, dfg]
     anchor: { method: assignment_flow, selector: fetch, occurrence: 1 }
@@ -142,6 +170,16 @@ cases:
   - id: short_circuit_call_execution
     capabilities: [short-circuit-call, exact-execution-range, skipped-execution]
     anchor: { method: short_circuit_guard, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      observed_executions: 1
+
+  - id: safe_navigation_execution
+    capabilities: [safe-navigation, skipped-execution, exact-execution-range]
+    anchor: { method: safe_navigation, selector: normalize, occurrence: 1 }
     expect:
       required: [RECEIVER_VALUE, CALL_TARGET]
       receiver_type: RuntimeEvidenceConformance::Value
@@ -226,6 +264,16 @@ cases:
       target_name: map
       source_role: STANDARD_LIBRARY
 
+  - id: callback_local
+    capabilities: [callback, block-parameter, block-local, multiline-call]
+    anchor: { method: callback_local_flow, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      observed_executions: 2
+
   - id: dynamic_dispatch
     capabilities: [dynamic-dispatch, production-target]
     anchor: { method: dynamic_dispatch, selector: dispatch, occurrence: 1 }
@@ -234,6 +282,20 @@ cases:
       receiver_type: RuntimeEvidenceConformance::ProductionDispatcher
       target_owner: RuntimeEvidenceConformance::ProductionDispatcher
       source_role: PRODUCTION
+
+  - id: alternative_dynamic_targets
+    capabilities: [dynamic-dispatch, alternative-receivers, alternative-targets, repeated-execution]
+    anchor: { method: alternative_target, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_types:
+        - RuntimeEvidenceConformance::Value
+        - RuntimeEvidenceConformance::AlternateValue
+      target_owners:
+        - RuntimeEvidenceConformance::Value
+        - RuntimeEvidenceConformance::AlternateValue
+      target_name: normalize
+      observed_executions: 2
 
   - id: container_shape
     capabilities: [result, container-shape, mapping, sequence]
@@ -244,6 +306,24 @@ cases:
       result_type: Array
       result_element_type: RuntimeEvidenceConformance::Value
 
+  - id: mapping_result_shape
+    capabilities: [result, container-shape, mapping]
+    anchor: { method: mapping_shape, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: Hash
+      result_shape: mapping
+
+  - id: record_result_shape
+    capabilities: [result, container-shape, record]
+    anchor: { method: record_shape, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: RuntimeEvidenceConformance::Generated
+      result_shape: record
+
   - id: boolean_predicate
     capabilities: [boolean-result, branch-predicate]
     anchor: { method: predicate, selector: respond_to?, occurrence: 1 }
@@ -251,6 +331,24 @@ cases:
       required: [RECEIVER_VALUE, CALL_TARGET, BOOLEAN_RESULT]
       receiver_type: RuntimeEvidenceConformance::Value
       boolean_result: true
+
+  - id: false_boolean_predicate
+    capabilities: [boolean-result, false-value, branch-predicate]
+    anchor: { method: false_predicate, selector: respond_to?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, BOOLEAN_RESULT]
+      receiver_type: RuntimeEvidenceConformance::Value
+      boolean_result: false
+
+  - id: repeated_exact_call
+    capabilities: [repeated-execution, execution-count, exact-anchor]
+    anchor: { method: repeated_call, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      observed_executions: 3
 
   - id: subprocess_result
     capabilities: [subprocess, result-object, native-call]
@@ -264,6 +362,28 @@ cases:
   - id: mixed_production_and_test_replacement
     capabilities: [test-replacement, mixed-provenance, transparent-wrapper]
     anchor: { method: mixed_provenance_status, selector: success?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Process::Status
+      target_owner: Process::Status
+      target_name: success?
+      source_role: STANDARD_LIBRARY
+      excluded_target_owner: RuntimeEvidenceConformance::TestStatus
+
+  - id: mixed_generated_accessor_replacement
+    capabilities: [test-replacement, mixed-provenance, generated-accessor, transparent-wrapper]
+    anchor: { method: mixed_generated_accessor, selector: decision_line, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::GeneratedStatus
+      target_owner: RuntimeEvidenceConformance::GeneratedStatus
+      target_name: decision_line
+      source_role: PRODUCTION
+      excluded_target_owner: RuntimeEvidenceConformance::TestGeneratedStatus
+
+  - id: result_call_after_replaced_producer
+    capabilities: [test-replacement, mixed-provenance, resumed-production-frame, result-object]
+    anchor: { method: status_after_capture, selector: success?, occurrence: 1 }
     expect:
       required: [RECEIVER_VALUE, CALL_TARGET]
       receiver_type: Process::Status
@@ -317,6 +437,35 @@ cases:
       target_owner: RuntimeEvidenceConformance::Value
       target_name: normalize
       source_role: PRODUCTION
+
+  - id: state_receiver_dispatch
+    capabilities: [state-read, state-write, state-value, receiver-from-state, cfg, dfg]
+    anchor: { method: state_receiver_flow, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      source_role: PRODUCTION
+
+  - id: chained_result_dispatch
+    capabilities: [chained-call, nested-receiver, result-flow, callback-origin]
+    anchor: { method: chained_result_flow, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: rescued_exception_value
+    capabilities: [exception, rescue-binding, native-call]
+    anchor: { method: exception_value_flow, selector: message, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeError
+      target_owner: Exception
+      target_name: message
+      source_role: STANDARD_LIBRARY
 
   - id: dependency_target
     capabilities: [dependency-provenance, third-party-target]

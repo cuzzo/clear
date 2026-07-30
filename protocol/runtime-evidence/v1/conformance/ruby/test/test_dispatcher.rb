@@ -15,4 +15,12 @@ module RuntimeEvidenceConformance
       ok
     end
   end
+
+  TestGeneratedStatus = Struct.new(:decision_line)
+
+  class TestCapture
+    def capture
+      ["", "", TestStatus.new(true)]
+    end
+  end
 end

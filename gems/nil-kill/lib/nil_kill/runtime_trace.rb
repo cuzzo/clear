@@ -1448,7 +1448,8 @@ module NilKillRuntimeTrace
       loc = caller_locations(1, 1)&.first
       klass = __nil_kill_orig_new(*fields, **opts, &blk)
       path = loc && File.expand_path(loc.absolute_path || loc.path, ROOT)
-      if path && NilKillRuntimeTrace.target_path?(path) && klass.is_a?(Class) && klass < Struct
+      if path && klass.is_a?(Class) && klass < Struct &&
+          (NilKillRuntimeTrace.target_path?(path) || ENV["NIL_KILL_RUNTIME_SCIP"] == "1")
         klass.instance_variable_set(:@__nil_kill_struct_path, path)
         klass.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
         NilKillRuntimeTrace.attach_struct(klass)
@@ -1760,7 +1761,8 @@ module NilKillRuntimeTrace
       klass.instance_variable_set(:@__nil_kill_struct_path, path) if path
       klass.instance_variable_set(:@__nil_kill_struct_line, line) if line
     end
-    return unless path && target_path?(path)
+    production_struct = path && target_path?(path)
+    return unless production_struct || ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
     fields = klass.members
     return if fields.empty?
     klass.instance_variable_set(:@__nil_kill_attached, true)
@@ -1772,12 +1774,12 @@ module NilKillRuntimeTrace
     original_new = klass.method(:new)
     klass.define_singleton_method(:new) do |*args, **kw, &blk|
       instance = original_new.call(*args, **kw, &blk)
-      NilKillRuntimeTrace.record_struct_instance(instance, fields)
+      NilKillRuntimeTrace.record_struct_instance(instance, fields) if production_struct
       instance
     end
     register_generated_constructor_wrapper(klass, native: true)
 
-    if klass.method_defined?(:[]=)
+    if production_struct && klass.method_defined?(:[]=)
       original_index_set = klass.instance_method(:[]=)
       klass.define_method(:[]=) do |field, value|
         class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
@@ -1799,7 +1801,10 @@ module NilKillRuntimeTrace
       setter = "#{field}="
       if !klass.method_defined?(setter) || klass.instance_method(setter).source_location.nil?
         original_setter = klass.instance_method(setter) if klass.method_defined?(setter)
-        klass.define_method(setter, struct_field_setter(field, original_setter))
+        klass.define_method(
+          setter,
+          struct_field_setter(field, original_setter, record_field: production_struct)
+        )
         @runtime_generated_wrapper_methods << [klass, setter.to_sym]
       end
     end
@@ -1829,10 +1834,12 @@ module NilKillRuntimeTrace
     end
   end
 
-  def self.struct_field_setter(field, original_setter)
+  def self.struct_field_setter(field, original_setter, record_field: true)
     proc do |value|
-      class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
-      NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+      if record_field
+        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
+        NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
+      end
       if original_setter
         original_setter.bind_call(self, value)
       else

@@ -105,6 +105,15 @@ module NilKill
             end
           end
         executions = merge_identical_buckets(executions)
+        exact_count = @exact_anchor_execution_counts.fetch(anchor.fetch("symbol"), 0)
+        retained_count = executions.sum { |bucket| bucket.fetch("count").to_i }
+        if executions.one? && exact_count > retained_count
+          # Identity-only collection may retain one representative value/target
+          # bucket while the exact opaque marker counts every execution. With
+          # one bucket there is no distribution ambiguity, so restore its exact
+          # multiplicity without reintroducing a hot global merge in providers.
+          executions.first["count"] = exact_count
+        end
         requested = request.fetch("required")
         executed_without_capture = executions.empty? && anchor_executed?(anchor)
         complete_kinds =
@@ -213,16 +222,19 @@ module NilKill
 
       def matching_calls(anchor)
         key = [anchor.fetch("relative_path"), anchor.fetch("display_name").to_s]
-        candidates = @calls_by_path_selector.fetch(key, []).select do |_event, row|
-          source_line_matches?(anchor, row.dig("callsite", "line"))
-        end
+        candidates = @calls_by_path_selector.fetch(key, [])
         exact = candidates.select do |_event, row|
           row.dig("callsite", "anchor_symbol") == anchor.fetch("symbol")
         end
+        # Exact identity dominates the provider's informational source line.
+        # A provider may report a multiline call at its receiver line while
+        # FactMine anchors the selector line. The opaque execution-range
+        # binding already proved which planned anchor executed.
         return [exact, false] if exact.any?
 
         candidates = candidates.select do |_event, row|
-          row.dig("callsite", "anchor_symbol").to_s.empty?
+          row.dig("callsite", "anchor_symbol").to_s.empty? &&
+            source_line_matches?(anchor, row.dig("callsite", "line"))
         end
         siblings = @call_anchor_counts.fetch(
           [*key, anchor.fetch("range").fetch("start_line")],
@@ -284,7 +296,7 @@ module NilKill
         )
         bucket["result"] = result if result
         truths = Array(row["result_truths"]).uniq
-        bucket["boolean_result"] = truths.first if truths.one?
+        bucket["boolean_result"] = truths.first if truths.length == 1
         bucket
       end
 
@@ -419,6 +431,11 @@ module NilKill
           end.transform_values { |rows| rows.map { |row| row.fetch("line") } }
         @exact_anchor_execution_symbols =
           @exact_anchor_executions.map { |row| row.fetch("symbol") }.to_set
+        @exact_anchor_execution_counts =
+          @exact_anchor_executions.group_by { |row| row.fetch("symbol") }
+            .transform_values do |rows|
+              rows.sum { |row| [row.fetch("count", 1).to_i, 0].max }
+            end
         @function_entries_by_path =
           @function_entries.group_by { |row| canonical_path(row.fetch("path")) }
             .transform_values { |rows| rows.map { |row| row.fetch("line") } }

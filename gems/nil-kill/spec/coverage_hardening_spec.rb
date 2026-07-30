@@ -788,11 +788,16 @@ RSpec.describe "NilKill coverage hardening" do
         runtime_scip_frames: Hash.new { |hash, thread_id| hash[thread_id] = [] },
         runtime_scip_external_depth: Hash.new(0),
         runtime_scip_native_calls: Hash.new { |hash, thread_id| hash[thread_id] = [] },
+        runtime_exact_anchor_executions: Hash.new(0),
+        runtime_anchor_execution_stack: Hash.new { |hash, thread_id| hash[thread_id] = [] },
         runtime_scip_native_call_trace: nil,
         runtime_scip_native_call_armed: false,
         runtime_scip_native_selector_filter: nil,
         runtime_scip_native_result_depth: 0,
         runtime_scip_native_result_armed: false,
+        runtime_evidence_anchor_by_callsite: nil,
+        runtime_evidence_required_by_anchor: nil,
+        runtime_anchor_marker_depth: Hash.new(0),
       }.each do |name, value|
         described_class.instance_variable_set(:"@#{name}", value)
       end
@@ -1021,6 +1026,152 @@ RSpec.describe "NilKill coverage hardening" do
       expect(described_class).not_to have_received(:runtime_scip_captures_for)
       expect(described_class).not_to have_received(:runtime_value_domain)
       expect(described_class.runtime_scip_native_calls[Thread.current.object_id]).to be_empty
+    end
+
+    it "binds a unique opaque plan key without source-expression instrumentation" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_unique_anchor_unit.rb")
+      anchor = {
+        "kind" => "CALL_SELECTOR",
+        "relative_path" => target_file,
+        "display_name" => "normalize",
+        "symbol" => "local unique-normalize",
+        "range" => {
+          "start_line" => 6,
+          "start_character" => 4,
+          "end_line" => 6,
+          "end_character" => 13,
+        },
+      }
+      allow(described_class).to receive(:trace_plan).and_return({
+        "runtime_evidence" => {
+          "requests" => [{ "anchor" => anchor, "execution_range" => anchor.fetch("range") }],
+        },
+      })
+
+      bound = described_class.runtime_exact_anchor_callsite(
+        { path: target_file, line: 7 },
+        :normalize
+      )
+
+      expect(bound.fetch(:anchor_symbol)).to eq("local unique-normalize")
+      expect(described_class.instance_variable_get(:@runtime_exact_anchor_executions))
+        .to include("local unique-normalize" => 1)
+    end
+
+    it "binds every Ruby-reported line inside FactMine's opaque multiline execution range" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_multiline_anchor_unit.rb")
+      anchor = {
+        "kind" => "CALL_SELECTOR",
+        "relative_path" => target_file,
+        "display_name" => "normalize",
+        "symbol" => "local multiline-normalize",
+        "range" => {
+          "start_line" => 8,
+          "start_character" => 4,
+          "end_line" => 8,
+          "end_character" => 13,
+        },
+      }
+      execution_range = {
+        "start_line" => 6,
+        "start_character" => 2,
+        "end_line" => 8,
+        "end_character" => 13,
+      }
+      allow(described_class).to receive(:trace_plan).and_return({
+        "runtime_evidence" => {
+          "requests" => [{ "anchor" => anchor, "execution_range" => execution_range }],
+        },
+      })
+
+      [7, 8, 9].each do |line|
+        bound = described_class.runtime_exact_anchor_callsite(
+          { path: target_file, line: line },
+          :normalize
+        )
+        expect(bound.fetch(:anchor_symbol)).to eq("local multiline-normalize")
+      end
+      expect(described_class.instance_variable_get(:@runtime_exact_anchor_executions))
+        .to include("local multiline-normalize" => 3)
+    end
+
+    it "refuses to guess when an opaque plan key names multiple anchors" do
+      target_file = File.join(described_class::TARGETS.first, "runtime_ambiguous_anchor_unit.rb")
+      requests = %w[first second].map do |suffix|
+        range = {
+          "start_line" => 6,
+          "start_character" => 4,
+          "end_line" => 6,
+          "end_character" => 13,
+        }
+        {
+          "anchor" => {
+            "kind" => "CALL_SELECTOR",
+            "relative_path" => target_file,
+            "display_name" => "normalize",
+            "symbol" => "local #{suffix}",
+            "range" => range,
+          },
+          "execution_range" => range,
+        }
+      end
+      allow(described_class).to receive(:trace_plan).and_return({
+        "runtime_evidence" => { "requests" => requests },
+      })
+
+      callsite = { path: target_file, line: 7 }
+      expect(described_class.runtime_exact_anchor_callsite(callsite, :normalize))
+        .to eq(callsite)
+      expect(described_class.instance_variable_get(:@runtime_exact_anchor_executions))
+        .to be_empty
+    end
+
+    it "records expression markers inside the TracePoint callback, not their bodies" do
+      symbol = "local ambiguous-first"
+      selector = "normalize"
+      begin_binding = binding
+      _symbol = symbol
+      end_binding = binding
+      marker_path = described_class::RUNTIME_ANCHOR_MARKER_PATH
+
+      expect(described_class.begin_runtime_anchor_execution(symbol, selector)).to be(true)
+      expect(described_class.instance_variable_get(:@runtime_exact_anchor_executions))
+        .to be_empty
+
+      expect(described_class.record_runtime_anchor_marker_call(FakeTracePoint.new(
+        event: :call,
+        path: marker_path,
+        method_id: :begin_runtime_anchor_execution,
+        trace_binding: begin_binding
+      ))).to be(true)
+      expect(described_class.instance_variable_get(:@runtime_exact_anchor_executions))
+        .to include(symbol => 1)
+      expect(described_class.instance_variable_get(:@runtime_anchor_execution_stack)
+        .fetch(Thread.current.object_id).last).to include(
+          symbol: symbol,
+          selector: selector
+        )
+
+      expect(described_class.record_runtime_anchor_marker_return(FakeTracePoint.new(
+        event: :return,
+        path: marker_path,
+        method_id: :begin_runtime_anchor_execution
+      ))).to be(true)
+      expect(described_class.record_runtime_anchor_marker_call(FakeTracePoint.new(
+        event: :call,
+        path: marker_path,
+        method_id: :end_runtime_anchor_execution,
+        trace_binding: end_binding
+      ))).to be(true)
+      expect(described_class.instance_variable_get(:@runtime_anchor_execution_stack)
+        .fetch(Thread.current.object_id)).to be_empty
+      expect(described_class.record_runtime_anchor_marker_return(FakeTracePoint.new(
+        event: :return,
+        path: marker_path,
+        method_id: :end_runtime_anchor_execution
+      ))).to be(true)
+      expect(described_class.instance_variable_get(:@runtime_anchor_marker_depth)
+        .fetch(Thread.current.object_id)).to eq(0)
     end
 
     it "enables native tracing only across selected-source line execution" do

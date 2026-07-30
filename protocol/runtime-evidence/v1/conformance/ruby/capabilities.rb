@@ -17,11 +17,29 @@ module RuntimeEvidenceConformance
     end
   end
 
+  class AlternateValue
+    def initialize(payload)
+      @payload = payload
+    end
+
+    def normalize
+      @payload.to_s.upcase
+    end
+  end
+
   Generated = Struct.new(:payload, :count)
+  GeneratedStatus = Struct.new(:decision_line)
 
   class ProductionDispatcher
     def dispatch
       Value.new(:production)
+    end
+  end
+
+  class ProductionCapture
+    def capture
+      system(RbConfig.ruby, "-e", "exit 0")
+      ["", "", $CHILD_STATUS]
     end
   end
 
@@ -49,6 +67,20 @@ module RuntimeEvidenceConformance
       value.child.normalize
     end
 
+    def multiline_receiver(value)
+      value
+        .child
+        .normalize
+    end
+
+    def nested_argument(value)
+      accept(value.normalize)
+    end
+
+    def accept(value)
+      value
+    end
+
     def assignment_flow(source)
       value = source.fetch(:direct)
       value.normalize
@@ -67,6 +99,10 @@ module RuntimeEvidenceConformance
 
     def short_circuit_guard(enabled, value)
       enabled && value.normalize
+    end
+
+    def safe_navigation(value)
+      value&.normalize
     end
 
     def native_call(value)
@@ -98,8 +134,18 @@ module RuntimeEvidenceConformance
       values.map { |value| value.normalize }.select { |value| !value.empty? }
     end
 
+    def callback_local_flow(values)
+      values.each_with_object([]) do |value, output|
+        output << value.normalize
+      end
+    end
+
     def dynamic_dispatch(receiver)
       receiver.dispatch
+    end
+
+    def alternative_target(receiver)
+      receiver.normalize
     end
 
     def container_shape(source)
@@ -108,8 +154,26 @@ module RuntimeEvidenceConformance
       rows
     end
 
+    def mapping_shape(source)
+      mapping = source.fetch(:mapping)
+      mapping.keys
+    end
+
+    def record_shape(source)
+      record = source.fetch(:record)
+      record.payload
+    end
+
     def predicate(value)
       value.respond_to?(:normalize) ? :supported : :unsupported
+    end
+
+    def false_predicate(value)
+      value.respond_to?(:missing_runtime_evidence_method) ? :unexpected : :expected
+    end
+
+    def repeated_call(value)
+      3.times { value.normalize }
     end
 
     def subprocess_result
@@ -118,6 +182,15 @@ module RuntimeEvidenceConformance
     end
 
     def mixed_provenance_status(status)
+      status.success?
+    end
+
+    def mixed_generated_accessor(status)
+      status.decision_line
+    end
+
+    def status_after_capture(provider)
+      _stdout, _stderr, status = provider.capture
       status.success?
     end
 
@@ -145,6 +218,21 @@ module RuntimeEvidenceConformance
     def state_flow(value)
       @state = value
       @state.normalize
+    end
+
+    def state_receiver_flow(value)
+      @cached = value
+      @cached.normalize
+    end
+
+    def chained_result_flow(source)
+      source.fetch(:rows).first.normalize
+    end
+
+    def exception_value_flow
+      raise "runtime evidence"
+    rescue RuntimeError => error
+      error.message
     end
 
     def dependency_call(left, right)

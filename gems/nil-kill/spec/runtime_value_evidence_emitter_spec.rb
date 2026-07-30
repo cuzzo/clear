@@ -133,6 +133,66 @@ RSpec.describe "canonical runtime semantic evidence v1" do
     end
   end
 
+  it "joins an exact multiline anchor even when Ruby reports its receiver line" do
+    request = {
+      "anchor" => anchor(
+        symbol: "local multiline-call",
+        kind: "CALL_SELECTOR",
+        name: "size",
+        line: 5
+      ),
+      "required" => %w[RECEIVER_VALUE CALL_TARGET],
+    }
+    raw = event
+    raw["callsite"] = raw.fetch("callsite").merge(
+      "line" => 3,
+      "anchor_symbol" => "local multiline-call"
+    )
+
+    Dir.mktmpdir do |directory|
+      evidence = parse(
+        NilKill::Runtime::ValueEvidenceEmitter.emit(
+          root: NilKill::ROOT,
+          runtime_dir: directory,
+          events: [raw],
+          plan: plan(request)
+        ).fetch("path")
+      )
+
+      expect(evidence.dig("anchors", 0, "capture", "status")).to eq("COMPLETE_FOR_RUNS")
+      expect(evidence.dig("anchors", 0, "executions", 0, "target", "symbol"))
+        .to end_with(" String#size().")
+    end
+  end
+
+  it "restores exact execution multiplicity for a deduplicated identity bucket" do
+    request = {
+      "anchor" => anchor(symbol: "local repeated-call", kind: "CALL_SELECTOR", name: "size"),
+      "required" => %w[RECEIVER_VALUE CALL_TARGET],
+    }
+    raw = event
+    raw["count"] = 1
+    raw["callsite"]["anchor_symbol"] = "local repeated-call"
+
+    Dir.mktmpdir do |directory|
+      NilKill::Runtime::JsonIO.write(
+        File.join(directory, "exact-anchor-executions-1.jsonl.gz"),
+        JSON.generate("symbol" => "local repeated-call", "count" => 3) + "\n"
+      )
+      evidence = parse(
+        NilKill::Runtime::ValueEvidenceEmitter.emit(
+          root: NilKill::ROOT,
+          runtime_dir: directory,
+          events: [raw],
+          plan: plan(request)
+        ).fetch("path")
+      )
+
+      expect(evidence.dig("anchors", 0, "capture", "observed_executions")).to eq("3")
+      expect(evidence.dig("anchors", 0, "executions", 0, "count")).to eq("3")
+    end
+  end
+
   it "reports field-level completeness when result capture is partial" do
     request = {
       "anchor" => anchor(symbol: "local call-1", kind: "CALL_SELECTOR", name: "size"),
@@ -151,6 +211,36 @@ RSpec.describe "canonical runtime semantic evidence v1" do
       expect(capture.fetch("status")).to eq("PARTIAL")
       expect(capture.fetch("complete_kinds"))
         .to contain_exactly("RECEIVER_VALUE", "CALL_TARGET")
+    end
+  end
+
+  it "preserves a single observed false predicate as complete Boolean evidence" do
+    request = {
+      "anchor" => anchor(symbol: "local predicate", kind: "BRANCH_PREDICATE", name: "size"),
+      "required" => %w[RECEIVER_VALUE CALL_TARGET RESULT_VALUE BOOLEAN_RESULT],
+    }
+    raw = event(truth: false)
+    raw["result_domain"] = {
+      "types" => ["FalseClass"],
+      "singletons" => [],
+      "elements" => [],
+      "keys" => [],
+      "values" => [],
+      "shapes" => [],
+    }
+
+    Dir.mktmpdir do |directory|
+      evidence = parse(
+        NilKill::Runtime::ValueEvidenceEmitter.emit(
+          root: NilKill::ROOT,
+          runtime_dir: directory,
+          events: [raw],
+          plan: plan(request)
+        ).fetch("path")
+      )
+
+      expect(evidence.dig("anchors", 0, "capture", "status")).to eq("COMPLETE_FOR_RUNS")
+      expect(evidence.dig("anchors", 0, "executions", 0, "boolean_result")).to be(false)
     end
   end
 

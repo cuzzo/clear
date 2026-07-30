@@ -1653,6 +1653,60 @@ RSpec.describe "nil-kill runtime trace" do
     end
   end
 
+  it "brackets only opaque callsite keys that require runtime disambiguation" do
+    Dir.mktmpdir("nil-kill-exact-anchor-cost", NilKill::ROOT) do |dir|
+      src = File.join(dir, "exact_anchor_cost.rb")
+      first_line = 'first = normalize("a"); second = normalize("b")'
+      unique_line = 'third = normalize("c")'
+      File.write(src, "#{first_line}\n#{unique_line}\n")
+      request = lambda do |symbol, line, start_character, expression|
+        {
+          "anchor" => {
+            "kind" => "CALL_SELECTOR",
+            "relative_path" => src,
+            "display_name" => "normalize",
+            "symbol" => symbol,
+            "range" => {
+              "start_line" => line,
+              "start_character" => start_character,
+              "end_line" => line,
+              "end_character" => start_character + "normalize".length,
+            },
+          },
+          "execution_range" => {
+            "start_line" => line,
+            "start_character" => start_character,
+            "end_line" => line,
+            "end_character" => start_character + expression.length,
+          },
+        }
+      end
+      first_start = first_line.index("normalize")
+      second_start = first_line.rindex("normalize")
+      unique_start = unique_line.index("normalize")
+      plan = {
+        "methods" => {},
+        "runtime_evidence" => {
+          "requests" => [
+            request.call("local first", 0, first_start, 'normalize("a")'),
+            request.call("local second", 0, second_start, 'normalize("b")'),
+            request.call("local unique", 1, unique_start, 'normalize("c")'),
+          ],
+        },
+      }
+      FileUtils.mkdir_p(File.dirname(NilKill::TRACE_PLAN_PATH))
+      File.write(NilKill::TRACE_PLAN_PATH, JSON.generate(plan))
+
+      instrumented = NilKill::SourceInstrumenter.new.instrument_file(src)
+
+      expect(instrumented.scan("begin_runtime_anchor_execution").length).to eq(2)
+      expect(instrumented).to include('"local first"')
+      expect(instrumented).to include('"local second"')
+      expect(instrumented).not_to include('"local unique"')
+      expect(instrumented).to include(unique_line)
+    end
+  end
+
   it "records loop iterations against original source lines even when __LINE__ is present" do
     Dir.mktmpdir("nil-kill-loop-line", NilKill::ROOT) do |dir|
       src = File.join(dir, "loop_line.rb")
