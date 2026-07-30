@@ -149,6 +149,17 @@ module NilKill
       end
     end
 
+    # Stage timing, off unless asked for. A collect is a pipeline and the only
+    # useful question about it is which stage owns the time.
+    def stage(name)
+      return yield unless ENV["NIL_KILL_STAGE_TIMING"] == "1"
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      result = yield
+      warn format("stage %-26s %6.2fs", name, Process.clock_gettime(Process::CLOCK_MONOTONIC) - started)
+      result
+    end
+
     def collect
       fast = @argv.delete("--fast")
       append = @argv.delete("--append-runtime")
@@ -163,15 +174,17 @@ module NilKill
         abort "usage: bundle exec tools/nil-kill collect [--fast] [--commands FILE] [--continue-on-error] -- <command...>"
       end
       trace_plan_enabled = ENV["NIL_KILL_TRACE_PLAN"] != "0"
-      TracePlan.write if trace_plan_enabled
+      stage("trace-plan") { TracePlan.write if trace_plan_enabled }
       trace_plan = File.file?(TRACE_PLAN_PATH) ? JSON.parse(File.read(TRACE_PLAN_PATH)) : {}
       trace_plan_digest = trace_plan.dig("runtime_evidence", "plan_digest").to_s
       target_files = NilKill.target_files
-      inventory = Runtime::FunctionInventory.build(
-        root: ROOT,
-        files: target_files,
-        trace_plan: trace_plan
-      )
+      inventory = stage("function-inventory") do
+        Runtime::FunctionInventory.build(
+          root: ROOT,
+          files: target_files,
+          trace_plan: trace_plan
+        )
+      end
       snapshot = fast && begin
         Runtime::Snapshot.load(root: ROOT, runtime_dir: RUNTIME_DIR)
       rescue ArgumentError => error
@@ -235,7 +248,7 @@ module NilKill
       jobs = ENV["NK_JOBS"] || ENV["NIL_KILL_JOBS"] || Etc.nprocessors.to_s rescue "4"
       shard_jobs = ENV.fetch(
         "NIL_KILL_SHARD_JOBS",
-        [[jobs.to_i, 1].max, [selected.size, 1].max, 4].min.to_s
+        [[jobs.to_i, 1].max, [selected.size, 1].max].min.to_s
       ).to_i.clamp(1, [selected.size, 1].max)
       default_inner_jobs = [[jobs.to_i, 1].max / shard_jobs, 1].max.to_s
       tracer = File.expand_path("runtime_trace.rb", __dir__)
@@ -319,10 +332,10 @@ module NilKill
       end
       # Parsing and digest-checking the plan costs about as much as tracing a
       # shard, so it happens once rather than once per shard.
-      evidence_plan = Runtime::EvidenceProtocol.plan
+      evidence_plan = stage("plan-parse") { Runtime::EvidenceProtocol.plan }
       trace_languages =
         target_files.filter_map { |path| Languages.provider_for_path(path)&.language }.uniq
-      selected.each do |shard|
+      stage("trace-write + join") { selected.each do |shard|
         shard_id = shard.fetch("id")
         shard_dir = File.join(working_runtime_dir, shard_id)
         dependency_updates[shard_id] = dependencies_for_shard(shard_dir, inventory)
@@ -341,7 +354,7 @@ module NilKill
         staged_evidence[shard_id] = Runtime::TraceArtifact.join(
           root: ROOT, trace: trace_path, output: File.join(shard_dir, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
         )
-      end
+      end }
       shard_store = File.join(RUNTIME_DIR, "shard-evidence")
       FileUtils.mkdir_p(shard_store)
       current_shards = workload.shard_ids
@@ -363,12 +376,12 @@ module NilKill
         selection.fetch("deleted_shards").map { |id| File.join(shard_store, "#{id}.json.gz") }
       ).uniq
       emitted = with_canonical_snapshot_transaction(extra_paths: transaction_paths) do
-        canonical_evidence = Runtime::EvidenceMerger.write(
+        canonical_evidence = stage("evidence-merge") { Runtime::EvidenceMerger.write(
           effective,
           File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT),
           plan: Runtime::EvidenceProtocol.plan
-        )
-        result = Runtime::ScipEmitter.emit(
+        ) }
+        result = stage("scip-index") { Runtime::ScipEmitter.emit(
           root: ROOT,
           runtime_dir: working_runtime_dir,
           output: File.join(RUNTIME_DIR, "runtime.scip.json"),
@@ -379,7 +392,7 @@ module NilKill
             "runtime_scip.snapshot_mode" => fast ? "fast" : "full",
             "runtime_scip.potentially_stale" => selection.fetch("uncertain_closure").to_s
           )
-        )
+        ) }
         staged_evidence.each do |shard_id, path|
           Runtime::JsonIO.write(destinations.fetch(shard_id), Runtime::JsonIO.read(path))
         end
