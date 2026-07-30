@@ -30,7 +30,8 @@ class BigOLocalTypesTest < Minitest::Test
   TYPED = {
     # Appending each element of a collection sums to that collection, so none
     # of these is quadratic - the same shape Go's VariableArgumentWrite pins.
-    "typed.cs" => { "SumLengths" => "O(N)", "Has" => "O(1)", "Join" => "O(N)", "Copy" => "O(N)" },
+    "typed.cs" => { "SumLengths" => "O(N)", "Has" => "O(1)", "Join" => "O(N)", "Copy" => "O(N)",
+                    "CountDown" => "O(N)" },
     "typed.ts" => { "sumLengths" => "O(N)", "lookup" => "O(1)", "copy" => "O(N)" }
   }.freeze
 

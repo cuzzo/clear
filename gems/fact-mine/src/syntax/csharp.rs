@@ -417,6 +417,13 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         super::normalized_behavior::foreach_binding_names(&node.text, &["in"])
     }
 
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        &[
+            "int", "long", "short", "byte", "sbyte", "uint", "ulong", "ushort", "float", "double",
+            "decimal", "bool", "char", "nint", "nuint",
+        ]
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("csharp")
     }

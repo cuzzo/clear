@@ -1262,12 +1262,31 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
 
     /// Price an operator only when the language adapter recognizes both the
     /// operator and a compiler/DFG-proven scalar operand type.
+    /// The primitive types this language treats as machine scalars. A string is
+    /// never one: it is a sequence, and `string_operand_complexity` prices it.
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// An operator applied to a proven machine scalar is a single instruction in
+    /// every language. Only the type names differ, so the rule lives here and
+    /// each language contributes its own names.
     fn scalar_operator_complexity(
         &self,
-        _message: &str,
-        _operand_type: Option<&TypeExpr>,
+        message: &str,
+        operand_type: Option<&TypeExpr>,
     ) -> Option<NormalizedCallComplexity> {
-        None
+        const SCALAR_OPERATORS: &[&str] = &[
+            "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&", "|", "^", "<<", ">>",
+            "&&", "||",
+        ];
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if !SCALAR_OPERATORS.contains(&operator) {
+            return None;
+        }
+        let names = self.scalar_type_names();
+        matches!(operand_type, Some(TypeExpr::Primitive(name)) if names.contains(&name.as_str()))
+            .then_some(NormalizedCollectionOperation::Constant.complexity())
     }
 
     /// Strings are sequences: concatenating copies both operands and ordering

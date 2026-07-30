@@ -23,4 +23,11 @@ public class Typed {
     foreach (string item in items) { output.Add(item); }
     return output;
   }
+
+  // A scalar comparison is a machine instruction, not an unpriced call.
+  public int CountDown(long limit) {
+    int steps = 0;
+    for (long n = limit; n > 0; n--) { steps++; }
+    return steps;
+  }
 }
