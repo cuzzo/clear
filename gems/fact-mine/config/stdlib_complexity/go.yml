@@ -478,7 +478,7 @@ Intrinsic:
   # Language builtins. These are syntax-proven by the Go adapter and do not
   # require a SCIP declaration. Materializing operations use worst-case upper
   # bounds, including allocation/copy during append growth.
-  append: linear_materialize
+  append: linear_argument
   make: linear_materialize
   new: constant
   copy: linear_scan
