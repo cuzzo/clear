@@ -377,12 +377,14 @@ module Espalier
         Espalier::SymbolicComplexity.degree(substituted).zero?
 
       relation = context["argument_cardinality_relation"]
-      if receiver_state_dependent || relation == "independent_of"
-        Espalier::SymbolicComplexity.multiply(execution, substituted)
-      elsif relation == "partition_of" && !Espalier::SymbolicComplexity.opaque_cost?(substituted)
+      if relation == "partition_of" && !receiver_state_dependent &&
+         !Espalier::SymbolicComplexity.opaque_cost?(substituted)
         Espalier::SymbolicComplexity.sum(execution, substituted)
       else
-        nil
+        # An unproven relation is not an unknowable one: the product of two
+        # proven bounds is still a bound, which is what the rendered path has
+        # always used. Dropping the expression here discarded the whole result.
+        Espalier::SymbolicComplexity.multiply(execution, substituted)
       end
     end
 
