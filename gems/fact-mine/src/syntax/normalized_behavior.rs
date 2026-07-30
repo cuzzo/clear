@@ -1584,6 +1584,11 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    /// Which half of a map's pairs this adapter yields, if it yields one.
+    fn iterator_map_projection(&self, _message: &str) -> Option<&'static str> {
+        None
+    }
+
     /// Whether this adapter yields its receiver's elements unchanged, so a
     /// closure further along the chain still receives that element type.
     fn iterator_element_preserving(&self, _message: &str) -> bool {

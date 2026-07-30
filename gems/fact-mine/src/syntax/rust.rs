@@ -209,9 +209,9 @@ const RUST_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     strip_prefixes: &["&mut "],
     trim_prefix_chars: &['&'],
     trim_suffix_chars: &[],
-    array_names: &["Vec"],
-    hash_names: &["HashMap"],
-    set_names: &["HashSet"],
+    array_names: &["Vec", "VecDeque"],
+    hash_names: &["HashMap", "BTreeMap"],
+    set_names: &["HashSet", "BTreeSet"],
     string_names: &["String", "str"],
     bare_array_names: &[],
     suffix_array: false,
@@ -427,6 +427,14 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
                 | "for_each" | "position" | "retain" | "take_while" | "skip_while" | "inspect"
                 | "partition" | "min_by_key" | "max_by_key" | "sort_by_key" | "map_while"
         )
+    }
+
+    fn iterator_map_projection(&self, message: &str) -> Option<&'static str> {
+        match message {
+            "values" | "values_mut" | "into_values" => Some("values"),
+            "keys" | "into_keys" => Some("keys"),
+            _ => None,
+        }
     }
 
     fn iterator_element_preserving(&self, message: &str) -> bool {

@@ -2175,6 +2175,15 @@ fn resolve_expr_type(
     if let Some(state_type) = state_types.get(expr.trim_start_matches('@')) {
         return Some(state_type.clone());
     }
+    // A state field read through the receiver names that field: state is keyed
+    // by the bare name, and the receiver is how the source spells reaching it.
+    if let Some((receiver, field)) = expr.split_once('.') {
+        if matches!(receiver.trim(), "self" | "this" | "Self") {
+            if let Some(state_type) = state_types.get(field.trim()) {
+                return Some(state_type.clone());
+            }
+        }
+    }
     // `xs[i]` has the element type of `xs`.
     if let Some(indexed) = expr.strip_suffix(']').and_then(|rest| rest.split_once('[')) {
         if let Some(TypeExpr::Array(element)) =
@@ -3333,14 +3342,37 @@ fn closure_element_type(
         return None;
     }
     let mut base = call_receiver(node)?;
-    while base.r#type == "CALL" {
-        if !behavior.iterator_element_preserving(direct_call_message(base)?) {
+    let mut projection = None;
+    loop {
+        // Whatever the chain currently stands on may already name the
+        // collection: a field or a local is where the walk ends, and a field
+        // access is spelled as a call in some languages.
+        if let Some(declared) = resolve_expr_type(base.text.trim(), types, state_types, field_types)
+        {
+            return collection_element_type(declared, projection);
+        }
+        if base.r#type != "CALL" {
+            return None;
+        }
+        let message = direct_call_message(base)?;
+        if let Some(part) = behavior.iterator_map_projection(message) {
+            if projection.replace(part).is_some() {
+                return None;
+            }
+        } else if !behavior.iterator_element_preserving(message) {
             return None;
         }
         base = call_receiver(base)?;
     }
-    match resolve_expr_type(base.text.trim(), types, state_types, field_types)?.strip_nilable() {
-        TypeExpr::Array(element) | TypeExpr::Set(element) => Some(*element),
+}
+
+/// What one step of iterating a collection yields. A map yields a pair unless
+/// the chain already said which half it wants, and a pair is not one element.
+fn collection_element_type(declared: TypeExpr, projection: Option<&str>) -> Option<TypeExpr> {
+    match (declared.strip_nilable(), projection) {
+        (TypeExpr::Array(element), None) | (TypeExpr::Set(element), None) => Some(*element),
+        (TypeExpr::Hash { value, .. }, Some("values")) => Some(*value),
+        (TypeExpr::Hash { key, .. }, Some("keys")) => Some(*key),
         _ => None,
     }
 }
