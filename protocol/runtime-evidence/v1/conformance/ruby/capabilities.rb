@@ -404,5 +404,53 @@ module RuntimeEvidenceConformance
     def native_dependency_constant_call
       TreeSitter.languages
     end
+
+    def interpolation_with_index_calls(index, row, field, message)
+      index[message] << "#{row[:owner]}##{field[:name]}"
+    end
+
+    def production_interpolation_caller(index, row, field, message)
+      interpolation_with_index_calls(index, row, field, message)
+    end
+
+    def modifier_with_repeated_index_calls(target, source, key)
+      target[key].concat(source[key]) if source[key]
+    end
+
+    def nested_callbacks_with_interpolation(groups)
+      groups.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |group, index|
+        group[:fields].each do |field|
+          index["message"] << "#{group[:owner]}##{field[:name]}"
+        end
+      end
+    end
+
+    def native_yield_then_same_line_sibling(index, row, key)
+      index[key]; row[:owner]
+    end
+
+    def constructor_result_flow(klass)
+      value = klass.new(:constructed)
+      value.normalize
+    end
+
+    def yielding_native_result_flow(values)
+      normalized = values.map { |value| value.normalize }
+      normalized.first
+    end
+
+    def nested_index_receiver_flow(constant_operations, owner, message)
+      constant_operations[owner].include?(message)
+    end
+
+    def ternary_callback_result_flow(flag, values, fallback, key)
+      selected = flag ? values.map { |value| value.normalize } : fallback[key]
+      selected.first
+    end
+
+    def repeated_short_circuit_env
+      ENV["NIL_KILL_CONFORMANCE_VALUE"] &&
+        !ENV["NIL_KILL_CONFORMANCE_VALUE"].empty?
+    end
   end
 end

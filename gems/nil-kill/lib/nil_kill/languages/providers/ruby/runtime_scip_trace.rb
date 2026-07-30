@@ -431,7 +431,17 @@ module NilKillRuntimeTrace
     # callsite, receiver, or result to FactMine, so reject it before path
     # normalization, trace-plan lookup, receiver inspection, or allocation.
     return unless frame&.fetch(:caller, nil) && frame[:callsite]
-    selector_filter = @runtime_scip_native_selector_filter
+    callsite = runtime_scip_native_callsite(tp, frame.fetch(:callsite))
+    # A native call may yield to a selected Ruby block. Ruby reports a line
+    # event for that block even though this method tracer does not create a
+    # method frame for :b_call. The line correctly arms demands inside the
+    # block, but its selector filter must not reject native calls that resume
+    # later in the yielding expression. TracePoint supplies the resumed
+    # call's exact source coordinate, so apply the plan filter for that
+    # coordinate instead of trusting mutable line-window state.
+    native_activation = runtime_scip_native_activation(callsite)
+    selector_filter =
+      native_activation.is_a?(Array) ? native_activation : nil
     if selector_filter && !selector_filter.include?(tp.method_id.to_s)
       if @runtime_scip_native_result_depth.to_i.positive?
         @runtime_scip_native_calls[Thread.current.object_id] << {
@@ -444,7 +454,6 @@ module NilKillRuntimeTrace
       return
     end
 
-    callsite = runtime_scip_native_callsite(tp, frame&.fetch(:callsite, nil))
     callsite = runtime_exact_anchor_callsite(callsite, tp.method_id)
     capture_call, capture_result, receiver_shape =
       runtime_scip_captures_for(callsite, tp.method_id)
@@ -791,6 +800,34 @@ module NilKillRuntimeTrace
     nil
   end
 
+  # Ruby exposes singleton methods on constant objects such as ENV through an
+  # anonymous singleton class. TracePoint therefore has an exact receiver but
+  # `Module#name` cannot provide its source-level owner. Preserve the loaded
+  # top-level constant whose value is identical to that receiver. This is
+  # reflection-only identity recovery: it does not resolve dispatch, inspect
+  # source, or infer any behavior/cost. Avoid autoloads so observation cannot
+  # change application execution.
+  def self.runtime_named_singleton_owner(value)
+    constants = Object.constants(false)
+    if @runtime_named_singleton_owner_constant_count != constants.length
+      owners = {}
+      constants.sort_by(&:to_s).each do |constant_name|
+        next if Object.autoload?(constant_name)
+
+        constant_value = Object.const_get(constant_name, false)
+        owners[constant_value.__id__] ||= [constant_name.to_s, "class"]
+      rescue NameError
+        next
+      end
+      @runtime_named_singleton_owners = owners.freeze
+      @runtime_named_singleton_owner_constant_count = constants.length
+    end
+
+    @runtime_named_singleton_owners[value.__id__]
+  rescue StandardError
+    nil
+  end
+
   def self.record_runtime_scip_call(tp, receiver_shape: true, deduplicate: false, callsite: nil)
     return if Thread.current[:__nil_kill_runtime_scip] ||
       Thread.current[:__nil_kill_collection_hook]
@@ -814,6 +851,12 @@ module NilKillRuntimeTrace
             end
     if (!owner || !owner[0]) && tp.self.is_a?(Struct)
       owner = [runtime_record_type_name(tp.self), "instance"]
+    end
+    if !owner &&
+        tp.event == :c_call &&
+        tp.defined_class.respond_to?(:singleton_class?) &&
+        tp.defined_class.singleton_class?
+      owner = runtime_named_singleton_owner(tp.self)
     end
     owner ||= runtime_anonymous_method_owner(tp)
     return unless owner && owner[0]

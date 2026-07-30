@@ -962,6 +962,231 @@ cases:
       target_kind: class
       source_role: DEPENDENCY
 
+  - id: interpolation_outer_index
+    capabilities: [string-interpolation, selected-production-caller, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: interpolation_with_index_calls, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: interpolation_first_nested_index
+    capabilities: [string-interpolation, selected-production-caller, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: interpolation_with_index_calls, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: interpolation_second_nested_index
+    capabilities: [string-interpolation, selected-production-caller, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: interpolation_with_index_calls, selector: "[]", occurrence: 3 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: interpolation_outer_append
+    capabilities: [string-interpolation, selected-production-caller, nested-call, same-line, exact-execution-range, operator-method, collection-mutation]
+    anchor: { method: interpolation_with_index_calls, selector: "<<", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: "<<"
+      source_role: STANDARD_LIBRARY
+
+  - id: modifier_target_index
+    capabilities: [modifier-condition, short-circuit-call, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: modifier_with_repeated_index_calls, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: modifier_argument_index
+    capabilities: [modifier-condition, short-circuit-call, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: modifier_with_repeated_index_calls, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: modifier_guard_index
+    capabilities: [modifier-condition, short-circuit-call, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: modifier_with_repeated_index_calls, selector: "[]", occurrence: 3 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: modifier_nested_concat
+    capabilities: [modifier-condition, short-circuit-call, nested-call, same-line, exact-execution-range, collection-mutation]
+    anchor: { method: modifier_with_repeated_index_calls, selector: concat, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: concat
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_collection_index
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, index-read, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_outer_index
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, string-interpolation, nested-call, same-line, repeated-selector, index-read, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_first_interpolated_index
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, string-interpolation, nested-call, same-line, repeated-selector, index-read, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "[]", occurrence: 3 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_second_interpolated_index
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, string-interpolation, nested-call, same-line, repeated-selector, index-read, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "[]", occurrence: 4 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_interpolated_append
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, string-interpolation, nested-call, same-line, collection-mutation, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "<<", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: "<<"
+      source_role: STANDARD_LIBRARY
+
+  - id: native_yield_default_index
+    capabilities: [native-call, native-yield, callback, selected-callback-source, resumed-expression, same-line, repeated-selector, exact-execution-range]
+    anchor: { method: native_yield_then_same_line_sibling, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: native_yield_resumed_sibling_index
+    capabilities: [native-call, native-yield, callback, selected-callback-source, resumed-expression, same-line, repeated-selector, exact-execution-range]
+    anchor: { method: native_yield_then_same_line_sibling, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: ordinary_constructor_result
+    capabilities: [constructor, native-call, ruby-callback, result-flow, result]
+    anchor: { method: constructor_result_flow, selector: new, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Class
+      result_type: RuntimeEvidenceConformance::Value
+
+  - id: yielding_iterator_result
+    capabilities: [native-call, native-yield, callback, result-flow, container-shape, result, collection-value]
+    anchor: { method: yielding_native_result_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      result_element_type: String
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_index_receiver_source
+    capabilities: [nested-receiver, result-flow, native-call, index-read, exact-execution-range]
+    anchor: { method: nested_index_receiver_flow, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      result_type: Set
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_index_receiver_consumer
+    capabilities: [nested-receiver, result-flow, native-call, predicate, exact-execution-range]
+    anchor: { method: nested_index_receiver_flow, selector: include?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Set
+      target_owner: Set
+      target_name: include?
+      source_role: STANDARD_LIBRARY
+
+  - id: ternary_yielding_result
+    capabilities: [ternary, native-call, native-yield, callback, result-flow, container-shape]
+    anchor: { method: ternary_callback_result_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      source_role: STANDARD_LIBRARY
+
+  - id: ternary_fallback_index
+    capabilities: [ternary, alternative-branch, native-call, result-flow, index-read]
+    anchor: { method: ternary_callback_result_flow, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      result_type: Array
+      source_role: STANDARD_LIBRARY
+
+  - id: short_circuit_first_index
+    capabilities: [short-circuit, repeated-selector, native-call, predicate, constant-receiver, environment, exact-execution-range]
+    anchor: { method: repeated_short_circuit_env, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+
+  - id: short_circuit_second_index
+    capabilities: [short-circuit, repeated-selector, native-call, predicate, constant-receiver, environment, exact-execution-range]
+    anchor: { method: repeated_short_circuit_env, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+
 boundary_cases:
   - id: parameter_value
     capabilities: [function-entry, parameter-value]

@@ -23,9 +23,10 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     File.read(File.join(CONFORMANCE_ROOT, path))
   end
 
-  def run_collector_oracle
+  def run_collector_oracle(target_driver:)
     dir = Dir.mktmpdir("nk-runtime-conformance", NilKill::ROOT)
     production_dir = File.join(dir, "production")
+    collect_dir = File.join(dir, ".nil-kill")
     source = catalog.fetch("fixture").fetch("source")
     lib(production_dir, fixture(source), File.basename(source))
     catalog.dig("fixture", "support").each do |support|
@@ -34,40 +35,69 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     end
     driver = fixture(catalog.fetch("fixture").fetch("driver"))
       .sub('require_relative "capabilities"', 'require_relative "production/capabilities"')
-    result = mini_collect(
-      dir,
-      File.join("production", File.basename(source)),
-      driver,
-      runtime_scip: true,
-      targets: production_dir
+    driver_path = lib(dir, driver, "driver.rb")
+    executable = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill.rb")
+    stdout, stderr, status = Open3.capture3(
+      {
+        "NIL_KILL_ROOT" => NilKill::ROOT,
+        "NIL_KILL_TARGETS" => (
+          # Exercise both entry modes: ordinary tests outside the production
+          # surface and a selected-source executable/callback entering the
+          # same production methods.
+          target_driver ? [production_dir, driver_path] : [production_dir]
+        ).join(File::PATH_SEPARATOR),
+        "NIL_KILL_TMP_DIR" => collect_dir,
+        "NIL_KILL_SHARD_JOBS" => "1",
+        "FACT_MINE_RUST_BINARY" =>
+          Espalier::StaticEvidence::FACT_MINE_RUST_BINARY,
+      },
+      RbConfig.ruby,
+      executable,
+      "collect",
+      "--",
+      RbConfig.ruby,
+      driver_path,
+      chdir: NilKill::ROOT
     )
-    plan = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH)).fetch("runtime_evidence")
-    # The production collector restores the source snapshot after the traced
-    # process. The mini harness intentionally leaves its throwaway source
-    # wrapped for instrumentation assertions, so restore it here before the
-    # end-to-end FactMine snapshot check.
-    File.write(File.join(production_dir, File.basename(source)), fixture(source))
-    catalog.dig("fixture", "support").each do |support|
-      relative = support.sub(%r{\Aruby/}, "")
-      File.write(File.join(dir, relative), fixture(support))
+    unless status.success?
+      raise <<~MESSAGE
+        production collector oracle failed with status #{status.exitstatus}
+        stdout:
+        #{stdout}
+        stderr:
+        #{stderr}
+      MESSAGE
     end
-    emitted = NilKill::Runtime::ValueEvidenceEmitter.emit(
-      root: NilKill::ROOT,
-      runtime_dir: NilKill::RUNTIME_DIR,
-      events: result.fetch(:runtime_calls),
-      plan: plan
+
+    trace_plan_path = File.join(collect_dir, "trace-plan.json")
+    runtime_dir = File.join(collect_dir, "runtime")
+    evidence_path = File.join(
+      runtime_dir,
+      NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT
     )
-    result.merge(
+    plan = JSON.parse(File.read(trace_plan_path)).fetch("runtime_evidence")
+    runtime_calls = Dir.glob(
+      File.join(runtime_dir, "runs", "**", "runtime-calls-*.jsonl{,.gz}")
+    ).sort.flat_map do |path|
+      NilKill::Runtime::JsonIO.foreach(path).filter_map do |line|
+        JSON.parse(line) unless line.strip.empty?
+      end
+    end
+    {
+      status: status,
+      out: stdout,
+      err: stderr,
       fixture_root: dir,
       source: File.join(production_dir, File.basename(source)),
-      runtime_dir: NilKill::RUNTIME_DIR,
+      runtime_dir: runtime_dir,
       support: catalog.dig("fixture", "support").map do |support|
         File.join(dir, support.sub(%r{\Aruby/}, ""))
       end,
+      runtime_calls: runtime_calls,
       plan: plan,
-      evidence_path: emitted.fetch("path"),
-      evidence: NilKill::Runtime::JsonIO.parse(emitted.fetch("path"))
-    )
+      evidence_path: evidence_path,
+      evidence: NilKill::Runtime::JsonIO.parse(evidence_path),
+    }
   rescue StandardError
     FileUtils.remove_entry(dir) if dir && File.directory?(dir)
     raise
@@ -86,7 +116,18 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       exact = plan.fetch("requests").select do |request|
         exact_symbols.include?(request.dig("anchor", "symbol"))
       end
-      return exact.sort_by do |request|
+      paths = exact.map { |request| request.dig("anchor", "relative_path") }.uniq
+      lines = events.map { |event| event.dig("callsite", "line").to_i - 1 }.uniq
+      # An absent sibling event is precisely what this oracle must expose.
+      # Do not let the first successfully correlated same-line event hide
+      # other planned occurrences of the same selector.
+      same_source_occurrences = plan.fetch("requests").select do |request|
+        source_anchor = request.fetch("anchor")
+        paths.include?(source_anchor.fetch("relative_path")) &&
+          source_anchor.fetch("display_name") == anchor.fetch("selector") &&
+          lines.include?(source_anchor.dig("range", "start_line").to_i)
+      end
+      return (exact | same_source_occurrences).sort_by do |request|
         range = request.fetch("anchor").fetch("range")
         [
           range.fetch("start_line"),
@@ -150,12 +191,15 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
   end
 
   before(:context) do
-    @collector = run_collector_oracle
+    @collector = run_collector_oracle(target_driver: true)
+    @external_collector = run_collector_oracle(target_driver: false)
   end
 
   after(:context) do
-    root = @collector && @collector[:fixture_root]
-    FileUtils.remove_entry(root) if root && File.directory?(root)
+    [@collector, @external_collector].compact.each do |result|
+      root = result[:fixture_root]
+      FileUtils.remove_entry(root) if root && File.directory?(root)
+    end
   end
 
   it "uses one shared catalog that covers the complete v1 behavior matrix" do
@@ -431,6 +475,42 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     end
   end
 
+  it "collector oracle: the same catalog is complete from an unselected workload entrypoint" do
+    by_symbol = @external_collector.fetch(:evidence).fetch("anchors").to_h do |row|
+      [row.fetch("anchor_symbol"), row]
+    end
+    fields = {
+      "RECEIVER_VALUE" => "receiver",
+      "COLLECTION_VALUE" => "receiver",
+      "CALL_TARGET" => "target",
+      "RESULT_VALUE" => "result",
+      "BOOLEAN_RESULT" => "boolean_result",
+    }
+    catalog.fetch("cases").reject { |row| row.dig("expect", "correlation") }.each do |test_case|
+      expected = test_case.fetch("expect")
+      request = selected_request(@external_collector, test_case.fetch("anchor"))
+      row = by_symbol.fetch(request.dig("anchor", "symbol"))
+      status = expected.fetch("allowed_status", "COMPLETE_FOR_RUNS")
+      expect(row.dig("capture", "status")).to eq(status), test_case.fetch("id")
+      complete =
+        if status == "COMPLETE_FOR_RUNS"
+          expected.fetch("required")
+        else
+          expected.fetch("complete_kinds", [])
+        end
+      expect(row.dig("capture", "complete_kinds")).to include(*complete),
+        test_case.fetch("id")
+      next if row.fetch("executions").empty?
+
+      row.fetch("executions").each do |bucket|
+        complete.grep(fields.keys).each do |kind|
+          expect(bucket).to have_key(fields.fetch(kind)),
+            "#{test_case.fetch('id')} omitted #{kind} from external-entry collection"
+        end
+      end
+    end
+  end
+
   it "collector oracle: FactMine supplies every call's closed execution range" do
     catalog.fetch("cases").each do |test_case|
       request = selected_request(@collector, test_case.fetch("anchor"))
@@ -572,6 +652,16 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     requests = @collector.fetch(:plan).fetch("requests").to_h do |request|
       [request.dig("anchor", "symbol"), request]
     end
+    evidence_symbols = @collector.fetch(:evidence).fetch("anchors")
+      .map { |row| row.fetch("anchor_symbol") }
+      .to_set
+    expect(evidence_symbols).to eq(requests.keys.to_set),
+      "canonical evidence must account for every planned anchor exactly once"
+    allowed_partial_symbols = catalog.fetch("cases").filter_map do |test_case|
+      next unless test_case.dig("expect", "allowed_status") == "PARTIAL"
+
+      selected_request(@collector, test_case.fetch("anchor")).dig("anchor", "symbol")
+    end.to_set
     @collector.fetch(:evidence).fetch("anchors").each do |row|
       request = requests.fetch(row.fetch("anchor_symbol"))
       capture = row.fetch("capture")
@@ -583,6 +673,13 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
         expect(capture.fetch("status")).not_to eq("COMPLETE_FOR_RUNS")
         expect(capture.fetch("reason")).not_to be_empty,
           "#{row.fetch("anchor_symbol")} omitted #{missing.to_a.sort} without explanation"
+      end
+      if capture.fetch("status") == "PARTIAL" &&
+          capture.fetch("observed_executions").to_i.positive?
+        expect(allowed_partial_symbols).to include(row.fetch("anchor_symbol")),
+          "executed anchor #{row.fetch('anchor_symbol')} was partial without " \
+          "an explicit semantic exception in the shared catalog: " \
+          "#{capture.fetch('reason')} request=#{JSON.generate(request)}"
       end
       row.fetch("executions").each do |bucket|
         complete.each do |kind|

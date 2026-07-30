@@ -114,3 +114,35 @@ subject.exception_value_flow
 subject.dependency_call(%w[a], %w[b])
 subject.native_dependency_class_call(TreeSitter)
 subject.native_dependency_constant_call
+subject.production_interpolation_caller(
+  Hash.new { |hash, key| hash[key] = [] },
+  { owner: "Owner" },
+  { name: "member" },
+  "message"
+)
+subject.modifier_with_repeated_index_calls(
+  { key: ["left"] },
+  { key: ["right"] },
+  :key
+)
+subject.nested_callbacks_with_interpolation(
+  [{ owner: "Owner", fields: [{ name: "member" }] }]
+)
+subject.native_yield_then_same_line_sibling(
+  Hash.new { |hash, key| hash[key] = [] },
+  { owner: "Owner" },
+  :message
+)
+subject.constructor_result_flow(RuntimeEvidenceConformance::Value)
+subject.yielding_native_result_flow([left, right])
+subject.nested_index_receiver_flow(
+  { owner: Set.new(["message"]) },
+  :owner,
+  "message"
+)
+subject.ternary_callback_result_flow(true, [left, right], { other: [left] }, :other)
+subject.ternary_callback_result_flow(false, [left, right], { other: [left] }, :other)
+ENV["NIL_KILL_CONFORMANCE_VALUE"] = "value"
+subject.repeated_short_circuit_env
+ENV.delete("NIL_KILL_CONFORMANCE_VALUE")
+subject.repeated_short_circuit_env

@@ -1244,7 +1244,7 @@ RSpec.describe "NilKill coverage hardening" do
       FileUtils.rm_f(target_file) if defined?(target_file)
     end
 
-    it "rejects native selectors outside the active FactMine demand before resolving a callsite" do
+    it "rejects native selectors against the exact TracePoint callsite demand" do
       target_file = File.join(described_class::TARGETS.first, "runtime_native_budget_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "payload.fetch('rows')\n")
@@ -1266,6 +1266,8 @@ RSpec.describe "NilKill coverage hardening" do
       allow(described_class).to receive(:runtime_scip_native_call_trace).and_return(native_calls)
       allow(described_class).to receive(:runtime_scip_native_calls_enabled?).and_return(true)
       allow(described_class).to receive(:runtime_scip_native_callsite)
+        .and_return(path: target_file, line: 1)
+      allow(described_class).to receive(:record_runtime_scip_call)
 
       described_class.record_runtime_scip_line(
         FakeTracePoint.new(path: target_file, lineno: 1)
@@ -1280,7 +1282,8 @@ RSpec.describe "NilKill coverage hardening" do
       ))
 
       expect(native_calls).to have_received(:enable).once
-      expect(described_class).not_to have_received(:runtime_scip_native_callsite)
+      expect(described_class).to have_received(:runtime_scip_native_callsite).once
+      expect(described_class).not_to have_received(:record_runtime_scip_call)
     ensure
       FileUtils.rm_f(target_file) if defined?(target_file)
     end

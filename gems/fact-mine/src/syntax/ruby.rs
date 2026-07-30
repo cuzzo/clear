@@ -1449,14 +1449,26 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn value_preserving_call_result_operands<'a>(&self, node: &'a Node) -> Option<Vec<&'a Node>> {
-        matches!(node.r#type.as_str(), "OR" | "AND")
-            .then(|| {
+        if matches!(node.r#type.as_str(), "OR" | "AND") {
+            return Some(
                 node.children
                     .iter()
                     .filter_map(ast::node)
-                    .collect::<Vec<_>>()
-            })
-            .filter(|operands| operands.len() >= 2)
+                    .collect::<Vec<_>>(),
+            )
+            .filter(|operands| operands.len() >= 2);
+        }
+        if matches!(node.r#type.as_str(), "IF" | "UNLESS") {
+            let operands = node
+                .children
+                .iter()
+                .skip(1)
+                .filter_map(ast::node)
+                .filter_map(ruby_branch_result)
+                .collect::<Vec<_>>();
+            return (operands.len() == 2).then_some(operands);
+        }
+        None
     }
 
     fn nullable_call_result_contract(&self, node: &Node) -> Option<&'static str> {
@@ -2804,6 +2816,18 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 }
 
+fn ruby_branch_result(node: &Node) -> Option<&Node> {
+    if matches!(node.r#type.as_str(), "BLOCK" | "BEGIN" | "EXPRESSION_LIST") {
+        return node
+            .children
+            .iter()
+            .filter_map(ast::node)
+            .next_back()
+            .and_then(ruby_branch_result);
+    }
+    Some(node)
+}
+
 /// Ruby has two syntactically distinct array-literal families.  Tree-sitter's
 /// normalized node kind for `%w[...]` is not stable across parser versions, so
 /// the Ruby adapter owns this source-syntax check instead of making shared
@@ -3311,6 +3335,52 @@ fn wrap_nilable(ty: &str) -> String {
 mod tests {
     use super::*;
     use crate::syntax::normalized_behavior::NormalizedLanguageBehavior;
+
+    fn normalized_test_node(kind: &str, children: Vec<ast::Child>) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children,
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 1,
+            text: kind.to_string(),
+        }
+    }
+
+    #[test]
+    fn conditional_expression_results_are_the_two_branch_values() {
+        let behavior = RubyNormalizedBehavior;
+        let condition = normalized_test_node("LVAR", vec![]);
+        let positive = normalized_test_node("CALL", vec![]);
+        let ignored = normalized_test_node("LIT", vec![]);
+        let negative = normalized_test_node(
+            "BEGIN",
+            vec![
+                ast::Child::Node(Box::new(ignored)),
+                ast::Child::Node(Box::new(normalized_test_node("CALL", vec![]))),
+            ],
+        );
+        let conditional = normalized_test_node(
+            "IF",
+            vec![
+                ast::Child::Node(Box::new(condition)),
+                ast::Child::Node(Box::new(positive)),
+                ast::Child::Node(Box::new(negative)),
+            ],
+        );
+
+        let operands = behavior
+            .value_preserving_call_result_operands(&conditional)
+            .expect("Ruby IF expressions preserve one branch result");
+        assert_eq!(
+            operands
+                .iter()
+                .map(|operand| operand.r#type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["CALL", "CALL"]
+        );
+    }
 
     #[test]
     fn attribute_assignment_runtime_anchors_name_the_source_selector() {
