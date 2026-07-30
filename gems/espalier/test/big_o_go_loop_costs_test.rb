@@ -16,7 +16,9 @@ class BigOGoLoopCostsTest < Minitest::Test
     "PartitionedElementCost" => "O(N)",
     "PartitionedUnderFixedLoop" => "O(N)",
     "ConstantArgumentWrite" => "O(N)",
-    "VariableArgumentWrite" => "O(N)"
+    "VariableArgumentWrite" => "O(N)",
+    "BoundedTagsPerRow" => "O(N)",
+    "AccumulatedTagsPerRow" => "O(N^2)"
   }.freeze
 
   SWEEP = {

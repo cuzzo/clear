@@ -241,6 +241,7 @@ struct CollectionGrowth {
     line: usize,
     span: [usize; 4],
     receiver_was_fixed: bool,
+    declared_empty_power: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -1913,7 +1914,15 @@ fn visit_loops(
             // instantiates constant here.
             let arguments = call_argument_nodes(node);
             let constant_size_arguments = !arguments.is_empty()
-                && arguments.iter().all(|argument| constant_size_node(argument));
+                && arguments.iter().all(|argument| {
+                    constant_size_node(argument) || {
+                        let names = local_names(argument);
+                        !names.is_empty()
+                            && names.iter().all(|name| {
+                                bounded_size_local(name, collection_growth, assignments)
+                            })
+                    }
+                });
             let known_call_complexity = known_call_complexity.map(|complexity| {
                 if complexity.time != "O(1)"
                     && constant_size_arguments
@@ -2126,6 +2135,9 @@ fn record_collection_growth(
 ) {
     if context.power == 0 {
         return;
+    }
+    if let Some(name) = declared_empty_collection_name(node, assignments) {
+        growth.entry(name).or_default().declared_empty_power = Some(context.power);
     }
     let receiver = if matches!(node.r#type.as_str(), "OP_ASGN1" | "ATTRASGN") {
         node.children.first().and_then(ast::node)
@@ -2512,6 +2524,60 @@ fn iteration_local_names(
             .unwrap_or_default();
     }
     local_names(node)
+}
+
+/// The local a statement declares with nothing in it: a bare declaration, or an
+/// initializer whose contents are written out rather than computed.
+fn declared_empty_collection_name(
+    node: &Node,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+) -> Option<String> {
+    if node.r#type == "VAR_SPEC" {
+        let name = child_nodes(node).into_iter().next()?;
+        return (name.r#type == "LVAR").then(|| name.text.trim().to_string());
+    }
+    if !matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
+        return None;
+    }
+    let name = child_string(node.children.first())?;
+    let value = node.children.get(1).and_then(ast::node);
+    let value = value.filter(|value| value.r#type != "EXPRESSION_LIST").or_else(|| {
+        value.and_then(|list| child_nodes(list).into_iter().next())
+    });
+    let empty = value.is_some_and(|value| {
+        value.r#type == "COMPOSITE_LITERAL"
+            || assignments.get(name).is_some_and(|rows| {
+                rows.iter().any(|row| {
+                    row.line == node.first_lineno
+                        && (row.empty_collection || row.fixed_collection)
+                })
+            })
+    });
+    empty.then(|| name.to_string())
+}
+
+/// A local that cannot hold more elements as the input grows: it is declared
+/// empty inside some scope and only ever grown at that same loop depth, so a
+/// straight-line sequence of statements bounds it however large the input is.
+fn bounded_size_local(
+    name: &str,
+    growth: &BTreeMap<String, CollectionGrowth>,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+) -> bool {
+    let Some(entry) = growth.get(name) else {
+        return false;
+    };
+    let Some(declared) = entry.declared_empty_power else {
+        return false;
+    };
+    entry.power <= declared
+        && assignments.get(name).is_some_and(|rows| {
+            rows.iter().all(|row| {
+                row.cardinality_dependencies
+                    .iter()
+                    .all(|dependency| dependency == name)
+            })
+        })
 }
 
 /// Size fixed at compile time: reads no local or state, computes nothing.

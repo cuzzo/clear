@@ -81,3 +81,31 @@ func VariableArgumentWrite(parts []string) string {
 	}
 	return sb.String()
 }
+
+// O(N): tags is declared fresh per iteration and appended a fixed number of
+// times, so the join over it does not grow with the input.
+func BoundedTagsPerRow(rows []string) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		var tags []string
+		if row == "a" {
+			tags = append(tags, "[A]")
+		}
+		if row == "b" {
+			tags = append(tags, "[B]")
+		}
+		out = append(out, strings.Join(tags, " ")+row)
+	}
+	return out
+}
+
+// O(N^2): the same join, but the accumulator outlives the iteration.
+func AccumulatedTagsPerRow(rows []string) []string {
+	var tags []string
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		tags = append(tags, row)
+		out = append(out, strings.Join(tags, " "))
+	}
+	return out
+}
