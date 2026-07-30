@@ -465,7 +465,7 @@ RSpec.describe "canonical runtime semantic evidence v1" do
   it "produces evidence accepted by FactMine's canonical validator" do
     binary = ENV.fetch(
       "FACT_MINE_RUST_BINARY",
-      File.join(NilKill::ROOT, "gems/fact-mine/target/debug/fact-mine-rust")
+      File.join(NilKill::ROOT, "gems/fact-mine/target/release/fact-mine-rust")
     )
     skip "FactMine debug binary is unavailable" unless File.executable?(binary)
 

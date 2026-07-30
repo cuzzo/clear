@@ -16,7 +16,7 @@ RSpec.describe "NilKill incremental test shards" do
         "NIL_KILL_TARGETS" => File.join(root, "lib"),
         "NIL_KILL_TMP_DIR" => File.join(root, ".nil-kill"),
         "FACT_MINE_RUST_BINARY" =>
-          File.join(NilKill::ROOT, "gems/fact-mine/target/debug/fact-mine-rust"),
+          File.join(NilKill::ROOT, "gems/fact-mine/target/release/fact-mine-rust"),
       }
       loader = "Dir[#{File.join(root, "test", "*_test.rb").inspect}].sort.each { |file| require file }"
       workload = [RbConfig.ruby, "-I", File.join(root, "lib"), "-e", loader]

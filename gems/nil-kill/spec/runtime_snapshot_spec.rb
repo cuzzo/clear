@@ -270,7 +270,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
         "NIL_KILL_TARGETS" => File.join(root, "lib"),
         "NIL_KILL_TMP_DIR" => File.join(root, ".nil-kill"),
         "FACT_MINE_RUST_BINARY" =>
-          File.join(NilKill::ROOT, "gems/fact-mine/target/debug/fact-mine-rust"),
+          File.join(NilKill::ROOT, "gems/fact-mine/target/release/fact-mine-rust"),
       }
       executable = File.join(NilKill::ROOT, "gems/nil-kill/lib/nil_kill.rb")
       workload = [RbConfig.ruby, File.join(root, "run.rb")]

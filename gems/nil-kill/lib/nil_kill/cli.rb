@@ -149,6 +149,38 @@ module NilKill
       end
     end
 
+    # A shard's trace is written in its own process: the work is CPU-bound Ruby
+    # that shares nothing between shards, and a thread pool would just queue on
+    # the GIL. Failures are reported by exit status, so a child that dies cannot
+    # be mistaken for a shard that observed nothing.
+    def write_traces_in_parallel(shards, working_runtime_dir, plan, languages, run_ids, jobs)
+      queue = shards.dup
+      workers = [jobs, queue.length].min
+      return if queue.empty?
+
+      slices = Array.new(workers) { [] }
+      queue.each_with_index { |shard, index| slices[index % workers] << shard }
+      pids = slices.reject(&:empty?).map do |slice|
+        fork do
+          slice.each do |shard|
+            shard_id = shard.fetch("id")
+            Runtime::TraceArtifact.write(
+              root: ROOT,
+              runtime_dir: File.join(working_runtime_dir, shard_id),
+              plan: plan,
+              languages: languages,
+              run_ids: [run_ids.fetch(shard_id)]
+            )
+          end
+        rescue StandardError => error
+          warn "nil-kill: trace write failed: #{error.message}"
+          exit!(1)
+        end
+      end
+      failures = pids.reject { |pid| Process.waitpid2(pid).last.success? }
+      abort "nil-kill: #{failures.length} trace writer(s) failed" unless failures.empty?
+    end
+
     # Stage timing, off unless asked for. A collect is a pipeline and the only
     # useful question about it is which stage owns the time.
     def stage(name)
@@ -336,26 +368,24 @@ module NilKill
       staged_traces = {}
       trace_languages =
         target_files.filter_map { |path| Languages.provider_for_path(path)&.language }.uniq
-      stage("trace-write") { selected.each do |shard|
+      stage("shard-bookkeeping") { selected.each do |shard|
         shard_id = shard.fetch("id")
         shard_dir = File.join(working_runtime_dir, shard_id)
         dependency_updates[shard_id] = dependencies_for_shard(shard_dir, inventory)
         callsite_updates[shard_id] = callsites_for_shard(shard_dir)
         assert_incremental_shard_sound!(shard_dir, inventory, dependency_updates[shard_id])
         compress_runtime_evidence!(shard_dir)
-        # A collect observes; it does not join. The trace is what the run saw,
-        # and FactMine decides which planned anchor each observation satisfies.
-        trace_path = Runtime::TraceArtifact.write(
-          root: ROOT,
-          runtime_dir: shard_dir,
-          plan: evidence_plan,
-          languages: trace_languages,
-          run_ids: [shard_run_ids.fetch(shard_id)]
-        )
-        staged_traces[shard_id] = trace_path
+        staged_traces[shard_id] = File.join(shard_dir, Runtime::TraceArtifact::DEFAULT_NAME)
         staged_evidence[shard_id] =
           File.join(shard_dir, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
       end }
+      # Writing a shard's trace is CPU-bound Ruby, so threads would serialise on
+      # the GIL. The shards share nothing and each writes only into its own
+      # directory, so fork and let the OS schedule them.
+      stage("trace-write") do
+        write_traces_in_parallel(selected, working_runtime_dir, evidence_plan,
+                                 trace_languages, shard_run_ids, shard_jobs)
+      end
       stage("join (batched)") do
         Runtime::TraceArtifact.join_all(root: ROOT, traces: staged_traces)
       end
