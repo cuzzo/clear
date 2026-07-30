@@ -215,7 +215,8 @@ const RUST_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     string_names: &["String", "str"],
     bare_array_names: &[],
     suffix_array: false,
-    bracket_array: false,
+    // A slice is Rust's idiomatic collection parameter.
+    bracket_array: true,
 };
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {

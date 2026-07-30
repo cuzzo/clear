@@ -1547,6 +1547,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
             .is_some_and(NormalizedCollectionOperation::argument_sized)
     }
 
+    /// Whether a proven bound reads its receiver, so an operand it never
+    /// touches cannot introduce a dimension.
+    fn call_cost_is_receiver_sized(&self, receiver_type: &TypeExpr, message: &str) -> bool {
+        self.collection_operation(receiver_type, message)
+            .is_some_and(|operation| {
+                !operation.argument_sized()
+                    && !matches!(operation, NormalizedCollectionOperation::Constant)
+            })
+    }
+
     fn parametric_call_cost(&self, receiver_type: &TypeExpr, message: &str) -> Option<String> {
         self.stdlib_language()
             .and_then(|language| configured_parametric_call_cost(language, receiver_type, message))

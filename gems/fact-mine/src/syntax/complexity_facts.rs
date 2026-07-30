@@ -637,6 +637,17 @@ fn fact_for_method(
                 .or_insert_with(|| TypeExpr::parse(owner, language));
         }
     }
+    // A loop binding has the element type of what it iterates. Without it the
+    // element is untyped, so no library bound resolves for a call on it and the
+    // whole loop body is priced conservatively.
+    collect_iteration_element_types(
+        node,
+        &mut augmented_parameter_types,
+        &assignments,
+        state_types,
+        &field_types,
+        behavior,
+    );
     let parameter_types = &augmented_parameter_types;
     visit_loops(
         node,
@@ -1802,10 +1813,32 @@ fn visit_loops(
                 })
                 .chain(argument_names.iter().cloned())
                 .collect::<BTreeSet<_>>();
+            // A bound that reads its receiver sums over a partitioned receiver
+            // however many other operands the call takes: an operand the bound
+            // never touches cannot add a dimension to it.
+            let receiver_partitions = !argument_sized
+                && call_receiver_type(
+                    node,
+                    parameter_types,
+                    assignments,
+                    state_types,
+                    field_types,
+                    (node.first_lineno, node.first_column),
+                    behavior,
+                )
+                .is_some_and(|receiver_type| {
+                    behavior.call_cost_is_receiver_sized(&receiver_type, message)
+                })
+                && {
+                    let receiver_names = call_receiver(node).map(local_names).unwrap_or_default();
+                    !receiver_names.is_empty()
+                        && receiver_names.is_subset(&parent.partition_locals)
+                };
             let argument_cardinality_relation = if parent.power == 0 {
                 "same"
-            } else if !operand_names.is_empty()
-                && operand_names.is_subset(&parent.partition_locals)
+            } else if receiver_partitions
+                || (!operand_names.is_empty()
+                    && operand_names.is_subset(&parent.partition_locals))
             {
                 // A binding merely mentioned in an operand (`parts[:i+1]`) is an
                 // index into the whole, not a disjoint piece of it.
@@ -2879,6 +2912,38 @@ fn iterator_message(node: &Node) -> Option<&str> {
         .first()
         .and_then(ast::node)
         .and_then(direct_call_message)
+}
+
+fn collect_iteration_element_types(
+    node: &Node,
+    types: &mut BTreeMap<String, TypeExpr>,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+    state_types: &BTreeMap<String, TypeExpr>,
+    field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
+    behavior: &dyn NormalizedLanguageBehavior,
+) {
+    if loop_node(node, behavior) {
+        let bindings = loop_binding_names(node, behavior);
+        if !bindings.is_empty() {
+            let iterated = loop_control(node)
+                .map(|control| control.text.trim().to_string())
+                .unwrap_or_default();
+            if let Some(element) = resolve_expr_type(&iterated, types, state_types, field_types)
+                .and_then(|iterated_type| match iterated_type {
+                    TypeExpr::Array(element) => Some(*element),
+                    TypeExpr::Set(element) => Some(*element),
+                    _ => None,
+                })
+            {
+                for binding in bindings {
+                    types.entry(binding).or_insert_with(|| element.clone());
+                }
+            }
+        }
+    }
+    for child in child_nodes(node) {
+        collect_iteration_element_types(child, types, assignments, state_types, field_types, behavior);
+    }
 }
 
 fn loop_control(node: &Node) -> Option<&Node> {
