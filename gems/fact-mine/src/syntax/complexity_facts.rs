@@ -1296,6 +1296,12 @@ fn visit_loops(
     }
     if node.r#type == "ITER" && block_semantics == BlockCallSemantics::Once {
         for child in child_nodes(node) {
+            // A lambda body is its own first-class function with its own fact,
+            // and its cost reaches this function as the callback it is passed
+            // as. Descending would attribute the same calls to both.
+            if child.r#type == "LAMBDA" {
+                continue;
+            }
             visit_loops(
                 child,
                 params,
@@ -1855,7 +1861,16 @@ fn visit_loops(
                 }
             });
             let evidence_gap = known_call_complexity.is_none().then(|| {
-                if behavior.callback_invocation_message(message) {
+                // Calling a value that is a declared function-typed parameter is
+                // a callback dispatch whatever the language spells it, and is
+                // priced parametrically rather than left unresolved.
+                let dispatches_callback = callback_params.contains(message)
+                    || call_receiver(node)
+                        .map(local_names)
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|name| callback_params.contains(name));
+                if behavior.callback_invocation_message(message) || dispatches_callback {
                     "callback_dispatch".to_string()
                 } else if receiver_type.is_some() {
                     "unmodeled_typed_operation".to_string()
@@ -1905,6 +1920,9 @@ fn visit_loops(
             });
         }
         for child in child_nodes(node) {
+            if child.r#type == "LAMBDA" {
+                continue;
+            }
             visit_loops(
                 child,
                 params,
