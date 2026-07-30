@@ -1,3 +1,4 @@
+pub mod qualifier;
 pub mod outparam;
 pub mod paths;
 // O(N): each file's name is scanned once, so the strips sum to the input.

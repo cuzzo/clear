@@ -1815,7 +1815,16 @@ fn visit_loops(
                         || assignments.contains_key(name)
                         || parent.partition_locals.contains(name)
                 })
-                .chain(argument_names.iter().cloned())
+                .chain(
+                    argument_names
+                        .iter()
+                        .filter(|name| {
+                            params.contains(*name)
+                                || assignments.contains_key(*name)
+                                || parent.partition_locals.contains(*name)
+                        })
+                        .cloned(),
+                )
                 .collect::<BTreeSet<_>>();
             // A bound that reads its receiver sums over a partitioned receiver
             // however many other operands the call takes: an operand the bound

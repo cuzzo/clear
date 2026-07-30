@@ -11,7 +11,7 @@ class BigORustTest < Minitest::Test
 
   def test_slice_element_costs
     evidence = Espalier::StaticEvidence.build(
-      [File.join(ROOT, "src/lib.rs"), File.join(ROOT, "src/paths.rs"), File.join(ROOT, "src/outparam.rs")],
+      [File.join(ROOT, "src/lib.rs"), File.join(ROOT, "src/paths.rs"), File.join(ROOT, "src/outparam.rs"), File.join(ROOT, "src/qualifier.rs")],
       root: ROOT,
       scip_indexes: [File.join(ROOT, "index.scip")]
     )
@@ -30,5 +30,8 @@ class BigORustTest < Minitest::Test
     # The collection a helper fills through an out parameter carries that
     # parameter's element type, so its elements are priced.
     assert_equal "O(N)", actual["digest"]
+    # A module qualifier is not an operand, so it cannot block the partition the
+    # real argument establishes.
+    assert_equal "O(N)", actual["total_len"]
   end
 end

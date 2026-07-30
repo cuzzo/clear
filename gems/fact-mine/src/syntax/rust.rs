@@ -793,6 +793,28 @@ fn is_simple_name(name: &str) -> bool {
 mod tests {
 
     #[test]
+    fn rust_local_types_cover_this_crates_own_digest_helper() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/incremental.rs");
+        let document = crate::syntax::parse_file(path, crate::syntax::Language::Rust).unwrap();
+        let definition = document
+            .function_defs
+            .iter()
+            .find(|row| row.name == "stdlib_registry_digest")
+            .expect("digest helper");
+        let key = crate::syntax::normalized_behavior::method_parameter_type_key(
+            &definition.owner,
+            &definition.name,
+            definition.line,
+        );
+        let locals = document.method_local_types.get(&key);
+        assert_eq!(
+            locals.and_then(|types| types.get("hasher")).map(String::as_str),
+            Some("Sha256"),
+            "locals={locals:?}"
+        );
+    }
+
+    #[test]
     fn rust_digest_update_is_priced_by_its_input() {
         let behavior = RustNormalizedBehavior;
         assert_eq!(
