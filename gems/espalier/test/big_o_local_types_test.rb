@@ -28,8 +28,10 @@ class BigOLocalTypesTest < Minitest::Test
   # With the declared types in hand nothing here is a mystery, so none of these
   # may fall back to incomplete.
   TYPED = {
-    "typed.cs" => { "SumLengths" => "O(N)", "Has" => "O(N)" },
-    "typed.ts" => { "sumLengths" => "O(N)", "lookup" => "O(N)" }
+    # Appending each element of a collection sums to that collection, so none
+    # of these is quadratic - the same shape Go's VariableArgumentWrite pins.
+    "typed.cs" => { "SumLengths" => "O(N)", "Has" => "O(N)", "Join" => "O(N)", "Copy" => "O(N)" },
+    "typed.ts" => { "sumLengths" => "O(N)", "lookup" => "O(N)", "copy" => "O(N)" }
   }.freeze
 
   def test_declared_types_leave_nothing_unpriced

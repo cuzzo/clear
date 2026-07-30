@@ -278,6 +278,10 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         true
     }
 
+    fn loop_binding_names(&self, node: &Node) -> Option<Vec<String>> {
+        super::normalized_behavior::foreach_binding_names(&node.text, &["of", "in"])
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("typescript")
     }

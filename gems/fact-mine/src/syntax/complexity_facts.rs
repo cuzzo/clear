@@ -1574,7 +1574,7 @@ fn visit_loops(
             amortized,
         });
         let root_line = parent.root_line.or(Some(node.first_lineno));
-        let bindings = loop_binding_names(node);
+        let bindings = loop_binding_names(node, behavior);
         let independent_collection_bindings = if iterator_message(node)
             .is_some_and(|message| behavior.iteration_yields_collection_value(message))
             && states.len() == 1
@@ -2721,7 +2721,7 @@ fn collect_recursion(
                 })
         });
         if parameter_rooted {
-            nested_structural_bindings.extend(loop_binding_names(node));
+            nested_structural_bindings.extend(loop_binding_names(node, behavior));
         }
     }
     if recursive_self_call(node, function, bare_self_calls_are_recursive) {
@@ -2900,7 +2900,10 @@ fn loop_body(node: &Node) -> Option<&Node> {
         .and_then(ast::node)
 }
 
-fn loop_binding_names(node: &Node) -> BTreeSet<String> {
+fn loop_binding_names(node: &Node, behavior: &dyn NormalizedLanguageBehavior) -> BTreeSet<String> {
+    if let Some(bound) = behavior.loop_binding_names(node) {
+        return bound.into_iter().collect();
+    }
     if node.r#type == "FOR" {
         let Some(control) = node.children.first().and_then(ast::node) else {
             return BTreeSet::new();

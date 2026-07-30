@@ -1446,6 +1446,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         false
     }
 
+    /// Names a loop's header binds, when the normalized tree does not carry
+    /// them as nodes. An enhanced-for declares its element in the header, which
+    /// is language syntax, so the language reads it.
+    fn loop_binding_names(&self, _node: &Node) -> Option<Vec<String>> {
+        None
+    }
+
     fn callback_parameter_names(&self, _function: &Node) -> Vec<String> {
         Vec::new()
     }
@@ -2651,7 +2658,10 @@ fn assigned_local_names(line: &str) -> Vec<String> {
         {
             continue;
         }
+        // `const out: string[] =` and `string out =` both declare `out`: the
+        // name precedes any annotation, which follows a colon.
         let head = line[..index].trim_end().trim_end_matches(':');
+        let head = head.split_once(':').map(|(before, _)| before).unwrap_or(head);
         let name = head
             .rsplit(|character: char| !character.is_alphanumeric() && character != '_')
             .next()
@@ -2661,6 +2671,22 @@ fn assigned_local_names(line: &str) -> Vec<String> {
         }
     }
     names
+}
+
+/// The element an enhanced-for binds: the identifier before the separator in
+/// `for (T name <sep> collection)`. Type tokens, modifiers, and the collection
+/// expression are not bindings.
+pub(crate) fn foreach_binding_names(text: &str, separators: &[&str]) -> Option<Vec<String>> {
+    let header = text.split_once('(')?.1;
+    let header = header.split(')').next()?;
+    let (left, _) = separators
+        .iter()
+        .find_map(|separator| header.split_once(&format!(" {separator} ")))?;
+    let name = left
+        .split_whitespace()
+        .last()?
+        .trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
+    (!name.is_empty()).then(|| vec![name.to_string()])
 }
 
 pub(crate) fn type_before_local_name(source: &str, name: &str) -> Option<String> {

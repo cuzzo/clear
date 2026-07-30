@@ -1,0 +1,209 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [
+                {
+                  "Symbol": "sum"
+                },
+                {
+                  "Node": {
+                    "children": [
+                      "Nil",
+                      "Nil",
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "t"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [],
+                                                  "first_column": 10,
+                                                  "first_lineno": 2,
+                                                  "last_column": 11,
+                                                  "last_lineno": 2,
+                                                  "text": "0",
+                                                  "type": "NUMBER"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 6,
+                                            "first_lineno": 2,
+                                            "last_column": 11,
+                                            "last_lineno": 2,
+                                            "text": "t = 0",
+                                            "type": "LASGN"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 6,
+                                      "first_lineno": 2,
+                                      "last_column": 11,
+                                      "last_lineno": 2,
+                                      "text": "t = 0",
+                                      "type": "VARIABLE_DECLARATOR"
+                                    }
+                                  }
+                                ],
+                                "first_column": 2,
+                                "first_lineno": 2,
+                                "last_column": 12,
+                                "last_lineno": 2,
+                                "text": "let t = 0;",
+                                "type": "LEXICAL_DECLARATION"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "xs"
+                                        }
+                                      ],
+                                      "first_column": 18,
+                                      "first_lineno": 3,
+                                      "last_column": 20,
+                                      "last_lineno": 3,
+                                      "text": "xs",
+                                      "type": "LVAR"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "t"
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "x"
+                                                    }
+                                                  ],
+                                                  "first_column": 29,
+                                                  "first_lineno": 3,
+                                                  "last_column": 30,
+                                                  "last_lineno": 3,
+                                                  "text": "x",
+                                                  "type": "LVAR"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 24,
+                                            "first_lineno": 3,
+                                            "last_column": 30,
+                                            "last_lineno": 3,
+                                            "text": "t += x",
+                                            "type": "LASGN"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 24,
+                                      "first_lineno": 3,
+                                      "last_column": 30,
+                                      "last_lineno": 3,
+                                      "text": "t += x",
+                                      "type": "AUGMENTED_ASSIGNMENT_EXPRESSION"
+                                    }
+                                  }
+                                ],
+                                "first_column": 2,
+                                "first_lineno": 3,
+                                "last_column": 33,
+                                "last_lineno": 3,
+                                "text": "for (const x of xs) { t += x; }",
+                                "type": "FOR"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "t"
+                                        }
+                                      ],
+                                      "first_column": 9,
+                                      "first_lineno": 4,
+                                      "last_column": 10,
+                                      "last_lineno": 4,
+                                      "text": "t",
+                                      "type": "LVAR"
+                                    }
+                                  }
+                                ],
+                                "first_column": 2,
+                                "first_lineno": 4,
+                                "last_column": 11,
+                                "last_lineno": 4,
+                                "text": "return t;",
+                                "type": "RETURN"
+                              }
+                            }
+                          ],
+                          "first_column": 42,
+                          "first_lineno": 1,
+                          "last_column": 1,
+                          "last_lineno": 5,
+                          "text": "{\n  let t = 0;\n  for (const x of xs) { t += x; }\n  return t;\n}",
+                          "type": "BLOCK"
+                        }
+                      }
+                    ],
+                    "first_column": 42,
+                    "first_lineno": 1,
+                    "last_column": 1,
+                    "last_lineno": 5,
+                    "text": "{\n  let t = 0;\n  for (const x of xs) { t += x; }\n  return t;\n}",
+                    "type": "SCOPE"
+                  }
+                }
+              ],
+              "first_column": 7,
+              "first_lineno": 1,
+              "last_column": 1,
+              "last_lineno": 5,
+              "text": "function sum(xs: number[]): number {\n  let t = 0;\n  for (const x of xs) { t += x; }\n  return t;\n}",
+              "type": "DEFN"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 1,
+        "last_lineno": 5,
+        "text": "export function sum(xs: number[]): number {\n  let t = 0;\n  for (const x of xs) { t += x; }\n  return t;\n}",
+        "type": "EXPORT_STATEMENT"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 6,
+  "text": "export function sum(xs: number[]): number {\n  let t = 0;\n  for (const x of xs) { t += x; }\n  return t;\n}\n",
+  "type": "ROOT"
+}

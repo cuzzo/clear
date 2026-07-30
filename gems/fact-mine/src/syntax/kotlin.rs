@@ -229,6 +229,10 @@ impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
         super::normalized_behavior::type_after_local_colon(source, name)
     }
 
+    fn loop_binding_names(&self, node: &Node) -> Option<Vec<String>> {
+        super::normalized_behavior::foreach_binding_names(&node.text, &["in"])
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("kotlin")
     }

@@ -414,6 +414,10 @@ impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
         .to_string()
     }
 
+    fn loop_binding_names(&self, node: &Node) -> Option<Vec<String>> {
+        super::normalized_behavior::foreach_binding_names(&node.text, &[":"])
+    }
+
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("java")
     }
