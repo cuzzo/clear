@@ -22,16 +22,14 @@ module NilKill
         emitter = ScipEmitter.new(root: root, runtime_dir: runtime_dir)
         events, invalid_events = emitter.send(:load_events)
         calls = events.map do |event|
-          {
-            "event" => event,
-            "row" => Languages.provider_for(event.fetch("language"))
-              .runtime_scip_call_evidence(event: event, root: root),
-          }
+          provider = Languages.provider_for(event.fetch("language"))
+          row = provider.runtime_scip_call_evidence(event: event, root: root)
+          { "row" => row, "bucket" => call_bucket(row, event, provider) }.compact
         end
         observations = languages.flat_map do |language|
-          Languages.provider_for(language).runtime_value_observations(
-            runtime_dir: runtime_dir, root: root
-          )
+          provider = Languages.provider_for(language)
+          provider.runtime_value_observations(runtime_dir: runtime_dir, root: root)
+            .map { |row| row.merge("bucket" => value_bucket(row, provider)).compact }
         end
         {
           "trace_version" => VERSION,
@@ -41,6 +39,11 @@ module NilKill
           },
           "trace_plan_digest" => plan.fetch("plan_digest"),
           "languages" => languages,
+          # Environment claims are the collector's own facts about the runtime
+          # it observed, so they travel with the observations.
+          "environment" => languages.flat_map { |language|
+            Languages.provider_for(language).runtime_scip_environment(root: root).to_a
+          }.uniq.sort.map { |key, value| { "key" => key.to_s, "value" => value.to_s } },
           "run_ids" => Array(run_ids).map(&:to_s).reject(&:empty?).uniq.sort,
           "invalid_events" => invalid_events,
           "observations" => observations,
@@ -50,6 +53,54 @@ module NilKill
           "function_entries" => jsonl(runtime_dir, "function-entries-*.jsonl"),
           "coverage" => jsonl(runtime_dir, "coverage-*.jsonl"),
         }
+      end
+
+      # Minting a protocol value from an observed one needs the language's own
+      # type-symbol rules, which only the collector has. The join does not, so
+      # the values travel already encoded and the consumer only has to decide
+      # which anchor each belongs to.
+      def self.value_bucket(row, provider)
+        values = EvidenceProtocol.value_set(
+          row.fetch("domain"), count: row.fetch("count", 1),
+          provider: provider, source_role: "UNKNOWN_SOURCE"
+        )
+        return nil unless values
+
+        {
+          "count" => [row.fetch("count", 1).to_i, 1].max,
+          "value" => values,
+          "provenance" => provider.runtime_evidence_provenance.merge("run_id" => ""),
+        }
+      end
+
+      def self.call_bucket(row, event, provider)
+        receiver = EvidenceProtocol.value_set(
+          row["receiver_domain"], count: row.fetch("count", 1),
+          provider: provider,
+          source_role: row.fetch("receiver_source_role", "UNKNOWN_SOURCE")
+        )
+        return nil unless receiver
+
+        bucket = {
+          "count" => [row.fetch("count", 1).to_i, 1].max,
+          "receiver" => receiver,
+          "target" => EvidenceProtocol.target(row),
+          # The declaration the collector observed. Which planned function it
+          # corresponds to is a question about the plan, so the locator travels
+          # raw and the consumer resolves it.
+          "target_definition" => row.dig("target", "definition"),
+          "provenance" => provider.runtime_evidence_provenance.merge(
+            "run_id" => event["run_id"].to_s
+          ),
+        }
+        result = EvidenceProtocol.value_set(
+          row["result_domain"], count: row.fetch("count", 1),
+          provider: provider, source_role: "UNKNOWN_SOURCE"
+        )
+        bucket["result"] = result if result
+        truths = Array(row["result_truths"]).uniq
+        bucket["boolean_result"] = truths.first if truths.length == 1
+        bucket
       end
 
       def self.jsonl(runtime_dir, pattern)

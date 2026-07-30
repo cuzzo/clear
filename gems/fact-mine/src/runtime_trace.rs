@@ -35,11 +35,17 @@ pub struct Trace {
     pub function_entries: Vec<FunctionEntry>,
     #[serde(default)]
     pub coverage: Vec<CoverageRow>,
+    #[serde(default)]
+    pub environment: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Observation {
     pub kind: String,
+    /// The protocol value this observation contributes, already encoded by the
+    /// collector because minting it needs that language's type-symbol rules.
+    #[serde(default)]
+    pub bucket: Option<serde_json::Value>,
     #[serde(default)]
     pub scope: Scope,
     #[serde(default)]
@@ -62,8 +68,9 @@ pub struct Scope {
 
 #[derive(Debug, Deserialize)]
 pub struct CallEntry {
-    pub event: serde_json::Value,
     pub row: CallRow,
+    #[serde(default)]
+    pub bucket: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,6 +217,7 @@ fn observation_kind(kind: AnchorKind) -> Option<&'static str> {
 
 pub struct Join<'a> {
     root: &'a Path,
+    plan: &'a TracePlan,
     trace: &'a Trace,
     observations_by_kind_path: HashMap<(String, String), Vec<usize>>,
     calls_by_path_selector: HashMap<(String, String), Vec<usize>>,
@@ -221,7 +229,7 @@ pub struct Join<'a> {
 }
 
 impl<'a> Join<'a> {
-    pub fn new(root: &'a Path, trace: &'a Trace) -> Self {
+    pub fn new(root: &'a Path, plan: &'a TracePlan, trace: &'a Trace) -> Self {
         let mut observations_by_kind_path: HashMap<(String, String), Vec<usize>> = HashMap::new();
         for (index, row) in trace.observations.iter().enumerate() {
             observations_by_kind_path
@@ -268,6 +276,7 @@ impl<'a> Join<'a> {
         }
         Self {
             root,
+            plan,
             trace,
             observations_by_kind_path,
             calls_by_path_selector,
@@ -409,31 +418,19 @@ fn has_types(domain: &serde_json::Value) -> bool {
         })
 }
 
-/// The bucket fields one match would produce. A call whose receiver has no
-/// observed type produces no bucket at all, exactly as the value case does.
-fn bucket_fields(trace: &Trace, index: usize, is_call: bool) -> Option<Vec<&'static str>> {
-    if !is_call {
-        let row = &trace.observations[index];
-        return has_types(&row.domain).then(|| vec!["value"]);
+/// The bucket a match contributes, or nothing when the collector observed no
+/// value for it -- which is not an execution, it is a call whose value was not
+/// captured.
+fn bucket_of(trace: &Trace, index: usize, is_call: bool) -> Option<&serde_json::Value> {
+    if is_call {
+        trace.calls[index].bucket.as_ref()
+    } else {
+        trace.observations[index].bucket.as_ref()
     }
-    let row = &trace.calls[index].row;
-    if !has_types(&row.receiver_domain) {
-        return None;
-    }
-    let mut fields = vec!["receiver", "target"];
-    if has_types(&row.result_domain) {
-        fields.push("result");
-    }
-    let mut truths: Vec<&serde_json::Value> = Vec::new();
-    for truth in &row.result_truths {
-        if !truths.contains(&truth) {
-            truths.push(truth);
-        }
-    }
-    if truths.len() == 1 {
-        fields.push("boolean_result");
-    }
-    Some(fields)
+}
+
+fn bucket_has(bucket: &serde_json::Value, field: &str) -> bool {
+    bucket.get(field).is_some_and(|value| !value.is_null())
 }
 
 /// Which requested evidence kind each execution-bucket field satisfies.
@@ -448,50 +445,47 @@ pub fn evidence_field(kind: &str) -> Option<&'static str> {
     })
 }
 
-/// Anchor-by-anchor capture status, in the plan's request order.
-pub fn anchor_statuses(
-    root: &Path,
-    plan: &TracePlan,
-    trace: &Trace,
-) -> Result<Vec<(String, String, Vec<String>, i64)>> {
-    let join = Join::new(root, trace);
-    let mut out = Vec::with_capacity(plan.requests.len());
-    for request in &plan.requests {
-        let anchor = request
-            .anchor
-            .as_ref()
-            .context("trace plan request has no anchor")?;
+impl Join<'_> {
+    /// One anchor's evidence: which observations satisfy it, whether they
+    /// covered everything the request asked for, and how many executions they
+    /// account for.
+    pub fn evaluate(
+        &self,
+        request: &runtime_protocol::EvidenceRequest,
+        anchor: &runtime_protocol::SourceAnchor,
+        run_ids: &[String],
+    ) -> Result<serde_json::Value> {
+        let trace = self.trace;
         let (matches, ambiguous) = match observation_kind(anchor_kind(anchor)) {
-            Some(kind) => (join.matching_observations(anchor, kind), false),
-            None => join.matching_calls(anchor),
+            Some(kind) => (self.matching_observations(anchor, kind), false),
+            None => self.matching_calls(anchor),
         };
+        let is_call = observation_kind(anchor_kind(anchor)).is_none();
         let requested: Vec<String> = request
             .required
             .iter()
             .map(|kind| format!("{:?}", kind.enum_value_or_default()))
             .collect();
-        let is_call = observation_kind(anchor_kind(anchor)).is_none();
+
         // A match that yields no bucket is not an execution: the collector saw
         // the call but captured nothing about it.
-        let buckets: Vec<Vec<&'static str>> = if ambiguous {
+        let kept: Vec<serde_json::Value> = if ambiguous {
             Vec::new()
         } else {
             matches
                 .iter()
-                .filter_map(|index| bucket_fields(trace, *index, is_call))
+                .filter_map(|index| bucket_of(trace, *index, is_call).cloned())
+                .map(|mut bucket| {
+                    self.resolve_target(&mut bucket);
+                    bucket
+                })
                 .collect()
         };
-        let kept: Vec<usize> = if ambiguous {
-            Vec::new()
-        } else {
-            matches
-                .iter()
-                .copied()
-                .filter(|index| bucket_fields(trace, *index, is_call).is_some())
-                .collect()
-        };
-        let executed_without_capture =
-            buckets.is_empty() && join.anchor_executed(anchor, request.execution_range.is_some());
+        let kept: Vec<&serde_json::Value> = kept.iter().collect();
+        let mut buckets = merge_identical_buckets(&kept, run_ids);
+
+        let executed_without_capture = buckets.is_empty()
+            && self.anchor_executed(anchor, request.execution_range.is_some());
         let complete_kinds: Vec<String> = if ambiguous || executed_without_capture {
             Vec::new()
         } else if buckets.is_empty() {
@@ -502,57 +496,306 @@ pub fn anchor_statuses(
             requested
                 .iter()
                 .filter(|kind| {
-                    evidence_field(kind).is_some_and(|field| {
-                        buckets.iter().all(|fields| fields.contains(&field))
-                    })
+                    evidence_field(kind)
+                        .is_some_and(|field| buckets.iter().all(|b| bucket_has(b, field)))
                 })
                 .cloned()
                 .collect()
         };
-        let status = if ambiguous {
-            "PARTIAL"
+        let (status, reason) = if ambiguous {
+            (
+                "PARTIAL",
+                Some("observed execution is preserved in a candidate correlation group"),
+            )
         } else if buckets.is_empty() {
             if executed_without_capture {
-                "NOT_INSTRUMENTED"
+                (
+                    "NOT_INSTRUMENTED",
+                    Some("anchor executed but the provider did not capture its requested value"),
+                )
             } else {
-                "NOT_EXECUTED"
+                ("NOT_EXECUTED", Some("no matching execution in the modeled runs"))
             }
         } else if complete_kinds.len() != requested.len() {
-            "PARTIAL"
+            (
+                "PARTIAL",
+                Some("provider did not capture every value requested at this anchor"),
+            )
         } else {
-            "COMPLETE_FOR_RUNS"
+            ("COMPLETE_FOR_RUNS", None)
         };
-        let mut observed: i64 = kept
+
+        let mut observed: i64 = buckets
             .iter()
-            .map(|index| {
-                if is_call {
-                    trace.calls[*index].row.count.max(1)
-                } else {
-                    trace.observations[*index].count.max(1)
-                }
-            })
+            .map(|b| b.get("count").and_then(|c| c.as_i64()).unwrap_or(1).max(1))
             .sum();
         // Identity-only collection may retain one representative bucket while
         // the exact marker counted every execution. With one bucket there is no
         // distribution ambiguity, so its exact multiplicity is restored.
-        let exact = join.exact_count(&anchor.symbol);
-        if kept.len() == 1 && exact > observed {
+        let exact = self.exact_count(&anchor.symbol);
+        if buckets.len() == 1 && exact > observed {
             observed = exact;
+            if let Some(object) = buckets[0].as_object_mut() {
+                object.insert("count".into(), serde_json::json!(exact));
+            }
         }
-        out.push((
-            anchor.symbol.clone(),
-            status.to_string(),
-            requested,
-            observed,
-        ));
+
+        let mut capture = serde_json::Map::new();
+        capture.insert("status".into(), serde_json::json!(status));
+        capture.insert("run_ids".into(), serde_json::json!(run_ids));
+        capture.insert("observed_executions".into(), serde_json::json!(observed));
+        capture.insert("dropped_executions".into(), serde_json::json!(0));
+        if let Some(reason) = reason {
+            capture.insert("reason".into(), serde_json::json!(reason));
+        }
+        capture.insert("complete_kinds".into(), serde_json::json!(complete_kinds));
+
+        Ok(serde_json::json!({
+            "anchor_symbol": anchor.symbol,
+            "anchor_semantic_digest": base64_standard(&anchor.semantic_digest),
+            "capture": capture,
+            "executions": buckets,
+        }))
     }
-    Ok(out)
+}
+
+/// ProtoJSON encodes `bytes` as standard base64. Written out rather than taken
+/// as a dependency: it is fifteen lines and the alphabet is fixed by the spec.
+impl Join<'_> {
+    /// A collector reports where a callee was declared; the plan says which
+    /// function that is. Exactly one planned boundary at that declaration names
+    /// it -- more than one is not a resolution -- and otherwise the raw locator
+    /// is preserved so the consumer can bind it from source itself.
+    fn resolve_target(&self, bucket: &mut serde_json::Value) {
+        let Some(definition) = bucket.get("target_definition").cloned() else {
+            return;
+        };
+        if let Some(object) = bucket.as_object_mut() {
+            object.remove("target_definition");
+        }
+        if definition.is_null() {
+            return;
+        }
+        let path = definition
+            .get("path")
+            .and_then(|p| p.as_str())
+            .map(|p| canonical_path(self.root, p))
+            .unwrap_or_default();
+        let line = definition.get("line").and_then(|l| l.as_i64()).unwrap_or(0);
+
+        let mut seen: Vec<&str> = Vec::new();
+        let mut candidates: Vec<&runtime_protocol::SourceAnchor> = Vec::new();
+        for request in &self.plan.requests {
+            let Some(anchor) = request.anchor.as_ref() else {
+                continue;
+            };
+            if !matches!(
+                anchor.kind.enum_value_or_default(),
+                AnchorKind::FUNCTION_ENTRY | AnchorKind::FUNCTION_RETURN
+            ) {
+                continue;
+            }
+            if anchor.relative_path != path {
+                continue;
+            }
+            if !anchor.range.as_ref().is_some_and(|r| line_in_range(r, line)) {
+                continue;
+            }
+            if seen.contains(&anchor.enclosing_symbol.as_str()) {
+                continue;
+            }
+            seen.push(&anchor.enclosing_symbol);
+            candidates.push(anchor);
+        }
+
+        let Some(target) = bucket.get_mut("target").and_then(|t| t.as_object_mut()) else {
+            return;
+        };
+        if candidates.len() != 1 {
+            if line <= 0 || path.is_empty() {
+                return;
+            }
+            let symbol = target
+                .get("symbol")
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .to_string();
+            target.insert(
+                "definition".into(),
+                serde_json::json!({
+                    "symbol": symbol,
+                    "anchor_symbol": "",
+                    "relative_path": path,
+                    "range": {
+                        "start_line": line - 1, "start_character": 0,
+                        "end_line": line - 1, "end_character": 0,
+                    },
+                }),
+            );
+            return;
+        }
+        let anchor = candidates[0];
+        let range = anchor.range.as_ref();
+        target.insert(
+            "symbol".into(),
+            serde_json::json!(anchor.enclosing_symbol),
+        );
+        target.insert(
+            "definition".into(),
+            serde_json::json!({
+                "symbol": anchor.enclosing_symbol,
+                "anchor_symbol": anchor.symbol,
+                "relative_path": anchor.relative_path,
+                "range": {
+                    "start_line": range.map_or(0, |r| r.start_line),
+                    "start_character": range.map_or(0, |r| r.start_character),
+                    "end_line": range.map_or(0, |r| r.end_line),
+                    "end_character": range.map_or(0, |r| r.end_character),
+                },
+            }),
+        );
+    }
+}
+
+fn base64_standard(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHABET[(triple >> 18) as usize & 63] as char);
+        out.push(ALPHABET[(triple >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            ALPHABET[(triple >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[triple as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// Buckets that differ only in how many executions they account for are one
+/// observation seen repeatedly, not several.
+fn merge_identical_buckets(
+    buckets: &[&serde_json::Value],
+    run_ids: &[String],
+) -> Vec<serde_json::Value> {
+    let mut order: Vec<String> = Vec::new();
+    let mut merged: HashMap<String, serde_json::Value> = HashMap::new();
+    for bucket in buckets {
+        let mut owned = (*bucket).clone();
+        if let Some(object) = owned.as_object_mut() {
+            // A bucket with no run of its own belongs to the run being reported.
+            let empty = object
+                .get("provenance")
+                .and_then(|p| p.get("run_id"))
+                .and_then(|id| id.as_str())
+                .is_none_or(|id| id.is_empty());
+            if empty {
+                if let Some(provenance) = object.get_mut("provenance").and_then(|p| p.as_object_mut())
+                {
+                    provenance.insert(
+                        "run_id".into(),
+                        serde_json::json!(run_ids.first().cloned().unwrap_or_default()),
+                    );
+                }
+            }
+        }
+        let mut key_value = owned.clone();
+        if let Some(object) = key_value.as_object_mut() {
+            object.remove("count");
+        }
+        let key = serde_json::to_string(&key_value).unwrap_or_default();
+        match merged.get_mut(&key) {
+            Some(existing) => {
+                let add = owned.get("count").and_then(|c| c.as_i64()).unwrap_or(1);
+                let total = existing.get("count").and_then(|c| c.as_i64()).unwrap_or(1) + add;
+                if let Some(object) = existing.as_object_mut() {
+                    object.insert("count".into(), serde_json::json!(total));
+                }
+            }
+            None => {
+                order.push(key.clone());
+                merged.insert(key, owned);
+            }
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|key| merged.remove(&key))
+        .collect()
+}
+
+/// The evidence a trace supports, in the plan's request order.
+///
+/// Built as ProtoJSON and then round-tripped through the protocol message, so
+/// the result is canonical by construction rather than by matching a producer's
+/// formatting.
+pub fn build_evidence(root: &Path, plan: &TracePlan, trace: &Trace) -> Result<String> {
+    let join = Join::new(root, plan, trace);
+    let mut run_ids: Vec<String> = trace
+        .run_ids
+        .iter()
+        .filter(|id| !id.is_empty())
+        .cloned()
+        .collect();
+    run_ids.sort();
+    run_ids.dedup();
+    if run_ids.is_empty() {
+        run_ids.push("unidentified-run".to_string());
+    }
+
+    let mut anchors = Vec::with_capacity(plan.requests.len());
+    for request in &plan.requests {
+        let anchor = request
+            .anchor
+            .as_ref()
+            .context("trace plan request has no anchor")?;
+        let outcome = join.evaluate(request, anchor, &run_ids)?;
+        anchors.push(outcome);
+    }
+
+    let evidence = serde_json::json!({
+        "protocol_version": 1,
+        "producer": { "name": "nil-kill", "version": "1", "arguments": ["collect", "runtime-evidence"] },
+        "authority": "MODELED_RUNS",
+        "trace_plan_digest": trace.trace_plan_digest,
+        "environment": trace.environment,
+        "runs": run_ids.iter().map(|id| serde_json::json!({ "id": id, "status": "SUCCEEDED" }))
+            .collect::<Vec<_>>(),
+        "anchors": anchors,
+        "correlations": Vec::<serde_json::Value>::new(),
+    });
+    let canonical = runtime_protocol::parse_runtime_evidence_json(&serde_json::to_string(&evidence)?)
+        .context("joined evidence is not canonical ProtoJSON")?;
+    runtime_protocol::to_json_with_defaults(&canonical)
 }
 
 /// A stable summary of what the trace covers, keyed by capture status.
 pub fn summarize(root: &Path, plan: &TracePlan, trace: &Trace) -> Result<BTreeMap<String, usize>> {
+    let join = Join::new(root, plan, trace);
+    let run_ids = vec!["summary".to_string()];
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for (_symbol, status, _requested, _observed) in anchor_statuses(root, plan, trace)? {
+    for request in &plan.requests {
+        let anchor = request
+            .anchor
+            .as_ref()
+            .context("trace plan request has no anchor")?;
+        let row = join.evaluate(request, anchor, &run_ids)?;
+        let status = row
+            .get("capture")
+            .and_then(|capture| capture.get("status"))
+            .and_then(|status| status.as_str())
+            .unwrap_or("UNKNOWN")
+            .to_string();
         *counts.entry(status).or_insert(0) += 1;
     }
     Ok(counts)

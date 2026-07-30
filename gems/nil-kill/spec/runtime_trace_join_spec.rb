@@ -46,14 +46,7 @@ RSpec.describe "runtime trace join" do
     w.raises
   RUBY
 
-  def ruby_statuses(evidence)
-    evidence.fetch("anchors").to_h do |row|
-      [row.fetch("anchor_symbol"),
-       [row.dig("capture", "status"), row.dig("capture", "observed_executions").to_i]]
-    end
-  end
-
-  def rust_statuses(plan_path, trace_path)
+  def rust_evidence(plan_path, trace_path)
     out, err, status = Open3.capture3(
       FACT_MINE, "runtime-trace",
       "--plan", plan_path, "--runtime-trace", trace_path, "--root", NilKill::ROOT
@@ -81,19 +74,28 @@ RSpec.describe "runtime trace join" do
         languages: ["ruby"], run_ids: ["join-spec"]
       )
 
-      ruby = ruby_statuses(NilKill::Runtime::JsonIO.parse(evidence.fetch("path")))
-      rust = rust_statuses(NilKill::TRACE_PLAN_PATH, trace_path)
+      ruby_doc = NilKill::Runtime::JsonIO.parse(evidence.fetch("path"))
+      rust_doc = rust_evidence(NilKill::TRACE_PLAN_PATH, trace_path)
 
-      expect(rust.keys.sort).to eq(ruby.keys.sort)
-      disagreements = ruby.filter_map do |symbol, expected|
-        observed = rust.fetch(symbol)
+      %w[protocol_version authority trace_plan_digest runs environment correlations].each do |key|
+        expect(rust_doc[key]).to eq(ruby_doc[key]), key
+      end
+
+      ruby_anchors = ruby_doc.fetch("anchors").to_h { |row| [row.fetch("anchor_symbol"), row] }
+      rust_anchors = rust_doc.fetch("anchors").to_h { |row| [row.fetch("anchor_symbol"), row] }
+      expect(rust_anchors.keys.sort).to eq(ruby_anchors.keys.sort)
+
+      disagreements = ruby_anchors.filter_map do |symbol, expected|
+        observed = rust_anchors.fetch(symbol)
         next if observed == expected
 
-        "#{symbol}: ruby=#{expected.inspect} rust=#{observed.inspect}"
+        "#{symbol}\n  ruby=#{JSON.generate(expected)[0, 400]}\n  rust=#{JSON.generate(observed)[0, 400]}"
       end
       expect(disagreements).to be_empty
+
       # A corpus where nothing was captured would make the comparison vacuous.
-      expect(ruby.values.count { |status, _| status == "COMPLETE_FOR_RUNS" }).to be > 0
+      captured = ruby_anchors.values.count { |row| row.dig("capture", "status") == "COMPLETE_FOR_RUNS" }
+      expect(captured).to be > 0
     end
   end
 end

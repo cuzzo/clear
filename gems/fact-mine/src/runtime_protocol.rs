@@ -453,6 +453,21 @@ pub fn read_runtime_evidence(path: &Path) -> Result<RuntimeEvidence> {
         .with_context(|| format!("invalid runtime evidence {}", path.display()))
 }
 
+/// The producer's encoding: every field present, including defaults, so a
+/// consumer never has to distinguish "absent" from "zero".
+pub fn to_json_with_defaults(message: &dyn protobuf::MessageDyn) -> Result<String> {
+    protobuf_json_mapping::print_to_string_with_options(
+        message,
+        &protobuf_json_mapping::PrintOptions {
+            enum_values_int: false,
+            proto_field_name: true,
+            always_output_default_values: true,
+            _future_options: (),
+        },
+    )
+    .context("failed to encode canonical ProtoJSON")
+}
+
 pub fn to_json(message: &dyn protobuf::MessageDyn) -> Result<String> {
     protobuf_json_mapping::print_to_string_with_options(
         message,

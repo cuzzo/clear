@@ -300,15 +300,11 @@ fn run() -> Result<()> {
             let plan = fact_mine_rust::runtime_trace::read_plan(&plan)?;
             let trace = fact_mine_rust::runtime_trace::read_trace(&trace)?;
             let root = std::fs::canonicalize(&root).unwrap_or(root);
-            let rows = fact_mine_rust::runtime_trace::anchor_statuses(&root, &plan, &trace)?;
-            let mut out = std::collections::BTreeMap::new();
-            for (symbol, status, _requested, observed) in &rows {
-                out.insert(symbol.clone(), (status.clone(), *observed));
-            }
-            println!("{}", serde_json::to_string(&out)?);
+            let evidence = fact_mine_rust::runtime_trace::build_evidence(&root, &plan, &trace)?;
+            println!("{evidence}");
             eprintln!(
                 "Runtime trace joined: {} anchors, {} observations, {} calls",
-                rows.len(),
+                plan.requests.len(),
                 trace.observations.len(),
                 trace.calls.len()
             );
