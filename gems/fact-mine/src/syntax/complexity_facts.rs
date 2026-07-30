@@ -1884,6 +1884,9 @@ fn visit_loops(
                         .flatten()
                 })
                 .or_else(|| {
+                    behavior.empty_constructor_complexity(message, call_argument_nodes(node).len())
+                })
+                .or_else(|| {
                     // A paren-less member access is a constant-time field/
                     // property read, not an unresolved method call.
                     behavior.complexity_member_read_complexity(node)

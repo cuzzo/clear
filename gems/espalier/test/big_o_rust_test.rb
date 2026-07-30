@@ -21,9 +21,9 @@ class BigORustTest < Minitest::Test
 
     # Each name is scanned once, so the strips sum to the input.
     assert_equal "O(N)", actual["strip_each"]
-    # Every iteration rescans the accumulated buffer; a linear answer here would
-    # be an under-estimate, whatever else remains unproven.
-    refute_equal "O(N)", actual["scan_accumulated"]
-    refute_equal "O(1)", actual["scan_accumulated"]
+    # Appending each name copies that name, which also sums to the input.
+    assert_equal "O(N)", actual["join_each"]
+    # Every iteration rescans the accumulated buffer.
+    assert_equal "O(N^2)", actual["scan_accumulated"]
   end
 end

@@ -394,6 +394,24 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         Some("rust")
     }
 
+    fn complexity_uses_syntax_local_types(&self) -> bool {
+        true
+    }
+
+    fn syntax_metadata(
+        &self,
+        source: &str,
+        functions: &[crate::syntax::FunctionDef],
+    ) -> super::normalized_behavior::SyntaxMetadata {
+        super::normalized_behavior::SyntaxMetadata {
+            method_param_types:
+                super::normalized_behavior::method_param_types_from_signatures(self, source, functions),
+            method_local_types:
+                super::normalized_behavior::method_local_types_from_declarations(self, source, functions),
+            ..super::normalized_behavior::SyntaxMetadata::default()
+        }
+    }
+
     fn scalar_operator_complexity(
         &self,
         message: &str,

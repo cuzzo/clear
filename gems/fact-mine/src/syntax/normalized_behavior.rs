@@ -1547,6 +1547,18 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
             .is_some_and(NormalizedCollectionOperation::argument_sized)
     }
 
+    /// Constructing an empty value allocates nothing to copy, whatever the
+    /// language spells the constructor. A constructor taking arguments is not
+    /// covered: it may build from them.
+    fn empty_constructor_complexity(
+        &self,
+        message: &str,
+        argument_count: usize,
+    ) -> Option<NormalizedCallComplexity> {
+        (argument_count == 0 && matches!(message, "new" | "default" | "with_capacity"))
+            .then(|| NormalizedCollectionOperation::Constant.complexity())
+    }
+
     /// Whether a proven bound reads its receiver, so an operand it never
     /// touches cannot introduce a dimension.
     fn call_cost_is_receiver_sized(&self, receiver_type: &TypeExpr, message: &str) -> bool {
@@ -2636,7 +2648,10 @@ pub(crate) fn method_local_types_from_declarations<B: NormalizedLanguageBehavior
             let mut candidates = BTreeMap::<String, BTreeSet<String>>::new();
             for line in lines.get(start..end)? {
                 for name in assigned_local_names(line) {
-                    if let Some(declared) = behavior.declared_local_type(line, &name) {
+                    if let Some(declared) = behavior
+                        .declared_local_type(line, &name)
+                        .or_else(|| constructed_local_type(line, &name))
+                    {
                         candidates.entry(name).or_default().insert(declared);
                     }
                 }
@@ -2697,6 +2712,33 @@ pub(crate) fn foreach_binding_names(text: &str, separators: &[&str]) -> Option<V
         .last()?
         .trim_matches(|character: char| !character.is_alphanumeric() && character != '_');
     (!name.is_empty()).then(|| vec![name.to_string()])
+}
+
+/// The type a local is constructed from: `new T(...)` or `T::new(...)`. A
+/// constructor names its own type in every language here, so a local bound to
+/// one is that type even where nothing declares it.
+fn constructed_local_type(line: &str, name: &str) -> Option<String> {
+    let (_, initializer) = line.split_once(&format!("{name} ="))?;
+    let initializer = initializer.trim_start_matches('=').trim();
+    let head = initializer
+        .split(|character: char| character == '(' || character == '{' || character == '<')
+        .next()?
+        .trim();
+    let candidate = head.strip_prefix("new ").map(str::trim).unwrap_or(head);
+    let candidate = candidate.rsplit("::").nth(1).unwrap_or_else(|| {
+        if head.starts_with("new ") {
+            candidate
+        } else {
+            ""
+        }
+    });
+    let candidate = candidate.rsplit(['.', ':']).next().unwrap_or_default().trim();
+    (!candidate.is_empty()
+        && candidate
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_uppercase()))
+    .then(|| candidate.to_string())
 }
 
 pub(crate) fn type_before_local_name(source: &str, name: &str) -> Option<String> {
