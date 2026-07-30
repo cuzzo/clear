@@ -1915,7 +1915,14 @@ fn visit_loops(
                 // A proven operand type outranks the type-blind intrinsic table.
                 .or_else(|| {
                     let operand_type =
-                        operator_operand_type(node, parameter_types, state_types, field_types, behavior);
+                        operator_operand_type(
+                            node,
+                            parameter_types,
+                            state_types,
+                            field_types,
+                            assignments,
+                            behavior,
+                        );
                     behavior
                         .scalar_operator_complexity(message, operand_type.as_ref())
                         .or_else(|| {
@@ -1945,7 +1952,14 @@ fn visit_loops(
                 })
                 .or_else(|| {
                     let operand_type =
-                        operator_operand_type(node, parameter_types, state_types, field_types, behavior);
+                        operator_operand_type(
+                            node,
+                            parameter_types,
+                            state_types,
+                            field_types,
+                            assignments,
+                            behavior,
+                        );
                     behavior.scalar_operator_complexity(message, operand_type.as_ref())
                 });
             // No operand grows with the input, so a size-dependent bound
@@ -2693,13 +2707,19 @@ fn operator_operand_type(
     local_types: &BTreeMap<String, TypeExpr>,
     state_types: &BTreeMap<String, TypeExpr>,
     field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> Option<TypeExpr> {
     let operands = child_nodes(node);
     let resolve = |operand: &Node| {
         local_names(operand)
             .into_iter()
-            .find_map(|name| local_types.get(&name).cloned())
+            .find_map(|name| {
+                local_types
+                    .get(&name)
+                    .cloned()
+                    .or_else(|| assigned_local_type(&name, local_types, assignments, 0))
+            })
             .or_else(|| {
                 resolve_expr_type(operand.text.trim(), local_types, state_types, field_types)
             })
@@ -2715,6 +2735,34 @@ fn operator_operand_type(
             .filter_map(|operand| resolve(operand))
             .find(|resolved| matches!(resolved, TypeExpr::NilClass))
     })
+}
+
+/// A local declared from another binding has that binding's type. A cursor
+/// introduced in a loop header carries no annotation, so nothing else records
+/// what it is - yet the operators applied to it are a mystery only while its
+/// type is.
+fn assigned_local_type(
+    name: &str,
+    local_types: &BTreeMap<String, TypeExpr>,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+    depth: usize,
+) -> Option<TypeExpr> {
+    if depth >= 4 {
+        return None;
+    }
+    let types = assignments
+        .get(name)?
+        .iter()
+        .flat_map(|row| row.dependencies.iter())
+        .filter(|dependency| *dependency != name)
+        .filter_map(|dependency| {
+            local_types
+                .get(dependency)
+                .cloned()
+                .or_else(|| assigned_local_type(dependency, local_types, assignments, depth + 1))
+        })
+        .collect::<BTreeSet<_>>();
+    (types.len() == 1).then(|| types.into_iter().next().unwrap())
 }
 
 /// Rust bindings have invariant types. A complete singleton DFG type for a

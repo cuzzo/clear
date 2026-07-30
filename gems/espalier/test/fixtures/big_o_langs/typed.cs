@@ -30,4 +30,11 @@ public class Typed {
     for (long n = limit; n > 0; n--) { steps++; }
     return steps;
   }
+
+  // The header's update is what makes this logarithmic rather than linear.
+  public int DivideDescent(long limit) {
+    int steps = 0;
+    for (long n = limit; n > 1; n /= 2) { steps++; }
+    return steps;
+  }
 }

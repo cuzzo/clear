@@ -1123,17 +1123,35 @@ impl<'source> TreeSitterNormalizer<'source> {
             .named_field(node, "body")
             .or_else(|| self.named_field(node, "consequence"))
             .or_else(|| self.block_child(node));
+        // A C-style header states what the loop binds and how it advances. Both
+        // run - the initializer once, the update every iteration - so dropping
+        // them loses the cursor's type, what it starts from, and how it moves.
+        // The field names are shared by every language that spells this header.
+        let initializer = self.named_field(node, "initializer");
+        let update = self
+            .named_field(node, "update")
+            .or_else(|| self.named_field(node, "increment"));
         let binding = self
             .normalization_adapter
             .loop_binding_node(node)
-            .and_then(|binding| self.normalize_node(binding));
+            .and_then(|binding| self.normalize_node(binding))
+            .or_else(|| initializer.and_then(|initializer| self.normalize_node(initializer)));
         let condition =
             optional_node(condition.and_then(|condition| self.normalize_node(condition)));
         let body = optional_node(body.and_then(|body| self.normalize_control_body(body)));
-        let children = if let Some(binding) = binding {
-            vec![Child::Node(Box::new(binding)), condition, body]
-        } else {
-            vec![condition, body]
+        let update = update.and_then(|update| self.normalize_node(update));
+        // The update trails the body rather than joining it: it runs on every
+        // iteration including one a `continue` cuts short, and the loop's parts
+        // are addressed from the front, so a trailing child disturbs neither.
+        let children = match (binding, update) {
+            (binding, Some(update)) => vec![
+                optional_node(binding),
+                condition,
+                body,
+                Child::Node(Box::new(update)),
+            ],
+            (Some(binding), None) => vec![Child::Node(Box::new(binding)), condition, body],
+            (None, None) => vec![condition, body],
         };
         Some(self.wrap(node_type, children, node))
     }

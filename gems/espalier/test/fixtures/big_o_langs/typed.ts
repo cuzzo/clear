@@ -14,3 +14,11 @@ export function copy(items: string[]): string[] {
   for (const item of items) { output.push(item); }
   return output;
 }
+
+// The cursor's type comes from what it is initialized from, so its comparison
+// is priced and the descent in the header is visible.
+export function divideDescent(limit: number): number {
+  let steps = 0;
+  for (let n = limit; n > 1; n /= 2) { steps++; }
+  return steps;
+}

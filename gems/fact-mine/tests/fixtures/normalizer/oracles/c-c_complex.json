@@ -59,6 +59,32 @@
                               "Node": {
                                 "children": [
                                   {
+                                    "String": "i"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [],
+                                      "first_column": 13,
+                                      "first_lineno": 3,
+                                      "last_column": 14,
+                                      "last_lineno": 3,
+                                      "text": "0",
+                                      "type": "NUMBER_LITERAL"
+                                    }
+                                  }
+                                ],
+                                "first_column": 9,
+                                "first_lineno": 3,
+                                "last_column": 14,
+                                "last_lineno": 3,
+                                "text": "i = 0",
+                                "type": "LASGN"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
                                     "Node": {
                                       "children": [
                                         {
@@ -183,6 +209,33 @@
                                 "last_lineno": 4,
                                 "text": "if (i == 5) continue;",
                                 "type": "IF"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "i"
+                                        }
+                                      ],
+                                      "first_column": 24,
+                                      "first_lineno": 3,
+                                      "last_column": 25,
+                                      "last_lineno": 3,
+                                      "text": "i",
+                                      "type": "LVAR"
+                                    }
+                                  }
+                                ],
+                                "first_column": 24,
+                                "first_lineno": 3,
+                                "last_column": 27,
+                                "last_lineno": 3,
+                                "text": "i++",
+                                "type": "UPDATE_EXPRESSION"
                               }
                             }
                           ],
