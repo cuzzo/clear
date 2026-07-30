@@ -52,6 +52,32 @@ module NilKillRuntimeTrace
     native_scip_anchors_by_key.transform_values(&:first)
   end
 
+  # A state write is the one anchor kind with no event of its own: Ruby raises
+  # nothing when an ivar is assigned. The collector therefore reads the member
+  # back after the demanded line has run, which needs the member's own ivar name
+  # as well as the bare name the plan asks under.
+  def self.native_scip_state_demand_map
+    @native_scip_state_demand_map ||=
+      Array(trace_plan&.dig("runtime_evidence", "requests"))
+        .each_with_object({}) do |request, map|
+          anchor = request["anchor"]
+          next unless anchor.is_a?(Hash) && anchor["kind"] == "STATE_WRITE"
+
+          range = anchor["range"]
+          next unless range.is_a?(Hash)
+
+          name = anchor.fetch("display_name").to_s
+          next if name.empty?
+
+          path = abs_path(anchor.fetch("relative_path"))
+          map["#{path}\x01#{range.fetch("start_line").to_i + 1}\x01#{name}"] = "@#{name}"
+        end
+  end
+
+  def self.native_state_owner(klass)
+    safe_module_name(klass)
+  end
+
   def self.native_scip_symbols_for(path, line, selector)
     native_scip_anchors_by_key.fetch("#{path}\x01#{line}\x01#{selector}", [])
   end
@@ -146,7 +172,9 @@ module NilKillRuntimeTrace
 
   def self.install_native_runtime_scip_trace
     NilKillTraceNative.value_domain_owner = self
-    NilKillTraceNative.configure(Array(TARGETS).map(&:to_s), native_scip_demand_map)
+    NilKillTraceNative.configure(
+      Array(TARGETS).map(&:to_s), native_scip_demand_map, native_scip_state_demand_map
+    )
     NilKillTraceNative.start
   end
 
@@ -314,11 +342,41 @@ module NilKillRuntimeTrace
     end
   end
 
+  # The same observations answer two questions: which classes a member holds
+  # anywhere (ivars) and which it holds at one write site (state-values).
+  def self.native_scip_state_rows
+    NilKillTraceNative.state_values.map do |path, line, owner, name, classes, calls|
+      { path: path, line: line, class: owner, name: name,
+        classes: classes.compact.sort, calls: calls }
+    end
+  end
+
+  # `dump` owns the ivars/state-values files for every tier, so the observations
+  # are handed to the tables it serialises rather than written a second time.
+  def self.publish_native_state_observations!
+    native_scip_state_rows.each do |row|
+      owner = row.fetch(:class)
+      name = row.fetch(:name)
+      classes = row.fetch(:classes)
+      calls = row.fetch(:calls)
+      field = (@ivar_runtime[[owner, "@#{name}"]] ||= { calls: 0, classes: NKSet.new })
+      field[:calls] += calls
+      classes.each { |type| field[:classes] << type }
+      site = (
+        @runtime_state_values[[row.fetch(:path), row.fetch(:line), owner, name]] ||=
+          { calls: 0, classes: NKSet.new }
+      )
+      site[:calls] += calls
+      classes.each { |type| site[:classes] << type }
+    end
+  end
+
   def self.dump_native_runtime_scip(pid)
     NilKillTraceNative.stop
     write_jsonl("runtime-calls-#{pid}.jsonl", native_scip_call_rows)
     write_jsonl("methods-#{pid}.jsonl", native_scip_method_rows)
     write_jsonl("collections-#{pid}.jsonl", native_scip_collection_rows)
+    publish_native_state_observations!
     write_jsonl(
       "executed-callsites-#{pid}.jsonl",
       NilKillTraceNative.executed_callsites.sort_by { |row| row.map(&:to_s) }.map do |path, line, selector, count|

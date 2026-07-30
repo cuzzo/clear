@@ -69,12 +69,13 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
         { types: [value.class.name], singletons: [], elements: elements,
           keys: [], values: [], shapes: [], nonproduction: false }
       end
+      owner.define_singleton_method(:native_state_owner) { |klass| klass.name }
     end
   end
 
-  def trace(anchors)
+  def trace(anchors, state_anchors = {})
     NilKillTraceNative.reset
-    NilKillTraceNative.configure([FIXTURE_ROOT], anchors)
+    NilKillTraceNative.configure([FIXTURE_ROOT], anchors, state_anchors)
     NilKillTraceNative.start
     yield
   ensure
@@ -186,8 +187,9 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
 
   it "observes nothing while stopped" do
     NilKillTraceNative.reset
-    NilKillTraceNative.configure([FIXTURE_ROOT],
-                                 anchor_key(line_of("value.positive?"), "positive?") => "a")
+    NilKillTraceNative.configure(
+      [FIXTURE_ROOT], { anchor_key(line_of("value.positive?"), "positive?") => "a" }, {}
+    )
     NativeTraceSubject.scalar(1)
     expect(NilKillTraceNative.records).to be_empty
   end
@@ -307,7 +309,7 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     key = "#{inner_path}\u00013\u0001inner"
 
     NilKillTraceNative.reset
-    NilKillTraceNative.configure([FIXTURE_ROOT], key => "anchor-internal")
+    NilKillTraceNative.configure([FIXTURE_ROOT], { key => "anchor-internal" }, {})
     NilKillTraceNative.start
     NativeTraceInner.outer(5)
     NilKillTraceNative.stop
@@ -338,7 +340,7 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     load path
 
     NilKillTraceNative.reset
-    NilKillTraceNative.configure([FIXTURE_ROOT], "#{path}4length" => "anchor-block")
+    NilKillTraceNative.configure([FIXTURE_ROOT], { "#{path}4length" => "anchor-block" }, {})
     NilKillTraceNative.start
     NativeTraceBlocks.wrapping("abc")
     NilKillTraceNative.stop
@@ -375,7 +377,7 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     # `widen` is demanded on every line of the method, exactly as a parameter
     # name would be, so only the true callsite line distinguishes the anchors.
     anchors = (3..6).to_h { |line| ["#{path}#{line}widen", "anchor-#{line}"] }
-    NilKillTraceNative.configure([FIXTURE_ROOT], anchors)
+    NilKillTraceNative.configure([FIXTURE_ROOT], anchors, {})
     NilKillTraceNative.start
     NativeTraceMultiline.build("x")
     NilKillTraceNative.stop
@@ -410,7 +412,7 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     end
 
     NilKillTraceNative.reset
-    NilKillTraceNative.configure([FIXTURE_ROOT], "#{path}3length" => "anchor-declared")
+    NilKillTraceNative.configure([FIXTURE_ROOT], { "#{path}3length" => "anchor-declared" }, {})
     NilKillTraceNative.start
     NativeTraceDeclared.read("abc")
     NilKillTraceNative.stop
@@ -420,5 +422,60 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     expect(row.dig(:callee, :owner)).to eq("Record")
     expect(row.dig(:callee, :path)).to eq("/declared/record.rb")
     expect(row.dig(:callee, :line)).to eq(12)
+  end
+
+  # Ruby raises no event when an ivar is assigned, so a demanded state write is
+  # read back off the object once the line performing it has run. Source
+  # rewriting is the only other way to see this, and rewriting shifts every line
+  # the rest of the collector depends on.
+  it "reads a demanded state write back after its line has run" do
+    path = File.join(FIXTURE_ROOT, "state.rb")
+    File.write(path, <<~RUBY)
+      class NativeTraceState
+        def initialize(value)
+          @label = value.to_s
+          @count = value
+        end
+      end
+    RUBY
+    load path
+
+    NilKillTraceNative.reset
+    NilKillTraceNative.configure(
+      [FIXTURE_ROOT], {},
+      "#{path}\u00013\u0001label" => "@label",
+      "#{path}\u00014\u0001count" => "@count"
+    )
+    NilKillTraceNative.start
+    NativeTraceState.new(7)
+    NilKillTraceNative.stop
+
+    rows = NilKillTraceNative.state_values.to_h do |file, line, owner, name, types, calls|
+      [name, [file, line, owner, types, calls]]
+    end
+    expect(rows.fetch("label")).to eq([path, 3, "NativeTraceState", ["String"], 1])
+    # The write on the method's last line has no following :line event; the
+    # frame's own :return is what flushes it.
+    expect(rows.fetch("count")).to eq([path, 4, "NativeTraceState", ["Integer"], 1])
+  end
+
+  it "records nothing for a state write the plan did not demand" do
+    path = File.join(FIXTURE_ROOT, "state_undemanded.rb")
+    File.write(path, <<~RUBY)
+      class NativeTraceUndemanded
+        def initialize
+          @hidden = 1
+        end
+      end
+    RUBY
+    load path
+
+    NilKillTraceNative.reset
+    NilKillTraceNative.configure([FIXTURE_ROOT], {}, {})
+    NilKillTraceNative.start
+    NativeTraceUndemanded.new
+    NilKillTraceNative.stop
+
+    expect(NilKillTraceNative.state_values).to be_empty
   end
 end

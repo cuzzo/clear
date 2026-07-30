@@ -28,6 +28,11 @@ typedef struct {
     int caller_line;
     int analyzed;
     struct call_record *record; // set when this frame is an observed callee
+    // A demanded state write executes between this :line and the next event in
+    // the frame, so the assigned value is read back then rather than now.
+    struct state_demand *pending_state;
+    ID pending_state_path;
+    int pending_state_line;
 } frame_t;
 
 // A c_return does not always report the same coordinate as its c_call, so the
@@ -76,12 +81,17 @@ static st_table *records;        // record identity -> call_record_t*
 static st_table *thread_states;  // thread VALUE -> thread_state_t*
 static st_table *callsite_hits;  // path -> line -> selector -> count
 static st_table *entries;        // path -> line -> owner -> name -> count
+static st_table *state_demand;   // path -> line -> demanded state write
+static st_table *states;         // path -> line -> owner -> name -> state_record_t*
+static st_table *state_owners;   // class identity -> reportable owner name, 0 = skip
 static VALUE roots_ary;          // analyzed-source path prefixes
 static VALUE domains_ary;        // Ruby domain Hashes, referenced by index
 static VALUE tracepoint;
 static VALUE ruby_owner;         // NilKillRuntimeTrace, for delegation
 static ID id_runtime_value_domain, id_call, id_instance, id_return;
-static ID id_local_variables, id_local_variable_get, id_callee_identity;
+static ID id_local_variables, id_local_variable_get, id_callee_identity, id_state_owner;
+
+static ID class_name_id(VALUE klass);
 static unsigned long counts[8];
 
 static thread_state_t *current_state(void) {
@@ -138,6 +148,19 @@ typedef struct {
     int native;
 } identity_t;
 
+// A state write is demanded under the bare member name, but reading it back
+// needs the ivar's own name, so both are interned once at configure time.
+typedef struct state_demand {
+    ID name;
+    ID ivar;
+} state_demand_t;
+
+typedef struct {
+    ID types[MAX_ALTS];
+    int n_types;
+    unsigned long count;
+} state_record_t;
+
 // Callee identity is a pure function of (defined class, selector) -- whether the
 // method is C-implemented is a property of that pair too, not of the event -- so
 // the Ruby round trip that resolves transparent wrappers and declaration sites is
@@ -167,6 +190,64 @@ static identity_t *cached_identity(VALUE defined, ID selector, int native) {
     }
     st_insert(by_selector, (st_data_t)selector, (st_data_t)identity);
     return identity;
+}
+
+// An anonymous class has no name the evidence can join on, and Ruby already
+// owns that rule. Ask once per class; the answer cannot change.
+static ID cached_state_owner(VALUE klass) {
+    st_data_t found;
+    if (st_lookup(state_owners, (st_data_t)klass, &found)) return (ID)found;
+
+    if (NIL_P(ruby_owner)) {
+        ruby_owner = rb_const_get(rb_cObject, rb_intern("NilKillRuntimeTrace"));
+    }
+    VALUE name = rb_funcall(ruby_owner, id_state_owner, 1, klass);
+    ID owner = RB_TYPE_P(name, T_STRING) ? rb_intern_str(name) : 0;
+    st_insert(state_owners, (st_data_t)klass, (st_data_t)owner);
+    return owner;
+}
+
+// Ruby has no event for an assignment, so a demanded state write is read back
+// from the object once the line that performs it has run -- at the frame's next
+// :line, or at its :return when the write was the last thing it did. `self` is
+// taken from that event, which is the same object the write targeted, so no
+// receiver is retained across events.
+static void flush_pending_state(frame_t *frame, VALUE self) {
+    state_demand_t *want = frame->pending_state;
+    if (!want) return;
+    frame->pending_state = NULL;
+    if (!rb_ivar_defined(self, want->ivar)) return;
+
+    ID owner = cached_state_owner(rb_obj_class(self));
+    if (!owner) return;
+
+    st_table *by_line = nested(states, (st_data_t)frame->pending_state_path);
+    st_table *by_owner = nested(by_line, (st_data_t)frame->pending_state_line);
+    st_table *by_name = nested(by_owner, (st_data_t)owner);
+    st_data_t found;
+    state_record_t *record;
+    if (st_lookup(by_name, (st_data_t)want->name, &found)) {
+        record = (state_record_t *)found;
+    } else {
+        record = ALLOC(state_record_t);
+        memset(record, 0, sizeof(*record));
+        st_insert(by_name, (st_data_t)want->name, (st_data_t)record);
+    }
+    record->count++;
+    ID type = class_name_id(rb_obj_class(rb_ivar_get(self, want->ivar)));
+    if (type) {
+        for (int i = 0; i < record->n_types; i++) {
+            if (record->types[i] == type) return;
+        }
+        if (record->n_types < MAX_ALTS) record->types[record->n_types++] = type;
+    }
+}
+
+static state_demand_t *demanded_state(ID path, int line) {
+    st_table *by_line = nested_lookup(state_demand, (st_data_t)path);
+    if (!by_line) return NULL;
+    st_data_t found;
+    return st_lookup(by_line, (st_data_t)line, &found) ? (state_demand_t *)found : NULL;
 }
 
 static void bump(st_table *table, st_data_t key) {
@@ -490,6 +571,13 @@ static void on_event(VALUE tpval, void *_unused) {
         frame->path = id;
         frame->line = NUM2INT(rb_tracearg_lineno(arg));
         frame->analyzed = 1;
+        if (frame->pending_state) flush_pending_state(frame, rb_tracearg_self(arg));
+        state_demand_t *want = demanded_state(id, frame->line);
+        if (want) {
+            frame->pending_state = want;
+            frame->pending_state_path = id;
+            frame->pending_state_line = frame->line;
+        }
         return;
       }
       case RUBY_EVENT_CALL: {
@@ -540,6 +628,7 @@ static void on_event(VALUE tpval, void *_unused) {
             thread_state_t *state = current_state();
             if (state->depth == 0) return;
             frame_t *frame = &state->frames[--state->depth];
+            if (frame->pending_state) flush_pending_state(frame, rb_tracearg_self(arg));
             if (frame->record) record_result(frame->record, rb_tracearg_return_value(arg));
             // A FUNCTION_RETURN anchor is demanded under the selector "return"
             // across the whole method body, so the returning line matches it.
@@ -569,7 +658,7 @@ static void on_event(VALUE tpval, void *_unused) {
     }
 }
 
-static VALUE nk_configure(VALUE self, VALUE roots, VALUE anchor_map) {
+static VALUE nk_configure(VALUE self, VALUE roots, VALUE anchor_map, VALUE state_map) {
     rb_ary_clear(roots_ary);
     for (long i = 0; i < RARRAY_LEN(roots); i++) {
         rb_ary_push(roots_ary, rb_obj_freeze(rb_String(RARRAY_AREF(roots, i))));
@@ -586,6 +675,19 @@ static VALUE nk_configure(VALUE self, VALUE roots, VALUE anchor_map) {
         st_insert(nested(nested(demand, (st_data_t)path), (st_data_t)selector),
                   (st_data_t)line, 1);
         st_insert(nested(demand_in_file, (st_data_t)path), (st_data_t)selector, 1);
+    }
+    st_clear(state_demand);
+    VALUE state_keys = rb_funcall(state_map, rb_intern("keys"), 0);
+    for (long i = 0; i < RARRAY_LEN(state_keys); i++) {
+        VALUE key = RARRAY_AREF(state_keys, i);
+        VALUE parts = rb_str_split(key, "\1");
+        if (RARRAY_LEN(parts) != 3) continue;
+        ID path = rb_intern_str(RARRAY_AREF(parts, 0));
+        int line = NUM2INT(rb_funcall(RARRAY_AREF(parts, 1), rb_intern("to_i"), 0));
+        state_demand_t *want = ALLOC(state_demand_t);
+        want->name = rb_intern_str(RARRAY_AREF(parts, 2));
+        want->ivar = rb_intern_str(rb_hash_aref(state_map, key));
+        st_insert(nested(state_demand, (st_data_t)path), (st_data_t)line, (st_data_t)want);
     }
     return Qtrue;
 }
@@ -770,6 +872,47 @@ static VALUE nk_function_entries(VALUE self) {
     return rows;
 }
 
+static int emit_state_leaf(st_data_t name, st_data_t value, st_data_t _x) {
+    state_record_t *record = (state_record_t *)value;
+    VALUE types = rb_ary_new();
+    for (int i = 0; i < record->n_types; i++) rb_ary_push(types, id_or_nil(record->types[i]));
+    VALUE row = rb_ary_new_capa(5);
+    rb_ary_push(row, id_or_nil(tally_k1));
+    rb_ary_push(row, INT2NUM((int)tally_k2));
+    rb_ary_push(row, id_or_nil(tally_k3));
+    rb_ary_push(row, id_or_nil((ID)name));
+    rb_ary_push(row, types);
+    rb_ary_push(row, ULONG2NUM(record->count));
+    rb_ary_push(tally_out, row);
+    return ST_CONTINUE;
+}
+
+static int emit_state_owner(st_data_t owner, st_data_t table, st_data_t _x) {
+    tally_k3 = (ID)owner;
+    st_foreach((st_table *)table, emit_state_leaf, 0);
+    return ST_CONTINUE;
+}
+
+static int emit_state_line(st_data_t line, st_data_t table, st_data_t _x) {
+    tally_k2 = (ID)line;
+    st_foreach((st_table *)table, emit_state_owner, 0);
+    return ST_CONTINUE;
+}
+
+static int emit_state_path(st_data_t path, st_data_t table, st_data_t _x) {
+    tally_k1 = (ID)path;
+    st_foreach((st_table *)table, emit_state_line, 0);
+    return ST_CONTINUE;
+}
+
+static VALUE nk_state_values(VALUE self) {
+    tally_out = rb_ary_new();
+    st_foreach(states, emit_state_path, 0);
+    VALUE rows = tally_out;
+    tally_out = Qnil;
+    return rows;
+}
+
 static VALUE nk_stats(VALUE self) {
     VALUE stats = rb_hash_new();
     const char *names[] = {"line", "call", "return", "c_call", "c_return"};
@@ -812,6 +955,32 @@ static VALUE nk_set_owner(VALUE self, VALUE owner) {
     return owner;
 }
 
+static int free_state(st_data_t _key, st_data_t value, st_data_t _arg) {
+    xfree((state_record_t *)value);
+    return ST_CONTINUE;
+}
+
+static int free_state_owner_level(st_data_t _key, st_data_t value, st_data_t _arg) {
+    st_table *table = (st_table *)value;
+    st_foreach(table, free_state, 0);
+    st_free_table(table);
+    return ST_CONTINUE;
+}
+
+static int free_state_line_level(st_data_t _key, st_data_t value, st_data_t _arg) {
+    st_table *table = (st_table *)value;
+    st_foreach(table, free_state_owner_level, 0);
+    st_free_table(table);
+    return ST_CONTINUE;
+}
+
+static int free_state_path_level(st_data_t _key, st_data_t value, st_data_t _arg) {
+    st_table *table = (st_table *)value;
+    st_foreach(table, free_state_line_level, 0);
+    st_free_table(table);
+    return ST_CONTINUE;
+}
+
 static int free_identity(st_data_t _key, st_data_t value, st_data_t _arg) {
     xfree((identity_t *)value);
     return ST_CONTINUE;
@@ -833,6 +1002,9 @@ static VALUE nk_reset(VALUE self) {
     // Reset means no observation survives, this one included.
     st_foreach(identities, free_identity_level, 0);
     st_clear(identities);
+    st_foreach(states, free_state_path_level, 0);
+    st_clear(states);
+    st_clear(state_owners);
     st_clear(callsite_hits);
     st_clear(entries);
     rb_ary_clear(domains_ary);
@@ -842,13 +1014,14 @@ static VALUE nk_reset(VALUE self) {
 
 void Init_nil_kill_trace(void) {
     VALUE mod = rb_define_module("NilKillTraceNative");
-    rb_define_singleton_method(mod, "configure", nk_configure, 2);
+    rb_define_singleton_method(mod, "configure", nk_configure, 3);
     rb_define_singleton_method(mod, "start", nk_start, 0);
     rb_define_singleton_method(mod, "stop", nk_stop, 0);
     rb_define_singleton_method(mod, "records", nk_records, 0);
     rb_define_singleton_method(mod, "domains", nk_domains, 0);
     rb_define_singleton_method(mod, "executed_callsites", nk_executed_callsites, 0);
     rb_define_singleton_method(mod, "function_entries", nk_function_entries, 0);
+    rb_define_singleton_method(mod, "state_values", nk_state_values, 0);
     rb_define_singleton_method(mod, "stats", nk_stats, 0);
     rb_define_singleton_method(mod, "reset", nk_reset, 0);
     rb_define_singleton_method(mod, "value_domain_owner=", nk_set_owner, 1);
@@ -861,6 +1034,9 @@ void Init_nil_kill_trace(void) {
     thread_states = st_init_numtable();
     callsite_hits = st_init_numtable();
     entries = st_init_numtable();
+    state_demand = st_init_numtable();
+    states = st_init_numtable();
+    state_owners = st_init_numtable();
     tally_out = Qnil;
     rb_global_variable(&tally_out);
     tracepoint = Qnil;
@@ -877,6 +1053,7 @@ void Init_nil_kill_trace(void) {
     id_local_variables = rb_intern("local_variables");
     id_local_variable_get = rb_intern("local_variable_get");
     id_callee_identity = rb_intern("native_callee_identity");
+    id_state_owner = rb_intern("native_state_owner");
     ruby_owner = Qnil;
     rb_global_variable(&ruby_owner);
 }
