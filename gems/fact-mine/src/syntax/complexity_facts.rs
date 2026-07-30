@@ -170,6 +170,8 @@ pub struct CallContainmentFact {
     pub argument_size_domains: Vec<Vec<String>>,
     #[serde(default)]
     pub receiver_size_domains: Vec<String>,
+    #[serde(default)]
+    pub constant_size_arguments: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbolic_execution: Option<SymbolicComplexityFact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -326,10 +328,6 @@ struct LoopContext {
     unknown: bool,
     symbolic_factors: BTreeMap<String, usize>,
     symbolic_complete: bool,
-    /// The power and size domains in force immediately outside the innermost
-    /// enclosing loop. A statement block that unconditionally leaves that loop
-    /// runs at most once no matter how many times the loop would otherwise
-    /// iterate, so its contents are priced against this context instead.
     escape_power: usize,
     escape_symbolic_factors: BTreeMap<String, usize>,
 }
@@ -1179,16 +1177,10 @@ fn collect_allocations(
 }
 
 #[allow(clippy::too_many_arguments)] // Loop analysis requires the full immutable analysis context.
-/// A statement block that unconditionally leaves the enclosing loop executes at
-/// most once per loop entry, so its contents must not be multiplied by the
-/// loop's trip count. `return` escapes every enclosing loop and is priced at the
-/// function root; `break` escapes only the innermost one, so it reverts to the
-/// context recorded immediately outside it. `continue` is not an escape: the
-/// loop keeps iterating. A labelled break that leaves an outer loop is treated
-/// as leaving only the innermost, which overstates rather than understates.
-///
-/// Returns `None` when there is no loop power to drop, which also makes the
-/// rewritten context terminal: revisiting the same block cannot escape twice.
+/// A block that leaves the loop runs at most once per loop entry. A labelled
+/// break is treated as leaving only the innermost loop, which overstates.
+/// Returning `None` when there is no power to drop also keeps the rewritten
+/// context terminal, so revisiting the block cannot escape twice.
 fn loop_escaping_context(node: &Node, parent: &LoopContext) -> Option<LoopContext> {
     if parent.power == 0 && parent.escape_power == 0 {
         return None;
@@ -1596,7 +1588,11 @@ fn visit_loops(
             params: refs,
             domain_names,
             independent_collection_bindings,
-            partition_locals: bindings,
+            partition_locals: parent
+                .partition_locals
+                .union(&bindings)
+                .cloned()
+                .collect(),
             cursor,
             absorb_next: fixpoint,
             root_line,
@@ -1661,8 +1657,6 @@ fn visit_loops(
             );
         }
     } else if let Some(escaped) = loop_escaping_context(node, parent) {
-        // This block ends by leaving the enclosing loop, so everything in it
-        // executes at most once per loop entry rather than once per iteration.
         visit_loops(
             node,
             params,
@@ -1774,7 +1768,11 @@ fn visit_loops(
                 .unwrap_or_default();
             let argument_cardinality_relation = if parent.power == 0 {
                 "same"
-            } else if !argument_names.is_disjoint(&parent.partition_locals) {
+            } else if !argument_names.is_empty()
+                && argument_names.is_subset(&parent.partition_locals)
+            {
+                // A binding merely mentioned in the argument (`parts[:i+1]`) is
+                // an index into the whole, not a disjoint piece of it.
                 "partition_of"
             } else if !argument_domains.is_empty() {
                 "independent_of"
@@ -1815,6 +1813,21 @@ fn visit_loops(
                     let operand_type = operator_operand_type(node, parameter_types);
                     behavior.scalar_operator_complexity(message, operand_type.as_ref())
                 });
+            // No operand grows with the input, so a size-dependent bound
+            // instantiates constant here.
+            let arguments = call_argument_nodes(node);
+            let constant_size_arguments = !arguments.is_empty()
+                && arguments.iter().all(|argument| constant_size_node(argument));
+            let known_call_complexity = known_call_complexity.map(|complexity| {
+                if complexity.time != "O(1)"
+                    && constant_size_arguments
+                    && receiver_size_domains.is_empty()
+                {
+                    NormalizedCollectionOperation::Constant.complexity()
+                } else {
+                    complexity
+                }
+            });
             let evidence_gap = known_call_complexity.is_none().then(|| {
                 if behavior.callback_invocation_message(message) {
                     "callback_dispatch".to_string()
@@ -1853,6 +1866,7 @@ fn visit_loops(
                 ),
                 argument_size_domains,
                 receiver_size_domains,
+                constant_size_arguments,
                 symbolic_execution: Some(symbolic_complexity(
                     &parent.symbolic_factors,
                     parent.symbolic_complete && !parent.unknown,
@@ -2384,6 +2398,20 @@ fn iteration_local_names(
     local_names(node)
 }
 
+/// Size fixed at compile time: reads no local or state, computes nothing.
+fn constant_size_node(node: &Node) -> bool {
+    if !local_names(node).is_empty() || !state_names(node).is_empty() {
+        return false;
+    }
+    fn computes(node: &Node) -> bool {
+        matches!(
+            node.r#type.as_str(),
+            "CALL" | "QCALL" | "FCALL" | "VCALL" | "OPCALL" | "ITER" | "LAMBDA" | "YIELD"
+        ) || child_nodes(node).into_iter().any(computes)
+    }
+    !computes(node)
+}
+
 fn call_argument_nodes(node: &Node) -> Vec<&Node> {
     node.children
         .iter()
@@ -2788,12 +2816,20 @@ fn loop_body(node: &Node) -> Option<&Node> {
 
 fn loop_binding_names(node: &Node) -> BTreeSet<String> {
     if node.r#type == "FOR" {
-        return node
-            .children
-            .first()
-            .and_then(ast::node)
-            .map(local_names)
-            .unwrap_or_default();
+        let Some(control) = node.children.first().and_then(ast::node) else {
+            return BTreeSet::new();
+        };
+        // A range clause is [targets, iterated expression]; the collection being
+        // iterated is not one of its own elements.
+        if control.r#type == "RANGE_CLAUSE" {
+            let children = child_nodes(control);
+            return if children.len() >= 2 {
+                local_names(children[0])
+            } else {
+                BTreeSet::new()
+            };
+        }
+        return local_names(control);
     }
     if node.r#type != "ITER" {
         return BTreeSet::new();

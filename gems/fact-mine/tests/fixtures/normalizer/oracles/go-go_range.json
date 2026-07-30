@@ -1,0 +1,251 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Node": {
+              "children": [],
+              "first_column": 8,
+              "first_lineno": 1,
+              "last_column": 12,
+              "last_lineno": 1,
+              "text": "main",
+              "type": "PACKAGE_IDENTIFIER"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 12,
+        "last_lineno": 1,
+        "text": "package main",
+        "type": "PACKAGE_CLAUSE"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "f"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "i"
+                                              }
+                                            ],
+                                            "first_column": 5,
+                                            "first_lineno": 4,
+                                            "last_column": 6,
+                                            "last_lineno": 4,
+                                            "text": "i",
+                                            "type": "LVAR"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "part"
+                                              }
+                                            ],
+                                            "first_column": 8,
+                                            "first_lineno": 4,
+                                            "last_column": 12,
+                                            "last_lineno": 4,
+                                            "text": "part",
+                                            "type": "LVAR"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 5,
+                                      "first_lineno": 4,
+                                      "last_column": 12,
+                                      "last_lineno": 4,
+                                      "text": "i, part",
+                                      "type": "EXPRESSION_LIST"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "parts"
+                                        }
+                                      ],
+                                      "first_column": 22,
+                                      "first_lineno": 4,
+                                      "last_column": 27,
+                                      "last_lineno": 4,
+                                      "text": "parts",
+                                      "type": "LVAR"
+                                    }
+                                  }
+                                ],
+                                "first_column": 5,
+                                "first_lineno": 4,
+                                "last_column": 27,
+                                "last_lineno": 4,
+                                "text": "i, part := range parts",
+                                "type": "RANGE_CLAUSE"
+                              }
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "_"
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "i"
+                                                    }
+                                                  ],
+                                                  "first_column": 6,
+                                                  "first_lineno": 5,
+                                                  "last_column": 7,
+                                                  "last_lineno": 5,
+                                                  "text": "i",
+                                                  "type": "LVAR"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 6,
+                                            "first_lineno": 5,
+                                            "last_column": 7,
+                                            "last_lineno": 5,
+                                            "text": "i",
+                                            "type": "EXPRESSION_LIST"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 2,
+                                      "first_lineno": 5,
+                                      "last_column": 7,
+                                      "last_lineno": 5,
+                                      "text": "_ = i",
+                                      "type": "LASGN"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "_"
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "part"
+                                                    }
+                                                  ],
+                                                  "first_column": 6,
+                                                  "first_lineno": 6,
+                                                  "last_column": 10,
+                                                  "last_lineno": 6,
+                                                  "text": "part",
+                                                  "type": "LVAR"
+                                                }
+                                              }
+                                            ],
+                                            "first_column": 6,
+                                            "first_lineno": 6,
+                                            "last_column": 10,
+                                            "last_lineno": 6,
+                                            "text": "part",
+                                            "type": "EXPRESSION_LIST"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 2,
+                                      "first_lineno": 6,
+                                      "last_column": 10,
+                                      "last_lineno": 6,
+                                      "text": "_ = part",
+                                      "type": "LASGN"
+                                    }
+                                  }
+                                ],
+                                "first_column": 2,
+                                "first_lineno": 5,
+                                "last_column": 0,
+                                "last_lineno": 7,
+                                "text": "_ = i\n\t\t_ = part\n",
+                                "type": "BLOCK"
+                              }
+                            }
+                          ],
+                          "first_column": 1,
+                          "first_lineno": 4,
+                          "last_column": 2,
+                          "last_lineno": 7,
+                          "text": "for i, part := range parts {\n\t\t_ = i\n\t\t_ = part\n\t}",
+                          "type": "FOR"
+                        }
+                      }
+                    ],
+                    "first_column": 1,
+                    "first_lineno": 4,
+                    "last_column": 0,
+                    "last_lineno": 8,
+                    "text": "for i, part := range parts {\n\t\t_ = i\n\t\t_ = part\n\t}\n",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 1,
+              "first_lineno": 4,
+              "last_column": 0,
+              "last_lineno": 8,
+              "text": "for i, part := range parts {\n\t\t_ = i\n\t\t_ = part\n\t}\n",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 3,
+        "last_column": 1,
+        "last_lineno": 8,
+        "text": "func f(parts []string) {\n\tfor i, part := range parts {\n\t\t_ = i\n\t\t_ = part\n\t}\n}",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 9,
+  "text": "package main\n\nfunc f(parts []string) {\n\tfor i, part := range parts {\n\t\t_ = i\n\t\t_ = part\n\t}\n}\n",
+  "type": "ROOT"
+}

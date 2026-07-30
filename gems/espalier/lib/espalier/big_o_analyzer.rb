@@ -66,7 +66,11 @@ module Espalier
               known_complexity =
                 Espalier::SymbolicComplexity.render(node[:symbolic_time])&.first || known_complexity
             elsif node[:execution_complexity]
-              known_complexity = multiply_complexity(known_complexity, node[:execution_complexity])
+              known_complexity = if node[:cardinality_relation] == "partition_of"
+                                   max_complexity(known_complexity, node[:execution_complexity])
+                                 else
+                                   multiply_complexity(known_complexity, node[:execution_complexity])
+                                 end
             end
             complexity = max_complexity(complexity, known_complexity)
             if node[:known_space_complexity]

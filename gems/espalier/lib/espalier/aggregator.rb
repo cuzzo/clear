@@ -1124,6 +1124,7 @@ module Espalier
           method: delegation[:message],
           line: delegation[:line] || method[:line] || 0,
           execution_complexity: context && context["execution_multiplicity"],
+          cardinality_relation: context && context["argument_cardinality_relation"],
           # The canonical CallRecord is enriched after syntax normalization by
           # SCIP and dependency summaries. Its exact symbol cost must outrank
           # an earlier adapter-level context model for the same source span.
@@ -1184,7 +1185,13 @@ module Espalier
         context["symbolic_execution"],
         context["size_domains"]
       )
-      Espalier::SymbolicComplexity.multiply(execution, local)
+      # Summing an element-sized cost over its collection is that collection's
+      # total size, not its square.
+      if context["argument_cardinality_relation"] == "partition_of"
+        Espalier::SymbolicComplexity.sum(execution, local)
+      else
+        Espalier::SymbolicComplexity.multiply(execution, local)
+      end
     end
 
     def parametric_call_symbolic(delegation, context)

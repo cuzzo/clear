@@ -695,6 +695,12 @@ pub(crate) fn apply_resolved_call_costs_to_contexts(output: &mut ProfileOutput) 
                 continue;
             }
             let (time, space) = candidates.iter().next().unwrap();
+            let (time, space) =
+                if context.constant_size_arguments && context.receiver_size_domains.is_empty() {
+                    (&"O(1)".to_string(), &"O(1)".to_string())
+                } else {
+                    (time, space)
+                };
             if context.known_time_complexity.is_none() {
                 context.known_time_complexity = Some(time.clone());
             }
