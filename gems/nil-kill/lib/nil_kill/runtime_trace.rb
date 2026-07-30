@@ -1751,6 +1751,14 @@ module NilKillRuntimeTrace
     return unless klass.is_a?(Class) && klass < Struct
     if klass.instance_variable_get(:@__nil_kill_attached)
       register_generated_constructor_wrapper(klass, native: true)
+      Array(klass.instance_variable_get(:@__nil_kill_struct_fields)).each do |field|
+        register_runtime_scip_generated_record_wrapper(klass, field, kind: "instance")
+        register_runtime_scip_generated_record_wrapper(
+          klass,
+          "#{field}=",
+          kind: "instance"
+        )
+      end
       return
     end
     path = klass.instance_variable_get(:@__nil_kill_struct_path)
@@ -1765,6 +1773,8 @@ module NilKillRuntimeTrace
     return unless production_struct || ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
     fields = klass.members
     return if fields.empty?
+    klass.instance_variable_set(:@__nil_kill_struct_fields, fields.map(&:to_s).freeze)
+    klass.instance_variable_set(:@__nil_kill_record_family, "Struct")
     klass.instance_variable_set(:@__nil_kill_attached, true)
     # Do not prepend #initialize. A Struct is often assigned to a constant and
     # reopened immediately with a Sorbet-signed initializer; Sorbet cannot
@@ -1796,6 +1806,7 @@ module NilKillRuntimeTrace
         original_getter = klass.instance_method(field) if klass.method_defined?(field)
         klass.define_method(field, struct_field_getter(field, original_getter))
         @runtime_generated_wrapper_methods << [klass, field.to_sym]
+        register_runtime_scip_generated_record_wrapper(klass, field, kind: "instance")
       end
 
       setter = "#{field}="
@@ -1806,22 +1817,13 @@ module NilKillRuntimeTrace
           struct_field_setter(field, original_setter, record_field: production_struct)
         )
         @runtime_generated_wrapper_methods << [klass, setter.to_sym]
+        register_runtime_scip_generated_record_wrapper(klass, setter, kind: "instance")
       end
     end
   end
 
-  def self.register_generated_constructor_wrapper(klass, native:)
-    owner = safe_module_name(klass)
-
-    register_runtime_scip_transparent_wrapper(
-      klass.singleton_class,
-      :new,
-      owner: owner,
-      name: "new",
-      kind: "class",
-      native: native,
-      path: klass.instance_variable_get(:@__nil_kill_struct_path)
-    )
+  def self.register_generated_constructor_wrapper(klass, native: true)
+    register_runtime_scip_generated_record_wrapper(klass, :new, kind: "class")
   end
 
   def self.struct_field_getter(field, original_getter)
@@ -1866,6 +1868,8 @@ module NilKillRuntimeTrace
     return unless path && line && target_path?(path)
     fields = klass.respond_to?(:members) ? klass.members : []
     return if fields.empty?
+    klass.instance_variable_set(:@__nil_kill_struct_fields, fields.map(&:to_s).freeze)
+    klass.instance_variable_set(:@__nil_kill_record_family, "Data")
     klass.instance_variable_set(:@__nil_kill_attached, true)
     original_new = klass.method(:new)
     klass.define_singleton_method(:new) do |*args, **kw, &blk|

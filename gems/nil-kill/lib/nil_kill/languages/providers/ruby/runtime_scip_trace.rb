@@ -34,6 +34,32 @@ module NilKillRuntimeTrace
     @runtime_transparent_wrapper_targets[[defined_class, method_id.to_sym]] = target.freeze
   end
 
+  # Anonymous generated records have no nominal module name, but their
+  # observed field schema is a stable structural runtime identity. Register
+  # collector-installed wrappers against that identity so tracing does not
+  # report NilKill as the target or silently drop the call. This is raw
+  # provider identity only; FactMine still owns every CFG/DFG and dispatch
+  # conclusion derived from it.
+  def self.register_runtime_scip_generated_record_wrapper(klass, method_id, kind:)
+    fields = Array(klass.instance_variable_get(:@__nil_kill_struct_fields))
+    return if fields.empty?
+
+    owner = safe_module_name(klass)
+    family = klass.instance_variable_get(:@__nil_kill_record_family) || "Struct"
+    owner ||= "Anonymous#{family}(#{fields.map(&:to_s).join(",")})"
+    register_runtime_scip_transparent_wrapper(
+      kind == "class" ? klass.singleton_class : klass,
+      method_id,
+      owner: owner,
+      name: method_id.to_s,
+      kind: kind,
+      native: true,
+      path: klass.instance_variable_get(:@__nil_kill_struct_path)
+    )
+  rescue StandardError
+    nil
+  end
+
   # Source instrumentation receives this opaque symbol/range from FactMine.
   # The collector records only that the expression was entered and associates
   # a matching TracePoint call with the symbol. It performs no source lookup,
@@ -710,6 +736,9 @@ module NilKillRuntimeTrace
             else
               method_owner(tp.defined_class)
             end
+    if (!owner || !owner[0]) && tp.self.is_a?(Struct)
+      owner = [runtime_record_type_name(tp.self), "instance"]
+    end
     return unless owner && owner[0]
     return if owner[0] == "NilKillRuntimeTrace"
 

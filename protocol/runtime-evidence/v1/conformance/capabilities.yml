@@ -234,6 +234,67 @@ cases:
       target_owner: RuntimeEvidenceConformance::Generated
       target_name: payload=
 
+  - id: local_generated_struct_kind
+    capabilities: [generated-accessor, anonymous-generated-class, local-constructor, transparent-wrapper]
+    anchor: { method: local_generated_accessors, selector: kind, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_name: kind
+
+  - id: local_generated_struct_decision_line
+    capabilities: [generated-accessor, anonymous-generated-class, local-constructor, same-line, transparent-wrapper]
+    anchor: { method: local_generated_accessors, selector: decision_line, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_name: decision_line
+
+  - id: local_generated_struct_decision_span
+    capabilities: [generated-accessor, anonymous-generated-class, local-constructor, same-line, transparent-wrapper]
+    anchor: { method: local_generated_accessors, selector: decision_span, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_name: decision_span
+
+  - id: nested_test_generated_outer_reader
+    capabilities: [generated-accessor, nested-receiver, nonproduction-provenance, transparent-wrapper]
+    anchor: { method: nested_generated_accessors, selector: arm, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestArmCoverage
+      target_owner: RuntimeEvidenceConformance::TestArmCoverage
+      target_name: arm
+      source_role: NON_PRODUCTION
+
+  - id: nested_test_generated_inner_reader
+    capabilities: [generated-accessor, nested-receiver, nonproduction-provenance, transparent-wrapper]
+    anchor: { method: nested_generated_accessors, selector: span, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestArm
+      target_owner: RuntimeEvidenceConformance::TestArm
+      target_name: span
+      source_role: NON_PRODUCTION
+
+  - id: test_generated_result_outer_reader
+    capabilities: [generated-accessor, chained-result, nonproduction-provenance, resumed-production-frame]
+    anchor: { method: generated_result_accessor, selector: arm, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestArmCoverage
+      target_owner: RuntimeEvidenceConformance::TestArmCoverage
+      target_name: arm
+      source_role: NON_PRODUCTION
+
+  - id: test_generated_result_inner_reader
+    capabilities: [generated-accessor, chained-result, nested-receiver, nonproduction-provenance]
+    anchor: { method: generated_result_accessor, selector: span, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestArm
+      target_owner: RuntimeEvidenceConformance::TestArm
+      target_name: span
+      source_role: NON_PRODUCTION
+
   - id: callback_and_yield
     capabilities: [callback, yield, block-parameter, attached-block-range]
     anchor: { method: callback_flow, selector: map, occurrence: 1 }
@@ -392,6 +453,26 @@ cases:
       source_role: STANDARD_LIBRARY
       excluded_target_owner: RuntimeEvidenceConformance::TestStatus
 
+  - id: direct_subprocess_result_with_anonymous_replacement
+    capabilities: [subprocess, result-object, test-replacement, anonymous-generated-class, resumed-production-frame]
+    anchor: { method: direct_capture_status, selector: success?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_types: [Process::Status, AnonymousStruct(ok)]
+      target_owners: [Process::Status, AnonymousStruct(ok)]
+      target_name: success?
+      observed_executions: 2
+
+  - id: direct_subprocess_provider_replacement
+    capabilities: [subprocess, module-method, test-replacement, result, transparent-wrapper]
+    anchor: { method: direct_capture_status, selector: capture3, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Module
+      target_name: capture3
+      result_type: Array
+      observed_executions: 2
+
   - id: exception_target
     capabilities: [exception, non-returning-call, partial-result]
     anchor: { method: exception_flow, selector: fail!, occurrence: 1 }
@@ -528,3 +609,8 @@ merge_cases:
     capabilities: [incremental, replacement, stale-source]
     expected_runs: [run-new]
     forbidden_runs: [run-old]
+
+  - id: production_and_replacement_shards_remain_complete
+    capabilities: [sharded-run, test-replacement, mixed-provenance, per-run-completeness]
+    expected_runs: [production-run, replacement-run]
+    expected_source_roles: [STANDARD_LIBRARY, NON_PRODUCTION]

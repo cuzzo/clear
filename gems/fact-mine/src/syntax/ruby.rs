@@ -4290,4 +4290,16 @@ mod tests {
         .expect("Regexp#match? should carry the regex-engine worst-case bound");
         assert_eq!((match_p.time, match_p.space), ("O(2^N)", "O(N)"));
     }
+
+    #[test]
+    fn struct_class_generation_has_a_reviewed_linear_fallback() {
+        let cost = external_symbol_call_complexity(
+            "nil-kill-runtime ruby ruby 3.2.3 Struct.new().",
+            "new",
+        )
+        .expect("Struct.new must price its generated member surface");
+
+        assert_eq!((cost.time, cost.space), ("O(N)", "O(N)"));
+        assert_eq!(cost.bound_quality, "upper_bound_exact_target");
+    }
 }

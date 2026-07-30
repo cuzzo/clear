@@ -265,10 +265,14 @@ module NilKill
             package = callee["package"].to_s
             return "NON_PRODUCTION" if callee["source_role"] == "nonproduction"
             return "NON_PRODUCTION" if %w[minitest mocha rspec-mocks rr].include?(package)
-            return "STANDARD_LIBRARY" if callee["native"] == true ||
-              callee["package_manager"] == "ruby"
+            # Generated native accessors in tests are still test replacements.
+            # Their exact source provenance dominates the implementation
+            # mechanism; otherwise a C-backed test Struct masquerades as a
+            # standard-library target.
             return "NON_PRODUCTION" if nonproduction_path?(callee["path"], root)
             return "PRODUCTION" if callee["package_manager"].to_s == "workspace"
+            return "STANDARD_LIBRARY" if callee["native"] == true ||
+              callee["package_manager"] == "ruby"
             return "DEPENDENCY" unless package.empty?
 
             "UNKNOWN_SOURCE"

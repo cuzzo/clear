@@ -374,7 +374,9 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
         }).not_to be_empty
       end
       if expected["source_role"]
-        expect(first.dig("target", "source_role")).to eq(expected.fetch("source_role"))
+        expect(first.dig("target", "source_role")).to eq(expected.fetch("source_role")),
+          "#{test_case.fetch('id')} attributed the target to the wrong source role: " \
+          "#{JSON.generate(first)} raw=#{JSON.generate(matching_raw)}"
       end
       unless expected["boolean_result"].nil?
         expect(first.fetch("boolean_result")).to eq(expected.fetch("boolean_result"))
@@ -419,7 +421,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
 
   it "collector oracle: exact execution ranges disambiguate same-line calls" do
     test_cases = catalog.fetch("cases").select do |row|
-      row.fetch("capabilities").include?("same-line")
+      row.fetch("capabilities").include?("ambiguous-anchor")
     end
     requests = test_cases.map { |test_case| selected_request(@collector, test_case.fetch("anchor")) }
     symbols = requests.map { |request| request.dig("anchor", "symbol") }.sort
@@ -579,6 +581,46 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     end
     expect(row.dig("capture", "observed_executions"))
       .to eq(repeated.fetch("expected_count"))
+
+    mixed_case = catalog.fetch("cases").find do |candidate|
+      candidate.fetch("id") == "direct_subprocess_result_with_anonymous_replacement"
+    end
+    mixed_request = selected_request(@collector, mixed_case.fetch("anchor"))
+    mixed_events = @collector.fetch(:runtime_calls).select do |event|
+      event.dig("caller", "method") == "direct_capture_status" &&
+        event.dig("callee", "name") == "success?"
+    end
+    production, replacement = mixed_events.partition do |event|
+      event.dig("callee", "owner") == "Process::Status"
+    end
+    expect(production).not_to be_empty
+    expect(replacement).not_to be_empty
+    split_paths = [
+      ["production-run", production],
+      ["replacement-run", replacement],
+    ].map do |run_id, shard_events|
+      NilKill::Runtime::ValueEvidenceEmitter.emit(
+        root: NilKill::ROOT,
+        runtime_dir: @collector.fetch(:runtime_dir),
+        output: File.join(NilKill::TMP_DIR, "#{run_id}.json.gz"),
+        events: shard_events.map { |event| event.merge("run_id" => run_id) },
+        run_ids: [run_id],
+        plan: @collector.fetch(:plan)
+      ).fetch("path")
+    end
+    split = NilKill::Runtime::EvidenceMerger.merge(split_paths)
+    split_contract = catalog.fetch("merge_cases").find do |candidate|
+      candidate.fetch("id") == "production_and_replacement_shards_remain_complete"
+    end
+    expect(split.fetch("runs").map { |run| run.fetch("id") })
+      .to eq(split_contract.fetch("expected_runs"))
+    split_row = split.fetch("anchors").find do |candidate|
+      candidate.fetch("anchor_symbol") == mixed_request.dig("anchor", "symbol")
+    end
+    expect(split_row.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+    expect(split_row.fetch("executions").map { |bucket|
+      bucket.dig("target", "source_role")
+    }).to contain_exactly(*split_contract.fetch("expected_source_roles"))
 
     replacement = catalog.fetch("merge_cases").find do |candidate|
       candidate.fetch("id") == "changed_shard_replaces_owned_evidence"

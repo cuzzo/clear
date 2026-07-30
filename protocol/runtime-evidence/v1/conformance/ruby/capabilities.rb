@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "open3"
+
 module RuntimeEvidenceConformance
   class Value
     attr_reader :payload
@@ -126,6 +128,29 @@ module RuntimeEvidenceConformance
       value.payload
     end
 
+    def local_generated_accessors(value)
+      record_type = Struct.new(
+        :kind,
+        :decision_line,
+        :decision_span,
+        keyword_init: true
+      )
+      record = record_type.new(
+        kind: :branch,
+        decision_line: 7,
+        decision_span: [7, 0, 7, 4]
+      )
+      [record.kind, record.decision_line, record.decision_span, value]
+    end
+
+    def nested_generated_accessors(coverage)
+      [coverage.arm.line, coverage.arm.span]
+    end
+
+    def generated_result_accessor(provider)
+      provider.capture.arm.span
+    end
+
     def callback_flow(values)
       values.map { |value| yield(value) }
     end
@@ -191,6 +216,15 @@ module RuntimeEvidenceConformance
 
     def status_after_capture(provider)
       _stdout, _stderr, status = provider.capture
+      status.success?
+    end
+
+    def direct_capture_status
+      _stdout, _stderr, status = Open3.capture3(
+        RbConfig.ruby,
+        "-e",
+        "exit 0"
+      )
       status.success?
     end
 

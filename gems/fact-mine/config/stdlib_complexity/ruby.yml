@@ -323,6 +323,11 @@ Intrinsic:
   "Pathname.new": linear_materialize
   "Dir.pwd": linear_materialize
 SemanticSymbol:
+  # CRuby installs one generated member surface per declared field. The C
+  # producer currently reports this registration path as incomplete because
+  # it crosses VM callbacks; this reviewed O(N) fallback is used only until
+  # the source proof can replace it.
+  'Struct.new().': linear_materialize
   'Hash.`[]`().': linear_materialize
   'JSON.parse().': linear_materialize
   'JSON.generate().': linear_materialize

@@ -39,6 +39,12 @@ subject.generated_constructor(left)
 subject.generated_constructor(right)
 subject.generated_accessor_chain(generated)
 subject.generated_accessor_write(generated, right)
+subject.local_generated_accessors(left)
+test_arm = RuntimeEvidenceConformance::TestArm.new(7, [7, 0, 7, 4])
+test_coverage = RuntimeEvidenceConformance::TestArmCoverage.new(test_arm)
+subject.nested_generated_accessors(test_coverage)
+test_capture = RuntimeEvidenceConformance::TestGeneratedCapture.new(test_coverage)
+subject.generated_result_accessor(test_capture)
 subject.callback_flow([left, right]) { |value| value.normalize }
 subject.nested_callback_flow([left, right])
 subject.callback_local_flow([left, right])
@@ -59,6 +65,14 @@ subject.mixed_generated_accessor(RuntimeEvidenceConformance::GeneratedStatus.new
 subject.mixed_generated_accessor(RuntimeEvidenceConformance::TestGeneratedStatus.new(8))
 subject.status_after_capture(RuntimeEvidenceConformance::ProductionCapture.new)
 subject.status_after_capture(RuntimeEvidenceConformance::TestCapture.new)
+subject.direct_capture_status
+anonymous_status =
+  RuntimeEvidenceConformance::Capture3Replacement.anonymous_status(true)
+RuntimeEvidenceConformance::Capture3Replacement.with_result(
+  ["", "", anonymous_status]
+) do
+  subject.direct_capture_status
+end
 subject.exception_flow(RuntimeEvidenceConformance::Raiser.new)
 subject.exception_result_flow(RuntimeEvidenceConformance::Raiser.new)
 begin

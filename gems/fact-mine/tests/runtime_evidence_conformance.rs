@@ -286,10 +286,7 @@ fn boundary_symbol(
 }
 
 fn ruby_type_symbol(name: &str) -> String {
-    format!(
-        "nil-kill-runtime ruby ruby 3.2.3 {}#",
-        name.replace("::", "/")
-    )
+    format!("nil-kill-runtime ruby ruby 3.2.3 {}#", descriptor_owner(name))
 }
 
 fn descriptor_name(name: &str) -> String {
@@ -301,6 +298,13 @@ fn descriptor_name(name: &str) -> String {
     } else {
         format!("`{}`", name.replace('`', "``"))
     }
+}
+
+fn descriptor_owner(name: &str) -> String {
+    name.split("::")
+        .map(descriptor_name)
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn value_set(name: &str, element: Option<&str>, role: SourceRole) -> ValueSet {
@@ -417,7 +421,7 @@ fn target(owner: &str, name: &str, role: SourceRole) -> RuntimeTarget {
     RuntimeTarget {
         symbol: format!(
             "nil-kill-runtime {manager} {package} {version} {}#{}().",
-            owner.replace("::", "/"),
+            descriptor_owner(owner),
             descriptor_name(name)
         ),
         source_role: EnumOrUnknown::new(role),
@@ -1141,7 +1145,7 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
             if let Some(name) = expected.target_name.as_deref() {
                 for owner in expected_owners {
                     let expected_suffix =
-                        format!("{}#{}().", owner.replace("::", "/"), descriptor_name(name));
+                        format!("{}#{}().", descriptor_owner(owner), descriptor_name(name));
                     if expected.source_role.as_deref() == Some("NON_PRODUCTION") {
                         assert!(
                             !at_anchor
