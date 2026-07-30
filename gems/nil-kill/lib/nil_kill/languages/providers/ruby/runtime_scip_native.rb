@@ -94,24 +94,41 @@ module NilKillRuntimeTrace
               target[:line] || declared&.fetch(:line)]
     end
 
+    # A C-backed method has no Ruby definition site of its own, but the module
+    # it is defined on does. Without it a Struct reader, or any C method a
+    # dependency gem defines, exports as CRuby stdlib and is priced by the wrong
+    # cost model entirely. Core classes have no declaration file at all, so this
+    # stays nil for String#to_s and its peers.
+    site = native ? declared : nil
+
     # A singleton class of a plain object -- ENV is the common one -- has no
     # useful class name, so resolve it to the constant that names the object.
     if defined_class.is_a?(Class) && defined_class.singleton_class? &&
         (attached = singleton_attached_object(defined_class))
       named = runtime_named_singleton_owner(attached)
-      return [named[0], named[1], nil, nil, nil] if named
+      return [named[0], named[1], nil, site&.fetch(:path), site&.fetch(:line)] if named
     end
 
-    # A C-backed method has no Ruby definition site of its own, but a generated
-    # accessor on a workspace class still belongs to that class's declaration.
-    # Without it a Struct reader exports as CRuby stdlib and is priced by the
-    # wrong cost model entirely. Core classes have no declaration under the
-    # workspace, so this stays nil for String#to_s and its peers.
-    site = native ? declared : nil
-    owner = method_owner(defined_class) || native_anonymous_owner(defined_class, method_id)
+    owner = method_owner(defined_class) ||
+            native_anonymous_record_owner(defined_class) ||
+            native_anonymous_owner(defined_class, method_id)
     return [nil, "instance", nil, site&.fetch(:path), site&.fetch(:line)] unless owner
 
     [owner[0], owner[1], nil, site&.fetch(:path), site&.fetch(:line)]
+  end
+
+  # An anonymous Struct layout is identified by its members, not by where it was
+  # declared: two anonymous Structs sharing a file and line are still the same
+  # record contract only if they expose the same fields.
+  def self.native_anonymous_record_owner(defined_class)
+    return nil unless defined_class.is_a?(Class) && defined_class < Struct
+
+    fields = defined_class.members
+    return nil unless fields.is_a?(Array) && !fields.empty?
+
+    ["AnonymousStruct(#{fields.map(&:to_s).join(",")})", "instance"]
+  rescue StandardError
+    nil
   end
 
   # An anonymous class has no name to report, but its methods still have a
@@ -371,12 +388,39 @@ module NilKillRuntimeTrace
     end
   end
 
+  # A call record already names both endpoints, so the caller->callee edge list
+  # is a projection of what was observed rather than a second observation. Only
+  # edges into analyzed source are edges between two known functions; a call
+  # into a dependency has no callee declaration to join.
+  def self.native_scip_method_edge_rows
+    NilKillTraceNative.records.filter_map do |row|
+      caller = row.fetch(:caller)
+      callee = row.fetch(:callee)
+      path = native_scip_definition_path(callee[:path])
+      next unless caller[:path] && caller[:class] && path && callee[:owner]
+      next unless target_path?(path)
+
+      [caller, callee, path, row.fetch(:count)]
+    end.group_by { |caller, callee, path, _| [caller.values_at(:class, :method, :kind, :path, :line),
+                                              [callee[:owner], callee[:name], callee[:kind], path,
+                                               callee[:line]]] }
+      .map do |(caller_key, callee_key), rows|
+        calls = rows.sum { |row| row.fetch(3) }
+        {
+          caller: %i[class method kind path line].zip(caller_key).to_h,
+          callee: %i[class method kind path line].zip(callee_key).to_h,
+          calls: calls, ok_calls: calls, raised_calls: 0,
+        }
+      end
+  end
+
   def self.dump_native_runtime_scip(pid)
     NilKillTraceNative.stop
     write_jsonl("runtime-calls-#{pid}.jsonl", native_scip_call_rows)
     write_jsonl("methods-#{pid}.jsonl", native_scip_method_rows)
     write_jsonl("collections-#{pid}.jsonl", native_scip_collection_rows)
     publish_native_state_observations!
+    write_jsonl("method-edges-#{pid}.jsonl", native_scip_method_edge_rows)
     write_jsonl(
       "executed-callsites-#{pid}.jsonl",
       NilKillTraceNative.executed_callsites.sort_by { |row| row.map(&:to_s) }.map do |path, line, selector, count|

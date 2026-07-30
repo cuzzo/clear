@@ -33,6 +33,10 @@ typedef struct {
     struct state_demand *pending_state;
     ID pending_state_path;
     int pending_state_line;
+    // Ruby reports a :return carrying nil for a method left by an exception.
+    // That nil is the absence of a result, not a result, so it must not be
+    // recorded as one.
+    int raised;
 } frame_t;
 
 // A c_return does not always report the same coordinate as its c_call, so the
@@ -42,6 +46,7 @@ typedef struct {
     struct call_record *record;
     ID method;
     ID owner;
+    int raised;
 } native_frame_t;
 
 typedef struct {
@@ -49,6 +54,12 @@ typedef struct {
     int depth;
     native_frame_t natives[MAX_FRAMES];
     int native_depth;
+    // `break` out of a block makes the method it was passed to return the break
+    // value, but the VM reports that method's return as a synthetic nil. The
+    // value is only visible on the block's own return, which is the event
+    // immediately before it.
+    VALUE last_block_value;
+    int last_event_was_block_return;
 } thread_state_t;
 
 typedef struct call_record {
@@ -101,6 +112,8 @@ static thread_state_t *current_state(void) {
     thread_state_t *state = ALLOC(thread_state_t);
     state->depth = 0;
     state->native_depth = 0;
+    state->last_block_value = Qnil;
+    state->last_event_was_block_return = 0;
     st_insert(thread_states, (st_data_t)thread, (st_data_t)state);
     return state;
 }
@@ -272,12 +285,21 @@ static int demanded_in_file(ID path, ID selector) {
 // Mirrors the Ruby collector's callsite recovery: the interesting frame is the
 // nearest one whose path is the analyzed file, not simply the next frame up,
 // because a collector-installed wrapper sits in between.
-// `skip` drops leading frames the caller is known not to be. rb_profile_frames
+// `callee_path` is the file the entered method is defined in, or 0 for a call
+// that pushed no frame of its own. The top VM frame is that method only when the
+// two agree -- a method defined by `define_method` does not always appear there
+// -- so the callee is skipped by matching it rather than by counting. Counting
+// silently walked past the real caller into its caller. rb_profile_frames also
 // ignores its own start argument on 3.2, so the offset is applied here.
-static int caller_line_from_vm(ID want_path, int skip) {
+static int caller_line_from_vm(ID want_path, ID callee_path) {
     VALUE frames[16];
     int lines[16];
     int count = rb_profile_frames(0, 16, frames, lines);
+    int skip = 0;
+    if (callee_path && count > 0) {
+        VALUE top = rb_profile_frame_path(frames[0]);
+        if (RB_TYPE_P(top, T_STRING) && rb_intern_str(top) == callee_path) skip = 1;
+    }
     for (int i = skip; i < count; i++) {
         if (lines[i] <= 0) continue;
         VALUE path = rb_profile_frame_path(frames[i]);
@@ -380,13 +402,17 @@ static call_record_t *observed_record(frame_t *frame, rb_trace_arg_t *arg, int n
     // multi-line expression, and demand alone cannot detect that: a selector
     // that is also a parameter name is demanded on every line of the method, so
     // a stale line binds the call to a real but wrong coordinate.
-    int skip = native ? 0 : 1;
+    // A native call pushes no frame of its own, so the top VM frame is already
+    // its caller.
+    ID callee_path = 0;
     if (!native) {
-        int line = caller_line_from_vm(frame->path, skip);
+        VALUE path = rb_tracearg_path(arg);
+        if (RB_TYPE_P(path, T_STRING)) callee_path = rb_intern_str(path);
+        int line = caller_line_from_vm(frame->path, callee_path);
         if (line) frame->line = line;
     }
     if (!demanded(frame->path, frame->line, selector)) {
-        int line = caller_line_from_vm(frame->path, skip);
+        int line = caller_line_from_vm(frame->path, callee_path);
         if (!line || !demanded(frame->path, line, selector)) return NULL;
         frame->line = line;
     }
@@ -516,6 +542,7 @@ static void observe_native_call(rb_trace_arg_t *arg) {
         pending->record = record;
         pending->method = selector;
         pending->owner = record ? record->callee_owner : 0;
+        pending->raised = 0;
     }
 }
 
@@ -529,7 +556,19 @@ static void observe_native_return(rb_trace_arg_t *arg) {
     // frame; traced native calls are strictly nested so only the top can match.
     if (pending->method != selector) return;
     state->native_depth--;
-    if (pending->record) record_result(pending->record, rb_tracearg_return_value(arg));
+    // A C method left by an exception still reports a :c_return, carrying nil.
+    if (pending->raised) return;
+    if (!pending->record) return;
+    VALUE result = rb_tracearg_return_value(arg);
+    // Recover a `break` value: this call reported nothing, the event before it
+    // was its own block returning, and that block produced something. A method
+    // that genuinely returns nil is reached either from a nested call's return
+    // (`find`) or with no block at all, so neither matches.
+    if (NIL_P(result) && state->last_event_was_block_return &&
+        !NIL_P(state->last_block_value)) {
+        result = state->last_block_value;
+    }
+    record_result(pending->record, result);
 }
 
 // Copy the enclosing analyzed method's identity onto a frame that is executing
@@ -551,7 +590,11 @@ static void inherit_caller(thread_state_t *state, frame_t *frame, ID path) {
 
 static void on_event(VALUE tpval, void *_unused) {
     rb_trace_arg_t *arg = rb_tracearg_from_tracepoint(tpval);
-    switch (rb_tracearg_event_flag(arg)) {
+    rb_event_flag_t event = rb_tracearg_event_flag(arg);
+    if (event != RUBY_EVENT_B_RETURN && event != RUBY_EVENT_C_RETURN) {
+        current_state()->last_event_was_block_return = 0;
+    }
+    switch (event) {
       case RUBY_EVENT_LINE: {
         counts[0]++;
         VALUE path = rb_tracearg_path(arg);
@@ -571,6 +614,9 @@ static void on_event(VALUE tpval, void *_unused) {
         frame->path = id;
         frame->line = NUM2INT(rb_tracearg_lineno(arg));
         frame->analyzed = 1;
+        // Execution resumed in this frame, so whatever was raised was handled
+        // here and the frame will return a real value after all.
+        frame->raised = 0;
         if (frame->pending_state) flush_pending_state(frame, rb_tracearg_self(arg));
         state_demand_t *want = demanded_state(id, frame->line);
         if (want) {
@@ -629,6 +675,12 @@ static void on_event(VALUE tpval, void *_unused) {
             if (state->depth == 0) return;
             frame_t *frame = &state->frames[--state->depth];
             if (frame->pending_state) flush_pending_state(frame, rb_tracearg_self(arg));
+            if (frame->raised) {
+                // The exception is still travelling, so the caller is leaving
+                // the same way unless it goes on to execute a handler.
+                if (state->depth > 0) state->frames[state->depth - 1].raised = 1;
+                return;
+            }
             if (frame->record) record_result(frame->record, rb_tracearg_return_value(arg));
             // A FUNCTION_RETURN anchor is demanded under the selector "return"
             // across the whole method body, so the returning line matches it.
@@ -645,6 +697,24 @@ static void on_event(VALUE tpval, void *_unused) {
             }
         }
         return;
+      case RUBY_EVENT_B_RETURN: {
+        thread_state_t *state = current_state();
+        state->last_block_value = rb_tracearg_return_value(arg);
+        state->last_event_was_block_return = 1;
+        return;
+      }
+      case RUBY_EVENT_RAISE: {
+        thread_state_t *state = current_state();
+        if (state->depth > 0) state->frames[state->depth - 1].raised = 1;
+        // The raise is attributed to the method that raised, so a native call
+        // still in flight under that name is the one being left.
+        if (state->native_depth > 0) {
+            VALUE method = rb_tracearg_method_id(arg);
+            native_frame_t *pending = &state->natives[state->native_depth - 1];
+            if (!NIL_P(method) && pending->method == SYM2ID(method)) pending->raised = 1;
+        }
+        return;
+      }
       case RUBY_EVENT_C_CALL:
         counts[3]++;
         observe_native_call(arg);
@@ -696,7 +766,8 @@ static VALUE nk_start(VALUE self) {
     if (NIL_P(tracepoint)) {
         tracepoint = rb_tracepoint_new(Qnil,
                                        RUBY_EVENT_LINE | RUBY_EVENT_CALL | RUBY_EVENT_RETURN |
-                                           RUBY_EVENT_C_CALL | RUBY_EVENT_C_RETURN,
+                                           RUBY_EVENT_C_CALL | RUBY_EVENT_C_RETURN |
+                                           RUBY_EVENT_RAISE | RUBY_EVENT_B_RETURN,
                                        on_event, NULL);
     }
     rb_tracepoint_enable(tracepoint);

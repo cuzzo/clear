@@ -1731,6 +1731,7 @@ module NilKillRuntimeTrace
       end
     end
     Array.prepend(wrapper)
+    register_collection_wrapper_targets(Array, wrapper)
     %i[<< push append unshift []= concat].each do |method_id|
       register_runtime_scip_transparent_wrapper(
         wrapper,
@@ -1786,6 +1787,7 @@ module NilKillRuntimeTrace
       end
     end
     Hash.prepend(wrapper)
+    register_collection_wrapper_targets(Hash, wrapper)
     %i[[]= store merge! update].each do |method_id|
       register_runtime_scip_transparent_wrapper(
         wrapper,
@@ -1831,6 +1833,7 @@ module NilKillRuntimeTrace
       end
     end
     Set.prepend(wrapper)
+    register_collection_wrapper_targets(Set, wrapper)
     %i[add << merge].each do |method_id|
       path, line = original_locations.fetch(method_id)
       register_runtime_scip_transparent_wrapper(
@@ -2091,6 +2094,22 @@ module NilKillRuntimeTrace
 
   def self.dump_hash_counts(counts)
     counts.transform_values(&:to_h)
+  end
+
+  # A mutation wrapper is prepended to the real container class, so the VM
+  # reports the wrapper module -- which is NilKill's own code -- as the callee.
+  # Record the method it stands in for, exactly as generated record accessors
+  # do, so the observation keeps the container's identity.
+  def self.register_collection_wrapper_targets(klass, wrapper)
+    wrapper.instance_methods(false).each do |method_id|
+      register_runtime_scip_transparent_wrapper(
+        wrapper, method_id,
+        owner: klass.name, name: method_id.to_s, kind: "instance",
+        native: true, path: nil
+      )
+    end
+  rescue StandardError
+    nil
   end
 
   def self.method_key_payload(key)
