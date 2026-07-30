@@ -1,3 +1,4 @@
+pub mod paths;
 // O(N): each file's name is scanned once, so the strips sum to the input.
 pub fn strip_each(files: &[String], root: &str) -> usize {
     let mut total = 0;

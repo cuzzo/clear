@@ -394,6 +394,36 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         Some("rust")
     }
 
+    fn collection_operation(
+        &self,
+        receiver_type: &TypeExpr,
+        message: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCollectionOperation> {
+        if let Some(operation) = super::normalized_behavior::configured_collection_operation(
+            "rust",
+            receiver_type,
+            message,
+        ) {
+            return Some(operation);
+        }
+        // An owned Rust value derefs to its borrowed form, so it answers to the
+        // borrowed type's methods: PathBuf reads as Path, OsString as OsStr.
+        let deref = match receiver_type {
+            TypeExpr::Primitive(name) => match name.trim() {
+                "PathBuf" => Some("Path"),
+                "OsString" => Some("OsStr"),
+                "CString" => Some("CStr"),
+                _ => None,
+            },
+            _ => None,
+        }?;
+        super::normalized_behavior::configured_collection_operation(
+            "rust",
+            &TypeExpr::Primitive(deref.to_string()),
+            message,
+        )
+    }
+
     fn complexity_uses_syntax_local_types(&self) -> bool {
         true
     }
