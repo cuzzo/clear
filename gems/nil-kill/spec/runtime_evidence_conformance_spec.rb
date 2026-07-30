@@ -306,7 +306,13 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
             "#{test_case.fetch("id")} omitted requested #{kind}"
         end
       end
-      first = row.fetch("executions").first
+      first =
+        if expected["source_role"]
+          row.fetch("executions").find do |bucket|
+            bucket.dig("target", "source_role") == expected.fetch("source_role")
+          end
+        end
+      first ||= row.fetch("executions").first
       matching_raw = @collector.fetch(:runtime_calls).select do |event|
         event.dig("caller", "method") == test_case.dig("anchor", "method") &&
           event.dig("callee", "name") == test_case.dig("anchor", "selector")
@@ -373,6 +379,18 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
         expect(row.fetch("executions").filter_map { |bucket|
           bucket["target"] if bucket.dig("target", "source_role") == "NON_PRODUCTION"
         }).not_to be_empty
+      end
+      if expected["excluded_target_owner_prefix"]
+        excluded = expected.fetch("excluded_target_owner_prefix")
+        excluded_raw = matching_raw.select do |event|
+          event.dig("callee", "owner").to_s.start_with?(excluded)
+        end
+        expect(excluded_raw).not_to be_empty,
+          "#{test_case.fetch("id")} did not preserve its anonymous nonproduction replacement"
+        expect(row.fetch("executions").any? do |bucket|
+          bucket.dig("target", "source_role") == "NON_PRODUCTION" &&
+            bucket.dig("target", "symbol").to_s.include?(excluded)
+        end).to be(true)
       end
       if expected["source_role"]
         expect(first.dig("target", "source_role")).to eq(expected.fetch("source_role")),
@@ -623,6 +641,48 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       bucket.dig("target", "source_role")
     }).to contain_exactly(*split_contract.fetch("expected_source_roles"))
 
+    anonymous_case = catalog.fetch("cases").find do |candidate|
+      candidate.fetch("id") == "mixed_production_and_anonymous_replacement"
+    end
+    anonymous_request = selected_request(@collector, anonymous_case.fetch("anchor"))
+    anonymous_events = @collector.fetch(:runtime_calls).select do |event|
+      event.dig("callsite", "anchor_symbol") ==
+        anonymous_request.dig("anchor", "symbol")
+    end
+    anonymous_production, anonymous_replacement = anonymous_events.partition do |event|
+      !event.dig("callee", "path").to_s.split(File::SEPARATOR).include?("test")
+    end
+    expect(anonymous_production).not_to be_empty
+    expect(anonymous_replacement).not_to be_empty,
+      "anonymous shard events=#{JSON.generate(anonymous_events)}"
+    anonymous_paths = [
+      ["anonymous-production-run", anonymous_production],
+      ["anonymous-replacement-run", anonymous_replacement],
+    ].map do |run_id, shard_events|
+      NilKill::Runtime::ValueEvidenceEmitter.emit(
+        root: NilKill::ROOT,
+        runtime_dir: @collector.fetch(:runtime_dir),
+        output: File.join(NilKill::TMP_DIR, "#{run_id}.json.gz"),
+        events: shard_events.map { |event| event.merge("run_id" => run_id) },
+        run_ids: [run_id],
+        plan: @collector.fetch(:plan)
+      ).fetch("path")
+    end
+    anonymous_split = NilKill::Runtime::EvidenceMerger.merge(anonymous_paths)
+    anonymous_contract = catalog.fetch("merge_cases").find do |candidate|
+      candidate.fetch("id") ==
+        "production_and_anonymous_replacement_shards_remain_complete"
+    end
+    expect(anonymous_split.fetch("runs").map { |run| run.fetch("id") })
+      .to eq(anonymous_contract.fetch("expected_runs"))
+    anonymous_row = anonymous_split.fetch("anchors").find do |candidate|
+      candidate.fetch("anchor_symbol") == anonymous_request.dig("anchor", "symbol")
+    end
+    expect(anonymous_row.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+    expect(anonymous_row.fetch("executions").map { |bucket|
+      bucket.dig("target", "source_role")
+    }).to contain_exactly(*anonymous_contract.fetch("expected_source_roles"))
+
     replacement = catalog.fetch("merge_cases").find do |candidate|
       candidate.fetch("id") == "changed_shard_replaces_owned_evidence"
     end
@@ -738,6 +798,11 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
           symbol.include?(excluded_suffix)
         }).to be(true),
           "#{test_case.fetch("id")} published a nonproduction replacement at the callsite"
+      end
+      if test_case.dig("expect", "excluded_target_owner_prefix")
+        excluded = test_case.dig("expect", "excluded_target_owner_prefix")
+        expect(at_anchor.map(&:last).none? { |symbol| symbol.include?(excluded) }).to be(true),
+          "#{test_case.fetch("id")} published an anonymous nonproduction replacement at the callsite"
       end
     end
     expect(index.dig("_runtimeEvidence", "observedCallSites")).to be_positive

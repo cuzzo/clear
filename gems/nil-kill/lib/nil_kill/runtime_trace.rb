@@ -1614,7 +1614,7 @@ module NilKillRuntimeTrace
   def self.install_array_hook
     return if Array.instance_variable_get(:@__nil_kill_attached)
     Array.instance_variable_set(:@__nil_kill_attached, true)
-    Array.prepend(Module.new do
+    wrapper = Module.new do
       define_method(:<<) do |value|
         result = super(value)
         if @__nil_kill_traced
@@ -1667,13 +1667,24 @@ module NilKillRuntimeTrace
         end
         result
       end
-    end)
+    end
+    Array.prepend(wrapper)
+    %i[<< push append unshift []= concat].each do |method_id|
+      register_runtime_scip_transparent_wrapper(
+        wrapper,
+        method_id,
+        owner: "Array",
+        name: method_id.to_s,
+        kind: "instance",
+        native: true
+      )
+    end
   end
 
   def self.install_hash_hook
     return if Hash.instance_variable_get(:@__nil_kill_attached)
     Hash.instance_variable_set(:@__nil_kill_attached, true)
-    Hash.prepend(Module.new do
+    wrapper = Module.new do
       define_method(:[]=) do |key, value|
         result = super(key, value)
         if @__nil_kill_traced
@@ -1711,7 +1722,18 @@ module NilKillRuntimeTrace
         end
         result
       end
-    end)
+    end
+    Hash.prepend(wrapper)
+    %i[[]= store merge! update].each do |method_id|
+      register_runtime_scip_transparent_wrapper(
+        wrapper,
+        method_id,
+        owner: "Hash",
+        name: method_id.to_s,
+        kind: "instance",
+        native: true
+      )
+    end
   end
 
   def self.install_set_hook

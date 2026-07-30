@@ -552,6 +552,24 @@ RSpec.describe "canonical runtime semantic evidence v1" do
       .to end_with("String#+().")
   end
 
+  it "assigns a nonproduction dispatch the same provenance for target and receiver" do
+    decoder = NilKill::Languages::Providers::Ruby::RuntimeValueEvidence
+    raw = event(receiver: "AnonymousClass(test/worker_test.rb:7)")
+    raw["callee"].merge!(
+      "path" => File.expand_path(__FILE__),
+      "line" => __LINE__,
+      "native" => false,
+      "package_manager" => "workspace",
+      "package" => "easy-vm",
+      "version" => "workspace"
+    )
+
+    decoded = decoder.call(event: raw, root: NilKill::ROOT)
+
+    expect(decoded.dig("target", "source_role")).to eq("NON_PRODUCTION")
+    expect(decoded.fetch("receiver_source_role")).to eq("NON_PRODUCTION")
+  end
+
   it "indexes provider rows once instead of rescanning them for every anchor" do
     requests = 20.times.map do |index|
       {

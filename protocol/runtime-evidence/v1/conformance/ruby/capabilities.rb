@@ -116,6 +116,24 @@ module RuntimeEvidenceConformance
       value.upcase
     end
 
+    def instrumented_array_writes(values, value)
+      values << value
+      values.push(value)
+      values.append(value)
+      values.unshift(value)
+      values[0] = value
+      values.concat([value])
+      values
+    end
+
+    def instrumented_hash_writes(values, value)
+      values[:index] = value
+      values.store(:store, value)
+      values.merge!(merge: value)
+      values.update(update: value)
+      values
+    end
+
     def generated_accessor(value)
       value.payload
     end
@@ -270,6 +288,10 @@ module RuntimeEvidenceConformance
     end
 
     def anonymous_replaced_dispatch(receiver)
+      receiver.dispatch
+    end
+
+    def mixed_anonymous_dispatch(receiver)
       receiver.dispatch
     end
 

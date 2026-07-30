@@ -197,8 +197,13 @@ module NilKill
               "receiver_domain" => normalized_domain_payload(event["receiver_domain"]),
               "result_domain" => normalized_domain_payload(event["result_domain"]),
               "result_truths" => Array(event["result_truths"]).uniq.sort_by { |truth| truth ? 1 : 0 },
+              # Receiver and target describe the same observed dispatch.
+              # Applying a weaker role to the receiver lets a test double's
+              # value domain contaminate production flow after FactMine
+              # correctly filters its NON_PRODUCTION target.
               "receiver_source_role" =>
-                callee["source_role"] == "nonproduction" ? "NON_PRODUCTION" : "UNKNOWN_SOURCE",
+                target["source_role"] == "NON_PRODUCTION" ?
+                  "NON_PRODUCTION" : "UNKNOWN_SOURCE",
               "count" => event["count"].to_i,
             }.compact
           end

@@ -197,6 +197,96 @@ cases:
       target_name: upcase
       source_role: STANDARD_LIBRARY
 
+  - id: instrumented_array_push
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation]
+    anchor: { method: instrumented_array_writes, selector: push, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: push
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_array_alias_append
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, alias-method]
+    anchor: { method: instrumented_array_writes, selector: append, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: append
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_array_unshift
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation]
+    anchor: { method: instrumented_array_writes, selector: unshift, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: unshift
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_array_index_write
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, operator-method]
+    anchor: { method: instrumented_array_writes, selector: "[]=", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: "[]="
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_array_concat
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation]
+    anchor: { method: instrumented_array_writes, selector: concat, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: concat
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_hash_index_write
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, operator-method]
+    anchor: { method: instrumented_hash_writes, selector: "[]=", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]="
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_hash_store
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation]
+    anchor: { method: instrumented_hash_writes, selector: store, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: store
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_hash_merge
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, callback]
+    anchor: { method: instrumented_hash_writes, selector: merge!, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: merge!
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_hash_update
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, alias-method, callback]
+    anchor: { method: instrumented_hash_writes, selector: update, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: update
+      source_role: STANDARD_LIBRARY
+
   - id: generated_struct_accessor
     capabilities: [generated-accessor, transparent-wrapper, native-call]
     anchor: { method: generated_accessor, selector: payload, occurrence: 1 }
@@ -581,6 +671,17 @@ cases:
       target_name: dispatch
       source_role: NON_PRODUCTION
 
+  - id: mixed_production_and_anonymous_replacement
+    capabilities: [test-replacement, anonymous-class, mixed-provenance, runtime-identity, alternative-targets]
+    anchor: { method: mixed_anonymous_dispatch, selector: dispatch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::ProductionDispatcher
+      target_owner: RuntimeEvidenceConformance::ProductionDispatcher
+      target_name: dispatch
+      source_role: PRODUCTION
+      excluded_target_owner_prefix: AnonymousClass(
+
   - id: state_value_dispatch
     capabilities: [state-read, state-write, state-value, cfg, dfg]
     anchor: { method: state_flow, selector: normalize, occurrence: 1 }
@@ -686,3 +787,8 @@ merge_cases:
     capabilities: [sharded-run, test-replacement, mixed-provenance, per-run-completeness]
     expected_runs: [production-run, replacement-run]
     expected_source_roles: [STANDARD_LIBRARY, NON_PRODUCTION]
+
+  - id: production_and_anonymous_replacement_shards_remain_complete
+    capabilities: [sharded-run, test-replacement, anonymous-class, mixed-provenance, per-run-completeness]
+    expected_runs: [anonymous-production-run, anonymous-replacement-run]
+    expected_source_roles: [PRODUCTION, NON_PRODUCTION]

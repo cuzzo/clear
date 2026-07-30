@@ -1133,7 +1133,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn scip_occurrence_matches_call(&self, symbol: &str, source_text: &str, message: &str) -> bool {
-        if source_text == message || source_text == format!("{message}=") {
+        if source_text == message
+            || source_text == format!("{message}=")
+            || message
+                .strip_suffix('=')
+                .is_some_and(|setter| source_text == setter)
+        {
             return true;
         }
         if !matches!(message, "[]" | "[]=") {
@@ -1303,13 +1308,21 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         let message_child = match node.r#type.as_str() {
             "CALL" | "QCALL" => node.children.get(1),
             "FCALL" | "VCALL" => node.children.first(),
+            "ATTRASGN" => node.children.get(1),
             _ => None,
         };
         let message = match message_child {
             Some(ast::Child::String(value) | ast::Child::Symbol(value)) => value.as_str(),
             _ => return computed_span.unwrap_or(full_span),
         };
-        let Some(offset) = node.text.rfind(message) else {
+        let source_selector = if node.r#type == "ATTRASGN" && message == "[]=" {
+            "["
+        } else if node.r#type == "ATTRASGN" {
+            message.strip_suffix('=').unwrap_or(message)
+        } else {
+            message
+        };
+        let Some(offset) = node.text.rfind(source_selector) else {
             return computed_span.unwrap_or(full_span);
         };
         let prefix = &node.text[..offset];
@@ -1319,7 +1332,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             .map(|(_, line)| line.len())
             .unwrap_or_else(|| full_span[1] + prefix.len());
         let line = full_span[0] + line_offset;
-        [line, column, line, column + message.len()]
+        [line, column, line, column + source_selector.len()]
     }
 
     fn value_preserving_call_result_operands<'a>(&self, node: &'a Node) -> Option<Vec<&'a Node>> {
@@ -3201,6 +3214,46 @@ mod tests {
     use crate::syntax::normalized_behavior::NormalizedLanguageBehavior;
 
     #[test]
+    fn attribute_assignment_runtime_anchors_name_the_source_selector() {
+        let behavior = RubyNormalizedBehavior;
+        let index_write = Node {
+            r#type: "ATTRASGN".to_string(),
+            children: vec![
+                ast::Child::Nil,
+                ast::Child::Symbol("[]=".to_string()),
+                ast::Child::Nil,
+            ],
+            first_lineno: 7,
+            first_column: 6,
+            last_lineno: 7,
+            last_column: 23,
+            text: "values[0] = value".to_string(),
+        };
+        assert_eq!(
+            behavior.call_access_span(&index_write, None, [7, 6, 7, 23]),
+            [7, 12, 7, 13]
+        );
+
+        let writer = Node {
+            r#type: "ATTRASGN".to_string(),
+            children: vec![
+                ast::Child::Nil,
+                ast::Child::Symbol("payload=".to_string()),
+                ast::Child::Nil,
+            ],
+            first_lineno: 9,
+            first_column: 4,
+            last_lineno: 9,
+            last_column: 31,
+            text: "record.payload = replacement".to_string(),
+        };
+        assert_eq!(
+            behavior.call_access_span(&writer, None, [9, 4, 9, 31]),
+            [9, 11, 9, 18]
+        );
+    }
+
+    #[test]
     fn ruby_behavior_edge_cases() {
         let behavior = RubyNormalizedBehavior;
 
@@ -3208,6 +3261,11 @@ mod tests {
             "nil-kill-runtime workspace slopcop workspace SlopCop/CoverageData/Dataset#`[]`().",
             "[",
             "[]"
+        ));
+        assert!(behavior.scip_occurrence_matches_call(
+            "fact-mine workspace project . Generated#`payload=`().",
+            "payload",
+            "payload="
         ));
 
         assert_eq!(

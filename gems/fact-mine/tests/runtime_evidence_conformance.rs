@@ -79,6 +79,7 @@ struct Expectation {
     target_name: Option<String>,
     target_kind: Option<String>,
     excluded_target_owner: Option<String>,
+    excluded_target_owner_prefix: Option<String>,
     source_role: Option<String>,
     result_type: Option<String>,
     result_element_type: Option<String>,
@@ -613,6 +614,40 @@ fn evidence_for_catalog(
                             .then(|| {
                                 target(
                                     excluded_owner,
+                                    target_name,
+                                    expected.target_kind.as_deref(),
+                                    SourceRole::NON_PRODUCTION,
+                                )
+                            })
+                            .into(),
+                        provenance: MessageField::some(Provenance {
+                            run_id: "oracle-run".to_string(),
+                            provider: "canonical-conformance".to_string(),
+                            provider_version: "1".to_string(),
+                            ..Provenance::default()
+                        }),
+                        ..ExecutionBucket::default()
+                    });
+                }
+                if let Some(excluded_prefix) = expected.excluded_target_owner_prefix.as_deref() {
+                    let excluded_owner = format!("{excluded_prefix}fixture.rb:1)");
+                    executions.push(ExecutionBucket {
+                        count: 1,
+                        receiver: required
+                            .contains(&EvidenceKind::RECEIVER_VALUE.value())
+                            .then(|| {
+                                value_set(
+                                    &excluded_owner,
+                                    None,
+                                    SourceRole::NON_PRODUCTION,
+                                )
+                            })
+                            .into(),
+                        target: required
+                            .contains(&EvidenceKind::CALL_TARGET.value())
+                            .then(|| {
+                                target(
+                                    &excluded_owner,
                                     target_name,
                                     expected.target_kind.as_deref(),
                                     SourceRole::NON_PRODUCTION,
@@ -1233,6 +1268,14 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
                         .iter()
                         .all(|symbol| !symbol.contains(&excluded.replace("::", "/"))),
                     "{} published excluded target {} at its callsite",
+                    case.id,
+                    excluded
+                );
+            }
+            if let Some(excluded) = expected.excluded_target_owner_prefix.as_deref() {
+                assert!(
+                    at_anchor.iter().all(|symbol| !symbol.contains(excluded)),
+                    "{} published excluded anonymous target {} at its callsite",
                     case.id,
                     excluded
                 );
