@@ -2,7 +2,7 @@ Array:
   at: constant
   length: constant
   pop: constant
-  push: linear_materialize
+  push: linear_argument
   shift: linear_scan
   unshift: linear_scan
   includes: linear_scan

@@ -1,7 +1,7 @@
 Array:
   get: constant
   Count: constant
-  Add: linear_materialize
+  Add: linear_argument
   Remove: linear_scan
   Contains: linear_scan
   IndexOf: linear_scan
@@ -18,7 +18,7 @@ Hash:
   Keys: linear_materialize
   Values: linear_materialize
 Set:
-  Add: linear_materialize
+  Add: linear_argument
   Remove: linear_scan
   Contains: linear_scan
   Count: constant
@@ -37,12 +37,12 @@ String:
   Replace: linear_materialize
   TrimStart: linear_materialize
 StringBuilder:
-  Append: linear_materialize
+  Append: linear_argument
   AppendLine: linear_materialize
   ToString: linear_materialize
   Length: constant
 List:
-  Add: linear_materialize
+  Add: linear_argument
   AddRange: linear_materialize
   Remove: linear_scan
   Contains: linear_scan
@@ -52,7 +52,7 @@ Dictionary:
   get_Item: linear_scan
   TryGetValue: linear_scan
   ContainsKey: linear_scan
-  Add: linear_materialize
+  Add: linear_argument
   Count: constant
 Type:
   ToString: linear_materialize

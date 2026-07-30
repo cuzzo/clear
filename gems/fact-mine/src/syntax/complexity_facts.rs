@@ -1772,10 +1772,25 @@ fn visit_loops(
                     domains.into_iter().collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            // An append's cost is in the value appended, not the accumulator, so
+            // only the argument governs the partition there.
+            let argument_sized = call_receiver_type(
+                node,
+                parameter_types,
+                assignments,
+                state_types,
+                field_types,
+                (node.first_lineno, node.first_column),
+                behavior,
+            )
+            .is_some_and(|receiver_type| {
+                behavior.call_cost_is_argument_sized(&receiver_type, message)
+            });
             // A receiver that names a value the function holds is an operand;
             // a package or type qualifier is not, and must not disqualify the
             // partition its arguments establish.
             let operand_names = call_receiver(node)
+                .filter(|_| !argument_sized)
                 .or_else(|| (node.r#type == "OPCALL").then(|| child_nodes(node).into_iter().next()).flatten())
                 .map(local_names)
                 .unwrap_or_default()

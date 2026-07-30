@@ -183,6 +183,9 @@ pub(crate) enum NormalizedCollectionOperation {
     Logarithmic,
     LinearScan,
     LinearMaterialize,
+    /// Linear in the argument's size rather than the receiver's: appending a
+    /// value to a builder or collection copies that value, not the accumulator.
+    LinearArgument,
     Sort,
     Pairwise,
     Cubic,
@@ -190,6 +193,12 @@ pub(crate) enum NormalizedCollectionOperation {
 }
 
 impl NormalizedCollectionOperation {
+    /// Whether the linear cost is in the argument rather than the receiver. The
+    /// partition rule needs the operand the bound actually refers to.
+    pub(crate) fn argument_sized(self) -> bool {
+        matches!(self, Self::LinearArgument)
+    }
+
     pub(crate) fn complexity(self) -> NormalizedCallComplexity {
         match self {
             Self::Constant => NormalizedCallComplexity {
@@ -205,6 +214,10 @@ impl NormalizedCollectionOperation {
                 space: "O(1)",
             },
             Self::LinearMaterialize => NormalizedCallComplexity {
+                time: "O(N)",
+                space: "O(N)",
+            },
+            Self::LinearArgument => NormalizedCallComplexity {
                 time: "O(N)",
                 space: "O(N)",
             },
@@ -682,6 +695,7 @@ fn operation_from_config(value: &str) -> Option<NormalizedCollectionOperation> {
         "logarithmic" => Some(NormalizedCollectionOperation::Logarithmic),
         "linear_scan" => Some(NormalizedCollectionOperation::LinearScan),
         "linear_materialize" => Some(NormalizedCollectionOperation::LinearMaterialize),
+        "linear_argument" => Some(NormalizedCollectionOperation::LinearArgument),
         "sort" => Some(NormalizedCollectionOperation::Sort),
         "pairwise" => Some(NormalizedCollectionOperation::Pairwise),
         "cubic" => Some(NormalizedCollectionOperation::Cubic),
@@ -1517,6 +1531,13 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     ) -> Option<NormalizedCallComplexity> {
         self.collection_operation(receiver_type, message)
             .map(NormalizedCollectionOperation::complexity)
+    }
+
+    /// Whether this call's cost is linear in its argument rather than its
+    /// receiver, so only the argument governs the partition relation.
+    fn call_cost_is_argument_sized(&self, receiver_type: &TypeExpr, message: &str) -> bool {
+        self.collection_operation(receiver_type, message)
+            .is_some_and(NormalizedCollectionOperation::argument_sized)
     }
 
     fn parametric_call_cost(&self, receiver_type: &TypeExpr, message: &str) -> Option<String> {

@@ -105,7 +105,7 @@ String:
   # Sets the length after a boundary check; no element is moved.
   truncate: constant
   to_lowercase: linear_materialize
-  push_str: linear_materialize
+  push_str: linear_argument
   clear: constant
   with_capacity: linear_materialize
   encode_utf16: constant
