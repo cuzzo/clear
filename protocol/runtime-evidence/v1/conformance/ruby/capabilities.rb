@@ -151,6 +151,11 @@ module RuntimeEvidenceConformance
       value.payload
     end
 
+    def repeated_generated_accessor_write(value, replacement)
+      value.payload = value.payload == replacement.payload ? value.payload : replacement.payload
+      value.payload
+    end
+
     def generated_override(value)
       value.payload
     end

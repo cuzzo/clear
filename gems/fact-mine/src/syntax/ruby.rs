@@ -1133,13 +1133,18 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn scip_occurrence_matches_call(&self, symbol: &str, source_text: &str, message: &str) -> bool {
-        if source_text == message
-            || source_text == format!("{message}=")
-            || message
-                .strip_suffix('=')
-                .is_some_and(|setter| source_text == setter)
-        {
+        if source_text == message || source_text == format!("{message}=") {
             return true;
+        }
+        if message.strip_suffix('=').is_some_and(|setter| source_text == setter) {
+            // Ruby's writer syntax has no `=` in the selector token, and a
+            // runtime producer can legitimately report both the generated
+            // reader and writer at that range. The symbol, rather than the
+            // shared source token, must disambiguate the callable identity.
+            return scip_ruby_descriptor(symbol)
+                .or_else(|| runtime_ruby_dependency_descriptor(symbol))
+                .and_then(ruby_descriptor_parts)
+                .is_some_and(|(_, member)| member.trim_matches('`') == message);
         }
         if !matches!(message, "[]" | "[]=") {
             return false;
@@ -1322,7 +1327,26 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         } else {
             message
         };
-        let Some(offset) = node.text.rfind(source_selector) else {
+        let search_start = match node.r#type.as_str() {
+            "CALL" | "QCALL" | "ATTRASGN" => node
+                .children
+                .first()
+                .and_then(|child| match child {
+                    ast::Child::Node(receiver) => Some(receiver.as_ref()),
+                    _ => None,
+                })
+                .and_then(|receiver| {
+                    node.text
+                        .find(&receiver.text)
+                        .map(|offset| offset + receiver.text.len())
+                })
+                .unwrap_or(0),
+            _ => 0,
+        };
+        let Some(offset) = node.text[search_start..]
+            .find(source_selector)
+            .map(|offset| search_start + offset)
+        else {
             return computed_span.unwrap_or(full_span);
         };
         let prefix = &node.text[..offset];
@@ -3251,6 +3275,31 @@ mod tests {
             behavior.call_access_span(&writer, None, [9, 4, 9, 31]),
             [9, 11, 9, 18]
         );
+        let repeated_writer = Node {
+            r#type: "ATTRASGN".to_string(),
+            children: vec![
+                ast::Child::Node(Box::new(Node {
+                    r#type: "VAR_REF".to_string(),
+                    children: vec![],
+                    first_lineno: 10,
+                    first_column: 4,
+                    last_lineno: 10,
+                    last_column: 10,
+                    text: "target".to_string(),
+                })),
+                ast::Child::Symbol("format=".to_string()),
+                ast::Child::Nil,
+            ],
+            first_lineno: 10,
+            first_column: 4,
+            last_lineno: 10,
+            last_column: 48,
+            text: "target.format = target.format == source.format".to_string(),
+        };
+        assert_eq!(
+            behavior.call_access_span(&repeated_writer, None, [10, 4, 10, 48]),
+            [10, 11, 10, 17]
+        );
     }
 
     #[test]
@@ -3263,7 +3312,12 @@ mod tests {
             "[]"
         ));
         assert!(behavior.scip_occurrence_matches_call(
-            "fact-mine workspace project . Generated#`payload=`().",
+            "nil-kill-runtime workspace project abc Generated#`payload=`().",
+            "payload",
+            "payload="
+        ));
+        assert!(!behavior.scip_occurrence_matches_call(
+            "nil-kill-runtime workspace project abc Generated#payload().",
             "payload",
             "payload="
         ));

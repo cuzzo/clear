@@ -804,6 +804,13 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
         expect(at_anchor.map(&:last).none? { |symbol| symbol.include?(excluded) }).to be(true),
           "#{test_case.fetch("id")} published an anonymous nonproduction replacement at the callsite"
       end
+      if test_case.dig("expect", "forbidden_target_name")
+        owner = test_case.dig("expect", "target_owner").gsub("::", "/")
+        name = test_case.dig("expect", "forbidden_target_name")
+        suffix = "#{owner}##{name}()."
+        expect(at_anchor.map(&:last).none? { |symbol| symbol.end_with?(suffix) }).to be(true),
+          "#{test_case.fetch("id")} published the same-range reader #{suffix} as a writer target"
+      end
     end
     expect(index.dig("_runtimeEvidence", "observedCallSites")).to be_positive
     expect(index.dig("_runtimeEvidence", "inferredCallSites")).to be_positive

@@ -323,13 +323,26 @@ cases:
         - { method: generated_accessor_chain, selector: normalize, target_owner: RuntimeEvidenceConformance::Value }
 
   - id: generated_struct_accessor_setter
-    capabilities: [generated-accessor, generated-setter, transparent-wrapper]
+    capabilities: [generated-accessor, generated-setter, same-range-reader-writer, transparent-wrapper]
     anchor: { method: generated_accessor_write, selector: payload=, occurrence: 1 }
     expect:
       required: [RECEIVER_VALUE, CALL_TARGET]
       receiver_type: RuntimeEvidenceConformance::Generated
       target_owner: RuntimeEvidenceConformance::Generated
       target_name: payload=
+      forbidden_target_name: payload
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: repeated_generated_struct_accessor_setter
+    capabilities: [generated-accessor, generated-setter, repeated-selector, same-range-reader-writer, transparent-wrapper]
+    anchor: { method: repeated_generated_accessor_write, selector: payload=, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Generated
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: payload=
+      forbidden_target_name: payload
       call_time: O(1)
       call_space: O(1)
 
@@ -388,13 +401,14 @@ cases:
       call_space: O(1)
 
   - id: local_generated_struct_writer
-    capabilities: [generated-accessor, generated-setter, anonymous-generated-class, local-constructor, transparent-wrapper]
+    capabilities: [generated-accessor, generated-setter, same-range-reader-writer, anonymous-generated-class, local-constructor, transparent-wrapper]
     anchor: { method: local_generated_writer, selector: payload=, occurrence: 1 }
     expect:
       required: [RECEIVER_VALUE, CALL_TARGET]
       receiver_type: AnonymousStruct(payload)
       target_owner: AnonymousStruct(payload)
       target_name: payload=
+      forbidden_target_name: payload
       call_time: O(1)
       call_space: O(1)
 

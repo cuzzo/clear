@@ -77,6 +77,7 @@ struct Expectation {
     #[serde(default)]
     target_owners: Vec<String>,
     target_name: Option<String>,
+    forbidden_target_name: Option<String>,
     target_kind: Option<String>,
     excluded_target_owner: Option<String>,
     excluded_target_owner_prefix: Option<String>,
@@ -1232,6 +1233,24 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
                         );
                     }
                 }
+            }
+            if let (Some(owner), Some(name)) = (
+                expected.target_owner.as_deref(),
+                expected.forbidden_target_name.as_deref(),
+            ) {
+                let forbidden_suffix = format!(
+                    "{}#{}().",
+                    descriptor_owner(owner),
+                    descriptor_name(name)
+                );
+                assert!(
+                    at_anchor
+                        .iter()
+                        .all(|symbol| !symbol.ends_with(&forbidden_suffix)),
+                    "{} published forbidden same-range target {} at its callsite",
+                    case.id,
+                    forbidden_suffix
+                );
             }
             if expected.call_time.is_some() || expected.call_space.is_some() {
                 let runtime_protocol::AnchorBinding::Call { call_id } = built

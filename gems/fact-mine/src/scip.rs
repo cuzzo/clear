@@ -5389,6 +5389,75 @@ void run_dependent() {
     }
 
     #[test]
+    fn runtime_modeled_scip_disambiguates_same_range_ruby_reader_and_writer_symbols() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(target)\n  target.format = :json\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let line = source.lines().nth(1).unwrap();
+        let call_column = line.find("target.format").unwrap();
+        let selector_column = line.find("format").unwrap();
+        let writer =
+            "nil-kill-runtime workspace demo abc Demo/FileCoverage#`format=`().";
+        let reader = "nil-kill-runtime workspace demo abc Demo/FileCoverage#format().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [
+                    {
+                        "range": [1, selector_column, selector_column + "format".len()],
+                        "symbol": writer,
+                        "symbolRoles": 0
+                    },
+                    {
+                        "range": [1, selector_column, selector_column + "format".len()],
+                        "symbol": reader,
+                        "symbolRoles": 0
+                    }
+                ]
+            }]
+        });
+        let mut caller = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller.language = "ruby".into();
+        let mut call = call(
+            "caller",
+            &path,
+            "format=",
+            [2, call_column, 2, line.len()],
+        );
+        call.owner = "Demo".into();
+        call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller];
+        output.calls = vec![call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(writer));
+        assert_eq!(
+            output.calls[0].target_provenance.as_deref(),
+            Some("runtime_scip_modeled")
+        );
+        assert!(
+            output.calls[0]
+                .complexity_candidates
+                .iter()
+                .all(|candidate| candidate != reader),
+            "the same-range reader must not survive as a writer alternative"
+        );
+    }
+
+    #[test]
     fn runtime_modeled_scip_matches_an_opaque_ruby_project_symbol_at_a_bracket_selector() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("demo.rb");
