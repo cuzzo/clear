@@ -11,9 +11,14 @@ module NilKill
         module RuntimeValueEvidence
           module_function
 
-          def observations(runtime_dir:, root:)
+          # A workload may fork, and every process dumps into the same shard
+          # directory. `pid` narrows the read to one process's files so each can
+          # claim exactly its own observations without double-counting the
+          # others; the default reads them all, which is what an after-the-fact
+          # aggregator wants.
+          def observations(runtime_dir:, root:, pid: nil)
             rows = []
-            each_jsonl(runtime_dir, "methods-*.jsonl") do |method|
+            each_jsonl(runtime_dir, "methods", pid) do |method|
               scope = method_scope(method, root)
               method.fetch("params_by_name", {}).each do |name, types|
                 key_shapes, value_shapes = key_value_shapes(
@@ -65,7 +70,7 @@ module NilKill
                 )
               end
             end
-            each_jsonl(runtime_dir, "ivars-*.jsonl") do |field|
+            each_jsonl(runtime_dir, "ivars", pid) do |field|
               rows << observation(
                 "state",
                 {
@@ -80,7 +85,7 @@ module NilKill
                 field["calls"]
               )
             end
-            each_jsonl(runtime_dir, "state-values-*.jsonl") do |field|
+            each_jsonl(runtime_dir, "state-values", pid) do |field|
               rows << observation(
                 "state",
                 {
@@ -95,7 +100,7 @@ module NilKill
                 field["calls"]
               )
             end
-            each_jsonl(runtime_dir, "structs-*.jsonl") do |field|
+            each_jsonl(runtime_dir, "structs", pid) do |field|
               rows << observation(
                 "state",
                 {
@@ -115,7 +120,7 @@ module NilKill
                 field["calls"]
               )
             end
-            each_jsonl(runtime_dir, "collections-*.jsonl") do |collection|
+            each_jsonl(runtime_dir, "collections", pid) do |collection|
               rows << observation(
                 "collection",
                 {
@@ -208,7 +213,8 @@ module NilKill
             }.compact
           end
 
-          def each_jsonl(runtime_dir, glob)
+          def each_jsonl(runtime_dir, name, pid = nil)
+            glob = "#{name}-#{pid || "*"}.jsonl"
             NilKill::Runtime::JsonIO.matching(runtime_dir, glob).each do |path|
               NilKill::Runtime::JsonIO.foreach(path) do |line|
                 yield JSON.parse(line)

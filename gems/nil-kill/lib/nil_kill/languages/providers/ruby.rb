@@ -1,6 +1,7 @@
 # typed: false
 # frozen_string_literal: true
 
+require_relative "../../runtime/environment_claims"
 require_relative "ruby/sorbet"
 require_relative "ruby/runtime_value_evidence"
 require "ripper"
@@ -71,18 +72,7 @@ module NilKill
         end
 
         def runtime_scip_environment(root:)
-          claims = {
-            "runtime.language" => "ruby",
-            "runtime.version" => RUBY_VERSION,
-            "runtime.engine" => RUBY_ENGINE,
-            "runtime.engine_version" => RUBY_ENGINE_VERSION,
-          }
-          lockfile = File.join(root, "Gemfile.lock")
-          if File.file?(lockfile)
-            claims["runtime.lockfile.Gemfile.lock.sha256"] =
-              "sha256:#{Digest::SHA256.file(lockfile).hexdigest}"
-          end
-          claims
+          NilKill::Runtime::EnvironmentClaims.ruby(root: root)
         end
 
         def runtime_value_observations(runtime_dir:, root:)
@@ -102,10 +92,7 @@ module NilKill
         end
 
         def runtime_evidence_provenance
-          {
-            "provider" => "ruby-tracepoint",
-            "provider_version" => "1",
-          }
+          NilKill::Runtime::EnvironmentClaims.ruby_provenance
         end
 
         # Ripper's semantic tree excludes ordinary comments and formatting,

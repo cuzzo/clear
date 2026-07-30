@@ -19,6 +19,7 @@ module NilKillRuntimeTrace
     ),
     ROOT
   )
+  SHARD_ROOT_PID = Process.pid
   TRACE_PLAN_PATH = File.expand_path(File.join(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), "trace-plan.json"), ROOT)
   TARGETS = ENV.fetch("NIL_KILL_TARGETS", "src").split(File::PATH_SEPARATOR).map do |path|
     File.expand_path(path, ROOT)
@@ -2215,6 +2216,12 @@ module NilKillRuntimeTrace
       end
     end
     dump_coverage(pid)
+    # The trace reads back everything dumped above, so it goes last. A forked
+    # child only dumps its own jsonl; the process that started the shard exits
+    # after its children and aggregates the directory into one trace.
+    if ENV["NIL_KILL_RUNTIME_SCIP"] == "1" && Process.pid == SHARD_ROOT_PID
+      NilKillRuntimeTrace.write_native_trace(pid)
+    end
   end
 
   # Ruby stdlib line coverage for THIS collect run. Lets the report
@@ -2311,6 +2318,12 @@ module NilKillRuntimeTrace
   end
 end
 
+require_relative "runtime/json_io"
+require_relative "runtime/environment_claims"
+require_relative "runtime/value_encoding"
+require_relative "runtime/trace_artifact"
+require_relative "languages/provider"
+require_relative "languages/providers/ruby/runtime_value_evidence"
 require_relative "languages/providers/ruby/runtime_scip_trace"
 require_relative "languages/providers/ruby/runtime_scip_native"
 
