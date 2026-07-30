@@ -14,6 +14,17 @@ class BigOLocalTypesTest < Minitest::Test
     "concat.ts" => ["build", "O(N^2)"]
   }.freeze
 
+  # A call nothing can price leaves its caller incomplete rather than letting
+  # the surrounding loops stand as a complete bound.
+  def test_an_unpriced_call_leaves_its_caller_incomplete
+    evidence = Espalier::StaticEvidence.build([File.join(ROOT, "unpriced.cs")], root: ROOT)
+    manifest = Espalier::Aggregator.new.aggregate(Espalier::StaticEvidence.project_modules(evidence))
+    metrics = manifest.flat_map { |owner| owner.fetch(:functions) }
+                      .find { |fn| fn.fetch(:name) == "Count" }
+                      .fetch(:quality_metrics)
+    assert_equal false, metrics[:big_o_complete]
+  end
+
   def test_string_accumulation_is_quadratic
     EXPECTED.each do |file, (function, bound)|
       evidence = Espalier::StaticEvidence.build([File.join(ROOT, file)], root: ROOT)

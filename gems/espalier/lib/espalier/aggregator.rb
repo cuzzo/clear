@@ -1161,6 +1161,39 @@ module Espalier
         end
       end
 
+      # A call FactMine could not price, that no delegation covers, would never
+      # reach the analyzer at all - leaving the surrounding loops standing as a
+      # complete bound for a function with an unpriced call in it.
+      covered = nodes.filter_map { |node| node[:span] }.to_set
+      # A call whose span encloses a lambda invokes that lambda (`defer
+      # func(){...}()`, `go func(){...}()`); the lambda carries its own summary.
+      lambda_spans = Array(mod[:methods])
+        .select { |candidate| candidate[:dispatch_kind].to_s == "lambda" && candidate[:span] }
+        .filter_map { |candidate| normalized_call_span(candidate[:span]) }
+      contexts.each do |context|
+        gap = context["evidence_gap"].to_s
+        next if gap.empty? || gap == "callback_dispatch"
+        next if context["known_time_complexity"]
+
+        span = normalized_call_span(context["span"])
+        next if span && covered.include?(span)
+        next if span && lambda_spans.any? do |inner|
+          inner[0] >= span[0] && inner[2] <= span[2]
+        end
+
+        nodes << {
+          type: :call,
+          span: span,
+          receiver: nil,
+          method: context["message"].to_s,
+          line: context["line"].to_i,
+          execution_complexity: context["execution_multiplicity"],
+          cardinality_relation: context["argument_cardinality_relation"],
+          evidence_gap: gap,
+          internal_call: false
+        }
+      end
+
       @big_o_nodes_cache[cache_key] = nodes
       nodes.dup
     end
