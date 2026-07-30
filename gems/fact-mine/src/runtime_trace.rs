@@ -1643,4 +1643,216 @@ mod tests {
         };
         assert!(merge_evidence(&[doc("3.2.3"), doc("3.3.0")]).is_err());
     }
+
+    // --- target resolution --------------------------------------------------
+
+    fn bucket_with_definition(path: &str, line: i64) -> serde_json::Value {
+        serde_json::json!({
+            "count": 1,
+            "target": { "symbol": "observed-symbol", "source_role": "PRODUCTION" },
+            "target_definition": { "path": path, "line": line }
+        })
+    }
+
+    fn join_with_plan<'a>(
+        plan: &'a TracePlan,
+        trace: &'a Trace,
+    ) -> Join<'a> {
+        Join::new(Path::new("/repo"), plan, trace)
+    }
+
+    #[test]
+    fn a_declaration_matching_one_planned_function_takes_that_functions_identity() {
+        let plan = plan_of(vec![request(
+            anchor("s", "lib/a.rb", "value", AnchorKind::FUNCTION_ENTRY, (9, 11)),
+            &[runtime_protocol::EvidenceKind::PARAMETER_VALUE],
+        )]);
+        let trace = trace_of(serde_json::json!({ "trace_version": 1 }));
+        let join = join_with_plan(&plan, &trace);
+
+        let mut bucket = bucket_with_definition("/repo/lib/a.rb", 10);
+        join.resolve_target(&mut bucket);
+
+        assert_eq!(bucket["target"]["symbol"], "enclosing/s");
+        assert_eq!(bucket["target"]["definition"]["anchor_symbol"], "s");
+        assert_eq!(bucket["target"]["definition"]["relative_path"], "lib/a.rb");
+        assert!(bucket.get("target_definition").is_none(), "the locator is consumed");
+    }
+
+    #[test]
+    fn two_planned_functions_at_one_declaration_is_not_a_resolution() {
+        // Two distinct enclosing symbols covering the same line means the
+        // declaration does not name one of them, so the raw locator is kept
+        // for the consumer to bind from source itself.
+        let plan = plan_of(vec![
+            request(
+                anchor("s", "lib/a.rb", "value", AnchorKind::FUNCTION_ENTRY, (9, 11)),
+                &[runtime_protocol::EvidenceKind::PARAMETER_VALUE],
+            ),
+            request(
+                anchor("t", "lib/a.rb", "other", AnchorKind::FUNCTION_ENTRY, (9, 11)),
+                &[runtime_protocol::EvidenceKind::PARAMETER_VALUE],
+            ),
+        ]);
+        let trace = trace_of(serde_json::json!({ "trace_version": 1 }));
+        let join = join_with_plan(&plan, &trace);
+
+        let mut bucket = bucket_with_definition("/repo/lib/a.rb", 10);
+        join.resolve_target(&mut bucket);
+
+        assert_eq!(bucket["target"]["symbol"], "observed-symbol", "kept as observed");
+        assert_eq!(bucket["target"]["definition"]["anchor_symbol"], "");
+        assert_eq!(bucket["target"]["definition"]["range"]["start_line"], 9);
+    }
+
+    #[test]
+    fn the_same_function_entered_and_returned_is_still_one_candidate() {
+        // FUNCTION_ENTRY and FUNCTION_RETURN of one method share an enclosing
+        // symbol, so they must not read as an ambiguous pair.
+        let mut entry = anchor("s", "lib/a.rb", "value", AnchorKind::FUNCTION_ENTRY, (9, 11));
+        let mut ret = anchor("r", "lib/a.rb", "return", AnchorKind::FUNCTION_RETURN, (9, 11));
+        entry.enclosing_symbol = "same/method".to_string();
+        ret.enclosing_symbol = "same/method".to_string();
+        let plan = plan_of(vec![
+            request(entry, &[runtime_protocol::EvidenceKind::PARAMETER_VALUE]),
+            request(ret, &[runtime_protocol::EvidenceKind::RETURN_VALUE]),
+        ]);
+        let trace = trace_of(serde_json::json!({ "trace_version": 1 }));
+        let join = join_with_plan(&plan, &trace);
+
+        let mut bucket = bucket_with_definition("/repo/lib/a.rb", 10);
+        join.resolve_target(&mut bucket);
+        assert_eq!(bucket["target"]["symbol"], "same/method");
+    }
+
+    #[test]
+    fn a_declaration_outside_the_plan_keeps_its_observed_locator() {
+        let plan = plan_of(vec![]);
+        let trace = trace_of(serde_json::json!({ "trace_version": 1 }));
+        let join = join_with_plan(&plan, &trace);
+
+        let mut bucket = bucket_with_definition("/repo/vendor/dep.rb", 7);
+        join.resolve_target(&mut bucket);
+        assert_eq!(bucket["target"]["definition"]["relative_path"], "vendor/dep.rb");
+        assert_eq!(bucket["target"]["definition"]["range"]["start_line"], 6);
+    }
+
+    #[test]
+    fn a_bucket_with_no_declaration_is_left_alone() {
+        let plan = plan_of(vec![]);
+        let trace = trace_of(serde_json::json!({ "trace_version": 1 }));
+        let join = join_with_plan(&plan, &trace);
+
+        let mut bucket = serde_json::json!({ "count": 1, "target": { "symbol": "x" } });
+        join.resolve_target(&mut bucket);
+        assert_eq!(bucket["target"]["symbol"], "x");
+        assert!(bucket["target"].get("definition").is_none());
+    }
+
+    #[test]
+    fn a_declaration_without_a_usable_line_is_not_invented() {
+        let plan = plan_of(vec![]);
+        let trace = trace_of(serde_json::json!({ "trace_version": 1 }));
+        let join = join_with_plan(&plan, &trace);
+
+        let mut bucket = bucket_with_definition("/repo/lib/a.rb", 0);
+        join.resolve_target(&mut bucket);
+        assert!(bucket["target"].get("definition").is_none());
+    }
+
+    // --- documents in and out -----------------------------------------------
+
+    #[test]
+    fn a_trace_of_another_version_is_refused() {
+        let dir = std::env::temp_dir().join(format!("nk-trace-version-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("tmp");
+        let path = dir.join("trace.json");
+        std::fs::write(&path, serde_json::json!({ "trace_version": 99 }).to_string()).expect("write");
+        let error = read_trace(&path).expect_err("refused");
+        assert!(error.to_string().contains("unsupported runtime trace version"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_document_is_gzipped_when_its_name_says_so_and_round_trips() {
+        let dir = std::env::temp_dir().join(format!("nk-write-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("tmp");
+
+        let gz = dir.join("doc.json.gz");
+        write_json(&gz, "{\"a\":1}").expect("gz write");
+        let bytes = std::fs::read(&gz).expect("read");
+        assert_eq!(&bytes[..2], &[0x1f, 0x8b], "gzip magic");
+        assert_eq!(runtime_protocol::read_json(&gz).expect("read back"), "{\"a\":1}");
+
+        let plain = dir.join("doc.json");
+        write_json(&plain, "{\"a\":1}").expect("plain write");
+        assert_eq!(std::fs::read_to_string(&plain).expect("read"), "{\"a\":1}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_plan_is_accepted_inside_its_envelope_or_bare() {
+        let dir = std::env::temp_dir().join(format!("nk-plan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("tmp");
+        let bare = runtime_protocol::to_json(&plan_of(vec![])).expect("plan json");
+
+        let wrapped = dir.join("wrapped.json");
+        std::fs::write(
+            &wrapped,
+            serde_json::json!({
+                "version": 1,
+                "runtime_evidence": serde_json::from_str::<serde_json::Value>(&bare).unwrap()
+            })
+            .to_string(),
+        )
+        .expect("write");
+        let flat = dir.join("flat.json");
+        std::fs::write(&flat, &bare).expect("write");
+
+        // Both forms reach the same validation, which is what unwrapping means.
+        // A plan still inside its envelope used to fail on the envelope's own
+        // fields ("Unknown field name: version") before ever being read.
+        let from_envelope = format!("{:?}", read_plan(&wrapped));
+        let from_bare = format!("{:?}", read_plan(&flat));
+        let cause = "trace plan protocol_version must be 1";
+        assert!(from_bare.contains(cause), "{from_bare}");
+        assert!(from_envelope.contains(cause), "{from_envelope}");
+        assert!(!from_envelope.contains("Unknown field name"), "{from_envelope}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_emitted_document_omits_only_what_absence_already_says() {
+        let plan = plan_of(vec![
+            request(
+                anchor("ran", "lib/a.rb", "map", AnchorKind::CALL_SELECTOR, (4, 4)),
+                &[runtime_protocol::EvidenceKind::RECEIVER_VALUE],
+            ),
+            request(
+                anchor("idle", "lib/a.rb", "each", AnchorKind::CALL_SELECTOR, (4, 4)),
+                &[runtime_protocol::EvidenceKind::RECEIVER_VALUE],
+            ),
+        ]);
+        let trace = trace_of(serde_json::json!({
+            "trace_version": 1,
+            "run_ids": ["r1"],
+            "environment": [],
+            "trace_plan_digest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "calls": [{ "row": { "callsite": { "path": "lib/a.rb", "line": 5, "selector": "map",
+                                                "anchor_symbol": "" }, "count": 1 },
+                        "bucket": call_bucket(true) }]
+        }));
+        let document = build_evidence(Path::new("/repo"), &plan, &trace).expect("evidence");
+        let parsed: serde_json::Value = serde_json::from_str(&document).expect("json");
+        let symbols: Vec<&str> = parsed["anchors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["anchor_symbol"].as_str().unwrap())
+            .collect();
+        assert_eq!(symbols, vec!["ran"], "the idle anchor is implied by its absence");
+        assert_eq!(parsed["runs"][0]["id"], "r1");
+    }
 }
