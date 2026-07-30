@@ -5076,12 +5076,18 @@ fn injected_state_parameter_dispatch_is_a_parametric_callback() -> Result<()> {
     tmp.write_all(
         br#"
 class Pipeline
-  def initialize(runner:)
+  def initialize(runner:, items:)
     @runner = runner
+    @items = items
   end
 
   def execute(command)
     @runner.run!(command)
+  end
+
+  def scan(index)
+    @items.length
+    @items[index]
   end
 end
 "#,
@@ -5108,6 +5114,23 @@ end
         call.complexity_bound_quality.as_deref(),
         Some("upper_bound_parametric_callback_once")
     );
+    for message in ["length", "[]"] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "scan" && call.message == message)
+            .with_context(|| format!("injected collection-shaped {message} call present"))?;
+        assert!(
+            call.callback_receiver,
+            "an injected object is not proven to have native collection costs merely because it responds to {message}"
+        );
+        assert_eq!(call.known_time_complexity.as_deref(), Some("O(C)"));
+        assert_eq!(call.known_space_complexity.as_deref(), Some("O(S)"));
+        assert_eq!(
+            call.complexity_bound_quality.as_deref(),
+            Some("upper_bound_parametric_callback_once")
+        );
+    }
     Ok(())
 }
 
