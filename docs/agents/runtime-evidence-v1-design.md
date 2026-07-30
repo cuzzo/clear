@@ -171,6 +171,7 @@ message RuntimeEvidence {
   repeated EnvironmentClaim environment = 5;
   repeated Run runs = 6;
   repeated AnchorEvidence anchors = 7;
+  repeated CorrelationEvidence correlations = 8;
 }
 
 message AnchorEvidence {
@@ -186,6 +187,14 @@ message CaptureSummary {
   uint64 observed_executions = 3;
   uint64 dropped_executions = 4;
   string reason = 5;
+  repeated EvidenceKind complete_kinds = 6;
+}
+
+message CorrelationEvidence {
+  string group_id = 1;
+  repeated string candidate_anchor_symbols = 2;
+  CaptureSummary capture = 3;
+  repeated ExecutionBucket executions = 4;
 }
 
 enum CaptureStatus {
@@ -257,6 +266,14 @@ production-analysis policy; NilKill does not erase observations.
 Every requested anchor appears exactly once in the evidence, including
 `NOT_EXECUTED` anchors. Missing anchors are protocol errors, not ordinary
 unobserved calls.
+
+When a provider cannot distinguish two exact anchors—for example, identical
+selectors on one source line—it emits one `CorrelationEvidence` row containing
+the raw buckets and the sorted candidate-anchor set. It does not choose an
+anchor or duplicate the bucket into every candidate. FactMine validates that
+the candidates are compatible call anchors from the supplied plan, then may
+bind the observation only through normalized CFG/DFG or an already-proven
+static type. An unresolved group remains incomplete.
 
 ## Responsibility boundary
 

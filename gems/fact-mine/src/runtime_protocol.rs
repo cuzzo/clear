@@ -604,6 +604,16 @@ pub fn validate_runtime_evidence(plan: &TracePlan, evidence: &RuntimeEvidence) -
         }
         validate_anchor_evidence(index, request, anchor_evidence, evidence)?;
     }
+    let mut correlation_ids = BTreeSet::new();
+    for (index, correlation) in evidence.correlations.iter().enumerate() {
+        if !correlation_ids.insert(correlation.group_id.as_str()) {
+            bail!(
+                "duplicate runtime correlation group {:?}",
+                correlation.group_id
+            );
+        }
+        validate_correlation_evidence(index, correlation, &requests, evidence)?;
+    }
     let missing = requests
         .keys()
         .filter(|symbol| !observed.contains(**symbol))
@@ -653,8 +663,10 @@ fn validate_runtime_evidence_shape(evidence: &RuntimeEvidence) -> Result<()> {
             bail!("runs[{index}].status must be explicit");
         }
     }
-    if evidence.runs.is_empty() && !evidence.anchors.is_empty() {
-        bail!("runtime evidence with anchors must declare at least one run");
+    if evidence.runs.is_empty()
+        && (!evidence.anchors.is_empty() || !evidence.correlations.is_empty())
+    {
+        bail!("runtime evidence with observations must declare at least one run");
     }
     Ok(())
 }
@@ -665,16 +677,111 @@ fn validate_anchor_evidence(
     evidence: &AnchorEvidence,
     bundle: &RuntimeEvidence,
 ) -> Result<()> {
+    let context = format!("anchors[{index}]");
     let capture = evidence
         .capture
         .as_ref()
-        .with_context(|| format!("anchors[{index}] requires capture metadata"))?;
+        .with_context(|| format!("{context} requires capture metadata"))?;
+    let required = request
+        .required
+        .iter()
+        .filter_map(|kind| kind.enum_value().ok().map(|kind| kind.value()))
+        .collect::<BTreeSet<_>>();
+    validate_capture_and_buckets(&context, capture, &evidence.executions, &required, bundle)
+}
+
+fn validate_correlation_evidence(
+    index: usize,
+    evidence: &CorrelationEvidence,
+    requests: &BTreeMap<&str, (&EvidenceRequest, &SourceAnchor)>,
+    bundle: &RuntimeEvidence,
+) -> Result<()> {
+    let context = format!("correlations[{index}]");
+    if evidence.group_id.is_empty() {
+        bail!("{context} group_id must not be empty");
+    }
+    if evidence.candidate_anchor_symbols.len() < 2 {
+        bail!("{context} requires at least two candidate anchors");
+    }
+    if evidence
+        .candidate_anchor_symbols
+        .windows(2)
+        .any(|pair| pair[0] >= pair[1])
+    {
+        bail!("{context} candidate anchors must be unique and sorted");
+    }
+    let mut candidates = Vec::new();
+    let mut required = BTreeSet::new();
+    for symbol in &evidence.candidate_anchor_symbols {
+        let Some((request, anchor)) = requests.get(symbol.as_str()) else {
+            bail!("{context} references unknown plan anchor {symbol:?}");
+        };
+        if !matches!(
+            anchor.kind.enum_value_or_default(),
+            AnchorKind::CALL_SELECTOR
+                | AnchorKind::COLLECTION_OPERATION
+                | AnchorKind::BRANCH_PREDICATE
+        ) {
+            bail!("{context} candidate {symbol:?} is not a call anchor");
+        }
+        required.extend(
+            request
+                .required
+                .iter()
+                .filter_map(|kind| kind.enum_value().ok().map(|kind| kind.value())),
+        );
+        candidates.push(*anchor);
+    }
+    let first = candidates[0];
+    if candidates.iter().any(|anchor| {
+        anchor.relative_path != first.relative_path || anchor.display_name != first.display_name
+    }) {
+        bail!("{context} candidates must share a document and observed selector");
+    }
+    let latest_start = candidates
+        .iter()
+        .filter_map(|anchor| anchor.range.as_ref().map(|range| range.start_line))
+        .max()
+        .context("validated correlation candidate is missing a range")?;
+    let earliest_end = candidates
+        .iter()
+        .filter_map(|anchor| anchor.range.as_ref().map(|range| range.end_line))
+        .min()
+        .context("validated correlation candidate is missing a range")?;
+    if latest_start > earliest_end {
+        bail!("{context} candidate source ranges do not overlap");
+    }
+    let capture = evidence
+        .capture
+        .as_ref()
+        .with_context(|| format!("{context} requires capture metadata"))?;
     let status = capture
         .status
         .enum_value()
-        .map_err(|value| anyhow::anyhow!("anchors[{index}] has unknown capture status {value}"))?;
+        .map_err(|value| anyhow::anyhow!("{context} has unknown capture status {value}"))?;
+    if !matches!(
+        status,
+        CaptureStatus::COMPLETE_FOR_RUNS | CaptureStatus::PARTIAL
+    ) || evidence.executions.is_empty()
+    {
+        bail!("{context} must contain a complete or partial observed execution");
+    }
+    validate_capture_and_buckets(&context, capture, &evidence.executions, &required, bundle)
+}
+
+fn validate_capture_and_buckets(
+    context: &str,
+    capture: &CaptureSummary,
+    executions: &[ExecutionBucket],
+    allowed_kinds: &BTreeSet<i32>,
+    bundle: &RuntimeEvidence,
+) -> Result<()> {
+    let status = capture
+        .status
+        .enum_value()
+        .map_err(|value| anyhow::anyhow!("{context} has unknown capture status {value}"))?;
     if status == CaptureStatus::CAPTURE_STATUS_UNSPECIFIED {
-        bail!("anchors[{index}] capture status must be explicit");
+        bail!("{context} capture status must be explicit");
     }
     let known_runs = bundle
         .runs
@@ -684,92 +791,85 @@ fn validate_anchor_evidence(
     let mut capture_runs = BTreeSet::new();
     for run in &capture.run_ids {
         if !known_runs.contains(run.as_str()) {
-            bail!("anchors[{index}] references unknown run {run:?}");
+            bail!("{context} references unknown run {run:?}");
         }
         if !capture_runs.insert(run.as_str()) {
-            bail!("anchors[{index}] contains duplicate run {run:?}");
+            bail!("{context} contains duplicate run {run:?}");
         }
     }
     if capture.run_ids.is_empty() {
-        bail!("anchors[{index}] must identify its contributing runs");
+        bail!("{context} must identify its contributing runs");
     }
-    let bucket_count = evidence
-        .executions
+    let bucket_count = executions
         .iter()
         .try_fold(0u64, |total, bucket| total.checked_add(bucket.count))
-        .with_context(|| format!("anchors[{index}] execution count overflow"))?;
+        .with_context(|| format!("{context} execution count overflow"))?;
     if bucket_count != capture.observed_executions {
         bail!(
-            "anchors[{index}] observed_executions {} does not equal bucket count {bucket_count}",
+            "{context} observed_executions {} does not equal bucket count {bucket_count}",
             capture.observed_executions
         );
     }
     match status {
         CaptureStatus::COMPLETE_FOR_RUNS => {
             if capture.dropped_executions != 0 {
-                bail!("anchors[{index}] complete capture cannot contain dropped executions");
+                bail!("{context} complete capture cannot contain dropped executions");
             }
             if capture.observed_executions == 0 {
-                bail!("anchors[{index}] COMPLETE_FOR_RUNS requires an execution");
+                bail!("{context} COMPLETE_FOR_RUNS requires an execution");
             }
         }
         CaptureStatus::NOT_EXECUTED => {
             if capture.observed_executions != 0
                 || capture.dropped_executions != 0
-                || !evidence.executions.is_empty()
+                || !executions.is_empty()
             {
-                bail!("anchors[{index}] NOT_EXECUTED must have no executions");
+                bail!("{context} NOT_EXECUTED must have no executions");
             }
         }
         _ => {}
     }
-
-    let required = request
-        .required
-        .iter()
-        .filter_map(|kind| kind.enum_value().ok().map(|kind| kind.value()))
-        .collect::<BTreeSet<_>>();
     let complete = capture
         .complete_kinds
         .iter()
         .map(|kind| {
-            kind.enum_value().map(|kind| kind.value()).map_err(|value| {
-                anyhow::anyhow!("anchors[{index}] has unknown complete kind {value}")
-            })
+            kind.enum_value()
+                .map(|kind| kind.value())
+                .map_err(|value| anyhow::anyhow!("{context} has unknown complete kind {value}"))
         })
         .collect::<Result<BTreeSet<_>>>()?;
     if complete.contains(&EvidenceKind::EVIDENCE_KIND_UNSPECIFIED.value()) {
-        bail!("anchors[{index}] complete_kinds must be explicit");
+        bail!("{context} complete_kinds must be explicit");
     }
     if complete.len() != capture.complete_kinds.len() {
-        bail!("anchors[{index}] contains duplicate complete_kinds");
+        bail!("{context} contains duplicate complete_kinds");
     }
-    if !complete.iter().all(|kind| required.contains(kind)) {
-        bail!("anchors[{index}] completes evidence that the trace plan did not request");
+    if !complete.iter().all(|kind| allowed_kinds.contains(kind)) {
+        bail!("{context} completes evidence that the trace plan did not request");
     }
-    if status == CaptureStatus::COMPLETE_FOR_RUNS && complete != required {
-        bail!("anchors[{index}] COMPLETE_FOR_RUNS must complete every requested evidence kind");
+    if status == CaptureStatus::COMPLETE_FOR_RUNS && complete != *allowed_kinds {
+        bail!("{context} COMPLETE_FOR_RUNS must complete every requested evidence kind");
     }
-    for (bucket_index, bucket) in evidence.executions.iter().enumerate() {
+    for (bucket_index, bucket) in executions.iter().enumerate() {
         if bucket.count == 0 {
-            bail!("anchors[{index}].executions[{bucket_index}].count must be positive");
+            bail!("{context}.executions[{bucket_index}].count must be positive");
         }
         if (complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
             || complete.contains(&EvidenceKind::COLLECTION_VALUE.value()))
             && bucket.receiver.is_none()
         {
-            bail!("anchors[{index}].executions[{bucket_index}] lacks required receiver");
+            bail!("{context}.executions[{bucket_index}] lacks required receiver");
         }
         if complete.contains(&EvidenceKind::CALL_TARGET.value()) && bucket.target.is_none() {
-            bail!("anchors[{index}].executions[{bucket_index}] lacks required target");
+            bail!("{context}.executions[{bucket_index}] lacks required target");
         }
         if complete.contains(&EvidenceKind::RESULT_VALUE.value()) && bucket.result.is_none() {
-            bail!("anchors[{index}].executions[{bucket_index}] lacks required result");
+            bail!("{context}.executions[{bucket_index}] lacks required result");
         }
         if complete.contains(&EvidenceKind::BOOLEAN_RESULT.value())
             && bucket.boolean_result.is_none()
         {
-            bail!("anchors[{index}].executions[{bucket_index}] lacks required Boolean result");
+            bail!("{context}.executions[{bucket_index}] lacks required Boolean result");
         }
         if complete.iter().any(|kind| {
             *kind == EvidenceKind::PARAMETER_VALUE.value()
@@ -777,43 +877,44 @@ fn validate_anchor_evidence(
                 || *kind == EvidenceKind::STATE_VALUE.value()
         }) && bucket.value.is_none()
         {
-            bail!("anchors[{index}].executions[{bucket_index}] lacks required boundary value");
+            bail!("{context}.executions[{bucket_index}] lacks required boundary value");
         }
         if let Some(receiver) = bucket.receiver.as_ref() {
             validate_value_set(
                 Some(receiver),
-                &format!("anchors[{index}].executions[{bucket_index}].receiver"),
+                &format!("{context}.executions[{bucket_index}].receiver"),
             )?;
         }
         if let Some(result) = bucket.result.as_ref() {
             validate_value_set(
                 Some(result),
-                &format!("anchors[{index}].executions[{bucket_index}].result"),
+                &format!("{context}.executions[{bucket_index}].result"),
             )?;
         }
         if let Some(value) = bucket.value.as_ref() {
             validate_value_set(
                 Some(value),
-                &format!("anchors[{index}].executions[{bucket_index}].value"),
+                &format!("{context}.executions[{bucket_index}].value"),
             )?;
         }
         if let Some(target) = bucket.target.as_ref() {
             validate_runtime_target(
                 target,
-                &format!("anchors[{index}].executions[{bucket_index}].target"),
+                &format!("{context}.executions[{bucket_index}].target"),
             )?;
         }
-        let provenance = bucket.provenance.as_ref().with_context(|| {
-            format!("anchors[{index}].executions[{bucket_index}] requires provenance")
-        })?;
+        let provenance = bucket
+            .provenance
+            .as_ref()
+            .with_context(|| format!("{context}.executions[{bucket_index}] requires provenance"))?;
         if provenance.run_id.is_empty()
             || provenance.provider.is_empty()
             || provenance.provider_version.is_empty()
         {
-            bail!("anchors[{index}].executions[{bucket_index}] provenance is incomplete");
+            bail!("{context}.executions[{bucket_index}] provenance is incomplete");
         }
         if !capture_runs.contains(provenance.run_id.as_str()) {
-            bail!("anchors[{index}].executions[{bucket_index}] provenance run is outside capture runs");
+            bail!("{context}.executions[{bucket_index}] provenance run is outside capture runs");
         }
         if ((complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
             || complete.contains(&EvidenceKind::COLLECTION_VALUE.value()))
@@ -826,7 +927,7 @@ fn validate_anchor_evidence(
                     || *kind == EvidenceKind::STATE_VALUE.value()
             }) && bucket.value.as_ref().is_some_and(value_set_is_truncated))
         {
-            bail!("anchors[{index}] complete evidence kind cannot contain truncated values");
+            bail!("{context} complete evidence kind cannot contain truncated values");
         }
     }
     Ok(())
@@ -1188,6 +1289,68 @@ mod tests {
         }
     }
 
+    fn correlation_evidence() -> (TracePlan, RuntimeEvidence) {
+        let mut plan = plan();
+        let mut second = plan.requests[0].clone();
+        let second_anchor = second.anchor.as_mut().expect("anchor");
+        second_anchor.symbol = "local call-2".to_string();
+        second_anchor.semantic_digest = Sha256::digest(b"second call").to_vec();
+        second_anchor.range.as_mut().expect("range").start_character = 20;
+        second_anchor.range.as_mut().expect("range").end_character = 24;
+        plan.requests.push(second);
+        plan.plan_digest = trace_plan_digest(&plan).expect("digest");
+
+        let execution = evidence(&plan).anchors[0].executions[0].clone();
+        let anchors = plan
+            .requests
+            .iter()
+            .map(|request| {
+                let anchor = request.anchor.as_ref().expect("anchor");
+                AnchorEvidence {
+                    anchor_symbol: anchor.symbol.clone(),
+                    anchor_semantic_digest: anchor.semantic_digest.clone(),
+                    capture: MessageField::some(CaptureSummary {
+                        status: EnumOrUnknown::new(CaptureStatus::PARTIAL),
+                        run_ids: vec!["run-1".to_string()],
+                        reason: "execution is represented by a candidate group".to_string(),
+                        ..CaptureSummary::default()
+                    }),
+                    ..AnchorEvidence::default()
+                }
+            })
+            .collect();
+        let bundle = RuntimeEvidence {
+            protocol_version: PROTOCOL_VERSION,
+            producer: MessageField::some(tool("nil-kill")),
+            authority: EnumOrUnknown::new(Authority::MODELED_RUNS),
+            trace_plan_digest: plan.plan_digest.clone(),
+            runs: vec![Run {
+                id: "run-1".to_string(),
+                status: EnumOrUnknown::new(RunStatus::SUCCEEDED),
+                ..Run::default()
+            }],
+            anchors,
+            correlations: vec![CorrelationEvidence {
+                group_id: "candidate-group-1".to_string(),
+                candidate_anchor_symbols: vec![
+                    "local call-1".to_string(),
+                    "local call-2".to_string(),
+                ],
+                capture: MessageField::some(CaptureSummary {
+                    status: EnumOrUnknown::new(CaptureStatus::COMPLETE_FOR_RUNS),
+                    run_ids: vec!["run-1".to_string()],
+                    observed_executions: 1,
+                    complete_kinds: plan.requests[0].required.clone(),
+                    ..CaptureSummary::default()
+                }),
+                executions: vec![execution],
+                ..CorrelationEvidence::default()
+            }],
+            ..RuntimeEvidence::default()
+        };
+        (plan, bundle)
+    }
+
     #[test]
     fn canonical_plan_and_correlated_evidence_validate() {
         let plan = plan();
@@ -1200,6 +1363,26 @@ mod tests {
     }
 
     #[test]
+    fn candidate_correlations_are_strict_raw_evidence_not_guessed_anchors() {
+        let (plan, bundle) = correlation_evidence();
+        validate_runtime_evidence(&plan, &bundle).expect("candidate correlation");
+
+        let mut one_candidate = bundle.clone();
+        one_candidate.correlations[0].candidate_anchor_symbols.pop();
+        assert!(validate_runtime_evidence(&plan, &one_candidate)
+            .unwrap_err()
+            .to_string()
+            .contains("at least two"));
+
+        let mut missing_target = bundle;
+        missing_target.correlations[0].executions[0].target = MessageField::none();
+        assert!(validate_runtime_evidence(&plan, &missing_target)
+            .unwrap_err()
+            .to_string()
+            .contains("lacks required target"));
+    }
+
+    #[test]
     fn shared_conformance_corpus_is_accepted_and_rejected_consistently() {
         let plan =
             parse_trace_plan_json(&conformance_fixture("trace-plan.valid.json")).expect("plan");
@@ -1207,6 +1390,15 @@ mod tests {
             parse_runtime_evidence_json(&conformance_fixture("runtime-evidence.valid.json"))
                 .expect("evidence shape");
         validate_runtime_evidence(&plan, &evidence).expect("valid shared evidence");
+        let correlation_plan =
+            parse_trace_plan_json(&conformance_fixture("trace-plan.valid-correlation.json"))
+                .expect("correlation plan");
+        let correlation_evidence = parse_runtime_evidence_json(&conformance_fixture(
+            "runtime-evidence.valid-correlation.json",
+        ))
+        .expect("correlation evidence shape");
+        validate_runtime_evidence(&correlation_plan, &correlation_evidence)
+            .expect("valid shared candidate correlation");
 
         assert!(parse_runtime_evidence_json(&conformance_fixture(
             "runtime-evidence.invalid-unknown-field.json"

@@ -48,6 +48,7 @@ module NilKill
         anchors = @plan.fetch("requests").map do |request|
           anchor_evidence(request, ids)
         end
+        correlations = correlation_evidence(ids)
         evidence = {
           "protocol_version" => EvidenceProtocol::VERSION,
           "producer" => {
@@ -62,6 +63,7 @@ module NilKill
             { "id" => id, "status" => "SUCCEEDED" }
           end,
           "anchors" => anchors,
+          "correlations" => correlations,
         }
         FileUtils.mkdir_p(File.dirname(@output))
         JsonIO.write(@output, EvidenceProtocol.encode_evidence(evidence))
@@ -72,6 +74,7 @@ module NilKill
             |row| row.dig("capture", "status") == "COMPLETE_FOR_RUNS"
           },
           "calls" => anchors.count { |row| row["executions"].any? { |bucket| bucket["target"] } },
+          "correlations" => correlations.length,
           "observations" => anchors.count { |row| row["executions"].any? { |bucket| bucket["value"] } },
         }
       end
@@ -91,9 +94,14 @@ module NilKill
           else
             matching_calls(anchor)
           end
-        executions = matches.filter_map do |match|
-          call_anchor?(anchor) ? call_bucket(match, run_ids.first) : value_bucket(match, run_ids.first)
-        end
+        executions =
+          if ambiguity
+            []
+          else
+            matches.filter_map do |match|
+              call_anchor?(anchor) ? call_bucket(match, run_ids.first) : value_bucket(match, run_ids.first)
+            end
+          end
         executions = merge_identical_buckets(executions)
         requested = request.fetch("required")
         executed_without_capture = executions.empty? && anchor_executed?(anchor)
@@ -112,7 +120,7 @@ module NilKill
           end
         status, reason =
           if ambiguity
-            ["PARTIAL", "provider cannot uniquely correlate this source event to one exact anchor"]
+            ["PARTIAL", "observed execution is preserved in a candidate correlation group"]
           elsif executions.empty?
             if executed_without_capture
               ["NOT_INSTRUMENTED", "anchor executed but the provider did not capture its requested value"]
@@ -140,6 +148,52 @@ module NilKill
         }
       end
 
+      def correlation_evidence(run_ids)
+        grouped = Hash.new { |hash, key| hash[key] = [] }
+        @calls_by_path_selector.each do |(path, selector), pairs|
+          pairs.each do |pair|
+            _event, row = pair
+            callsite = row.fetch("callsite")
+            symbols = matching_call_requests(
+              path,
+              selector,
+              callsite.fetch("line")
+            ).map { |request| request.dig("anchor", "symbol") }.sort
+            grouped[symbols] << pair if symbols.length > 1
+          end
+        end
+        grouped.sort_by { |symbols, _pairs| symbols }.filter_map do |symbols, pairs|
+          requests = symbols.map { |symbol| @requests_by_symbol.fetch(symbol) }
+          requested = requests.flat_map { |request| request.fetch("required") }.uniq.sort
+          executions = merge_identical_buckets(
+            pairs.filter_map { |pair| call_bucket(pair, run_ids.first) }
+          )
+          next if executions.empty?
+
+          complete_kinds = requested.select do |kind|
+            field = evidence_field(kind)
+            executions.all? { |bucket| bucket.key?(field) }
+          end
+          complete = complete_kinds == requested
+          {
+            "group_id" => "candidate-#{Digest::SHA256.hexdigest(symbols.join("\0"))[0, 24]}",
+            "candidate_anchor_symbols" => symbols,
+            "capture" => {
+              "status" => complete ? "COMPLETE_FOR_RUNS" : "PARTIAL",
+              "run_ids" => run_ids,
+              "observed_executions" => executions.sum { |bucket| bucket.fetch("count").to_i },
+              "dropped_executions" => 0,
+              "reason" => (
+                "provider did not capture every value requested by the candidate anchors" unless
+                  complete
+              ),
+              "complete_kinds" => complete_kinds,
+            }.compact,
+            "executions" => executions,
+          }
+        end
+      end
+
       def matching_observations(anchor, kind)
         candidates = @observations_by_kind_path.fetch(
           [kind, anchor.fetch("relative_path")],
@@ -165,6 +219,12 @@ module NilKill
         # A provider may expose only line + selector rather than an exact
         # column. Never guess between two identical selectors on one line.
         [candidates, candidates.any? && siblings > 1]
+      end
+
+      def matching_call_requests(path, selector, one_based_line)
+        @call_requests_by_path_selector.fetch([path, selector], []).select do |request|
+          source_line_matches?(request.fetch("anchor"), one_based_line)
+        end
       end
 
       def value_bucket(row, run_id)
@@ -304,6 +364,15 @@ module NilKill
       end
 
       def build_lookup_indices(observations, decoded_calls)
+        @requests_by_symbol = @plan.fetch("requests").to_h do |request|
+          [request.dig("anchor", "symbol"), request]
+        end
+        @call_requests_by_path_selector = @plan.fetch("requests")
+          .select { |request| call_anchor?(request.fetch("anchor")) }
+          .group_by do |request|
+            anchor = request.fetch("anchor")
+            [anchor.fetch("relative_path"), anchor.fetch("display_name").to_s]
+          end
         @observations_by_kind_path = observations.group_by do |row|
           [row.fetch("kind"), canonical_path(row.dig("scope", "path"))]
         end

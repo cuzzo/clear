@@ -1,0 +1,104 @@
+{
+  "protocol_version": 1,
+  "producer": {
+    "name": "nil-kill",
+    "version": "1",
+    "arguments": []
+  },
+  "authority": "MODELED_RUNS",
+  "trace_plan_digest": "nJiaQ2XD+Sk5J8zMrdMaA1Msn1TZkF25onp1/15k6L4=",
+  "environment": [],
+  "runs": [
+    {
+      "id": "run-1",
+      "status": "SUCCEEDED",
+      "command_digest": "",
+      "test_ids": []
+    }
+  ],
+  "anchors": [
+    {
+      "anchor_symbol": "local call-1",
+      "anchor_semantic_digest": "fts2DwasrvLMgNuhbPVj8ZnTR9tEQ9oE2gyBc+P55O0=",
+      "capture": {
+        "status": "PARTIAL",
+        "run_ids": [
+          "run-1"
+        ],
+        "observed_executions": "0",
+        "dropped_executions": "0",
+        "reason": "execution is represented by a candidate group",
+        "complete_kinds": []
+      },
+      "executions": []
+    },
+    {
+      "anchor_symbol": "local call-2",
+      "anchor_semantic_digest": "WtnXw8n9bQlkxpv+KQaanvIuFgu/TdI5z+XosfKy60o=",
+      "capture": {
+        "status": "PARTIAL",
+        "run_ids": [
+          "run-1"
+        ],
+        "observed_executions": "0",
+        "dropped_executions": "0",
+        "reason": "execution is represented by a candidate group",
+        "complete_kinds": []
+      },
+      "executions": []
+    }
+  ],
+  "correlations": [
+    {
+      "group_id": "candidate-group-1",
+      "candidate_anchor_symbols": [
+        "local call-1",
+        "local call-2"
+      ],
+      "capture": {
+        "status": "COMPLETE_FOR_RUNS",
+        "run_ids": [
+          "run-1"
+        ],
+        "observed_executions": "2",
+        "dropped_executions": "0",
+        "reason": "",
+        "complete_kinds": [
+          "RECEIVER_VALUE",
+          "CALL_TARGET"
+        ]
+      },
+      "executions": [
+        {
+          "count": "2",
+          "receiver": {
+            "alternatives": [
+              {
+                "value": {
+                  "type_symbol": "nil-kill-runtime ruby ruby 3.2.3 String#",
+                  "singleton_symbol": "",
+                  "source_role": "PRODUCTION",
+                  "truncated": false
+                },
+                "count": "1"
+              }
+            ],
+            "truncated": false
+          },
+          "target": {
+            "symbol": "nil-kill-runtime ruby ruby 3.2.3 String#size().",
+            "source_role": "STANDARD_LIBRARY",
+            "package_manager": "ruby",
+            "package_name": "ruby",
+            "package_version": "3.2.3"
+          },
+          "provenance": {
+            "run_id": "run-1",
+            "provider": "ruby-tracepoint",
+            "provider_version": "1"
+          }
+        }
+      ]
+    }
+  ]
+}

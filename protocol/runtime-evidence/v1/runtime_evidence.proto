@@ -237,6 +237,17 @@ message AnchorEvidence {
   repeated ExecutionBucket executions = 4;
 }
 
+// A provider observation that cannot be assigned to one exact requested
+// source anchor. Candidate membership is observational, not an inference:
+// the consumer must correlate the bucket through its own normalized CFG/DFG
+// or leave every candidate unresolved.
+message CorrelationEvidence {
+  string group_id = 1;
+  repeated string candidate_anchor_symbols = 2;
+  CaptureSummary capture = 3;
+  repeated ExecutionBucket executions = 4;
+}
+
 message RuntimeEvidence {
   uint32 protocol_version = 1;
   ToolInfo producer = 2;
@@ -245,4 +256,5 @@ message RuntimeEvidence {
   repeated EnvironmentClaim environment = 5;
   repeated Run runs = 6;
   repeated AnchorEvidence anchors = 7;
+  repeated CorrelationEvidence correlations = 8;
 }

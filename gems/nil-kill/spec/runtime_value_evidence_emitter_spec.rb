@@ -189,7 +189,7 @@ RSpec.describe "canonical runtime semantic evidence v1" do
     expect(nested_element.fetch("type_symbol")).to end_with(" Integer#")
   end
 
-  it "fails closed instead of guessing between identical selectors on one line" do
+  it "emits one raw candidate correlation instead of guessing or duplicating same-line calls" do
     requests = %w[call-1 call-2].map do |id|
       {
         "anchor" => anchor(symbol: "local #{id}", kind: "CALL_SELECTOR", name: "size"),
@@ -209,6 +209,15 @@ RSpec.describe "canonical runtime semantic evidence v1" do
         .to eq(%w[PARTIAL PARTIAL])
       expect(evidence.fetch("anchors").map { |row| row.dig("capture", "complete_kinds") })
         .to eq([[], []])
+      expect(evidence.fetch("anchors").flat_map { |row| row.fetch("executions") }).to be_empty
+      correlation = evidence.fetch("correlations").fetch(0)
+      expect(correlation.fetch("candidate_anchor_symbols"))
+        .to eq(["local call-1", "local call-2"])
+      expect(correlation.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+      expect(correlation.dig("capture", "complete_kinds"))
+        .to contain_exactly("RECEIVER_VALUE", "CALL_TARGET")
+      expect(correlation.fetch("executions").length).to eq(1)
+      expect(correlation.dig("executions", 0, "count").to_i).to eq(2)
     end
   end
 
@@ -297,6 +306,37 @@ RSpec.describe "canonical runtime semantic evidence v1" do
     end
   end
 
+  it "merges candidate correlations by stable candidate ownership and run provenance" do
+    requests = %w[call-1 call-2].map do |id|
+      {
+        "anchor" => anchor(symbol: "local #{id}", kind: "CALL_SELECTOR", name: "size"),
+        "required" => %w[RECEIVER_VALUE CALL_TARGET],
+      }
+    end
+    Dir.mktmpdir do |directory|
+      paths = %w[run-1 run-2].map do |run_id|
+        NilKill::Runtime::ValueEvidenceEmitter.emit(
+          root: NilKill::ROOT,
+          runtime_dir: directory,
+          output: File.join(directory, "#{run_id}.json.gz"),
+          events: [event.merge("run_id" => run_id, "count" => 1)],
+          run_ids: [run_id],
+          plan: plan(*requests)
+        ).fetch("path")
+      end
+
+      merged = NilKill::Runtime::EvidenceMerger.merge(paths)
+      correlation = merged.fetch("correlations").fetch(0)
+      expect(correlation.fetch("candidate_anchor_symbols"))
+        .to eq(["local call-1", "local call-2"])
+      expect(correlation.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+      expect(correlation.dig("capture", "observed_executions")).to eq(2)
+      expect(
+        correlation.fetch("executions").map { |bucket| bucket.dig("provenance", "run_id") }
+      ).to contain_exactly("run-1", "run-2")
+    end
+  end
+
   it "intersects field completeness across replaceable run shards" do
     request = {
       "anchor" => anchor(symbol: "local call-1", kind: "CALL_SELECTOR", name: "size"),
@@ -376,6 +416,14 @@ RSpec.describe "canonical runtime semantic evidence v1" do
       conformance_fixture("runtime-evidence.valid.json")
     )
     expect(canonical_evidence.fetch("anchors").length).to eq(1)
+    correlation_plan = NilKill::Runtime::EvidenceProtocol.validate_plan!(
+      conformance_fixture("trace-plan.valid-correlation.json")
+    )
+    expect(correlation_plan.fetch("requests").length).to eq(2)
+    correlation_evidence = NilKill::Runtime::EvidenceProtocol.validate_evidence!(
+      conformance_fixture("runtime-evidence.valid-correlation.json")
+    )
+    expect(correlation_evidence.fetch("correlations").length).to eq(1)
     expect {
       NilKill::Runtime::EvidenceProtocol.validate_evidence!(
         conformance_fixture("runtime-evidence.invalid-unknown-field.json")

@@ -33,6 +33,7 @@ module NilKill
           "environment" => merge_environment(bundles),
           "runs" => merge_runs(bundles),
           "anchors" => merge_anchors(bundles),
+          "correlations" => merge_correlations(bundles),
         }
       end
 
@@ -54,6 +55,7 @@ module NilKill
           "environment" => [],
           "runs" => [],
           "anchors" => [],
+          "correlations" => [],
         }
       end
 
@@ -71,6 +73,9 @@ module NilKill
 
       def rebase(bundle, plan)
         old = bundle.fetch("anchors").to_h { |row| [row.fetch("anchor_symbol"), row] }
+        requests = plan.fetch("requests").to_h do |request|
+          [request.dig("anchor", "symbol"), request]
+        end
         run_ids = bundle.fetch("runs").map { |run| run.fetch("id") }
         anchors = plan.fetch("requests").map do |request|
           anchor = request.fetch("anchor")
@@ -94,7 +99,16 @@ module NilKill
         end
         bundle.merge(
           "trace_plan_digest" => plan.fetch("plan_digest"),
-          "anchors" => anchors
+          "anchors" => anchors,
+          "correlations" => bundle.fetch("correlations", []).select do |correlation|
+            correlation.fetch("candidate_anchor_symbols").all? do |symbol|
+              old_row = old[symbol]
+              request = requests[symbol]
+              old_row && request &&
+                old_row.fetch("anchor_semantic_digest") ==
+                  request.dig("anchor", "semantic_digest")
+            end
+          end
         )
       end
 
@@ -146,6 +160,37 @@ module NilKill
             "executions" => merge_buckets(executions),
           }
         end
+      end
+
+      def merge_correlations(bundles)
+        bundles.flat_map { |bundle| bundle.fetch("correlations", []) }
+          .group_by { |row| row.fetch("group_id") }
+          .sort.map do |group_id, rows|
+            candidates = unique!(
+              rows.map { |row| row.fetch("candidate_anchor_symbols") },
+              "candidate anchors for correlation #{group_id}"
+            )
+            executions = rows.flat_map { |row| row.fetch("executions") }
+            captures = rows.map { |row| row.fetch("capture") }
+            {
+              "group_id" => group_id,
+              "candidate_anchor_symbols" => candidates,
+              "capture" => {
+                "status" => merged_status(captures, executions),
+                "run_ids" => captures.flat_map { |capture| capture.fetch("run_ids") }.uniq.sort,
+                "observed_executions" => executions.sum { |bucket| bucket.fetch("count").to_i },
+                "dropped_executions" => captures.sum {
+                  |capture| capture.fetch("dropped_executions", 0).to_i
+                },
+                "reason" => merged_reason(captures, executions),
+                "complete_kinds" => captures
+                  .map { |capture| Array(capture["complete_kinds"]) }
+                  .reduce { |complete, kinds| complete & kinds }
+                  .to_a.sort,
+              }.reject { |key, value| key == "reason" && value.empty? },
+              "executions" => merge_buckets(executions),
+            }
+          end
       end
 
       def merge_buckets(rows)

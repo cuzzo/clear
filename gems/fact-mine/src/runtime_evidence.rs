@@ -559,75 +559,241 @@ fn protocol_evidence(
                     .get(call.source.as_str())
                     .with_context(|| format!("call refers to missing method {:?}", call.source))?;
                 for bucket in &row.executions {
-                    let target = if complete.contains(&EvidenceKind::CALL_TARGET.value()) {
-                        bucket
-                            .target
-                            .as_ref()
-                            .map(|target| {
-                                protocol_target(
-                                    target,
-                                    call,
-                                    method,
-                                    &methods,
-                                    &built.bindings,
-                                    &anchor_methods,
-                                    bucket.receiver.as_ref(),
-                                )
-                            })
-                            .transpose()?
-                            .flatten()
-                    } else {
-                        None
-                    };
-                    // A completely captured runtime target may still be unusable
-                    // as a production target (for example, a test double). Keep
-                    // the receiver evidence, but do not claim that the filtered
-                    // target set closes production dispatch.
-                    let target_observation_complete = target.is_some();
-                    internal.calls.push(ObservedCall {
-                        language: method.language.clone(),
-                        caller: method_locator(method),
-                        callsite: SourceAnchor {
-                            path: call.path.clone(),
-                            line: call.line,
-                            range: Some(call.span),
-                            selector: call.message.clone(),
-                        },
-                        targets: target.into_iter().collect(),
-                        target_observation_complete,
-                        receiver_domain: if complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
-                            || complete.contains(&EvidenceKind::COLLECTION_VALUE.value())
-                        {
-                            bucket
-                                .receiver
-                                .as_ref()
-                                .map(|value| protocol_value_set_domain(value, &method.language))
-                                .transpose()?
-                        } else {
-                            None
-                        },
-                        result_domain: if complete.contains(&EvidenceKind::RESULT_VALUE.value()) {
-                            bucket
-                                .result
-                                .as_ref()
-                                .map(|value| protocol_value_set_domain(value, &method.language))
-                                .transpose()?
-                        } else {
-                            None
-                        },
-                        result_truths: if complete.contains(&EvidenceKind::BOOLEAN_RESULT.value()) {
-                            bucket.boolean_result.into_iter().collect()
-                        } else {
-                            BTreeSet::new()
-                        },
-                        count: bucket.count,
-                        call_id: Some(call_id.clone()),
-                    });
+                    internal.calls.push(protocol_call_observation(
+                        call,
+                        method,
+                        call_id,
+                        bucket,
+                        &complete,
+                        &methods,
+                        &built.bindings,
+                        &anchor_methods,
+                    )?);
                 }
             }
         }
     }
+    let method_index = MethodIndex::new(&output.methods);
+    let points = flow_points(output, &method_index);
+    let requests = built
+        .plan
+        .requests
+        .iter()
+        .filter_map(|request| {
+            Some((
+                request.anchor.as_ref()?.symbol.as_str(),
+                request
+                    .required
+                    .iter()
+                    .filter_map(|kind| kind.enum_value().ok().map(|kind| kind.value()))
+                    .collect::<BTreeSet<_>>(),
+            ))
+        })
+        .collect::<BTreeMap<_, _>>();
+    for correlation in &evidence.correlations {
+        let Some(capture) = correlation.capture.as_ref() else {
+            continue;
+        };
+        let complete = capture
+            .complete_kinds
+            .iter()
+            .filter_map(|kind| kind.enum_value().ok().map(|kind| kind.value()))
+            .collect::<BTreeSet<_>>();
+        let candidates = correlation
+            .candidate_anchor_symbols
+            .iter()
+            .filter_map(|anchor| match built.bindings.get(anchor) {
+                Some(AnchorBinding::Call { call_id }) => {
+                    let call = calls.get(call_id.as_str()).copied()?;
+                    let method = methods.get(call.source.as_str()).copied()?;
+                    Some((anchor.as_str(), call_id, call, method))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() != correlation.candidate_anchor_symbols.len() {
+            bail!(
+                "validated correlation {:?} lacks an exact FactMine call binding",
+                correlation.group_id
+            );
+        }
+        for bucket in &correlation.executions {
+            let resolved = protocol_correlation_candidates(&candidates, bucket, &points)?;
+            for (anchor, call_id, call, method) in resolved {
+                let candidate_complete = complete
+                    .intersection(requests.get(anchor).with_context(|| {
+                        format!("correlation candidate {anchor:?} lacks a trace-plan request")
+                    })?)
+                    .copied()
+                    .collect::<BTreeSet<_>>();
+                if candidate_complete.is_empty() {
+                    continue;
+                }
+                internal.calls.push(protocol_call_observation(
+                    call,
+                    method,
+                    call_id,
+                    bucket,
+                    &candidate_complete,
+                    &methods,
+                    &built.bindings,
+                    &anchor_methods,
+                )?);
+            }
+        }
+    }
     Ok(internal)
+}
+
+fn protocol_call_observation(
+    call: &CallRecord,
+    method: &MethodRecord,
+    call_id: &str,
+    bucket: &runtime_protocol::ExecutionBucket,
+    complete: &BTreeSet<i32>,
+    methods: &BTreeMap<&str, &MethodRecord>,
+    bindings: &BTreeMap<String, AnchorBinding>,
+    anchor_methods: &BTreeMap<&str, &str>,
+) -> Result<ObservedCall> {
+    let target = if complete.contains(&EvidenceKind::CALL_TARGET.value()) {
+        bucket
+            .target
+            .as_ref()
+            .map(|target| {
+                protocol_target(
+                    target,
+                    call,
+                    method,
+                    methods,
+                    bindings,
+                    anchor_methods,
+                    bucket.receiver.as_ref(),
+                )
+            })
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    // A completely captured runtime target may still be unusable as a
+    // production target (for example, a test double). Keep the receiver
+    // evidence, but do not close production dispatch with the filtered target.
+    let target_observation_complete = target.is_some();
+    Ok(ObservedCall {
+        language: method.language.clone(),
+        caller: method_locator(method),
+        callsite: SourceAnchor {
+            path: call.path.clone(),
+            line: call.line,
+            range: Some(call.span),
+            selector: call.message.clone(),
+        },
+        targets: target.into_iter().collect(),
+        target_observation_complete,
+        receiver_domain: if complete.contains(&EvidenceKind::RECEIVER_VALUE.value())
+            || complete.contains(&EvidenceKind::COLLECTION_VALUE.value())
+        {
+            bucket
+                .receiver
+                .as_ref()
+                .map(|value| protocol_value_set_domain(value, &method.language))
+                .transpose()?
+        } else {
+            None
+        },
+        result_domain: if complete.contains(&EvidenceKind::RESULT_VALUE.value()) {
+            bucket
+                .result
+                .as_ref()
+                .map(|value| protocol_value_set_domain(value, &method.language))
+                .transpose()?
+        } else {
+            None
+        },
+        result_truths: if complete.contains(&EvidenceKind::BOOLEAN_RESULT.value()) {
+            bucket.boolean_result.into_iter().collect()
+        } else {
+            BTreeSet::new()
+        },
+        count: bucket.count,
+        call_id: Some(call_id.to_string()),
+    })
+}
+
+fn protocol_correlation_candidates<'a>(
+    candidates: &'a [(&str, &String, &'a CallRecord, &'a MethodRecord)],
+    bucket: &runtime_protocol::ExecutionBucket,
+    points: &[FlowPoint],
+) -> Result<Vec<(&'a str, &'a String, &'a CallRecord, &'a MethodRecord)>> {
+    if correlation_candidates_share_reaching_value(candidates, points) {
+        return Ok(candidates.to_vec());
+    }
+    let Some(receiver) = bucket.receiver.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let observed = protocol_value_set_domain(receiver, &candidates[0].3.language)?;
+    let mut compatible = Vec::new();
+    for candidate in candidates {
+        let source_type = candidate
+            .2
+            .receiver_type
+            .as_deref()
+            .or(candidate.2.receiver_symbol.as_deref());
+        let Some(source_type) = source_type else {
+            return Ok(Vec::new());
+        };
+        let domain = domain_from_type_source(source_type, &candidate.3.language);
+        if domain.types.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !domain.types.is_disjoint(&observed.types) {
+            compatible.push(*candidate);
+        }
+    }
+    Ok((compatible.len() == 1)
+        .then_some(compatible)
+        .unwrap_or_default())
+}
+
+fn correlation_candidates_share_reaching_value(
+    candidates: &[(&str, &String, &CallRecord, &MethodRecord)],
+    points: &[FlowPoint],
+) -> bool {
+    correlation_calls_share_reaching_value(
+        &candidates
+            .iter()
+            .map(|(_, _, call, _)| *call)
+            .collect::<Vec<_>>(),
+        points,
+    )
+}
+
+fn correlation_calls_share_reaching_value(calls: &[&CallRecord], points: &[FlowPoint]) -> bool {
+    let identities = calls
+        .iter()
+        .map(|call| {
+            points
+                .iter()
+                .filter(|point| point.source == call.source && point.name == call.receiver)
+                .filter(|point| {
+                    span_contains(call.span, point.span) || span_contains(point.span, call.span)
+                })
+                .map(|point| {
+                    (
+                        point.place_id.clone(),
+                        point
+                            .reaching_definitions
+                            .iter()
+                            .cloned()
+                            .collect::<BTreeSet<_>>(),
+                    )
+                })
+                .collect::<BTreeSet<_>>()
+        })
+        .collect::<Vec<_>>();
+    identities.first().is_some_and(|first| {
+        !first.is_empty() && identities.iter().all(|identity| identity == first)
+    })
 }
 
 fn protocol_observation(
@@ -5994,6 +6160,175 @@ end
             .find(|call| call.message == "size" && call.receiver == "right")
             .expect("other same-selector call");
         assert!(!other.runtime_evidence_observed);
+    }
+
+    #[test]
+    fn canonical_candidate_group_uses_fact_mine_dfg_to_join_shared_receivers() {
+        let directory = tempfile::tempdir().expect("directory");
+        let file = directory.path().join("worker.rb");
+        std::fs::write(
+            &file,
+            "class Worker\n  def run(row)\n    row.size + row.size\n  end\nend\n",
+        )
+        .expect("source");
+        let document = syntax::parse_file(file.clone(), Language::Ruby).expect("parse");
+        let mut overlay_profile = profile::extract(&document, Profile::Espalier);
+        let plan_profile = profile::extract(&document, Profile::TracePlan);
+        let built = runtime_protocol::build_trace_plan_with_bindings(
+            &plan_profile,
+            std::slice::from_ref(&file),
+            directory.path(),
+        )
+        .expect("plan");
+        let candidates = built
+            .bindings
+            .iter()
+            .filter_map(|(anchor, binding)| match binding {
+                AnchorBinding::Call { call_id }
+                    if overlay_profile
+                        .calls
+                        .iter()
+                        .find(|call| call.id == *call_id)
+                        .is_some_and(|call| call.message == "size") =>
+                {
+                    Some(anchor.clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(candidates.len(), 2);
+        let run_id = "run-1".to_string();
+        let anchors = built
+            .plan
+            .requests
+            .iter()
+            .map(|request| {
+                let anchor = request.anchor.as_ref().expect("anchor");
+                let candidate = candidates.contains(&anchor.symbol);
+                runtime_protocol::AnchorEvidence {
+                    anchor_symbol: anchor.symbol.clone(),
+                    anchor_semantic_digest: anchor.semantic_digest.clone(),
+                    capture: MessageField::some(runtime_protocol::CaptureSummary {
+                        status: EnumOrUnknown::new(if candidate {
+                            CaptureStatus::PARTIAL
+                        } else {
+                            CaptureStatus::NOT_EXECUTED
+                        }),
+                        run_ids: vec![run_id.clone()],
+                        reason: candidate
+                            .then(|| "execution is represented by a candidate group".to_string())
+                            .unwrap_or_default(),
+                        complete_kinds: if candidate {
+                            Vec::new()
+                        } else {
+                            request.required.clone()
+                        },
+                        ..runtime_protocol::CaptureSummary::default()
+                    }),
+                    ..runtime_protocol::AnchorEvidence::default()
+                }
+            })
+            .collect();
+        let runtime_values = runtime_protocol::ValueSet {
+            alternatives: vec![runtime_protocol::WeightedValue {
+                value: MessageField::some(runtime_protocol::RuntimeValue {
+                    type_symbol: "nil-kill-runtime ruby ruby 3.2.3 String#".to_string(),
+                    source_role: EnumOrUnknown::new(runtime_protocol::SourceRole::PRODUCTION),
+                    ..runtime_protocol::RuntimeValue::default()
+                }),
+                count: 1,
+                ..runtime_protocol::WeightedValue::default()
+            }],
+            ..runtime_protocol::ValueSet::default()
+        };
+        let evidence = runtime_protocol::RuntimeEvidence {
+            protocol_version: runtime_protocol::PROTOCOL_VERSION,
+            producer: MessageField::some(runtime_protocol::ToolInfo {
+                name: "nil-kill".to_string(),
+                version: "1".to_string(),
+                ..runtime_protocol::ToolInfo::default()
+            }),
+            authority: EnumOrUnknown::new(runtime_protocol::Authority::MODELED_RUNS),
+            trace_plan_digest: built.plan.plan_digest.clone(),
+            runs: vec![runtime_protocol::Run {
+                id: run_id.clone(),
+                status: EnumOrUnknown::new(runtime_protocol::RunStatus::SUCCEEDED),
+                ..runtime_protocol::Run::default()
+            }],
+            anchors,
+            correlations: vec![runtime_protocol::CorrelationEvidence {
+                group_id: "same-value-size-calls".to_string(),
+                candidate_anchor_symbols: candidates,
+                capture: MessageField::some(runtime_protocol::CaptureSummary {
+                    status: EnumOrUnknown::new(CaptureStatus::COMPLETE_FOR_RUNS),
+                    run_ids: vec![run_id.clone()],
+                    observed_executions: 2,
+                    complete_kinds: vec![
+                        EnumOrUnknown::new(EvidenceKind::RECEIVER_VALUE),
+                        EnumOrUnknown::new(EvidenceKind::CALL_TARGET),
+                    ],
+                    ..runtime_protocol::CaptureSummary::default()
+                }),
+                executions: vec![runtime_protocol::ExecutionBucket {
+                    count: 2,
+                    receiver: MessageField::some(runtime_values),
+                    target: MessageField::some(runtime_protocol::RuntimeTarget {
+                        symbol: "nil-kill-runtime ruby ruby 3.2.3 String#size().".to_string(),
+                        source_role: EnumOrUnknown::new(
+                            runtime_protocol::SourceRole::STANDARD_LIBRARY,
+                        ),
+                        package_manager: "ruby".to_string(),
+                        package_name: "ruby".to_string(),
+                        package_version: "3.2.3".to_string(),
+                        ..runtime_protocol::RuntimeTarget::default()
+                    }),
+                    provenance: MessageField::some(runtime_protocol::Provenance {
+                        run_id,
+                        provider: "ruby-tracepoint".to_string(),
+                        provider_version: "1".to_string(),
+                        ..runtime_protocol::Provenance::default()
+                    }),
+                    ..runtime_protocol::ExecutionBucket::default()
+                }],
+                ..runtime_protocol::CorrelationEvidence::default()
+            }],
+            ..runtime_protocol::RuntimeEvidence::default()
+        };
+
+        apply_protocol_to_profile(&mut overlay_profile, &built, &evidence).expect("overlay");
+        let size_calls = overlay_profile
+            .calls
+            .iter()
+            .filter(|call| call.message == "size")
+            .collect::<Vec<_>>();
+        assert_eq!(size_calls.len(), 2);
+        assert!(size_calls.iter().all(|call| call.runtime_evidence_observed));
+        assert!(size_calls.iter().all(|call| {
+            call.semantic_symbol.as_deref()
+                == Some("nil-kill-runtime ruby ruby 3.2.3 String#size().")
+        }));
+    }
+
+    #[test]
+    fn candidate_group_dfg_does_not_equate_distinct_same_line_receivers() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            b"class Worker\n  def run(left, right)\n    left.size + right.size\n  end\nend\n",
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let output = profile::extract(&document, Profile::Espalier);
+        let methods = MethodIndex::new(&output.methods);
+        let points = flow_points(&output, &methods);
+        let calls = output
+            .calls
+            .iter()
+            .filter(|call| call.message == "size")
+            .collect::<Vec<_>>();
+
+        assert_eq!(calls.len(), 2);
+        assert!(!correlation_calls_share_reaching_value(&calls, &points));
     }
 
     #[test]

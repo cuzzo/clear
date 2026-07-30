@@ -220,7 +220,10 @@ correlated value/target bucket for every requested anchor. FactMine rebuilds
 the plan from the analyzed source, validates both digests and the complete
 anchor set, then joins evidence through exact internal IDs. The collector does
 not infer CFG/DFG relationships or accept the former path/name/line evidence
-shape.
+shape. If a runtime only identifies a same-line event to multiple exact
+anchors, NilKill emits one candidate-correlation group instead of guessing or
+duplicating the event. FactMine alone may disambiguate that group using its
+normalized CFG/DFG; otherwise every candidate remains incomplete.
 
 The standalone validation and consumption flow is:
 
