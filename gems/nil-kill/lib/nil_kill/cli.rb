@@ -333,9 +333,10 @@ module NilKill
       # Parsing and digest-checking the plan costs about as much as tracing a
       # shard, so it happens once rather than once per shard.
       evidence_plan = stage("plan-parse") { Runtime::EvidenceProtocol.plan }
+      staged_traces = {}
       trace_languages =
         target_files.filter_map { |path| Languages.provider_for_path(path)&.language }.uniq
-      stage("trace-write + join") { selected.each do |shard|
+      stage("trace-write") { selected.each do |shard|
         shard_id = shard.fetch("id")
         shard_dir = File.join(working_runtime_dir, shard_id)
         dependency_updates[shard_id] = dependencies_for_shard(shard_dir, inventory)
@@ -351,10 +352,13 @@ module NilKill
           languages: trace_languages,
           run_ids: [shard_run_ids.fetch(shard_id)]
         )
-        staged_evidence[shard_id] = Runtime::TraceArtifact.join(
-          root: ROOT, trace: trace_path, output: File.join(shard_dir, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
-        )
+        staged_traces[shard_id] = trace_path
+        staged_evidence[shard_id] =
+          File.join(shard_dir, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
       end }
+      stage("join (batched)") do
+        Runtime::TraceArtifact.join_all(root: ROOT, traces: staged_traces)
+      end
       shard_store = File.join(RUNTIME_DIR, "shard-evidence")
       FileUtils.mkdir_p(shard_store)
       current_shards = workload.shard_ids

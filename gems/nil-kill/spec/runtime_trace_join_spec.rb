@@ -48,7 +48,7 @@ RSpec.describe "runtime trace join" do
 
   def rust_evidence(plan_path, trace_path)
     out, err, status = Open3.capture3(
-      FACT_MINE, "runtime-trace",
+      FACT_MINE, "runtime-trace", "--stdout",
       "--plan", plan_path, "--runtime-trace", trace_path, "--root", NilKill::ROOT
     )
     raise "fact-mine runtime-trace failed: #{err}" unless status.success?

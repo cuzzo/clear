@@ -300,30 +300,43 @@ fn run() -> Result<()> {
             plan,
             traces,
             output,
+            to_stdout,
             root,
         } => {
             // The plan is parsed and digest-checked once however many traces are
-            // joined; paying that per shard cost more than the join itself.
+            // joined; paying that per shard cost more than the join itself. The
+            // shards themselves are independent, so they join concurrently --
+            // this loop was the largest sequential stage of a collect.
             let plan = fact_mine_rust::runtime_trace::read_plan(&plan)?;
             let root = std::fs::canonicalize(&root).unwrap_or(root);
-            let mut joined = 0usize;
-            for path in &traces {
+            // Writing beside each trace is the default whatever the count.
+            // Making one trace behave differently from many meant a single-shard
+            // collect silently produced no evidence file at all.
+            let single = to_stdout;
+            let joined = fact_mine_rust::parallel::map_ordered(&traces, |path| {
                 let trace = fact_mine_rust::runtime_trace::read_trace(path)?;
                 let evidence =
                     fact_mine_rust::runtime_trace::build_evidence(&root, &plan, &trace)?;
-                match (&output, traces.len()) {
-                    (Some(target), _) => fact_mine_rust::runtime_trace::write_json(target, &evidence)?,
-                    (None, 1) => println!("{evidence}"),
-                    (None, _) => {
+                match (&output, single) {
+                    (Some(target), _) => {
+                        fact_mine_rust::runtime_trace::write_json(target, &evidence)?;
+                        Ok(None)
+                    }
+                    (None, true) => Ok(Some(evidence)),
+                    (None, false) => {
                         let target = path.with_file_name("runtime-evidence.v1.json.gz");
                         fact_mine_rust::runtime_trace::write_json(&target, &evidence)?;
+                        Ok(None)
                     }
                 }
-                joined += 1;
+            })?;
+            for evidence in joined.into_iter().flatten() {
+                println!("{evidence}");
             }
             eprintln!(
-                "Runtime trace joined: {} anchors over {joined} trace(s)",
-                plan.requests.len()
+                "Runtime trace joined: {} anchors over {} trace(s)",
+                plan.requests.len(),
+                traces.len()
             );
         }
         Command::RuntimeEvidenceValidate { plan, evidence } => {
@@ -737,6 +750,7 @@ enum Command {
         plan: PathBuf,
         traces: Vec<PathBuf>,
         output: Option<PathBuf>,
+        to_stdout: bool,
         root: PathBuf,
     },
 }
@@ -795,6 +809,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut plan = None;
             let mut traces: Vec<PathBuf> = Vec::new();
             let mut output = None;
+            let mut to_stdout = false;
             let mut root = None;
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
@@ -816,6 +831,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                         traces.push(PathBuf::from(
                             other.strip_prefix("--runtime-trace=").unwrap(),
                         ));
+                    }
+                    "--stdout" => {
+                        to_stdout = true;
                     }
                     "--output" => {
                         output = Some(PathBuf::from(
@@ -839,13 +857,14 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             if traces.is_empty() {
                 bail!("runtime-trace requires at least one --runtime-trace FILE");
             }
-            if output.is_some() && traces.len() > 1 {
-                bail!("--output names one file; joining several traces writes each beside its own");
+            if (output.is_some() || to_stdout) && traces.len() > 1 {
+                bail!("--output/--stdout name one document; joining several writes each beside its own");
             }
             Ok(Command::RuntimeTrace {
                 plan: plan.with_context(|| "runtime-trace requires --plan FILE")?,
                 traces,
                 output,
+                to_stdout,
                 root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
