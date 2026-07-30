@@ -15,8 +15,8 @@ class BigOBoundRenderingTest < Minitest::Test
     "O(N^2 + M)" => "O(N^2)",
     "O(N^2 + M + K + L)" => "O(N^2)",
     "O(N*M*K + N*M*L)" => "O(N*M*K + N*M*L)",
-    "O(N*M*K + N*M*L + N*M*P)" => "O(N*M*K#3)",
-    "O(N log N + M log M + K log K)" => "O(N log N#3)",
+    "O(N*M*K + N*M*L + N*M*P)" => "O((N*M*K)#3)",
+    "O(N log N + M log M + K log K)" => "O((N log N)#3)",
     "O(N^3*R^2 log N)" => "O(N^3*R^2 log N)"
   }.freeze
 

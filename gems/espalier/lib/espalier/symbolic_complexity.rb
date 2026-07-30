@@ -254,7 +254,11 @@ module Espalier
       leading = terms.take_while { |term| term_shape(term) == shape }
       return "O(#{leading.join(' + ')})" if leading.length < 3
 
-      "O(#{terms.first}##{leading.length})"
+      leader = terms.first
+      # A compound term needs its bounds marked, or the count reads as though it
+      # applied to the last factor alone.
+      leader = "(#{leader})" if leader.match?(/[* ]/)
+      "O(#{leader}##{leading.length})"
     end
 
     # Two terms have the same shape when they grow the same way, whatever they
