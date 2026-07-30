@@ -209,6 +209,86 @@ struct Definition {
     method_id: Option<String>,
 }
 
+/// Local bindings the indexer has already typed, as (relative path, line,
+/// name, declared type). A compiler index states the type of every binding it
+/// resolved; without this the type of an inferred local is re-derived from
+/// source text, which only works for languages that spell it there.
+pub fn local_binding_types(index_path: &Path) -> Result<Vec<(String, usize, String, String)>> {
+    let index = read_index(index_path)?;
+    let mut out = Vec::new();
+    for document in &index.documents {
+        let definitions = document
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.symbol_roles & 1 == 1)
+            .filter_map(|occurrence| {
+                occurrence_line(occurrence).map(|line| (occurrence.symbol.as_str(), line))
+            })
+            .collect::<BTreeMap<_, _>>();
+        for information in &document.symbols {
+            let Some(text) = information
+                .signature_documentation
+                .as_ref()
+                .map(|signature| signature.text.trim())
+            else {
+                continue;
+            };
+            let Some((name, declared)) = binding_signature(text) else {
+                continue;
+            };
+            let Some(line) = definitions.get(information.symbol.as_str()) else {
+                continue;
+            };
+            out.push((
+                document.relative_path.clone(),
+                *line,
+                name.to_string(),
+                declared.to_string(),
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// A binding's declaration reduced to name and type. Indexers render it with
+/// the language's own binding keyword, so the keyword is whatever precedes the
+/// name and is not part of either.
+fn binding_signature(text: &str) -> Option<(&str, &str)> {
+    let (head, declared) = text.split_once(':')?;
+    let name = head.split_whitespace().last()?;
+    let declared = declared.trim().trim_end_matches(['=', ';']).trim();
+    (!name.is_empty()
+        && !declared.is_empty()
+        && name.chars().all(|c| c.is_alphanumeric() || c == '_'))
+    .then_some((name, declared))
+}
+
+fn occurrence_line(occurrence: &Occurrence) -> Option<usize> {
+    occurrence
+        .range
+        .first()
+        .copied()
+        .or_else(|| match occurrence.typed_range.as_ref()? {
+            TypedRange::Single { value } => Some(value.line),
+            TypedRange::Multi { value } => Some(value.start_line),
+        })
+        .map(|line| line + 1)
+}
+
+fn read_index(index_path: &Path) -> Result<Index> {
+    if index_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        == Some("scip")
+    {
+        let bytes = fs::read(index_path)?;
+        let protobuf = scip::types::Index::parse_from_bytes(&bytes)?;
+        index_from_protobuf(protobuf)
+    } else {
+        Ok(serde_json::from_str(&fs::read_to_string(index_path)?)?)
+    }
+}
+
 pub fn apply_json_file(output: &mut ProfileOutput, index_path: &Path) -> Result<ImportStats> {
     if index_path
         .extension()
@@ -4524,5 +4604,50 @@ void run_dependent() {
             preprocessor_definition_source(source, 1).as_deref(),
             Some("#   define WRAP(value) value")
         );
+    }
+}
+
+#[cfg(test)]
+mod local_binding_type_tests {
+    use super::*;
+
+    #[test]
+    fn a_binding_signature_is_split_into_name_and_type() {
+        assert_eq!(
+            binding_signature("let kept: Vec<String>"),
+            Some(("kept", "Vec<String>"))
+        );
+        // Another language's binding keyword is still just what precedes the name.
+        assert_eq!(binding_signature("var total: int"), Some(("total", "int")));
+        assert_eq!(binding_signature("val rows: List<Row>"), Some(("rows", "List<Row>")));
+        // A declaration that names no type states nothing about one.
+        assert_eq!(binding_signature("let kept"), None);
+        // A function signature is not a binding.
+        assert_eq!(binding_signature("fn find(x: usize) -> usize"), None);
+    }
+
+    #[test]
+    fn typed_locals_are_read_from_an_index_with_their_definition_line() {
+        let index = serde_json::json!({
+            "documents": [{
+                "relativePath": "src/lib.rs",
+                "occurrences": [{"range": [11, 8, 12], "symbol": "local 0", "symbolRoles": 1}],
+                "symbols": [{
+                    "symbol": "local 0",
+                    "signatureDocumentation": {"text": "let kept: Vec<String>"}
+                }]
+            }]
+        })
+        .to_string();
+        let parsed: Index = serde_json::from_str(&index).unwrap();
+        let document = &parsed.documents[0];
+        let line = occurrence_line(&document.occurrences[0]).unwrap();
+        assert_eq!(line, 12);
+        let signature = document.symbols[0]
+            .signature_documentation
+            .as_ref()
+            .map(|signature| signature.text.trim())
+            .and_then(binding_signature);
+        assert_eq!(signature, Some(("kept", "Vec<String>")));
     }
 }
