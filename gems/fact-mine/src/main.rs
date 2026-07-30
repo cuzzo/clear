@@ -120,6 +120,9 @@ fn run() -> Result<()> {
                     return Ok(());
                 }
             }
+            // The compiler's answer for a binding has to be in hand before facts
+            // are built from it, not imported afterwards with the call graph.
+            fact_mine_rust::scip::preload_local_binding_types(&scip_indexes);
             let mut merged = build_requested_profile(
                 &files,
                 language_override,

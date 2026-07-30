@@ -16,6 +16,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ImportStats {
@@ -207,6 +208,34 @@ struct SelectedOccurrences<'a> {
 #[derive(Clone, Debug)]
 struct Definition {
     method_id: Option<String>,
+}
+
+static INDEXED_LOCALS: OnceLock<Vec<(String, usize, String, String)>> = OnceLock::new();
+
+/// Read the indexes once, before anything asks what a binding is. Complexity
+/// facts are built while parsing, so the compiler's answer has to be in hand by
+/// then rather than imported afterwards with the call graph.
+pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
+    let mut rows = Vec::new();
+    for path in index_paths {
+        if let Ok(indexed) = local_binding_types(path) {
+            rows.extend(indexed);
+        }
+    }
+    let _ = INDEXED_LOCALS.set(rows);
+}
+
+/// The bindings the index typed inside one span of one file.
+pub(crate) fn indexed_local_types(path: &str, first: usize, last: usize) -> Vec<(String, String)> {
+    let Some(rows) = INDEXED_LOCALS.get() else {
+        return Vec::new();
+    };
+    rows.iter()
+        .filter(|(indexed_path, line, _, _)| {
+            *line >= first && *line <= last && path.ends_with(indexed_path.as_str())
+        })
+        .map(|(_, _, name, declared)| (name.clone(), declared.clone()))
+        .collect()
 }
 
 /// Local bindings the indexer has already typed, as (relative path, line,

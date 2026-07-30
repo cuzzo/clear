@@ -642,6 +642,13 @@ fn fact_for_method(
                 }),
         );
     }
+    // A compiler index states the type of every binding it resolved, which is
+    // the only source for one a language leaves to inference.
+    for (name, declared) in crate::scip::indexed_local_types(path, span[0], span[2]) {
+        augmented_parameter_types
+            .entry(name)
+            .or_insert_with(|| TypeExpr::parse(&declared, language));
+    }
     for (receiver_var, target) in behavior.receiver_aliases_for_function(node) {
         if target == "self" {
             augmented_parameter_types
