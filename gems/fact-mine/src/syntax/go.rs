@@ -843,23 +843,6 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         configured_intrinsic_call_complexity("go", receiver, message)
     }
 
-    fn scalar_operator_complexity(
-        &self,
-        message: &str,
-        operand_type: Option<&TypeExpr>,
-    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
-        let operator = message.strip_suffix('@').unwrap_or(message);
-        if !GO_BUILTIN_OPERATORS.contains(&operator) {
-            return None;
-        }
-        // Go strings are immutable byte slices: concatenation copies both
-        // operands and comparison scans them. Only the scalar operands the
-        // intrinsic table assumes are constant-time.
-        matches!(operand_type, Some(TypeExpr::Primitive(name)) if name == "string").then_some(
-            super::normalized_behavior::NormalizedCollectionOperation::LinearScan.complexity(),
-        )
-    }
-
     fn supports_implicit_owner_dispatch(&self) -> bool {
         false
     }

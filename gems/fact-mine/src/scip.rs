@@ -1300,8 +1300,11 @@ fn apply_scalar_operator_types(output: &mut ProfileOutput, index: &Index) -> usi
             let operand_type = TypeExpr::parse(&declared, language);
             // A compiler-proven operand type outranks any untyped default the
             // adapter applied earlier.
-            let Some(complexity) =
-                behavior.scalar_operator_complexity(&context.message, Some(&operand_type))
+            let Some(complexity) = behavior
+                .scalar_operator_complexity(&context.message, Some(&operand_type))
+                .or_else(|| {
+                    behavior.string_operand_complexity(&context.message, Some(&operand_type))
+                })
             else {
                 continue;
             };

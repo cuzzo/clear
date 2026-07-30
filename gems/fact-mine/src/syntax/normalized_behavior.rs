@@ -1256,6 +1256,25 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Strings are sequences: concatenating copies both operands and ordering
+    /// compares them element by element. Type inference normalizes every
+    /// language's string type to the same primitive, so this holds wherever an
+    /// operand type is proven.
+    fn string_operand_complexity(
+        &self,
+        message: &str,
+        operand_type: Option<&TypeExpr>,
+    ) -> Option<NormalizedCallComplexity> {
+        const STRING_OPERATORS: &[&str] =
+            &["+", "+=", "==", "!=", "<", "<=", ">", ">=", "<=>"];
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if !STRING_OPERATORS.contains(&operator) {
+            return None;
+        }
+        matches!(operand_type, Some(TypeExpr::Primitive(name)) if name.eq_ignore_ascii_case("string"))
+            .then_some(NormalizedCollectionOperation::LinearScan.complexity())
+    }
+
     /// Interpret a compiler symbol only at the owning language boundary. The
     /// shared SCIP importer asks through this normalized interface and never
     /// contains a language-specific symbol grammar.

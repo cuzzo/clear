@@ -1809,7 +1809,11 @@ fn visit_loops(
                 // A proven operand type outranks the type-blind intrinsic table.
                 .or_else(|| {
                     let operand_type = operator_operand_type(node, parameter_types);
-                    behavior.scalar_operator_complexity(message, operand_type.as_ref())
+                    behavior
+                        .scalar_operator_complexity(message, operand_type.as_ref())
+                        .or_else(|| {
+                            behavior.string_operand_complexity(message, operand_type.as_ref())
+                        })
                 })
                 .or_else(|| {
                     behavior.intrinsic_call_complexity(
