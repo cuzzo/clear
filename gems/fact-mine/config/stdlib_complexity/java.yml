@@ -591,3 +591,26 @@ ExternalLatency:
 Namespace:
   java: declaration
   javax: declaration
+
+# Result types, held beside the cost above: an operand that is a call has no
+# type without them, so the operator applied to it cannot be priced.
+Returns.Array:
+  contains: boolean
+  isEmpty: boolean
+  size: int
+Returns.Hash:
+  containsKey: boolean
+  containsValue: boolean
+  isEmpty: boolean
+  size: int
+Returns.Set:
+  contains: boolean
+  isEmpty: boolean
+  size: int
+Returns.String:
+  contains: boolean
+  startsWith: boolean
+  endsWith: boolean
+  isEmpty: boolean
+  equals: boolean
+  length: int

@@ -209,3 +209,18 @@ Namespace:
   String: declaration
 DynamicGlobalBinding:
   enabled: declaration
+
+# Result types, held beside the cost above: an operand that is a call has no
+# type without them, so the operator applied to it cannot be priced.
+Returns.Array:
+  includes: boolean
+  some: boolean
+  every: boolean
+Returns.Hash:
+  has: boolean
+Returns.Set:
+  has: boolean
+Returns.String:
+  includes: boolean
+  startsWith: boolean
+  endsWith: boolean

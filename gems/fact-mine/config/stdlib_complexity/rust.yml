@@ -548,3 +548,68 @@ ExternalLatency:
   dir.tempdir: constant
   NamedTempFile.new: constant
   NamedTempFile.write_all: linear_materialize
+
+# Result types, held beside the cost above: an operand that is a call has no
+# type without them, so the operator applied to it cannot be priced.
+Returns.Array:
+  len: usize
+  is_empty: bool
+  contains: bool
+  starts_with: bool
+  ends_with: bool
+Returns.Hash:
+  len: usize
+  is_empty: bool
+  contains_key: bool
+Returns.Set:
+  len: usize
+  is_empty: bool
+  contains: bool
+  is_disjoint: bool
+  is_subset: bool
+  is_superset: bool
+Returns.String:
+  len: usize
+  is_empty: bool
+  contains: bool
+  starts_with: bool
+  ends_with: bool
+  is_char_boundary: bool
+  eq_ignore_ascii_case: bool
+Returns.BTreeMap:
+  len: usize
+  is_empty: bool
+  contains_key: bool
+Returns.BTreeSet:
+  len: usize
+  is_empty: bool
+  contains: bool
+  is_disjoint: bool
+  is_subset: bool
+  is_superset: bool
+Returns.Option:
+  is_some: bool
+  is_none: bool
+Returns.Result:
+  is_ok: bool
+  is_err: bool
+Returns.Path:
+  is_absolute: bool
+  is_relative: bool
+  is_dir: bool
+  is_file: bool
+  exists: bool
+  starts_with: bool
+  ends_with: bool
+Returns.char:
+  is_alphabetic: bool
+  is_alphanumeric: bool
+  is_ascii: bool
+  is_ascii_digit: bool
+  is_ascii_alphanumeric: bool
+  is_ascii_uppercase: bool
+  is_ascii_lowercase: bool
+  is_numeric: bool
+  is_uppercase: bool
+  is_lowercase: bool
+  is_whitespace: bool

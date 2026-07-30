@@ -919,26 +919,48 @@ pub(crate) fn configured_modeled_runtime_bound(
 /// configuration. Adapters provide the language identity and normalize native
 /// declaration grammar; Espalier never loads or interprets a language-specific
 /// complexity table.
+/// Registry sections a receiver type may be described by, most specific first.
+fn stdlib_sections(receiver_type: &TypeExpr) -> Option<Vec<String>> {
+    match receiver_type.strip_nilable() {
+        TypeExpr::Array(_) => Some(vec!["Array".to_string()]),
+        TypeExpr::Hash { .. } => Some(vec!["Hash".to_string()]),
+        TypeExpr::Set(_) => Some(vec!["Set".to_string()]),
+        TypeExpr::Primitive(name) => {
+            let unqualified = name.rsplit("::").next().unwrap_or(&name);
+            Some(if unqualified == name {
+                vec![name.clone()]
+            } else {
+                vec![name.clone(), unqualified.to_string()]
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The declared result type of a standard-library operation, held beside that
+/// operation's cost in the same registry: they are two facts about one call.
+/// Without it an operand that is a call has no type, so the operator applied to
+/// it cannot be priced even when the operation itself is fully modelled.
+pub(crate) fn configured_return_type(
+    language: &str,
+    receiver_type: &TypeExpr,
+    message: &str,
+) -> Option<String> {
+    let operations = stdlib_operations(language)?;
+    stdlib_sections(receiver_type)?.into_iter().find_map(|name| {
+        operations
+            .get(&format!("Returns.{name}"))
+            .and_then(|methods| methods.get(message))
+            .cloned()
+    })
+}
+
 pub(crate) fn configured_collection_operation(
     language: &str,
     receiver_type: &TypeExpr,
     message: &str,
 ) -> Option<NormalizedCollectionOperation> {
-    let receiver = receiver_type.strip_nilable();
-    let names = match &receiver {
-        TypeExpr::Array(_) => vec!["Array".to_string()],
-        TypeExpr::Hash { .. } => vec!["Hash".to_string()],
-        TypeExpr::Set(_) => vec!["Set".to_string()],
-        TypeExpr::Primitive(name) => {
-            let unqualified = name.rsplit("::").next().unwrap_or(name);
-            if unqualified == name {
-                vec![name.clone()]
-            } else {
-                vec![name.clone(), unqualified.to_string()]
-            }
-        }
-        _ => return None,
-    };
+    let names = stdlib_sections(receiver_type)?;
     let operations = stdlib_operations(language)?;
     names.into_iter().find_map(|name| {
         operations
@@ -1548,6 +1570,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     ) -> Option<NormalizedCollectionOperation> {
         self.stdlib_language()
             .and_then(|language| configured_collection_operation(language, receiver_type, message))
+    }
+
+    /// The result type of a standard-library call, so an operator applied to
+    /// that result has a proven operand type.
+    fn stdlib_return_type(&self, receiver_type: &TypeExpr, message: &str) -> Option<TypeExpr> {
+        let language = self.stdlib_language()?;
+        configured_return_type(language, receiver_type, message)
+            .map(|name| TypeExpr::parse(&name, language))
     }
 
     fn call_complexity(

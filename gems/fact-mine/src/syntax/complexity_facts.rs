@@ -2749,7 +2749,22 @@ fn operator_operand_type(
 ) -> Option<TypeExpr> {
     let operands = child_nodes(node);
     let resolve = |operand: &Node| {
+        // The whole expression first: `row.line` is the field's type and
+        // `name.is_empty()` is what the call returns. Reading the operand's
+        // base local instead types both as whatever holds them, which no rule
+        // can price.
         resolve_expr_type(operand.text.trim(), local_types, state_types, field_types)
+            .or_else(|| {
+                let message = direct_call_message(operand)?;
+                let receiver = call_receiver(operand)?;
+                let receiver_type = resolve_expr_type(
+                    receiver.text.trim(),
+                    local_types,
+                    state_types,
+                    field_types,
+                )?;
+                behavior.stdlib_return_type(&receiver_type, message)
+            })
             .or_else(|| {
                 local_names(operand).into_iter().find_map(|name| {
                     local_types

@@ -292,3 +292,23 @@ Namespace:
   Symbol: declaration
   T: declaration
   Time: declaration
+
+# Result types, held beside the cost above: an operand that is a call has no
+# type without them, so the operator applied to it cannot be priced.
+Returns.Array:
+  include?: TrueClass
+  empty?: TrueClass
+  any?: TrueClass
+  all?: TrueClass
+Returns.Hash:
+  key?: TrueClass
+  has_key?: TrueClass
+  empty?: TrueClass
+Returns.Set:
+  include?: TrueClass
+  empty?: TrueClass
+Returns.String:
+  include?: TrueClass
+  start_with?: TrueClass
+  end_with?: TrueClass
+  empty?: TrueClass
