@@ -2670,7 +2670,7 @@ mod tests {
                 "typescript",
                 "scip-typescript npm typescript 5.9.3 lib/`lib.es2015.collection.d.ts`/Map#get().",
                 "get",
-                "O(N)",
+                "O(1)",
                 "stdlib",
             ),
             (

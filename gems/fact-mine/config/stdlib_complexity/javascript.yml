@@ -72,9 +72,9 @@ Process:
   on: constant
   removeListener: linear_scan
 Map:
-  get: linear_scan
-  has: linear_scan
-  set: linear_scan
+  get: constant
+  has: constant
+  set: constant
   delete: linear_scan
   clear: linear_scan
   size: constant
@@ -102,9 +102,9 @@ PlatformPath:
 Module:
   createRequire: constant
 Hash:
-  get: linear_scan
-  has: linear_scan
-  set: linear_scan
+  get: constant
+  has: constant
+  set: constant
   delete: linear_scan
   size: constant
   entries: linear_materialize
@@ -112,7 +112,7 @@ Hash:
   values: linear_materialize
 Set:
   add: linear_scan
-  has: linear_scan
+  has: constant
   delete: linear_scan
   size: constant
   entries: linear_materialize

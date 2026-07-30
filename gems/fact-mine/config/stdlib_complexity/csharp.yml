@@ -11,8 +11,8 @@ Array:
   Take: constant
 Hash:
   get_Item: constant
-  TryGetValue: linear_scan
-  ContainsKey: linear_scan
+  TryGetValue: constant
+  ContainsKey: constant
   Add: linear_materialize
   Count: constant
   Keys: linear_materialize
@@ -50,8 +50,8 @@ List:
   Count: constant
 Dictionary:
   get_Item: linear_scan
-  TryGetValue: linear_scan
-  ContainsKey: linear_scan
+  TryGetValue: constant
+  ContainsKey: constant
   Add: linear_argument
   Count: constant
 Type:

@@ -834,7 +834,7 @@ mod tests {
         );
         assert_eq!(
             b.collection_operation(&hash, "get"),
-            Some(NormalizedCollectionOperation::LinearScan)
+            Some(NormalizedCollectionOperation::Constant)
         );
         assert_eq!(
             b.collection_operation(&hash, "entries"),
@@ -842,7 +842,7 @@ mod tests {
         );
         assert_eq!(
             b.collection_operation(&set, "has"),
-            Some(NormalizedCollectionOperation::LinearScan)
+            Some(NormalizedCollectionOperation::Constant)
         );
         assert_eq!(
             b.collection_operation(&string, "search"),

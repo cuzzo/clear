@@ -25,9 +25,9 @@ Array:
 Hash:
   add: linear_scan
   delete: linear_scan
-  get: linear_scan
-  has: linear_scan
-  set: linear_scan
+  get: constant
+  has: constant
+  set: constant
   size: constant
   entries: linear_materialize
   keys: linear_materialize
@@ -35,17 +35,17 @@ Hash:
 Set:
   add: linear_scan
   delete: linear_scan
-  get: linear_scan
-  has: linear_scan
-  set: linear_scan
+  get: constant
+  has: constant
+  set: constant
   size: constant
   entries: linear_materialize
   keys: linear_materialize
   values: linear_materialize
 Map:
-  get: linear_scan
-  has: linear_scan
-  set: linear_scan
+  get: constant
+  has: constant
+  set: constant
   delete: linear_scan
   clear: linear_scan
   size: constant
