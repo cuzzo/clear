@@ -2220,6 +2220,16 @@ module NilKillRuntimeTrace
     # child only dumps its own jsonl; the process that started the shard exits
     # after its children and aggregates the directory into one trace.
     if ENV["NIL_KILL_RUNTIME_SCIP"] == "1" && Process.pid == SHARD_ROOT_PID
+      # Loaded here, not at the top: this file is required into every traced
+      # process via RUBYOPT, but only the one process that writes the trace
+      # needs the encoder, and paying for it everywhere costs more than the
+      # stage this replaces.
+      require_relative "runtime/json_io"
+      require_relative "runtime/environment_claims"
+      require_relative "runtime/value_encoding"
+      require_relative "runtime/trace_artifact"
+      require_relative "languages/provider"
+      require_relative "languages/providers/ruby/runtime_value_evidence"
       NilKillRuntimeTrace.write_native_trace(pid)
     end
   end
@@ -2318,12 +2328,6 @@ module NilKillRuntimeTrace
   end
 end
 
-require_relative "runtime/json_io"
-require_relative "runtime/environment_claims"
-require_relative "runtime/value_encoding"
-require_relative "runtime/trace_artifact"
-require_relative "languages/provider"
-require_relative "languages/providers/ruby/runtime_value_evidence"
 require_relative "languages/providers/ruby/runtime_scip_trace"
 require_relative "languages/providers/ruby/runtime_scip_native"
 
