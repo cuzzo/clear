@@ -324,6 +324,16 @@ module NilKill
         callsite_updates[shard_id] = callsites_for_shard(shard_dir)
         assert_incremental_shard_sound!(shard_dir, inventory, dependency_updates[shard_id])
         compress_runtime_evidence!(shard_dir)
+        # The trace is what the run observed; the evidence is one consumer's join
+        # over it. Writing it per shard keeps it beside the artifacts it was
+        # derived from and lets a consumer do that join itself.
+        Runtime::TraceArtifact.write(
+          root: ROOT,
+          runtime_dir: shard_dir,
+          plan: Runtime::EvidenceProtocol.plan,
+          languages: target_files.filter_map { |path| Languages.provider_for_path(path)&.language }.uniq,
+          run_ids: [shard_run_ids.fetch(shard_id)]
+        )
         staged_evidence[shard_id] = Runtime::ScipEmitter.emit_value_evidence(
           root: ROOT,
           runtime_dir: shard_dir,
