@@ -1161,6 +1161,32 @@ module Espalier
         end
       end
 
+      # A call FactMine could not price and no delegation covers would otherwise
+      # never reach the analyzer, leaving the surrounding loops standing as a
+      # complete bound for a function with an unpriced call in it. The analyzer
+      # still gets to resolve it (a declared field, a state accessor) before
+      # recording it as unknown.
+      covered = nodes.filter_map { |node| node[:span] && [node[:method].to_s, node[:span]] }.to_set
+      contexts.each do |context|
+        gap = context["evidence_gap"]
+        next unless gap
+
+        span = normalized_call_span(context["span"])
+        next if span && covered.include?([context["message"].to_s, span])
+
+        nodes << {
+          type: :call,
+          span: span,
+          receiver: nil,
+          method: context["message"].to_s,
+          line: context["line"].to_i,
+          execution_complexity: context["execution_multiplicity"],
+          cardinality_relation: context["argument_cardinality_relation"],
+          evidence_gap: gap,
+          internal_call: false
+        }
+      end
+
       @big_o_nodes_cache[cache_key] = nodes
       nodes.dup
     end

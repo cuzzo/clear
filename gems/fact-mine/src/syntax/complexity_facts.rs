@@ -1808,7 +1808,8 @@ fn visit_loops(
                 .and_then(|receiver_type| behavior.call_complexity(receiver_type, message))
                 // A proven operand type outranks the type-blind intrinsic table.
                 .or_else(|| {
-                    let operand_type = operator_operand_type(node, parameter_types);
+                    let operand_type =
+                        operator_operand_type(node, parameter_types, state_types, field_types);
                     behavior
                         .scalar_operator_complexity(message, operand_type.as_ref())
                         .or_else(|| {
@@ -1834,7 +1835,8 @@ fn visit_loops(
                     behavior.complexity_member_read_complexity(node)
                 })
                 .or_else(|| {
-                    let operand_type = operator_operand_type(node, parameter_types);
+                    let operand_type =
+                        operator_operand_type(node, parameter_types, state_types, field_types);
                     behavior.scalar_operator_complexity(message, operand_type.as_ref())
                 });
             // No operand grows with the input, so a size-dependent bound
@@ -2005,6 +2007,14 @@ fn resolve_expr_type(
     }
     if let Some(state_type) = state_types.get(expr.trim_start_matches('@')) {
         return Some(state_type.clone());
+    }
+    // `xs[i]` has the element type of `xs`.
+    if let Some(indexed) = expr.strip_suffix(']').and_then(|rest| rest.split_once('[')) {
+        if let Some(TypeExpr::Array(element)) =
+            resolve_expr_type(indexed.0.trim(), parameter_types, state_types, field_types)
+        {
+            return Some(*element);
+        }
     }
     field_access_type(expr, parameter_types, state_types, field_types)
 }
@@ -2455,11 +2465,18 @@ fn call_receiver(node: &Node) -> Option<&Node> {
 fn operator_operand_type(
     node: &Node,
     local_types: &BTreeMap<String, TypeExpr>,
+    state_types: &BTreeMap<String, TypeExpr>,
+    field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
 ) -> Option<TypeExpr> {
     let operand = node.children.iter().find_map(ast::node)?;
+    // A named local first; otherwise the operand expression itself, which
+    // resolves projections such as `xs[i].field`.
     local_names(operand)
         .into_iter()
         .find_map(|name| local_types.get(&name).cloned())
+        .or_else(|| {
+            resolve_expr_type(operand.text.trim(), local_types, state_types, field_types)
+        })
 }
 
 /// Rust bindings have invariant types. A complete singleton DFG type for a
