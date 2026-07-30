@@ -2712,16 +2712,14 @@ fn operator_operand_type(
 ) -> Option<TypeExpr> {
     let operands = child_nodes(node);
     let resolve = |operand: &Node| {
-        local_names(operand)
-            .into_iter()
-            .find_map(|name| {
-                local_types
-                    .get(&name)
-                    .cloned()
-                    .or_else(|| assigned_local_type(&name, local_types, assignments, 0))
-            })
+        resolve_expr_type(operand.text.trim(), local_types, state_types, field_types)
             .or_else(|| {
-                resolve_expr_type(operand.text.trim(), local_types, state_types, field_types)
+                local_names(operand).into_iter().find_map(|name| {
+                    local_types
+                        .get(&name)
+                        .cloned()
+                        .or_else(|| assigned_local_type(&name, local_types, assignments, 0))
+                })
             })
             .or_else(|| behavior.literal_receiver_type(operand))
     };

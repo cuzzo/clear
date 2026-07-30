@@ -688,6 +688,18 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
                 _ => None,
             })
             .collect();
+        // A field states its visibility and attributes before it states its
+        // name. Reading the first child regardless takes `pub` for the name and
+        // the name for the type, so every exported field is recorded wrong.
+        let child_nodes = child_nodes
+            .into_iter()
+            .filter(|child| {
+                !matches!(
+                    child.r#type.as_str(),
+                    "VISIBILITY_MODIFIER" | "ATTRIBUTE_ITEM" | "MUTABLE_SPECIFIER"
+                )
+            })
+            .collect::<Vec<_>>();
         if child_nodes.len() >= 2 {
             let name = child_nodes[0].text.trim();
             if is_simple_name(name) {
