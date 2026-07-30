@@ -152,9 +152,60 @@ module NilKillRuntimeTrace
     end
   end
 
+  # The evidence emitter reads parameter and return domains from methods-*.jsonl,
+  # which the Ruby type tier used to produce. The collector already observes both
+  # -- parameters at analyzed method entry, returns under the "return" selector --
+  # so this regroups those records per function in the shape the emitter expects.
+  def self.native_scip_method_rows
+    records = NilKillTraceNative.records
+    by_site = records.group_by do |row|
+      [row.dig(:callsite, :path), row.dig(:callsite, :line)]
+    end
+    NilKillTraceNative.function_entries.map do |path, owner, name, line, count|
+      rows = by_site.fetch([path, line], [])
+      params = rows.reject { |row| row.dig(:callsite, :selector) == "return" }
+      returned = rows.find { |row| row.dig(:callsite, :selector) == "return" }
+      row = {
+        class: owner, method: name, kind: "instance", path: path, line: line,
+        calls: count, ok_calls: count, raised_calls: 0,
+        params_by_name: {}, param_singleton_types: {}, param_value_shapes: {},
+        param_elem: {}, param_elem_shapes: {}, param_kv: {}, param_kv_shapes: {},
+        params_ok: {}, params_raised: {}, param_sites: {},
+        returns: [], return_singleton_types: [], return_value_shapes: [],
+        return_elem: [], return_elem_shapes: [], return_kv: [[], []],
+        return_kv_shapes: [[], []],
+      }
+      params.each do |param|
+        slot = param.dig(:callsite, :selector)
+        domain = native_scip_domain(
+          param.fetch(:receiver_types), param.fetch(:receiver_domain_indices)
+        )
+        row[:params_by_name][slot] = domain.fetch(:types)
+        row[:param_singleton_types][slot] = domain.fetch(:singletons)
+        row[:param_value_shapes][slot] = domain.fetch(:shapes)
+        row[:param_elem][slot] = domain.fetch(:elements)
+        row[:param_elem_shapes][slot] = []
+        row[:param_kv][slot] = [domain.fetch(:keys), domain.fetch(:values)]
+        row[:param_kv_shapes][slot] = [[], []]
+      end
+      if returned
+        domain = native_scip_domain(
+          returned.fetch(:result_types), returned.fetch(:result_domain_indices)
+        )
+        row[:returns] = domain.fetch(:types)
+        row[:return_singleton_types] = domain.fetch(:singletons)
+        row[:return_value_shapes] = domain.fetch(:shapes)
+        row[:return_elem] = domain.fetch(:elements)
+        row[:return_kv] = [domain.fetch(:keys), domain.fetch(:values)]
+      end
+      row
+    end
+  end
+
   def self.dump_native_runtime_scip(pid)
     NilKillTraceNative.stop
     write_jsonl("runtime-calls-#{pid}.jsonl", native_scip_call_rows)
+    write_jsonl("methods-#{pid}.jsonl", native_scip_method_rows)
     write_jsonl(
       "executed-callsites-#{pid}.jsonl",
       NilKillTraceNative.executed_callsites.sort_by { |row| row.map(&:to_s) }.map do |path, line, selector, count|

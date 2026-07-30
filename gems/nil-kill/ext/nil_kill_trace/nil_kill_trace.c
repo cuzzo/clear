@@ -495,7 +495,7 @@ static void on_event(VALUE tpval, void *_unused) {
             // A FUNCTION_RETURN anchor is demanded under the selector "return"
             // across the whole method body, so the returning line matches it.
             if (frame->analyzed && frame->path) {
-                int line = NUM2INT(rb_tracearg_lineno(arg));
+                int line = frame->caller_line;
                 if (demanded(frame->path, line, id_return)) {
                     frame_t at = *frame;
                     at.line = line;
