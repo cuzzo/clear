@@ -317,6 +317,11 @@ module NilKill
         abort "nil-kill: required trace shard(s) failed; canonical evidence was not replaced: " \
           "#{failed_shards.join(", ")}"
       end
+      # Parsing and digest-checking the plan costs about as much as tracing a
+      # shard, so it happens once rather than once per shard.
+      evidence_plan = Runtime::EvidenceProtocol.plan
+      trace_languages =
+        target_files.filter_map { |path| Languages.provider_for_path(path)&.language }.uniq
       selected.each do |shard|
         shard_id = shard.fetch("id")
         shard_dir = File.join(working_runtime_dir, shard_id)
@@ -329,8 +334,8 @@ module NilKill
         trace_path = Runtime::TraceArtifact.write(
           root: ROOT,
           runtime_dir: shard_dir,
-          plan: Runtime::EvidenceProtocol.plan,
-          languages: target_files.filter_map { |path| Languages.provider_for_path(path)&.language }.uniq,
+          plan: evidence_plan,
+          languages: trace_languages,
           run_ids: [shard_run_ids.fetch(shard_id)]
         )
         staged_evidence[shard_id] = Runtime::TraceArtifact.join(
