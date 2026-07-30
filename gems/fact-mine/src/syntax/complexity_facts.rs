@@ -1766,13 +1766,28 @@ fn visit_loops(
                     domains.into_iter().collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            // A receiver that names a value the function holds is an operand;
+            // a package or type qualifier is not, and must not disqualify the
+            // partition its arguments establish.
+            let operand_names = call_receiver(node)
+                .or_else(|| (node.r#type == "OPCALL").then(|| child_nodes(node).into_iter().next()).flatten())
+                .map(local_names)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|name| {
+                    params.contains(name)
+                        || assignments.contains_key(name)
+                        || parent.partition_locals.contains(name)
+                })
+                .chain(argument_names.iter().cloned())
+                .collect::<BTreeSet<_>>();
             let argument_cardinality_relation = if parent.power == 0 {
                 "same"
-            } else if !argument_names.is_empty()
-                && argument_names.is_subset(&parent.partition_locals)
+            } else if !operand_names.is_empty()
+                && operand_names.is_subset(&parent.partition_locals)
             {
-                // A binding merely mentioned in the argument (`parts[:i+1]`) is
-                // an index into the whole, not a disjoint piece of it.
+                // A binding merely mentioned in an operand (`parts[:i+1]`) is an
+                // index into the whole, not a disjoint piece of it.
                 "partition_of"
             } else if !argument_domains.is_empty() {
                 "independent_of"
@@ -1791,6 +1806,11 @@ fn visit_loops(
             let known_call_complexity = receiver_type
                 .as_ref()
                 .and_then(|receiver_type| behavior.call_complexity(receiver_type, message))
+                // A proven operand type outranks the type-blind intrinsic table.
+                .or_else(|| {
+                    let operand_type = operator_operand_type(node, parameter_types);
+                    behavior.scalar_operator_complexity(message, operand_type.as_ref())
+                })
                 .or_else(|| {
                     behavior.intrinsic_call_complexity(
                         call_receiver(node).map(|receiver| receiver.text.trim()),

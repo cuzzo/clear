@@ -488,9 +488,17 @@ pub fn validate_config(config: LineageConfig) -> Result<LineageConfig> {
         }
         if producer.executor == ProducerExecutor::Gigasail
             && producer.argv.as_slice() != ["fact-mine-native"]
+            && producer.argv.first().map(String::as_str) != Some("scip-index")
         {
             bail!(
-                "gigasail producer {name:?} must use the allowlisted embedded provider argv: [fact-mine-native]; use executor: command for an explicitly trusted external command"
+                "gigasail producer {name:?} must use an allowlisted embedded provider argv: [fact-mine-native] or [scip-index] (optionally [scip-index, LANGUAGE]); use executor: command for an explicitly trusted external command"
+            );
+        }
+        if producer.argv.first().map(String::as_str) == Some("scip-index")
+            && producer.argv.len() > 2
+        {
+            bail!(
+                "gigasail producer {name:?} takes at most one language after scip-index"
             );
         }
         if producer.timeout_seconds == 0 || producer.max_output_bytes == 0 {
@@ -1969,6 +1977,28 @@ fn execute_gigasail_provider(
     fs::create_dir_all(&logs)?;
     let stdout_log = PathBuf::from("logs").join(format!("{name}.stdout"));
     let stderr_log = PathBuf::from("logs").join(format!("{name}.stderr"));
+    if producer.argv.first().map(String::as_str) == Some("scip-index") {
+        let output = producer
+            .produces
+            .iter()
+            .find(|artifact| artifact.kind == ArtifactKind::Auxiliary)
+            .with_context(|| {
+                format!("the built-in scip-index provider requires a declared auxiliary output")
+            })?;
+        let language = match producer.argv.get(1) {
+            Some(language) => language.clone(),
+            None => crate::scip_index::detect_language(repo)?.to_string(),
+        };
+        if let Some(parent) = repo.join(&output.path).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let resolved = EvidenceProducer {
+            executor: ProducerExecutor::Command,
+            argv: crate::scip_index::indexer_argv(&language, &output.path)?,
+            ..producer.clone()
+        };
+        return execute_producer(repo, name, &resolved, run_directory);
+    }
     if producer.argv.as_slice() == ["fact-mine-native"] {
         let repository = repo.to_path_buf();
         let (outcome, failure, exit_status, stats) =

@@ -37,6 +37,20 @@ module Espalier
       normalize(terms: [{ factors: {}, logs: {} }], domains: {}, complete: true)
     end
 
+    # An opaque per-invocation cost (a callback body, a reflective target) is not
+    # a function of any operand's size, so it cannot be summed over a partition
+    # the way an element-sized cost can.
+    def opaque_cost?(expression)
+      return false unless expression
+
+      Array(expression[:terms]).any? do |term|
+        term[:factors].keys.any? do |id|
+          domain = expression[:domains]&.fetch(id, nil) || {}
+          (domain["source_kind"] || domain[:source_kind]).to_s.end_with?("_cost")
+        end
+      end
+    end
+
     # A compiler-proven callback/reflection boundary has a precise parametric
     # cost even when the caller-supplied body is not available. Keep that cost
     # as an algebraic atom so loops and interprocedural propagation can compose

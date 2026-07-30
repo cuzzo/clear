@@ -32,6 +32,7 @@ pub mod quality;
 pub mod review;
 #[path = "db/sarif.rs"]
 pub mod sarif;
+pub mod scip_index;
 #[path = "db/stack_trace.rs"]
 pub mod stack_trace;
 #[path = "db/storage.rs"]

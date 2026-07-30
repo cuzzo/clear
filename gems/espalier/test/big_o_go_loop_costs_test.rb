@@ -19,6 +19,22 @@ class BigOGoLoopCostsTest < Minitest::Test
     "VariableArgumentWrite" => "O(N)"
   }.freeze
 
+  SWEEP = {
+    "NestedSameInput" => "O(N^2)",
+    "NestedIndependentInputs" => "O(N*M)",
+    "TripleNested" => "O(N^3)",
+    "ConcatEveryIteration" => "O(N^2)",
+    "SortInsideLoop" => "O(N log N)",
+    "SortOnce" => "O(N log N)",
+    "InnerOverElement" => "O(N)",
+    "NestedWithBreak" => "O(N^2)",
+    "MapLookupPerElement" => "O(N)",
+    "RegexpPerElement" => "O(N)",
+    "CallbackPerElement" => "O(N*C)",
+    "JoinGrowingPrefix" => "O(N^2)",
+    "ScanAccumulated" => "O(N^2)"
+  }.freeze
+
   def test_loop_and_call_pricing
     evidence = Espalier::StaticEvidence.build(
       [File.join(ROOT, "go_loop_costs.go")],
@@ -30,6 +46,24 @@ class BigOGoLoopCostsTest < Minitest::Test
                      .to_h { |function| [function.fetch(:name), function.fetch(:quality_metrics).fetch(:big_o)] }
 
     EXPECTED.each do |name, bound|
+      assert_equal bound, actual[name], name
+    end
+  end
+
+  # Shapes whose true bound is known by construction. A bound below the true one
+  # is unsound; these exist to catch a precision fix that overshoots into
+  # under-reporting.
+  def test_known_bounds_are_not_under_reported
+    evidence = Espalier::StaticEvidence.build(
+      [File.join(ROOT, "go_bound_sweep.go")],
+      root: ROOT,
+      scip_indexes: [File.join(ROOT, "index.scip")]
+    )
+    manifest = Espalier::Aggregator.new.aggregate(Espalier::StaticEvidence.project_modules(evidence))
+    actual = manifest.flat_map { |owner| owner.fetch(:functions) }
+                     .to_h { |function| [function.fetch(:name), function.fetch(:quality_metrics).fetch(:big_o)] }
+
+    SWEEP.each do |name, bound|
       assert_equal bound, actual[name], name
     end
   end

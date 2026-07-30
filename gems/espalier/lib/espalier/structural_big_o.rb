@@ -379,7 +379,7 @@ module Espalier
       relation = context["argument_cardinality_relation"]
       if receiver_state_dependent || relation == "independent_of"
         Espalier::SymbolicComplexity.multiply(execution, substituted)
-      elsif relation == "partition_of"
+      elsif relation == "partition_of" && !Espalier::SymbolicComplexity.opaque_cost?(substituted)
         Espalier::SymbolicComplexity.sum(execution, substituted)
       else
         nil

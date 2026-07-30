@@ -1267,9 +1267,6 @@ fn apply_scalar_operator_types(output: &mut ProfileOutput, index: &Index) -> usi
             continue;
         };
         for context in &mut fact.call_contexts {
-            if context.known_time_complexity.is_some() || context.known_space_complexity.is_some() {
-                continue;
-            }
             let span = [
                 context.span[0].saturating_sub(1),
                 context.span[1],
@@ -1301,6 +1298,8 @@ fn apply_scalar_operator_types(output: &mut ProfileOutput, index: &Index) -> usi
                 continue;
             };
             let operand_type = TypeExpr::parse(&declared, language);
+            // A compiler-proven operand type outranks any untyped default the
+            // adapter applied earlier.
             let Some(complexity) =
                 behavior.scalar_operator_complexity(&context.message, Some(&operand_type))
             else {

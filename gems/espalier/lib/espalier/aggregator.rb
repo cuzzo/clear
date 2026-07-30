@@ -1140,7 +1140,7 @@ module Espalier
                         else
                           context && context["evidence_gap"]
                         end,
-          symbolic_time: callback_cost || parametric_call_symbolic(delegation, context) ||
+          symbolic_time: per_invocation_cost(callback_cost || parametric_call_symbolic(delegation, context), context) ||
             (context && symbolic_call_complexity(context)),
           collection_arguments: context && context["power"].to_i.positive? &&
             (Array(context["parameter_arguments"]) & Array(context["collection_parameters"])),
@@ -1186,12 +1186,28 @@ module Espalier
         context["size_domains"]
       )
       # Summing an element-sized cost over its collection is that collection's
-      # total size, not its square.
-      if context["argument_cardinality_relation"] == "partition_of"
+      # total size, not its square. An opaque per-invocation cost is not
+      # element-sized, so it still multiplies.
+      if context["argument_cardinality_relation"] == "partition_of" &&
+         !Espalier::SymbolicComplexity.opaque_cost?(local)
         Espalier::SymbolicComplexity.sum(execution, local)
       else
         Espalier::SymbolicComplexity.multiply(execution, local)
       end
+    end
+
+    # An opaque per-invocation cost is incurred once per execution of the call
+    # site, so it carries that site's multiplicity like any other cost.
+    def per_invocation_cost(cost, context)
+      return nil unless cost
+
+      execution = context && Espalier::SymbolicComplexity.from_fact(
+        context["symbolic_execution"],
+        context["size_domains"]
+      )
+      return cost unless execution
+
+      Espalier::SymbolicComplexity.multiply(execution, cost)
     end
 
     def parametric_call_symbolic(delegation, context)
