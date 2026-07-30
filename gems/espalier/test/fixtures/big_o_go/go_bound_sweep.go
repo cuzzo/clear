@@ -150,3 +150,44 @@ func ScanAccumulated(parts []string) int {
 	}
 	return hits
 }
+
+// O(log N): the control variable is divided each iteration.
+func DivideDescent(b int64) int {
+	exp := 0
+	for n := b / 1024; n >= 1024; n /= 1024 {
+		exp++
+	}
+	return exp
+}
+
+// O(N): a decrement reaches the bound one step at a time.
+func DecrementDescent(b int64) int {
+	steps := 0
+	for n := b; n > 1; n-- {
+		steps++
+	}
+	return steps
+}
+
+// O(N log M): a descent over one input nested inside a scan over another.
+func DescentPerElement(rows []int64, limit int64) int {
+	total := 0
+	for range rows {
+		for n := limit; n > 1; n /= 2 {
+			total++
+		}
+	}
+	return total
+}
+
+// O(N log M): the descent runs over the element's value, which is not a
+// partition of the collection being scanned.
+func DescentOverElementValue(rows []int64) int {
+	total := 0
+	for _, row := range rows {
+		for n := row; n > 1; n /= 2 {
+			total++
+		}
+	}
+	return total
+}

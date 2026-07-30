@@ -97,6 +97,8 @@ pub struct SymbolicComplexityFact {
     pub factors: Vec<ComplexityFactorFact>,
     #[serde(default)]
     pub logarithmic: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logarithmic_domain_id: Option<String>,
     #[serde(default = "default_true")]
     pub complete: bool,
 }
@@ -235,6 +237,7 @@ struct Assignment {
 struct CollectionGrowth {
     power: usize,
     symbolic_factors: BTreeMap<String, usize>,
+    symbolic_logs: BTreeMap<String, usize>,
     symbolic_complete: bool,
     parameter_domains: BTreeSet<String>,
     domain_expression: BTreeSet<String>,
@@ -328,6 +331,7 @@ struct LoopContext {
     collapse_direct_child: bool,
     unknown: bool,
     symbolic_factors: BTreeMap<String, usize>,
+    symbolic_logs: BTreeMap<String, usize>,
     symbolic_complete: bool,
     escape_power: usize,
     escape_symbolic_factors: BTreeMap<String, usize>,
@@ -347,6 +351,7 @@ impl Default for LoopContext {
             collapse_direct_child: false,
             unknown: false,
             symbolic_factors: BTreeMap::new(),
+            symbolic_logs: BTreeMap::new(),
             symbolic_complete: true,
             escape_power: 0,
             escape_symbolic_factors: BTreeMap::new(),
@@ -729,6 +734,7 @@ fn fact_for_method(
             evidence_gap: None,
             symbolic_size: Some(symbolic_complexity(
                 &growth.symbolic_factors,
+                &growth.symbolic_logs,
                 growth.symbolic_complete,
             )),
             receiver_is_call: false,
@@ -1219,6 +1225,7 @@ fn loop_escaping_context(node: &Node, parent: &LoopContext) -> Option<LoopContex
     Some(LoopContext {
         power,
         symbolic_factors,
+        symbolic_logs: BTreeMap::new(),
         escape_power: power,
         escape_symbolic_factors: BTreeMap::new(),
         params: parent.params.clone(),
@@ -1498,11 +1505,14 @@ fn visit_loops(
         if fixpoint {
             power = power.max(parent.power + 2);
         }
+        let descent = multiplicative_descent(node, control, assignments);
         let mut symbolic_factors = parent.symbolic_factors.clone();
+        let mut symbolic_logs = parent.symbolic_logs.clone();
         let mut symbolic_complete = parent.symbolic_complete && !unknown_iteration;
         let added_power = power.saturating_sub(parent.power);
         if let Some(growth) = growth.filter(|_| added_power > 0 && !fixed) {
             symbolic_factors = growth.symbolic_factors;
+            symbolic_logs = growth.symbolic_logs;
             symbolic_complete &= growth.symbolic_complete;
         } else if added_power > 0 && !fixed {
             let mut domains = symbolic_refs
@@ -1530,7 +1540,27 @@ fn visit_loops(
                     ],
                 )
             };
-            *symbolic_factors.entry(domain_id).or_insert(0) += added_power;
+            // Dividing the control variable each iteration reaches the bound in
+            // a logarithmic number of steps, so the domain it descends over is
+            // not a linear factor.
+            if descent {
+                *symbolic_logs.entry(domain_id).or_insert(0) += 1;
+            } else {
+                *symbolic_factors.entry(domain_id).or_insert(0) += added_power;
+            }
+        } else if descent && !fixed && !unknown_iteration {
+            // A descent adds no linear dimension, so it is not gated on one: the
+            // control value's magnitude is still a domain the loop runs over.
+            let domain_id = domain_registry.local_loop(
+                &domain_names,
+                [
+                    node.first_lineno,
+                    node.first_column,
+                    node.last_lineno,
+                    node.last_column,
+                ],
+            );
+            *symbolic_logs.entry(domain_id).or_insert(0) += 1;
         }
         *max_power = (*max_power).max(power);
         let relation = if unknown_iteration {
@@ -1541,11 +1571,14 @@ fn visit_loops(
             || independent_nested_domain
         {
             "independent_of"
-        } else if amortized
-            || parent.collapse_direct_child
-            || parent.absorb_next
-            || (refs.is_empty() && states.is_empty())
+        } else if !descent
+            && (amortized
+                || parent.collapse_direct_child
+                || parent.absorb_next
+                || (refs.is_empty() && states.is_empty()))
         {
+            // A descent's trip count follows the control value's magnitude, not
+            // how an enclosing collection divides, so it never partitions one.
             "partition_of"
         } else {
             "independent_of"
@@ -1585,7 +1618,11 @@ fn visit_loops(
                 polynomial(power)
             },
             power,
-            symbolic_time: Some(symbolic_complexity(&symbolic_factors, symbolic_complete)),
+            symbolic_time: Some(symbolic_complexity(
+                &symbolic_factors,
+                &symbolic_logs,
+                symbolic_complete,
+            )),
             fixed,
             amortized,
         });
@@ -1621,6 +1658,7 @@ fn visit_loops(
             collapse_direct_child: linear_worklist(node, assignments, root_line, params, behavior),
             unknown: parent.unknown || unknown_iteration,
             symbolic_factors,
+            symbolic_logs,
             symbolic_complete,
             escape_power: parent.power,
             escape_symbolic_factors: parent.symbolic_factors.clone(),
@@ -1983,6 +2021,7 @@ fn visit_loops(
                 constant_size_arguments,
                 symbolic_execution: Some(symbolic_complexity(
                     &parent.symbolic_factors,
+                    &parent.symbolic_logs,
                     parent.symbolic_complete && !parent.unknown,
                 )),
                 known_time_complexity: known_call_complexity
@@ -2156,6 +2195,7 @@ fn record_collection_growth(
         if context.power >= entry.power {
             entry.power = context.power;
             entry.symbolic_factors = context.symbolic_factors.clone();
+            entry.symbolic_logs = context.symbolic_logs.clone();
             entry.symbolic_complete = context.symbolic_complete;
             entry.parameter_domains = context.params.clone();
             entry.domain_expression = context.domain_names.clone();
@@ -2174,6 +2214,29 @@ fn record_collection_growth(
             );
         }
     }
+}
+
+/// A loop whose control variable is multiplied or divided each iteration
+/// reaches its bound in a logarithmic number of steps.
+fn multiplicative_descent(
+    node: &Node,
+    control: Option<&Node>,
+    assignments: &BTreeMap<String, Vec<Assignment>>,
+) -> bool {
+    let Some(control) = control else {
+        return false;
+    };
+    let names = child_nodes(control)
+        .into_iter()
+        .flat_map(local_names)
+        .collect::<BTreeSet<_>>();
+    names.iter().any(|name| {
+        assignments.get(name).is_some_and(|rows| {
+            rows.iter().any(|row| {
+                row.halving && row.line >= node.first_lineno && row.line <= node.last_lineno
+            })
+        })
+    })
 }
 
 fn comparison_control(node: &Node) -> Option<&Node> {
@@ -2208,6 +2271,17 @@ fn fixpoint_loop(
         && contains_loop(body, behavior)
 }
 
+/// The operator of a compound assignment (`n /= 2`). The normalizer folds the
+/// operator into the assignment, so the statement text is the only place it
+/// survives; every language here spells it the same way.
+fn compound_assignment_operator<'a>(node: &'a Node, name: &str) -> Option<&'a str> {
+    let text = node.text.trim();
+    let rest = text.strip_prefix(name)?.trim_start();
+    let operator = rest.strip_suffix(rest.trim_start_matches(|c: char| c != '=')).unwrap_or("");
+    let operator = operator.trim();
+    matches!(operator, "/" | ">>" | "*" | "<<" | "-" | "+").then_some(operator)
+}
+
 fn collect_assignments(
     node: &Node,
     output: &mut BTreeMap<String, Vec<Assignment>>,
@@ -2236,10 +2310,14 @@ fn collect_assignments(
                     cardinality_dependencies: rhs
                         .map(|value| cardinality_names(value, behavior))
                         .unwrap_or_default(),
-                    shrinking: symbols.iter().any(|symbol| symbol == "-"),
+                    shrinking: symbols.iter().any(|symbol| symbol == "-")
+                        || compound_assignment_operator(node, name)
+                            .is_some_and(|operator| operator == "-"),
                     halving: symbols
                         .iter()
-                        .any(|symbol| matches!(symbol.as_str(), "/" | ">>")),
+                        .any(|symbol| matches!(symbol.as_str(), "/" | ">>"))
+                        || compound_assignment_operator(node, name)
+                            .is_some_and(|operator| matches!(operator, "/" | ">>")),
                     structural_descent: rhs
                         .is_some_and(|value| structural_projection_expression(value, behavior)),
                     empty_collection: rhs
@@ -3282,10 +3360,23 @@ fn polynomial(power: usize) -> String {
     }
 }
 
+/// One logarithmic domain is representable exactly. Several are folded back
+/// into linear factors, which over-reports rather than under-reports.
 fn symbolic_complexity(
     factors: &BTreeMap<String, usize>,
+    logs: &BTreeMap<String, usize>,
     complete: bool,
 ) -> SymbolicComplexityFact {
+    let named_log = (logs.len() == 1)
+        .then(|| logs.iter().next().unwrap())
+        .filter(|(_, exponent)| **exponent == 1)
+        .map(|(domain_id, _)| domain_id.clone());
+    let mut factors = factors.clone();
+    if named_log.is_none() {
+        for (domain_id, exponent) in logs {
+            *factors.entry(domain_id.clone()).or_insert(0) += exponent;
+        }
+    }
     SymbolicComplexityFact {
         factors: factors
             .iter()
@@ -3295,7 +3386,8 @@ fn symbolic_complexity(
                 exponent: *exponent,
             })
             .collect(),
-        logarithmic: false,
+        logarithmic: named_log.is_some(),
+        logarithmic_domain_id: named_log,
         complete,
     }
 }

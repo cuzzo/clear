@@ -34,7 +34,11 @@ class BigOGoLoopCostsTest < Minitest::Test
     "RegexpPerElement" => "O(N)",
     "CallbackPerElement" => "O(N*C)",
     "JoinGrowingPrefix" => "O(N^2)",
-    "ScanAccumulated" => "O(N^2)"
+    "ScanAccumulated" => "O(N^2)",
+    "DivideDescent" => "O(log N)",
+    "DecrementDescent" => "O(N)",
+    "DescentPerElement" => "O(N log M)",
+    "DescentOverElementValue" => "O(N log M)"
   }.freeze
 
   def test_loop_and_call_pricing
