@@ -1033,30 +1033,43 @@ fn merged_reason(captures: &[&serde_json::Value], status: &str) -> String {
     reasons.into_iter().collect::<Vec<_>>().join("; ")
 }
 
-/// Buckets differing only in count are one observation seen repeatedly.
-fn merge_buckets(rows: &[&serde_json::Value]) -> Vec<serde_json::Value> {
-    let mut merged: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-    for row in rows {
-        let mut key_value = (*row).clone();
-        if let Some(object) = key_value.as_object_mut() {
-            object.remove("count");
+/// Two buckets are the same observation when they agree on everything but how
+/// many times it was seen.
+fn same_except_count(left: &serde_json::Value, right: &serde_json::Value) -> bool {
+    match (left.as_object(), right.as_object()) {
+        (Some(a), Some(b)) => {
+            let count = |map: &serde_json::Map<String, serde_json::Value>| {
+                map.keys().filter(|key| *key != "count").count()
+            };
+            count(a) == count(b)
+                && a.iter()
+                    .filter(|(key, _)| *key != "count")
+                    .all(|(key, value)| b.get(key) == Some(value))
         }
-        let key = serde_json::to_string(&key_value).unwrap_or_default();
-        match merged.get_mut(&key) {
+        _ => left == right,
+    }
+}
+
+/// Buckets differing only in count are one observation seen repeatedly.
+///
+/// Grouping used to key on `serde_json::to_string` of each bucket, which built
+/// a full JSON document per bucket per shard purely to compare them. Values
+/// compare structurally, so the strings were never needed.
+fn merge_buckets(rows: &[&serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut merged: Vec<serde_json::Value> = Vec::new();
+    for row in rows {
+        match merged.iter_mut().find(|kept| same_except_count(kept, row)) {
             Some(existing) => {
                 let total = bucket_count(existing) + bucket_count(row);
                 if let Some(object) = existing.as_object_mut() {
                     object.insert("count".into(), serde_json::json!(total));
                 }
             }
-            None => {
-                merged.insert(key, (*row).clone());
-            }
+            None => merged.push((*row).clone()),
         }
     }
-    let mut out: Vec<serde_json::Value> = merged.into_values().collect();
-    out.sort_by_key(|row| serde_json::to_string(row).unwrap_or_default());
-    out
+    merged.sort_by_cached_key(|row| serde_json::to_string(row).unwrap_or_default());
+    merged
 }
 
 /// Write a document where the collector expects it, gzipped when named so.

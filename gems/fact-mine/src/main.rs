@@ -308,8 +308,16 @@ fn run() -> Result<()> {
             // joined; paying that per shard cost more than the join itself. The
             // shards themselves are independent, so they join concurrently --
             // this loop was the largest sequential stage of a collect.
+            // Stage timing, off unless asked for, so this command can be
+            // accounted for the same way the collector's stages are.
+            let timed = std::env::var("NIL_KILL_STAGE_TIMING").as_deref() == Ok("1");
+            let mark = std::time::Instant::now();
             let plan = fact_mine_rust::runtime_trace::read_plan(&plan)?;
+            if timed {
+                eprintln!("  rust plan-read      {:.2}s", mark.elapsed().as_secs_f64());
+            }
             let root = std::fs::canonicalize(&root).unwrap_or(root);
+            let mark = std::time::Instant::now();
             // Writing beside each trace is the default whatever the count.
             // Making one trace behave differently from many meant a single-shard
             // collect silently produced no evidence file at all.
@@ -336,15 +344,27 @@ fn run() -> Result<()> {
                     }
                 }
             })?;
+            if timed {
+                eprintln!("  rust join+write     {:.2}s", mark.elapsed().as_secs_f64());
+            }
             // Merging here saves writing every shard's document only for the
             // collector to read them all back and merge them in Ruby.
             if let Some(target) = &merged {
+                let mark = std::time::Instant::now();
                 let documents = joined
                     .iter()
                     .flatten()
                     .map(|text| serde_json::from_str(text).context("joined evidence"))
                     .collect::<Result<Vec<serde_json::Value>>>()?;
+                if timed {
+                    eprintln!("  rust merge-parse    {:.2}s", mark.elapsed().as_secs_f64());
+                }
+                let mark = std::time::Instant::now();
                 let document = fact_mine_rust::runtime_trace::merge_evidence(&documents)?;
+                if timed {
+                    eprintln!("  rust merge          {:.2}s", mark.elapsed().as_secs_f64());
+                }
+                let mark = std::time::Instant::now();
                 let canonical = fact_mine_rust::runtime_protocol::parse_runtime_evidence_json(
                     &serde_json::to_string(&document)?,
                 )?;
@@ -352,6 +372,9 @@ fn run() -> Result<()> {
                     target,
                     &fact_mine_rust::runtime_protocol::to_json_with_defaults(&canonical)?,
                 )?;
+                if timed {
+                    eprintln!("  rust canonical+write {:.2}s", mark.elapsed().as_secs_f64());
+                }
             } else {
                 for evidence in joined.into_iter().flatten() {
                     println!("{evidence}");
