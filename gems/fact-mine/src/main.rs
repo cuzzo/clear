@@ -301,6 +301,7 @@ fn run() -> Result<()> {
             traces,
             output,
             to_stdout,
+            merged,
             root,
         } => {
             // The plan is parsed and digest-checked once however many traces are
@@ -323,6 +324,11 @@ fn run() -> Result<()> {
                         Ok(None)
                     }
                     (None, true) => Ok(Some(evidence)),
+                    (None, false) if merged.is_some() => {
+                        let target = path.with_file_name("runtime-evidence.v1.json.gz");
+                        fact_mine_rust::runtime_trace::write_json(&target, &evidence)?;
+                        Ok(Some(evidence))
+                    }
                     (None, false) => {
                         let target = path.with_file_name("runtime-evidence.v1.json.gz");
                         fact_mine_rust::runtime_trace::write_json(&target, &evidence)?;
@@ -330,8 +336,26 @@ fn run() -> Result<()> {
                     }
                 }
             })?;
-            for evidence in joined.into_iter().flatten() {
-                println!("{evidence}");
+            // Merging here saves writing every shard's document only for the
+            // collector to read them all back and merge them in Ruby.
+            if let Some(target) = &merged {
+                let documents = joined
+                    .iter()
+                    .flatten()
+                    .map(|text| serde_json::from_str(text).context("joined evidence"))
+                    .collect::<Result<Vec<serde_json::Value>>>()?;
+                let document = fact_mine_rust::runtime_trace::merge_evidence(&documents)?;
+                let canonical = fact_mine_rust::runtime_protocol::parse_runtime_evidence_json(
+                    &serde_json::to_string(&document)?,
+                )?;
+                fact_mine_rust::runtime_trace::write_json(
+                    target,
+                    &fact_mine_rust::runtime_protocol::to_json_with_defaults(&canonical)?,
+                )?;
+            } else {
+                for evidence in joined.into_iter().flatten() {
+                    println!("{evidence}");
+                }
             }
             eprintln!(
                 "Runtime trace joined: {} anchors over {} trace(s)",
@@ -751,6 +775,7 @@ enum Command {
         traces: Vec<PathBuf>,
         output: Option<PathBuf>,
         to_stdout: bool,
+        merged: Option<PathBuf>,
         root: PathBuf,
     },
 }
@@ -810,6 +835,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut traces: Vec<PathBuf> = Vec::new();
             let mut output = None;
             let mut to_stdout = false;
+            let mut merged = None;
             let mut root = None;
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
@@ -834,6 +860,16 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                     }
                     "--stdout" => {
                         to_stdout = true;
+                    }
+                    "--merged-output" => {
+                        merged = Some(PathBuf::from(
+                            iter.next().with_context(|| "--merged-output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--merged-output=") => {
+                        merged = Some(PathBuf::from(
+                            other.strip_prefix("--merged-output=").unwrap(),
+                        ));
                     }
                     "--output" => {
                         output = Some(PathBuf::from(
@@ -865,6 +901,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 traces,
                 output,
                 to_stdout,
+                merged,
                 root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }

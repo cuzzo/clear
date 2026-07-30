@@ -386,8 +386,16 @@ module NilKill
         write_traces_in_parallel(selected, working_runtime_dir, evidence_plan,
                                  trace_languages, shard_run_ids, shard_jobs)
       end
+      # FactMine already holds every shard's evidence in memory at the end of the
+      # join, so it can merge there instead of writing each document out for
+      # this process to read them all back. Only valid when the canonical set is
+      # exactly this run's shards; an incremental collect mixes in stored ones
+      # and still merges below.
+      merged_candidate = File.join(working_runtime_dir, "merged-evidence.v1.json.gz")
       stage("join (batched)") do
-        Runtime::TraceArtifact.join_all(root: ROOT, traces: staged_traces)
+        Runtime::TraceArtifact.join_all(
+          root: ROOT, traces: staged_traces, merged: merged_candidate
+        )
       end
       shard_store = File.join(RUNTIME_DIR, "shard-evidence")
       FileUtils.mkdir_p(shard_store)
@@ -410,11 +418,18 @@ module NilKill
         selection.fetch("deleted_shards").map { |id| File.join(shard_store, "#{id}.json.gz") }
       ).uniq
       emitted = with_canonical_snapshot_transaction(extra_paths: transaction_paths) do
-        canonical_evidence = stage("evidence-merge") { Runtime::EvidenceMerger.write(
-          effective,
-          File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT),
-          plan: Runtime::EvidenceProtocol.plan
-        ) }
+        canonical_target = File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+        canonical_evidence = stage("evidence-merge") do
+          if effective.sort == staged_evidence.values.sort && File.file?(merged_candidate)
+            FileUtils.mkdir_p(File.dirname(canonical_target))
+            FileUtils.cp(merged_candidate, canonical_target)
+            canonical_target
+          else
+            Runtime::EvidenceMerger.write(
+              effective, canonical_target, plan: Runtime::EvidenceProtocol.plan
+            )
+          end
+        end
         result = stage("scip-index") { Runtime::ScipEmitter.emit(
           root: ROOT,
           runtime_dir: working_runtime_dir,
