@@ -88,49 +88,6 @@
                                       "text": "os := runtime.GOOS",
                                       "type": "LASGN"
                                     }
-                                  },
-                                  {
-                                    "Node": {
-                                      "children": [
-                                        {
-                                          "Node": {
-                                            "children": [
-                                              {
-                                                "Node": {
-                                                  "children": [
-                                                    {
-                                                      "String": "runtime"
-                                                    }
-                                                  ],
-                                                  "first_column": 17,
-                                                  "first_lineno": 4,
-                                                  "last_column": 24,
-                                                  "last_lineno": 4,
-                                                  "text": "runtime",
-                                                  "type": "LVAR"
-                                                }
-                                              },
-                                              {
-                                                "Symbol": "GOOS"
-                                              },
-                                              "Nil"
-                                            ],
-                                            "first_column": 17,
-                                            "first_lineno": 4,
-                                            "last_column": 29,
-                                            "last_lineno": 4,
-                                            "text": "runtime.GOOS",
-                                            "type": "CALL"
-                                          }
-                                        }
-                                      ],
-                                      "first_column": 17,
-                                      "first_lineno": 4,
-                                      "last_column": 29,
-                                      "last_lineno": 4,
-                                      "text": "runtime.GOOS",
-                                      "type": "EXPRESSION_LIST"
-                                    }
                                   }
                                 ],
                                 "first_column": 11,
@@ -474,29 +431,6 @@
                                             "last_lineno": 13,
                                             "text": "i := 0",
                                             "type": "LASGN"
-                                          }
-                                        },
-                                        {
-                                          "Node": {
-                                            "children": [
-                                              {
-                                                "Node": {
-                                                  "children": [],
-                                                  "first_column": 13,
-                                                  "first_lineno": 13,
-                                                  "last_column": 14,
-                                                  "last_lineno": 13,
-                                                  "text": "0",
-                                                  "type": "INT_LITERAL"
-                                                }
-                                              }
-                                            ],
-                                            "first_column": 13,
-                                            "first_lineno": 13,
-                                            "last_column": 14,
-                                            "last_lineno": 13,
-                                            "text": "0",
-                                            "type": "EXPRESSION_LIST"
                                           }
                                         }
                                       ],

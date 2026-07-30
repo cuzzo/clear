@@ -809,6 +809,46 @@ impl Widget {
 }
 
 #[test]
+fn go_short_var_declaration_extracts_each_lambda_once() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"package p
+
+func g(fn func() error) error { return fn() }
+
+func short() error {
+	err := g(func() error { return nil })
+	return err
+}
+
+func plain() error {
+	var err error
+	err = g(func() error { return nil })
+	return err
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let lambdas = output
+        .methods
+        .iter()
+        .filter(|method| method.name.starts_with("<lambda@"))
+        .map(|method| method.name.as_str())
+        .collect::<Vec<_>>();
+    // `x := f(func(){})` normalizes the right-hand side through the LASGN the
+    // single-target left-hand side synthesizes; the parent must not normalize
+    // that same sibling again, or the lambda is extracted (and priced) twice.
+    let mut unique = lambdas.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(lambdas.len(), unique.len(), "duplicated lambdas={lambdas:?}");
+    assert_eq!(lambdas.len(), 2, "lambdas={lambdas:?}");
+    Ok(())
+}
+
+#[test]
 fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_csharp.cs"), Language::CSharp)?;
     let output = profile::extract(&document, Profile::NilKill);

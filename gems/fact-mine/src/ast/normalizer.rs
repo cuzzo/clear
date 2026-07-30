@@ -4236,6 +4236,17 @@ impl<'source> TreeSitterNormalizer<'source> {
         if self.literal_fragment_assignment_context(node) {
             return false;
         }
+        // A single-target `x := expr` reaches forward from its left-hand side to
+        // normalize this sibling as the LASGN value, so the parent must not
+        // normalize it a second time. The declaration operator is not in any
+        // adapter's assignment-operator list, so mirror the predicate that
+        // consumed the sibling rather than the operator spelling.
+        if node
+            .prev_named_sibling()
+            .is_some_and(|sibling| self.single_short_var_lhs(sibling))
+        {
+            return true;
+        }
         node.prev_sibling()
             .map(|sibling| self.assignment_operator(node_text(sibling, self.source)))
             .unwrap_or(false)
