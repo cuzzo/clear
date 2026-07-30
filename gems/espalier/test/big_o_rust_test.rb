@@ -11,7 +11,7 @@ class BigORustTest < Minitest::Test
 
   def test_slice_element_costs
     evidence = Espalier::StaticEvidence.build(
-      [File.join(ROOT, "src/lib.rs"), File.join(ROOT, "src/paths.rs")],
+      [File.join(ROOT, "src/lib.rs"), File.join(ROOT, "src/paths.rs"), File.join(ROOT, "src/outparam.rs")],
       root: ROOT,
       scip_indexes: [File.join(ROOT, "index.scip")]
     )
@@ -27,5 +27,8 @@ class BigORustTest < Minitest::Test
     assert_equal "O(N^2)", actual["scan_accumulated"]
     # PathBuf answers to Path's methods, so each strip reads one path.
     assert_equal "O(N)", actual["strip_paths"]
+    # The collection a helper fills through an out parameter carries that
+    # parameter's element type, so its elements are priced.
+    assert_equal "O(N)", actual["digest"]
   end
 end

@@ -1,0 +1,139 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "walk"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "file"
+                            }
+                          ],
+                          "first_column": 8,
+                          "first_lineno": 2,
+                          "last_column": 12,
+                          "last_lineno": 2,
+                          "text": "file",
+                          "type": "LVAR"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "files"
+                            }
+                          ],
+                          "first_column": 16,
+                          "first_lineno": 2,
+                          "last_column": 21,
+                          "last_lineno": 2,
+                          "text": "files",
+                          "type": "LVAR"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "String": "_"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "file"
+                                              }
+                                            ],
+                                            "first_column": 16,
+                                            "first_lineno": 3,
+                                            "last_column": 20,
+                                            "last_lineno": 3,
+                                            "text": "file",
+                                            "type": "LVAR"
+                                          }
+                                        },
+                                        {
+                                          "Symbol": "len"
+                                        },
+                                        "Nil"
+                                      ],
+                                      "first_column": 16,
+                                      "first_lineno": 3,
+                                      "last_column": 26,
+                                      "last_lineno": 3,
+                                      "text": "file.len()",
+                                      "type": "CALL"
+                                    }
+                                  }
+                                ],
+                                "first_column": 8,
+                                "first_lineno": 3,
+                                "last_column": 27,
+                                "last_lineno": 3,
+                                "text": "let _ = file.len();",
+                                "type": "LASGN"
+                              }
+                            }
+                          ],
+                          "first_column": 8,
+                          "first_lineno": 3,
+                          "last_column": 27,
+                          "last_lineno": 3,
+                          "text": "let _ = file.len();",
+                          "type": "LET_DECLARATION"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 2,
+                    "last_column": 5,
+                    "last_lineno": 4,
+                    "text": "for file in files {\n        let _ = file.len();\n    }",
+                    "type": "FOR"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 2,
+              "last_column": 5,
+              "last_lineno": 4,
+              "text": "for file in files {\n        let _ = file.len();\n    }",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 1,
+        "last_lineno": 5,
+        "text": "fn walk(files: Vec<String>) {\n    for file in files {\n        let _ = file.len();\n    }\n}",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 6,
+  "text": "fn walk(files: Vec<String>) {\n    for file in files {\n        let _ = file.len();\n    }\n}\n",
+  "type": "ROOT"
+}

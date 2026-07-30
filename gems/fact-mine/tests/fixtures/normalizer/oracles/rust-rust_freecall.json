@@ -1,0 +1,291 @@
+{
+  "children": [
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "helper"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "String": "b"
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 2,
+                          "last_column": 5,
+                          "last_lineno": 2,
+                          "text": "b",
+                          "type": "LVAR"
+                        }
+                      },
+                      {
+                        "Symbol": "push"
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "a"
+                                        }
+                                      ],
+                                      "first_column": 11,
+                                      "first_lineno": 2,
+                                      "last_column": 12,
+                                      "last_lineno": 2,
+                                      "text": "a",
+                                      "type": "LVAR"
+                                    }
+                                  },
+                                  {
+                                    "Symbol": "to_string"
+                                  },
+                                  "Nil"
+                                ],
+                                "first_column": 10,
+                                "first_lineno": 2,
+                                "last_column": 25,
+                                "last_lineno": 2,
+                                "text": "(a.to_string())",
+                                "type": "CALL"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 2,
+                          "last_column": 25,
+                          "last_lineno": 2,
+                          "text": "b.push(a.to_string())",
+                          "type": "LIST"
+                        }
+                      }
+                    ],
+                    "first_column": 4,
+                    "first_lineno": 2,
+                    "last_column": 25,
+                    "last_lineno": 2,
+                    "text": "b.push(a.to_string())",
+                    "type": "CALL"
+                  }
+                }
+              ],
+              "first_column": 4,
+              "first_lineno": 2,
+              "last_column": 25,
+              "last_lineno": 2,
+              "text": "b.push(a.to_string())",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 1,
+        "last_column": 1,
+        "last_lineno": 3,
+        "text": "fn helper(a: &str, b: &mut Vec<String>) {\n    b.push(a.to_string());\n}",
+        "type": "DEFN"
+      }
+    },
+    {
+      "Node": {
+        "children": [
+          {
+            "Symbol": "caller"
+          },
+          {
+            "Node": {
+              "children": [
+                "Nil",
+                "Nil",
+                {
+                  "Node": {
+                    "children": [
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "String": "items"
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "Vec"
+                                              }
+                                            ],
+                                            "first_column": 20,
+                                            "first_lineno": 6,
+                                            "last_column": 23,
+                                            "last_lineno": 6,
+                                            "text": "Vec",
+                                            "type": "LVAR"
+                                          }
+                                        },
+                                        {
+                                          "Symbol": "new"
+                                        },
+                                        "Nil"
+                                      ],
+                                      "first_column": 20,
+                                      "first_lineno": 6,
+                                      "last_column": 30,
+                                      "last_lineno": 6,
+                                      "text": "Vec::new()",
+                                      "type": "CALL"
+                                    }
+                                  }
+                                ],
+                                "first_column": 4,
+                                "first_lineno": 6,
+                                "last_column": 31,
+                                "last_lineno": 6,
+                                "text": "let mut items = Vec::new();",
+                                "type": "LASGN"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 6,
+                          "last_column": 31,
+                          "last_lineno": 6,
+                          "text": "let mut items = Vec::new();",
+                          "type": "LET_DECLARATION"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "helper"
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "a"
+                                        }
+                                      ],
+                                      "first_column": 11,
+                                      "first_lineno": 7,
+                                      "last_column": 12,
+                                      "last_lineno": 7,
+                                      "text": "a",
+                                      "type": "LVAR"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [],
+                                            "first_column": 15,
+                                            "first_lineno": 7,
+                                            "last_column": 18,
+                                            "last_lineno": 7,
+                                            "text": "mut",
+                                            "type": "MUTABLE_SPECIFIER"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "String": "items"
+                                              }
+                                            ],
+                                            "first_column": 19,
+                                            "first_lineno": 7,
+                                            "last_column": 24,
+                                            "last_lineno": 7,
+                                            "text": "items",
+                                            "type": "LVAR"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 14,
+                                      "first_lineno": 7,
+                                      "last_column": 24,
+                                      "last_lineno": 7,
+                                      "text": "&mut items",
+                                      "type": "REFERENCE_EXPRESSION"
+                                    }
+                                  }
+                                ],
+                                "first_column": 4,
+                                "first_lineno": 7,
+                                "last_column": 25,
+                                "last_lineno": 7,
+                                "text": "helper(a, &mut items)",
+                                "type": "LIST"
+                              }
+                            }
+                          ],
+                          "first_column": 4,
+                          "first_lineno": 7,
+                          "last_column": 25,
+                          "last_lineno": 7,
+                          "text": "helper(a, &mut items)",
+                          "type": "FCALL"
+                        }
+                      }
+                    ],
+                    "first_column": 19,
+                    "first_lineno": 5,
+                    "last_column": 1,
+                    "last_lineno": 8,
+                    "text": "{\n    let mut items = Vec::new();\n    helper(a, &mut items);\n}",
+                    "type": "BLOCK"
+                  }
+                }
+              ],
+              "first_column": 19,
+              "first_lineno": 5,
+              "last_column": 1,
+              "last_lineno": 8,
+              "text": "{\n    let mut items = Vec::new();\n    helper(a, &mut items);\n}",
+              "type": "SCOPE"
+            }
+          }
+        ],
+        "first_column": 0,
+        "first_lineno": 5,
+        "last_column": 1,
+        "last_lineno": 8,
+        "text": "fn caller(a: &str) {\n    let mut items = Vec::new();\n    helper(a, &mut items);\n}",
+        "type": "DEFN"
+      }
+    }
+  ],
+  "first_column": 0,
+  "first_lineno": 1,
+  "last_column": 0,
+  "last_lineno": 9,
+  "text": "fn helper(a: &str, b: &mut Vec<String>) {\n    b.push(a.to_string());\n}\n\nfn caller(a: &str) {\n    let mut items = Vec::new();\n    helper(a, &mut items);\n}\n",
+  "type": "ROOT"
+}

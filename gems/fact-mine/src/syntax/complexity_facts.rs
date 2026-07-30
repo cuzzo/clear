@@ -2969,9 +2969,11 @@ fn collect_argument_parameter_types(
                     let declared = TypeExpr::parse(declared_type, language);
                     // A constructor names the container but not what it holds,
                     // so a declaration that names both is the better answer.
-                    let replace = types
-                        .get(&name)
-                        .is_none_or(|existing| untyped_element(existing) && !untyped_element(&declared));
+                    let replace = types.get(&name).is_none_or(|existing| {
+                        (untyped_element(existing) || matches!(existing, TypeExpr::Primitive(_)))
+                            && !untyped_element(&declared)
+                            && !matches!(declared, TypeExpr::Primitive(_))
+                    });
                     if replace {
                         types.insert(name, declared);
                     }

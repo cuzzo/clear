@@ -791,6 +791,23 @@ fn is_simple_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn rust_signatures_name_their_parameter_types() {
+        let source = "fn helper(a: &str, b: &mut Vec<String>) {}\n";
+        let mut file = tempfile::Builder::new().suffix(".rs").tempfile().unwrap();
+        std::io::Write::write_all(&mut file, source.as_bytes()).unwrap();
+        let document =
+            crate::syntax::parse_file(file.path().to_path_buf(), crate::syntax::Language::Rust)
+                .unwrap();
+        let key = crate::syntax::normalized_behavior::method_parameter_type_key(
+            &document.function_defs[0].owner,
+            &document.function_defs[0].name,
+            document.function_defs[0].line,
+        );
+        let declared = document.method_param_types.get(&key).expect("param types");
+        assert_eq!(declared.get("b").map(String::as_str), Some("&mut Vec<String>"));
+    }
     use super::*;
 
     #[test]
