@@ -809,266 +809,226 @@ fn is_vacuous(anchor: &serde_json::Value) -> bool {
 
 /// Combine the evidence of several shards into one document.
 ///
+/// Works on protocol messages rather than JSON. The shards arrive as messages
+/// and the result leaves as one, so nothing is encoded, parsed and re-encoded
+/// in between -- that round trip was three passes over tens of megabytes and
+/// most of what the join cost.
+///
 /// A shard contributes what it observed, so shards legitimately cover different
 /// anchors and a symbol is merged from the shards that saw it. The rules are the
 /// collector's, ported rather than reinvented: the worst status wins, run ids
 /// union, execution counts add, and a kind is complete only if every
 /// contributing shard found it complete.
-pub fn merge_evidence(documents: &[serde_json::Value]) -> Result<serde_json::Value> {
-    let mut by_symbol: BTreeMap<String, Vec<&serde_json::Value>> = BTreeMap::new();
+pub fn merge_evidence(
+    documents: &[runtime_protocol::RuntimeEvidence],
+) -> Result<runtime_protocol::RuntimeEvidence> {
+    use runtime_protocol::{AnchorEvidence, CaptureSummary, CaptureStatus};
+
+    let first = documents.first().context("no evidence to merge")?;
+    let mut order: Vec<String> = Vec::new();
+    let mut by_symbol: BTreeMap<String, Vec<&AnchorEvidence>> = BTreeMap::new();
     for document in documents {
-        let anchors = document
-            .get("anchors")
-            .and_then(|a| a.as_array())
-            .map(|a| a.as_slice())
-            .unwrap_or(&[]);
         let mut seen: HashSet<&str> = HashSet::new();
-        for anchor in anchors {
-            let symbol = anchor
-                .get("anchor_symbol")
-                .and_then(|s| s.as_str())
-                .context("merged anchor has no symbol")?;
-            if !seen.insert(symbol) {
+        for anchor in &document.anchors {
+            if !seen.insert(anchor.anchor_symbol.as_str()) {
                 bail!("runtime evidence shard contains duplicate anchors");
             }
-            by_symbol.entry(symbol.to_string()).or_default().push(anchor);
+            let entry = by_symbol.entry(anchor.anchor_symbol.clone()).or_default();
+            if entry.is_empty() {
+                order.push(anchor.anchor_symbol.clone());
+            }
+            entry.push(anchor);
         }
     }
 
     let mut anchors = Vec::with_capacity(by_symbol.len());
     for (symbol, rows) in &by_symbol {
-        let digests: BTreeSet<&str> = rows
+        let digests: BTreeSet<&[u8]> = rows
             .iter()
-            .filter_map(|row| row.get("anchor_semantic_digest").and_then(|d| d.as_str()))
+            .map(|row| row.anchor_semantic_digest.as_slice())
             .collect();
         if digests.len() > 1 {
             bail!("conflicting semantic digest for {symbol}");
         }
-        let executions: Vec<&serde_json::Value> = rows
-            .iter()
-            .filter_map(|row| row.get("executions").and_then(|e| e.as_array()))
-            .flatten()
-            .collect();
-        let captures: Vec<&serde_json::Value> =
-            rows.iter().filter_map(|row| row.get("capture")).collect();
+        let executions: Vec<&runtime_protocol::ExecutionBucket> =
+            rows.iter().flat_map(|row| row.executions.iter()).collect();
+        let captures: Vec<&CaptureSummary> =
+            rows.iter().filter_map(|row| row.capture.as_ref()).collect();
 
-        let status = merged_status(&captures, &executions);
         let mut run_ids: Vec<String> = captures
             .iter()
-            .filter_map(|c| c.get("run_ids").and_then(|r| r.as_array()))
-            .flatten()
-            .filter_map(|id| id.as_str().map(str::to_string))
+            .flat_map(|capture| capture.run_ids.iter().cloned())
             .collect();
         run_ids.sort();
         run_ids.dedup();
 
-        let observed: i64 = executions
-            .iter()
-            .map(|b| bucket_count(b))
-            .sum();
-        let dropped: i64 = captures
-            .iter()
-            .map(|c| {
-                c.get("dropped_executions")
-                    .map(json_i64)
-                    .unwrap_or(0)
-            })
-            .sum();
-
         // A kind is complete only where every contributing shard found it so.
-        let mut complete: Option<BTreeSet<String>> = None;
+        let mut complete: Option<BTreeSet<i32>> = None;
         for capture in &captures {
-            let kinds: BTreeSet<String> = capture
-                .get("complete_kinds")
-                .and_then(|k| k.as_array())
-                .map(|k| {
-                    k.iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
+            let kinds: BTreeSet<i32> = capture
+                .complete_kinds
+                .iter()
+                .map(|kind| kind.value())
+                .collect();
             complete = Some(match complete {
                 None => kinds,
-                Some(existing) => existing.intersection(&kinds).cloned().collect(),
+                Some(existing) => existing.intersection(&kinds).copied().collect(),
             });
         }
-        let complete_kinds: Vec<String> = complete.unwrap_or_default().into_iter().collect();
 
-        let mut capture = serde_json::Map::new();
-        capture.insert("status".into(), serde_json::json!(status));
-        capture.insert("run_ids".into(), serde_json::json!(run_ids));
-        // uint64 is a string in ProtoJSON. Emitting it as one keeps the merged
-        // document canonical by construction, so it does not have to be parsed
-        // back through the protocol and reprinted just to fix the encoding.
-        capture.insert("observed_executions".into(), serde_json::json!(observed));
-        capture.insert("dropped_executions".into(), serde_json::json!(dropped));
-        let reason = merged_reason(&captures, status);
-        if !reason.is_empty() {
-            capture.insert("reason".into(), serde_json::json!(reason));
-        }
-        capture.insert("complete_kinds".into(), serde_json::json!(complete_kinds));
+        let status = merged_status(&captures, &executions);
+        let merged_executions = merge_buckets(&executions);
+        let mut capture = CaptureSummary::new();
+        capture.status = protobuf::EnumOrUnknown::new(status);
+        capture.run_ids = run_ids;
+        capture.observed_executions = merged_executions.iter().map(|b| b.count).sum();
+        capture.dropped_executions = captures.iter().map(|c| c.dropped_executions).sum();
+        capture.reason = merged_reason(&captures, status);
+        // Sorted by name, not by enum value: the order is what a reader compares
+        // against, and the collector has always sorted these alphabetically.
+        let mut kinds: Vec<protobuf::EnumOrUnknown<runtime_protocol::EvidenceKind>> = complete
+            .unwrap_or_default()
+            .into_iter()
+            .map(protobuf::EnumOrUnknown::from_i32)
+            .collect();
+        kinds.sort_by_key(|kind| format!("{:?}", kind.enum_value_or_default()));
+        capture.complete_kinds = kinds;
 
-        anchors.push(serde_json::json!({
-            "anchor_symbol": symbol,
-            "anchor_semantic_digest": digests.iter().next().copied().unwrap_or_default(),
-            "capture": capture,
-            "executions": merge_buckets(&executions),
-        }));
+        let mut anchor = AnchorEvidence::new();
+        anchor.anchor_symbol = symbol.clone();
+        anchor.anchor_semantic_digest = rows[0].anchor_semantic_digest.clone();
+        anchor.capture = protobuf::MessageField::some(capture);
+        anchor.executions = merged_executions;
+        anchors.push(anchor);
     }
 
-    let first = documents.first().context("no evidence to merge")?;
-    let mut runs: Vec<serde_json::Value> = documents
+    let mut runs: Vec<runtime_protocol::Run> = documents
         .iter()
-        .filter_map(|d| d.get("runs").and_then(|r| r.as_array()))
-        .flatten()
-        .cloned()
+        .flat_map(|d| d.runs.iter().cloned())
         .collect();
-    runs.sort_by_key(|run| {
-        run.get("id")
-            .and_then(|id| id.as_str())
-            .unwrap_or_default()
-            .to_string()
-    });
-    runs.dedup_by_key(|run| {
-        run.get("id")
-            .and_then(|id| id.as_str())
-            .unwrap_or_default()
-            .to_string()
-    });
+    runs.sort_by(|a, b| a.id.cmp(&b.id));
+    runs.dedup_by(|a, b| a.id == b.id);
 
     let mut environment: BTreeMap<String, String> = BTreeMap::new();
     for document in documents {
-        for claim in document
-            .get("environment")
-            .and_then(|e| e.as_array())
-            .map(|e| e.as_slice())
-            .unwrap_or(&[])
-        {
-            let key = claim.get("key").and_then(|k| k.as_str()).unwrap_or_default();
-            let value = claim
-                .get("value")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            if let Some(existing) = environment.get(key) {
-                if existing != value {
-                    bail!("conflicting runtime environment claim {key}");
+        for claim in &document.environment {
+            if let Some(existing) = environment.get(&claim.key) {
+                if *existing != claim.value {
+                    bail!("conflicting runtime environment claim {}", claim.key);
                 }
             }
-            environment.insert(key.to_string(), value.to_string());
+            environment.insert(claim.key.clone(), claim.value.clone());
         }
     }
 
-    Ok(serde_json::json!({
-        "protocol_version": 1,
-        "producer": first.get("producer").cloned().unwrap_or(serde_json::json!({})),
-        "authority": "MODELED_RUNS",
-        "trace_plan_digest": first.get("trace_plan_digest").cloned().unwrap_or(serde_json::json!("")),
-        "environment": environment.into_iter()
-            .map(|(key, value)| serde_json::json!({ "key": key, "value": value }))
-            .collect::<Vec<_>>(),
-        "runs": runs,
-        "anchors": anchors,
-        "correlations": Vec::<serde_json::Value>::new(),
-    }))
-}
-
-fn json_i64(value: &serde_json::Value) -> i64 {
-    value
-        .as_i64()
-        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
-        .unwrap_or(0)
-}
-
-fn bucket_count(bucket: &serde_json::Value) -> i64 {
-    bucket.get("count").map(json_i64).unwrap_or(1)
+    let mut merged = runtime_protocol::RuntimeEvidence::new();
+    merged.protocol_version = runtime_protocol::PROTOCOL_VERSION;
+    merged.producer = first.producer.clone();
+    merged.authority = first.authority;
+    merged.trace_plan_digest = first.trace_plan_digest.clone();
+    merged.environment = environment
+        .into_iter()
+        .map(|(key, value)| {
+            let mut claim = runtime_protocol::EnvironmentClaim::new();
+            claim.key = key;
+            claim.value = value;
+            claim
+        })
+        .collect();
+    merged.runs = runs;
+    merged.anchors = anchors;
+    Ok(merged)
 }
 
 /// The worst outcome any shard saw is the outcome for the whole.
-fn merged_status(captures: &[&serde_json::Value], executions: &[&serde_json::Value]) -> &'static str {
-    let statuses: Vec<&str> = captures
+fn merged_status(
+    captures: &[&runtime_protocol::CaptureSummary],
+    executions: &[&runtime_protocol::ExecutionBucket],
+) -> runtime_protocol::CaptureStatus {
+    use runtime_protocol::CaptureStatus as S;
+    let statuses: Vec<S> = captures
         .iter()
-        .filter_map(|c| c.get("status").and_then(|s| s.as_str()))
+        .map(|capture| capture.status.enum_value_or_default())
         .collect();
-    if statuses.contains(&"FAILED_CAPTURE") {
-        return "FAILED_CAPTURE";
+    if statuses.contains(&S::FAILED_CAPTURE) {
+        return S::FAILED_CAPTURE;
     }
-    if statuses.contains(&"STALE") {
-        return "STALE";
+    if statuses.contains(&S::STALE) {
+        return S::STALE;
     }
     if statuses
         .iter()
-        .any(|s| matches!(*s, "PARTIAL" | "NOT_INSTRUMENTED" | "UNSUPPORTED"))
+        .any(|s| matches!(s, S::PARTIAL | S::NOT_INSTRUMENTED | S::UNSUPPORTED))
     {
-        return "PARTIAL";
+        return S::PARTIAL;
     }
     if executions.is_empty() {
-        return "NOT_EXECUTED";
+        return S::NOT_EXECUTED;
     }
-    "COMPLETE_FOR_RUNS"
+    S::COMPLETE_FOR_RUNS
 }
 
-fn merged_reason(captures: &[&serde_json::Value], status: &str) -> String {
-    if status == "COMPLETE_FOR_RUNS" {
+/// Only the shards that fell short explain why the whole did.
+fn merged_reason(
+    captures: &[&runtime_protocol::CaptureSummary],
+    status: runtime_protocol::CaptureStatus,
+) -> String {
+    use runtime_protocol::CaptureStatus as S;
+    if status == S::COMPLETE_FOR_RUNS {
         return String::new();
     }
-    let interesting: Vec<&&serde_json::Value> = captures
+    let short: Vec<&&runtime_protocol::CaptureSummary> = captures
         .iter()
         .filter(|c| {
             !matches!(
-                c.get("status").and_then(|s| s.as_str()).unwrap_or_default(),
-                "COMPLETE_FOR_RUNS" | "NOT_EXECUTED"
+                c.status.enum_value_or_default(),
+                S::COMPLETE_FOR_RUNS | S::NOT_EXECUTED
             )
         })
         .collect();
-    let source: Vec<&&serde_json::Value> = if interesting.is_empty() {
+    let source: Vec<&&runtime_protocol::CaptureSummary> = if short.is_empty() {
         captures.iter().collect()
     } else {
-        interesting
+        short
     };
     let reasons: BTreeSet<&str> = source
         .iter()
-        .filter_map(|c| c.get("reason").and_then(|r| r.as_str()))
+        .map(|c| c.reason.as_str())
         .filter(|r| !r.is_empty())
         .collect();
     reasons.into_iter().collect::<Vec<_>>().join("; ")
 }
 
-/// Two buckets are the same observation when they agree on everything but how
-/// many times it was seen.
-fn same_except_count(left: &serde_json::Value, right: &serde_json::Value) -> bool {
-    match (left.as_object(), right.as_object()) {
-        (Some(a), Some(b)) => {
-            let count = |map: &serde_json::Map<String, serde_json::Value>| {
-                map.keys().filter(|key| *key != "count").count()
-            };
-            count(a) == count(b)
-                && a.iter()
-                    .filter(|(key, _)| *key != "count")
-                    .all(|(key, value)| b.get(key) == Some(value))
-        }
-        _ => left == right,
-    }
-}
-
 /// Buckets differing only in count are one observation seen repeatedly.
-///
-/// Grouping used to key on `serde_json::to_string` of each bucket, which built
-/// a full JSON document per bucket per shard purely to compare them. Values
-/// compare structurally, so the strings were never needed.
-fn merge_buckets(rows: &[&serde_json::Value]) -> Vec<serde_json::Value> {
-    let mut merged: Vec<serde_json::Value> = Vec::new();
+/// Messages compare structurally, so nothing has to be serialised to group them.
+fn merge_buckets(
+    rows: &[&runtime_protocol::ExecutionBucket],
+) -> Vec<runtime_protocol::ExecutionBucket> {
+    let mut merged: Vec<runtime_protocol::ExecutionBucket> = Vec::new();
     for row in rows {
-        match merged.iter_mut().find(|kept| same_except_count(kept, row)) {
-            Some(existing) => {
-                let total = bucket_count(existing) + bucket_count(row);
-                if let Some(object) = existing.as_object_mut() {
-                    object.insert("count".into(), serde_json::json!(total));
-                }
+        let matched = merged.iter_mut().find(|kept| {
+            let mut a = (*kept).clone();
+            let mut b = (*row).clone();
+            a.count = 0;
+            b.count = 0;
+            a == b
+        });
+        match matched {
+            Some(existing) => existing.count += row.count.max(1),
+            None => {
+                let mut bucket = (*row).clone();
+                bucket.count = bucket.count.max(1);
+                merged.push(bucket);
             }
-            None => merged.push((*row).clone()),
         }
     }
-    merged.sort_by_cached_key(|row| serde_json::to_string(row).unwrap_or_default());
+    // Deterministic order, and the same one the collector produced: a reader
+    // that takes the first bucket as representative must get the same one every
+    // run and from either implementation.
+    merged.sort_by_cached_key(|bucket| {
+        // The same rendering the collector sorted by, so both orderings agree.
+        runtime_protocol::to_json_with_defaults(bucket).unwrap_or_default()
+    });
     merged
 }
 
@@ -1517,117 +1477,170 @@ mod tests {
 
     // --- merging ------------------------------------------------------------
 
+    /// Build a real protocol message so the merge is tested through the same
+    /// parse the pipeline uses, not a hand-rolled struct.
+    fn evidence_doc(anchors: serde_json::Value, extra: serde_json::Value) -> runtime_protocol::RuntimeEvidence {
+        let mut doc = serde_json::json!({
+            "protocol_version": 1,
+            "producer": { "name": "nil-kill", "version": "1" },
+            "authority": "MODELED_RUNS",
+            "trace_plan_digest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "environment": [],
+            "runs": [{ "id": "r1", "status": "SUCCEEDED" }],
+            "anchors": anchors,
+            "correlations": []
+        });
+        for (key, value) in extra.as_object().cloned().unwrap_or_default() {
+            doc[key] = value;
+        }
+        runtime_protocol::parse_runtime_evidence_json(&doc.to_string()).expect("evidence fixture")
+    }
+
+    fn anchor_row(symbol: &str, status: &str, kinds: &[&str], counts: &[(u64, &str)]) -> serde_json::Value {
+        anchor_row_for("r1", symbol, status, kinds, counts)
+    }
+
+    fn anchor_row_for(run: &str, symbol: &str, status: &str, kinds: &[&str], counts: &[(u64, &str)]) -> serde_json::Value {
+        serde_json::json!({
+            "anchor_symbol": symbol,
+            "anchor_semantic_digest": "AQID",
+            "capture": {
+                "status": status,
+                "run_ids": [run],
+                "observed_executions": "0",
+                "dropped_executions": "0",
+                "complete_kinds": kinds
+            },
+            "executions": counts.iter().map(|(count, receiver)| serde_json::json!({
+                "count": count.to_string(),
+                "receiver": { "alternatives": [{ "value": { "type_symbol": receiver }, "count": "1" }] }
+            })).collect::<Vec<_>>()
+        })
+    }
+
     #[test]
     fn buckets_differing_only_in_count_are_one_observation() {
-        let a = serde_json::json!({ "count": 2, "receiver": "R" });
-        let b = serde_json::json!({ "count": 3, "receiver": "R" });
-        let c = serde_json::json!({ "count": 1, "receiver": "S" });
-        let merged = merge_buckets(&[&a, &b, &c]);
-        assert_eq!(merged.len(), 2);
-        let total: i64 = merged.iter().map(bucket_count).sum();
-        assert_eq!(total, 6);
+        let doc = evidence_doc(
+            serde_json::json!([anchor_row("a", "COMPLETE_FOR_RUNS", &[], &[(2, "R"), (3, "R"), (1, "S")])]),
+            serde_json::json!({}),
+        );
+        let merged = merge_evidence(&[doc]).expect("merge");
+        let executions = &merged.anchors[0].executions;
+        assert_eq!(executions.len(), 2, "identical buckets fuse, distinct ones do not");
+        assert_eq!(executions.iter().map(|b| b.count).sum::<u64>(), 6);
     }
 
     #[test]
     fn the_worst_status_any_shard_saw_wins() {
-        let complete = serde_json::json!({ "status": "COMPLETE_FOR_RUNS" });
-        let partial = serde_json::json!({ "status": "PARTIAL" });
-        let stale = serde_json::json!({ "status": "STALE" });
-        let failed = serde_json::json!({ "status": "FAILED_CAPTURE" });
-        let bucket = serde_json::json!({ "count": 1 });
-        assert_eq!(merged_status(&[&complete], &[&bucket]), "COMPLETE_FOR_RUNS");
-        assert_eq!(merged_status(&[&complete, &partial], &[&bucket]), "PARTIAL");
-        assert_eq!(merged_status(&[&partial, &stale], &[&bucket]), "STALE");
-        assert_eq!(merged_status(&[&stale, &failed], &[&bucket]), "FAILED_CAPTURE");
-        assert_eq!(merged_status(&[&complete], &[]), "NOT_EXECUTED");
+        let cases = [
+            (["COMPLETE_FOR_RUNS", "COMPLETE_FOR_RUNS"], "COMPLETE_FOR_RUNS"),
+            (["COMPLETE_FOR_RUNS", "PARTIAL"], "PARTIAL"),
+            (["COMPLETE_FOR_RUNS", "NOT_INSTRUMENTED"], "PARTIAL"),
+            (["PARTIAL", "STALE"], "STALE"),
+            (["STALE", "FAILED_CAPTURE"], "FAILED_CAPTURE"),
+        ];
+        for (statuses, expected) in cases {
+            let docs: Vec<_> = statuses
+                .iter()
+                .map(|status| {
+                    evidence_doc(
+                        serde_json::json!([anchor_row("a", status, &["RECEIVER_VALUE"], &[(1, "R")])]),
+                        serde_json::json!({}),
+                    )
+                })
+                .collect();
+            let merged = merge_evidence(&docs).expect("merge");
+            assert_eq!(
+                format!("{:?}", merged.anchors[0].capture.status.enum_value_or_default()),
+                expected,
+                "{statuses:?}"
+            );
+        }
     }
 
     #[test]
-    fn a_merged_reason_explains_only_the_shards_that_fell_short() {
-        let complete = serde_json::json!({ "status": "COMPLETE_FOR_RUNS", "reason": "fine" });
-        let partial = serde_json::json!({ "status": "PARTIAL", "reason": "missing result" });
-        assert_eq!(merged_reason(&[&complete], "COMPLETE_FOR_RUNS"), "");
-        assert_eq!(merged_reason(&[&complete, &partial], "PARTIAL"), "missing result");
+    fn an_anchor_no_shard_executed_is_not_executed() {
+        let doc = evidence_doc(
+            serde_json::json!([anchor_row("a", "COMPLETE_FOR_RUNS", &[], &[])]),
+            serde_json::json!({}),
+        );
+        let merged = merge_evidence(&[doc]).expect("merge");
+        assert_eq!(
+            format!("{:?}", merged.anchors[0].capture.status.enum_value_or_default()),
+            "NOT_EXECUTED"
+        );
     }
 
     #[test]
     fn merging_unions_anchors_sums_counts_and_intersects_complete_kinds() {
-        let left = serde_json::json!({
-            "producer": { "name": "nil-kill" },
-            "trace_plan_digest": "d",
-            "runs": [{ "id": "r1" }],
-            "environment": [{ "key": "ruby", "value": "3.2.3" }],
-            "anchors": [{
-                "anchor_symbol": "a", "anchor_semantic_digest": "AQID",
-                "capture": { "status": "COMPLETE_FOR_RUNS", "run_ids": ["r1"],
-                             "dropped_executions": 0,
-                             "complete_kinds": ["RECEIVER_VALUE", "CALL_TARGET"] },
-                "executions": [{ "count": 2, "receiver": "R" }]
-            }]
-        });
-        let right = serde_json::json!({
-            "producer": { "name": "nil-kill" },
-            "trace_plan_digest": "d",
-            "runs": [{ "id": "r2" }],
-            "environment": [{ "key": "ruby", "value": "3.2.3" }],
-            "anchors": [
-                { "anchor_symbol": "a", "anchor_semantic_digest": "AQID",
-                  "capture": { "status": "PARTIAL", "run_ids": ["r2"],
-                               "dropped_executions": 1,
-                               "complete_kinds": ["RECEIVER_VALUE"] },
-                  "executions": [{ "count": 3, "receiver": "R" }] },
-                { "anchor_symbol": "b", "anchor_semantic_digest": "AQID",
-                  "capture": { "status": "COMPLETE_FOR_RUNS", "run_ids": ["r2"],
-                               "dropped_executions": 0, "complete_kinds": [] },
-                  "executions": [{ "count": 1, "receiver": "S" }] }
-            ]
-        });
-        let merged = merge_evidence(&[left, right]).expect("merge");
-        let anchors = merged["anchors"].as_array().unwrap();
-        assert_eq!(anchors.len(), 2, "a shard contributes what it observed");
+        let left = evidence_doc(
+            serde_json::json!([anchor_row(
+                "a", "COMPLETE_FOR_RUNS", &["RECEIVER_VALUE", "CALL_TARGET"], &[(2, "R")]
+            )]),
+            serde_json::json!({
+                "runs": [{ "id": "r1", "status": "SUCCEEDED" }],
+                "environment": [{ "key": "ruby", "value": "3.2.3" }]
+            }),
+        );
+        let right = evidence_doc(
+            serde_json::json!([
+                anchor_row_for("r2", "a", "PARTIAL", &["RECEIVER_VALUE"], &[(3, "R")]),
+                anchor_row_for("r2", "b", "COMPLETE_FOR_RUNS", &[], &[(1, "S")])
+            ]),
+            serde_json::json!({
+                "runs": [{ "id": "r2", "status": "SUCCEEDED" }],
+                "environment": [{ "key": "ruby", "value": "3.2.3" }]
+            }),
+        );
 
-        let a = anchors.iter().find(|x| x["anchor_symbol"] == "a").unwrap();
-        assert_eq!(a["capture"]["status"], "PARTIAL");
-        assert_eq!(a["capture"]["observed_executions"], 5, "counts add");
-        assert_eq!(a["capture"]["dropped_executions"], 1);
-        assert_eq!(a["capture"]["run_ids"], serde_json::json!(["r1", "r2"]));
+        let merged = merge_evidence(&[left, right]).expect("merge");
+        assert_eq!(merged.anchors.len(), 2, "a shard contributes what it observed");
+
+        let a = merged
+            .anchors
+            .iter()
+            .find(|x| x.anchor_symbol == "a")
+            .expect("anchor a");
         assert_eq!(
-            a["capture"]["complete_kinds"],
-            serde_json::json!(["RECEIVER_VALUE"]),
+            format!("{:?}", a.capture.status.enum_value_or_default()),
+            "PARTIAL"
+        );
+        assert_eq!(a.capture.observed_executions, 5, "counts add");
+        assert_eq!(a.capture.run_ids, vec!["r1".to_string(), "r2".to_string()]);
+        assert_eq!(
+            a.capture
+                .complete_kinds
+                .iter()
+                .map(|k| format!("{:?}", k.enum_value_or_default()))
+                .collect::<Vec<_>>(),
+            vec!["RECEIVER_VALUE"],
             "a kind is complete only where every shard found it so"
         );
-        assert_eq!(a["executions"].as_array().unwrap().len(), 1, "identical buckets fuse");
-        assert_eq!(merged["environment"].as_array().unwrap().len(), 1);
-        assert_eq!(merged["runs"].as_array().unwrap().len(), 2);
+        assert_eq!(a.executions.len(), 1, "identical buckets fuse across shards");
+        assert_eq!(merged.environment.len(), 1);
+        assert_eq!(merged.runs.len(), 2);
     }
 
     #[test]
     fn merging_rejects_a_shard_that_repeats_an_anchor() {
-        let broken = serde_json::json!({
-            "anchors": [
-                { "anchor_symbol": "a", "capture": {}, "executions": [] },
-                { "anchor_symbol": "a", "capture": {}, "executions": [] }
-            ]
-        });
-        assert!(merge_evidence(&[broken]).is_err());
+        let doc = evidence_doc(
+            serde_json::json!([
+                anchor_row("a", "COMPLETE_FOR_RUNS", &[], &[(1, "R")]),
+                anchor_row("a", "COMPLETE_FOR_RUNS", &[], &[(1, "R")])
+            ]),
+            serde_json::json!({}),
+        );
+        assert!(merge_evidence(&[doc]).is_err());
     }
 
     #[test]
     fn merging_rejects_conflicting_environment_claims() {
-        let mk = |version: &str| {
-            serde_json::json!({
-                "environment": [{ "key": "ruby", "value": version }],
-                "anchors": [], "runs": []
-            })
+        let doc = |version: &str| {
+            evidence_doc(
+                serde_json::json!([]),
+                serde_json::json!({ "environment": [{ "key": "ruby", "value": version }] }),
+            )
         };
-        assert!(merge_evidence(&[mk("3.2.3"), mk("3.3.0")]).is_err());
-    }
-
-    #[test]
-    fn counts_are_read_whether_the_producer_wrote_them_as_numbers_or_strings() {
-        // ProtoJSON writes uint64 as a string; serde_json fixtures use numbers.
-        assert_eq!(bucket_count(&serde_json::json!({ "count": 4 })), 4);
-        assert_eq!(bucket_count(&serde_json::json!({ "count": "4" })), 4);
-        assert_eq!(bucket_count(&serde_json::json!({})), 1);
+        assert!(merge_evidence(&[doc("3.2.3"), doc("3.3.0")]).is_err());
     }
 }

@@ -354,8 +354,10 @@ fn run() -> Result<()> {
                 let documents = joined
                     .iter()
                     .flatten()
-                    .map(|text| serde_json::from_str(text).context("joined evidence"))
-                    .collect::<Result<Vec<serde_json::Value>>>()?;
+                    .map(|text| {
+                        fact_mine_rust::runtime_protocol::parse_runtime_evidence_json(text)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
                 if timed {
                     eprintln!("  rust merge-parse    {:.2}s", mark.elapsed().as_secs_f64());
                 }
@@ -365,12 +367,9 @@ fn run() -> Result<()> {
                     eprintln!("  rust merge          {:.2}s", mark.elapsed().as_secs_f64());
                 }
                 let mark = std::time::Instant::now();
-                let canonical = fact_mine_rust::runtime_protocol::parse_runtime_evidence_json(
-                    &serde_json::to_string(&document)?,
-                )?;
                 fact_mine_rust::runtime_trace::write_json(
                     target,
-                    &fact_mine_rust::runtime_protocol::to_json_with_defaults(&canonical)?,
+                    &fact_mine_rust::runtime_protocol::to_json_with_defaults(&document)?,
                 )?;
                 if timed {
                     eprintln!("  rust canonical+write {:.2}s", mark.elapsed().as_secs_f64());
