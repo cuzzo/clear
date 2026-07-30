@@ -326,6 +326,12 @@ struct LoopContext {
     unknown: bool,
     symbolic_factors: BTreeMap<String, usize>,
     symbolic_complete: bool,
+    /// The power and size domains in force immediately outside the innermost
+    /// enclosing loop. A statement block that unconditionally leaves that loop
+    /// runs at most once no matter how many times the loop would otherwise
+    /// iterate, so its contents are priced against this context instead.
+    escape_power: usize,
+    escape_symbolic_factors: BTreeMap<String, usize>,
 }
 
 impl Default for LoopContext {
@@ -343,6 +349,8 @@ impl Default for LoopContext {
             unknown: false,
             symbolic_factors: BTreeMap::new(),
             symbolic_complete: true,
+            escape_power: 0,
+            escape_symbolic_factors: BTreeMap::new(),
         }
     }
 }
@@ -1171,6 +1179,53 @@ fn collect_allocations(
 }
 
 #[allow(clippy::too_many_arguments)] // Loop analysis requires the full immutable analysis context.
+/// A statement block that unconditionally leaves the enclosing loop executes at
+/// most once per loop entry, so its contents must not be multiplied by the
+/// loop's trip count. `return` escapes every enclosing loop and is priced at the
+/// function root; `break` escapes only the innermost one, so it reverts to the
+/// context recorded immediately outside it. `continue` is not an escape: the
+/// loop keeps iterating. A labelled break that leaves an outer loop is treated
+/// as leaving only the innermost, which overstates rather than understates.
+///
+/// Returns `None` when there is no loop power to drop, which also makes the
+/// rewritten context terminal: revisiting the same block cannot escape twice.
+fn loop_escaping_context(node: &Node, parent: &LoopContext) -> Option<LoopContext> {
+    if parent.power == 0 && parent.escape_power == 0 {
+        return None;
+    }
+    if !matches!(
+        node.r#type.as_str(),
+        "BLOCK" | "BEGIN" | "SCOPE" | "COMPOUND_STATEMENT" | "DECLARATION_LIST"
+    ) {
+        return None;
+    }
+    let escape = child_nodes(node).into_iter().find_map(|child| match child.r#type.as_str() {
+        "RETURN" => Some((0, BTreeMap::new())),
+        "BREAK" => Some((parent.escape_power, parent.escape_symbolic_factors.clone())),
+        _ => None,
+    })?;
+    let (power, symbolic_factors) = escape;
+    if power >= parent.power {
+        return None;
+    }
+    Some(LoopContext {
+        power,
+        symbolic_factors,
+        escape_power: power,
+        escape_symbolic_factors: BTreeMap::new(),
+        params: parent.params.clone(),
+        domain_names: parent.domain_names.clone(),
+        independent_collection_bindings: parent.independent_collection_bindings.clone(),
+        partition_locals: parent.partition_locals.clone(),
+        cursor: parent.cursor.clone(),
+        absorb_next: parent.absorb_next,
+        root_line: parent.root_line,
+        collapse_direct_child: parent.collapse_direct_child,
+        unknown: parent.unknown,
+        symbolic_complete: parent.symbolic_complete,
+    })
+}
+
 fn visit_loops(
     node: &Node,
     params: &BTreeSet<String>,
@@ -1549,6 +1604,8 @@ fn visit_loops(
             unknown: parent.unknown || unknown_iteration,
             symbolic_factors,
             symbolic_complete,
+            escape_power: parent.power,
+            escape_symbolic_factors: parent.symbolic_factors.clone(),
         };
         // Iterator receiver/control expressions are evaluated before the loop;
         // only the normalized body is loop-contained. Treating a chained
@@ -1603,6 +1660,32 @@ fn visit_loops(
                 domain_registry,
             );
         }
+    } else if let Some(escaped) = loop_escaping_context(node, parent) {
+        // This block ends by leaving the enclosing loop, so everything in it
+        // executes at most once per loop entry rather than once per iteration.
+        visit_loops(
+            node,
+            params,
+            assignments,
+            collection_mutations,
+            &escaped,
+            max_power,
+            evidence,
+            call_contexts,
+            block_invocations,
+            collection_growth,
+            parameter_types,
+            owner,
+            callback_params,
+            block_summaries,
+            state_types,
+            type_aliases,
+            type_names,
+            field_types,
+            language,
+            behavior,
+            domain_registry,
+        );
     } else {
         record_collection_growth(
             node,

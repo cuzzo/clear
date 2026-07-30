@@ -849,6 +849,70 @@ func plain() error {
 }
 
 #[test]
+fn a_loop_escaping_block_runs_once_not_once_per_iteration() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"package p
+
+import "strings"
+
+func earlyReturn(path string) string {
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		if part == "x" {
+			return strings.Join(parts[:i+1], "/")
+		}
+	}
+	return ""
+}
+
+func earlyBreak(path string) string {
+	parts := strings.Split(path, "/")
+	out := ""
+	for i, part := range parts {
+		if part == "x" {
+			out = strings.Join(parts[:i+1], "/")
+			break
+		}
+	}
+	return out
+}
+
+func everyIteration(path string) string {
+	parts := strings.Split(path, "/")
+	out := ""
+	for i, part := range parts {
+		if part == "x" {
+			out = strings.Join(parts[:i+1], "/")
+		}
+	}
+	return out
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let multiplicity = |function: &str| -> Vec<String> {
+        output
+            .complexity_facts
+            .iter()
+            .filter(|fact| fact.function == function)
+            .flat_map(|fact| fact.call_contexts.iter())
+            .filter(|context| context.message == "Join")
+            .map(|context| context.execution_multiplicity.clone())
+            .collect()
+    };
+    // The `Join` is guarded by a block that leaves the loop, so it runs at most
+    // once however many times the loop iterates. Only `everyIteration` pays the
+    // per-iteration price.
+    assert_eq!(multiplicity("earlyReturn"), vec!["O(1)".to_string()]);
+    assert_eq!(multiplicity("earlyBreak"), vec!["O(1)".to_string()]);
+    assert_eq!(multiplicity("everyIteration"), vec!["O(N)".to_string()]);
+    Ok(())
+}
+
+#[test]
 fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_csharp.cs"), Language::CSharp)?;
     let output = profile::extract(&document, Profile::NilKill);
