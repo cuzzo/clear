@@ -20,6 +20,17 @@ pub(super) fn parse(source: &str) -> TypeExpr {
             };
         }
     }
+    for prefix in ["Map<", "ReadonlyMap<"] {
+        if source.starts_with(prefix) && source.ends_with('>') {
+            let parts = split_top_level_params(&source[prefix.len()..source.len() - 1]);
+            if parts.len() == 2 {
+                return TypeExpr::Hash {
+                    key: Box::new(parse(&parts[0])),
+                    value: Box::new(parse(&parts[1])),
+                };
+            }
+        }
+    }
     if source.starts_with("Set<") && source.ends_with('>') {
         return TypeExpr::Set(Box::new(parse(&source["Set<".len()..source.len() - 1])));
     }

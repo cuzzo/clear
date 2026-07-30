@@ -1265,11 +1265,18 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         message: &str,
         operand_type: Option<&TypeExpr>,
     ) -> Option<NormalizedCallComplexity> {
-        const STRING_OPERATORS: &[&str] =
-            &["+", "+=", "==", "!=", "<", "<=", ">", ">=", "<=>"];
+        const STRING_OPERATORS: &[&str] = &[
+            "+", "+=", "==", "!=", "===", "!==", "<", "<=", ">", ">=", "<=>",
+        ];
         let operator = message.strip_suffix('@').unwrap_or(message);
         if !STRING_OPERATORS.contains(&operator) {
             return None;
+        }
+        // Comparing against nil is a tag check whatever the other operand is.
+        if matches!(operand_type, Some(TypeExpr::NilClass))
+            && matches!(operator, "==" | "!=" | "===" | "!==")
+        {
+            return Some(NormalizedCollectionOperation::Constant.complexity());
         }
         matches!(operand_type, Some(TypeExpr::Primitive(name)) if name.eq_ignore_ascii_case("string"))
             .then_some(NormalizedCollectionOperation::LinearScan.complexity())

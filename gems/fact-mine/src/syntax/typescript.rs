@@ -228,6 +228,29 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         rows
     }
 
+    fn literal_receiver_type(&self, node: &Node) -> Option<crate::type_inference::TypeExpr> {
+        match node.text.trim() {
+            "undefined" | "null" => Some(crate::type_inference::TypeExpr::NilClass),
+            _ => None,
+        }
+    }
+
+    fn scalar_operator_complexity(
+        &self,
+        message: &str,
+        operand_type: Option<&crate::type_inference::TypeExpr>,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        const SCALAR_TYPES: &[&str] = &["number", "boolean", "bigint", "symbol"];
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if !TYPESCRIPT_OPERATORS.contains(&operator) {
+            return None;
+        }
+        matches!(operand_type, Some(crate::type_inference::TypeExpr::Primitive(name)) if SCALAR_TYPES.contains(&name.as_str()))
+            .then_some(
+                super::normalized_behavior::NormalizedCollectionOperation::Constant.complexity(),
+            )
+    }
+
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
         super::normalized_behavior::type_after_local_colon(source, name)
             .or_else(|| typescript_literal_local_type(source, name))
@@ -1004,3 +1027,10 @@ fn typescript_literal_local_type(source: &str, name: &str) -> Option<String> {
     }
     None
 }
+
+/// TypeScript operators that reduce to a machine comparison or arithmetic on a
+/// primitive operand. Strict equality is included: it compares value and type
+/// without coercion.
+const TYPESCRIPT_OPERATORS: &[&str] = &[
+    "===", "!==", "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&&", "||", "!",
+];

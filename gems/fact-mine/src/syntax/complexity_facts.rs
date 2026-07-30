@@ -1815,7 +1815,7 @@ fn visit_loops(
                 // A proven operand type outranks the type-blind intrinsic table.
                 .or_else(|| {
                     let operand_type =
-                        operator_operand_type(node, parameter_types, state_types, field_types);
+                        operator_operand_type(node, parameter_types, state_types, field_types, behavior);
                     behavior
                         .scalar_operator_complexity(message, operand_type.as_ref())
                         .or_else(|| {
@@ -1842,7 +1842,7 @@ fn visit_loops(
                 })
                 .or_else(|| {
                     let operand_type =
-                        operator_operand_type(node, parameter_types, state_types, field_types);
+                        operator_operand_type(node, parameter_types, state_types, field_types, behavior);
                     behavior.scalar_operator_complexity(message, operand_type.as_ref())
                 });
             // No operand grows with the input, so a size-dependent bound
@@ -2485,16 +2485,28 @@ fn operator_operand_type(
     local_types: &BTreeMap<String, TypeExpr>,
     state_types: &BTreeMap<String, TypeExpr>,
     field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
+    behavior: &dyn NormalizedLanguageBehavior,
 ) -> Option<TypeExpr> {
-    let operand = node.children.iter().find_map(ast::node)?;
-    // A named local first; otherwise the operand expression itself, which
-    // resolves projections such as `xs[i].field`.
-    local_names(operand)
-        .into_iter()
-        .find_map(|name| local_types.get(&name).cloned())
-        .or_else(|| {
-            resolve_expr_type(operand.text.trim(), local_types, state_types, field_types)
-        })
+    let operands = child_nodes(node);
+    let resolve = |operand: &Node| {
+        local_names(operand)
+            .into_iter()
+            .find_map(|name| local_types.get(&name).cloned())
+            .or_else(|| {
+                resolve_expr_type(operand.text.trim(), local_types, state_types, field_types)
+            })
+            .or_else(|| behavior.literal_receiver_type(operand))
+    };
+    // The governing operand decides dispatch, so only it prices the operator.
+    // A later operand counts only when it is nil: comparing against nil is a
+    // tag check whatever the other side turns out to be.
+    operands.first().copied().and_then(resolve).or_else(|| {
+        operands
+            .iter()
+            .skip(1)
+            .filter_map(|operand| resolve(operand))
+            .find(|resolved| matches!(resolved, TypeExpr::NilClass))
+    })
 }
 
 /// Rust bindings have invariant types. A complete singleton DFG type for a

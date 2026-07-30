@@ -25,6 +25,27 @@ class BigOLocalTypesTest < Minitest::Test
     assert_equal false, metrics[:big_o_complete]
   end
 
+  # With the declared types in hand nothing here is a mystery, so none of these
+  # may fall back to incomplete.
+  TYPED = {
+    "typed.cs" => { "SumLengths" => "O(N)", "Has" => "O(N)" },
+    "typed.ts" => { "sumLengths" => "O(N)", "lookup" => "O(N)" }
+  }.freeze
+
+  def test_declared_types_leave_nothing_unpriced
+    TYPED.each do |file, expected|
+      evidence = Espalier::StaticEvidence.build([File.join(ROOT, file)], root: ROOT)
+      manifest = Espalier::Aggregator.new.aggregate(Espalier::StaticEvidence.project_modules(evidence))
+      functions = manifest.flat_map { |owner| owner.fetch(:functions) }
+      functions.each do |function|
+        metrics = function.fetch(:quality_metrics)
+        assert_equal true, metrics[:big_o_complete], "#{file}:#{function.fetch(:name)}"
+      end
+      actual = functions.to_h { |fn| [fn.fetch(:name), fn.fetch(:quality_metrics).fetch(:big_o)] }
+      expected.each { |name, bound| assert_equal bound, actual[name], "#{file}:#{name}" }
+    end
+  end
+
   def test_string_accumulation_is_quadratic
     EXPECTED.each do |file, (function, bound)|
       evidence = Espalier::StaticEvidence.build([File.join(ROOT, file)], root: ROOT)
