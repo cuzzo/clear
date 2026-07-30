@@ -103,6 +103,7 @@ module NilKillRuntimeTrace
   end
   @path_cache = {}
   @target_cache = {}
+  @rel_cache = {}
   # Per-(path,line) memo of the constant-per-callsite context (abs,
   # plan, bucket, site prefix, method-id string). The wrapper injects
   # owner/method_id/kind/__FILE__/line as LITERALS, so all of this is
@@ -2252,6 +2253,20 @@ module NilKillRuntimeTrace
     @coverage_line_map = {}
   end
 
+  # Root-relative form of a raw trace path. A pure function of the string that
+  # every :line event needs, so it is cached alongside @path_cache. Building
+  # two Pathnames per line event dominated collection wall time.
+  def self.rel_path(path)
+    raw = path.to_s
+    return @rel_cache[raw] if @rel_cache.key?(raw)
+
+    @rel_cache[raw] = begin
+      Pathname.new(abs_path(raw)).relative_path_from(Pathname.new(ROOT)).to_s
+    rescue StandardError
+      nil
+    end
+  end
+
   # Translate an INSTRUMENTED runtime line number back to its src line
   # via .nk-linemap.json. Any runtime hook that keys off the caller's
   # lineno (T.let, ...) is otherwise wrong under source instrumentation:
@@ -2261,7 +2276,7 @@ module NilKillRuntimeTrace
   # literal; line-keyed hooks need this translation. Identity when the
   # file was not instrumented (no map entry).
   def self.src_line(path, lineno)
-    rel = Pathname.new(abs_path(path)).relative_path_from(Pathname.new(ROOT)).to_s rescue nil
+    rel = rel_path(path)
     per_file = rel && coverage_line_map[rel]
     (per_file && (per_file[lineno] || per_file[lineno.to_s])) || lineno
   end

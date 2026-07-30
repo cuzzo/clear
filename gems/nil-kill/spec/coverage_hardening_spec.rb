@@ -1192,12 +1192,14 @@ RSpec.describe "NilKill coverage hardening" do
       allow(described_class).to receive(:runtime_scip_captures_for).and_return([true, false, false])
 
       described_class.record_runtime_scip_line(FakeTracePoint.new(path: target_file, lineno: 1))
-      expect(native_calls).to have_received(:enable).once
+      expect(described_class.instance_variable_get(:@runtime_scip_native_call_armed))
+        .to be(true)
 
       described_class.record_runtime_scip_line(
         FakeTracePoint.new(path: "/dependency/runtime.rb", lineno: 1)
       )
-      expect(native_calls).to have_received(:disable).once
+      expect(described_class.instance_variable_get(:@runtime_scip_native_call_armed))
+        .to be(false)
     ensure
       FileUtils.rm_f(target_file) if defined?(target_file)
     end
@@ -1237,7 +1239,8 @@ RSpec.describe "NilKill coverage hardening" do
         FakeTracePoint.new(event: :return, path: target_file, return_value: true)
       )
 
-      expect(native_calls).to have_received(:enable).once
+      expect(described_class.instance_variable_get(:@runtime_scip_native_call_armed))
+        .to be(true)
       expect(described_class.instance_variable_get(:@runtime_scip_native_selector_filter))
         .to eq(["empty?"])
     ensure
@@ -1281,7 +1284,8 @@ RSpec.describe "NilKill coverage hardening" do
         self_value: { "rows" => [] }
       ))
 
-      expect(native_calls).to have_received(:enable).once
+      expect(described_class.instance_variable_get(:@runtime_scip_native_call_armed))
+        .to be(true)
       expect(described_class).to have_received(:runtime_scip_native_callsite).once
       expect(described_class).not_to have_received(:record_runtime_scip_call)
     ensure
@@ -1380,7 +1384,8 @@ RSpec.describe "NilKill coverage hardening" do
       expect(frames.length).to eq(1)
       expect(described_class).to have_received(:record_runtime_scip_result)
         .with(:external_call, "rendered").once
-      expect(native_calls).to have_received(:enable).once
+      expect(described_class.instance_variable_get(:@runtime_scip_native_call_armed))
+        .to be(true)
     ensure
       FileUtils.rm_f(target_file) if defined?(target_file)
     end

@@ -93,6 +93,14 @@ module NilKillRuntimeTrace
   def self.record_runtime_anchor_result(symbol, value)
     return value if Thread.current[:__nil_kill_collection_hook]
 
+    # Value-domain derivation is itself made of native calls. Run it inside the
+    # native re-entrancy window so the :c_call/:c_return listeners reject the
+    # collector's own observation work instead of tracing it.
+    inside_native_hook { record_runtime_anchor_result!(symbol, value) }
+    value
+  end
+
+  def self.record_runtime_anchor_result!(symbol, value)
     observed = runtime_value_domain(value)
     return value if runtime_value_domain_empty?(observed)
 
@@ -258,14 +266,12 @@ module NilKillRuntimeTrace
     if @runtime_scip_native_call_armed && !frame
       @runtime_scip_native_call_armed = false
       @runtime_scip_native_selector_filter = nil
-      runtime_scip_native_call_trace.disable
     end
     # A prior line can arm result capture without executing a native call.
     # Its window ends at the next Ruby line event, unless a native call is
     # still suspended across a yielding callback.
     if @runtime_scip_native_result_armed && !@runtime_scip_native_result_depth.to_i.positive?
       @runtime_scip_native_result_armed = false
-      runtime_scip_native_result_trace.disable
     end
     return unless frame
 
@@ -289,23 +295,23 @@ module NilKillRuntimeTrace
        !activate_native_calls &&
        !@runtime_scip_native_result_depth.to_i.positive?
       @runtime_scip_native_call_armed = false
-      runtime_scip_native_call_trace.disable
     elsif activate_native_calls && !@runtime_scip_native_call_armed
       # Native calls expose their caller location, but Ruby offers no
-      # target-filtered C-call TracePoint. Scope the expensive listener to the
-      # interval after a selected-source line and disable it at the very next
-      # Ruby line, including a line in a dependency entered by that source.
+      # target-filtered C-call TracePoint. The listener is enabled once for the
+      # whole process and this flag scopes ACCEPTANCE to the interval after a
+      # selected-source line, ending at the very next Ruby line -- including a
+      # line in a dependency entered by that source. Toggling TracePoint#enable
+      # per callsite instead rewalks every loaded iseq and dominated collection
+      # wall time.
       @runtime_scip_native_call_armed = true
-      runtime_scip_native_call_trace.enable
     end
     _capture_call, capture_result, _receiver_shape = runtime_scip_captures_for(callsite)
     return unless capture_result && runtime_scip_native_calls_enabled?
 
-    # Enable c_return before the requested c_call starts. Enabling it from
-    # inside c_call can expose a VM housekeeping return that has no matching
-    # c_call frame, corrupting the requested result.
+    # Arm result acceptance before the requested c_call starts, so a VM
+    # housekeeping return with no matching c_call frame can never be mistaken
+    # for the requested result.
     @runtime_scip_native_result_armed = true
-    runtime_scip_native_result_trace.enable
   end
 
   def self.enter_runtime_scip_ruby_call(tp, selected_target: nil)
@@ -564,12 +570,6 @@ module NilKillRuntimeTrace
     return unless capture_result
 
     @runtime_scip_native_result_depth = @runtime_scip_native_result_depth.to_i + 1
-    # Keep a line-armed trace alive until the next line event. That covers
-    # multiple requested native calls on one source line without re-enabling
-    # c_return from inside a later c_call.
-    unless @runtime_scip_native_result_armed
-      runtime_scip_native_result_trace.enable
-    end
   end
 
   def self.leave_runtime_scip_native_call(tp)
@@ -593,20 +593,27 @@ module NilKillRuntimeTrace
     return unless frame[:capture_result]
 
     @runtime_scip_native_result_depth -= 1
-    if !@runtime_scip_native_result_depth.positive? && !@runtime_scip_native_result_armed
-      runtime_scip_native_result_trace.disable
-    end
   end
 
   def self.runtime_scip_native_result_trace
     @runtime_scip_native_result_trace ||= TracePoint.new(:c_return) do |trace|
-      leave_runtime_scip_native_call(trace)
+      next unless @runtime_scip_native_result_armed ||
+        @runtime_scip_native_result_depth.to_i.positive?
+      # Ruby suppresses re-entry into the SAME TracePoint's handler only. The
+      # :c_call, :c_return, and :line/:call listeners are distinct objects, so
+      # without this flag each handler's own native calls fire the other two.
+      next if Thread.current[:__nk_in_native_hook]
+
+      inside_native_hook { leave_runtime_scip_native_call(trace) }
     end
   end
 
   def self.runtime_scip_native_call_trace
     @runtime_scip_native_call_trace ||= TracePoint.new(:c_call) do |trace|
-      enter_runtime_scip_native_call(trace)
+      next unless @runtime_scip_native_call_armed
+      next if Thread.current[:__nk_in_native_hook]
+
+      inside_native_hook { enter_runtime_scip_native_call(trace) }
     end
   end
 
@@ -654,6 +661,18 @@ module NilKillRuntimeTrace
 
   # Ruby-level call tracing remains useful for project and gem dispatch while
   # this switch gives the feedback loop an explicit, measurable fast tier.
+  # Re-entrancy window for the native listeners. Ruby suppresses re-entry into
+  # the SAME TracePoint's handler only; :c_call and :c_return are distinct
+  # objects, so each handler's own native calls would fire the other. This flag
+  # is deliberately NOT the collection hook, which the recorders read as
+  # "do not record".
+  def self.inside_native_hook
+    Thread.current[:__nk_in_native_hook] = true
+    yield
+  ensure
+    Thread.current[:__nk_in_native_hook] = nil
+  end
+
   # A full collect keeps native calls enabled by default; callers that only
   # need to validate a FactMine/NilKill join can opt out of the expensive VM
   # C-call events without changing any source-language analysis.
@@ -1413,6 +1432,13 @@ module NilKillRuntimeTrace
   end
 
   def self.install_runtime_scip_trace
+    if runtime_scip_native_calls_enabled?
+      # Enable once. Acceptance is gated by @runtime_scip_native_*_armed, a
+      # plain flag read; TracePoint#enable/#disable rewalks every loaded iseq
+      # and must never appear on a per-line or per-callsite path.
+      runtime_scip_native_call_trace.enable
+      runtime_scip_native_result_trace.enable
+    end
     TracePoint.new(:line, :call, :return, :raise) do |trace|
       thread_id = Thread.current.object_id
       frames = @runtime_scip_frames[thread_id]
