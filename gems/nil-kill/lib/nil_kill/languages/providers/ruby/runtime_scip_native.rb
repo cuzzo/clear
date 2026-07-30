@@ -20,8 +20,13 @@ module NilKillRuntimeTrace
     end
   end
 
-  def self.native_scip_requested?
-    ENV["NIL_KILL_NATIVE_SCIP"] == "1" && native_scip_available?
+  # The collector has no Ruby fallback any more, so a missing extension is a
+  # broken install rather than a slower mode to degrade into.
+  def self.require_native_scip!
+    return if native_scip_available?
+
+    abort "nil-kill: the native trace extension is not built. Run " \
+      "`ruby extconf.rb && make` in #{NATIVE_SCIP_EXT}."
   end
 
   # "<abs path>\1<line>\1<selector>" => every anchor symbol the plan requests at
@@ -188,6 +193,7 @@ module NilKillRuntimeTrace
   end
 
   def self.install_native_runtime_scip_trace
+    require_native_scip!
     NilKillTraceNative.value_domain_owner = self
     NilKillTraceNative.configure(
       Array(TARGETS).map(&:to_s), native_scip_demand_map, native_scip_state_demand_map
@@ -388,30 +394,21 @@ module NilKillRuntimeTrace
     end
   end
 
-  # A call record already names both endpoints, so the caller->callee edge list
-  # is a projection of what was observed rather than a second observation. Only
-  # edges into analyzed source are edges between two known functions; a call
-  # into a dependency has no callee declaration to join.
+  # An edge is a fact about the call graph, not evidence about a requested
+  # value, so it is recorded for every call between two analyzed methods rather
+  # than only for callsites the plan demanded. Both endpoints are function
+  # entries, so their owner and name are read back from those.
   def self.native_scip_method_edge_rows
-    NilKillTraceNative.records.filter_map do |row|
-      caller = row.fetch(:caller)
-      callee = row.fetch(:callee)
-      path = native_scip_definition_path(callee[:path])
-      next unless caller[:path] && caller[:class] && path && callee[:owner]
-      next unless target_path?(path)
+    entries = NilKillTraceNative.function_entries.to_h do |path, owner, name, line, _count|
+      [[path, line], { class: owner, method: name, kind: "instance", path: path, line: line }]
+    end
+    NilKillTraceNative.method_edges.filter_map do |caller_path, caller_line, callee_path, callee_line, calls|
+      from = entries[[caller_path, caller_line]]
+      to = entries[[callee_path, callee_line]]
+      next unless from && to
 
-      [caller, callee, path, row.fetch(:count)]
-    end.group_by { |caller, callee, path, _| [caller.values_at(:class, :method, :kind, :path, :line),
-                                              [callee[:owner], callee[:name], callee[:kind], path,
-                                               callee[:line]]] }
-      .map do |(caller_key, callee_key), rows|
-        calls = rows.sum { |row| row.fetch(3) }
-        {
-          caller: %i[class method kind path line].zip(caller_key).to_h,
-          callee: %i[class method kind path line].zip(callee_key).to_h,
-          calls: calls, ok_calls: calls, raised_calls: 0,
-        }
-      end
+      { caller: from, callee: to, calls: calls, ok_calls: calls, raised_calls: 0 }
+    end
   end
 
   def self.dump_native_runtime_scip(pid)

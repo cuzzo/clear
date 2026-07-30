@@ -8,9 +8,9 @@ module NilKill
     end
 
     def run
-      # Self-heal first: if a prior `collect` crashed mid-instrumentation
-      # src/ is still wrapped. Restore pristine bytes BEFORE any guard or
-      # subcommand reads src (a stale wrapped tree poisons everything).
+      # A collect from before source rewriting was removed may have crashed and
+      # left src/ wrapped. Restoring is cheap and unconditional, and a tree that
+      # was never wrapped is untouched.
       NilKill.ensure_src_restored!
       command = @argv.shift
       case command
@@ -153,8 +153,11 @@ module NilKill
       fast = @argv.delete("--fast")
       append = @argv.delete("--append-runtime")
       abort "nil-kill: --fast and --append-runtime cannot be combined" if fast && append
-      instrument_source = !@argv.delete("--no-instrument-source")
-      instrument_source = true if @argv.delete("--instrument-source")
+      # Source rewriting is gone: the collector observes the running program
+      # directly. The flags are still accepted so an existing invocation does
+      # not break, but neither of them changes what happens.
+      @argv.delete("--no-instrument-source")
+      @argv.delete("--instrument-source")
       commands = collect_commands
       if commands.empty? && !fast
         abort "usage: bundle exec tools/nil-kill collect [--fast] [--commands FILE] [--continue-on-error] -- <command...>"
@@ -228,15 +231,6 @@ module NilKill
       )
       FileUtils.rm_rf(working_runtime_dir)
       FileUtils.mkdir_p(working_runtime_dir)
-      snapshot_dir = File.join(working_runtime_dir, "src-snapshot")
-      instrumented = instrument_source && selected.any?
-      if instrumented
-        acquire_inplace_lock!
-        NilKill.write_inplace_sentinel!(snapshot_dir, target_files.map { |f| NilKill.rel(f) })
-        install_inplace_restore_traps!
-        SourceInstrumenter.new(runtime_dir: working_runtime_dir)
-          .run_in_place(snapshot_dir, files: target_files)
-      end
       require "etc"
       jobs = ENV["NK_JOBS"] || ENV["NIL_KILL_JOBS"] || Etc.nprocessors.to_s rescue "4"
       shard_jobs = ENV.fetch(
@@ -267,7 +261,6 @@ module NilKill
         "NK_JOBS" => ENV["NK_JOBS"] || default_inner_jobs,
         "NIL_KILL_JOBS" => ENV["NIL_KILL_JOBS"] || default_inner_jobs
       )
-      base_env["NIL_KILL_TRACE_METHODS"] ||= "0" if instrumented && trace_plan_enabled
       continue = @argv.delete("--continue-on-error")
       dependency_updates = {}
       callsite_updates = {}
@@ -315,8 +308,6 @@ module NilKill
             end
           end
         end.each(&:join)
-      ensure
-        NilKill.restore_inplace_snapshot! if instrumented
       end
       if failed_shards.any?
         snapshot&.mark_stale!(
@@ -413,29 +404,6 @@ module NilKill
           "#{selection.fetch("changed_functions").length} changed functions, " \
           "#{selection.fetch("changed_tests").length} changed tests, " \
           "#{selected.length} traced shards"
-      end
-    end
-
-    # A second concurrent `collect` would race in-place writes against
-    # this one and corrupt src/. flock auto-releases on process exit.
-    def acquire_inplace_lock!
-      FileUtils.mkdir_p(RUNTIME_DIR)
-      @collect_lock = File.open(File.join(RUNTIME_DIR, ".nk-collect.lock"), File::RDWR | File::CREAT, 0o644)
-      return if @collect_lock.flock(File::LOCK_EX | File::LOCK_NB)
-      abort "nil-kill: another `collect` is already running (in-place src instrumentation is exclusive). " \
-        "Wait for it to finish or kill it; src/ will self-heal on the next nil-kill run."
-    end
-
-    # Restore pristine src on INT/TERM/HUP too (the ensure covers normal
-    # exit and `exit`/raises; signals would otherwise leave src wrapped
-    # until the next run's ensure_src_restored!). `prev` is block-local
-    # per iteration, so the three traps don't clobber each other.
-    def install_inplace_restore_traps!
-      %w[INT TERM HUP].each do |sig|
-        Signal.trap(sig) do
-          NilKill.restore_inplace_snapshot!
-          exit(false)
-        end
       end
     end
 
@@ -613,8 +581,6 @@ module NilKill
           bundle exec tools/nil-kill collect --cmd "bundle exec rspec" --cmd "./clear test transpile-tests"
           bundle exec tools/nil-kill collect --glob "lib/**/*.rb" --template "ruby {file}"
           bundle exec tools/nil-kill collect --append-runtime --commands more-runtime-commands.txt
-          bundle exec tools/nil-kill collect --instrument-source -- <command...>
-          bundle exec tools/nil-kill collect --no-instrument-source -- <command...>
           bundle exec tools/nil-kill infer [--no-sorbet]
           bundle exec tools/nil-kill static [--root DIR] [--language ruby|python|typescript|rust|zig] [--vcs git] [--source-role production|test|benchmark|example|generated|vendored|vcs_metadata|all] [--output static.json] [targets...]
           bundle exec tools/nil-kill collect-runtime --language python [--target src] [--output traces/] -- <python test command...>

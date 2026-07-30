@@ -37,6 +37,14 @@ typedef struct {
     // That nil is the absence of a result, not a result, so it must not be
     // recorded as one.
     int raised;
+    // The file this frame's own method lives in, and its last line there. A
+    // block defined elsewhere can run on this frame -- `Hash.new { |h, k| ... }`
+    // executes its caller's block during a lookup made here -- and execution
+    // resumes mid-expression afterwards, so no :line event puts the coordinate
+    // back. Without this every later call on that line is attributed to the
+    // block's file and dropped.
+    ID home_path;
+    int home_line;
 } frame_t;
 
 // A c_return does not always report the same coordinate as its c_call, so the
@@ -95,6 +103,10 @@ static st_table *entries;        // path -> line -> owner -> name -> count
 static st_table *state_demand;   // path -> line -> demanded state write
 static st_table *states;         // path -> line -> owner -> name -> state_record_t*
 static st_table *state_owners;   // class identity -> reportable owner name, 0 = skip
+// caller path -> caller def line -> callee path -> callee def line -> count.
+// Both endpoints are function entries, so their owner and name are read back
+// from `entries` at export instead of being stored a second time.
+static st_table *edges;
 static VALUE roots_ary;          // analyzed-source path prefixes
 static VALUE domains_ary;        // Ruby domain Hashes, referenced by index
 static VALUE tracepoint;
@@ -614,6 +626,7 @@ static void on_event(VALUE tpval, void *_unused) {
         frame->path = id;
         frame->line = NUM2INT(rb_tracearg_lineno(arg));
         frame->analyzed = 1;
+        if (id == frame->home_path) frame->home_line = frame->line;
         // Execution resumed in this frame, so whatever was raised was handled
         // here and the frame will return a real value after all.
         frame->raised = 0;
@@ -639,8 +652,9 @@ static void on_event(VALUE tpval, void *_unused) {
         // The callsite lives in the caller, so a project-internal callee is
         // observed exactly like a dependency one.
         call_record_t *observed = NULL;
-        if (state->depth > 0) {
-            observed = observed_record(&state->frames[state->depth - 1], arg, 0, 1);
+        frame_t *caller = state->depth > 0 ? &state->frames[state->depth - 1] : NULL;
+        if (caller) {
+            observed = observed_record(caller, arg, 0, 1);
             if (observed) record_receiver(observed, rb_tracearg_self(arg));
         }
         frame_t *frame = &state->frames[state->depth++];
@@ -658,12 +672,23 @@ static void on_event(VALUE tpval, void *_unused) {
             frame->caller_line = NUM2INT(rb_tracearg_lineno(arg));
             frame->path = frame->caller_path;
             frame->line = frame->caller_line;
+            frame->home_path = frame->caller_path;
+            frame->home_line = frame->caller_line;
             observe_parameters(frame, arg);
             if (frame->caller_class && frame->caller_method) {
                 st_table *by_line = nested(entries, (st_data_t)frame->caller_path);
                 st_table *by_owner = nested(by_line, (st_data_t)frame->caller_line);
                 st_table *by_name = nested(by_owner, (st_data_t)frame->caller_class);
                 bump(by_name, (st_data_t)frame->caller_method);
+                // A call between two analyzed methods is a call-graph fact, not
+                // evidence about a requested value, so it is recorded whatever
+                // the plan asked for.
+                if (caller && caller->caller_path && caller->caller_class) {
+                    st_table *e1 = nested(edges, (st_data_t)caller->caller_path);
+                    st_table *e2 = nested(e1, (st_data_t)caller->caller_line);
+                    st_table *e3 = nested(e2, (st_data_t)frame->caller_path);
+                    bump(e3, (st_data_t)frame->caller_line);
+                }
             }
         }
         return;
@@ -701,6 +726,13 @@ static void on_event(VALUE tpval, void *_unused) {
         thread_state_t *state = current_state();
         state->last_block_value = rb_tracearg_return_value(arg);
         state->last_event_was_block_return = 1;
+        if (state->depth > 0) {
+            frame_t *frame = &state->frames[state->depth - 1];
+            if (frame->home_path && frame->path != frame->home_path) {
+                frame->path = frame->home_path;
+                frame->line = frame->home_line;
+            }
+        }
         return;
       }
       case RUBY_EVENT_RAISE: {
@@ -976,6 +1008,46 @@ static int emit_state_path(st_data_t path, st_data_t table, st_data_t _x) {
     return ST_CONTINUE;
 }
 
+static ID edge_k1, edge_k3;
+static int edge_k2;
+
+static int emit_edge_leaf(st_data_t line, st_data_t count, st_data_t _x) {
+    VALUE row = rb_ary_new_capa(5);
+    rb_ary_push(row, id_or_nil(edge_k1));
+    rb_ary_push(row, INT2NUM(edge_k2));
+    rb_ary_push(row, id_or_nil(edge_k3));
+    rb_ary_push(row, INT2NUM((int)line));
+    rb_ary_push(row, ULONG2NUM((unsigned long)count));
+    rb_ary_push(tally_out, row);
+    return ST_CONTINUE;
+}
+
+static int emit_edge_callee_path(st_data_t path, st_data_t table, st_data_t _x) {
+    edge_k3 = (ID)path;
+    st_foreach((st_table *)table, emit_edge_leaf, 0);
+    return ST_CONTINUE;
+}
+
+static int emit_edge_caller_line(st_data_t line, st_data_t table, st_data_t _x) {
+    edge_k2 = (int)line;
+    st_foreach((st_table *)table, emit_edge_callee_path, 0);
+    return ST_CONTINUE;
+}
+
+static int emit_edge_caller_path(st_data_t path, st_data_t table, st_data_t _x) {
+    edge_k1 = (ID)path;
+    st_foreach((st_table *)table, emit_edge_caller_line, 0);
+    return ST_CONTINUE;
+}
+
+static VALUE nk_method_edges(VALUE self) {
+    tally_out = rb_ary_new();
+    st_foreach(edges, emit_edge_caller_path, 0);
+    VALUE rows = tally_out;
+    tally_out = Qnil;
+    return rows;
+}
+
 static VALUE nk_state_values(VALUE self) {
     tally_out = rb_ary_new();
     st_foreach(states, emit_state_path, 0);
@@ -1093,6 +1165,7 @@ void Init_nil_kill_trace(void) {
     rb_define_singleton_method(mod, "executed_callsites", nk_executed_callsites, 0);
     rb_define_singleton_method(mod, "function_entries", nk_function_entries, 0);
     rb_define_singleton_method(mod, "state_values", nk_state_values, 0);
+    rb_define_singleton_method(mod, "method_edges", nk_method_edges, 0);
     rb_define_singleton_method(mod, "stats", nk_stats, 0);
     rb_define_singleton_method(mod, "reset", nk_reset, 0);
     rb_define_singleton_method(mod, "value_domain_owner=", nk_set_owner, 1);
@@ -1106,6 +1179,7 @@ void Init_nil_kill_trace(void) {
     callsite_hits = st_init_numtable();
     entries = st_init_numtable();
     state_demand = st_init_numtable();
+    edges = st_init_numtable();
     states = st_init_numtable();
     state_owners = st_init_numtable();
     tally_out = Qnil;

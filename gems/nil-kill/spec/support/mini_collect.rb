@@ -27,26 +27,23 @@ module MiniCollect
     p
   end
 
-  # Instrument `dir` IN PLACE, run `driver_src` under the tracer with
-  # NIL_KILL_TARGETS=dir and NO instrumented-root redirect. The child's
-  # NIL_KILL_TMP_DIR is the spec's per-example TMP_DIR so the linemap
-  # (written by run_in_place to RUNTIME_DIR) and the trace plan are the
-  # same files the child reads. Returns runtime records + Coverage.
-  # instrument: false is the NEGATIVE CONTROL -- skip in-place wrapping
-  # so the tracer's source-wrap recorder never fires while Ruby
-  # Coverage still marks bodies executed. The invariant MUST then fail
-  # (proving it has teeth, not vacuously green).
-  def mini_collect(dir, lib_rel, driver_src, extra_files: {}, instrument: true, runtime_scip: false, trace_plan_patch: nil, targets: dir)
+  # Run `driver_src` under the tracer with NIL_KILL_TARGETS=dir. The child's
+  # NIL_KILL_TMP_DIR is the spec's per-example TMP_DIR so the trace plan is the
+  # same file the child reads. Returns runtime records + Coverage. Source is
+  # executed exactly as written; the collector observes the running program.
+  # collector: false is the NEGATIVE CONTROL -- run the workload with Ruby
+  # Coverage marking bodies executed but the observer never installed, so no
+  # record is produced for anything. The guarantee MUST then fail loudly,
+  # proving it has teeth rather than being vacuously green.
+  def mini_collect(dir, lib_rel, driver_src, extra_files: {}, runtime_scip: false, collector: true, trace_plan_patch: nil, targets: dir)
     FileUtils.mkdir_p(NilKill::RUNTIME_DIR)
-    snapshot = File.join(NilKill::TMP_DIR, "src-snapshot")
-    isolated_env("NIL_KILL_TARGETS" => targets, "NIL_KILL_INSTRUMENTED_ROOT" => nil) do
+    isolated_env("NIL_KILL_TARGETS" => targets) do
       NilKill::TracePlan.write(NilKill::TRACE_PLAN_PATH)
       if trace_plan_patch
         plan = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH))
         trace_plan_patch.call(plan)
         File.write(NilKill::TRACE_PLAN_PATH, JSON.generate(plan))
       end
-      NilKill::SourceInstrumenter.new.run_in_place(snapshot) if instrument
     end
     extra_files.each do |rel, body|
       p = File.join(dir, rel)
@@ -57,8 +54,9 @@ module MiniCollect
     File.write(driver, driver_src)
     env = {
       "NIL_KILL_TRACE" => "1",
-      "NIL_KILL_TRACE_METHODS" => "0",
-      "NIL_KILL_RUNTIME_SCIP" => runtime_scip ? "1" : nil,
+      # The native collector is the only tier, so it is always installed; the
+      # keyword now only selects whether the SCIP artifacts are also read back.
+      "NIL_KILL_RUNTIME_SCIP" => collector ? "1" : nil,
       "NIL_KILL_TMP_DIR" => NilKill::TMP_DIR,
       "NIL_KILL_TARGETS" => targets,
       "RUBYOPT" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "-r#{SUBPROCESS_COVERAGE} -r#{TRACER}" : "-r#{TRACER}",
@@ -98,8 +96,8 @@ module MiniCollect
   # mini_collect + the real in-process Infer/Report tail (no Sorbet:
   # fast + offline). Returns the collect result plus :evidence (parsed
   # evidence.json), :report (a NilKill::Report) and :report_md.
-  def full_collect(dir, driver_src, extra_files: {}, instrument: true)
-    r = mini_collect(dir, "lib.rb", driver_src, extra_files: extra_files, instrument: instrument)
+  def full_collect(dir, driver_src, extra_files: {}, collector: true)
+    r = mini_collect(dir, "lib.rb", driver_src, extra_files: extra_files, collector: collector)
     isolated_env("NIL_KILL_TARGETS" => dir, "NIL_KILL_INSTRUMENTED_ROOT" => nil) do
       capture_stdout { NilKill::Infer.new(["--no-sorbet"]).run }
     end

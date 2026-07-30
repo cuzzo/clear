@@ -1416,10 +1416,8 @@ module NilKillRuntimeTrace
           decision = false
           if NilKillRuntimeTrace.target_path?(raw)
             path = File.expand_path(raw, ROOT)
-            # Under source instrumentation loc.lineno is the shifted
-            # instrumented line; the plan is keyed by the real src line.
-            src_ln = NilKillRuntimeTrace.src_line(raw, loc.lineno)
-            decision = [path, src_ln].freeze if NilKillRuntimeTrace.sample_tlet?(path, src_ln)
+            decision = [path, loc.lineno].freeze if
+              NilKillRuntimeTrace.sample_tlet?(path, loc.lineno)
           end
           NilKillRuntimeTrace.store_tlet_site_decision(by_line, loc.lineno, decision)
         end
@@ -1732,6 +1730,7 @@ module NilKillRuntimeTrace
     end
     Array.prepend(wrapper)
     register_collection_wrapper_targets(Array, wrapper)
+    register_collection_wrapper_targets(Array, wrapper)
     %i[<< push append unshift []= concat].each do |method_id|
       register_runtime_scip_transparent_wrapper(
         wrapper,
@@ -1788,6 +1787,7 @@ module NilKillRuntimeTrace
     end
     Hash.prepend(wrapper)
     register_collection_wrapper_targets(Hash, wrapper)
+    register_collection_wrapper_targets(Hash, wrapper)
     %i[[]= store merge! update].each do |method_id|
       register_runtime_scip_transparent_wrapper(
         wrapper,
@@ -1833,6 +1833,7 @@ module NilKillRuntimeTrace
       end
     end
     Set.prepend(wrapper)
+    register_collection_wrapper_targets(Set, wrapper)
     register_collection_wrapper_targets(Set, wrapper)
     %i[add << merge].each do |method_id|
       path, line = original_locations.fetch(method_id)
@@ -2017,36 +2018,6 @@ module NilKillRuntimeTrace
     record_struct_field(shim, klass_name, field, value)
   end
 
-  def self.record_ivar_assignment(receiver, name, value, path, line)
-    abs = File.expand_path(path, ROOT)
-    if target_path?(abs)
-      cls = safe_module_name(receiver.class)
-      return value if cls && !sample_state_field?(cls, name)
-
-      with_collection_hooks_disabled do
-        @lock.synchronize do
-          register_collection_owner(value, owner_kind: "ivar", name: name.to_s, path: abs, line: line)
-          # Per-(declaring class, ivar) runtime class set. An accessor
-          # contract like `.type_info` is backed by `@type_info`; the
-          # Union Decomplexity report joins this to attribute the
-          # producer types feeding its is_a?(Type) guards.
-          if cls
-            rec = (@ivar_runtime[[cls, name.to_s]] ||= { calls: 0, classes: NKSet.new })
-            rec[:calls] += 1
-            rec[:classes] << class_name(value)
-            state = (
-              @runtime_state_values[[abs, line.to_i, cls, name.to_s.sub(/\A@/, "")]] ||=
-                { calls: 0, classes: NKSet.new }
-            )
-            state[:calls] += 1
-            state[:classes] << class_name(value)
-          end
-        end
-      end
-    end
-    value
-  end
-
   def self.record_struct_field(klass, klass_name, field, value)
     path = klass.instance_variable_get(:@__nil_kill_struct_path)
     line = klass.instance_variable_get(:@__nil_kill_struct_line)
@@ -2094,6 +2065,22 @@ module NilKillRuntimeTrace
 
   def self.dump_hash_counts(counts)
     counts.transform_values(&:to_h)
+  end
+
+  # A mutation wrapper is prepended to the real container class, so the VM
+  # reports the wrapper module -- which is NilKill's own code -- as the callee.
+  # Record the method it stands in for, exactly as generated record accessors
+  # do, so the observation keeps the container's identity.
+  def self.register_collection_wrapper_targets(klass, wrapper)
+    wrapper.instance_methods(false).each do |method_id|
+      register_runtime_scip_transparent_wrapper(
+        wrapper, method_id,
+        owner: klass.name, name: method_id.to_s, kind: "instance",
+        native: true, path: nil
+      )
+    end
+  rescue StandardError
+    nil
   end
 
   # A mutation wrapper is prepended to the real container class, so the VM
@@ -2170,11 +2157,7 @@ module NilKillRuntimeTrace
         )
       end
     end
-    if native_scip_requested?
-      dump_native_runtime_scip(pid)
-    elsif respond_to?(:dump_runtime_scip_calls)
-      dump_runtime_scip_calls(pid)
-    end
+    dump_native_runtime_scip(pid) if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
     File.open(File.join(OUT_DIR, "tlets-#{pid}.jsonl"), "w") do |file|
       @tlets.each do |(path, line), rec|
         file.puts JSON.generate(path: path, line: line, calls: rec[:calls], classes: rec[:classes].to_a.sort)
@@ -2262,20 +2245,6 @@ module NilKillRuntimeTrace
     @coverage_owned = false
   end
 
-  # instrumented_line -> src_line per src-rel-path, written by
-  # SourceInstrumenter#run_in_place to RUNTIME_DIR/.nk-linemap.json.
-  # In-place wrapping keeps the file at its real path but still shifts
-  # its line numbers (the injected wrapper adds lines), so Coverage's
-  # line numbers must be translated back to src space or the join
-  # against src def-ranges (collect_ran?) is systematically wrong.
-  def self.coverage_line_map
-    return @coverage_line_map if defined?(@coverage_line_map) && @coverage_line_map
-    path = File.join(OUT_DIR, ".nk-linemap.json")
-    @coverage_line_map = File.exist?(path) ? JSON.parse(File.read(path)) : {}
-  rescue StandardError
-    @coverage_line_map = {}
-  end
-
   # Root-relative form of a raw trace path. A pure function of the string that
   # every :line event needs, so it is cached alongside @path_cache. Building
   # two Pathnames per line event dominated collection wall time.
@@ -2290,26 +2259,11 @@ module NilKillRuntimeTrace
     end
   end
 
-  # Translate an INSTRUMENTED runtime line number back to its src line
-  # via .nk-linemap.json. Any runtime hook that keys off the caller's
-  # lineno (T.let, ...) is otherwise wrong under source instrumentation:
-  # the wrapper injects lines, so the caller's lineno is shifted and
-  # never matches the (real-src-line-keyed) trace plan. Methods avoid
-  # this because the instrumenter injects the plan's src line as a
-  # literal; line-keyed hooks need this translation. Identity when the
-  # file was not instrumented (no map entry).
-  def self.src_line(path, lineno)
-    rel = rel_path(path)
-    per_file = rel && coverage_line_map[rel]
-    (per_file && (per_file[lineno] || per_file[lineno.to_s])) || lineno
-  end
-
   def self.dump_coverage(pid)
     return unless @coverage_owned
     require "coverage"
     require "pathname"
     result = Coverage.result(stop: false, clear: false)
-    lmap = coverage_line_map
     covered_by_path = {}
     File.open(File.join(OUT_DIR, "coverage-#{pid}.jsonl"), "w") do |file|
       result.each do |abs, data|
@@ -2322,19 +2276,16 @@ module NilKillRuntimeTrace
         # arrays rather than restarting or weakening that external session.
         oneshot = data.is_a?(Hash) ? (data[:oneshot_lines] || data["oneshot_lines"]) : nil
         lines = data.is_a?(Hash) ? (data[:lines] || data["lines"]) : data
-        per_file = lmap[rel] # nil => file uninstrumented, lines == src
+        # Source is executed as written, so a coverage line IS a source line.
         covered = []
         if oneshot
-          Array(oneshot).each do |instr_line|
-            src_line = per_file ? (per_file[instr_line] || per_file[instr_line.to_s]) : instr_line
-            covered << src_line if src_line
+          Array(oneshot).each do |line|
+            covered << line if line
           end
         else
           Array(lines).each_with_index do |hits, i|
             next unless hits && hits.to_i.positive?
-            instr_line = i + 1
-            src_line = per_file ? (per_file[instr_line] || per_file[instr_line.to_s]) : instr_line
-            covered << src_line if src_line
+            covered << i + 1
           end
         end
         covered = covered.uniq.sort
@@ -2365,21 +2316,10 @@ require_relative "languages/providers/ruby/runtime_scip_native"
 
 if ENV["NIL_KILL_TRACE"] == "1"
   NilKillRuntimeTrace.start_coverage!
-  tracepoint_fallback = NilKillRuntimeTrace.trace_plan&.fetch("tracepoint_methods", {})&.any?
-  if NilKillRuntimeTrace.targeted_method_tracing? || tracepoint_fallback
-    NilKillRuntimeTrace.install_targeted_definition_trace
-  elsif ENV["NIL_KILL_TRACE_METHODS"] != "0"
-    TracePoint.new(:call) { |tp| NilKillRuntimeTrace.record_call(tp) }.enable
-    TracePoint.new(:return) { |tp| NilKillRuntimeTrace.record_return(tp) }.enable
-    TracePoint.new(:raise) { |tp| NilKillRuntimeTrace.record_raise(tp) }.enable
-  end
-  if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
-    if NilKillRuntimeTrace.native_scip_requested?
-      NilKillRuntimeTrace.install_native_runtime_scip_trace
-    else
-      NilKillRuntimeTrace.install_runtime_scip_trace
-    end
-  end
+  # Every per-event observation is the native collector's. What remains in Ruby
+  # are declaration-time hooks -- Struct.new, Data.define, T.let, container
+  # mutation -- which run once per definition or per mutation, not per VM event.
+  NilKillRuntimeTrace.install_native_runtime_scip_trace if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
   begin
     require "sorbet-runtime"
   rescue LoadError
