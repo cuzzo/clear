@@ -202,10 +202,48 @@ module NilKillRuntimeTrace
     end
   end
 
+  COLLECTION_KINDS = { "Array" => "array", "Hash" => "hash", "Set" => "set" }.freeze
+
+  # A collection observation is keyed by the slot it came from, at that slot's
+  # definition line, which is what FactMine links to a COLLECTION_OPERATION
+  # anchor through its own flow facts. A reader whose result is a collection is
+  # exactly such a slot, and the callee definition site the collector records is
+  # its location.
+  def self.native_scip_collection_rows
+    NilKillTraceNative.records.filter_map do |row|
+      callee = row.fetch(:callee)
+      path = native_scip_definition_path(callee[:path])
+      owner = callee[:owner]
+      next unless path && owner && callee[:name]
+
+      domain = native_scip_domain(
+        row.fetch(:result_types), row.fetch(:result_domain_indices)
+      )
+      kind = domain.fetch(:types).filter_map { |type| COLLECTION_KINDS[type] }.first
+      next unless kind
+
+      {
+        owner_kind: "struct_field",
+        name: "#{owner}.#{callee[:name]}",
+        path: path,
+        line: callee[:line].to_i,
+        kind: kind,
+        calls: row.fetch(:count),
+        classes: domain.fetch(:types),
+        elem_classes: domain.fetch(:elements),
+        key_classes: domain.fetch(:keys),
+        value_classes: domain.fetch(:values),
+        elem_shapes: [], key_shapes: [], value_shapes: [],
+        mutation_sites: {},
+      }
+    end
+  end
+
   def self.dump_native_runtime_scip(pid)
     NilKillTraceNative.stop
     write_jsonl("runtime-calls-#{pid}.jsonl", native_scip_call_rows)
     write_jsonl("methods-#{pid}.jsonl", native_scip_method_rows)
+    write_jsonl("collections-#{pid}.jsonl", native_scip_collection_rows)
     write_jsonl(
       "executed-callsites-#{pid}.jsonl",
       NilKillTraceNative.executed_callsites.sort_by { |row| row.map(&:to_s) }.map do |path, line, selector, count|
