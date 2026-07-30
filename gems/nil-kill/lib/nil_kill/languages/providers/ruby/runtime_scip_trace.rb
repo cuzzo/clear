@@ -34,19 +34,31 @@ module NilKillRuntimeTrace
     @runtime_transparent_wrapper_targets[[defined_class, method_id.to_sym]] = target.freeze
   end
 
-  # Anonymous generated records have no nominal module name, but their
-  # observed field schema is a stable structural runtime identity. Register
-  # collector-installed wrappers against that identity so tracing does not
-  # report NilKill as the target or silently drop the call. This is raw
-  # provider identity only; FactMine still owns every CFG/DFG and dispatch
-  # conclusion derived from it.
+  # Generated records outside the analyzed source corpus cannot join a parsed
+  # declaration. Preserve the runtime-observed record family and members in a
+  # structural symbol instead of presenting a body-less nominal method.
+  # Generated records inside the corpus retain their nominal identity, while
+  # non-production records retain theirs so FactMine can exclude the exact
+  # replacement. This is raw Ruby reflection only; FactMine owns validation,
+  # dispatch, CFG/DFG propagation, and every cost conclusion.
   def self.register_runtime_scip_generated_record_wrapper(klass, method_id, kind:)
     fields = Array(klass.instance_variable_get(:@__nil_kill_struct_fields))
     return if fields.empty?
 
-    owner = safe_module_name(klass)
+    path = klass.instance_variable_get(:@__nil_kill_struct_path)
     family = klass.instance_variable_get(:@__nil_kill_record_family) || "Struct"
-    owner ||= "Anonymous#{family}(#{fields.map(&:to_s).join(",")})"
+    nominal_owner = safe_module_name(klass)
+    owner =
+      if nominal_owner &&
+          path &&
+          !target_path?(path) &&
+          !runtime_nonproduction_source_path?(path) &&
+          !runtime_obvious_nonproduction_path?(path)
+        normalized_owner = nominal_owner.split("::").join("/")
+        "Generated#{family}(#{normalized_owner};#{fields.map(&:to_s).join(",")})"
+      else
+        nominal_owner || "Anonymous#{family}(#{fields.map(&:to_s).join(",")})"
+      end
     register_runtime_scip_transparent_wrapper(
       kind == "class" ? klass.singleton_class : klass,
       method_id,
@@ -54,10 +66,16 @@ module NilKillRuntimeTrace
       name: method_id.to_s,
       kind: kind,
       native: true,
-      path: klass.instance_variable_get(:@__nil_kill_struct_path)
+      path: path
     )
   rescue StandardError
     nil
+  end
+
+  def self.runtime_obvious_nonproduction_path?(path)
+    parts = File.expand_path(path, ROOT).split(File::SEPARATOR)
+    %w[test tests spec specs].any? { |component| parts.include?(component) } ||
+      File.basename(path).match?(/(?:_test|_spec)\.rb\z/)
   end
 
   # Source instrumentation receives this opaque symbol/range from FactMine.

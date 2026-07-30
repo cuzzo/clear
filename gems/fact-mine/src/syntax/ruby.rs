@@ -183,24 +183,53 @@ fn ruby_descriptor_parts(descriptor: &str) -> Option<(&str, &str)> {
     Some((&callable[..separator], &callable[separator + 1..]))
 }
 
-/// NilKill gives anonymous generated Ruby records a structural owner such as
-/// `AnonymousStruct(file,line)`.  That is raw runtime identity, not a cost
-/// claim: this adapter validates the owner grammar and the exact requested
-/// member before applying Ruby's generated-record contract.  Named records
+/// NilKill gives generated Ruby records without an analyzed declaration a
+/// structural owner. Anonymous records use `AnonymousStruct(file,line)`;
+/// named records outside the source corpus use
+/// `GeneratedStruct(Nominal/Owner;file,line)`. That is raw runtime identity,
+/// not a cost claim: this adapter validates the exact requested member before
+/// applying Ruby's generated-record contract. Named records inside the corpus
 /// continue to join against FactMine's parsed source declarations.
-fn ruby_anonymous_generated_record_operation(
+fn ruby_generated_record_operation(
     descriptor: &str,
     message: &str,
 ) -> Option<NormalizedCallComplexity> {
     let (owner, member) = ruby_descriptor_parts(descriptor)?;
     let owner = owner.trim_matches('`');
-    let fields = ["AnonymousStruct(", "AnonymousData("]
-        .iter()
-        .find_map(|prefix| {
-            owner
-                .strip_prefix(prefix)
-                .and_then(|rest| rest.strip_suffix(')'))
-        })?
+    let (family, payload) = [
+        ("AnonymousStruct(", "Struct"),
+        ("AnonymousData(", "Data"),
+        ("GeneratedStruct(", "Struct"),
+        ("GeneratedData(", "Data"),
+    ]
+    .iter()
+    .find_map(|(prefix, family)| {
+        owner
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(')'))
+            .map(|payload| (*family, payload))
+    })?;
+    let field_payload = if owner.starts_with("Generated") {
+        let (nominal_owner, fields) = payload.split_once(';')?;
+        if nominal_owner.is_empty()
+            || nominal_owner.split('/').any(|component| {
+                component.is_empty()
+                    || !component
+                        .chars()
+                        .all(|character| character == '_' || character.is_ascii_alphanumeric())
+                    || component
+                        .chars()
+                        .next()
+                        .is_some_and(|character| character.is_ascii_digit())
+            })
+        {
+            return None;
+        }
+        fields
+    } else {
+        payload
+    };
+    let fields = field_payload
         .split(',')
         .map(str::trim)
         .filter(|field| !field.is_empty())
@@ -223,7 +252,7 @@ fn ruby_anonymous_generated_record_operation(
         || (member != "new"
             && !fields.iter().any(|field| {
                 *field == member
-                    || (owner.starts_with("AnonymousStruct(")
+                    || (family == "Struct"
                         && member
                             .strip_suffix('=')
                             .is_some_and(|setter| setter == *field))
@@ -285,7 +314,7 @@ pub(crate) fn external_symbol_call_complexity(
 ) -> Option<ExternalCallComplexity> {
     if let Some(complexity) = runtime_ruby_dependency_descriptor(symbol)
         .or_else(|| runtime_ruby_core_descriptor(symbol))
-        .and_then(|descriptor| ruby_anonymous_generated_record_operation(descriptor, message))
+        .and_then(|descriptor| ruby_generated_record_operation(descriptor, message))
     {
         return Some(ExternalCallComplexity {
             time: complexity.time,
@@ -4597,6 +4626,18 @@ mod tests {
             ("`AnonymousStruct(file,line)`.new().", "new"),
             ("`AnonymousData(file,line)`#line().", "line"),
             ("`AnonymousData(file,line)`.new().", "new"),
+            (
+                "`GeneratedStruct(WaitLoopCoverage/Loop;tag,file,line)`#file().",
+                "file",
+            ),
+            (
+                "`GeneratedStruct(WaitLoopCoverage/Loop;tag,file,line)`#`line=`().",
+                "line=",
+            ),
+            (
+                "`GeneratedData(Dependency/Record;file,line)`#line().",
+                "line",
+            ),
         ] {
             let symbol = format!("nil-kill-runtime workspace demo 1 {descriptor}");
             let cost = external_symbol_call_complexity(&symbol, message)
@@ -4611,6 +4652,12 @@ mod tests {
             ("`AnonymousStruct(file,bad-field)`#file().", "file"),
             ("`AnonymousStruct()`#file().", "file"),
             ("`AnonymousRecord(file)`#file().", "file"),
+            (
+                "`GeneratedStruct(WaitLoopCoverage/Loop;tag,file)`#missing().",
+                "missing",
+            ),
+            ("`GeneratedStruct(WaitLoopCoverage/Loop)`#file().", "file"),
+            ("`GeneratedStruct(;file,line)`#file().", "file"),
         ] {
             let symbol = format!("nil-kill-runtime workspace demo 1 {descriptor}");
             assert!(

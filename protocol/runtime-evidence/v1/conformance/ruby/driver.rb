@@ -4,6 +4,7 @@ require "English"
 require "diff/lcs"
 require "rbconfig"
 require_relative "capabilities"
+require_relative "dependency/generated_record"
 require_relative "test/test_dispatcher"
 
 subject = RuntimeEvidenceConformance::Subject.new
@@ -36,6 +37,7 @@ subject.native_call("value")
 subject.instrumented_array_writes([], left)
 subject.instrumented_hash_writes({}, left)
 subject.instrumented_set_writes(Set.new, left)
+subject.append_string(+"prefix")
 subject.converted_index([left], 0)
 subject.sorbet_typed_passthrough(left)
 typed_generated = subject.typed_generated_constructor(left)
@@ -43,6 +45,8 @@ subject.typed_generated_accessor(typed_generated)
 subject.open_struct_index_write(left)
 generated = RuntimeEvidenceConformance::Generated.new(left, 1)
 subject.generated_accessor(generated)
+dependency_generated = RuntimeEvidenceConformance::DependencyGenerated.new(left, 1)
+subject.excluded_generated_accessor(dependency_generated)
 subject.generated_constructor(left)
 subject.generated_constructor(right)
 subject.generated_accessor_chain(generated)

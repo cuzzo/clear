@@ -148,6 +148,10 @@ module RuntimeEvidenceConformance
       values
     end
 
+    def append_string(value)
+      value << "suffix"
+    end
+
     def converted_index(value, index)
       Array(value)[index]
     end
@@ -171,6 +175,10 @@ module RuntimeEvidenceConformance
     end
 
     def generated_accessor(value)
+      value.payload
+    end
+
+    def excluded_generated_accessor(value)
       value.payload
     end
 

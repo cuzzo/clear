@@ -74,6 +74,7 @@ fixture:
   source: ruby/capabilities.rb
   driver: ruby/driver.rb
   support:
+    - ruby/dependency/generated_record.rb
     - ruby/test/test_dispatcher.rb
 
 # Each entry names a semantic capability, not a bug or application.
@@ -217,6 +218,18 @@ cases:
       target_name: append
       source_role: STANDARD_LIBRARY
 
+  - id: instrumented_array_operator_append
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, alias-method, operator-method]
+    anchor: { method: instrumented_array_writes, selector: <<, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: <<
+      source_role: STANDARD_LIBRARY
+      call_time: O(1)
+      call_space: O(1)
+
   - id: instrumented_array_unshift
     capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation]
     anchor: { method: instrumented_array_writes, selector: unshift, occurrence: 1 }
@@ -306,6 +319,20 @@ cases:
       target_owner: Set
       target_name: <<
       source_role: STANDARD_LIBRARY
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: native_string_append
+    capabilities: [native-call, collection-mutation, string-builder, operator-method]
+    anchor: { method: append_string, selector: <<, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: String
+      target_owner: String
+      target_name: <<
+      source_role: STANDARD_LIBRARY
+      call_time: O(N)
+      call_space: O(N)
 
   - id: instrumented_set_merge
     capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, set]
@@ -383,6 +410,18 @@ cases:
       receiver_type: RuntimeEvidenceConformance::Generated
       target_owner: RuntimeEvidenceConformance::Generated
       target_name: payload
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: excluded_source_generated_struct_accessor
+    capabilities: [generated-accessor, named-generated-class, excluded-source, structural-runtime-identity, transparent-wrapper]
+    anchor: { method: excluded_generated_accessor, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::DependencyGenerated
+      target_owner: GeneratedStruct(RuntimeEvidenceConformance/DependencyGenerated;payload,count)
+      target_name: payload
+      source_role: PRODUCTION
       call_time: O(1)
       call_space: O(1)
 
