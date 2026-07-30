@@ -1171,7 +1171,8 @@ fn apply_semantic_block_call_semantics(output: &mut ProfileOutput) -> usize {
     let mut applied = 0;
     for fact in &mut output.complexity_facts {
         let mut remove = BTreeSet::new();
-        for (iteration_index, iteration) in fact.iterations.iter().enumerate() {
+        for iteration_index in 0..fact.iterations.len() {
+            let iteration = fact.iterations[iteration_index].clone();
             if iteration.cardinality_relation != "unknown" {
                 continue;
             }
@@ -1193,7 +1194,6 @@ fn apply_semantic_block_call_semantics(output: &mut ProfileOutput) -> usize {
             if matching
                 .iter()
                 .any(|proof| proof.semantics != first.semantics)
-                || first.semantics != BlockCallSemantics::Once
             {
                 continue;
             }
@@ -1205,7 +1205,7 @@ fn apply_semantic_block_call_semantics(output: &mut ProfileOutput) -> usize {
             let anchor_symbolic = anchor.symbolic_execution.clone();
             let anchor_power = anchor.power;
             let anchor_multiplicity = anchor.execution_multiplicity.clone();
-            let false_factors = iteration
+            let local_factors = iteration
                 .symbolic_time
                 .iter()
                 .flat_map(|symbolic| &symbolic.factors)
@@ -1217,6 +1217,21 @@ fn apply_semantic_block_call_semantics(output: &mut ProfileOutput) -> usize {
                             .any(|anchor| anchor.domain_id == factor.domain_id)
                     })
                 })
+                .cloned()
+                .collect::<Vec<_>>();
+            if first.semantics == BlockCallSemantics::LogarithmicIteration
+                && (local_factors.len() != 1 || local_factors[0].exponent != 1)
+            {
+                continue;
+            }
+            if !matches!(
+                first.semantics,
+                BlockCallSemantics::Once | BlockCallSemantics::LogarithmicIteration
+            ) {
+                continue;
+            }
+            let local_domains = local_factors
+                .iter()
                 .map(|factor| factor.domain_id.clone())
                 .collect::<BTreeSet<_>>();
 
@@ -1227,10 +1242,16 @@ fn apply_semantic_block_call_semantics(output: &mut ProfileOutput) -> usize {
                 if let Some(symbolic) = &mut context.symbolic_execution {
                     symbolic
                         .factors
-                        .retain(|factor| !false_factors.contains(&factor.domain_id));
+                        .retain(|factor| !local_domains.contains(&factor.domain_id));
+                    if first.semantics == BlockCallSemantics::LogarithmicIteration {
+                        symbolic.logarithmic = true;
+                        symbolic.logarithmic_domain_id =
+                            Some(local_factors[0].domain_id.clone());
+                    }
                     symbolic.complete = true;
                     context.power = symbolic.factors.iter().map(|factor| factor.exponent).sum();
-                    context.execution_multiplicity = polynomial(context.power);
+                    context.execution_multiplicity =
+                        symbolic_multiplicity(context.power, symbolic.logarithmic);
                 } else {
                     context.symbolic_execution = anchor_symbolic.clone();
                     context.power = anchor_power;
@@ -1240,7 +1261,26 @@ fn apply_semantic_block_call_semantics(output: &mut ProfileOutput) -> usize {
                     context.evidence_gap = None;
                 }
             }
-            remove.insert(iteration_index);
+            if first.semantics == BlockCallSemantics::Once {
+                remove.insert(iteration_index);
+            } else {
+                let iteration = &mut fact.iterations[iteration_index];
+                let symbolic = iteration
+                    .symbolic_time
+                    .get_or_insert_with(Default::default);
+                symbolic
+                    .factors
+                    .retain(|factor| !local_domains.contains(&factor.domain_id));
+                symbolic.logarithmic = true;
+                symbolic.logarithmic_domain_id = Some(local_factors[0].domain_id.clone());
+                symbolic.complete = true;
+                iteration.power = symbolic.factors.iter().map(|factor| factor.exponent).sum();
+                iteration.execution_multiplicity =
+                    symbolic_multiplicity(iteration.power, true);
+                iteration.cardinality_relation = "logarithmic_of".to_string();
+                iteration.bound_classification = "input".to_string();
+                iteration.evidence_gap = None;
+            }
             applied += 1;
         }
         if !remove.is_empty() {
@@ -1253,6 +1293,17 @@ fn apply_semantic_block_call_semantics(output: &mut ProfileOutput) -> usize {
         }
     }
     applied
+}
+
+fn symbolic_multiplicity(power: usize, logarithmic: bool) -> String {
+    if !logarithmic {
+        return polynomial(power);
+    }
+    match power {
+        0 => "O(log N)".to_string(),
+        1 => "O(N log N)".to_string(),
+        _ => format!("O(N^{power} log N)"),
+    }
 }
 
 fn polynomial(power: usize) -> String {

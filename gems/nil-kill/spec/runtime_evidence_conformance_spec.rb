@@ -161,6 +161,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
   it "uses one shared catalog that covers the complete v1 behavior matrix" do
     capabilities = (
       catalog.fetch("cases").flat_map { |row| row.fetch("capabilities") } +
+      catalog.fetch("static_closures").flat_map { |row| row.fetch("capabilities") } +
       catalog.fetch("merge_cases").flat_map { |row| row.fetch("capabilities") }
     ).to_set
     expect(capabilities).to include(
@@ -181,6 +182,12 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       "typed-record",
       "open-struct",
       "string-builder",
+      "module-function",
+      "project-call",
+      "statically-indexed-target",
+      "binary-search",
+      "logarithmic-iteration",
+      "callback-multiplicity",
       "excluded-source",
       "structural-runtime-identity",
       "generated-accessor",
@@ -243,6 +250,16 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     expect(planned & reserved.keys).to be_empty
     expect(planned | reserved.keys).to match_array(matrix.fetch("anchor_kinds"))
     expect(reserved.values).to all(satisfy { |reason| !reason.to_s.empty? })
+  end
+
+  it "does not manufacture evidence for calls FactMine closed statically" do
+    names = catalog.fetch("static_closures")
+      .map { |row| row.dig("anchor", "selector") }
+      .uniq
+    requests = @collector.fetch(:plan).fetch("requests").select do |request|
+      names.include?(request.dig("anchor", "display_name"))
+    end
+    expect(requests).to be_empty
   end
 
   it "negative control: cannot pass if an executed planned call has no raw event" do

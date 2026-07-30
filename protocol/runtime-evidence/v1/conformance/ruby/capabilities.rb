@@ -6,6 +6,14 @@ require "set"
 require "sorbet-runtime"
 
 module RuntimeEvidenceConformance
+  module LocalModuleFunctions
+    module_function
+
+    def classify(_value)
+      true
+    end
+  end
+
   class Value
     attr_reader :payload
 
@@ -150,6 +158,22 @@ module RuntimeEvidenceConformance
 
     def append_string(value)
       value << "suffix"
+    end
+
+    def local_module_function(value)
+      LocalModuleFunctions.classify(value)
+    end
+
+    def nested_local_module_function(value)
+      LocalModuleFunctions.classify(value.strip)
+    end
+
+    def binary_search(values, target)
+      values.bsearch { |value| value >= target }
+    end
+
+    def binary_search_index(values, target)
+      values.bsearch_index { |value| value >= target }
     end
 
     def converted_index(value, index)

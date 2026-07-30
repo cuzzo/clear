@@ -77,6 +77,24 @@ fixture:
     - ruby/dependency/generated_record.rb
     - ruby/test/test_dispatcher.rb
 
+# Calls in this table are intentionally absent from the runtime trace plan:
+# FactMine has already bound them to an analyzed declaration. The oracle must
+# prove both the exact static target and the absence of a redundant request.
+static_closures:
+  - id: direct_local_module_function
+    capabilities: [ruby-call, module-method, module-function, project-call, statically-indexed-target]
+    anchor: { method: local_module_function, selector: classify, occurrence: 1 }
+    expect:
+      target_owner: RuntimeEvidenceConformance::LocalModuleFunctions
+      target_name: classify
+
+  - id: nested_local_module_function
+    capabilities: [ruby-call, module-method, module-function, project-call, statically-indexed-target, nested-argument, nested-call]
+    anchor: { method: nested_local_module_function, selector: classify, occurrence: 1 }
+    expect:
+      target_owner: RuntimeEvidenceConformance::LocalModuleFunctions
+      target_name: classify
+
 # Each entry names a semantic capability, not a bug or application.
 # `anchor` is resolved against FactMine's plan; collectors only receive the
 # resulting opaque request.
@@ -333,6 +351,44 @@ cases:
       source_role: STANDARD_LIBRARY
       call_time: O(N)
       call_space: O(N)
+
+  - id: nested_local_module_function_argument
+    capabilities: [native-call, nested-argument, nested-call]
+    anchor: { method: nested_local_module_function, selector: strip, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: String
+      target_owner: String
+      target_name: strip
+      source_role: STANDARD_LIBRARY
+      call_time: O(N)
+      call_space: O(N)
+
+  - id: native_array_binary_search
+    capabilities: [native-call, callback, block-parameter, binary-search, logarithmic-iteration, callback-multiplicity]
+    anchor: { method: binary_search, selector: bsearch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: bsearch
+      source_role: STANDARD_LIBRARY
+      call_time: O(log N)
+      call_space: O(1)
+      iteration_multiplicity: O(log N)
+
+  - id: native_array_binary_search_index
+    capabilities: [native-call, callback, block-parameter, binary-search, logarithmic-iteration, callback-multiplicity]
+    anchor: { method: binary_search_index, selector: bsearch_index, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: bsearch_index
+      source_role: STANDARD_LIBRARY
+      call_time: O(log N)
+      call_space: O(1)
+      iteration_multiplicity: O(log N)
 
   - id: instrumented_set_merge
     capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, set]

@@ -49,6 +49,8 @@ Array:
   freeze: constant
   sort: sort
   sort_by: sort
+  bsearch: logarithmic
+  bsearch_index: logarithmic
   "-": pairwise
   "&": pairwise
   "|": pairwise

@@ -135,6 +135,7 @@ pub(crate) struct NormalizedPresenceCorrelation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BlockCallSemantics {
     Iteration,
+    LogarithmicIteration,
     Once,
     Deferred,
     Unknown,

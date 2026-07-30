@@ -97,6 +97,8 @@ pub struct SymbolicComplexityFact {
     pub factors: Vec<ComplexityFactorFact>,
     #[serde(default)]
     pub logarithmic: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logarithmic_domain_id: Option<String>,
     #[serde(default = "default_true")]
     pub complete: bool,
 }
@@ -2974,6 +2976,7 @@ fn symbolic_complexity(
             })
             .collect(),
         logarithmic: false,
+        logarithmic_domain_id: None,
         complete,
     }
 }

@@ -18,9 +18,24 @@ struct Catalog {
     version: u32,
     wire_matrix: WireMatrix,
     fixture: Fixture,
+    static_closures: Vec<StaticClosure>,
     cases: Vec<Case>,
     boundary_cases: Vec<BoundaryCase>,
     merge_cases: Vec<MergeCase>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StaticClosure {
+    id: String,
+    capabilities: Vec<String>,
+    anchor: AnchorSelector,
+    expect: StaticClosureExpectation,
+}
+
+#[derive(Debug, Deserialize)]
+struct StaticClosureExpectation {
+    target_owner: String,
+    target_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +104,7 @@ struct Expectation {
     observed_executions: Option<u64>,
     call_time: Option<String>,
     call_space: Option<String>,
+    iteration_multiplicity: Option<String>,
     #[serde(default)]
     factmine_infers: Vec<InferredExpectation>,
 }
@@ -232,6 +248,40 @@ fn selected_symbol(
             )
         })
         .clone()
+}
+
+fn selected_call<'a>(
+    output: &'a profile::ProfileOutput,
+    selector: &AnchorSelector,
+) -> &'a profile::CallRecord {
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    let mut matching = output
+        .calls
+        .iter()
+        .filter(|call| {
+            call.message == selector.selector
+                && methods
+                    .get(call.source.as_str())
+                    .is_some_and(|method| method.name == selector.method)
+        })
+        .collect::<Vec<_>>();
+    matching.sort_by_key(|call| call.span);
+    matching
+        .get(selector.occurrence.saturating_sub(1))
+        .copied()
+        .unwrap_or_else(|| {
+            panic!(
+                "missing occurrence {} of {} in {} (found {})",
+                selector.occurrence,
+                selector.selector,
+                selector.method,
+                matching.len()
+            )
+        })
 }
 
 fn boundary_symbol(
@@ -915,6 +965,12 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
         .flat_map(|case| case.capabilities.iter().map(String::as_str))
         .chain(
             catalog
+                .static_closures
+                .iter()
+                .flat_map(|case| case.capabilities.iter().map(String::as_str)),
+        )
+        .chain(
+            catalog
                 .boundary_cases
                 .iter()
                 .flat_map(|case| case.capabilities.iter().map(String::as_str)),
@@ -946,6 +1002,12 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
         "typed-record",
         "open-struct",
         "string-builder",
+        "module-function",
+        "project-call",
+        "statically-indexed-target",
+        "binary-search",
+        "logarithmic-iteration",
+        "callback-multiplicity",
         "excluded-source",
         "structural-runtime-identity",
         "generated-accessor",
@@ -1108,6 +1170,35 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
                 .as_deref()
                 .is_some_and(|name| !name.is_empty()));
         }
+    }
+}
+
+#[test]
+fn statically_closed_project_calls_are_exact_and_not_retraced() {
+    let (catalog, _source, output, built) = built_fixture();
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    for case in &catalog.static_closures {
+        let call = selected_call(&output, &case.anchor);
+        let target_id = call
+            .target
+            .as_deref()
+            .unwrap_or_else(|| panic!("{} lacks a static target", case.id));
+        let target = methods
+            .get(target_id)
+            .unwrap_or_else(|| panic!("{} target is outside the analyzed corpus", case.id));
+        assert_eq!(target.owner, case.expect.target_owner, "{} owner", case.id);
+        assert_eq!(target.name, case.expect.target_name, "{} name", case.id);
+        assert!(
+            !built.bindings.values().any(
+                |binding| matches!(binding, runtime_protocol::AnchorBinding::Call { call_id } if call_id == &call.id)
+            ),
+            "{} redundantly requested runtime evidence for an exact analyzed target",
+            case.id
+        );
     }
 }
 
@@ -1312,6 +1403,40 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
                 case.id,
                 expected_suffix,
                 inferred.method
+            );
+        }
+        if let Some(multiplicity) = expected.iteration_multiplicity.as_deref() {
+            let selector = case.anchor.as_ref().expect("iteration case anchor");
+            let fact = output
+                .complexity_facts
+                .iter()
+                .find(|fact| fact.function == selector.method)
+                .unwrap_or_else(|| panic!("{} method has no complexity facts", case.id));
+            let iteration = fact
+                .iterations
+                .iter()
+                .find(|iteration| iteration.message.as_deref() == Some(&selector.selector))
+                .unwrap_or_else(|| panic!("{} has no normalized iteration", case.id));
+            assert_eq!(
+                iteration.execution_multiplicity, multiplicity,
+                "{} callback/iteration multiplicity",
+                case.id
+            );
+            assert!(
+                iteration.evidence_gap.is_none(),
+                "{} retained iteration evidence gap {:?}",
+                case.id,
+                iteration.evidence_gap
+            );
+            assert!(
+                fact.call_contexts.iter().any(|context| {
+                    context.message != selector.selector
+                        && context.execution_multiplicity == multiplicity
+                        && context.span[0] >= iteration.span[0]
+                        && context.span[2] <= iteration.span[2]
+                }),
+                "{} did not apply logarithmic multiplicity to its callback body",
+                case.id
             );
         }
         assert_eq!(

@@ -1604,6 +1604,9 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             return BlockCallSemantics::Unknown;
         };
         match (owner.as_str(), message) {
+            ("Array", "bsearch" | "bsearch_index") => {
+                BlockCallSemantics::LogarithmicIteration
+            }
             ("Hash" | "ENV", "fetch") => BlockCallSemantics::Once,
             ("Hash", "new") => BlockCallSemantics::Deferred,
             ("Dir", "chdir") | ("IO", "popen") => BlockCallSemantics::Once,
