@@ -20,6 +20,7 @@ module NilKill
         @output = File.expand_path(output || File.join(@runtime_dir, DEFAULT_OUTPUT))
         @plan = EvidenceProtocol.validate_plan!(plan || EvidenceProtocol.plan)
         @executed_callsites = load_rows("executed-callsites-*.jsonl")
+        @exact_anchor_executions = load_rows("exact-anchor-executions-*.jsonl")
         @function_entries = load_rows("function-entries-*.jsonl")
         @covered_lines = load_rows("coverage-*.jsonl")
       end
@@ -155,6 +156,8 @@ module NilKill
           pairs.each do |pair|
             _event, row = pair
             callsite = row.fetch("callsite")
+            next unless callsite["anchor_symbol"].to_s.empty?
+
             symbols = matching_call_requests(
               path,
               selector,
@@ -212,6 +215,14 @@ module NilKill
         key = [anchor.fetch("relative_path"), anchor.fetch("display_name").to_s]
         candidates = @calls_by_path_selector.fetch(key, []).select do |_event, row|
           source_line_matches?(anchor, row.dig("callsite", "line"))
+        end
+        exact = candidates.select do |_event, row|
+          row.dig("callsite", "anchor_symbol") == anchor.fetch("symbol")
+        end
+        return [exact, false] if exact.any?
+
+        candidates = candidates.select do |_event, row|
+          row.dig("callsite", "anchor_symbol").to_s.empty?
         end
         siblings = @call_anchor_counts.fetch(
           [*key, anchor.fetch("range").fetch("start_line")],
@@ -354,6 +365,11 @@ module NilKill
 
       def anchor_executed?(anchor)
         if call_anchor?(anchor)
+          request = @requests_by_symbol.fetch(anchor.fetch("symbol"))
+          if request["execution_range"]
+            return @exact_anchor_execution_symbols.include?(anchor.fetch("symbol"))
+          end
+
           observed = @executed_callsites_by_path_selector.fetch(
             [anchor.fetch("relative_path"), anchor.fetch("display_name").to_s],
             []
@@ -367,6 +383,13 @@ module NilKill
           # NOT_INSTRUMENTED instead of making the unsound NOT_EXECUTED claim.
           @covered_lines_by_path.fetch(anchor.fetch("relative_path"), [])
             .any? { |line| source_line_matches?(anchor, line) }
+        elsif anchor.fetch("kind") == "FUNCTION_RETURN"
+          # A return anchor is reached only on normal function return. Provider
+          # conformance requires an observation for every returned value,
+          # including null-like and false values, so no matching observation
+          # means this boundary did not execute (for example, every invocation
+          # raised).
+          false
         else
           @function_entries_by_path.fetch(anchor.fetch("relative_path"), [])
             .any? { |line| source_line_matches?(anchor, line) }
@@ -394,6 +417,8 @@ module NilKill
           @executed_callsites.group_by do |row|
             [canonical_path(row.fetch("path")), row.fetch("selector", "").to_s]
           end.transform_values { |rows| rows.map { |row| row.fetch("line") } }
+        @exact_anchor_execution_symbols =
+          @exact_anchor_executions.map { |row| row.fetch("symbol") }.to_set
         @function_entries_by_path =
           @function_entries.group_by { |row| canonical_path(row.fetch("path")) }
             .transform_values { |rows| rows.map { |row| row.fetch("line") } }

@@ -521,6 +521,11 @@ pub struct CallRecord {
     /// invocation span when a callback body makes that invocation multiline.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selector_span: Option<[usize; 4]>,
+    /// Complete executable expression range supplied to runtime collectors.
+    /// For calls with attached callbacks this includes the callback body while
+    /// `span` remains the semantic call span used by CFG/DFG analysis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_span: Option<[usize; 4]>,
     /// Exact producer call spans for every reaching definition of a local
     /// receiver. Empty means at least one definition was not a direct call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -8166,6 +8171,11 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
         .iter()
         .map(|projection| (projection.call_span, projection.selector_span))
         .collect::<BTreeMap<_, _>>();
+    let execution_spans = document
+        .call_execution_projections
+        .iter()
+        .map(|projection| (projection.call_span, projection.execution_span))
+        .collect::<BTreeMap<_, _>>();
     let mut calls = document
         .call_sites
         .iter()
@@ -8770,6 +8780,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 lexical_symbol_origin,
                 receiver_call_span: receiver_call_spans.get(&call.span).copied(),
                 selector_span: selector_spans.get(&call.span).copied(),
+                execution_span: execution_spans.get(&call.span).copied(),
                 receiver_definition_call_spans,
                 receiver_definition_sequence_projection,
                 receiver_symbol,
@@ -9399,6 +9410,7 @@ pub(crate) mod tests {
             normalization_call_origins: Vec::new(),
             call_raw_origin_projections: Vec::new(),
             call_selector_projections: Vec::new(),
+            call_execution_projections: Vec::new(),
             state_declarations: vec![syntax::StateDeclaration {
                 field: "@name".to_string(),
                 owner: "Greeter".to_string(),
@@ -11181,6 +11193,7 @@ def py_fn(a: int) -> str:
             lexical_symbol_origin: None,
             receiver_call_span: None,
             selector_span: None,
+            execution_span: None,
             receiver_definition_call_spans: Vec::new(),
             receiver_definition_sequence_projection: None,
             receiver_symbol: None,

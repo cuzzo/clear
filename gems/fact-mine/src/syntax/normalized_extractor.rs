@@ -23,6 +23,7 @@ pub(crate) struct NormalizedFacts {
     pub(crate) call_node_projections: Vec<CallNodeProjection>,
     pub(crate) call_selector_projections: Vec<super::CallSelectorProjection>,
     pub(crate) call_receiver_projections: Vec<super::CallReceiverProjection>,
+    pub(crate) call_execution_projections: Vec<super::CallExecutionProjection>,
     pub(crate) state_declarations: Vec<StateDeclaration>,
     pub(crate) state_reads: Vec<StateRead>,
     pub(crate) state_writes: Vec<StateWrite>,
@@ -135,6 +136,10 @@ impl<'a> Extractor<'a> {
             )
         });
         self.facts.call_node_projections.dedup();
+        self.facts
+            .call_execution_projections
+            .sort_by_key(|projection| (projection.call_span, projection.execution_span));
+        self.facts.call_execution_projections.dedup();
         self.facts
             .call_selector_projections
             .sort_by_key(|projection| (projection.call_span, projection.selector_span));
@@ -460,7 +465,18 @@ impl<'a> Extractor<'a> {
 
     fn scan_iter(&mut self, node: &Node) {
         if let Some(call) = child_node(node, 0) {
+            // ITER is the complete executable expression for a call with an
+            // attached callback body. Preserve that range here so runtime
+            // collectors never need to parse language syntax to find it.
             self.record_call_node(call, true);
+            if let Some(call_span) = self.direct_emitted_receiver_call_span(call) {
+                self.facts
+                    .call_execution_projections
+                    .push(super::CallExecutionProjection {
+                        call_span,
+                        execution_span: span(node),
+                    });
+            }
         }
         if let Some(scope) = child_node(node, 1) {
             if let Some(body) = scope_body(scope) {

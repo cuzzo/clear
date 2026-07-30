@@ -66,6 +66,15 @@ module MiniCollect
       "NIL_KILL_SHARED_COVERAGE" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "1" : nil,
     }
     out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", driver, chdir: NilKill::ROOT)
+    unless status.success?
+      raise <<~MESSAGE
+        mini collect driver failed with status #{status.exitstatus}
+        stdout:
+        #{out}
+        stderr:
+        #{err}
+      MESSAGE
+    end
     rd = NilKill::RUNTIME_DIR
     glob = lambda do |k|
       Dir.glob(File.join(rd, "#{k}-*.jsonl")).flat_map do |p|

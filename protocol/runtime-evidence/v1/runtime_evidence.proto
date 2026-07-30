@@ -74,6 +74,10 @@ message EvidenceRequest {
   repeated EvidenceKind required = 2;
   SourceAnchor activation_anchor = 3;
   optional uint32 parameter_ordinal = 4;
+  // The complete source expression whose evaluation attempts this anchor.
+  // FactMine owns this normalized range. Collectors may use it only to emit
+  // an opaque exact-execution marker; it carries no flow or target inference.
+  SourceRange execution_range = 5;
 }
 
 message TracePlan {

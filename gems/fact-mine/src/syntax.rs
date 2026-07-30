@@ -321,6 +321,11 @@ pub struct Document {
     pub call_selector_projections: Vec<CallSelectorProjection>,
     #[serde(default)]
     pub call_receiver_projections: Vec<CallReceiverProjection>,
+    /// Complete executable range for a normalized call. This differs from
+    /// the call's semantic span when an attached callback body belongs to the
+    /// invocation.
+    #[serde(default)]
+    pub call_execution_projections: Vec<CallExecutionProjection>,
     #[serde(default)]
     pub state_declarations: Vec<StateDeclaration>,
     #[serde(default)]
@@ -599,6 +604,12 @@ pub struct CallReceiverProjection {
 pub struct CallSelectorProjection {
     pub call_span: Span,
     pub selector_span: Span,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CallExecutionProjection {
+    pub call_span: Span,
+    pub execution_span: Span,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

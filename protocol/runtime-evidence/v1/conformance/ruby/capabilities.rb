@@ -36,6 +36,11 @@ module RuntimeEvidenceConformance
       value.normalize
     end
 
+    def nil_return(value)
+      value.normalize
+      nil
+    end
+
     def ambiguous_calls(left, right)
       left.normalize; right.normalize
     end
@@ -60,6 +65,10 @@ module RuntimeEvidenceConformance
       value.normalize
     end
 
+    def short_circuit_guard(enabled, value)
+      enabled && value.normalize
+    end
+
     def native_call(value)
       value.upcase
     end
@@ -68,8 +77,25 @@ module RuntimeEvidenceConformance
       value.payload
     end
 
+    def generated_constructor(value)
+      Generated.new(value, 2)
+    end
+
+    def generated_accessor_chain(value)
+      value.payload.normalize
+    end
+
+    def generated_accessor_write(value, replacement)
+      value.payload = replacement
+      value.payload
+    end
+
     def callback_flow(values)
       values.map { |value| yield(value) }
+    end
+
+    def nested_callback_flow(values)
+      values.map { |value| value.normalize }.select { |value| !value.empty? }
     end
 
     def dynamic_dispatch(receiver)
@@ -91,8 +117,19 @@ module RuntimeEvidenceConformance
       $CHILD_STATUS.success?
     end
 
+    def mixed_provenance_status(status)
+      status.success?
+    end
+
     def exception_flow(receiver)
       receiver.fail!
+    rescue RuntimeError
+      :rescued
+    end
+
+    def exception_result_flow(receiver)
+      value = receiver.fail!
+      value.normalize
     rescue RuntimeError
       :rescued
     end

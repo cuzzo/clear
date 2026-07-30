@@ -275,6 +275,9 @@ pub fn build_trace_plan_with_bindings(
         requests.push(EvidenceRequest {
             anchor: MessageField::some(anchor),
             required: required.into_iter().map(Into::into).collect(),
+            execution_range: MessageField::some(plan_source_range(
+                call.execution_span.unwrap_or(call.span),
+            )),
             ..EvidenceRequest::default()
         });
     }
@@ -360,18 +363,22 @@ fn plan_anchor(
     SourceAnchor {
         symbol: format!("local {id}"),
         relative_path: relative_path.to_string(),
-        range: MessageField::some(SourceRange {
-            start_line: span[0].saturating_sub(1) as u32,
-            start_character: span[1] as u32,
-            end_line: span[2].saturating_sub(1) as u32,
-            end_character: span[3] as u32,
-            ..SourceRange::default()
-        }),
+        range: MessageField::some(plan_source_range(span)),
         kind: kind.into(),
         enclosing_symbol: enclosing_symbol.to_string(),
         semantic_digest: Sha256::digest(semantic_source.as_bytes()).to_vec(),
         display_name: display_name.to_string(),
         ..SourceAnchor::default()
+    }
+}
+
+fn plan_source_range(span: [usize; 4]) -> SourceRange {
+    SourceRange {
+        start_line: span[0].saturating_sub(1) as u32,
+        start_character: span[1] as u32,
+        end_line: span[2].saturating_sub(1) as u32,
+        end_character: span[3] as u32,
+        ..SourceRange::default()
     }
 }
 
@@ -526,6 +533,29 @@ pub fn validate_trace_plan(plan: &TracePlan) -> Result<()> {
             .as_ref()
             .with_context(|| format!("requests[{index}] requires an anchor"))?;
         validate_anchor(anchor, &documents, &format!("requests[{index}].anchor"))?;
+        let call_anchor = matches!(
+            anchor.kind.enum_value_or_default(),
+            AnchorKind::CALL_SELECTOR
+                | AnchorKind::COLLECTION_OPERATION
+                | AnchorKind::BRANCH_PREDICATE
+        );
+        if call_anchor && request.execution_range.is_none() {
+            bail!("requests[{index}].execution_range is required for a call anchor");
+        }
+        if let Some(execution_range) = request.execution_range.as_ref() {
+            validate_range(
+                Some(execution_range),
+                &format!("requests[{index}].execution_range"),
+            )?;
+            let selector_range = anchor.range.as_ref().expect("validated anchor range");
+            if (execution_range.start_line, execution_range.start_character)
+                > (selector_range.start_line, selector_range.start_character)
+                || (execution_range.end_line, execution_range.end_character)
+                    < (selector_range.end_line, selector_range.end_character)
+            {
+                bail!("requests[{index}].execution_range must contain the complete anchor range");
+            }
+        }
         if !anchors.insert(anchor.symbol.as_str()) {
             bail!("duplicate trace-plan anchor {:?}", anchor.symbol);
         }
@@ -543,6 +573,13 @@ pub fn validate_trace_plan(plan: &TracePlan) -> Result<()> {
             if !kinds.insert(kind.value()) {
                 bail!("requests[{index}] contains duplicate evidence kind {kind:?}");
             }
+        }
+        let allowed_kinds = allowed_evidence_kinds(anchor.kind.enum_value_or_default());
+        if !kinds.iter().all(|kind| allowed_kinds.contains(kind)) {
+            bail!(
+                "requests[{index}] requests evidence incompatible with {:?}",
+                anchor.kind.enum_value_or_default()
+            );
         }
         if request.parameter_ordinal.is_some()
             && !kinds.contains(&EvidenceKind::PARAMETER_VALUE.value())
@@ -565,6 +602,33 @@ pub fn validate_trace_plan(plan: &TracePlan) -> Result<()> {
         bail!("trace plan plan_digest does not match its canonical contents");
     }
     Ok(())
+}
+
+fn allowed_evidence_kinds(kind: AnchorKind) -> BTreeSet<i32> {
+    let kinds: &[EvidenceKind] = match kind {
+        AnchorKind::FUNCTION_ENTRY | AnchorKind::CALLBACK_ENTRY => &[EvidenceKind::PARAMETER_VALUE],
+        AnchorKind::FUNCTION_RETURN => &[EvidenceKind::RETURN_VALUE],
+        AnchorKind::CALL_SELECTOR => &[
+            EvidenceKind::RECEIVER_VALUE,
+            EvidenceKind::CALL_TARGET,
+            EvidenceKind::RESULT_VALUE,
+        ],
+        AnchorKind::STATE_READ | AnchorKind::STATE_WRITE => &[EvidenceKind::STATE_VALUE],
+        AnchorKind::COLLECTION_OPERATION => &[
+            EvidenceKind::RECEIVER_VALUE,
+            EvidenceKind::CALL_TARGET,
+            EvidenceKind::RESULT_VALUE,
+            EvidenceKind::COLLECTION_VALUE,
+        ],
+        AnchorKind::BRANCH_PREDICATE => &[
+            EvidenceKind::RECEIVER_VALUE,
+            EvidenceKind::CALL_TARGET,
+            EvidenceKind::RESULT_VALUE,
+            EvidenceKind::BOOLEAN_RESULT,
+        ],
+        AnchorKind::ANCHOR_KIND_UNSPECIFIED => &[],
+    };
+    kinds.iter().map(|kind| kind.value()).collect()
 }
 
 pub fn validate_runtime_evidence(plan: &TracePlan, evidence: &RuntimeEvidence) -> Result<()> {
@@ -1212,6 +1276,13 @@ mod tests {
                     EnumOrUnknown::new(EvidenceKind::CALL_TARGET),
                     EnumOrUnknown::new(EvidenceKind::RESULT_VALUE),
                 ],
+                execution_range: MessageField::some(SourceRange {
+                    start_line: 2,
+                    start_character: 0,
+                    end_line: 2,
+                    end_character: 13,
+                    ..SourceRange::default()
+                }),
                 ..EvidenceRequest::default()
             }],
             ..TracePlan::default()
@@ -1300,6 +1371,13 @@ mod tests {
         second_anchor.semantic_digest = Sha256::digest(b"second call").to_vec();
         second_anchor.range.as_mut().expect("range").start_character = 20;
         second_anchor.range.as_mut().expect("range").end_character = 24;
+        second.execution_range = MessageField::some(SourceRange {
+            start_line: 2,
+            start_character: 14,
+            end_line: 2,
+            end_character: 25,
+            ..SourceRange::default()
+        });
         plan.requests.push(second);
         plan.plan_digest = trace_plan_digest(&plan).expect("digest");
 

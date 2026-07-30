@@ -6,7 +6,7 @@
     "arguments": []
   },
   "project_root": "file:///workspace",
-  "plan_digest": "Wny749Q1hIW2HIvenW+V1fysvBWFtleEzoMyYnYJIjc=",
+  "plan_digest": "XBhJ0x+SLVQJTrPUoapu3jQzr8Ayv4JOIvJV5sPUc6Q=",
   "documents": [
     {
       "relative_path": "lib/worker.rb",
@@ -34,7 +34,13 @@
       "required": [
         "RECEIVER_VALUE",
         "CALL_TARGET"
-      ]
+      ],
+      "execution_range": {
+        "start_line": 2,
+        "start_character": 0,
+        "end_line": 2,
+        "end_character": 13
+      }
     }
   ]
 }

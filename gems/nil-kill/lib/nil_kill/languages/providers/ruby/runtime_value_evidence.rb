@@ -191,6 +191,7 @@ module NilKill
                 "line" => callsite.fetch("line").to_i,
                 "range" => normalized_range(callsite["range"]),
                 "selector" => (callsite["selector"] || callee.fetch("name")).to_s,
+                "anchor_symbol" => callsite["anchor_symbol"].to_s,
               }.compact,
               "target" => target,
               "receiver_domain" => normalized_domain_payload(event["receiver_domain"]),

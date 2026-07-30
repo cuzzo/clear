@@ -11,6 +11,22 @@ module NilKill
       @trace_plan = File.exist?(TRACE_PLAN_PATH) ? JSON.parse(File.read(TRACE_PLAN_PATH)) : { "methods" => {} }
       @loop_sites = @trace_plan.fetch("loop_sites", {})
       @state_write_sites = @trace_plan.fetch("state_write_sites", {})
+      @runtime_execution_anchors_by_path = Hash.new { |hash, path| hash[path] = [] }
+      Array(@trace_plan.dig("runtime_evidence", "requests")).each do |request|
+        anchor = request["anchor"]
+        range = request["execution_range"]
+        next unless anchor.is_a?(Hash) && range.is_a?(Hash)
+        next unless %w[
+          CALL_SELECTOR COLLECTION_OPERATION BRANCH_PREDICATE
+        ].include?(anchor["kind"])
+
+        path = File.expand_path(anchor.fetch("relative_path"), ROOT)
+        @runtime_execution_anchors_by_path[path] << {
+          "symbol" => anchor.fetch("symbol"),
+          "selector" => anchor.fetch("display_name").to_s,
+          "range" => range,
+        }
+      end
       @plan_dirty = false
       @defer_plan_write = false
       @trace_plan.fetch("methods", {}).each do |raw_key, plan|
@@ -31,6 +47,7 @@ module NilKill
       @tracepoint_methods ||= {}
       @loop_sites ||= {}
       @state_write_sites ||= {}
+      @runtime_execution_anchors_by_path ||= Hash.new { |hash, path| hash[path] = [] }
       @plan_dirty = false
       @defer_plan_write = false
     end
@@ -100,6 +117,7 @@ module NilKill
       source ||= File.read(path)
       abs_path = File.expand_path(path, ROOT)
       return [source, nil] unless instrumentable_source?(source, abs_path)
+      source = instrument_runtime_execution_anchors(abs_path, source)
       state_writes = state_write_candidate?(source)
       @line_offsets = line_offsets(source)
       parsed = Syntax.parse(source)
@@ -148,6 +166,7 @@ module NilKill
       source = File.read(path)
       abs_path = File.expand_path(path, ROOT)
       return source unless instrumentable_source?(source, abs_path)
+      source = instrument_runtime_execution_anchors(abs_path, source)
       state_writes = state_write_candidate?(source)
       @line_offsets = line_offsets(source)
       parsed = Syntax.parse(source)
@@ -169,8 +188,71 @@ module NilKill
 
     def instrumentable_source?(source, abs_path)
       @method_plans_by_file_line[abs_path].any? ||
+        @runtime_execution_anchors_by_path[abs_path].any? ||
         state_write_candidate?(source) || source.include?("while") ||
         source.include?("until") || source.include?("__LINE__")
+    end
+
+    # FactMine supplies the exact full-expression range for each requested
+    # runtime call. The Ruby adapter uses that opaque range only to bracket
+    # evaluation with an execution marker. It does not parse receivers,
+    # targets, arguments, or flow; those remain FactMine-owned.
+    def instrument_runtime_execution_anchors(path, source)
+      anchors = @runtime_execution_anchors_by_path[path]
+      return source if anchors.empty?
+
+      offsets = line_offsets(source)
+      insertions = Hash.new { |hash, offset| hash[offset] = [] }
+      anchors.each do |anchor|
+        range = anchor.fetch("range")
+        start_offset = runtime_range_offset(
+          offsets,
+          range.fetch("start_line"),
+          range.fetch("start_character")
+        )
+        end_offset = runtime_range_offset(
+          offsets,
+          range.fetch("end_line"),
+          range.fetch("end_character")
+        )
+        next unless start_offset && end_offset && end_offset > start_offset
+
+        symbol = anchor.fetch("symbol")
+        selector = anchor.fetch("selector")
+        insertions[start_offset] << [
+          1,
+          -end_offset,
+          symbol,
+          "(begin; NilKillRuntimeTrace.begin_runtime_anchor_execution(" \
+            "#{symbol.inspect}, #{selector.inspect}); "
+        ]
+        insertions[end_offset] << [
+          0,
+          -start_offset,
+          symbol,
+          "; ensure; NilKillRuntimeTrace.end_runtime_anchor_execution(" \
+            "#{symbol.inspect}); end)"
+        ]
+      end
+      return source if insertions.empty?
+
+      bytes = source.b.dup
+      insertions.keys.sort.reverse_each do |offset|
+        text = insertions.fetch(offset)
+          .sort_by { |priority, extent, symbol, _text| [priority, extent, symbol] }
+          .map(&:last)
+          .join
+        bytes.insert(offset, text.b)
+      end
+      bytes
+    end
+
+    def runtime_range_offset(offsets, line, character)
+      line = line.to_i
+      return if line.negative? || line >= offsets.length
+
+      offset = offsets.fetch(line) + character.to_i
+      offset if offset <= offsets.last
     end
 
     # Conservative lexical gate only: false positives merely parse a file,

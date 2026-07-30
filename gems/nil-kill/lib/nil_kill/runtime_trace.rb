@@ -1748,7 +1748,10 @@ module NilKillRuntimeTrace
 
   def self.attach_struct(klass)
     return unless klass.is_a?(Class) && klass < Struct
-    return if klass.instance_variable_get(:@__nil_kill_attached)
+    if klass.instance_variable_get(:@__nil_kill_attached)
+      register_generated_constructor_wrapper(klass, native: true)
+      return
+    end
     path = klass.instance_variable_get(:@__nil_kill_struct_path)
     line = klass.instance_variable_get(:@__nil_kill_struct_line)
     unless path && line
@@ -1772,6 +1775,7 @@ module NilKillRuntimeTrace
       NilKillRuntimeTrace.record_struct_instance(instance, fields)
       instance
     end
+    register_generated_constructor_wrapper(klass, native: true)
 
     if klass.method_defined?(:[]=)
       original_index_set = klass.instance_method(:[]=)
@@ -1786,11 +1790,41 @@ module NilKillRuntimeTrace
     end
 
     fields.each do |field|
+      if !klass.method_defined?(field) || klass.instance_method(field).source_location.nil?
+        original_getter = klass.instance_method(field) if klass.method_defined?(field)
+        klass.define_method(field, struct_field_getter(field, original_getter))
+        @runtime_generated_wrapper_methods << [klass, field.to_sym]
+      end
+
       setter = "#{field}="
       if !klass.method_defined?(setter) || klass.instance_method(setter).source_location.nil?
         original_setter = klass.instance_method(setter) if klass.method_defined?(setter)
         klass.define_method(setter, struct_field_setter(field, original_setter))
         @runtime_generated_wrapper_methods << [klass, setter.to_sym]
+      end
+    end
+  end
+
+  def self.register_generated_constructor_wrapper(klass, native:)
+    owner = safe_module_name(klass)
+
+    register_runtime_scip_transparent_wrapper(
+      klass.singleton_class,
+      :new,
+      owner: owner,
+      name: "new",
+      kind: "class",
+      native: native,
+      path: klass.instance_variable_get(:@__nil_kill_struct_path)
+    )
+  end
+
+  def self.struct_field_getter(field, original_getter)
+    proc do
+      if original_getter
+        original_getter.bind_call(self)
+      else
+        self[field]
       end
     end
   end
@@ -1816,7 +1850,10 @@ module NilKillRuntimeTrace
 
   def self.attach_data(klass)
     return unless klass.is_a?(Class)
-    return if klass.instance_variable_get(:@__nil_kill_attached)
+    if klass.instance_variable_get(:@__nil_kill_attached)
+      register_generated_constructor_wrapper(klass, native: true)
+      return
+    end
     path = klass.instance_variable_get(:@__nil_kill_struct_path)
     line = klass.instance_variable_get(:@__nil_kill_struct_line)
     return unless path && line && target_path?(path)
@@ -1832,6 +1869,7 @@ module NilKillRuntimeTrace
       end
       instance
     end
+    register_generated_constructor_wrapper(klass, native: true)
   end
 
   def self.record_open_struct(instance)

@@ -31,6 +31,7 @@ struct WireMatrix {
     source_roles: Vec<String>,
     value_shapes: Vec<String>,
     negative_controls: Vec<String>,
+    request_contracts: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,11 +63,15 @@ struct AnchorSelector {
 #[derive(Debug, Deserialize)]
 struct Expectation {
     required: Vec<String>,
+    allowed_status: Option<String>,
+    #[serde(default)]
+    complete_kinds: Vec<String>,
     #[serde(default)]
     correlation: bool,
     receiver_type: Option<String>,
     target_owner: Option<String>,
     target_name: Option<String>,
+    excluded_target_owner: Option<String>,
     source_role: Option<String>,
     result_type: Option<String>,
     result_element_type: Option<String>,
@@ -464,43 +469,83 @@ fn evidence_for_catalog(
         .iter()
         .map(|request| {
             let anchor = request.anchor.as_ref().expect("anchor");
-            let (status, complete_kinds, executions, reason) =
-                if let Some(case) = exact.get(&anchor.symbol) {
-                    let expected = &case.expect;
-                    let receiver_name = expected
-                        .receiver_type
-                        .as_deref()
-                        .or(expected.target_owner.as_deref())
-                        .unwrap_or("Object");
-                    let owner = expected.target_owner.as_deref().unwrap_or(receiver_name);
-                    let target_name = expected
-                        .target_name
-                        .as_deref()
-                        .unwrap_or(&anchor.display_name);
-                    let source_role = role(expected.source_role.as_deref(), Some(owner));
-                    let required = request
+            let (status, complete_kinds, executions, reason) = if let Some(case) =
+                exact.get(&anchor.symbol)
+            {
+                let expected = &case.expect;
+                let receiver_name = expected
+                    .receiver_type
+                    .as_deref()
+                    .or(expected.target_owner.as_deref())
+                    .unwrap_or("Object");
+                let owner = expected.target_owner.as_deref().unwrap_or(receiver_name);
+                let target_name = expected
+                    .target_name
+                    .as_deref()
+                    .unwrap_or(&anchor.display_name);
+                let source_role = role(expected.source_role.as_deref(), Some(owner));
+                let required = request
+                    .required
+                    .iter()
+                    .filter_map(|kind| kind.enum_value().ok().map(|kind| kind.value()))
+                    .collect::<BTreeSet<_>>();
+                let complete_kind_names = if expected.allowed_status.as_deref() == Some("PARTIAL") {
+                    expected
+                        .complete_kinds
+                        .iter()
+                        .cloned()
+                        .collect::<BTreeSet<_>>()
+                } else {
+                    request
                         .required
                         .iter()
-                        .filter_map(|kind| kind.enum_value().ok().map(|kind| kind.value()))
-                        .collect::<BTreeSet<_>>();
-                    let mut bucket = ExecutionBucket {
+                        .filter_map(|kind| kind.enum_value().ok())
+                        .map(|kind| format!("{kind:?}"))
+                        .collect::<BTreeSet<_>>()
+                };
+                let complete_kind =
+                    |kind: EvidenceKind| complete_kind_names.contains(format!("{kind:?}").as_str());
+                let mut bucket = ExecutionBucket {
+                    count: 1,
+                    receiver: (complete_kind(EvidenceKind::RECEIVER_VALUE)
+                        || complete_kind(EvidenceKind::COLLECTION_VALUE))
+                    .then(|| value_set(receiver_name, None, source_role))
+                    .into(),
+                    target: complete_kind(EvidenceKind::CALL_TARGET)
+                        .then(|| target(owner, target_name, source_role))
+                        .into(),
+                    result: complete_kind(EvidenceKind::RESULT_VALUE)
+                        .then(|| {
+                            value_set(
+                                expected.result_type.as_deref().unwrap_or("Object"),
+                                expected.result_element_type.as_deref(),
+                                SourceRole::PRODUCTION,
+                            )
+                        })
+                        .into(),
+                    provenance: MessageField::some(Provenance {
+                        run_id: "oracle-run".to_string(),
+                        provider: "canonical-conformance".to_string(),
+                        provider_version: "1".to_string(),
+                        ..Provenance::default()
+                    }),
+                    ..ExecutionBucket::default()
+                };
+                if complete_kind(EvidenceKind::BOOLEAN_RESULT) {
+                    bucket.boolean_result = Some(expected.boolean_result.unwrap_or(false));
+                }
+                let mut executions = vec![bucket];
+                if let Some(excluded_owner) = expected.excluded_target_owner.as_deref() {
+                    executions.push(ExecutionBucket {
                         count: 1,
                         receiver: required
                             .contains(&EvidenceKind::RECEIVER_VALUE.value())
-                            .then(|| value_set(receiver_name, None, source_role))
+                            .then(|| value_set(excluded_owner, None, SourceRole::NON_PRODUCTION))
                             .into(),
                         target: required
                             .contains(&EvidenceKind::CALL_TARGET.value())
-                            .then(|| target(owner, target_name, source_role))
-                            .into(),
-                        result: required
-                            .contains(&EvidenceKind::RESULT_VALUE.value())
                             .then(|| {
-                                value_set(
-                                    expected.result_type.as_deref().unwrap_or("Object"),
-                                    expected.result_element_type.as_deref(),
-                                    SourceRole::PRODUCTION,
-                                )
+                                target(excluded_owner, target_name, SourceRole::NON_PRODUCTION)
                             })
                             .into(),
                         provenance: MessageField::some(Provenance {
@@ -510,64 +555,86 @@ fn evidence_for_catalog(
                             ..Provenance::default()
                         }),
                         ..ExecutionBucket::default()
-                    };
-                    if required.contains(&EvidenceKind::BOOLEAN_RESULT.value()) {
-                        bucket.boolean_result = Some(expected.boolean_result.unwrap_or(false));
-                    }
-                    (
-                        CaptureStatus::COMPLETE_FOR_RUNS,
-                        request.required.clone(),
-                        vec![bucket],
-                        String::new(),
-                    )
-                } else if let Some(boundary) = boundaries.get(&anchor.symbol) {
-                    if boundary.allowed_status.as_deref() == Some("NOT_INSTRUMENTED") {
-                        (
-                            CaptureStatus::NOT_INSTRUMENTED,
-                            Vec::new(),
-                            Vec::new(),
-                            "function entered but did not produce a return value".to_string(),
-                        )
+                    });
+                }
+                let status = match expected.allowed_status.as_deref() {
+                    None | Some("COMPLETE_FOR_RUNS") => CaptureStatus::COMPLETE_FOR_RUNS,
+                    Some("PARTIAL") => CaptureStatus::PARTIAL,
+                    other => panic!("unsupported case status {other:?}"),
+                };
+                let completed = request
+                    .required
+                    .iter()
+                    .filter(|kind| kind.enum_value().ok().is_some_and(&complete_kind))
+                    .cloned()
+                    .collect();
+                (
+                    status,
+                    completed,
+                    executions,
+                    if status == CaptureStatus::COMPLETE_FOR_RUNS {
+                        String::new()
                     } else {
-                        (
-                            CaptureStatus::COMPLETE_FOR_RUNS,
-                            request.required.clone(),
-                            vec![ExecutionBucket {
-                                count: 1,
-                                value: MessageField::some(value_set(
-                                    boundary
-                                        .expected_type
-                                        .as_deref()
-                                        .expect("complete boundary expected type"),
-                                    None,
-                                    SourceRole::PRODUCTION,
-                                )),
-                                provenance: MessageField::some(Provenance {
-                                    run_id: "oracle-run".to_string(),
-                                    provider: "canonical-conformance".to_string(),
-                                    provider_version: "1".to_string(),
-                                    ..Provenance::default()
-                                }),
-                                ..ExecutionBucket::default()
-                            }],
-                            String::new(),
-                        )
-                    }
-                } else if correlated.contains(&anchor.symbol) {
+                        "call raised before producing its requested result".to_string()
+                    },
+                )
+            } else if let Some(boundary) = boundaries.get(&anchor.symbol) {
+                if boundary.allowed_status.is_some() {
+                    let status = match boundary.allowed_status.as_deref() {
+                        Some("NOT_EXECUTED") => CaptureStatus::NOT_EXECUTED,
+                        Some("NOT_INSTRUMENTED") => CaptureStatus::NOT_INSTRUMENTED,
+                        other => panic!("unsupported boundary status {other:?}"),
+                    };
                     (
-                        CaptureStatus::PARTIAL,
+                        status,
+                        if status == CaptureStatus::NOT_EXECUTED {
+                            request.required.clone()
+                        } else {
+                            Vec::new()
+                        },
                         Vec::new(),
-                        Vec::new(),
-                        "execution is represented by an exact candidate correlation".to_string(),
+                        "function entered but did not produce a return value".to_string(),
                     )
                 } else {
                     (
-                        CaptureStatus::NOT_EXECUTED,
+                        CaptureStatus::COMPLETE_FOR_RUNS,
                         request.required.clone(),
-                        Vec::new(),
-                        "anchor did not execute in the canonical modeled run".to_string(),
+                        vec![ExecutionBucket {
+                            count: 1,
+                            value: MessageField::some(value_set(
+                                boundary
+                                    .expected_type
+                                    .as_deref()
+                                    .expect("complete boundary expected type"),
+                                None,
+                                SourceRole::PRODUCTION,
+                            )),
+                            provenance: MessageField::some(Provenance {
+                                run_id: "oracle-run".to_string(),
+                                provider: "canonical-conformance".to_string(),
+                                provider_version: "1".to_string(),
+                                ..Provenance::default()
+                            }),
+                            ..ExecutionBucket::default()
+                        }],
+                        String::new(),
                     )
-                };
+                }
+            } else if correlated.contains(&anchor.symbol) {
+                (
+                    CaptureStatus::PARTIAL,
+                    Vec::new(),
+                    Vec::new(),
+                    "execution is represented by an exact candidate correlation".to_string(),
+                )
+            } else {
+                (
+                    CaptureStatus::NOT_EXECUTED,
+                    request.required.clone(),
+                    Vec::new(),
+                    "anchor did not execute in the canonical modeled run".to_string(),
+                )
+            };
             AnchorEvidence {
                 anchor_symbol: anchor.symbol.clone(),
                 anchor_semantic_digest: anchor.semantic_digest.clone(),
@@ -678,6 +745,49 @@ fn occurrence_symbols(index: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+fn occurrence_symbols_at_anchor(
+    index: &serde_json::Value,
+    anchor: &runtime_protocol::SourceAnchor,
+) -> Vec<String> {
+    let range = anchor.range.as_ref().expect("anchor range");
+    index["documents"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|document| {
+            document["relativePath"]
+                .as_str()
+                .is_some_and(|path| path.ends_with(&anchor.relative_path))
+        })
+        .flat_map(|document| {
+            document["occurrences"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|occurrence| {
+                    let occurrence_range = occurrence["range"].as_array()?;
+                    let numbers = occurrence_range
+                        .iter()
+                        .filter_map(serde_json::Value::as_u64)
+                        .collect::<Vec<_>>();
+                    let (start_line, start_character, end_line, end_character) =
+                        match numbers.as_slice() {
+                            [line, start, end] => (*line, *start, *line, *end),
+                            [start_line, start, end_line, end] => {
+                                (*start_line, *start, *end_line, *end)
+                            }
+                            _ => return None,
+                        };
+                    let contains = (start_line, start_character)
+                        <= (range.start_line as u64, range.start_character as u64)
+                        && (end_line, end_character)
+                            >= (range.end_line as u64, range.end_character as u64);
+                    contains.then(|| occurrence["symbol"].as_str().map(str::to_string))?
+                })
+        })
+        .collect()
+}
+
 fn assert_validation_error(
     plan: &runtime_protocol::TracePlan,
     evidence: &RuntimeEvidence,
@@ -716,17 +826,23 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
         "exact-anchor",
         "ambiguous-anchor",
         "same-line",
+        "exact-execution-range",
         "nested-receiver",
         "chained-call",
         "assignment",
         "destructuring",
         "short-circuit-assignment",
+        "short-circuit-call",
+        "skipped-execution",
         "native-call",
         "generated-accessor",
         "transparent-wrapper",
         "callback",
         "yield",
         "block-parameter",
+        "attached-block-range",
+        "nested-attached-blocks",
+        "generated-setter",
         "dynamic-dispatch",
         "test-replacement",
         "container-shape",
@@ -796,6 +912,32 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
         ["sequence", "mapping", "record", "tuple"]
     );
     assert!(catalog.wire_matrix.negative_controls.len() >= 10);
+    assert_eq!(
+        catalog
+            .wire_matrix
+            .request_contracts
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        catalog
+            .wire_matrix
+            .anchor_kinds
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    );
+    let declared_evidence = catalog
+        .wire_matrix
+        .evidence_kinds
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert!(catalog
+        .wire_matrix
+        .request_contracts
+        .values()
+        .flatten()
+        .all(|kind| declared_evidence.contains(kind)));
     for boundary in &catalog.boundary_cases {
         assert!(!boundary.id.is_empty());
         assert!(!boundary.method.is_empty());
@@ -813,6 +955,49 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
                 .expected_type
                 .as_deref()
                 .is_some_and(|name| !name.is_empty()));
+        }
+    }
+}
+
+#[test]
+fn every_planned_call_has_a_closed_execution_range_owned_by_factmine() {
+    let (catalog, _source, output, built) = built_fixture();
+    for case in &catalog.cases {
+        let Some(selector) = &case.anchor else {
+            continue;
+        };
+        let symbol = selected_symbol(&built, &output, selector);
+        let request = built
+            .plan
+            .requests
+            .iter()
+            .find(|request| request.anchor.as_ref().unwrap().symbol == symbol)
+            .expect("catalog request");
+        let anchor = request.anchor.as_ref().unwrap().range.as_ref().unwrap();
+        let execution = request
+            .execution_range
+            .as_ref()
+            .unwrap_or_else(|| panic!("{} has no execution range", case.id));
+        assert!(
+            (execution.start_line, execution.start_character)
+                <= (anchor.start_line, anchor.start_character)
+                && (execution.end_line, execution.end_character)
+                    >= (anchor.end_line, anchor.end_character),
+            "{} execution range does not contain its selector",
+            case.id
+        );
+        if case.capabilities.iter().any(|capability| {
+            matches!(
+                capability.as_str(),
+                "attached-block-range" | "nested-attached-blocks"
+            )
+        }) {
+            assert!(
+                (execution.end_line, execution.end_character)
+                    > (anchor.end_line, anchor.end_character),
+                "{} did not retain its attached callback body",
+                case.id
+            );
         }
     }
 }
@@ -856,22 +1041,45 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
                 declared,
                 actual
             );
-        }
-        if let (Some(owner), Some(name)) = (
-            expected.target_owner.as_deref(),
-            expected.target_name.as_deref(),
-        ) {
-            let expected_suffix =
-                format!("{}#{}().", owner.replace("::", "/"), descriptor_name(name));
-            assert!(
-                symbols
-                    .iter()
-                    .any(|symbol| symbol.ends_with(&expected_suffix)),
-                "{} did not join target {}; emitted symbols: {:?}",
-                case.id,
-                expected_suffix,
-                symbols
-            );
+            let anchor = request.anchor.as_ref().unwrap();
+            let at_anchor = occurrence_symbols_at_anchor(&overlay.index, anchor);
+            if let (Some(owner), Some(name)) = (
+                expected.target_owner.as_deref(),
+                expected.target_name.as_deref(),
+            ) {
+                let expected_suffix =
+                    format!("{}#{}().", owner.replace("::", "/"), descriptor_name(name));
+                if expected.source_role.as_deref() == Some("NON_PRODUCTION") {
+                    assert!(
+                        !at_anchor
+                            .iter()
+                            .any(|symbol| symbol.ends_with(&expected_suffix)),
+                        "{} published nonproduction target {} at its callsite",
+                        case.id,
+                        expected_suffix
+                    );
+                } else {
+                    assert!(
+                        at_anchor
+                            .iter()
+                            .any(|symbol| symbol.ends_with(&expected_suffix)),
+                        "{} did not join target {} at its callsite; emitted {:?}",
+                        case.id,
+                        expected_suffix,
+                        at_anchor
+                    );
+                }
+            }
+            if let Some(excluded) = expected.excluded_target_owner.as_deref() {
+                assert!(
+                    at_anchor
+                        .iter()
+                        .all(|symbol| !symbol.contains(&excluded.replace("::", "/"))),
+                    "{} published excluded target {} at its callsite",
+                    case.id,
+                    excluded
+                );
+            }
         }
         for inferred in &expected.factmine_infers {
             let expected_suffix = format!(
@@ -903,10 +1111,11 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
             .iter()
             .find(|row| row.anchor_symbol == symbol)
             .expect("canonical boundary evidence");
-        let expected_status = if boundary.allowed_status.as_deref() == Some("NOT_INSTRUMENTED") {
-            CaptureStatus::NOT_INSTRUMENTED
-        } else {
-            CaptureStatus::COMPLETE_FOR_RUNS
+        let expected_status = match boundary.allowed_status.as_deref() {
+            Some("NOT_EXECUTED") => CaptureStatus::NOT_EXECUTED,
+            Some("NOT_INSTRUMENTED") => CaptureStatus::NOT_INSTRUMENTED,
+            None => CaptureStatus::COMPLETE_FOR_RUNS,
+            other => panic!("unsupported boundary status {other:?}"),
         };
         assert_eq!(
             row.capture.as_ref().unwrap().status.enum_value_or_default(),
@@ -1011,6 +1220,56 @@ fn shared_negative_controls_fail_closed_at_the_protocol_boundary() {
         .to_string()
         .contains("canonical"));
     exercised.insert("noncanonical-path");
+
+    let mut plan = built.plan.clone();
+    let request = plan
+        .requests
+        .iter_mut()
+        .find(|request| request.execution_range.is_some())
+        .expect("canonical call request");
+    request.execution_range = MessageField::none();
+    assert!(runtime_protocol::validate_trace_plan(&plan)
+        .unwrap_err()
+        .to_string()
+        .contains("execution_range is required"));
+    exercised.insert("missing-call-execution-range");
+
+    let mut plan = built.plan.clone();
+    let request = plan
+        .requests
+        .iter_mut()
+        .find(|request| request.execution_range.is_some())
+        .expect("canonical call request");
+    let anchor_range = request.anchor.as_ref().unwrap().range.as_ref().unwrap();
+    let execution_range = request.execution_range.as_mut().unwrap();
+    execution_range.start_line = anchor_range.end_line;
+    execution_range.start_character = anchor_range.end_character;
+    assert!(runtime_protocol::validate_trace_plan(&plan)
+        .unwrap_err()
+        .to_string()
+        .contains("must contain the complete anchor range"));
+    exercised.insert("execution-range-excludes-selector");
+
+    let mut plan = built.plan.clone();
+    let request = plan
+        .requests
+        .iter_mut()
+        .find(|request| {
+            request
+                .anchor
+                .as_ref()
+                .unwrap()
+                .kind
+                .enum_value_or_default()
+                == runtime_protocol::AnchorKind::FUNCTION_ENTRY
+        })
+        .expect("canonical function-entry request");
+    request.required = vec![EvidenceKind::CALL_TARGET.into()];
+    assert!(runtime_protocol::validate_trace_plan(&plan)
+        .unwrap_err()
+        .to_string()
+        .contains("incompatible"));
+    exercised.insert("incompatible-anchor-evidence");
 
     let mut evidence = canonical;
     let target = evidence

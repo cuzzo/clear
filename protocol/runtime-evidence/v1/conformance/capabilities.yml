@@ -46,6 +46,18 @@ wire_matrix:
     - unknown-run-provenance
     - noncanonical-path
     - noncanonical-symbol
+    - missing-call-execution-range
+    - execution-range-excludes-selector
+    - incompatible-anchor-evidence
+  request_contracts:
+    FUNCTION_ENTRY: [PARAMETER_VALUE]
+    FUNCTION_RETURN: [RETURN_VALUE]
+    CALL_SELECTOR: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+    STATE_READ: [STATE_VALUE]
+    STATE_WRITE: [STATE_VALUE]
+    CALLBACK_ENTRY: [PARAMETER_VALUE]
+    COLLECTION_OPERATION: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+    BRANCH_PREDICATE: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, BOOLEAN_RESULT]
 
 fixture:
   language: ruby
@@ -68,13 +80,27 @@ cases:
       target_name: normalize
       source_role: PRODUCTION
 
-  - id: ambiguous_same_line_call
-    capabilities: [ambiguous-anchor, same-line, correlation]
-    anchors:
-      - { method: ambiguous_calls, selector: normalize, occurrence: 1 }
-      - { method: ambiguous_calls, selector: normalize, occurrence: 2 }
+  - id: nil_return_call
+    capabilities: [exact-anchor, nil-value]
+    anchor: { method: nil_return, selector: normalize, occurrence: 1 }
     expect:
-      correlation: true
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: exact_same_line_call_first
+    capabilities: [ambiguous-anchor, same-line, exact-execution-range]
+    anchor: { method: ambiguous_calls, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: exact_same_line_call_second
+    capabilities: [ambiguous-anchor, same-line, exact-execution-range]
+    anchor: { method: ambiguous_calls, selector: normalize, occurrence: 2 }
+    expect:
       required: [RECEIVER_VALUE, CALL_TARGET]
       target_owner: RuntimeEvidenceConformance::Value
       target_name: normalize
@@ -113,6 +139,16 @@ cases:
       receiver_type: Hash
       result_type: RuntimeEvidenceConformance::Value
 
+  - id: short_circuit_call_execution
+    capabilities: [short-circuit-call, exact-execution-range, skipped-execution]
+    anchor: { method: short_circuit_guard, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      observed_executions: 1
+
   - id: native_c_call
     capabilities: [native-call, receiver, target, result]
     anchor: { method: native_call, selector: upcase, occurrence: 1 }
@@ -131,11 +167,58 @@ cases:
       receiver_type: RuntimeEvidenceConformance::Generated
       target_owner: RuntimeEvidenceConformance::Generated
       target_name: payload
-      allowed_status: NOT_INSTRUMENTED
+
+  - id: generated_struct_constructor
+    capabilities: [generated-constructor, transparent-wrapper, native-call]
+    anchor: { method: generated_constructor, selector: new, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: new
+
+  - id: generated_struct_accessor_result_flow
+    capabilities: [generated-accessor, chained-call, result-flow, transparent-wrapper]
+    anchor: { method: generated_accessor_chain, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Generated
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: payload
+      factmine_infers:
+        - { method: generated_accessor_chain, selector: normalize, target_owner: RuntimeEvidenceConformance::Value }
+
+  - id: generated_struct_accessor_setter
+    capabilities: [generated-accessor, generated-setter, transparent-wrapper]
+    anchor: { method: generated_accessor_write, selector: payload=, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Generated
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: payload=
 
   - id: callback_and_yield
-    capabilities: [callback, yield, block-parameter]
+    capabilities: [callback, yield, block-parameter, attached-block-range]
     anchor: { method: callback_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callback_outer
+    capabilities: [callback, nested-attached-blocks, exact-execution-range]
+    anchor: { method: nested_callback_flow, selector: select, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: select
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callback_inner
+    capabilities: [callback, nested-attached-blocks, exact-execution-range]
+    anchor: { method: nested_callback_flow, selector: map, occurrence: 1 }
     expect:
       required: [RECEIVER_VALUE, CALL_TARGET]
       receiver_type: Array
@@ -178,6 +261,17 @@ cases:
       target_owner: Process::Status
       target_name: success?
 
+  - id: mixed_production_and_test_replacement
+    capabilities: [test-replacement, mixed-provenance, transparent-wrapper]
+    anchor: { method: mixed_provenance_status, selector: success?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Process::Status
+      target_owner: Process::Status
+      target_name: success?
+      source_role: STANDARD_LIBRARY
+      excluded_target_owner: RuntimeEvidenceConformance::TestStatus
+
   - id: exception_target
     capabilities: [exception, non-returning-call, partial-result]
     anchor: { method: exception_flow, selector: fail!, occurrence: 1 }
@@ -185,6 +279,17 @@ cases:
       required: [RECEIVER_VALUE, CALL_TARGET]
       receiver_type: RuntimeEvidenceConformance::Raiser
       target_owner: RuntimeEvidenceConformance::Raiser
+
+  - id: exception_missing_result
+    capabilities: [exception, non-returning-call, partial-result, per-kind-completeness]
+    anchor: { method: exception_result_flow, selector: fail!, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      allowed_status: PARTIAL
+      complete_kinds: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Raiser
+      target_owner: RuntimeEvidenceConformance::Raiser
+      target_name: fail!
 
   - id: uncaught_exception_target
     capabilities: [exception, non-returning-call, failed-return]
@@ -240,6 +345,14 @@ boundary_cases:
     evidence_kind: RETURN_VALUE
     expected_type: String
 
+  - id: nil_return_value
+    capabilities: [function-return, return-value, nil-value]
+    method: nil_return
+    display_name: return
+    anchor_kind: FUNCTION_RETURN
+    evidence_kind: RETURN_VALUE
+    expected_type: NilClass
+
   - id: state_write_value
     capabilities: [state-write, state-value]
     method: state_flow
@@ -254,7 +367,7 @@ boundary_cases:
     display_name: return
     anchor_kind: FUNCTION_RETURN
     evidence_kind: RETURN_VALUE
-    allowed_status: NOT_INSTRUMENTED
+    allowed_status: NOT_EXECUTED
 
 merge_cases:
   - id: repeated_runs_are_additive

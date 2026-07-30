@@ -86,7 +86,10 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       "collector emitted no raw event for #{anchor.fetch("method")}##{anchor.fetch("selector")}; " \
       "selector events=#{raw_events.select { |event|
         event.dig("callee", "name") == anchor.fetch("selector")
-      }.map { |event| [event["caller"], event["callee"]] }}"
+      }.map { |event| [event["caller"], event["callee"]] }}; " \
+      "all events=#{raw_events.map { |event|
+        [event.dig("caller", "method"), event.dig("callee", "name"), event.dig("callsite", "line")]
+      }}"
     lines = events.map { |event| event.dig("callsite", "line").to_i - 1 }.uniq
     plan.fetch("requests").select do |request|
       source_anchor = request.fetch("anchor")
@@ -135,6 +138,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     expect(capabilities).to include(
       "exact-anchor",
       "ambiguous-anchor",
+      "exact-execution-range",
       "nested-receiver",
       "assignment",
       "destructuring",
@@ -187,6 +191,10 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       "sequence", "mapping", "record", "tuple"
     )
     expect(matrix.fetch("negative_controls").length).to be >= 10
+    expect(matrix.fetch("request_contracts").keys)
+      .to contain_exactly(*matrix.fetch("anchor_kinds"))
+    expect(matrix.fetch("request_contracts").values.flatten.uniq)
+      .to match_array(matrix.fetch("evidence_kinds"))
   end
 
   it "negative control: cannot pass if an executed planned call has no raw event" do
@@ -220,15 +228,27 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
         "events=#{JSON.generate(@collector.fetch(:runtime_calls).select { |event|
           event.dig("caller", "method") == test_case.dig("anchor", "method")
         })}"
+      complete_kinds =
+        if expected_status == "COMPLETE_FOR_RUNS"
+          request.fetch("required")
+        else
+          expected.fetch("complete_kinds", [])
+        end
       if expected_status != "COMPLETE_FOR_RUNS"
         expect(row.dig("capture", "reason")).not_to be_empty
-        expect(row.dig("capture", "complete_kinds")).to be_empty
-        next
+        expect(row.dig("capture", "complete_kinds"))
+          .to contain_exactly(*complete_kinds)
+        next if row.fetch("executions").empty?
+      else
+        expect(row.dig("capture", "complete_kinds")).to include(*complete_kinds)
       end
-      expect(row.dig("capture", "complete_kinds")).to include(*request.fetch("required"))
+      if expected["observed_executions"]
+        expect(row.dig("capture", "observed_executions"))
+          .to satisfy { |count| count.to_i == expected.fetch("observed_executions") }
+      end
       expect(row.fetch("executions")).not_to be_empty
       row.fetch("executions").each do |bucket|
-        request.fetch("required").each do |kind|
+        complete_kinds.each do |kind|
           field = {
             "RECEIVER_VALUE" => "receiver",
             "COLLECTION_VALUE" => "receiver",
@@ -267,6 +287,16 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
           end).to be(true)
         end
       end
+      if expected["excluded_target_owner"]
+        excluded = expected.fetch("excluded_target_owner")
+        excluded_raw = matching_raw.select do |event|
+          event.dig("callee", "owner") == excluded
+        end
+        expect(excluded_raw).not_to be_empty
+        expect(row.fetch("executions").filter_map { |bucket|
+          bucket["target"] if bucket.dig("target", "source_role") == "NON_PRODUCTION"
+        }).not_to be_empty
+      end
       if expected["source_role"]
         expect(first.dig("target", "source_role")).to eq(expected.fetch("source_role"))
       end
@@ -276,21 +306,57 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     end
   end
 
-  it "collector oracle: same-line ambiguity is preserved once as a candidate correlation" do
-    test_case = catalog.fetch("cases").find { |row| row.dig("expect", "correlation") }
-    requests = test_case.fetch("anchors").map { |anchor| selected_request(@collector, anchor) }
+  it "collector oracle: FactMine supplies every call's closed execution range" do
+    catalog.fetch("cases").each do |test_case|
+      request = selected_request(@collector, test_case.fetch("anchor"))
+      selector = request.fetch("anchor").fetch("range")
+      execution = request.fetch("execution_range")
+      start_before = ([
+        execution.fetch("start_line"),
+        execution.fetch("start_character"),
+      ] <=> [
+        selector.fetch("start_line"),
+        selector.fetch("start_character"),
+      ]) <= 0
+      end_after = ([
+        execution.fetch("end_line"),
+        execution.fetch("end_character"),
+      ] <=> [
+        selector.fetch("end_line"),
+        selector.fetch("end_character"),
+      ]) >= 0
+      expect(start_before && end_after).to be(true), test_case.fetch("id")
+      next unless (
+        test_case.fetch("capabilities") &
+          %w[attached-block-range nested-attached-blocks]
+      ).any?
+
+      expect(([
+        execution.fetch("end_line"),
+        execution.fetch("end_character"),
+      ] <=> [
+        selector.fetch("end_line"),
+        selector.fetch("end_character"),
+      ])).to be_positive
+    end
+  end
+
+  it "collector oracle: exact execution ranges disambiguate same-line calls" do
+    test_cases = catalog.fetch("cases").select do |row|
+      row.fetch("capabilities").include?("same-line")
+    end
+    requests = test_cases.map { |test_case| selected_request(@collector, test_case.fetch("anchor")) }
     symbols = requests.map { |request| request.dig("anchor", "symbol") }.sort
     rows = @collector.fetch(:evidence).fetch("anchors").select do |row|
       symbols.include?(row.fetch("anchor_symbol"))
     end
-    expect(rows.map { |row| row.dig("capture", "status") }).to eq(%w[PARTIAL PARTIAL])
-    expect(rows.flat_map { |row| row.fetch("executions") }).to be_empty
-    correlation = @collector.fetch(:evidence).fetch("correlations").find do |row|
+    expect(symbols.length).to eq(2)
+    expect(rows.map { |row| row.dig("capture", "status") })
+      .to contain_exactly("COMPLETE_FOR_RUNS", "COMPLETE_FOR_RUNS")
+    expect(rows.map { |row| row.fetch("executions").length }).to eq([1, 1])
+    expect(@collector.fetch(:evidence).fetch("correlations").none? do |row|
       row.fetch("candidate_anchor_symbols") == symbols
-    end
-    expect(correlation).not_to be_nil
-    expect(correlation.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
-    expect(correlation.fetch("executions")).not_to be_empty
+    end).to be(true)
   end
 
   it "collector oracle: function boundary parameters and returns satisfy the same requests" do
@@ -316,7 +382,12 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
         "#{boundary.fetch("id")}: #{row.dig("capture", "reason")}"
       if expected_status != "COMPLETE_FOR_RUNS"
         expect(row.dig("capture", "reason")).not_to be_empty
-        expect(row.dig("capture", "complete_kinds")).to be_empty
+        if expected_status == "NOT_EXECUTED"
+          expect(row.dig("capture", "complete_kinds"))
+            .to include(boundary.fetch("evidence_kind"))
+        else
+          expect(row.dig("capture", "complete_kinds")).to be_empty
+        end
         expect(row.fetch("executions")).to be_empty
         next
       end
@@ -540,6 +611,14 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
           "same_path=#{occurrences.select { |path, _range, _symbol|
             path == anchor.fetch("relative_path")
           }}"
+      end
+      if test_case.dig("expect", "excluded_target_owner")
+        excluded_suffix = test_case.dig("expect", "excluded_target_owner")
+          .gsub("::", "/")
+        expect(at_anchor.map(&:last).none? { |symbol|
+          symbol.include?(excluded_suffix)
+        }).to be(true),
+          "#{test_case.fetch("id")} published a nonproduction replacement at the callsite"
       end
     end
     expect(index.dig("_runtimeEvidence", "observedCallSites")).to be_positive

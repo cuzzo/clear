@@ -32,3 +32,45 @@ The core invariant is:
 
 The suite includes negative controls, so an empty trace or a collector that
 silently omits an executed anchor cannot pass.
+
+## Ownership contract
+
+FactMine owns all source semantics. It parses source, constructs normalized
+CFG/DFG facts, selects exact anchors, supplies the complete executable range
+for every call anchor, requests evidence kinds, and joins validated evidence.
+An executable range must contain its selector and, for calls with attached
+callbacks, the complete callback expression.
+
+A collector may use those opaque anchors and ranges only to observe execution.
+It records values, targets, results, provenance, exceptions, and counts. It
+must not parse source to infer receivers, assignments, local ownership,
+callbacks, control flow, data flow, or complexity.
+
+Every anchor kind has a closed set of legal evidence kinds in
+`wire_matrix.request_contracts`. FactMine rejects incompatible requests before
+collection begins.
+
+## Completeness semantics
+
+- `COMPLETE_FOR_RUNS` means every requested kind is present in every
+  applicable execution bucket and no execution was dropped.
+- `NOT_EXECUTED` means the exact anchor did not execute in the declared runs.
+  Its empty result is complete negative evidence; entering the enclosing
+  function or covering the same line does not prove that the anchor executed.
+- `PARTIAL` may name only the evidence kinds actually complete in every
+  retained bucket. A call that raised after its receiver and target were
+  observed, but before a requested result existed, is the canonical example.
+- Every other non-complete status requires a precise reason and cannot silently
+  publish missing fields as facts.
+- A normal return of `nil` or `false` is an observed return. A function that
+  raises before its return anchor is `NOT_EXECUTED` at that return anchor.
+- Non-production replacements remain observable evidence but can never be
+  published by FactMine as production call targets. Mixed production and test
+  executions preserve the production target without allowing the replacement
+  to poison or masquerade as it.
+
+Exact anchor symbols participate in observation identity and deduplication.
+Two calls to the same selector on the same source line remain distinct. A
+collector correlation is accepted only when the provider genuinely cannot
+produce exact identity; exact execution ranges remove that ambiguity for the
+Ruby collector.

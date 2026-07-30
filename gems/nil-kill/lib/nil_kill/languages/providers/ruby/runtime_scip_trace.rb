@@ -12,6 +12,8 @@ module NilKillRuntimeTrace
   @runtime_scip_native_result_depth = 0
   @runtime_function_entries = Hash.new(0)
   @runtime_executed_callsites = Hash.new(0)
+  @runtime_exact_anchor_executions = Hash.new(0)
+  @runtime_anchor_execution_stack = Hash.new { |hash, thread_id| hash[thread_id] = [] }
   @runtime_generated_wrapper_methods = Set.new
   # Collector-installed wrappers may be the Ruby frame observed by
   # TracePoint even though the workload invoked the wrapped method. Preserve
@@ -29,6 +31,37 @@ module NilKillRuntimeTrace
 
   def self.register_runtime_scip_transparent_wrapper(defined_class, method_id, target)
     @runtime_transparent_wrapper_targets[[defined_class, method_id.to_sym]] = target.freeze
+  end
+
+  # Source instrumentation receives this opaque symbol/range from FactMine.
+  # The collector records only that the expression was entered and associates
+  # a matching TracePoint call with the symbol. It performs no source lookup,
+  # receiver inference, dispatch resolution, or flow analysis.
+  def self.begin_runtime_anchor_execution(symbol, selector)
+    @runtime_exact_anchor_executions[symbol.to_s] += 1
+    @runtime_anchor_execution_stack[Thread.current.object_id] << {
+      symbol: symbol.to_s,
+      selector: selector.to_s,
+    }
+    true
+  end
+
+  def self.end_runtime_anchor_execution(symbol)
+    stack = @runtime_anchor_execution_stack[Thread.current.object_id]
+    index = stack.rindex { |entry| entry.fetch(:symbol) == symbol.to_s }
+    stack.delete_at(index) if index
+    nil
+  end
+
+  def self.runtime_exact_anchor_callsite(callsite, selector)
+    return callsite unless callsite
+
+    entry = @runtime_anchor_execution_stack[Thread.current.object_id]
+      .reverse_each
+      .find { |candidate| candidate.fetch(:selector) == selector.to_s }
+    return callsite unless entry
+
+    callsite.merge(anchor_symbol: entry.fetch(:symbol))
   end
 
   def self.record_runtime_scip_line(tp)
@@ -112,6 +145,7 @@ module NilKillRuntimeTrace
                    else
                      runtime_scip_ruby_callsite(tp, fallback_callsite)
                    end
+        callsite = runtime_exact_anchor_callsite(callsite, tp.method_id)
         capture_call, capture_result, receiver_shape =
           runtime_scip_captures_for(callsite, tp.method_id)
         observed_call = if capture_call || capture_result || receiver_shape
@@ -159,6 +193,7 @@ module NilKillRuntimeTrace
                else
                  runtime_scip_ruby_callsite(tp, fallback_callsite)
                end
+    callsite = runtime_exact_anchor_callsite(callsite, tp.method_id)
     capture_call, capture_result, receiver_shape =
       callsite ? runtime_scip_captures_for(callsite, tp.method_id) : [false, false, false]
     observed_call = if capture_call || capture_result || receiver_shape
@@ -200,9 +235,15 @@ module NilKillRuntimeTrace
         selected_frame[:runtime_scip_external_depth] = frame_depth - 1
         if frame_depth == 1
           external_call = selected_frame.delete(:runtime_scip_external_call)
-          if external_call&.fetch(:capture_result, false)
+          if external_call&.fetch(:capture_result, false) && !external_call[:raised]
             record_runtime_scip_result(external_call[:observed_call], tp.return_value)
           end
+          # Collector-owned transparent helpers can run between the source
+          # line event and a requested native call. Their non-selected line
+          # events deliberately suspend the native listener; restore the
+          # selected caller's exact demand window when that helper returns.
+          parent_callsite = selected_frame[:callsite]
+          arm_runtime_scip_native_callsite(parent_callsite) if parent_callsite
         end
       end
       return
@@ -212,7 +253,7 @@ module NilKillRuntimeTrace
     return if frames.empty?
 
     frame = frames.pop
-    if frame&.fetch(:capture_result, false)
+    if frame&.fetch(:capture_result, false) && !frame[:raised]
       record_runtime_scip_result(frame[:observed_call], tp.return_value)
     end
 
@@ -222,6 +263,18 @@ module NilKillRuntimeTrace
     # are neither lost nor attributed to the callee's last source line.
     parent_callsite = frames.last&.fetch(:callsite, nil)
     arm_runtime_scip_native_callsite(parent_callsite) if parent_callsite
+  end
+
+  def self.record_runtime_scip_raise
+    thread_id = Thread.current.object_id
+    frame = @runtime_scip_frames[thread_id].last
+    return unless frame
+
+    if @runtime_scip_external_depth[thread_id].positive?
+      frame[:runtime_scip_external_call][:raised] = true if frame[:runtime_scip_external_call]
+    else
+      frame[:raised] = true
+    end
   end
 
   def self.enter_runtime_scip_native_call(tp)
@@ -245,6 +298,7 @@ module NilKillRuntimeTrace
     end
 
     callsite = runtime_scip_native_callsite(tp, frame&.fetch(:callsite, nil))
+    callsite = runtime_exact_anchor_callsite(callsite, tp.method_id)
     capture_call, capture_result, receiver_shape =
       runtime_scip_captures_for(callsite, tp.method_id)
     unless capture_call || capture_result || receiver_shape
@@ -572,11 +626,14 @@ module NilKillRuntimeTrace
     transparent_target =
       @runtime_transparent_wrapper_targets[[tp.defined_class, tp.method_id.to_sym]]
     owner = if transparent_target
-              [transparent_target.fetch(:owner), transparent_target.fetch(:kind)]
+              [
+                transparent_target[:owner] || safe_module_name(tp.self),
+                transparent_target.fetch(:kind),
+              ]
             else
               method_owner(tp.defined_class)
             end
-    return unless owner
+    return unless owner && owner[0]
     return if owner[0] == "NilKillRuntimeTrace"
 
     native = transparent_target ? transparent_target.fetch(:native) : tp.event == :c_call
@@ -658,7 +715,7 @@ module NilKillRuntimeTrace
 
     key = [
       caller[:class], caller[:method], caller[:kind], caller[:path], caller[:line],
-      callsite[:path], callsite[:line],
+      callsite[:path], callsite[:line], callsite[:anchor_symbol],
       callee[:owner], callee[:name], callee[:kind], callee[:path], callee[:line],
       callee[:receiver_type],
       callee[:native], callee[:package_manager], callee[:package], callee[:version],
@@ -697,6 +754,7 @@ module NilKillRuntimeTrace
       callsite: {
         path: callsite[:path],
         line: callsite[:line],
+        anchor_symbol: callsite[:anchor_symbol],
       },
       callee: callee,
       receiver_domain: receiver_domain,
@@ -952,6 +1010,16 @@ module NilKillRuntimeTrace
   # the hot path performs neither repeated plan parsing nor string allocation.
   def self.runtime_scip_captures_for(callsite, selector = nil)
     return [true, true, true] unless callsite
+    if (anchor_symbol = callsite[:anchor_symbol])
+      required = runtime_evidence_required_by_anchor[anchor_symbol.to_s]
+      if required
+        return [
+          required.include?("RECEIVER_VALUE") || required.include?("CALL_TARGET"),
+          required.include?("RESULT_VALUE") || required.include?("BOOLEAN_RESULT"),
+          required.include?("COLLECTION_VALUE"),
+        ]
+      end
+    end
     cache = (callsite[:runtime_scip_capture_cache] ||= {})
     cache_key = selector&.to_s
     return cache[cache_key] if cache.key?(cache_key)
@@ -979,6 +1047,17 @@ module NilKillRuntimeTrace
     end
   end
 
+  def self.runtime_evidence_required_by_anchor
+    @runtime_evidence_required_by_anchor ||= Array(
+      trace_plan&.dig("runtime_evidence", "requests")
+    ).to_h do |request|
+      [
+        request.dig("anchor", "symbol").to_s,
+        Array(request["required"]).map(&:to_s).to_set.freeze,
+      ]
+    end
+  end
+
   def self.runtime_scip_value_capture?(field, callsite, selector = nil)
     plan = trace_plan
     return true unless plan
@@ -995,7 +1074,7 @@ module NilKillRuntimeTrace
   end
 
   def self.install_runtime_scip_trace
-    TracePoint.new(:line, :call, :return) do |trace|
+    TracePoint.new(:line, :call, :return, :raise) do |trace|
       thread_id = Thread.current.object_id
       frames = @runtime_scip_frames[thread_id]
       case trace.event
@@ -1014,6 +1093,10 @@ module NilKillRuntimeTrace
         next if frames.empty? && !@runtime_scip_external_depth[thread_id].positive?
 
         leave_runtime_scip_ruby_call(trace)
+      when :raise
+        next if frames.empty?
+
+        record_runtime_scip_raise
       end
     end.enable
   end
@@ -1051,6 +1134,11 @@ module NilKillRuntimeTrace
           selector: key[2],
           count: count
         )
+      end
+    end
+    File.open(File.join(OUT_DIR, "exact-anchor-executions-#{pid}.jsonl"), "w") do |file|
+      @runtime_exact_anchor_executions.sort.each do |symbol, count|
+        file.puts JSON.generate(symbol: symbol, count: count)
       end
     end
   end

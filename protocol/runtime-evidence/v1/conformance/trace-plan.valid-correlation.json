@@ -6,7 +6,7 @@
     "arguments": []
   },
   "project_root": "file:///workspace",
-  "plan_digest": "nJiaQ2XD+Sk5J8zMrdMaA1Msn1TZkF25onp1/15k6L4=",
+  "plan_digest": "wsySeZKGBsXY14zVdXO9/gC/zNMvNrhOOo8c1b5kcZ4=",
   "documents": [
     {
       "relative_path": "lib/worker.rb",
@@ -34,7 +34,13 @@
       "required": [
         "RECEIVER_VALUE",
         "CALL_TARGET"
-      ]
+      ],
+      "execution_range": {
+        "start_line": 2,
+        "start_character": 0,
+        "end_line": 2,
+        "end_character": 13
+      }
     },
     {
       "anchor": {
@@ -54,7 +60,13 @@
       "required": [
         "RECEIVER_VALUE",
         "CALL_TARGET"
-      ]
+      ],
+      "execution_range": {
+        "start_line": 2,
+        "start_character": 14,
+        "end_line": 2,
+        "end_character": 25
+      }
     }
   ]
 }

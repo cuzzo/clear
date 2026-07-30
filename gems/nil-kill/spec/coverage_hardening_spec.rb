@@ -739,6 +739,17 @@ RSpec.describe "NilKill coverage hardening" do
 
   describe NilKillRuntimeTrace do
     def reset_runtime_trace_state!
+      %i[
+        @runtime_scip_native_call_trace
+        @runtime_scip_native_result_trace
+      ].each do |trace_name|
+        trace = described_class.instance_variable_get(trace_name)
+        trace.disable if trace.respond_to?(:disable)
+      rescue RSpec::Mocks::MockExpectationError
+        # An example may have installed a verifying double whose lifecycle has
+        # already ended. The real TracePoint, when present, was disabled above.
+        nil
+      end
       FileUtils.rm_f(described_class::TRACE_PLAN_PATH)
       Thread.current[:__nil_kill_runtime_scip_identity_samples] = nil
       {
@@ -1161,6 +1172,11 @@ RSpec.describe "NilKill coverage hardening" do
       allow(described_class).to receive(:record_runtime_scip_call)
         .and_return(:external_call)
       allow(described_class).to receive(:record_runtime_scip_result)
+      native_calls = instance_double(TracePoint, enable: true, disable: true)
+      allow(described_class).to receive(:runtime_scip_native_call_trace)
+        .and_return(native_calls)
+      allow(described_class).to receive(:runtime_scip_native_calls_enabled?)
+        .and_return(true)
       external = FakeTracePoint.new(
         event: :call,
         path: "/dependency/runtime.rb",
@@ -1209,6 +1225,7 @@ RSpec.describe "NilKill coverage hardening" do
       expect(frames.length).to eq(1)
       expect(described_class).to have_received(:record_runtime_scip_result)
         .with(:external_call, "rendered").once
+      expect(native_calls).to have_received(:enable).once
     ensure
       FileUtils.rm_f(target_file) if defined?(target_file)
     end
@@ -1353,6 +1370,10 @@ RSpec.describe "NilKill coverage hardening" do
     end
 
     before do
+      reset_runtime_trace_state!
+    end
+
+    after do
       reset_runtime_trace_state!
     end
 

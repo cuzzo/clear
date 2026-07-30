@@ -9,4 +9,10 @@ module RuntimeEvidenceConformance
       Value.new(:test)
     end
   end
+
+  TestStatus = Struct.new(:ok) do
+    def success?
+      ok
+    end
+  end
 end
