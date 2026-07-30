@@ -1928,6 +1928,14 @@ fn visit_loops(
                         .or_else(|| {
                             behavior.string_operand_complexity(message, operand_type.as_ref())
                         })
+                        .or_else(|| {
+                            record_operator_complexity(
+                                message,
+                                operand_type.as_ref(),
+                                field_types,
+                                behavior,
+                            )
+                        })
                 })
                 .or_else(|| {
                     behavior.intrinsic_call_complexity(
@@ -2646,6 +2654,35 @@ fn declared_empty_collection_name(
             })
     });
     empty.then(|| name.to_string())
+}
+
+/// Comparing two records of machine scalars is a fixed number of scalar
+/// comparisons: the shape is declared, so the count is a constant rather than a
+/// function of any input. A record holding a sequence is not, and each language
+/// decides for itself which of its types are machine scalars.
+fn record_operator_complexity(
+    message: &str,
+    operand_type: Option<&TypeExpr>,
+    field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> Option<crate::syntax::normalized_behavior::NormalizedCallComplexity> {
+    let operator = message.strip_suffix('@').unwrap_or(message);
+    if !matches!(operator, "==" | "!=" | "<" | "<=" | ">" | ">=") {
+        return None;
+    }
+    let owner = type_owner_name(operand_type?)?;
+    let fields = field_types.get(&owner)?;
+    if fields.is_empty() {
+        return None;
+    }
+    fields
+        .values()
+        .all(|field| {
+            behavior
+                .scalar_operator_complexity(operator, Some(field))
+                .is_some()
+        })
+        .then(|| NormalizedCollectionOperation::Constant.complexity())
 }
 
 /// A local that cannot hold more elements as the input grows: it is declared
