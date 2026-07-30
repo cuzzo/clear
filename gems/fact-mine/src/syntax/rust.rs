@@ -394,6 +394,49 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         Some("rust")
     }
 
+    /// `|a, b|` heads a Rust closure; `move` may precede it.
+    fn closure_parameter_names(&self, lambda: &Node) -> Vec<String> {
+        let text = lambda.text.trim();
+        let text = text.strip_prefix("move").map(str::trim_start).unwrap_or(text);
+        let Some(header) = text.strip_prefix('|').and_then(|rest| rest.split('|').next()) else {
+            return Vec::new();
+        };
+        header
+            .split(',')
+            .filter_map(|part| {
+                let name = part
+                    .split(':')
+                    .next()?
+                    .trim()
+                    .trim_matches(|c: char| c == '(' || c == ')' || c.is_whitespace())
+                    .trim_start_matches(['&', '*'])
+                    .trim_start_matches("mut ")
+                    .trim();
+                (!name.is_empty()
+                    && name != "_"
+                    && name.chars().all(|c| c.is_alphanumeric() || c == '_'))
+                .then(|| name.to_string())
+            })
+            .collect()
+    }
+
+    fn iterator_element_closure(&self, message: &str) -> bool {
+        matches!(
+            message,
+            "filter" | "map" | "filter_map" | "flat_map" | "find" | "find_map" | "any" | "all"
+                | "for_each" | "position" | "retain" | "take_while" | "skip_while" | "inspect"
+                | "partition" | "min_by_key" | "max_by_key" | "sort_by_key" | "map_while"
+        )
+    }
+
+    fn iterator_element_preserving(&self, message: &str) -> bool {
+        matches!(
+            message,
+            "iter" | "into_iter" | "iter_mut" | "filter" | "rev" | "take" | "skip" | "peekable"
+                | "take_while" | "skip_while" | "cloned" | "copied" | "inspect" | "by_ref"
+        )
+    }
+
     fn collection_operation(
         &self,
         receiver_type: &TypeExpr,

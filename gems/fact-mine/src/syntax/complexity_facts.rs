@@ -362,9 +362,13 @@ impl Default for LoopContext {
 pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
     let behavior = super::normalized_behavior::behavior(document.language);
     let block_summaries = preliminary_block_summaries(document, behavior);
-    document
-        .local_methods
-        .iter()
+    let mut closure_types: BTreeMap<String, BTreeMap<String, TypeExpr>> = BTreeMap::new();
+    let mut ordered = document.local_methods.iter().collect::<Vec<_>>();
+    // A closure is typed by the scope that hands it over, so that scope is
+    // visited before the closure that reads the type it left behind.
+    ordered.sort_by_key(|method| method.line);
+    ordered
+        .into_iter()
         .filter_map(|method| {
             let definition = document
                 .function_defs
@@ -427,6 +431,7 @@ pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
                 .map(|(name, _)| name.clone())
                 .collect::<BTreeSet<_>>();
             fact_for_method(
+                &mut closure_types,
                 document,
                 &document.file,
                 owner,
@@ -545,6 +550,7 @@ fn collect_block_invocations(
 
 #[allow(clippy::too_many_arguments)] // The fact mirrors the independently extracted method evidence.
 fn fact_for_method(
+    closure_types: &mut BTreeMap<String, BTreeMap<String, TypeExpr>>,
     document: &Document,
     path: &str,
     owner: &str,
@@ -656,8 +662,17 @@ fn fact_for_method(
         &assignments,
         state_types,
         &field_types,
+        closure_types,
         behavior,
     );
+    // This method may itself be a closure an earlier scope typed.
+    if let Some(bound) = closure_types.get(function) {
+        for (name, declared) in bound {
+            augmented_parameter_types
+                .entry(name.clone())
+                .or_insert_with(|| declared.clone());
+        }
+    }
     let parameter_types = &augmented_parameter_types;
     visit_loops(
         node,
@@ -3244,6 +3259,7 @@ fn collect_iteration_element_types(
     assignments: &BTreeMap<String, Vec<Assignment>>,
     state_types: &BTreeMap<String, TypeExpr>,
     field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
+    closure_types: &mut BTreeMap<String, BTreeMap<String, TypeExpr>>,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
     if loop_node(node, behavior) {
@@ -3265,8 +3281,67 @@ fn collect_iteration_element_types(
             }
         }
     }
+    if let Some(lambda) = child_nodes(node)
+        .into_iter()
+        .flat_map(child_nodes)
+        .find(|child| child.r#type == "LAMBDA")
+    {
+        if let Some(element) = closure_element_type(node, types, state_types, field_types, behavior)
+        {
+            // A closure is analysed as its own function, so the element type is
+            // recorded against that identity rather than the scope declaring it.
+            // One parameter takes the element whole. Several destructure it, and
+            // which part each one takes is not the element's own type.
+            let bindings = behavior.closure_parameter_names(lambda);
+            if let [binding] = bindings.as_slice() {
+                closure_types
+                    .entry(crate::syntax::lambda_function_name(
+                        lambda.first_lineno,
+                        lambda.first_column,
+                    ))
+                    .or_default()
+                    .entry(binding.clone())
+                    .or_insert(element);
+            }
+        }
+    }
     for child in child_nodes(node) {
-        collect_iteration_element_types(child, types, assignments, state_types, field_types, behavior);
+        collect_iteration_element_types(
+            child,
+            types,
+            assignments,
+            state_types,
+            field_types,
+            closure_types,
+            behavior,
+        );
+    }
+}
+
+/// The element a closure parameter is bound to. An adapter's closure receives
+/// what its receiver yields, so the type follows the chain back to whatever it
+/// started from - but only while every adapter in between passes its elements
+/// through, since one that rebuilds them yields something else entirely.
+fn closure_element_type(
+    node: &Node,
+    types: &BTreeMap<String, TypeExpr>,
+    state_types: &BTreeMap<String, TypeExpr>,
+    field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
+    behavior: &dyn NormalizedLanguageBehavior,
+) -> Option<TypeExpr> {
+    if !behavior.iterator_element_closure(direct_call_message(node)?) {
+        return None;
+    }
+    let mut base = call_receiver(node)?;
+    while base.r#type == "CALL" {
+        if !behavior.iterator_element_preserving(direct_call_message(base)?) {
+            return None;
+        }
+        base = call_receiver(base)?;
+    }
+    match resolve_expr_type(base.text.trim(), types, state_types, field_types)?.strip_nilable() {
+        TypeExpr::Array(element) | TypeExpr::Set(element) => Some(*element),
+        _ => None,
     }
 }
 

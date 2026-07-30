@@ -1572,6 +1572,24 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
             .and_then(|language| configured_collection_operation(language, receiver_type, message))
     }
 
+    /// The names a closure binds. Normalization keeps a closure's body, not its
+    /// header, so a language whose closures declare parameters reads them from
+    /// its own syntax.
+    fn closure_parameter_names(&self, _lambda: &Node) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Whether this call hands its closure one element of its receiver.
+    fn iterator_element_closure(&self, _message: &str) -> bool {
+        false
+    }
+
+    /// Whether this adapter yields its receiver's elements unchanged, so a
+    /// closure further along the chain still receives that element type.
+    fn iterator_element_preserving(&self, _message: &str) -> bool {
+        false
+    }
+
     /// The result type of a standard-library call, so an operator applied to
     /// that result has a proven operand type.
     fn stdlib_return_type(&self, receiver_type: &TypeExpr, message: &str) -> Option<TypeExpr> {
