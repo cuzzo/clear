@@ -107,6 +107,19 @@
         "safe_navigation": false
       },
       {
+        "arguments": [
+          "\"- [Lineage Unit Risk (#{@lineage[:units].size})]\""
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "lineage_summary",
+        "line": 11,
+        "message": "<<",
+        "receiver": "out",
+        "safe_navigation": false
+      },
+      {
         "arguments": [],
         "block": false,
         "conditional": false,

@@ -219,6 +219,19 @@
       },
       {
         "arguments": [
+          "\"| #{key.join(\":\")} | #{audit.findings.size} |\""
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "build",
+        "line": 16,
+        "message": "<<",
+        "receiver": "rows",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
           "audit.findings"
         ],
         "block": false,

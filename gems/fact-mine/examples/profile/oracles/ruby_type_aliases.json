@@ -89,6 +89,12 @@
       "receiver": "T::Array",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
+      "selector_span": [
+        4,
+        35,
+        4,
+        36
+      ],
       "source": "fn:a4f16908d1ca0abc",
       "span": [
         4,

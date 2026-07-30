@@ -93,6 +93,7 @@ Hash:
   slice: linear_materialize
   transform_values!: linear_scan
 OptionParser:
+  banner=: constant
   parse!: linear_scan
   to_s: linear_materialize
 Set:
@@ -375,6 +376,12 @@ ExternalLatency:
   "Kernel.warn": linear_scan
   "Kernel.exit": constant
   "Kernel.system": linear_scan
+  # Activating a gem scans the installed specification/load-path surface.
+  # Filesystem latency is excluded; N is the activation search surface.
+  "Kernel.gem": linear_scan
+  # Loading YAML reads and parses input proportional to the file contents.
+  # Filesystem latency is excluded from the CPU/space bound.
+  "Psych.load_file": linear_materialize
 ExternalLatencyParametric:
   # Native path APIs invoke Ruby's to_path before their bounded byte/path
   # work.  C is that single coercion callback and N is the path/output size.

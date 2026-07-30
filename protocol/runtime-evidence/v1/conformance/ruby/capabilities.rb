@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require "open3"
+require "ostruct"
+require "set"
+require "sorbet-runtime"
 
 module RuntimeEvidenceConformance
   class Value
@@ -31,6 +34,10 @@ module RuntimeEvidenceConformance
 
   Generated = Struct.new(:payload, :count)
   GeneratedStatus = Struct.new(:decision_line)
+  class TypedGenerated < T::Struct
+    const :payload, Object
+  end
+
   GeneratedOverride = Struct.new(:payload) do
     def payload
       "override:#{self[:payload]}"
@@ -132,6 +139,35 @@ module RuntimeEvidenceConformance
       values.merge!(merge: value)
       values.update(update: value)
       values
+    end
+
+    def instrumented_set_writes(values, value)
+      values.add(value)
+      values << value
+      values.merge([value])
+      values
+    end
+
+    def converted_index(value, index)
+      Array(value)[index]
+    end
+
+    def sorbet_typed_passthrough(value)
+      T.let(value, Object)
+    end
+
+    def typed_generated_constructor(value)
+      TypedGenerated.new(payload: value)
+    end
+
+    def typed_generated_accessor(value)
+      value.payload
+    end
+
+    def open_struct_index_write(value)
+      record = OpenStruct.new
+      record[:payload] = value
+      record[:payload]
     end
 
     def generated_accessor(value)

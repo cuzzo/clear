@@ -129,6 +129,12 @@
       "receiver": "T::Array",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
+      "selector_span": [
+        8,
+        20,
+        8,
+        21
+      ],
       "source": "fn:8b060578990b3bc3",
       "span": [
         8,
@@ -333,6 +339,12 @@
         26
       ],
       "receiver_kind": "value",
+      "selector_span": [
+        13,
+        26,
+        13,
+        27
+      ],
       "source": "fn:f40acd31cc807dfc",
       "span": [
         13,

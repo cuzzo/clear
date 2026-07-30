@@ -291,7 +291,10 @@ fn boundary_symbol(
 }
 
 fn ruby_type_symbol(name: &str) -> String {
-    format!("nil-kill-runtime ruby ruby 3.2.3 {}#", descriptor_owner(name))
+    format!(
+        "nil-kill-runtime ruby ruby 3.2.3 {}#",
+        descriptor_owner(name)
+    )
 }
 
 fn descriptor_name(name: &str) -> String {
@@ -636,13 +639,7 @@ fn evidence_for_catalog(
                         count: 1,
                         receiver: required
                             .contains(&EvidenceKind::RECEIVER_VALUE.value())
-                            .then(|| {
-                                value_set(
-                                    &excluded_owner,
-                                    None,
-                                    SourceRole::NON_PRODUCTION,
-                                )
-                            })
+                            .then(|| value_set(&excluded_owner, None, SourceRole::NON_PRODUCTION))
                             .into(),
                         target: required
                             .contains(&EvidenceKind::CALL_TARGET.value())
@@ -802,12 +799,7 @@ fn evidence_for_catalog(
                         None,
                         SourceRole::PRODUCTION,
                     )),
-                    target: MessageField::some(target(
-                        owner,
-                        name,
-                        None,
-                        SourceRole::PRODUCTION,
-                    )),
+                    target: MessageField::some(target(owner, name, None, SourceRole::PRODUCTION)),
                     provenance: MessageField::some(Provenance {
                         run_id: "oracle-run".to_string(),
                         provider: "canonical-conformance".to_string(),
@@ -947,6 +939,12 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
         "short-circuit-call",
         "skipped-execution",
         "native-call",
+        "set",
+        "chained-index",
+        "kernel-conversion",
+        "sorbet",
+        "typed-record",
+        "open-struct",
         "generated-accessor",
         "anonymous-class",
         "transparent-wrapper",
@@ -1238,11 +1236,8 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
                 expected.target_owner.as_deref(),
                 expected.forbidden_target_name.as_deref(),
             ) {
-                let forbidden_suffix = format!(
-                    "{}#{}().",
-                    descriptor_owner(owner),
-                    descriptor_name(name)
-                );
+                let forbidden_suffix =
+                    format!("{}#{}().", descriptor_owner(owner), descriptor_name(name));
                 assert!(
                     at_anchor
                         .iter()

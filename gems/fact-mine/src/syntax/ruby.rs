@@ -243,6 +243,9 @@ fn ruby_stdlib_descriptor(descriptor: &str, message: &str) -> bool {
         let plain = format!("{owner}#{message}().");
         let quoted = format!("{owner}#`{message}`().");
         configured_stdlib_call_identity("ruby", Some(&namespace_owner), None, message)
+            || configured_external_latency_bound("ruby", &namespace_owner, message).is_some()
+            || configured_external_latency_parametric_cost("ruby", &namespace_owner, message)
+                .is_some()
             || configured_semantic_symbol_parametric_cost("ruby", &plain).is_some()
             || configured_semantic_symbol_parametric_cost("ruby", &quoted).is_some()
             || ruby_stdlib_fallback_owners(&owner).iter().any(|fallback| {
@@ -1136,7 +1139,10 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         if source_text == message || source_text == format!("{message}=") {
             return true;
         }
-        if message.strip_suffix('=').is_some_and(|setter| source_text == setter) {
+        if message
+            .strip_suffix('=')
+            .is_some_and(|setter| source_text == setter)
+        {
             // Ruby's writer syntax has no `=` in the selector token, and a
             // runtime producer can legitimately report both the generated
             // reader and writer at that range. The symbol, rather than the
@@ -1303,6 +1309,54 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         .then_some(NormalizedRuntimeTruthinessGuard { subject })
     }
 
+    fn node_call_projections(&self, node: &Node) -> Vec<NormalizedCallProjection> {
+        // Ripper represents `receiver << value` as OPCALL rather than CALL.
+        // It is nevertheless ordinary Ruby dispatch (Array, Set, String, or a
+        // user implementation), so it needs the same runtime-evidence request
+        // and cost join as an explicitly spelled method call.
+        if node.r#type != "OPCALL" {
+            return Vec::new();
+        }
+        let Some(receiver) = node.children.first().and_then(ast::node) else {
+            return Vec::new();
+        };
+        let Some(message) = node.children.get(1).and_then(|child| match child {
+            ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.as_str()),
+            _ => None,
+        }) else {
+            return Vec::new();
+        };
+        if message != "<<" {
+            return Vec::new();
+        }
+        let full_span = [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ];
+        let arguments = node
+            .children
+            .get(2)
+            .and_then(ast::node)
+            .map(|arguments| {
+                arguments
+                    .children
+                    .iter()
+                    .filter_map(ast::node)
+                    .map(|argument| ast::normalize_text(&argument.text).trim().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        vec![NormalizedCallProjection {
+            receiver: ast::normalize_text(&receiver.text).trim().to_string(),
+            message: message.to_string(),
+            arguments,
+            access_span: self.call_access_span(node, None, full_span),
+            span: full_span,
+        }]
+    }
+
     fn call_access_span(&self, node: &Node, computed_span: Option<Span>, full_span: Span) -> Span {
         // Ruby normalizes an explicit receiver call as
         // `CALL(receiver, message, arguments)`, but a bare function call as
@@ -1311,7 +1365,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         // child position.  Returning the source span of the selector keeps
         // runtime SCIP occurrences distinct from their nested argument calls.
         let message_child = match node.r#type.as_str() {
-            "CALL" | "QCALL" => node.children.get(1),
+            "CALL" | "QCALL" | "OPCALL" => node.children.get(1),
             "FCALL" | "VCALL" => node.children.first(),
             "ATTRASGN" => node.children.get(1),
             _ => None,
@@ -1320,7 +1374,10 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             Some(ast::Child::String(value) | ast::Child::Symbol(value)) => value.as_str(),
             _ => return computed_span.unwrap_or(full_span),
         };
-        let source_selector = if node.r#type == "ATTRASGN" && message == "[]=" {
+        let source_selector = if matches!(node.r#type.as_str(), "CALL" | "QCALL") && message == "[]"
+        {
+            "["
+        } else if node.r#type == "ATTRASGN" && message == "[]=" {
             "["
         } else if node.r#type == "ATTRASGN" {
             message.strip_suffix('=').unwrap_or(message)
@@ -1328,7 +1385,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             message
         };
         let search_start = match node.r#type.as_str() {
-            "CALL" | "QCALL" | "ATTRASGN" => node
+            "CALL" | "QCALL" | "OPCALL" | "ATTRASGN" => node
                 .children
                 .first()
                 .and_then(|child| match child {
@@ -3303,6 +3360,37 @@ mod tests {
     }
 
     #[test]
+    fn chained_index_runtime_anchor_names_the_bracket_after_its_receiver() {
+        let behavior = RubyNormalizedBehavior;
+        let receiver = Node {
+            r#type: "FCALL".to_string(),
+            children: vec![ast::Child::Symbol("Array".to_string()), ast::Child::Nil],
+            first_lineno: 12,
+            first_column: 6,
+            last_lineno: 12,
+            last_column: 17,
+            text: "Array(value)".to_string(),
+        };
+        let index = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                ast::Child::Node(Box::new(receiver)),
+                ast::Child::Symbol("[]".to_string()),
+                ast::Child::Nil,
+            ],
+            first_lineno: 12,
+            first_column: 6,
+            last_lineno: 12,
+            last_column: 24,
+            text: "Array(value)[index]".to_string(),
+        };
+        assert_eq!(
+            behavior.call_access_span(&index, None, [12, 6, 12, 24]),
+            [12, 18, 12, 19]
+        );
+    }
+
+    #[test]
     fn ruby_behavior_edge_cases() {
         let behavior = RubyNormalizedBehavior;
 
@@ -4434,6 +4522,24 @@ mod tests {
             );
         }
 
+        for (symbol, message, expected) in [
+            (
+                "nil-kill-runtime ruby bundler 2.7.2 Kernel#gem().",
+                "gem",
+                ("O(N)", "O(1)"),
+            ),
+            (
+                "nil-kill-runtime ruby psych 5.4.0 Psych.load_file().",
+                "load_file",
+                ("O(N)", "O(N)"),
+            ),
+        ] {
+            let cost = external_symbol_call_complexity(symbol, message)
+                .unwrap_or_else(|| panic!("missing external contract for {symbol}"));
+            assert_eq!((cost.time, cost.space), expected);
+            assert_eq!(cost.bound_quality, "upper_bound_external_latency_excluded");
+        }
+
         for (symbol, kind) in [
             (
                 "nil-kill-runtime ruby ruby 3.2.3 Exception#message().",
@@ -4486,35 +4592,17 @@ mod tests {
     #[test]
     fn anonymous_runtime_record_contract_is_exact_and_closed() {
         for (descriptor, message) in [
-            (
-                "`AnonymousStruct(file,line)`#file().",
-                "file",
-            ),
-            (
-                "`AnonymousStruct(file,line)`#`line=`().",
-                "line=",
-            ),
-            (
-                "`AnonymousStruct(file,line)`.new().",
-                "new",
-            ),
-            (
-                "`AnonymousData(file,line)`#line().",
-                "line",
-            ),
-            (
-                "`AnonymousData(file,line)`.new().",
-                "new",
-            ),
+            ("`AnonymousStruct(file,line)`#file().", "file"),
+            ("`AnonymousStruct(file,line)`#`line=`().", "line="),
+            ("`AnonymousStruct(file,line)`.new().", "new"),
+            ("`AnonymousData(file,line)`#line().", "line"),
+            ("`AnonymousData(file,line)`.new().", "new"),
         ] {
             let symbol = format!("nil-kill-runtime workspace demo 1 {descriptor}");
             let cost = external_symbol_call_complexity(&symbol, message)
                 .unwrap_or_else(|| panic!("missing structural record cost for {symbol}"));
             assert_eq!((cost.time, cost.space), ("O(1)", "O(1)"));
-            assert_eq!(
-                cost.provenance,
-                "ruby_generated_record_runtime_contract"
-            );
+            assert_eq!(cost.provenance, "ruby_generated_record_runtime_contract");
         }
 
         for (descriptor, message) in [

@@ -796,6 +796,7 @@ RSpec.describe "NilKill coverage hardening" do
         runtime_scip_native_result_depth: 0,
         runtime_scip_native_result_armed: false,
         runtime_evidence_anchor_by_callsite: nil,
+        runtime_evidence_selectors_by_callsite: nil,
         runtime_evidence_required_by_anchor: nil,
         runtime_anchor_marker_depth: Hash.new(0),
       }.each do |name, value|

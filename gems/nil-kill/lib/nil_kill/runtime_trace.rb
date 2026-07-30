@@ -1401,6 +1401,7 @@ module NilKillRuntimeTrace
   def self.install_tlet_hook
     return unless defined?(T) && T.respond_to?(:let)
     return if T.singleton_class.method_defined?(:__nil_kill_orig_let)
+    original_location = T.method(:let).source_location
     T.singleton_class.alias_method(:__nil_kill_orig_let, :let)
     T.singleton_class.define_method(:let) do |value, type, **kw|
       loc = caller_locations(1, 1)&.first
@@ -1431,6 +1432,16 @@ module NilKillRuntimeTrace
       end
       T.send(:__nil_kill_orig_let, value, type, **kw)
     end
+    register_runtime_scip_transparent_wrapper(
+      T.singleton_class,
+      :let,
+      owner: "T",
+      name: "let",
+      kind: "class",
+      native: false,
+      path: original_location&.first,
+      line: original_location&.last
+    )
   end
 
   def self.tlet_site_decisions_for(path)
@@ -1512,7 +1523,10 @@ module NilKillRuntimeTrace
     require "ostruct"
     return if OpenStruct.instance_variable_get(:@__nil_kill_attached)
     OpenStruct.instance_variable_set(:@__nil_kill_attached, true)
-    OpenStruct.prepend(Module.new do
+    original_locations = %i[initialize []=].to_h do |method_id|
+      [method_id, OpenStruct.instance_method(method_id).source_location]
+    end
+    wrapper = Module.new do
       define_method(:initialize) do |hash = nil|
         super(hash)
         NilKillRuntimeTrace.record_open_struct(self)
@@ -1523,7 +1537,21 @@ module NilKillRuntimeTrace
         NilKillRuntimeTrace.record_open_struct_field(self, name, value)
         result
       end
-    end)
+    end
+    OpenStruct.prepend(wrapper)
+    %i[initialize []=].each do |method_id|
+      path, line = original_locations.fetch(method_id)
+      register_runtime_scip_transparent_wrapper(
+        wrapper,
+        method_id,
+        owner: "OpenStruct",
+        name: method_id.to_s,
+        kind: "instance",
+        native: false,
+        path: path,
+        line: line
+      )
+    end
   rescue LoadError
     nil
   end
@@ -1558,13 +1586,44 @@ module NilKillRuntimeTrace
     return if klass.instance_variable_get(:@__nil_kill_tstruct_attached)
 
     klass.instance_variable_set(:@__nil_kill_tstruct_attached, true)
-    klass.singleton_class.prepend(Module.new do
+    fields = klass.respond_to?(:props) ? klass.props.keys.map(&:to_s) : []
+    klass.instance_variable_set(:@__nil_kill_struct_fields, fields.freeze)
+    klass.instance_variable_set(:@__nil_kill_record_family, "TStruct")
+    wrapper = Module.new do
       def new(*args, **kw, &blk)
         instance = super
         NilKillRuntimeTrace.record_tstruct_instance(instance, kw)
         instance
       end
-    end)
+    end
+    klass.singleton_class.prepend(wrapper)
+    @runtime_generated_wrapper_methods << [wrapper, :new]
+    register_runtime_scip_transparent_wrapper(
+      wrapper,
+      :new,
+      owner: safe_module_name(klass),
+      name: "new",
+      kind: "class",
+      native: false,
+      path: klass.instance_variable_get(:@__nil_kill_struct_path),
+      line: klass.instance_variable_get(:@__nil_kill_struct_line)
+    )
+    fields.each do |field|
+      method_id = field.to_sym
+      defined_class = klass.instance_method(method_id).owner
+      register_runtime_scip_transparent_wrapper(
+        defined_class,
+        method_id,
+        owner: safe_module_name(klass),
+        name: field,
+        kind: "instance",
+        native: false,
+        path: klass.instance_variable_get(:@__nil_kill_struct_path),
+        line: klass.instance_variable_get(:@__nil_kill_struct_line)
+      )
+    rescue NameError
+      next
+    end
   end
 
   def self.record_tstruct_instance(instance, keyword_values = {})
@@ -1740,7 +1799,10 @@ module NilKillRuntimeTrace
     require "set"
     return if Set.instance_variable_get(:@__nil_kill_attached)
     Set.instance_variable_set(:@__nil_kill_attached, true)
-    Set.prepend(Module.new do
+    original_locations = %i[add << merge].to_h do |method_id|
+      [method_id, Set.instance_method(method_id).source_location]
+    end
+    wrapper = Module.new do
       define_method(:add) do |value|
         result = super(value)
         if @__nil_kill_traced
@@ -1764,7 +1826,21 @@ module NilKillRuntimeTrace
         end
         result
       end
-    end)
+    end
+    Set.prepend(wrapper)
+    %i[add << merge].each do |method_id|
+      path, line = original_locations.fetch(method_id)
+      register_runtime_scip_transparent_wrapper(
+        wrapper,
+        method_id,
+        owner: "Set",
+        name: method_id.to_s,
+        kind: "instance",
+        native: false,
+        path: path,
+        line: line
+      )
+    end
   rescue LoadError
     nil
   end

@@ -167,6 +167,32 @@ module NilKillRuntimeTrace
     end
   end
 
+  # The protocol request is the collector's source of truth. Legacy
+  # `runtime_*_sites` fields are retained as performance hints, but they may
+  # omit a call whose static cost is already known even though FactMine still
+  # requests its receiver or exact target. Native tracing must therefore be
+  # armed for every call-like runtime-evidence request.
+  def self.runtime_evidence_selectors_by_callsite
+    @runtime_evidence_selectors_by_callsite ||= begin
+      Array(trace_plan&.dig("runtime_evidence", "requests")).each_with_object({}) do |request, selectors|
+        anchor = request["anchor"]
+        range = request["execution_range"]
+        next unless anchor.is_a?(Hash) && range.is_a?(Hash)
+        next unless %w[
+          CALL_SELECTOR COLLECTION_OPERATION BRANCH_PREDICATE
+        ].include?(anchor["kind"])
+
+        path = abs_path(anchor.fetch("relative_path"))
+        (range.fetch("start_line").to_i..range.fetch("end_line").to_i).each do |line|
+          key = [path, line + 1].join("\0")
+          selector = anchor.fetch("display_name").to_s
+          selectors[key] ||= []
+          selectors[key] << selector unless selectors[key].include?(selector)
+        end
+      end.transform_values { |selectors| selectors.sort.freeze }.freeze
+    end
+  end
+
   def self.record_runtime_scip_line(tp)
     raw_path = tp.path
     selected_source = target_path?(raw_path)
@@ -823,7 +849,8 @@ module NilKillRuntimeTrace
     # Sorbet installs validation wrappers under the application's declared
     # owner. TracePoint reports both that wrapper and the underlying method;
     # the wrapper is an implementation detail, not a source-level call target.
-    return if package[:package] == "sorbet-runtime" &&
+    return if transparent_target.nil? &&
+      package[:package] == "sorbet-runtime" &&
       !owner[0].to_s.start_with?("T::")
 
     callee = {
@@ -831,7 +858,8 @@ module NilKillRuntimeTrace
       name: transparent_target&.fetch(:name, nil) || tp.method_id.to_s,
       kind: owner[1],
       path: callee_path,
-      line: native_source ? native_source.fetch(:line) : (native ? nil : src_line(callee_path, tp.lineno)),
+      line: transparent_target&.fetch(:line, nil) ||
+        (native_source ? native_source.fetch(:line) : (native ? nil : src_line(callee_path, tp.lineno))),
       native: native,
       receiver_type: class_name(tp.self),
       source_role: (
@@ -1135,9 +1163,18 @@ module NilKillRuntimeTrace
     return true unless plan
 
     sites = plan["runtime_native_activation_sites"]
-    return true unless sites
+    key = [callsite[:path], callsite[:line]].join("\0")
+    legacy = sites && sites[key]
+    return true if legacy == true
 
-    sites[[callsite[:path], callsite[:line]].join("\0")]
+    protocol_requests = runtime_evidence_selectors_by_callsite
+    requested = protocol_requests[key]
+    # Plans predating both activation hints and the runtime-evidence protocol
+    # meant "capture exhaustively". Preserve that compatibility contract.
+    return true unless sites || !protocol_requests.empty?
+    return legacy unless requested
+
+    (Array(legacy) | requested).sort
   end
 
   def self.runtime_scip_native_activation?(callsite)

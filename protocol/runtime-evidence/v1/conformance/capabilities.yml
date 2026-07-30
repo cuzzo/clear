@@ -287,6 +287,94 @@ cases:
       target_name: update
       source_role: STANDARD_LIBRARY
 
+  - id: instrumented_set_add
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, set]
+    anchor: { method: instrumented_set_writes, selector: add, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Set
+      target_owner: Set
+      target_name: add
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_set_alias_append
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, set, alias-method, operator-method]
+    anchor: { method: instrumented_set_writes, selector: <<, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Set
+      target_owner: Set
+      target_name: <<
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_set_merge
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, set]
+    anchor: { method: instrumented_set_writes, selector: merge, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Set
+      target_owner: Set
+      target_name: merge
+      source_role: STANDARD_LIBRARY
+
+  - id: kernel_array_conversion_before_index
+    capabilities: [native-call, nested-receiver, chained-call, chained-index, kernel-conversion, exact-execution-range]
+    anchor: { method: converted_index, selector: Array, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      target_owner: Kernel
+      target_name: Array
+      source_role: STANDARD_LIBRARY
+
+  - id: index_after_kernel_array_conversion
+    capabilities: [native-call, nested-receiver, chained-call, chained-index, operator-method, exact-execution-range]
+    anchor: { method: converted_index, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: transparent_sorbet_tlet
+    capabilities: [ruby-call, transparent-wrapper, collector-instrumentation, sorbet, result]
+    anchor: { method: sorbet_typed_passthrough, selector: let, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: T
+      target_name: let
+      source_role: DEPENDENCY
+
+  - id: typed_generated_constructor
+    capabilities: [generated-constructor, generated-accessor, transparent-wrapper, sorbet, typed-record]
+    anchor: { method: typed_generated_constructor, selector: new, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: RuntimeEvidenceConformance::TypedGenerated
+      target_name: new
+      target_kind: class
+      source_role: PRODUCTION
+
+  - id: typed_generated_accessor
+    capabilities: [generated-accessor, transparent-wrapper, sorbet, typed-record]
+    anchor: { method: typed_generated_accessor, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TypedGenerated
+      target_owner: RuntimeEvidenceConformance::TypedGenerated
+      target_name: payload
+      source_role: PRODUCTION
+
+  - id: transparent_open_struct_index_write
+    capabilities: [generated-accessor, transparent-wrapper, collector-instrumentation, open-struct, generated-setter]
+    anchor: { method: open_struct_index_write, selector: "[]=", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: OpenStruct
+      target_owner: OpenStruct
+      target_name: "[]="
+      source_role: STANDARD_LIBRARY
+
   - id: generated_struct_accessor
     capabilities: [generated-accessor, transparent-wrapper, native-call]
     anchor: { method: generated_accessor, selector: payload, occurrence: 1 }

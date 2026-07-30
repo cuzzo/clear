@@ -223,6 +223,19 @@
       },
       {
         "arguments": [
+          "item"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "add_item",
+        "line": 31,
+        "message": "<<",
+        "receiver": "items",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
           "key",
           "[]"
         ],
@@ -259,6 +272,19 @@
         "line": 6,
         "message": "call",
         "receiver": "callback",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "value"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "mutate",
+        "line": 13,
+        "message": "<<",
+        "receiver": "target.items",
         "safe_navigation": false
       },
       {
@@ -1859,12 +1885,6 @@
         "function": "mutate",
         "kind": "hidden_mutation",
         "line": 13
-      },
-      {
-        "detail": "[]=",
-        "function": "mutate",
-        "kind": "hidden_mutation",
-        "line": 12
       },
       {
         "detail": "[]=",

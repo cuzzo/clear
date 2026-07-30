@@ -5286,6 +5286,7 @@ fn ruby_option_parser_calls_use_reviewed_stdlib_costs() -> Result<()> {
         br#"
 def parse_options
   parser = OptionParser.new
+  parser.banner = "Usage"
   parser.parse!
   parser.to_s
 end
@@ -5303,7 +5304,14 @@ end
         .iter()
         .find(|call| call.message == "to_s")
         .context("OptionParser#to_s call present")?;
+    let banner = output
+        .calls
+        .iter()
+        .find(|call| call.message == "banner=")
+        .context("OptionParser#banner= call present")?;
 
+    assert_eq!(banner.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(banner.known_space_complexity.as_deref(), Some("O(1)"));
     assert_eq!(parse.known_time_complexity.as_deref(), Some("O(N)"));
     assert_eq!(parse.known_space_complexity.as_deref(), Some("O(1)"));
     assert_eq!(render.known_time_complexity.as_deref(), Some("O(N)"));

@@ -103,6 +103,19 @@
     ],
     "calls": [
       {
+        "arguments": [
+          "item.name"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "process",
+        "line": 9,
+        "message": "<<",
+        "receiver": "names",
+        "safe_navigation": false
+      },
+      {
         "arguments": [],
         "block": false,
         "conditional": false,
