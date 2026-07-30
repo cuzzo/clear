@@ -1165,6 +1165,14 @@ module NilKillRuntimeTrace
   def self.runtime_value_domain(value)
     return empty_runtime_value_domain if runtime_nonproduction_value?(value)
 
+    observed_runtime_value_domain(value)
+  end
+
+  # The observation itself, with no source-role policy applied. Call evidence
+  # must not export a test double as a call target, but the shape a function was
+  # actually handed is real evidence about that function whatever declared it,
+  # so the two consumers apply the policy separately.
+  def self.observed_runtime_value_domain(value)
     domain = empty_runtime_value_domain
     domain[:types] << class_name(value)
     singleton = semantic_value_type_name(value)

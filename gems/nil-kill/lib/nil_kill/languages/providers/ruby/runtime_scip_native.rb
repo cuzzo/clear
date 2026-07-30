@@ -60,22 +60,82 @@ module NilKillRuntimeTrace
   # class TracePoint reports is not the owner the evidence needs. Ruby already
   # holds that mapping; the collector asks for it once per record rather than
   # carrying a second copy of the rule.
-  def self.native_callee_identity(defined_class, method_id)
+  def self.native_callee_identity(defined_class, method_id, native = false)
+    declared = native_declaration_site(defined_class)
     target = @runtime_transparent_wrapper_targets[[defined_class, method_id.to_sym]]
-    return [target[:owner], target[:kind], target[:native], target[:path]] if target
+    if target
+      return [target[:owner], target[:kind], target[:native], target[:path],
+              target[:line] || declared&.fetch(:line)]
+    end
 
     # A singleton class of a plain object -- ENV is the common one -- has no
     # useful class name, so resolve it to the constant that names the object.
     if defined_class.is_a?(Class) && defined_class.singleton_class? &&
         (attached = singleton_attached_object(defined_class))
       named = runtime_named_singleton_owner(attached)
-      return [named[0], named[1], nil, nil] if named
+      return [named[0], named[1], nil, nil, nil] if named
     end
 
-    owner = method_owner(defined_class)
-    return [nil, "instance", nil, nil] unless owner
+    # A C-backed method has no Ruby definition site of its own, but a generated
+    # accessor on a workspace class still belongs to that class's declaration.
+    # Without it a Struct reader exports as CRuby stdlib and is priced by the
+    # wrong cost model entirely. Core classes have no declaration under the
+    # workspace, so this stays nil for String#to_s and its peers.
+    site = native ? declared : nil
+    owner = method_owner(defined_class) || native_anonymous_owner(defined_class, method_id)
+    return [nil, "instance", nil, site&.fetch(:path), site&.fetch(:line)] unless owner
 
-    [owner[0], owner[1], nil, nil]
+    [owner[0], owner[1], nil, site&.fetch(:path), site&.fetch(:line)]
+  end
+
+  # An anonymous class has no name to report, but its methods still have a
+  # declaration site, which is the identity FactMine joins on.
+  def self.native_anonymous_owner(defined_class, method_id)
+    return nil unless defined_class.is_a?(Module)
+
+    singleton = defined_class.is_a?(Class) && defined_class.singleton_class?
+    subject = singleton ? singleton_attached_object(defined_class) : defined_class
+    return nil unless subject.is_a?(Module)
+
+    location = (singleton ? subject.method(method_id) : subject.instance_method(method_id))
+      .source_location
+    return nil unless location && location[0] && location[1]
+
+    ["#{singleton ? 'AnonymousSingleton' : 'AnonymousClass'}" \
+     "(#{runtime_relative_declaration_path(location[0])}:#{location[1]})",
+     singleton ? "class" : "instance"]
+  rescue StandardError
+    nil
+  end
+
+  def self.runtime_relative_declaration_path(path)
+    absolute = abs_path(path)
+    return "." if absolute == ROOT
+    return absolute.delete_prefix("#{ROOT}#{File::SEPARATOR}") if
+      absolute.start_with?("#{ROOT}#{File::SEPARATOR}")
+
+    absolute
+  end
+
+  # `native_receiver_source_location` answers for a receiver; the collector asks
+  # about the class a method is defined on, which for a singleton is the module
+  # it is attached to.
+  def self.native_declaration_site(defined_class)
+    return nil unless defined_class.is_a?(Module)
+
+    subject =
+      if defined_class.is_a?(Class) && defined_class.singleton_class?
+        singleton_attached_object(defined_class)
+      else
+        defined_class
+      end
+    return nil unless subject.is_a?(Module)
+
+    # A constant defined in C reports its extension file with line 0. That is a
+    # load location, not a declaration, and claiming it turns an opaque CRuby
+    # method into apparent project source.
+    site = native_receiver_source_location(subject)
+    site if site && site.fetch(:line).positive?
   end
 
   def self.singleton_attached_object(singleton)
@@ -90,11 +150,21 @@ module NilKillRuntimeTrace
     NilKillTraceNative.start
   end
 
-  def self.native_scip_domain(types, indices)
+  # One derivation serves both consumers: the source role is recorded alongside
+  # the observation instead of deriving the value twice under two policies.
+  def self.native_runtime_value_domain(value)
+    observed_runtime_value_domain(value)
+      .merge(nonproduction: runtime_nonproduction_value?(value))
+  end
+
+  def self.native_scip_domain(types, indices, production_only: false)
     domain = empty_runtime_value_domain
     Array(types).each { |type| merge_runtime_value_domain!(domain, types: [type]) }
     Array(indices).each do |index|
-      merge_runtime_value_domain!(domain, NilKillTraceNative.domains.fetch(index))
+      observed = NilKillTraceNative.domains.fetch(index)
+      next if production_only && observed[:nonproduction]
+
+      merge_runtime_value_domain!(domain, observed.reject { |field, _| field == :nonproduction })
     end
     domain
   end
@@ -137,13 +207,18 @@ module NilKillRuntimeTrace
         run_id: run_id,
         caller: row.fetch(:caller),
         callsite: callsite.slice(:path, :line).merge(anchor_symbol: anchor_symbol),
+        # A known definition site outranks the C-implementation flag for package
+        # attribution: a generated accessor on a workspace class is workspace
+        # code, not CRuby, even though the VM reported it as a native call.
         callee: callee.merge(path: path, line: (path ? callee[:line] : nil))
-          .merge(native_scip_callee_facts(path, callee.fetch(:native))),
+          .merge(native_scip_callee_facts(path, callee.fetch(:native) && path.nil?)),
         receiver_domain: native_scip_domain(
-          row.fetch(:receiver_types), row.fetch(:receiver_domain_indices)
+          row.fetch(:receiver_types), row.fetch(:receiver_domain_indices),
+          production_only: true
         ),
         result_domain: native_scip_domain(
-          row.fetch(:result_types), row.fetch(:result_domain_indices)
+          row.fetch(:result_types), row.fetch(:result_domain_indices),
+          production_only: true
         ),
         result_truths: row.fetch(:result_truths),
         count: row.fetch(:count),

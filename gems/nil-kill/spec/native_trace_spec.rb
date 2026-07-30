@@ -55,18 +55,19 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     File.readlines(FIXTURE).index { |line| line.include?(pattern) } + 1
   end
 
-  # Stands in for NilKillRuntimeTrace.runtime_value_domain so the extension can be
-  # exercised without loading the whole tracer.
+  # Stands in for NilKillRuntimeTrace's two delegations so the extension can be
+  # exercised without loading the whole tracer. Identity answers owner, kind,
+  # nativeness, and the callee's declaration site; the domain answers the value.
   before do
     NilKillTraceNative.value_domain_owner = Object.new.tap do |owner|
-      owner.define_singleton_method(:native_callee_identity) do |defined_class, method_id|
+      owner.define_singleton_method(:native_callee_identity) do |defined_class, method_id, native|
         name = defined_class.respond_to?(:name) ? defined_class.name : nil
-        [name, "instance", nil, nil]
+        [name, "instance", nil, nil, nil]
       end
-      owner.define_singleton_method(:runtime_value_domain) do |value|
+      owner.define_singleton_method(:native_runtime_value_domain) do |value|
         elements = value.is_a?(Enumerable) ? value.map { |item| item.class.name }.uniq : []
         { types: [value.class.name], singletons: [], elements: elements,
-          keys: [], values: [], shapes: [] }
+          keys: [], values: [], shapes: [], nonproduction: false }
       end
     end
   end
@@ -319,4 +320,105 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     expect(row.fetch(:result_types)).to eq(["Integer"])
   end
 
+  # `Kernel#tap` is a Ruby method defined in <internal:kernel>, so it pushes a
+  # frame of its own between the analyzed method and the block it yields to.
+  # Without the enclosing method's identity the whole block's evidence is
+  # unattributable and FactMine drops it.
+  it "attributes a call inside a yielded block to the enclosing analyzed method" do
+    path = File.join(FIXTURE_ROOT, "blocks.rb")
+    File.write(path, <<~RUBY)
+      module NativeTraceBlocks
+        def self.wrapping(value)
+          value.tap do |held|
+            held.length
+          end
+        end
+      end
+    RUBY
+    load path
+
+    NilKillTraceNative.reset
+    NilKillTraceNative.configure([FIXTURE_ROOT], "#{path}4length" => "anchor-block")
+    NilKillTraceNative.start
+    NativeTraceBlocks.wrapping("abc")
+    NilKillTraceNative.stop
+
+    row = NilKillTraceNative.records.find { |r| r.dig(:callee, :name) == "length" }
+    expect(row).not_to be_nil
+    expect(row.dig(:callsite, :line)).to eq(4)
+    expect(row.dig(:caller, :method)).to eq("wrapping")
+    expect(row.dig(:caller, :line)).to eq(2)
+  end
+
+  # A :call reports the callee's definition line, and no :line event fires for
+  # the continuation lines of a multi-line expression, so the frame's last known
+  # line points at the start of the expression rather than the callsite.
+  it "binds a call on a continuation line to the line it was written on" do
+    path = File.join(FIXTURE_ROOT, "multiline.rb")
+    File.write(path, <<~RUBY)
+      module NativeTraceMultiline
+        def self.build(value)
+          {
+            "first" => value,
+            "second" => widen(value)
+          }
+        end
+
+        def self.widen(value)
+          value
+        end
+      end
+    RUBY
+    load path
+
+    NilKillTraceNative.reset
+    # `widen` is demanded on every line of the method, exactly as a parameter
+    # name would be, so only the true callsite line distinguishes the anchors.
+    anchors = (3..6).to_h { |line| ["#{path}#{line}widen", "anchor-#{line}"] }
+    NilKillTraceNative.configure([FIXTURE_ROOT], anchors)
+    NilKillTraceNative.start
+    NativeTraceMultiline.build("x")
+    NilKillTraceNative.stop
+
+    row = NilKillTraceNative.records.find { |r| r.dig(:callee, :name) == "widen" }
+    expect(row).not_to be_nil
+    expect(row.dig(:callsite, :line)).to eq(5)
+  end
+
+  # A generated accessor is C-backed, so the VM offers no definition site for it.
+  # Its owning class still has one, and without it the accessor is exported as
+  # opaque CRuby rather than the project declaration FactMine can price.
+  it "reports the declaration site the identity delegation supplies for a native callee" do
+    path = File.join(FIXTURE_ROOT, "declared.rb")
+    File.write(path, <<~RUBY)
+      module NativeTraceDeclared
+        def self.read(record)
+          record.length
+        end
+      end
+    RUBY
+    load path
+
+    NilKillTraceNative.value_domain_owner = Object.new.tap do |owner|
+      owner.define_singleton_method(:native_callee_identity) do |_defined_class, _method_id, native|
+        native ? ["Record", "instance", true, "/declared/record.rb", 12] : [nil, nil, nil, nil, nil]
+      end
+      owner.define_singleton_method(:native_runtime_value_domain) do |value|
+        { types: [value.class.name], singletons: [], elements: [],
+          keys: [], values: [], shapes: [], nonproduction: false }
+      end
+    end
+
+    NilKillTraceNative.reset
+    NilKillTraceNative.configure([FIXTURE_ROOT], "#{path}3length" => "anchor-declared")
+    NilKillTraceNative.start
+    NativeTraceDeclared.read("abc")
+    NilKillTraceNative.stop
+
+    row = NilKillTraceNative.records.find { |r| r.dig(:callee, :name) == "length" }
+    expect(row).not_to be_nil
+    expect(row.dig(:callee, :owner)).to eq("Record")
+    expect(row.dig(:callee, :path)).to eq("/declared/record.rb")
+    expect(row.dig(:callee, :line)).to eq(12)
+  end
 end

@@ -134,13 +134,15 @@ static st_table *nested_lookup(st_table *parent, st_data_t key) {
 
 typedef struct {
     ID owner, kind, path;
+    int line;
     int native;
 } identity_t;
 
-// Callee identity is a pure function of (defined class, selector), so the Ruby
-// round trip that resolves transparent wrappers is cached rather than repeated
-// for every record that shares a target.
-static identity_t *cached_identity(VALUE defined, ID selector) {
+// Callee identity is a pure function of (defined class, selector) -- whether the
+// method is C-implemented is a property of that pair too, not of the event -- so
+// the Ruby round trip that resolves transparent wrappers and declaration sites is
+// cached rather than repeated for every record that shares a target.
+static identity_t *cached_identity(VALUE defined, ID selector, int native) {
     st_table *by_selector = nested(identities, (st_data_t)defined);
     st_data_t found;
     if (st_lookup(by_selector, (st_data_t)selector, &found)) return (identity_t *)found;
@@ -151,14 +153,17 @@ static identity_t *cached_identity(VALUE defined, ID selector) {
     identity_t *identity = ALLOC(identity_t);
     memset(identity, 0, sizeof(*identity));
     identity->native = -1;
-    VALUE row = rb_funcall(ruby_owner, id_callee_identity, 2, defined, ID2SYM(selector));
-    if (RB_TYPE_P(row, T_ARRAY) && RARRAY_LEN(row) == 4) {
+    VALUE row = rb_funcall(ruby_owner, id_callee_identity, 3, defined, ID2SYM(selector),
+                           native ? Qtrue : Qfalse);
+    if (RB_TYPE_P(row, T_ARRAY) && RARRAY_LEN(row) == 5) {
         VALUE o = RARRAY_AREF(row, 0), k = RARRAY_AREF(row, 1);
         VALUE nat = RARRAY_AREF(row, 2), pth = RARRAY_AREF(row, 3);
+        VALUE lno = RARRAY_AREF(row, 4);
         if (RB_TYPE_P(o, T_STRING)) identity->owner = rb_intern_str(o);
         if (RB_TYPE_P(k, T_STRING)) identity->kind = rb_intern_str(k);
         if (!NIL_P(nat)) identity->native = RTEST(nat) ? 1 : 0;
         if (RB_TYPE_P(pth, T_STRING)) identity->path = rb_intern_str(pth);
+        if (RB_INTEGER_TYPE_P(lno)) identity->line = NUM2INT(lno);
     }
     st_insert(by_selector, (st_data_t)selector, (st_data_t)identity);
     return identity;
@@ -186,11 +191,13 @@ static int demanded_in_file(ID path, ID selector) {
 // Mirrors the Ruby collector's callsite recovery: the interesting frame is the
 // nearest one whose path is the analyzed file, not simply the next frame up,
 // because a collector-installed wrapper sits in between.
-static int caller_line_from_vm(ID want_path) {
+// `skip` drops leading frames the caller is known not to be. rb_profile_frames
+// ignores its own start argument on 3.2, so the offset is applied here.
+static int caller_line_from_vm(ID want_path, int skip) {
     VALUE frames[16];
     int lines[16];
     int count = rb_profile_frames(0, 16, frames, lines);
-    for (int i = 0; i < count; i++) {
+    for (int i = skip; i < count; i++) {
         if (lines[i] <= 0) continue;
         VALUE path = rb_profile_frame_path(frames[i]);
         if (!RB_TYPE_P(path, T_STRING)) continue;
@@ -285,9 +292,20 @@ static call_record_t *observed_record(frame_t *frame, rb_trace_arg_t *arg, int n
     VALUE method = rb_tracearg_method_id(arg);
     if (NIL_P(method)) return NULL;
     ID selector = SYM2ID(method);
+    if (!demanded_in_file(frame->path, selector)) return NULL;
+    // A :call reports the callee's definition line, so the callsite has to come
+    // from the caller's own frame -- which :call has already pushed the callee
+    // on top of. The frame's last :line is stale on the continuation lines of a
+    // multi-line expression, and demand alone cannot detect that: a selector
+    // that is also a parameter name is demanded on every line of the method, so
+    // a stale line binds the call to a real but wrong coordinate.
+    int skip = native ? 0 : 1;
+    if (!native) {
+        int line = caller_line_from_vm(frame->path, skip);
+        if (line) frame->line = line;
+    }
     if (!demanded(frame->path, frame->line, selector)) {
-        if (!demanded_in_file(frame->path, selector)) return NULL;
-        int line = caller_line_from_vm(frame->path);
+        int line = caller_line_from_vm(frame->path, skip);
         if (!line || !demanded(frame->path, line, selector)) return NULL;
         frame->line = line;
     }
@@ -298,19 +316,24 @@ static call_record_t *observed_record(frame_t *frame, rb_trace_arg_t *arg, int n
     ID kind = class_method ? rb_intern("class") : id_instance;
     int resolved_native = native;
     ID resolved_path = 0;
+    int resolved_line = 0;
     if (!NIL_P(defined)) {
-        identity_t *identity = cached_identity(defined, selector);
+        identity_t *identity = cached_identity(defined, selector, native);
         if (identity->owner) owner = identity->owner;
         if (identity->kind) kind = identity->kind;
         if (identity->native >= 0) resolved_native = identity->native;
         resolved_path = identity->path;
+        resolved_line = identity->line;
     }
     if (counting) {
         bump(nested(nested(callsite_hits, (st_data_t)frame->path), (st_data_t)frame->line),
              (st_data_t)selector);
     }
     call_record_t *record = record_for(frame, selector, owner, selector, kind, resolved_native);
-    if (resolved_path && !record->callee_path) record->callee_path = resolved_path;
+    if (resolved_path && !record->callee_path) {
+        record->callee_path = resolved_path;
+        record->callee_line = resolved_line;
+    }
     // For a :call event the event's own coordinate is the callee's definition
     // site, which is what tells FactMine whether the target is project code it
     // can price or an opaque dependency.
@@ -428,6 +451,23 @@ static void observe_native_return(rb_trace_arg_t *arg) {
     if (pending->record) record_result(pending->record, rb_tracearg_return_value(arg));
 }
 
+// Copy the enclosing analyzed method's identity onto a frame that is executing
+// that method's source without being its own frame. Nothing is invented: the
+// identity is only ever taken from a frame whose own :call reported this exact
+// file, so an unmatched search leaves the frame untouched.
+static void inherit_caller(thread_state_t *state, frame_t *frame, ID path) {
+    for (int i = state->depth - 2; i >= 0; i--) {
+        frame_t *outer = &state->frames[i];
+        if (outer->caller_path != path) continue;
+        frame->caller_class = outer->caller_class;
+        frame->caller_method = outer->caller_method;
+        frame->caller_kind = outer->caller_kind;
+        frame->caller_path = outer->caller_path;
+        frame->caller_line = outer->caller_line;
+        return;
+    }
+}
+
 static void on_event(VALUE tpval, void *_unused) {
     rb_trace_arg_t *arg = rb_tracearg_from_tracepoint(tpval);
     switch (rb_tracearg_event_flag(arg)) {
@@ -438,7 +478,16 @@ static void on_event(VALUE tpval, void *_unused) {
         thread_state_t *state = current_state();
         if (state->depth == 0) return;
         frame_t *frame = &state->frames[state->depth - 1];
-        frame->path = rb_intern_str(path);
+        ID id = rb_intern_str(path);
+        // A block runs in its defining method's source, but the frame on top may
+        // belong to whatever yielded to it: Kernel#tap, Enumerable#* and their
+        // peers are Ruby methods defined in <internal:...>, so they push a frame
+        // of their own carrying no analyzed identity. Attribute the executing
+        // line to the innermost frame that really is this file's method -- the
+        // same search the Ruby collector runs over caller_locations -- so calls
+        // inside the block keep their caller.
+        if (frame->caller_path != id) inherit_caller(state, frame, id);
+        frame->path = id;
         frame->line = NUM2INT(rb_tracearg_lineno(arg));
         frame->analyzed = 1;
         return;
@@ -763,10 +812,27 @@ static VALUE nk_set_owner(VALUE self, VALUE owner) {
     return owner;
 }
 
+static int free_identity(st_data_t _key, st_data_t value, st_data_t _arg) {
+    xfree((identity_t *)value);
+    return ST_CONTINUE;
+}
+
+static int free_identity_level(st_data_t _key, st_data_t value, st_data_t _arg) {
+    st_table *table = (st_table *)value;
+    st_foreach(table, free_identity, 0);
+    st_free_table(table);
+    return ST_CONTINUE;
+}
+
 static VALUE nk_reset(VALUE self) {
     st_foreach(records, free_line_level, 0);
     st_clear(records);
     st_clear(path_cache);
+    // Identities are keyed by class object, which a later run may not even have
+    // loaded, and they encode answers from whichever delegate was installed.
+    // Reset means no observation survives, this one included.
+    st_foreach(identities, free_identity_level, 0);
+    st_clear(identities);
     st_clear(callsite_hits);
     st_clear(entries);
     rb_ary_clear(domains_ary);
@@ -804,7 +870,7 @@ void Init_nil_kill_trace(void) {
     rb_global_variable(&roots_ary);
     rb_global_variable(&domains_ary);
 
-    id_runtime_value_domain = rb_intern("runtime_value_domain");
+    id_runtime_value_domain = rb_intern("native_runtime_value_domain");
     id_call = rb_intern("call");
     id_instance = rb_intern("instance");
     id_return = rb_intern("return");
