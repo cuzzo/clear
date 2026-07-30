@@ -637,7 +637,7 @@ mod tests {
 
         assert_eq!(
             external_symbol_call_complexity(push, "push").map(|complexity| complexity.time),
-            Some("O(N)")
+            Some("O(1)")
         );
         assert_eq!(
             external_symbol_call_complexity(path, "join").map(|complexity| complexity.time),

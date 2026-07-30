@@ -6,7 +6,7 @@ Array:
   first: constant
   last: constant
   # Worst-case upper bound includes capacity growth and element movement.
-  push: linear_materialize
+  push: constant
   pop: constant
   contains: linear_scan
   insert: linear_scan
