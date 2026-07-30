@@ -77,10 +77,18 @@ module NilKill
           [request.dig("anchor", "symbol"), request]
         end
         run_ids = bundle.fetch("runs").map { |run| run.fetch("id") }
-        anchors = plan.fetch("requests").map do |request|
+        # An anchor this shard has no entry for was not executed in it, which is
+        # what absence already means. Rehydrating one for every planned anchor
+        # made each shard's contribution scale with the plan rather than with
+        # the run -- 13 shards of a 0.65s suite merged to 46MB, nearly all of it
+        # saying nothing happened. STALE stays for the case it was written for:
+        # an entry that IS present but describes different source.
+        anchors = plan.fetch("requests").filter_map do |request|
           anchor = request.fetch("anchor")
           row = old[anchor.fetch("symbol")]
-          if row && row.fetch("anchor_semantic_digest") == anchor.fetch("semantic_digest")
+          if row.nil?
+            nil
+          elsif row.fetch("anchor_semantic_digest") == anchor.fetch("semantic_digest")
             row
           else
             {
@@ -129,12 +137,12 @@ module NilKill
           end
           rows.to_h { |row| [row.fetch("anchor_symbol"), row] }
         end
+        # Shards no longer carry an entry per planned anchor, so they legitimately
+        # cover different sets: a shard contributes what it observed. A symbol is
+        # merged from the shards that saw it.
         symbols = per_bundle.flat_map(&:keys).uniq.sort
-        unless per_bundle.all? { |rows| rows.keys.sort == symbols }
-          raise ArgumentError, "runtime evidence shards do not cover the same trace-plan anchors"
-        end
         symbols.map do |symbol|
-          rows = per_bundle.map { |bundle| bundle.fetch(symbol) }
+          rows = per_bundle.filter_map { |bundle| bundle[symbol] }
           digest = unique!(
             rows.map { |row| row.fetch("anchor_semantic_digest") },
             "semantic digest for #{symbol}"

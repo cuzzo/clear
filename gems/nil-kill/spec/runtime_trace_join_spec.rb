@@ -81,8 +81,18 @@ RSpec.describe "runtime trace join" do
         expect(rust_doc[key]).to eq(ruby_doc[key]), key
       end
 
+      # FactMine's evidence is sparse: an anchor with no entry was not executed.
+      # Compare on the dense view so the two are judged on what they claim, not
+      # on how much of it they spell out.
       ruby_anchors = ruby_doc.fetch("anchors").to_h { |row| [row.fetch("anchor_symbol"), row] }
       rust_anchors = rust_doc.fetch("anchors").to_h { |row| [row.fetch("anchor_symbol"), row] }
+      expect(rust_anchors.keys.to_set - ruby_anchors.keys.to_set).to be_empty
+      (ruby_anchors.keys - rust_anchors.keys).each do |symbol|
+        row = ruby_anchors.fetch(symbol)
+        expect(row.dig("capture", "status")).to eq("NOT_EXECUTED"), symbol
+        expect(row.fetch("executions")).to be_empty, symbol
+        rust_anchors[symbol] = row
+      end
       expect(rust_anchors.keys.sort).to eq(ruby_anchors.keys.sort)
 
       disagreements = ruby_anchors.filter_map do |symbol, expected|

@@ -766,7 +766,13 @@ pub fn build_evidence(root: &Path, plan: &TracePlan, trace: &Trace) -> Result<St
             .as_ref()
             .context("trace plan request has no anchor")?;
         let outcome = join.evaluate(request, anchor, &run_ids)?;
-        anchors.push(outcome);
+        // An anchor nothing was observed for is left out: absence already says
+        // "not executed in these runs", and saying it explicitly for every
+        // planned anchor is what made this document scale with the plan instead
+        // of with the run.
+        if !is_vacuous(&outcome) {
+            anchors.push(outcome);
+        }
     }
 
     let evidence = serde_json::json!({
@@ -783,6 +789,21 @@ pub fn build_evidence(root: &Path, plan: &TracePlan, trace: &Trace) -> Result<St
     let canonical = runtime_protocol::parse_runtime_evidence_json(&serde_json::to_string(&evidence)?)
         .context("joined evidence is not canonical ProtoJSON")?;
     runtime_protocol::to_json_with_defaults(&canonical)
+}
+
+/// True when an entry carries nothing a consumer could not infer from its
+/// absence: no executions, and the status that absence itself means.
+fn is_vacuous(anchor: &serde_json::Value) -> bool {
+    let empty = anchor
+        .get("executions")
+        .and_then(|e| e.as_array())
+        .is_none_or(|e| e.is_empty());
+    let status = anchor
+        .get("capture")
+        .and_then(|c| c.get("status"))
+        .and_then(|s| s.as_str())
+        .unwrap_or_default();
+    empty && status == "NOT_EXECUTED"
 }
 
 /// Write a document where the collector expects it, gzipped when named so.

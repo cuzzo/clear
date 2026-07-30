@@ -12,6 +12,35 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     "conformance"
   )
 
+  # v1 evidence is sparse: an anchor with no entry was not executed in these
+  # runs, which is what an explicit NOT_EXECUTED entry used to say at the cost
+  # of making every shard's document scale with the plan. The oracle asserts
+  # against the dense view, so absence is expanded here, in one place.
+  def anchors_by_symbol(collector)
+    present = collector.fetch(:evidence).fetch("anchors").to_h do |row|
+      [row.fetch("anchor_symbol"), row]
+    end
+    collector.fetch(:plan).fetch("requests").each_with_object(present) do |request, out|
+      anchor = request.fetch("anchor")
+      symbol = anchor.fetch("symbol")
+      next if out.key?(symbol)
+
+      out[symbol] = {
+        "anchor_symbol" => symbol,
+        "anchor_semantic_digest" => anchor.fetch("semantic_digest"),
+        "capture" => {
+          "status" => "NOT_EXECUTED",
+          "run_ids" => collector.fetch(:evidence).fetch("runs").map { |run| run.fetch("id") },
+          "observed_executions" => "0",
+          "dropped_executions" => "0",
+          "reason" => "no matching execution in the modeled runs",
+          "complete_kinds" => request.fetch("required"),
+        },
+        "executions" => [],
+      }
+    end
+  end
+
   def catalog
     @catalog ||= YAML.safe_load(
       File.read(File.join(CONFORMANCE_ROOT, "capabilities.yml")),
@@ -323,9 +352,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
   end
 
   it "collector oracle: every exact capability emits every requested field" do
-    by_symbol = @collector.fetch(:evidence).fetch("anchors").to_h do |row|
-      [row.fetch("anchor_symbol"), row]
-    end
+    by_symbol = anchors_by_symbol(@collector)
     catalog.fetch("cases").reject { |row| row.dig("expect", "correlation") }.each do |test_case|
       request = selected_request(@collector, test_case.fetch("anchor"))
       expected = test_case.fetch("expect")
@@ -494,9 +521,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
   end
 
   it "collector oracle: the same catalog is complete from an unselected workload entrypoint" do
-    by_symbol = @external_collector.fetch(:evidence).fetch("anchors").to_h do |row|
-      [row.fetch("anchor_symbol"), row]
-    end
+    by_symbol = anchors_by_symbol(@external_collector)
     fields = {
       "RECEIVER_VALUE" => "receiver",
       "COLLECTION_VALUE" => "receiver",
@@ -583,9 +608,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
   end
 
   it "collector oracle: function boundary parameters and returns satisfy the same requests" do
-    by_symbol = @collector.fetch(:evidence).fetch("anchors").to_h do |row|
-      [row.fetch("anchor_symbol"), row]
-    end
+    by_symbol = anchors_by_symbol(@collector)
     catalog.fetch("boundary_cases").each do |boundary|
       call_case = catalog.fetch("cases").find do |candidate|
         candidate.dig("anchor", "method") == boundary.fetch("method")
@@ -670,9 +693,14 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     requests = @collector.fetch(:plan).fetch("requests").to_h do |request|
       [request.dig("anchor", "symbol"), request]
     end
-    evidence_symbols = @collector.fetch(:evidence).fetch("anchors")
-      .map { |row| row.fetch("anchor_symbol") }
-      .to_set
+    # Sparse evidence still accounts for every planned anchor: one entry, or
+    # absence, which means it was not executed. What it must never do is carry
+    # an anchor twice, or one the plan never asked for.
+    emitted = @collector.fetch(:evidence).fetch("anchors").map { |row| row.fetch("anchor_symbol") }
+    expect(emitted.uniq.length).to eq(emitted.length), "evidence repeats an anchor"
+    expect(emitted.to_set - requests.keys.to_set).to be_empty,
+      "evidence carries an anchor the plan never requested"
+    evidence_symbols = anchors_by_symbol(@collector).keys.to_set
     expect(evidence_symbols).to eq(requests.keys.to_set),
       "canonical evidence must account for every planned anchor exactly once"
     allowed_partial_symbols = catalog.fetch("cases").filter_map do |test_case|
@@ -882,9 +910,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
         [document.fetch("relativePath"), occurrence.fetch("range"), occurrence.fetch("symbol")]
       end
     end
-    by_symbol = @collector.fetch(:evidence).fetch("anchors").to_h do |row|
-      [row.fetch("anchor_symbol"), row]
-    end
+    by_symbol = anchors_by_symbol(@collector)
 
     catalog.fetch("cases").reject { |row| row.dig("expect", "correlation") }.each do |test_case|
       request = selected_request(@collector, test_case.fetch("anchor"))

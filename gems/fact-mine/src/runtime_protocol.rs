@@ -693,17 +693,12 @@ pub fn validate_runtime_evidence(plan: &TracePlan, evidence: &RuntimeEvidence) -
         }
         validate_correlation_evidence(index, correlation, &requests, evidence)?;
     }
-    let missing = requests
-        .keys()
-        .filter(|symbol| !observed.contains(**symbol))
-        .copied()
-        .collect::<Vec<_>>();
-    if !missing.is_empty() {
-        bail!(
-            "runtime evidence omits requested anchors: {}",
-            missing.join(", ")
-        );
-    }
+    // An anchor with no entry was not executed in these runs. Requiring an
+    // explicit entry for every planned anchor made a shard's evidence
+    // proportional to the plan rather than to what it observed: a 682-byte
+    // trace produced a 4.6MB document, almost all of it saying "nothing
+    // happened here", and every stage downstream paid to write, read and merge
+    // it. Absence carries the same claim at no cost.
     Ok(())
 }
 
