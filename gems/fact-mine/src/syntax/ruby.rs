@@ -183,6 +183,60 @@ fn ruby_descriptor_parts(descriptor: &str) -> Option<(&str, &str)> {
     Some((&callable[..separator], &callable[separator + 1..]))
 }
 
+/// NilKill gives anonymous generated Ruby records a structural owner such as
+/// `AnonymousStruct(file,line)`.  That is raw runtime identity, not a cost
+/// claim: this adapter validates the owner grammar and the exact requested
+/// member before applying Ruby's generated-record contract.  Named records
+/// continue to join against FactMine's parsed source declarations.
+fn ruby_anonymous_generated_record_operation(
+    descriptor: &str,
+    message: &str,
+) -> Option<NormalizedCallComplexity> {
+    let (owner, member) = ruby_descriptor_parts(descriptor)?;
+    let owner = owner.trim_matches('`');
+    let fields = ["AnonymousStruct(", "AnonymousData("]
+        .iter()
+        .find_map(|prefix| {
+            owner
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.strip_suffix(')'))
+        })?
+        .split(',')
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    if fields.is_empty()
+        || fields.iter().any(|field| {
+            !field
+                .chars()
+                .all(|character| character == '_' || character.is_ascii_alphanumeric())
+                || field
+                    .chars()
+                    .next()
+                    .is_some_and(|character| character.is_ascii_digit())
+        })
+    {
+        return None;
+    }
+    let member = member.trim_matches('`');
+    if member != message
+        || (member != "new"
+            && !fields.iter().any(|field| {
+                *field == member
+                    || (owner.starts_with("AnonymousStruct(")
+                        && member
+                            .strip_suffix('=')
+                            .is_some_and(|setter| setter == *field))
+            }))
+    {
+        return None;
+    }
+    Some(NormalizedCallComplexity {
+        time: "O(1)",
+        space: "O(1)",
+    })
+}
+
 fn ruby_stdlib_descriptor(descriptor: &str, message: &str) -> bool {
     ruby_descriptor_owner(descriptor).is_some_and(|owner| {
         let namespace_owner = owner.replace('/', "::");
@@ -226,6 +280,20 @@ pub(crate) fn external_symbol_call_complexity(
     symbol: &str,
     message: &str,
 ) -> Option<ExternalCallComplexity> {
+    if let Some(complexity) = runtime_ruby_dependency_descriptor(symbol)
+        .or_else(|| runtime_ruby_core_descriptor(symbol))
+        .and_then(|descriptor| ruby_anonymous_generated_record_operation(descriptor, message))
+    {
+        return Some(ExternalCallComplexity {
+            time: complexity.time,
+            space: complexity.space,
+            provenance: "ruby_generated_record_runtime_contract",
+            bound_quality: "upper_bound_normalized_runtime_record_contract",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
+
     // Runtime SCIP retains exact gem/package identity. A reviewed dependency
     // contract may therefore be keyed by the exact callable descriptor without
     // allowing an arbitrary gem method to consume the native Ruby registry.
@@ -4301,5 +4369,54 @@ mod tests {
 
         assert_eq!((cost.time, cost.space), ("O(N)", "O(N)"));
         assert_eq!(cost.bound_quality, "upper_bound_exact_target");
+    }
+
+    #[test]
+    fn anonymous_runtime_record_contract_is_exact_and_closed() {
+        for (descriptor, message) in [
+            (
+                "`AnonymousStruct(file,line)`#file().",
+                "file",
+            ),
+            (
+                "`AnonymousStruct(file,line)`#`line=`().",
+                "line=",
+            ),
+            (
+                "`AnonymousStruct(file,line)`.new().",
+                "new",
+            ),
+            (
+                "`AnonymousData(file,line)`#line().",
+                "line",
+            ),
+            (
+                "`AnonymousData(file,line)`.new().",
+                "new",
+            ),
+        ] {
+            let symbol = format!("nil-kill-runtime workspace demo 1 {descriptor}");
+            let cost = external_symbol_call_complexity(&symbol, message)
+                .unwrap_or_else(|| panic!("missing structural record cost for {symbol}"));
+            assert_eq!((cost.time, cost.space), ("O(1)", "O(1)"));
+            assert_eq!(
+                cost.provenance,
+                "ruby_generated_record_runtime_contract"
+            );
+        }
+
+        for (descriptor, message) in [
+            ("`AnonymousStruct(file,line)`#missing().", "missing"),
+            ("`AnonymousData(file,line)`#`line=`().", "line="),
+            ("`AnonymousStruct(file,bad-field)`#file().", "file"),
+            ("`AnonymousStruct()`#file().", "file"),
+            ("`AnonymousRecord(file)`#file().", "file"),
+        ] {
+            let symbol = format!("nil-kill-runtime workspace demo 1 {descriptor}");
+            assert!(
+                external_symbol_call_complexity(&symbol, message).is_none(),
+                "malformed or undeclared record operation must stay open: {symbol}"
+            );
+        }
     }
 }

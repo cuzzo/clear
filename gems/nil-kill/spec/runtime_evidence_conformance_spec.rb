@@ -175,6 +175,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       "short-circuit-assignment",
       "native-call",
       "generated-accessor",
+      "anonymous-class",
       "transparent-wrapper",
       "callback",
       "yield",

@@ -715,6 +715,38 @@ module NilKillRuntimeTrace
     path && runtime_nonproduction_source_path?(path)
   end
 
+  # Ordinary anonymous classes have no nominal Ruby owner, but TracePoint
+  # still supplies the exact method definition location. Preserve a stable
+  # raw identity from that location so a test replacement is represented as
+  # NON_PRODUCTION evidence instead of disappearing after its callsite was
+  # observed. This does not infer dispatch or cost; FactMine remains the sole
+  # consumer that relates the observation to source analysis.
+  def self.runtime_anonymous_method_owner(tp)
+    receiver = tp.self
+    klass = receiver.is_a?(Module) ? receiver.singleton_class : receiver.class
+    location =
+      if receiver.is_a?(Module)
+        receiver.method(tp.method_id).source_location
+      else
+        klass.instance_method(tp.method_id).source_location
+      end
+    return unless location && location[0] && location[1]
+
+    path = abs_path(location[0])
+    relative =
+      if path == ROOT
+        "."
+      elsif path.start_with?("#{ROOT}#{File::SEPARATOR}")
+        path.delete_prefix("#{ROOT}#{File::SEPARATOR}")
+      else
+        path
+      end
+    family = receiver.is_a?(Module) ? "AnonymousSingleton" : "AnonymousClass"
+    ["#{family}(#{relative}:#{location[1]})", receiver.is_a?(Module) ? "class" : "instance"]
+  rescue StandardError
+    nil
+  end
+
   def self.record_runtime_scip_call(tp, receiver_shape: true, deduplicate: false, callsite: nil)
     return if Thread.current[:__nil_kill_runtime_scip] ||
       Thread.current[:__nil_kill_collection_hook]
@@ -739,6 +771,7 @@ module NilKillRuntimeTrace
     if (!owner || !owner[0]) && tp.self.is_a?(Struct)
       owner = [runtime_record_type_name(tp.self), "instance"]
     end
+    owner ||= runtime_anonymous_method_owner(tp)
     return unless owner && owner[0]
     return if owner[0] == "NilKillRuntimeTrace"
 

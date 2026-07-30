@@ -205,6 +205,8 @@ cases:
       receiver_type: RuntimeEvidenceConformance::Generated
       target_owner: RuntimeEvidenceConformance::Generated
       target_name: payload
+      call_time: O(1)
+      call_space: O(1)
 
   - id: generated_struct_constructor
     capabilities: [generated-constructor, transparent-wrapper, native-call]
@@ -213,6 +215,9 @@ cases:
       required: [RECEIVER_VALUE, CALL_TARGET]
       target_owner: RuntimeEvidenceConformance::Generated
       target_name: new
+      target_kind: class
+      call_time: O(1)
+      call_space: O(1)
 
   - id: generated_struct_accessor_result_flow
     capabilities: [generated-accessor, chained-call, result-flow, transparent-wrapper]
@@ -222,6 +227,8 @@ cases:
       receiver_type: RuntimeEvidenceConformance::Generated
       target_owner: RuntimeEvidenceConformance::Generated
       target_name: payload
+      call_time: O(1)
+      call_space: O(1)
       factmine_infers:
         - { method: generated_accessor_chain, selector: normalize, target_owner: RuntimeEvidenceConformance::Value }
 
@@ -233,27 +240,84 @@ cases:
       receiver_type: RuntimeEvidenceConformance::Generated
       target_owner: RuntimeEvidenceConformance::Generated
       target_name: payload=
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: generated_struct_override
+    capabilities: [generated-record, source-override, nontransparent-method]
+    anchor: { method: generated_override, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::GeneratedOverride
+      target_owner: RuntimeEvidenceConformance::GeneratedOverride
+      target_name: payload
 
   - id: local_generated_struct_kind
     capabilities: [generated-accessor, anonymous-generated-class, local-constructor, transparent-wrapper]
     anchor: { method: local_generated_accessors, selector: kind, occurrence: 1 }
     expect:
       required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(kind,decision_line,decision_span)
+      target_owner: AnonymousStruct(kind,decision_line,decision_span)
       target_name: kind
+      call_time: O(1)
+      call_space: O(1)
 
   - id: local_generated_struct_decision_line
     capabilities: [generated-accessor, anonymous-generated-class, local-constructor, same-line, transparent-wrapper]
     anchor: { method: local_generated_accessors, selector: decision_line, occurrence: 1 }
     expect:
       required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(kind,decision_line,decision_span)
+      target_owner: AnonymousStruct(kind,decision_line,decision_span)
       target_name: decision_line
+      call_time: O(1)
+      call_space: O(1)
 
   - id: local_generated_struct_decision_span
     capabilities: [generated-accessor, anonymous-generated-class, local-constructor, same-line, transparent-wrapper]
     anchor: { method: local_generated_accessors, selector: decision_span, occurrence: 1 }
     expect:
       required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(kind,decision_line,decision_span)
+      target_owner: AnonymousStruct(kind,decision_line,decision_span)
       target_name: decision_span
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: local_generated_struct_constructor
+    capabilities: [generated-constructor, anonymous-generated-class, local-constructor, transparent-wrapper]
+    anchor: { method: local_generated_constructor, selector: new, occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Class
+      target_owner: AnonymousStruct(payload,count)
+      target_name: new
+      target_kind: class
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: local_generated_struct_writer
+    capabilities: [generated-accessor, generated-setter, anonymous-generated-class, local-constructor, transparent-wrapper]
+    anchor: { method: local_generated_writer, selector: payload=, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(payload)
+      target_owner: AnonymousStruct(payload)
+      target_name: payload=
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: local_generated_struct_reader_after_write
+    capabilities: [generated-accessor, anonymous-generated-class, assignment, cfg, dfg, transparent-wrapper]
+    anchor: { method: local_generated_writer, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(payload)
+      target_owner: AnonymousStruct(payload)
+      target_name: payload
+      call_time: O(1)
+      call_space: O(1)
 
   - id: nested_test_generated_outer_reader
     capabilities: [generated-accessor, nested-receiver, nonproduction-provenance, transparent-wrapper]
@@ -507,6 +571,14 @@ cases:
       required: [RECEIVER_VALUE, CALL_TARGET]
       receiver_type: RuntimeEvidenceConformance::TestDispatcher
       target_owner: RuntimeEvidenceConformance::TestDispatcher
+      source_role: NON_PRODUCTION
+
+  - id: anonymous_nonproduction_target
+    capabilities: [test-replacement, anonymous-class, nonproduction-provenance, runtime-identity]
+    anchor: { method: anonymous_replaced_dispatch, selector: dispatch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_name: dispatch
       source_role: NON_PRODUCTION
 
   - id: state_value_dispatch

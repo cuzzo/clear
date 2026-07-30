@@ -31,6 +31,11 @@ module RuntimeEvidenceConformance
 
   Generated = Struct.new(:payload, :count)
   GeneratedStatus = Struct.new(:decision_line)
+  GeneratedOverride = Struct.new(:payload) do
+    def payload
+      "override:#{self[:payload]}"
+    end
+  end
 
   class ProductionDispatcher
     def dispatch
@@ -128,6 +133,14 @@ module RuntimeEvidenceConformance
       value.payload
     end
 
+    def generated_override(value)
+      value.payload
+    end
+
+    def local_generated_constructor(value)
+      Struct.new(:payload, :count, keyword_init: true).new(payload: value, count: 2)
+    end
+
     def local_generated_accessors(value)
       record_type = Struct.new(
         :kind,
@@ -141,6 +154,13 @@ module RuntimeEvidenceConformance
         decision_span: [7, 0, 7, 4]
       )
       [record.kind, record.decision_line, record.decision_span, value]
+    end
+
+    def local_generated_writer(value)
+      record_type = Struct.new(:payload, keyword_init: true)
+      record = record_type.new(payload: value)
+      record.payload = Value.new(:replacement)
+      record.payload
     end
 
     def nested_generated_accessors(coverage)
@@ -246,6 +266,10 @@ module RuntimeEvidenceConformance
     end
 
     def replaced_dispatch(receiver)
+      receiver.dispatch
+    end
+
+    def anonymous_replaced_dispatch(receiver)
       receiver.dispatch
     end
 

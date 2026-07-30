@@ -39,7 +39,10 @@ subject.generated_constructor(left)
 subject.generated_constructor(right)
 subject.generated_accessor_chain(generated)
 subject.generated_accessor_write(generated, right)
+subject.generated_override(RuntimeEvidenceConformance::GeneratedOverride.new(left))
+subject.local_generated_constructor(left)
 subject.local_generated_accessors(left)
+subject.local_generated_writer(left)
 test_arm = RuntimeEvidenceConformance::TestArm.new(7, [7, 0, 7, 4])
 test_coverage = RuntimeEvidenceConformance::TestArmCoverage.new(test_arm)
 subject.nested_generated_accessors(test_coverage)
@@ -82,6 +85,7 @@ rescue RuntimeError
   # not produce a return value.
 end
 subject.replaced_dispatch(RuntimeEvidenceConformance::TestDispatcher.new)
+subject.anonymous_replaced_dispatch(RuntimeEvidenceConformance.anonymous_dispatcher)
 subject.state_flow(left)
 subject.state_receiver_flow(left)
 subject.chained_result_flow(source)

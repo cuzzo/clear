@@ -2502,6 +2502,33 @@ fn select_call_occurrences<'a>(
     if !exact_call_range.is_empty() {
         return selected_occurrences(&exact_call_range);
     }
+    // A normalized writer includes its right-hand side in the call span.
+    // When that value is itself a call, the trace-plan anchor deliberately
+    // ends before the nested expression so collectors can bind the writer
+    // independently.  Accept that exact prefix only when the semantic symbol
+    // itself names the normalized writer; sharing the call start excludes the
+    // nested RHS and the language adapter prevents a receiver occurrence from
+    // masquerading as the setter.
+    if message.ends_with('=') {
+        let exact_writer_prefix = contained
+            .iter()
+            .copied()
+            .filter(|occurrence| {
+                occurrence.span().is_some_and(|span| {
+                    (span[0], span[1]) == (call_span[0], call_span[1])
+                        && syntax::scip_occurrence_matches_call(
+                            language,
+                            &occurrence.symbol,
+                            message,
+                            message,
+                        )
+                })
+            })
+            .collect::<Vec<_>>();
+        if !exact_writer_prefix.is_empty() {
+            return selected_occurrences(&exact_writer_prefix);
+        }
+    }
     let mut exact = contained
         .iter()
         .copied()

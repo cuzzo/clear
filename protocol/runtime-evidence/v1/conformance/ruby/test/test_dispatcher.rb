@@ -10,6 +10,17 @@ module RuntimeEvidenceConformance
     end
   end
 
+  # Ordinary anonymous classes have neither a constant name nor a generated
+  # record schema. Their method source is nevertheless observable and must be
+  # retained as a non-production target rather than silently dropped.
+  def self.anonymous_dispatcher
+    Class.new do
+      def dispatch
+        Value.new(:anonymous_test)
+      end
+    end.new
+  end
+
   TestStatus = Struct.new(:ok) do
     def success?
       ok

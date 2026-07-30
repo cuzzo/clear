@@ -77,6 +77,7 @@ struct Expectation {
     #[serde(default)]
     target_owners: Vec<String>,
     target_name: Option<String>,
+    target_kind: Option<String>,
     excluded_target_owner: Option<String>,
     source_role: Option<String>,
     result_type: Option<String>,
@@ -84,6 +85,8 @@ struct Expectation {
     result_shape: Option<String>,
     boolean_result: Option<bool>,
     observed_executions: Option<u64>,
+    call_time: Option<String>,
+    call_space: Option<String>,
     #[serde(default)]
     factmine_infers: Vec<InferredExpectation>,
 }
@@ -412,7 +415,7 @@ fn role(value: Option<&str>, owner: Option<&str>) -> SourceRole {
     }
 }
 
-fn target(owner: &str, name: &str, role: SourceRole) -> RuntimeTarget {
+fn target(owner: &str, name: &str, kind: Option<&str>, role: SourceRole) -> RuntimeTarget {
     let (manager, package, version) = if role == SourceRole::STANDARD_LIBRARY {
         ("ruby", "ruby", "3.2.3")
     } else {
@@ -420,8 +423,9 @@ fn target(owner: &str, name: &str, role: SourceRole) -> RuntimeTarget {
     };
     RuntimeTarget {
         symbol: format!(
-            "nil-kill-runtime {manager} {package} {version} {}#{}().",
+            "nil-kill-runtime {manager} {package} {version} {}{}{}().",
             descriptor_owner(owner),
+            if kind == Some("class") { "." } else { "#" },
             descriptor_name(name)
         ),
         source_role: EnumOrUnknown::new(role),
@@ -571,7 +575,14 @@ fn evidence_for_catalog(
                             .then(|| value_set(receiver_name, None, source_role))
                             .into(),
                             target: complete_kind(EvidenceKind::CALL_TARGET)
-                                .then(|| target(owner, target_name, source_role))
+                                .then(|| {
+                                    target(
+                                        owner,
+                                        target_name,
+                                        expected.target_kind.as_deref(),
+                                        source_role,
+                                    )
+                                })
                                 .into(),
                             result: complete_kind(EvidenceKind::RESULT_VALUE)
                                 .then_some(result)
@@ -600,7 +611,12 @@ fn evidence_for_catalog(
                         target: required
                             .contains(&EvidenceKind::CALL_TARGET.value())
                             .then(|| {
-                                target(excluded_owner, target_name, SourceRole::NON_PRODUCTION)
+                                target(
+                                    excluded_owner,
+                                    target_name,
+                                    expected.target_kind.as_deref(),
+                                    SourceRole::NON_PRODUCTION,
+                                )
                             })
                             .into(),
                         provenance: MessageField::some(Provenance {
@@ -750,7 +766,12 @@ fn evidence_for_catalog(
                         None,
                         SourceRole::PRODUCTION,
                     )),
-                    target: MessageField::some(target(owner, name, SourceRole::PRODUCTION)),
+                    target: MessageField::some(target(
+                        owner,
+                        name,
+                        None,
+                        SourceRole::PRODUCTION,
+                    )),
                     provenance: MessageField::some(Provenance {
                         run_id: "oracle-run".to_string(),
                         provider: "canonical-conformance".to_string(),
@@ -891,6 +912,7 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
         "skipped-execution",
         "native-call",
         "generated-accessor",
+        "anonymous-class",
         "transparent-wrapper",
         "callback",
         "yield",
@@ -1144,8 +1166,16 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
                 .collect::<Vec<_>>();
             if let Some(name) = expected.target_name.as_deref() {
                 for owner in expected_owners {
-                    let expected_suffix =
-                        format!("{}#{}().", descriptor_owner(owner), descriptor_name(name));
+                    let expected_suffix = format!(
+                        "{}{}{}().",
+                        descriptor_owner(owner),
+                        if expected.target_kind.as_deref() == Some("class") {
+                            "."
+                        } else {
+                            "#"
+                        },
+                        descriptor_name(name)
+                    );
                     if expected.source_role.as_deref() == Some("NON_PRODUCTION") {
                         assert!(
                             !at_anchor
@@ -1167,6 +1197,35 @@ fn factmine_oracle_joins_every_canonical_capability_through_its_cfg_and_dfg() {
                         );
                     }
                 }
+            }
+            if expected.call_time.is_some() || expected.call_space.is_some() {
+                let runtime_protocol::AnchorBinding::Call { call_id } = built
+                    .bindings
+                    .get(&symbol)
+                    .expect("canonical call anchor binding")
+                else {
+                    panic!("{} complexity expectation is not a call", case.id);
+                };
+                let call = output
+                    .calls
+                    .iter()
+                    .find(|call| call.id == *call_id)
+                    .unwrap_or_else(|| panic!("{} call disappeared after overlay", case.id));
+                assert_eq!(
+                    call.known_time_complexity.as_deref(),
+                    expected.call_time.as_deref(),
+                    "{} time complexity mismatch for {} with semantic target {:?}",
+                    case.id,
+                    call.message,
+                    call.semantic_symbol
+                );
+                assert_eq!(
+                    call.known_space_complexity.as_deref(),
+                    expected.call_space.as_deref(),
+                    "{} space complexity mismatch for {}",
+                    case.id,
+                    call.message
+                );
             }
             if let Some(excluded) = expected.excluded_target_owner.as_deref() {
                 assert!(
