@@ -244,6 +244,20 @@ pub(crate) fn external_symbol_call_complexity(
 
     let descriptor = scip_ruby_descriptor(symbol)?;
     let owner = ruby_descriptor_owner(descriptor)?;
+    // An exact reviewed semantic-symbol contract is already the strongest
+    // available identity. It must not depend on also registering the owner in
+    // the family-level fallback table (default-gem module functions such as
+    // JSON.parse are the common counterexample).
+    if let Some(complexity) = configured_semantic_symbol_call_complexity("ruby", descriptor) {
+        return Some(ExternalCallComplexity {
+            time: complexity.time,
+            space: complexity.space,
+            provenance: "ruby_stdlib_registry",
+            bound_quality: "upper_bound_exact_target",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
     if !ruby_stdlib_descriptor(descriptor, message)
         || configured_semantic_symbol_parametric_cost("ruby", descriptor).is_some()
         || ruby_family_parametric_cost(&owner, message).is_some()
@@ -1056,6 +1070,13 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         }
         if !matches!(message, "[]" | "[]=") {
             return false;
+        }
+        // An index occurrence for Ruby's bracket selector commonly spans the
+        // opening bracket. The normalized call already distinguishes reader
+        // from writer; the token is sufficient even when a project/runtime
+        // symbol intentionally uses an opaque stable declaration ID.
+        if source_text == "[" {
+            return true;
         }
         scip_ruby_descriptor(symbol)
             .or_else(|| runtime_ruby_dependency_descriptor(symbol))
@@ -4112,9 +4133,14 @@ mod tests {
                 "nil-kill-runtime rubygems json 2.19.5 JSON.parse().",
                 "parse",
             ),
+            ("nil-kill-runtime ruby json 2.19.5 JSON.parse().", "parse"),
             (
                 "nil-kill-runtime rubygems json 2.19.5 JSON.generate().",
                 "generate",
+            ),
+            (
+                "nil-kill-runtime ruby json 2.19.5 JSON.pretty_generate().",
+                "pretty_generate",
             ),
             (
                 "nil-kill-runtime rubygems psych 5.4.0 Psych.safe_load().",

@@ -2484,6 +2484,24 @@ fn select_call_occurrences<'a>(
                 .is_some_and(|span| contains(call_span, span))
         })
         .collect::<Vec<_>>();
+    // Runtime producers can use the exact normalized call range when the
+    // source language has no independently addressable selector token (Ruby
+    // attribute writers are one example). Equality with FactMine's call span
+    // is already an exact anchor; preserve all symbols at that range as the
+    // modeled dispatch alternatives instead of requiring the whole
+    // expression text to equal the selector spelling.
+    let exact_call_range = contained
+        .iter()
+        .copied()
+        .filter(|occurrence| {
+            occurrence.span() == Some(call_span)
+                && (callable_symbol(&occurrence.symbol)
+                    || syntax::scip_noncall_access_is_callable(language, &occurrence.symbol))
+        })
+        .collect::<Vec<_>>();
+    if !exact_call_range.is_empty() {
+        return selected_occurrences(&exact_call_range);
+    }
     let mut exact = contained
         .iter()
         .copied()
@@ -5287,6 +5305,111 @@ void run_dependent() {
         assert_eq!(
             call.unresolved_reason.as_deref(),
             Some("runtime_modeled_project_candidate_set_requires_summary")
+        );
+    }
+
+    #[test]
+    fn runtime_modeled_scip_accepts_an_exact_whole_call_anchor_for_a_ruby_writer() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(target)\n  target.format = :json\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let call_text = "target.format = :json";
+        let call_column = source.lines().nth(1).unwrap().find(call_text).unwrap();
+        let symbol = "nil-kill-runtime workspace demo abc Demo/FileCoverage#`format=`().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [{
+                    "range": [1, call_column, call_column + call_text.len()],
+                    "symbol": symbol,
+                    "symbolRoles": 0
+                }]
+            }]
+        });
+        let mut caller = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller.language = "ruby".into();
+        let mut writer = call(
+            "caller",
+            &path,
+            "format=",
+            [2, call_column, 2, call_column + call_text.len()],
+        );
+        writer.owner = "Demo".into();
+        writer.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller];
+        output.calls = vec![writer];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
+        assert_eq!(
+            output.calls[0].target_provenance.as_deref(),
+            Some("runtime_scip_modeled")
+        );
+    }
+
+    #[test]
+    fn runtime_modeled_scip_matches_an_opaque_ruby_project_symbol_at_a_bracket_selector() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(dataset)\n  dataset[\"file\"]\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let call_text = "dataset[\"file\"]";
+        let call_column = source.lines().nth(1).unwrap().find(call_text).unwrap();
+        let bracket_column = call_column + call_text.find('[').unwrap();
+        let symbol = "fact-mine workspace project . Method#opaque().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [{
+                    "range": [1, bracket_column, bracket_column + 1],
+                    "symbol": symbol,
+                    "symbolRoles": 0
+                }]
+            }]
+        });
+        let mut caller = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller.language = "ruby".into();
+        let mut index_call = call(
+            "caller",
+            &path,
+            "[]",
+            [2, call_column, 2, call_column + call_text.len()],
+        );
+        index_call.owner = "Demo".into();
+        index_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller];
+        output.calls = vec![index_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
+        assert_eq!(
+            output.calls[0].target_provenance.as_deref(),
+            Some("runtime_scip_modeled")
         );
     }
 

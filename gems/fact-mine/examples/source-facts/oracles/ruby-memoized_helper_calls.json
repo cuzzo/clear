@@ -298,17 +298,19 @@
         "writes": []
       },
       {
-        "reads": [],
-        "writes": []
-      },
-      {
-        "reads": [],
-        "writes": []
-      },
-      {
         "reads": [
           "place:SourceFactMemoizedHelperCalls#owner_edges:instance_field:@owner_edges"
         ],
+        "writes": [
+          "place:SourceFactMemoizedHelperCalls#owner_edges:instance_field:@owner_edges"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
         "writes": []
       }
     ],

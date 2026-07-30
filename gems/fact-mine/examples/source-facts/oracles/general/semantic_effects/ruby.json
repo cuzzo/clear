@@ -996,6 +996,7 @@
       {},
       {},
       {},
+      {},
       {}
     ],
     "dispatch_sites": [],
@@ -1026,6 +1027,7 @@
       {}
     ],
     "flow_types": [
+      {},
       {},
       {},
       {},
@@ -1550,6 +1552,7 @@
       },
       {
         "reads": [
+          "place:SourceFactSemanticEffects#perform:local:callback",
           "place:SourceFactSemanticEffects#perform:local:name"
         ],
         "writes": []
@@ -1822,6 +1825,7 @@
       {}
     ],
     "reaching_definitions": [
+      {},
       {},
       {},
       {},

@@ -250,6 +250,58 @@ RSpec.describe "nil-kill runtime trace" do
     NilKillRuntimeTrace.runtime_calls.clear
   end
 
+  it "attributes a transparent collector wrapper to the method it invokes" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    NilKillRuntimeTrace.register_runtime_scip_transparent_wrapper(
+      Struct.singleton_class,
+      :new,
+      owner: "Struct",
+      name: "new",
+      kind: "class",
+      native: true
+    )
+    NilKillRuntimeTrace.runtime_calls.clear
+    NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id] << {
+      caller: {
+        class: "Worker", method: "run", kind: "instance",
+        path: File.expand_path(__FILE__), line: __LINE__,
+      },
+      callsite: { path: File.expand_path(__FILE__), line: __LINE__ },
+    }
+    tracepoint = Struct.new(
+      :event, :path, :lineno, :defined_class, :method_id, :self_value,
+      keyword_init: true
+    ) do
+      def self
+        self_value
+      end
+    end.new(
+      event: :call,
+      path: File.join(NilKill::ROOT, "gems/nil-kill/lib/nil_kill/runtime_trace.rb"),
+      lineno: 1_446,
+      defined_class: Struct.singleton_class,
+      method_id: :new,
+      self_value: Struct
+    )
+
+    NilKillRuntimeTrace.record_runtime_scip_call(tracepoint, receiver_shape: false)
+
+    callee = NilKillRuntimeTrace.runtime_calls.values.fetch(0).fetch(:callee)
+    expect(callee).to include(
+      owner: "Struct",
+      name: "new",
+      kind: "class",
+      path: nil,
+      native: true,
+      package_manager: "ruby",
+      package: "ruby",
+      version: RUBY_VERSION
+    )
+  ensure
+    NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id].clear
+    NilKillRuntimeTrace.runtime_calls.clear
+  end
+
   it "removes explicitly nonproduction values from runtime SCIP domains, including containers" do
     require_relative "../lib/nil_kill/runtime_trace"
     Dir.mktmpdir("nil-kill-source-role-domain") do |dir|

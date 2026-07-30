@@ -222,7 +222,8 @@ module NilKill
             site_key = [path, raw.start_point.row + 1, normalized_name].join("\0")
             unless @state_write_sites[site_key] == false
               rhs = context.source.byteslice(value.start_byte...value.end_byte)
-              replacement = "NilKillRuntimeTrace.record_ivar_assignment(self, #{name.inspect}, (#{rhs}), __FILE__, __LINE__)"
+              source_line = raw.start_point.row + 1
+              replacement = "NilKillRuntimeTrace.record_ivar_assignment(self, #{name.inspect}, (#{rhs}), __FILE__, #{source_line})"
               edits << [value.start_byte, value.end_byte, replacement]
             end
           end

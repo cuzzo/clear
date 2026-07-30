@@ -143,7 +143,7 @@ pub(crate) fn extract(
                                 .insert(name, contract.to_string());
                         }
                     }
-                    apply_normalized_local_contract(method, node, &mut raw, behavior);
+                    apply_normalized_local_contract(method, node, target, &mut raw, behavior);
                     let declared_candidates = raw
                         .writes
                         .iter()
@@ -388,6 +388,7 @@ pub(crate) fn extract(
 fn apply_normalized_local_contract(
     method: &MethodSummary,
     node: &ControlFlowNode,
+    target: &Node,
     effect: &mut RawEffect,
     behavior: &dyn NormalizedLanguageBehavior,
 ) {
@@ -402,11 +403,17 @@ fn apply_normalized_local_contract(
     let Some(statement) = method
         .statements
         .iter()
-        .find(|statement| statement.span == node.span && statement.writes.len() == 1)
+        .find(|statement| statement.span == node.span)
     else {
         return;
     };
+    if statement.writes.len() != 1 {
+        return;
+    }
     let name = statement.writes.iter().next().expect("single local write");
+    if !plain_local_name(name) {
+        return;
+    }
     if effect.place_kinds.iter().any(|(raw_name, kind)| {
         kind != "local"
             && (raw_name == name
@@ -415,6 +422,16 @@ fn apply_normalized_local_contract(
                 }) == name)
     }) {
         return;
+    }
+    // The syntax tree owns producer relations. When it proves this exact
+    // statement is a direct call-result assignment, retain the normalized
+    // local-flow target even if an equal parser span hid the write node.
+    if !effect.write_call_sources.contains_key(name) {
+        if let Some(span) = direct_call_result_span(target) {
+            effect.writes.insert(name.clone());
+            effect.record_place(name.clone(), "local");
+            effect.write_call_sources.insert(name.clone(), span);
+        }
     }
     let Some(value) =
         crate::syntax::local_flow::raw_local_assignment_source(name, &statement.source)
@@ -437,6 +454,13 @@ fn apply_normalized_local_contract(
             effect.write_type_hints.insert(name.clone(), type_name);
         }
     }
+}
+
+fn plain_local_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
 }
 
 fn method_for_node<'a>(
@@ -912,6 +936,22 @@ fn find_by_span(node: &Node, span: Span, prefer_innermost: bool) -> Option<&Node
             .filter_map(ast::node)
             .find_map(|child| find_by_span(child, span, true))
         {
+            // Argument containers may be assigned the same range and source
+            // text as their enclosing normalized expression. They are not a
+            // complete effect boundary: selecting one drops the receiver and
+            // callee. Prefer the enclosing semantic node in that exact case,
+            // while still unwrapping ordinary transparent expression groups.
+            if ["LIST", "ARGS"].contains(&match_.r#type.as_str())
+                && CALL_TYPES.contains(&node.r#type.as_str())
+                && [
+                    node.first_lineno,
+                    node.first_column,
+                    node.last_lineno,
+                    node.last_column,
+                ] == span
+            {
+                return Some(node);
+            }
             return Some(match_);
         }
     }
@@ -946,6 +986,18 @@ fn find_syntax_node<'a>(node: &'a Node, span: Span, role: &str) -> Option<&'a No
     };
     preferred_kind
         .and_then(|kind| find_by_span_and_kind(node, span, kind))
+        // Some normalized parsers assign the same span to an assignment and
+        // its value expression. A linear CFG node represents the whole
+        // statement, so retain the normalized write node instead of selecting
+        // the innermost call and silently dropping the definition edge.
+        .or_else(|| {
+            (role == "linear_statement").then(|| {
+                WRITE_TYPES
+                    .iter()
+                    .chain(std::iter::once(&"MASGN"))
+                    .find_map(|kind| find_by_span_and_kind(node, span, kind))
+            })?
+        })
         .or_else(|| find_by_span(node, span, role == "linear_statement"))
 }
 

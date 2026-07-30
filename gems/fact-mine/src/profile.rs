@@ -1136,6 +1136,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
         // call result; all other runtime calls need just their receiver type.
         let calls = extract_calls(document, &language, &path);
         let flow_local_types = extract_flow_local_types(document);
+        let state_accesses = extract_state_accesses(document, &language, &path);
         let (mut runtime_result_call_sites, runtime_collection_receiver_sites) =
             extract_runtime_value_capture_sites(document, &flow_local_types, &calls);
         runtime_result_call_sites.extend(runtime_capability_guards.iter().map(|guard| {
@@ -1160,6 +1161,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
                 type_definitions,
                 declaration_type_pressures,
                 calls,
+                state_accesses,
                 tlet_sites,
                 runtime_call_sites: Vec::new(),
                 runtime_result_call_sites,

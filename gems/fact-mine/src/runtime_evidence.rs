@@ -541,11 +541,15 @@ fn protocol_evidence(
                     let value = bucket.value.as_ref().with_context(|| {
                         format!("parameter anchor {:?} lacks its value", row.anchor_symbol)
                     })?;
+                    let domain = protocol_value_set_domain(value, &method.language)?;
+                    if domain.is_empty() {
+                        continue;
+                    }
                     internal.observations.push(protocol_observation(
                         "parameter",
                         method,
                         name,
-                        protocol_value_set_domain(value, &method.language)?,
+                        domain,
                         bucket.count,
                         Some(method_id.clone()),
                         None,
@@ -563,11 +567,15 @@ fn protocol_evidence(
                     let value = bucket.value.as_ref().with_context(|| {
                         format!("return anchor {:?} lacks its value", row.anchor_symbol)
                     })?;
+                    let domain = protocol_value_set_domain(value, &method.language)?;
+                    if domain.is_empty() {
+                        continue;
+                    }
                     internal.observations.push(protocol_observation(
                         "return",
                         method,
                         "",
-                        protocol_value_set_domain(value, &method.language)?,
+                        domain,
                         bucket.count,
                         Some(method_id.clone()),
                         None,
@@ -591,11 +599,15 @@ fn protocol_evidence(
                     let value = bucket.value.as_ref().with_context(|| {
                         format!("state anchor {:?} lacks its value", row.anchor_symbol)
                     })?;
+                    let domain = protocol_value_set_domain(value, &method.language)?;
+                    if domain.is_empty() {
+                        continue;
+                    }
                     internal.observations.push(protocol_observation(
                         "state",
                         method,
                         &access.field,
-                        protocol_value_set_domain(value, &method.language)?,
+                        domain,
                         bucket.count,
                         Some(method.id.clone()),
                         Some(access_id.clone()),
@@ -6189,6 +6201,70 @@ end
     }
 
     #[test]
+    fn cfg_dfg_overlay_propagates_a_project_return_through_value_preserving_assignment() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            br#"class Worker
+  Fact = Struct.new(:score) do
+    def strong?
+      score.to_i > 0
+    end
+  end
+
+  def self.missing
+    Fact.new(0)
+  end
+
+  def self.run(fact)
+    fact ||= missing
+    fact.strong?
+  end
+end
+"#,
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [{
+                    "kind": "return",
+                    "scope": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "function": "missing", "line": 8
+                    },
+                    "domain": {
+                        "types": ["Worker::Fact"],
+                        "shapes": [{
+                            "kind": "record", "name": "Worker::Fact",
+                            "members": {"score": {"kind": "class", "name": "Integer"}}
+                        }]
+                    },
+                    "count": 1
+                }]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let predicate = output
+            .calls
+            .iter()
+            .find(|call| call.function == "self.run" && call.message == "strong?")
+            .expect("predicate");
+        assert_eq!(predicate.receiver_type.as_deref(), Some("Worker::Fact"));
+        assert!(
+            predicate.target.is_some() || predicate.semantic_symbol.is_some(),
+            "{predicate:#?}"
+        );
+    }
+
+    #[test]
     fn method_index_matches_runtime_scope_to_a_class_method_dispatch_name() {
         let mut file = tempfile::NamedTempFile::new().expect("source");
         file.write_all(
@@ -6290,6 +6366,11 @@ end
                         }),
                         run_ids: vec![run_id.clone()],
                         observed_executions: u64::from(selected_anchor),
+                        reason: if selected_anchor {
+                            "result value was not captured".to_string()
+                        } else {
+                            "anchor did not execute in the modeled run".to_string()
+                        },
                         complete_kinds: if selected_anchor {
                             vec![
                                 EnumOrUnknown::new(EvidenceKind::RECEIVER_VALUE),
@@ -6507,9 +6588,11 @@ end
                             CaptureStatus::NOT_EXECUTED
                         }),
                         run_ids: vec![run_id.clone()],
-                        reason: candidate
-                            .then(|| "execution is represented by a candidate group".to_string())
-                            .unwrap_or_default(),
+                        reason: if candidate {
+                            "execution is represented by a candidate group".to_string()
+                        } else {
+                            "anchor did not execute in the modeled run".to_string()
+                        },
                         complete_kinds: if candidate {
                             Vec::new()
                         } else {
@@ -6695,9 +6778,13 @@ end
                         }),
                         run_ids: vec![run_id.clone()],
                         observed_executions: u64::from(parameter),
-                        reason: candidate
-                            .then(|| "execution is represented by a candidate group".to_string())
-                            .unwrap_or_default(),
+                        reason: if candidate {
+                            "execution is represented by a candidate group".to_string()
+                        } else if parameter {
+                            String::new()
+                        } else {
+                            "anchor did not execute in the modeled run".to_string()
+                        },
                         complete_kinds: if candidate {
                             Vec::new()
                         } else {
@@ -6790,6 +6877,100 @@ end
                     == Some("nil-kill-runtime ruby ruby 3.2.3 String#to_s().")
                 && !call.runtime_evidence_observed
         }));
+    }
+
+    #[test]
+    fn cfg_dfg_projects_an_exact_parser_result_through_nested_hash_dispatch() {
+        let mut file = tempfile::NamedTempFile::new().expect("source");
+        file.write_all(
+            b"class Worker\n  def run(payload)\n    data = JSON.parse(payload)\n    data[\"coverage\"].is_a?(Hash)\n  end\nend\n",
+        )
+        .expect("write");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = profile::extract(&document, Profile::Espalier);
+        let path = file.path().to_string_lossy();
+        let evidence = RuntimeValueEvidence::from_json(
+            &json!({
+                "schema": SCHEMA,
+                "authority": "runtime-modeled-world",
+                "observations": [],
+                "calls": [{
+                    "language": "ruby",
+                    "caller": {
+                        "language": "ruby", "path": path,
+                        "owner": "Worker", "name": "run",
+                        "kind": "instance", "line": 2
+                    },
+                    "callsite": {"path": path, "line": 3, "selector": "parse"},
+                    "targets": [{
+                        "symbol": "nil-kill-runtime ruby json 2 JSON.parse().",
+                        "owner": "JSON", "name": "parse", "kind": "class",
+                        "receiver_type": "JSON"
+                    }],
+                    "result_domain": {
+                        "types": ["Hash"],
+                        "keys": ["String"],
+                        "values": ["Hash"],
+                        "shapes": [{
+                            "kind": "hash",
+                            "keys": [{"kind": "class", "name": "String"}],
+                            "values": [{"kind": "class", "name": "Hash"}]
+                        }]
+                    },
+                    "count": 1
+                }],
+                "target_catalog": [{
+                    "language": "ruby",
+                    "selector": "[]",
+                    "targets": [{
+                        "symbol": "nil-kill-runtime ruby ruby 3.2.3 Hash#`[]`().",
+                        "owner": "Hash", "name": "[]", "kind": "instance",
+                        "receiver_type": "Hash"
+                    }],
+                    "receiver_domain": {"types": ["Hash"]}
+                }, {
+                    "language": "ruby",
+                    "selector": "is_a?",
+                    "targets": [{
+                        "symbol": "nil-kill-runtime ruby ruby 3.2.3 Kernel#`is_a?`().",
+                        "owner": "Kernel", "name": "is_a?", "kind": "instance",
+                        "receiver_type": "Hash"
+                    }],
+                    "receiver_domain": {"types": ["Hash"]}
+                }]
+            })
+            .to_string(),
+        )
+        .expect("evidence");
+
+        apply_to_profile(&mut output, &evidence).expect("overlay");
+        let index = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "[]")
+            .expect("hash index");
+        assert_eq!(
+            index.receiver_type.as_deref(),
+            Some("Hash"),
+            "calls={:#?}\nflow={:#?}",
+            output.calls,
+            output.flow_local_types
+        );
+        assert_eq!(
+            index.semantic_symbol.as_deref(),
+            Some("nil-kill-runtime ruby ruby 3.2.3 Hash#`[]`().")
+        );
+        let type_check = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "is_a?")
+            .expect("nested type check");
+        assert_eq!(type_check.receiver_type.as_deref(), Some("Hash"));
+        assert_eq!(
+            type_check.semantic_symbol.as_deref(),
+            Some("nil-kill-runtime ruby ruby 3.2.3 Kernel#`is_a?`().")
+        );
     }
 
     #[test]
@@ -6932,6 +7113,9 @@ end
                         }),
                         run_ids: vec![run_id.clone()],
                         observed_executions: u64::from(selected),
+                        reason: (!selected)
+                            .then(|| "anchor did not execute in the modeled run".to_string())
+                            .unwrap_or_default(),
                         complete_kinds: request.required.clone(),
                         ..runtime_protocol::CaptureSummary::default()
                     }),
@@ -7062,6 +7246,9 @@ end
                         }),
                         run_ids: vec!["run-1".to_string()],
                         observed_executions: if selected { 2 } else { 0 },
+                        reason: (!selected)
+                            .then(|| "anchor did not execute in the modeled run".to_string())
+                            .unwrap_or_default(),
                         complete_kinds: request.required.clone(),
                         ..runtime_protocol::CaptureSummary::default()
                     }),

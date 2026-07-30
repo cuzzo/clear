@@ -80,6 +80,21 @@ module NilKill
                 field["calls"]
               )
             end
+            each_jsonl(runtime_dir, "state-values-*.jsonl") do |field|
+              rows << observation(
+                "state",
+                {
+                  "language" => "ruby",
+                  "path" => relative_path(field["path"], root),
+                  "owner" => field["class"].to_s,
+                  "function" => "",
+                  "line" => field["line"].to_i,
+                },
+                field["name"],
+                domain(types: field["classes"]),
+                field["calls"]
+              )
+            end
             each_jsonl(runtime_dir, "structs-*.jsonl") do |field|
               rows << observation(
                 "state",

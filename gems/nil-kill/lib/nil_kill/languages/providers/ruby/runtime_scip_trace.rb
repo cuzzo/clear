@@ -13,6 +13,10 @@ module NilKillRuntimeTrace
   @runtime_function_entries = Hash.new(0)
   @runtime_executed_callsites = Hash.new(0)
   @runtime_generated_wrapper_methods = Set.new
+  # Collector-installed wrappers may be the Ruby frame observed by
+  # TracePoint even though the workload invoked the wrapped method. Preserve
+  # that raw target identity without doing any source/call-flow inference.
+  @runtime_transparent_wrapper_targets = {}
   RUNTIME_SCIP_SOURCE_SLICE = ENV.fetch("NIL_KILL_TRACE_SOURCE_SLICE", "")
     .split(File::PATH_SEPARATOR)
     .reject(&:empty?)
@@ -21,6 +25,10 @@ module NilKillRuntimeTrace
 
   class << self
     attr_reader :runtime_calls, :runtime_scip_frames, :runtime_scip_native_calls
+  end
+
+  def self.register_runtime_scip_transparent_wrapper(defined_class, method_id, target)
+    @runtime_transparent_wrapper_targets[[defined_class, method_id.to_sym]] = target.freeze
   end
 
   def self.record_runtime_scip_line(tp)
@@ -561,11 +569,17 @@ module NilKillRuntimeTrace
     lock_owned = @lock.respond_to?(:owned?) && @lock.owned?
 
     Thread.current[:__nil_kill_runtime_scip] = true
-    owner = method_owner(tp.defined_class)
+    transparent_target =
+      @runtime_transparent_wrapper_targets[[tp.defined_class, tp.method_id.to_sym]]
+    owner = if transparent_target
+              [transparent_target.fetch(:owner), transparent_target.fetch(:kind)]
+            else
+              method_owner(tp.defined_class)
+            end
     return unless owner
     return if owner[0] == "NilKillRuntimeTrace"
 
-    native = tp.event == :c_call
+    native = transparent_target ? transparent_target.fetch(:native) : tp.event == :c_call
     generated_wrapper = @runtime_generated_wrapper_methods.include?(
       [tp.defined_class, tp.method_id.to_sym]
     )
@@ -590,7 +604,9 @@ module NilKillRuntimeTrace
     # project subclass: TracePoint's defined_class is authoritative there.
     native_source = nil unless native_source && tp.defined_class.equal?(receiver_class)
     raw_callee_path =
-      if native || generated_wrapper
+      if transparent_target
+        transparent_target[:path].to_s
+      elsif native || generated_wrapper
         native_source&.fetch(:path, "").to_s
       else
         tp.path.to_s
@@ -599,7 +615,7 @@ module NilKillRuntimeTrace
     # attribution, then omit it from the declaration locator entirely. It is
     # Ruby-core implementation metadata, not a repository source path.
     virtual_core_path = raw_callee_path.start_with?("<internal:")
-    callee_path = if virtual_core_path
+    callee_path = if virtual_core_path || raw_callee_path.empty?
                     nil
                   else
                     abs_path(raw_callee_path)
@@ -616,7 +632,7 @@ module NilKillRuntimeTrace
 
     callee = {
       owner: owner[0],
-      name: tp.method_id.to_s,
+      name: transparent_target&.fetch(:name, nil) || tp.method_id.to_s,
       kind: owner[1],
       path: callee_path,
       line: native_source ? native_source.fetch(:line) : (native ? nil : src_line(callee_path, tp.lineno)),

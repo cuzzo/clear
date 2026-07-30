@@ -21,6 +21,7 @@ module NilKill
         @plan = EvidenceProtocol.validate_plan!(plan || EvidenceProtocol.plan)
         @executed_callsites = load_rows("executed-callsites-*.jsonl")
         @function_entries = load_rows("function-entries-*.jsonl")
+        @covered_lines = load_rows("coverage-*.jsonl")
       end
 
       def emit(events, languages: nil, run_ids: nil)
@@ -353,10 +354,19 @@ module NilKill
 
       def anchor_executed?(anchor)
         if call_anchor?(anchor)
-          @executed_callsites_by_path_selector.fetch(
+          observed = @executed_callsites_by_path_selector.fetch(
             [anchor.fetch("relative_path"), anchor.fetch("display_name").to_s],
             []
           ).any? { |line| source_line_matches?(anchor, line) }
+          return true if observed
+
+          # Some runtime operations execute no observable call event (a
+          # VM-generated accessor is one example). Line coverage is a
+          # raw execution fact, not a source interpretation. It cannot prove
+          # which same-line call ran, so use it only to fail closed as
+          # NOT_INSTRUMENTED instead of making the unsound NOT_EXECUTED claim.
+          @covered_lines_by_path.fetch(anchor.fetch("relative_path"), [])
+            .any? { |line| source_line_matches?(anchor, line) }
         else
           @function_entries_by_path.fetch(anchor.fetch("relative_path"), [])
             .any? { |line| source_line_matches?(anchor, line) }
@@ -387,6 +397,11 @@ module NilKill
         @function_entries_by_path =
           @function_entries.group_by { |row| canonical_path(row.fetch("path")) }
             .transform_values { |rows| rows.map { |row| row.fetch("line") } }
+        @covered_lines_by_path =
+          @covered_lines.group_by { |row| canonical_path(row.fetch("path")) }
+            .transform_values do |rows|
+              rows.flat_map { |row| Array(row["lines"]).map(&:to_i) }.uniq
+            end
         @call_anchor_counts = Hash.new(0)
         @plan.fetch("requests").each do |request|
           anchor = request.fetch("anchor")

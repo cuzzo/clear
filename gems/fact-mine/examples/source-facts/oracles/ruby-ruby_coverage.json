@@ -2527,7 +2527,9 @@
       },
       {
         "reads": [],
-        "writes": []
+        "writes": [
+          "place:RubyCoverageParent::RubyCoverageChild#some_call:local:e"
+        ]
       },
       {
         "reads": [],

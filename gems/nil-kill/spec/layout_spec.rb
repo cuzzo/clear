@@ -75,12 +75,23 @@ RSpec.describe "nil-kill package layout" do
     expect(ruby_values).not_to include(
       "Prism",
       "File.read",
-      "reaching_definitions"
+      "Syntax.parse",
+      "TreeSitter",
+      "reaching_definitions",
+      "control_flow",
+      "data_flow"
     )
     expect(shared_values).not_to include(
       '"initialize"',
       'split("::")',
-      'caller["class"]'
+      'caller["class"]',
+      "Prism",
+      "Syntax.parse",
+      "TreeSitter",
+      "reaching_definitions",
+      "control_flow",
+      "data_flow",
+      "Languages::Providers::Ruby"
     )
     expect(fact_mine_overlay).not_to match(/\b(?:if|match)\s+language\s*==\s*[\"']ruby/)
     expect(fact_mine_overlay).not_to include(

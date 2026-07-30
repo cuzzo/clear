@@ -34,6 +34,7 @@ module NilKillRuntimeTrace
   @tlets = {}
   @structs = {}
   @ivar_runtime = {}
+  @runtime_state_values = {}
   @tuples = {}
   @collections = {}
   @method_edges = {}
@@ -1454,6 +1455,14 @@ module NilKillRuntimeTrace
       end
       klass
     end
+    register_runtime_scip_transparent_wrapper(
+      Struct.singleton_class,
+      :new,
+      owner: "Struct",
+      name: "new",
+      kind: "class",
+      native: true
+    )
 
     Module.prepend(Module.new do
       def const_added(name)
@@ -1488,6 +1497,14 @@ module NilKillRuntimeTrace
       end
       klass
     end
+    register_runtime_scip_transparent_wrapper(
+      Data.singleton_class,
+      :define,
+      owner: "Data",
+      name: "define",
+      kind: "class",
+      native: true
+    )
   end
 
   def self.install_open_struct_hook
@@ -1864,6 +1881,12 @@ module NilKillRuntimeTrace
             rec = (@ivar_runtime[[cls, name.to_s]] ||= { calls: 0, classes: NKSet.new })
             rec[:calls] += 1
             rec[:classes] << class_name(value)
+            state = (
+              @runtime_state_values[[abs, line.to_i, cls, name.to_s.sub(/\A@/, "")]] ||=
+                { calls: 0, classes: NKSet.new }
+            )
+            state[:calls] += 1
+            state[:classes] << class_name(value)
           end
         end
       end
@@ -2000,6 +2023,18 @@ module NilKillRuntimeTrace
     File.open(File.join(OUT_DIR, "ivars-#{pid}.jsonl"), "w") do |file|
       @ivar_runtime.each do |(klass, name), rec|
         file.puts JSON.generate(class: klass, name: name, calls: rec[:calls], classes: rec[:classes].to_a.sort)
+      end
+    end
+    File.open(File.join(OUT_DIR, "state-values-#{pid}.jsonl"), "w") do |file|
+      @runtime_state_values.each do |(path, line, klass, name), rec|
+        file.puts JSON.generate(
+          path: path,
+          line: line,
+          class: klass,
+          name: name,
+          calls: rec[:calls],
+          classes: rec[:classes].to_a.sort
+        )
       end
     end
     File.open(File.join(OUT_DIR, "tuples-#{pid}.jsonl"), "w") do |file|

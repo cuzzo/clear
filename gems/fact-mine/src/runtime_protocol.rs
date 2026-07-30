@@ -783,6 +783,9 @@ fn validate_capture_and_buckets(
     if status == CaptureStatus::CAPTURE_STATUS_UNSPECIFIED {
         bail!("{context} capture status must be explicit");
     }
+    if status != CaptureStatus::COMPLETE_FOR_RUNS && capture.reason.trim().is_empty() {
+        bail!("{context} non-complete capture requires a precise reason");
+    }
     let known_runs = bundle
         .runs
         .iter()
@@ -1508,6 +1511,7 @@ mod tests {
             capture: MessageField::some(CaptureSummary {
                 status: EnumOrUnknown::new(CaptureStatus::NOT_EXECUTED),
                 run_ids: vec!["run-1".to_string()],
+                reason: "anchor did not execute in the modeled run".to_string(),
                 complete_kinds: plan.requests[0].required.clone(),
                 ..CaptureSummary::default()
             }),

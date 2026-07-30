@@ -799,6 +799,7 @@
       {},
       {},
       {},
+      {},
       {}
     ],
     "functions": [
@@ -1166,7 +1167,9 @@
         "writes": []
       },
       {
-        "reads": [],
+        "reads": [
+          "place:RustSourceFactBehavior#update:local:result"
+        ],
         "writes": []
       },
       {
@@ -1396,6 +1399,7 @@
       {}
     ],
     "reaching_definitions": [
+      {},
       {},
       {},
       {},

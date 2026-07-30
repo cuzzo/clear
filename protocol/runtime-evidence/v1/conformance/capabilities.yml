@@ -1,0 +1,268 @@
+version: 1
+wire_matrix:
+  anchor_kinds:
+    - FUNCTION_ENTRY
+    - FUNCTION_RETURN
+    - CALL_SELECTOR
+    - STATE_READ
+    - STATE_WRITE
+    - CALLBACK_ENTRY
+    - COLLECTION_OPERATION
+    - BRANCH_PREDICATE
+  evidence_kinds:
+    - PARAMETER_VALUE
+    - RETURN_VALUE
+    - RECEIVER_VALUE
+    - CALL_TARGET
+    - RESULT_VALUE
+    - BOOLEAN_RESULT
+    - STATE_VALUE
+    - COLLECTION_VALUE
+  capture_statuses:
+    - COMPLETE_FOR_RUNS
+    - NOT_EXECUTED
+    - PARTIAL
+    - NOT_INSTRUMENTED
+    - UNSUPPORTED
+    - STALE
+    - FAILED_CAPTURE
+  source_roles:
+    - PRODUCTION
+    - NON_PRODUCTION
+    - STANDARD_LIBRARY
+    - DEPENDENCY
+    - RUNTIME
+    - UNKNOWN_SOURCE
+  value_shapes: [sequence, mapping, record, tuple]
+  negative_controls:
+    - unknown-field
+    - missing-anchor
+    - duplicate-anchor
+    - stale-plan-digest
+    - stale-anchor-digest
+    - incomplete-kind-without-field
+    - complete-with-dropped-execution
+    - complete-with-truncated-value
+    - unknown-run-provenance
+    - noncanonical-path
+    - noncanonical-symbol
+
+fixture:
+  language: ruby
+  source: ruby/capabilities.rb
+  driver: ruby/driver.rb
+  support:
+    - ruby/test/test_dispatcher.rb
+
+# Each entry names a semantic capability, not a bug or application.
+# `anchor` is resolved against FactMine's plan; collectors only receive the
+# resulting opaque request.
+cases:
+  - id: exact_ruby_call
+    capabilities: [exact-anchor, ruby-call, receiver, target, result]
+    anchor: { method: exact_call, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      source_role: PRODUCTION
+
+  - id: ambiguous_same_line_call
+    capabilities: [ambiguous-anchor, same-line, correlation]
+    anchors:
+      - { method: ambiguous_calls, selector: normalize, occurrence: 1 }
+      - { method: ambiguous_calls, selector: normalize, occurrence: 2 }
+    expect:
+      correlation: true
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: nested_receiver
+    capabilities: [nested-receiver, chained-call, result-flow]
+    anchor: { method: nested_receiver, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+
+  - id: assignment_result_flow
+    capabilities: [assignment, result, cfg, dfg]
+    anchor: { method: assignment_flow, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: RuntimeEvidenceConformance::Value
+      factmine_infers:
+        - { method: assignment_flow, selector: normalize, target_owner: RuntimeEvidenceConformance::Value }
+
+  - id: destructuring_result_flow
+    capabilities: [destructuring, result, cfg, dfg]
+    anchor: { method: destructuring_flow, selector: values_at, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: Array
+
+  - id: short_circuit_assignment
+    capabilities: [short-circuit-assignment, result, cfg, dfg]
+    anchor: { method: short_circuit_flow, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: RuntimeEvidenceConformance::Value
+
+  - id: native_c_call
+    capabilities: [native-call, receiver, target, result]
+    anchor: { method: native_call, selector: upcase, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: String
+      target_owner: String
+      target_name: upcase
+      source_role: STANDARD_LIBRARY
+
+  - id: generated_struct_accessor
+    capabilities: [generated-accessor, transparent-wrapper, native-call]
+    anchor: { method: generated_accessor, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Generated
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: payload
+      allowed_status: NOT_INSTRUMENTED
+
+  - id: callback_and_yield
+    capabilities: [callback, yield, block-parameter]
+    anchor: { method: callback_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      source_role: STANDARD_LIBRARY
+
+  - id: dynamic_dispatch
+    capabilities: [dynamic-dispatch, production-target]
+    anchor: { method: dynamic_dispatch, selector: dispatch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::ProductionDispatcher
+      target_owner: RuntimeEvidenceConformance::ProductionDispatcher
+      source_role: PRODUCTION
+
+  - id: container_shape
+    capabilities: [result, container-shape, mapping, sequence]
+    anchor: { method: container_shape, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: Array
+      result_element_type: RuntimeEvidenceConformance::Value
+
+  - id: boolean_predicate
+    capabilities: [boolean-result, branch-predicate]
+    anchor: { method: predicate, selector: respond_to?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, BOOLEAN_RESULT]
+      receiver_type: RuntimeEvidenceConformance::Value
+      boolean_result: true
+
+  - id: subprocess_result
+    capabilities: [subprocess, result-object, native-call]
+    anchor: { method: subprocess_result, selector: success?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Process::Status
+      target_owner: Process::Status
+      target_name: success?
+
+  - id: exception_target
+    capabilities: [exception, non-returning-call, partial-result]
+    anchor: { method: exception_flow, selector: fail!, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Raiser
+      target_owner: RuntimeEvidenceConformance::Raiser
+
+  - id: uncaught_exception_target
+    capabilities: [exception, non-returning-call, failed-return]
+    anchor: { method: uncaught_exception_flow, selector: fail!, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Raiser
+      target_owner: RuntimeEvidenceConformance::Raiser
+
+  - id: nonproduction_target
+    capabilities: [dynamic-dispatch, test-replacement, nonproduction-provenance]
+    anchor: { method: replaced_dispatch, selector: dispatch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestDispatcher
+      target_owner: RuntimeEvidenceConformance::TestDispatcher
+      source_role: NON_PRODUCTION
+
+  - id: state_value_dispatch
+    capabilities: [state-read, state-write, state-value, cfg, dfg]
+    anchor: { method: state_flow, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      source_role: PRODUCTION
+
+  - id: dependency_target
+    capabilities: [dependency-provenance, third-party-target]
+    anchor: { method: dependency_call, selector: diff, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Module
+      target_owner: Diff::LCS
+      target_name: diff
+      source_role: DEPENDENCY
+
+boundary_cases:
+  - id: parameter_value
+    capabilities: [function-entry, parameter-value]
+    method: exact_call
+    display_name: value
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: return_value
+    capabilities: [function-return, return-value]
+    method: exact_call
+    display_name: return
+    anchor_kind: FUNCTION_RETURN
+    evidence_kind: RETURN_VALUE
+    expected_type: String
+
+  - id: state_write_value
+    capabilities: [state-write, state-value]
+    method: state_flow
+    display_name: state
+    anchor_kind: STATE_WRITE
+    evidence_kind: STATE_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: uncaught_function_return
+    capabilities: [function-return, exception, non-returning-call, failed-return]
+    method: uncaught_exception_flow
+    display_name: return
+    anchor_kind: FUNCTION_RETURN
+    evidence_kind: RETURN_VALUE
+    allowed_status: NOT_INSTRUMENTED
+
+merge_cases:
+  - id: repeated_runs_are_additive
+    capabilities: [repeated-run, sharded-run, merge]
+    expected_runs: [run-a, run-b]
+    expected_count: 2
+
+  - id: changed_shard_replaces_owned_evidence
+    capabilities: [incremental, replacement, stale-source]
+    expected_runs: [run-new]
+    forbidden_runs: [run-old]
