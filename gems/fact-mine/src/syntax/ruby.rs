@@ -65,7 +65,11 @@ fn runtime_ruby_core_descriptor(symbol: &str) -> Option<&str> {
     let descriptor = fields.next()?;
     // Runtime core frames are deliberately distinct from project and gem
     // frames. Only the former may consume the Ruby stdlib registry.
-    (manager == "ruby" && package == "ruby").then_some(descriptor)
+    // Ruby's standard library is partly distributed as default gems. NilKill
+    // retains the component package (for example `stringio`) while the trusted
+    // `ruby` manager distinguishes it from an identically named third-party
+    // Rubygem.
+    (manager == "ruby" && !package.is_empty()).then_some(descriptor)
 }
 
 fn runtime_ruby_dependency_descriptor(symbol: &str) -> Option<&str> {
@@ -4191,7 +4195,7 @@ mod tests {
             "upper_bound_external_latency_excluded_parametric"
         );
         let stringio_read = external_symbol_call_complexity(
-            "nil-kill-runtime ruby ruby 3.2.3 StringIO#read().",
+            "nil-kill-runtime ruby stringio 3.2.0 StringIO#read().",
             "read",
         )
         .expect("StringIO#read must converge with a runtime IO#read candidate");

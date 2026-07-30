@@ -22,6 +22,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "google-protobuf", ">= 4.31", "< 5"
 
   spec.add_development_dependency "parallel_rspec"
+  spec.add_development_dependency "minitest"
   spec.add_development_dependency "rspec"
   spec.add_development_dependency "ruby-prof"
   spec.add_development_dependency "simplecov"

@@ -1773,6 +1773,7 @@ module NilKillRuntimeTrace
       if !klass.method_defined?(setter) || klass.instance_method(setter).source_location.nil?
         original_setter = klass.instance_method(setter) if klass.method_defined?(setter)
         klass.define_method(setter, struct_field_setter(field, original_setter))
+        @runtime_generated_wrapper_methods << [klass, setter.to_sym]
       end
     end
   end

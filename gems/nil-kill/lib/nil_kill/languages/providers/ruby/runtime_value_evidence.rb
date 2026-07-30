@@ -249,7 +249,8 @@ module NilKill
             package = callee["package"].to_s
             return "NON_PRODUCTION" if callee["source_role"] == "nonproduction"
             return "NON_PRODUCTION" if %w[minitest mocha rspec-mocks rr].include?(package)
-            return "STANDARD_LIBRARY" if callee["native"] == true || package == "ruby"
+            return "STANDARD_LIBRARY" if callee["native"] == true ||
+              callee["package_manager"] == "ruby"
             return "NON_PRODUCTION" if nonproduction_path?(callee["path"], root)
             return "PRODUCTION" if callee["package_manager"].to_s == "workspace"
             return "DEPENDENCY" unless package.empty?

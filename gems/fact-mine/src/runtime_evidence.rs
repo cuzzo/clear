@@ -698,6 +698,7 @@ fn protocol_target(
                     })
             })
             .and_then(|method_id| methods.get(method_id).copied())
+            .or_else(|| protocol_definition_method(definition, methods))
     });
     let receiver_type = receiver
         .map(|value| protocol_value_set_domain(value, &caller.language))
@@ -731,6 +732,34 @@ fn protocol_target(
         receiver_type,
         definition: definition_method.map(method_locator),
     }))
+}
+
+fn protocol_definition_method<'a>(
+    definition: &runtime_protocol::RuntimeDefinition,
+    methods: &'a BTreeMap<&str, &MethodRecord>,
+) -> Option<&'a MethodRecord> {
+    if definition.relative_path.is_empty() {
+        return None;
+    }
+    let relative = definition.relative_path.replace('\\', "/");
+    let line = definition.range.as_ref()?.start_line as usize + 1;
+    let candidates = methods
+        .values()
+        .copied()
+        .filter(|method| {
+            let path = method.path.replace('\\', "/");
+            (path == relative || path.ends_with(&format!("/{relative}")))
+                && (method.line == line
+                    || method
+                        .span
+                        .is_some_and(|span| span[0] <= line && line <= span[2]))
+        })
+        .collect::<Vec<_>>();
+    if candidates.len() == 1 {
+        candidates.into_iter().next()
+    } else {
+        None
+    }
 }
 
 fn protocol_runtime_type(value: &runtime_protocol::RuntimeValue, language: &str) -> Result<String> {
@@ -851,6 +880,10 @@ fn protocol_value_set_domain(
             .value
             .as_ref()
             .context("validated runtime value alternative is missing")?;
+        if value.source_role.enum_value_or_default() == runtime_protocol::SourceRole::NON_PRODUCTION
+        {
+            continue;
+        }
         merge_domain(&mut domain, &protocol_value_domain(value, language)?);
     }
     Ok(domain)
@@ -863,6 +896,11 @@ fn merge_protocol_value_set(
 ) -> Result<()> {
     for weighted in values.into_iter().flat_map(|set| &set.alternatives) {
         if let Some(value) = weighted.value.as_ref() {
+            if value.source_role.enum_value_or_default()
+                == runtime_protocol::SourceRole::NON_PRODUCTION
+            {
+                continue;
+            }
             destination.insert(protocol_runtime_type(value, language)?);
         }
     }
@@ -877,6 +915,10 @@ fn protocol_value_set_shapes(
         .into_iter()
         .flat_map(|set| &set.alternatives)
         .filter_map(|weighted| weighted.value.as_ref())
+        .filter(|value| {
+            value.source_role.enum_value_or_default()
+                != runtime_protocol::SourceRole::NON_PRODUCTION
+        })
         .map(|value| protocol_value_shape(value, language))
         .collect()
 }
@@ -3176,6 +3218,92 @@ mod tests {
         assert_eq!(hash_shape.keys[0].name, "String");
         assert_eq!(value_shape.kind, "array");
         assert_eq!(integer_shape.name, "Integer");
+    }
+
+    #[test]
+    fn canonical_protocol_excludes_nonproduction_runtime_values_from_inference() {
+        let runtime_value = |name: &str, source_role| runtime_protocol::RuntimeValue {
+            type_symbol: format!("nil-kill-runtime ruby ruby 3.2.3 {name}#"),
+            source_role: EnumOrUnknown::new(source_role),
+            ..runtime_protocol::RuntimeValue::default()
+        };
+        let values = runtime_protocol::ValueSet {
+            alternatives: vec![
+                runtime_protocol::WeightedValue {
+                    value: MessageField::some(runtime_value(
+                        "ProductionRow",
+                        runtime_protocol::SourceRole::PRODUCTION,
+                    )),
+                    count: 1,
+                    ..runtime_protocol::WeightedValue::default()
+                },
+                runtime_protocol::WeightedValue {
+                    value: MessageField::some(runtime_value(
+                        "TestDouble",
+                        runtime_protocol::SourceRole::NON_PRODUCTION,
+                    )),
+                    count: 1,
+                    ..runtime_protocol::WeightedValue::default()
+                },
+            ],
+            ..runtime_protocol::ValueSet::default()
+        };
+
+        let domain = protocol_value_set_domain(&values, "ruby").expect("runtime value domain");
+        assert_eq!(domain.types, BTreeSet::from(["ProductionRow".to_string()]));
+        assert_eq!(
+            protocol_value_set_shapes(Some(&values), "ruby")
+                .expect("runtime value shapes")
+                .into_iter()
+                .map(|shape| shape.name)
+                .collect::<Vec<_>>(),
+            vec!["ProductionRow"]
+        );
+    }
+
+    #[test]
+    fn canonical_workspace_definition_locator_binds_an_out_of_plan_method() {
+        let directory = tempfile::tempdir().expect("directory");
+        let helper = directory.path().join("helper.rb");
+        std::fs::write(
+            &helper,
+            "module Helper\n  def self.size\n    1\n  end\nend\n",
+        )
+        .expect("helper source");
+        let document = syntax::parse_file(helper.clone(), Language::Ruby).expect("parse helper");
+        let profile = profile::extract(&document, Profile::Espalier);
+        let methods = profile
+            .methods
+            .iter()
+            .map(|method| (method.id.as_str(), method))
+            .collect::<BTreeMap<_, _>>();
+        let expected = profile
+            .methods
+            .iter()
+            .find(|method| method.dispatch_name == "size")
+            .expect("helper method");
+        let definition = runtime_protocol::RuntimeDefinition {
+            symbol: "nil-kill-runtime workspace fixture workspace Helper.size().".to_string(),
+            relative_path: "helper.rb".to_string(),
+            range: MessageField::some(runtime_protocol::SourceRange {
+                start_line: (expected.line - 1) as u32,
+                end_line: (expected.line - 1) as u32,
+                ..runtime_protocol::SourceRange::default()
+            }),
+            ..runtime_protocol::RuntimeDefinition::default()
+        };
+
+        assert_eq!(
+            protocol_definition_method(&definition, &methods).map(|method| method.id.as_str()),
+            Some(expected.id.as_str())
+        );
+
+        let missing = runtime_protocol::RuntimeDefinition {
+            relative_path: "missing.rb".to_string(),
+            range: definition.range.clone(),
+            ..runtime_protocol::RuntimeDefinition::default()
+        };
+        assert!(protocol_definition_method(&missing, &methods).is_none());
     }
 
     fn valid_evidence() -> serde_json::Value {

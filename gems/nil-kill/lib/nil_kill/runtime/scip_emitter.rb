@@ -182,7 +182,7 @@ module NilKill
         }
       end
 
-      def runtime_sources(events, _evidence_path)
+      def runtime_sources(events, evidence_path)
         sources = Array(@files).map { |path| File.expand_path(path, @root) }
         if sources.empty?
           sources.concat(events.filter_map { |event| event.dig("callsite", "path") })
@@ -199,6 +199,7 @@ module NilKill
         # implementations remain external, and event eligibility has already
         # rejected test/mocking sources.
         sources.concat(events.filter_map { |event| workspace_callee_source(event) })
+        sources.concat(evidence_workspace_sources(evidence_path))
         languages = (
           events.map { |event| event.fetch("language") } +
           runtime_plan.fetch("documents", []).map { |row| row["language"] }
@@ -224,6 +225,28 @@ module NilKill
         return unless File.file?(absolute)
 
         absolute
+      end
+
+      def evidence_workspace_sources(evidence_path)
+        return [] unless evidence_path
+
+        JsonIO.parse(evidence_path).fetch("anchors", []).flat_map do |anchor|
+          anchor.fetch("executions", []).filter_map do |bucket|
+            target = bucket["target"]
+            next unless target &&
+              target["source_role"] == "PRODUCTION" &&
+              target["package_manager"] == "workspace"
+
+            relative = target.dig("definition", "relative_path").to_s
+            next if relative.empty?
+
+            absolute = File.expand_path(relative, @root)
+            next unless absolute.start_with?("#{@root}#{File::SEPARATOR}")
+            next unless File.file?(absolute)
+
+            absolute
+          end
+        end
       end
 
       def emit_with_fact_mine(evidence_path, sources)

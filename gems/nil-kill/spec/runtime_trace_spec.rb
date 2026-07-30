@@ -25,6 +25,29 @@ RSpec.describe "nil-kill runtime trace" do
     cache&.clear
   end
 
+  it "retains Ruby default gems as versioned standard-library packages" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    Dir.mktmpdir("nil-kill-default-gem") do |directory|
+      source = File.join(directory, "lib", "stringio.rb")
+      FileUtils.mkdir_p(File.dirname(source))
+      File.write(source, "# default gem fixture\n")
+      specification = Struct.new(:name, :version, :full_gem_path)
+        .new("stringio", Gem::Version.new("3.2.0"), directory)
+      stub = Struct.new(:name, :full_gem_path).new("stringio", directory)
+      allow(Gem).to receive(:loaded_specs).and_return("stringio" => specification)
+      allow(Gem::Specification).to receive(:default_stubs).and_return([stub])
+
+      expect(NilKillRuntimeTrace.runtime_package(source, native: false)).to eq(
+        package_manager: "ruby",
+        package: "stringio",
+        version: "3.2.0"
+      )
+    ensure
+      NilKillRuntimeTrace.instance_variable_get(:@runtime_package_by_path)
+        .delete(File.expand_path(source))
+    end
+  end
+
   it "serializes Struct members as a runtime record shape without dispatching an override" do
     require_relative "../lib/nil_kill/runtime_trace"
     record_class = Struct.new(:kind, :payload)
@@ -112,7 +135,12 @@ RSpec.describe "nil-kill runtime trace" do
         allow(NilKillRuntimeTrace).to receive(:method_owner)
           .with(RuntimeTraceSpecDouble).and_return(["RuntimeTraceSpecDouble", "instance"])
         NilKillRuntimeTrace.record_runtime_scip_call(tracepoint, receiver_shape: false)
-        expect(NilKillRuntimeTrace.runtime_calls).to be_empty
+        call = NilKillRuntimeTrace.runtime_calls.values.fetch(0)
+        expect(call.fetch(:callee)).to include(
+          source_role: "nonproduction",
+          path: File.expand_path(__FILE__)
+        )
+        expect(call.dig(:receiver_domain, :types)).to eq(["RuntimeTraceSpecDouble"])
       end
     end
   ensure
@@ -149,6 +177,7 @@ RSpec.describe "nil-kill runtime trace" do
     )
     allow(NilKillRuntimeTrace).to receive(:method_owner)
       .with(RuntimeTraceSpecDouble).and_return(["RuntimeTraceSpecDouble", "instance"])
+    allow(NilKillRuntimeTrace).to receive(:target_path?).and_call_original
     allow(NilKillRuntimeTrace).to receive(:target_path?)
       .with(File.expand_path(__FILE__)).and_return(true)
     NilKillRuntimeTrace.instance_variable_get(:@runtime_package_by_path)
@@ -162,6 +191,60 @@ RSpec.describe "nil-kill runtime trace" do
       package_manager: "workspace",
       native: true
     )
+  ensure
+    NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id].clear
+    NilKillRuntimeTrace.runtime_calls.clear
+  end
+
+  it "keeps a traced Struct writer wrapper attributed to the Struct declaration" do
+    require_relative "../lib/nil_kill/runtime_trace"
+    wrapper_class = Struct.new(:value)
+    stub_const("RuntimeTraceWrappedDouble", wrapper_class)
+    wrapper_class.instance_variable_set(:@__nil_kill_struct_path, File.expand_path(__FILE__))
+    wrapper_class.instance_variable_set(:@__nil_kill_struct_line, __LINE__)
+    allow(NilKillRuntimeTrace).to receive(:target_path?)
+      .with(File.expand_path(__FILE__)).and_return(true)
+    NilKillRuntimeTrace.attach_struct(wrapper_class)
+    instance = wrapper_class.new(1)
+    expect(
+      NilKillRuntimeTrace.instance_variable_get(:@runtime_generated_wrapper_methods)
+    ).to include([wrapper_class, :value=])
+    expect(NilKillRuntimeTrace.native_receiver_source_location(instance)).to include(
+      path: File.expand_path(__FILE__)
+    )
+    NilKillRuntimeTrace.runtime_calls.clear
+    NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id] << {
+      caller: {
+        class: "Worker", method: "run", kind: "instance",
+        path: File.expand_path(__FILE__), line: __LINE__,
+      },
+      callsite: { path: File.expand_path(__FILE__), line: __LINE__ },
+    }
+    tracepoint = Struct.new(
+      :event, :path, :lineno, :defined_class, :method_id, :self_value,
+      keyword_init: true
+    ) do
+      def self
+        self_value
+      end
+    end.new(
+      event: :call,
+      path: File.join(NilKill::ROOT, "gems/nil-kill/lib/nil_kill/runtime_trace.rb"),
+      lineno: 1_781,
+      defined_class: wrapper_class,
+      method_id: :value=,
+      self_value: instance
+    )
+
+    NilKillRuntimeTrace.record_runtime_scip_call(tracepoint, receiver_shape: false)
+
+    callee = NilKillRuntimeTrace.runtime_calls.values.fetch(0).fetch(:callee)
+    expect(callee).to include(
+      owner: "RuntimeTraceWrappedDouble",
+      name: "value=",
+      path: File.expand_path(__FILE__)
+    )
+    expect(callee.fetch(:package)).not_to eq("nil-kill")
   ensure
     NilKillRuntimeTrace.runtime_scip_frames[Thread.current.object_id].clear
     NilKillRuntimeTrace.runtime_calls.clear

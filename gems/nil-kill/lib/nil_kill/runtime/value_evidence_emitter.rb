@@ -229,7 +229,29 @@ module NilKill
 
           anchor
         end.uniq { |anchor| anchor.fetch("enclosing_symbol") }
-        return target unless candidates.one?
+        unless candidates.one?
+          line = definition.fetch("line").to_i
+          path = canonical_path(definition.fetch("path"))
+          return target if line <= 0 || path.empty?
+
+          # The provider has already observed the exact declaration path and
+          # line. Preserve that locator even when the declaration is outside
+          # the trace plan; FactMine will parse and bind it. NilKill neither
+          # opens the source nor guesses a callable identity here.
+          return target.merge(
+            "definition" => {
+              "symbol" => target.fetch("symbol"),
+              "anchor_symbol" => "",
+              "relative_path" => path,
+              "range" => {
+                "start_line" => line - 1,
+                "start_character" => 0,
+                "end_line" => line - 1,
+                "end_character" => 0,
+              },
+            }
+          )
+        end
 
         anchor = candidates.first
         target.merge(

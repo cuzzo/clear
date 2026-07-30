@@ -231,6 +231,43 @@ RSpec.describe "canonical runtime semantic evidence v1" do
     end
   end
 
+  it "preserves an observed workspace declaration locator outside the trace plan" do
+    request = {
+      "anchor" => anchor(symbol: "local call-1", kind: "CALL_SELECTOR", name: "size"),
+      "required" => %w[RECEIVER_VALUE CALL_TARGET],
+    }
+    Dir.mktmpdir("runtime-workspace-target", NilKill::ROOT) do |directory|
+      callee_path = File.join(directory, "helper.rb")
+      File.write(callee_path, "def size\n  1\nend\n")
+      raw = event
+      raw["callee"] = raw.fetch("callee").merge(
+        "path" => callee_path,
+        "line" => 1,
+        "native" => false,
+        "package_manager" => "workspace",
+        "package" => "easy-vm",
+        "version" => "workspace"
+      )
+      evidence = parse(
+        NilKill::Runtime::ValueEvidenceEmitter.emit(
+          root: NilKill::ROOT,
+          runtime_dir: directory,
+          events: [raw],
+          plan: plan(request)
+        ).fetch("path")
+      )
+
+      definition = evidence.dig("anchors", 0, "executions", 0, "target", "definition")
+      expect(definition).to include(
+        "symbol" => evidence.dig("anchors", 0, "executions", 0, "target", "symbol"),
+        "anchor_symbol" => "",
+        "relative_path" => Pathname.new(callee_path)
+          .relative_path_from(Pathname.new(NilKill::ROOT)).to_s,
+        "range" => include("start_line" => 0, "end_line" => 0)
+      )
+    end
+  end
+
   it "merges replaceable shards by exact anchor and preserves per-run provenance" do
     request = {
       "anchor" => anchor(symbol: "local call-1", kind: "CALL_SELECTOR", name: "size"),

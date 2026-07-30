@@ -12,6 +12,7 @@ module NilKillRuntimeTrace
   @runtime_scip_native_result_depth = 0
   @runtime_function_entries = Hash.new(0)
   @runtime_executed_callsites = Hash.new(0)
+  @runtime_generated_wrapper_methods = Set.new
   RUNTIME_SCIP_SOURCE_SLICE = ENV.fetch("NIL_KILL_TRACE_SOURCE_SLICE", "")
     .split(File::PATH_SEPARATOR)
     .reject(&:empty?)
@@ -404,13 +405,22 @@ module NilKillRuntimeTrace
           version: ENV.fetch("NIL_KILL_PROJECT_VERSION", "workspace"),
         }
       elsif absolute
+        default_stubs = Gem::Specification.default_stubs
         spec = Gem.loaded_specs.values.find do |candidate|
           root = File.expand_path(candidate.full_gem_path)
           absolute == root || absolute.start_with?("#{root}#{File::SEPARATOR}")
         end
+        spec ||= default_stubs.find do |candidate|
+          root = File.expand_path(candidate.full_gem_path)
+          absolute == root || absolute.start_with?("#{root}#{File::SEPARATOR}")
+        end
         if spec
+          stdlib = default_stubs.any? { |stub| stub.name == spec.name }
           {
-            package_manager: "rubygems",
+            # Ruby ships a growing portion of its standard library as default
+            # gems. Bundler may activate a newer vendored copy, but that does
+            # not turn StringIO, JSON, etc. into third-party APIs.
+            package_manager: stdlib ? "ruby" : "rubygems",
             package: spec.name,
             version: spec.version.to_s,
           }
@@ -458,8 +468,15 @@ module NilKillRuntimeTrace
     return @runtime_native_receiver_source_locations[klass] if
       @runtime_native_receiver_source_locations.key?(klass)
 
+    declared_path = klass.instance_variable_get(:@__nil_kill_struct_path)
+    declared_line = klass.instance_variable_get(:@__nil_kill_struct_line)
     name = klass.name.to_s
-    location = name.empty? ? nil : Object.const_source_location(name)
+    location =
+      if declared_path && declared_line
+        [declared_path, declared_line]
+      else
+        name.empty? ? nil : Object.const_source_location(name)
+      end
     path = location && location.first
     absolute = path && !path.start_with?("<") ? abs_path(path) : nil
     value = absolute && File.file?(absolute) ? { path: absolute, line: location.last.to_i } : nil
@@ -549,6 +566,9 @@ module NilKillRuntimeTrace
     return if owner[0] == "NilKillRuntimeTrace"
 
     native = tp.event == :c_call
+    generated_wrapper = @runtime_generated_wrapper_methods.include?(
+      [tp.defined_class, tp.method_id.to_sym]
+    )
     frame = @runtime_scip_frames[Thread.current.object_id].last
     return unless frame
     caller = frame[:caller]
@@ -558,7 +578,10 @@ module NilKillRuntimeTrace
     # Keep the trusted CRuby/generated-accessor identity for production
     # classes. The source-location override exists solely to prevent a test
     # double with a C-backed accessor from masquerading as CRuby stdlib.
-    native_source = native ? native_receiver_source_location(tp.self) : nil
+    native_source =
+      if native || generated_wrapper
+        native_receiver_source_location(tp.self)
+      end
     receiver_class = tp.self.is_a?(Module) ? tp.self : tp.self.class
     # A C event on a directly generated workspace method (Struct accessors
     # are the common case) has no method source_location, but its defining
@@ -566,7 +589,12 @@ module NilKillRuntimeTrace
     # receiver's source to inherited CRuby methods such as Array#each on a
     # project subclass: TracePoint's defined_class is authoritative there.
     native_source = nil unless native_source && tp.defined_class.equal?(receiver_class)
-    raw_callee_path = native ? native_source&.fetch(:path, "").to_s : tp.path.to_s
+    raw_callee_path =
+      if native || generated_wrapper
+        native_source&.fetch(:path, "").to_s
+      else
+        tp.path.to_s
+      end
     # Keep TracePoint's pseudo-file identity long enough for package
     # attribution, then omit it from the declaration locator entirely. It is
     # Ruby-core implementation metadata, not a repository source path.
@@ -598,7 +626,18 @@ module NilKillRuntimeTrace
         "nonproduction" if callee_path && runtime_nonproduction_source_path?(callee_path)
       ),
     }.merge(package)
-    receiver_domain = receiver_shape ? runtime_value_domain(tp.self) : runtime_type_domain(tp.self)
+    receiver_domain =
+      if callee[:source_role] == "nonproduction"
+        # A test double is still a real observed target. Preserve only its
+        # nominal runtime identity so the protocol can report that the
+        # production callsite was replaced; FactMine will exclude the
+        # NON_PRODUCTION value and target from semantic inference.
+        runtime_nonproduction_type_domain(tp.self)
+      elsif receiver_shape
+        runtime_value_domain(tp.self)
+      else
+        runtime_type_domain(tp.self)
+      end
     return if runtime_value_domain_empty?(receiver_domain)
 
     key = [
@@ -690,6 +729,13 @@ module NilKillRuntimeTrace
     record_type = runtime_record_type_name(value)
     runtime_type = record_type if runtime_type == "T.untyped" && record_type
     domain = empty_runtime_value_domain.merge(types: [runtime_type])
+    singleton = semantic_value_type_name(value)
+    domain[:singletons] << singleton if singleton
+    domain
+  end
+
+  def self.runtime_nonproduction_type_domain(value)
+    domain = empty_runtime_value_domain.merge(types: [class_name(value)])
     singleton = semantic_value_type_name(value)
     domain[:singletons] << singleton if singleton
     domain
