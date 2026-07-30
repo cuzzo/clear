@@ -466,7 +466,7 @@ pub fn to_json(message: &dyn protobuf::MessageDyn) -> Result<String> {
     .context("failed to encode canonical ProtoJSON")
 }
 
-fn read_json(path: &Path) -> Result<String> {
+pub fn read_json(path: &Path) -> Result<String> {
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     if bytes.starts_with(&[0x1f, 0x8b]) {
         let mut decoded = String::new();

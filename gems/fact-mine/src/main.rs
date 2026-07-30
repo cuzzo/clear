@@ -296,6 +296,23 @@ fn run() -> Result<()> {
                 plan.requests.len()
             );
         }
+        Command::RuntimeTrace { plan, trace, root } => {
+            let plan = fact_mine_rust::runtime_trace::read_plan(&plan)?;
+            let trace = fact_mine_rust::runtime_trace::read_trace(&trace)?;
+            let root = std::fs::canonicalize(&root).unwrap_or(root);
+            let rows = fact_mine_rust::runtime_trace::anchor_statuses(&root, &plan, &trace)?;
+            let mut out = std::collections::BTreeMap::new();
+            for (symbol, status, _requested, observed) in &rows {
+                out.insert(symbol.clone(), (status.clone(), *observed));
+            }
+            println!("{}", serde_json::to_string(&out)?);
+            eprintln!(
+                "Runtime trace joined: {} anchors, {} observations, {} calls",
+                rows.len(),
+                trace.observations.len(),
+                trace.calls.len()
+            );
+        }
         Command::RuntimeEvidenceValidate { plan, evidence } => {
             let plan = fact_mine_rust::runtime_protocol::read_trace_plan(&plan)?;
             let evidence = fact_mine_rust::runtime_protocol::read_runtime_evidence(&evidence)?;
@@ -703,6 +720,11 @@ enum Command {
         plan: PathBuf,
         evidence: PathBuf,
     },
+    RuntimeTrace {
+        plan: PathBuf,
+        trace: PathBuf,
+        root: PathBuf,
+    },
 }
 
 fn parse_args(args: Vec<String>) -> Result<Command> {
@@ -753,6 +775,48 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 output,
                 root,
                 language_override,
+            })
+        }
+        "runtime-trace" => {
+            let mut plan = None;
+            let mut trace = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--plan" => {
+                        plan = Some(PathBuf::from(
+                            iter.next().with_context(|| "--plan requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--plan=") => {
+                        plan = Some(PathBuf::from(other.strip_prefix("--plan=").unwrap()));
+                    }
+                    "--runtime-trace" => {
+                        trace = Some(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--runtime-trace requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--runtime-trace=") => {
+                        trace = Some(PathBuf::from(
+                            other.strip_prefix("--runtime-trace=").unwrap(),
+                        ));
+                    }
+                    "--root" => {
+                        root = Some(PathBuf::from(
+                            iter.next().with_context(|| "--root requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--root=") => {
+                        root = Some(PathBuf::from(other.strip_prefix("--root=").unwrap()));
+                    }
+                    other => bail!("unsupported runtime-trace argument: {other}"),
+                }
+            }
+            Ok(Command::RuntimeTrace {
+                plan: plan.with_context(|| "runtime-trace requires --plan FILE")?,
+                trace: trace.with_context(|| "runtime-trace requires --runtime-trace FILE")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "runtime-evidence" => {

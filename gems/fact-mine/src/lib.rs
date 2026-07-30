@@ -11,6 +11,7 @@ pub mod parallel;
 pub mod profile;
 pub mod runtime_evidence;
 pub mod runtime_protocol;
+pub mod runtime_trace;
 pub mod scip;
 pub mod syntax;
 pub mod syntax_oracle;
