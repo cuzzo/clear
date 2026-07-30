@@ -69,7 +69,11 @@ module NilKill
       end
 
       def encode_evidence(value)
-        JSON.pretty_generate(validate_evidence!(value)) + "\n"
+        # Compact, not pretty: this is a gzipped machine artifact that only
+        # FactMine reads. Indenting it inflated the canonical document by an
+        # order of magnitude, and every stage downstream paid to write, read and
+        # parse the whitespace.
+        JSON.generate(validate_evidence!(value)) + "\n"
       end
 
       def canonical_message(message_class, value, label)
