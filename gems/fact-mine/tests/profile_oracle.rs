@@ -2915,7 +2915,9 @@ func (h *holder) len() int {
     let expected = [
         ("len", "O(1)", "O(1)"),
         ("make", "O(N)", "O(N)"),
-        ("append", "O(N)", "O(N)"),
+        // appending one element is amortized constant, as every other language
+        // already prices it; a spread appends its own size and is not covered here.
+        ("append", "O(1)", "O(1)"),
         ("copy", "O(N)", "O(1)"),
         ("delete", "O(1)", "O(1)"),
         ("close", "O(1)", "O(1)"),
