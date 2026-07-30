@@ -88,7 +88,7 @@ module NilKill
           row = old[anchor.fetch("symbol")]
           if row.nil?
             nil
-          elsif row.fetch("anchor_semantic_digest") == anchor.fetch("semantic_digest")
+          elsif row["anchor_semantic_digest"].to_s == anchor.fetch("semantic_digest")
             row
           else
             {
@@ -113,7 +113,7 @@ module NilKill
               old_row = old[symbol]
               request = requests[symbol]
               old_row && request &&
-                old_row.fetch("anchor_semantic_digest") ==
+                old_row["anchor_semantic_digest"].to_s ==
                   request.dig("anchor", "semantic_digest")
             end
           end
@@ -144,11 +144,11 @@ module NilKill
         symbols.map do |symbol|
           rows = per_bundle.filter_map { |bundle| bundle[symbol] }
           digest = unique!(
-            rows.map { |row| row.fetch("anchor_semantic_digest") },
+            rows.map { |row| row["anchor_semantic_digest"].to_s },
             "semantic digest for #{symbol}"
           )
-          executions = rows.flat_map { |row| row.fetch("executions") }
-          captures = rows.map { |row| row.fetch("capture") }
+          executions = rows.flat_map { |row| row["executions"] || [] }
+          captures = rows.map { |row| row["capture"] || {} }
           {
             "anchor_symbol" => symbol,
             "anchor_semantic_digest" => digest,
@@ -178,8 +178,8 @@ module NilKill
               rows.map { |row| row.fetch("candidate_anchor_symbols") },
               "candidate anchors for correlation #{group_id}"
             )
-            executions = rows.flat_map { |row| row.fetch("executions") }
-            captures = rows.map { |row| row.fetch("capture") }
+            executions = rows.flat_map { |row| row["executions"] || [] }
+            captures = rows.map { |row| row["capture"] || {} }
             {
               "group_id" => group_id,
               "candidate_anchor_symbols" => candidates,

@@ -72,15 +72,17 @@ module NilKill
         events, invalid_events = load_events
         semantic_events = events
         excluded_events = 0
+        parsed_evidence = nil
         value_evidence =
           if @value_evidence_path
-            parsed = JsonIO.parse(@value_evidence_path)
+            parsed_evidence = JsonIO.parse(@value_evidence_path)
+            anchors = parsed_evidence.fetch("anchors", [])
             {
               "path" => @value_evidence_path,
-              "observations" => parsed.fetch("anchors", []).count {
+              "observations" => anchors.count {
                 |row| row.fetch("executions", []).any? { |bucket| bucket["value"] }
               },
-              "calls" => parsed.fetch("anchors", []).count {
+              "calls" => anchors.count {
                 |row| row.fetch("executions", []).any? { |bucket| bucket["target"] }
               },
             }
@@ -92,12 +94,12 @@ module NilKill
               plan: runtime_plan
             )
           end
-        parsed_evidence = JsonIO.parse(value_evidence.fetch("path"))
+        parsed_evidence ||= JsonIO.parse(value_evidence.fetch("path"))
         evidence_runs = parsed_evidence.fetch("runs", []).map { |run| run.fetch("id") }
         evidence_environment = parsed_evidence.fetch("environment", []).to_h do |claim|
           [claim.fetch("key"), claim.fetch("value")]
         end
-        sources = runtime_sources(semantic_events, value_evidence.fetch("path"))
+        sources = runtime_sources(semantic_events, parsed_evidence)
         index =
           if sources.empty?
             empty_index
@@ -109,7 +111,7 @@ module NilKill
         inferred_events = inference.fetch("inferredCallSites", 0).to_i
 
         FileUtils.mkdir_p(File.dirname(@output))
-        write_atomically(@output, JSON.pretty_generate(index) + "\n")
+        write_atomically(@output, JSON.generate(index) + "\n")
         write_atomically(
           @attestation,
           JSON.pretty_generate(
@@ -182,7 +184,7 @@ module NilKill
         }
       end
 
-      def runtime_sources(events, evidence_path)
+      def runtime_sources(events, evidence)
         sources = Array(@files).map { |path| File.expand_path(path, @root) }
         if sources.empty?
           sources.concat(events.filter_map { |event| event.dig("callsite", "path") })
@@ -199,7 +201,7 @@ module NilKill
         # implementations remain external, and event eligibility has already
         # rejected test/mocking sources.
         sources.concat(events.filter_map { |event| workspace_callee_source(event) })
-        sources.concat(evidence_workspace_sources(evidence_path))
+        sources.concat(evidence_workspace_sources(evidence))
         languages = (
           events.map { |event| event.fetch("language") } +
           runtime_plan.fetch("documents", []).map { |row| row["language"] }
@@ -227,10 +229,13 @@ module NilKill
         absolute
       end
 
-      def evidence_workspace_sources(evidence_path)
-        return [] unless evidence_path
+      # Takes the already-parsed document. It used to re-read and re-parse the
+      # evidence from disk, which was the third full parse of the same file in
+      # one emit.
+      def evidence_workspace_sources(evidence)
+        return [] unless evidence
 
-        JsonIO.parse(evidence_path).fetch("anchors", []).flat_map do |anchor|
+        evidence.fetch("anchors", []).flat_map do |anchor|
           anchor.fetch("executions", []).filter_map do |bucket|
             target = bucket["target"]
             next unless target &&

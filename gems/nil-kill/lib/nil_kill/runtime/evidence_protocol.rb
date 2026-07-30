@@ -76,7 +76,7 @@ module NilKill
         JSON.generate(validate_evidence!(value)) + "\n"
       end
 
-      def canonical_message(message_class, value, label)
+      def canonical_message(message_class, value, label, emit_defaults: true)
         message = message_class.decode_json(
           JSON.generate(value),
           ignore_unknown_fields: false
@@ -85,7 +85,7 @@ module NilKill
           message_class.encode_json(
             message,
             preserve_proto_fieldnames: true,
-            emit_defaults: true
+            emit_defaults: emit_defaults
           )
         )
       rescue Google::Protobuf::ParseError, Google::Protobuf::TypeError, JSON::ParserError => e
