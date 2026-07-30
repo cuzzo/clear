@@ -87,6 +87,12 @@
       "conditional": false,
       "confidence": "partial",
       "consumer_closed_candidate_set": false,
+      "execution_span": [
+        4,
+        2,
+        10,
+        5
+      ],
       "function": "(top-level)",
       "id": "edge:387473d4b6dd9291",
       "implicit_receiver": true,
@@ -179,6 +185,40 @@
         5
       ],
       "unresolved_reason": "target_not_defined_in_document"
+    },
+    {
+      "argument_count": 0,
+      "complexity_bound_quality": "upper_bound_declared_receiver",
+      "complexity_provenance": "language_stdlib_registry",
+      "conditional": true,
+      "confidence": "partial",
+      "consumer_closed_candidate_set": false,
+      "function": "(top-level)",
+      "id": "edge:7de05ee0cf649dba",
+      "kind": "external_call",
+      "known_space_complexity": "O(1)",
+      "known_time_complexity": "O(1)",
+      "line": 9,
+      "message": "untyped",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "T",
+      "receiver_binding_kind": "type",
+      "receiver_kind": "type",
+      "selector_span": [
+        9,
+        16,
+        9,
+        23
+      ],
+      "source": "fn:8b060578990b3bc3",
+      "span": [
+        9,
+        13,
+        9,
+        24
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
     },
     {
       "argument_count": 1,
@@ -514,6 +554,12 @@
       "conditional": false,
       "confidence": "partial",
       "consumer_closed_candidate_set": false,
+      "execution_span": [
+        18,
+        2,
+        18,
+        54
+      ],
       "function": "(top-level)",
       "id": "edge:fc57a4693722e9bf",
       "implicit_receiver": true,

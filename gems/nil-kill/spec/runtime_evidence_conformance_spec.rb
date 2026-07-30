@@ -188,6 +188,8 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       "binary-search",
       "logarithmic-iteration",
       "callback-multiplicity",
+      "setter-method",
+      "runtime-symbol-escaping",
       "excluded-source",
       "structural-runtime-identity",
       "generated-accessor",

@@ -276,8 +276,11 @@ module NilKill
             # standard-library target.
             return "NON_PRODUCTION" if nonproduction_path?(callee["path"], root)
             return "PRODUCTION" if callee["package_manager"].to_s == "workspace"
-            return "STANDARD_LIBRARY" if callee["native"] == true ||
-              callee["package_manager"] == "ruby"
+            # Native is an implementation mechanism, not provenance. A C
+            # method with an exact loaded-gem package remains a dependency;
+            # unresolved native methods are already attributed to `ruby` by
+            # the Ruby trace provider.
+            return "STANDARD_LIBRARY" if callee["package_manager"] == "ruby"
             return "DEPENDENCY" unless package.empty?
 
             "UNKNOWN_SOURCE"

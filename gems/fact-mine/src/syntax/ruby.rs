@@ -271,7 +271,10 @@ fn ruby_stdlib_descriptor(descriptor: &str, message: &str) -> bool {
         let namespace_owner = owner.replace('/', "::");
         let plain = format!("{owner}#{message}().");
         let quoted = format!("{owner}#`{message}`().");
-        configured_stdlib_call_identity("ruby", Some(&namespace_owner), None, message)
+        RubyNormalizedBehavior
+            .call_complexity(&TypeExpr::Primitive(namespace_owner.clone()), message)
+            .is_some()
+            || configured_stdlib_call_identity("ruby", Some(&namespace_owner), None, message)
             || configured_external_latency_bound("ruby", &namespace_owner, message).is_some()
             || configured_external_latency_parametric_cost("ruby", &namespace_owner, message)
                 .is_some()
@@ -2544,29 +2547,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         true
     }
 
-    fn preserve_constant_receiver_call(&self, call: &NormalizedCallProjection) -> bool {
-        let base = call
-            .receiver
-            .trim_start_matches("::")
-            .split("::")
-            .next()
-            .unwrap_or("");
-        (call.receiver == "ENV")
-            || RUBY_EFFECT_LEXICON
-                .context_pairs
-                .iter()
-                .any(|(name, mids)| *name == base && mids.contains(&call.message.as_str()))
-            || RUBY_EFFECT_LEXICON.io_consts.contains(&base)
-            || RUBY_EFFECT_LEXICON
-                .io_pairs
-                .iter()
-                .any(|(name, mids)| *name == base && mids.contains(&call.message.as_str()))
-            || RUBY_EFFECT_LEXICON
-                .io_receiver_prefixes
-                .iter()
-                .any(|prefix| call.receiver.starts_with(prefix))
-            || (call.receiver == "T" && call.message == "type_alias")
-            || RUBY_CORE_CONSTS.contains(&base)
+    fn preserve_constant_receiver_call(&self, _call: &NormalizedCallProjection) -> bool {
+        // Ruby has no field/property read syntax after `.`: `Owner.member`
+        // always dispatches a method, including a zero-argument call without
+        // parentheses. Provenance or cost may remain unknown, but dropping the
+        // call would manufacture a false completeness claim.
+        true
     }
 
     fn branch_state_ref(

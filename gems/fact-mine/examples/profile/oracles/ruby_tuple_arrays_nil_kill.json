@@ -137,6 +137,12 @@
       "conditional": false,
       "confidence": "partial",
       "consumer_closed_candidate_set": false,
+      "execution_span": [
+        6,
+        2,
+        6,
+        74
+      ],
       "function": "(top-level)",
       "id": "edge:076f3c3aeabfa362",
       "implicit_receiver": true,
@@ -191,6 +197,40 @@
         43
       ],
       "unresolved_reason": "target_not_defined_in_document"
+    },
+    {
+      "argument_count": 0,
+      "complexity_bound_quality": "upper_bound_declared_receiver",
+      "complexity_provenance": "language_stdlib_registry",
+      "conditional": true,
+      "confidence": "partial",
+      "consumer_closed_candidate_set": false,
+      "function": "(top-level)",
+      "id": "edge:3dbb9db644478691",
+      "kind": "external_call",
+      "known_space_complexity": "O(1)",
+      "known_time_complexity": "O(1)",
+      "line": 6,
+      "message": "untyped",
+      "owner": "TupleArrayEvidence",
+      "path": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
+      "receiver": "T",
+      "receiver_binding_kind": "type",
+      "receiver_kind": "type",
+      "selector_span": [
+        6,
+        63,
+        6,
+        70
+      ],
+      "source": "fn:50c72744be604cfe",
+      "span": [
+        6,
+        61,
+        6,
+        70
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
     },
     {
       "argument_count": 1,
@@ -333,6 +373,12 @@
       "conditional": false,
       "confidence": "partial",
       "consumer_closed_candidate_set": false,
+      "execution_span": [
+        12,
+        2,
+        12,
+        49
+      ],
       "function": "(top-level)",
       "id": "edge:37b2cae7c28e488c",
       "implicit_receiver": true,

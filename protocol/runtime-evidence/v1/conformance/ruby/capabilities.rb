@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "open3"
+require "optparse"
 require "ostruct"
 require "set"
 require "sorbet-runtime"
@@ -174,6 +175,10 @@ module RuntimeEvidenceConformance
 
     def binary_search_index(values, target)
       values.bsearch_index { |value| value >= target }
+    end
+
+    def option_parser_banner(parser)
+      parser.banner = "usage: conformance"
     end
 
     def converted_index(value, index)
@@ -390,6 +395,14 @@ module RuntimeEvidenceConformance
 
     def dependency_call(left, right)
       Diff::LCS.diff(left, right)
+    end
+
+    def native_dependency_class_call(receiver)
+      receiver.languages
+    end
+
+    def native_dependency_constant_call
+      TreeSitter.languages
     end
   end
 end

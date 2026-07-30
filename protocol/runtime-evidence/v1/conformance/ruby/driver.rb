@@ -3,6 +3,7 @@
 require "English"
 require "diff/lcs"
 require "rbconfig"
+require "tree_sitter"
 require_relative "capabilities"
 require_relative "dependency/generated_record"
 require_relative "test/test_dispatcher"
@@ -42,6 +43,7 @@ subject.local_module_function(left)
 subject.nested_local_module_function(" value ")
 subject.binary_search([1, 3, 5, 7], 4)
 subject.binary_search_index([1, 3, 5, 7], 4)
+subject.option_parser_banner(OptionParser.new)
 subject.converted_index([left], 0)
 subject.sorbet_typed_passthrough(left)
 typed_generated = subject.typed_generated_constructor(left)
@@ -110,3 +112,5 @@ subject.state_receiver_flow(left)
 subject.chained_result_flow(source)
 subject.exception_value_flow
 subject.dependency_call(%w[a], %w[b])
+subject.native_dependency_class_call(TreeSitter)
+subject.native_dependency_constant_call

@@ -842,7 +842,13 @@ module NilKillRuntimeTrace
     # class does. Preserve that declaration provenance. Do not apply the
     # receiver's source to inherited CRuby methods such as Array#each on a
     # project subclass: TracePoint's defined_class is authoritative there.
-    native_source = nil unless native_source && tp.defined_class.equal?(receiver_class)
+    defined_on_receiver =
+      tp.defined_class.equal?(receiver_class) ||
+      (
+        tp.self.is_a?(Module) &&
+        tp.defined_class.equal?(receiver_class.singleton_class)
+      )
+    native_source = nil unless native_source && defined_on_receiver
     raw_callee_path =
       if transparent_target
         transparent_target[:path].to_s

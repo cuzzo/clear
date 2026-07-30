@@ -390,6 +390,18 @@ cases:
       call_space: O(1)
       iteration_multiplicity: O(log N)
 
+  - id: native_option_parser_setter
+    capabilities: [native-call, setter-method, operator-method, runtime-symbol-escaping]
+    anchor: { method: option_parser_banner, selector: banner=, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: OptionParser
+      target_owner: OptionParser
+      target_name: banner=
+      source_role: STANDARD_LIBRARY
+      call_time: O(1)
+      call_space: O(1)
+
   - id: instrumented_set_merge
     capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, set]
     anchor: { method: instrumented_set_writes, selector: merge, occurrence: 1 }
@@ -926,6 +938,28 @@ cases:
       receiver_type: Module
       target_owner: Diff::LCS
       target_name: diff
+      source_role: DEPENDENCY
+
+  - id: native_dependency_class_target
+    capabilities: [dependency-provenance, third-party-target, native-call, native-extension, class-method, variable-receiver]
+    anchor: { method: native_dependency_class_call, selector: languages, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Module
+      target_owner: TreeSitter
+      target_name: languages
+      target_kind: class
+      source_role: DEPENDENCY
+
+  - id: native_dependency_constant_target
+    capabilities: [dependency-provenance, third-party-target, native-call, native-extension, class-method, constant-receiver, zero-argument-call]
+    anchor: { method: native_dependency_constant_call, selector: languages, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Module
+      target_owner: TreeSitter
+      target_name: languages
+      target_kind: class
       source_role: DEPENDENCY
 
 boundary_cases:

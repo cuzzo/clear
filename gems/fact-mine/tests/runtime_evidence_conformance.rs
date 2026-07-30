@@ -1008,6 +1008,8 @@ fn shared_catalog_covers_the_runtime_evidence_v1_behavior_matrix() {
         "binary-search",
         "logarithmic-iteration",
         "callback-multiplicity",
+        "setter-method",
+        "runtime-symbol-escaping",
         "excluded-source",
         "structural-runtime-identity",
         "generated-accessor",
