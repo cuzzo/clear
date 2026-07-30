@@ -64,10 +64,24 @@ module NilKillRuntimeTrace
     target = @runtime_transparent_wrapper_targets[[defined_class, method_id.to_sym]]
     return [target[:owner], target[:kind], target[:native], target[:path]] if target
 
+    # A singleton class of a plain object -- ENV is the common one -- has no
+    # useful class name, so resolve it to the constant that names the object.
+    if defined_class.is_a?(Class) && defined_class.singleton_class? &&
+        (attached = singleton_attached_object(defined_class))
+      named = runtime_named_singleton_owner(attached)
+      return [named[0], named[1], nil, nil] if named
+    end
+
     owner = method_owner(defined_class)
     return [nil, "instance", nil, nil] unless owner
 
     [owner[0], owner[1], nil, nil]
+  end
+
+  def self.singleton_attached_object(singleton)
+    singleton.attached_object if singleton.respond_to?(:attached_object)
+  rescue TypeError
+    nil
   end
 
   def self.install_native_runtime_scip_trace
@@ -87,6 +101,17 @@ module NilKillRuntimeTrace
 
   # Both are pure functions of the callee path and are asked once per emitted
   # row, so they are memoised per path rather than per row.
+  # A wrapper installed by the collector, and a pseudo-path such as
+  # <internal:kernel>, are not the callee's definition site. Reporting them would
+  # attribute a dependency call to NilKill's own source.
+  def self.native_scip_definition_path(path)
+    return nil unless path.is_a?(String)
+    return nil if path.start_with?("<")
+    return nil if path.include?("/gems/nil-kill/lib/")
+
+    path
+  end
+
   def self.native_scip_callee_facts(path, native)
     @native_scip_callee_facts ||= {}
     @native_scip_callee_facts[[path, native]] ||= {
@@ -98,7 +123,7 @@ module NilKillRuntimeTrace
     run_id = ENV.fetch("NIL_KILL_RUN_ID", "")
     NilKillTraceNative.records.flat_map do |row|
       callee = row.fetch(:callee)
-      path = callee[:path]
+      path = native_scip_definition_path(callee[:path])
       callsite = row.fetch(:callsite)
       symbols = native_scip_symbols_for(
         callsite.fetch(:path), callsite.fetch(:line), callsite.fetch(:selector)
@@ -112,7 +137,8 @@ module NilKillRuntimeTrace
         run_id: run_id,
         caller: row.fetch(:caller),
         callsite: callsite.slice(:path, :line).merge(anchor_symbol: anchor_symbol),
-        callee: callee.merge(native_scip_callee_facts(path, callee.fetch(:native))),
+        callee: callee.merge(path: path, line: (path ? callee[:line] : nil))
+          .merge(native_scip_callee_facts(path, callee.fetch(:native))),
         receiver_domain: native_scip_domain(
           row.fetch(:receiver_types), row.fetch(:receiver_domain_indices)
         ),
