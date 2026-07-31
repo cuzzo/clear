@@ -1217,6 +1217,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BENCHER_JSON: tmp/benchmark-leak-${{ matrix.shard }}.json
         run: |
+          # The benchmark still ran and still failed the job on a leak; this
+          # step only publishes the numbers. Without a token there is nowhere
+          # to publish them, and failing the gate on a missing credential says
+          # nothing about the code.
+          if [ -z "${BENCHER_API_TOKEN}" ]; then
+            echo "BENCHER_API_TOKEN is not set; skipping the upload." >&2
+            exit 0
+          fi
           testbed="${BENCHER_TESTBED:-ubuntu-latest}"
           project="${BENCHER_PROJECT:-clear}"
           branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
