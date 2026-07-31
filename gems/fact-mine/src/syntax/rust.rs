@@ -187,7 +187,7 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
     super::ExternalSymbolMetadata {
         scope: if rust_stdlib_crate(krate) {
             "stdlib"
-        } else if krate == "fact-mine-rust" {
+        } else if crate::scip::project_package(krate) {
             "project_declaration"
         } else {
             "dependency"

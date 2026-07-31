@@ -211,6 +211,52 @@ struct Definition {
 }
 
 static INDEXED_LOCALS: OnceLock<Vec<(String, usize, String, String)>> = OnceLock::new();
+static PROJECT_PACKAGES: OnceLock<BTreeSet<String>> = OnceLock::new();
+
+/// The packages the analysis owns the source of, taken from the indexes that
+/// describe the project rather than from any name written into an adapter. A
+/// symbol naming one of these is a declaration of this project, however many
+/// packages the project is split across and whatever they are called.
+pub fn preload_project_packages(index_paths: &[PathBuf]) {
+    let mut packages = BTreeSet::new();
+    for path in index_paths {
+        let Ok(index) = read_index(path) else {
+            continue;
+        };
+        for document in &index.documents {
+            for occurrence in &document.occurrences {
+                // A definition is where a package states what it holds; a
+                // reference names a package the project merely calls.
+                if occurrence.symbol_roles & 1 != 1 {
+                    continue;
+                }
+                if let Some(package) = symbol_package(&occurrence.symbol) {
+                    packages.insert(package.to_string());
+                }
+            }
+        }
+    }
+    let _ = PROJECT_PACKAGES.set(packages);
+}
+
+/// Whether a symbol's package is one the analysis owns the source of.
+pub(crate) fn project_package(package: &str) -> bool {
+    PROJECT_PACKAGES
+        .get()
+        .is_some_and(|packages| packages.contains(package))
+}
+
+/// The package a symbol belongs to. Every SCIP scheme spells this the same
+/// way - scheme, manager, package, version, descriptor - so reading it needs
+/// no adapter.
+fn symbol_package(symbol: &str) -> Option<&str> {
+    let mut fields = symbol.split(' ');
+    fields.next()?; // scheme
+    fields.next()?; // package manager
+    let package = fields.next()?;
+    fields.next()?; // version
+    (!package.is_empty() && package != "." && fields.next().is_some()).then_some(package)
+}
 
 /// Read the indexes once, before anything asks what a binding is. Complexity
 /// facts are built while parsing, so the compiler's answer has to be in hand by
@@ -4875,6 +4921,25 @@ mod local_binding_type_tests {
             .map(|signature| signature.text.trim())
             .and_then(binding_signature);
         assert_eq!(signature, Some(("kept", "Vec<String>")));
+    }
+
+    #[test]
+    fn a_symbols_package_is_read_the_same_way_in_every_scheme() {
+        assert_eq!(
+            symbol_package("rust-analyzer cargo decomplex-rust 0.1.0 dialect/Dialect#clean()."),
+            Some("decomplex-rust")
+        );
+        assert_eq!(
+            symbol_package("scip-typescript npm zod 4.4.3 src/`parse.ts`/parse."),
+            Some("zod")
+        );
+        assert_eq!(
+            symbol_package("scip-go gomod github.com/x/y v1 pkg/Fn()."),
+            Some("github.com/x/y")
+        );
+        // A local names no package, and neither does a bare descriptor.
+        assert_eq!(symbol_package("local 0"), None);
+        assert_eq!(symbol_package("rust-analyzer cargo core"), None);
     }
 
     #[test]

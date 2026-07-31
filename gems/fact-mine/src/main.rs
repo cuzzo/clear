@@ -131,6 +131,9 @@ fn run() -> Result<()> {
                 .cloned()
                 .collect::<Vec<_>>();
             fact_mine_rust::scip::preload_local_binding_types(&declaration_indexes);
+            // Only the project's own indexes say what the project is; a
+            // dependency index is attached for declarations it owns elsewhere.
+            fact_mine_rust::scip::preload_project_packages(&scip_indexes);
             let mut merged = build_requested_profile(
                 &files,
                 language_override,
