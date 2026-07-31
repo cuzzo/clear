@@ -140,47 +140,6 @@ module NilKillRuntimeTrace
 
   MODULE_NAME = Module.instance_method(:name)
 
-  # A module can override the singleton `.name` (e.g. REXML::Functions
-  # defines `.name` as an XPath DSL method). Binding Module#name
-  # directly always yields the real name and never invokes a user
-  # override that could raise mid-trace and abort the whole collect.
-  def self.safe_module_name(mod)
-    return nil unless mod.is_a?(Module)
-    MODULE_NAME.bind_call(mod) rescue nil
-  end
-
-  def self.method_owner(defined_class)
-    return nil unless defined_class
-    if defined_class.respond_to?(:singleton_class?) && defined_class.singleton_class?
-      target = defined_class.respond_to?(:attached_object) ? (defined_class.attached_object rescue nil) : nil
-      tn = safe_module_name(target)
-      return [tn, "class"] if tn
-      nil
-    else
-      dn = safe_module_name(defined_class)
-      dn && [dn, "instance"]
-    end
-  end
-
-  def self.site_key(loc, cls)
-    return "#{loc}:#{cls}" unless loc.respond_to?(:absolute_path)
-    "#{abs_path(loc.absolute_path || loc.path)}:#{loc.lineno}:#{cls}"
-  end
-
-  def self.trace_key(trace, cls)
-    frames = Array(trace).filter_map do |loc|
-      if loc.respond_to?(:absolute_path)
-        path = loc.absolute_path || loc.path
-        next unless path
-        "#{abs_path(path)}:#{loc.lineno}"
-      else
-        loc.to_s
-      end
-    end
-    return nil if frames.empty?
-    "#{frames.join("|")}:#{cls}"
-  end
-
   # NOTE: the parallel instrumented tree and its require/require_relative
   # redirect (instrumented_copy_for / resolve_required_source /
   # install_instrumented_require_hook) were DELETED. In-place

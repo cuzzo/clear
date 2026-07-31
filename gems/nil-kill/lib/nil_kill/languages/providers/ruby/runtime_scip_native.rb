@@ -79,10 +79,6 @@ module NilKillRuntimeTrace
         end
   end
 
-  def self.native_scip_symbols_for(path, line, selector)
-    native_scip_anchors_by_key.fetch("#{path}\x01#{line}\x01#{selector}", [])
-  end
-
   def self.install_native_runtime_scip_trace
     require_native_scip!
     NilKillTraceNative.value_domain_root = ROOT
@@ -90,18 +86,6 @@ module NilKillRuntimeTrace
       Array(TARGETS).map(&:to_s), native_scip_demand_map, native_scip_state_demand_map
     )
     NilKillTraceNative.start
-  end
-
-  def self.native_scip_domain(types, indices, production_only: false)
-    domain = empty_runtime_value_domain
-    Array(types).each { |type| merge_runtime_value_domain!(domain, types: [type]) }
-    Array(indices).each do |index|
-      observed = NilKillTraceNative.domains.fetch(index)
-      next if production_only && observed[:nonproduction]
-
-      merge_runtime_value_domain!(domain, observed.reject { |field, _| field == :nonproduction })
-    end
-    domain
   end
 
   # Both are pure functions of the callee path and are asked once per emitted
