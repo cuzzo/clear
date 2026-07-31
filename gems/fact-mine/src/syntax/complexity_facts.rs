@@ -4047,23 +4047,18 @@ fn field_in_closure(docs: &[Doc]) -> Vec<String> {
             Some("same"),
             "a copy of a loop binding is bounded by the collection the loop walks"
         );
-        // A closure is analysed as its own function, and the name in its header
-        // is that function's parameter. Without it the copy inside names a
-        // binding that belongs to nothing.
+        // A closure's copy is still unbounded. Naming the closure's own
+        // parameter is what would bind it, and doing that made a bound wrong:
+        // `|rest| rest.components().count()` inside a loop over paths became a
+        // product with the element rather than a partition of it, so
+        // `strip_paths` read O(N*M) instead of O(N). The parameter is only
+        // usable once a closure parameter derived from the element it is handed
+        // partitions with that element, which is not modelled yet.
         let closure = rows
             .iter()
             .find(|row| row.function.starts_with("<lambda@"))
             .expect("the closure is analysed as its own function");
-        assert_eq!(closure.parameters, vec!["d".to_string()]);
-        assert_eq!(
-            closure
-                .allocations
-                .iter()
-                .find(|allocation| allocation.kind == "clone")
-                .map(|allocation| allocation.cardinality_relation.as_str()),
-            Some("same"),
-            "a copy of a closure's own parameter is bounded by what it is handed"
-        );
+        assert!(closure.parameters.is_empty());
     }
 
     #[test]
