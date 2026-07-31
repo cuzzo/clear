@@ -730,7 +730,7 @@
             "complete": true,
             "factors": [
               {
-                "domain_id": "allocation:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
+                "domain_id": "allocation:examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
                 "exponent": 1
               }
             ],
@@ -756,7 +756,7 @@
             "complete": true,
             "factors": [
               {
-                "domain_id": "allocation:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
+                "domain_id": "allocation:examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
                 "exponent": 1
               }
             ],
@@ -783,7 +783,7 @@
             "complete": true,
             "factors": [
               {
-                "domain_id": "allocation:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
+                "domain_id": "allocation:examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
                 "exponent": 1
               }
             ],
@@ -1292,6 +1292,7 @@
       "callback_binding_position": null,
       "complete": true,
       "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "missing?",
       "line": 20,
@@ -1322,6 +1323,7 @@
       "callback_binding_position": null,
       "complete": true,
       "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 13,
@@ -1361,6 +1363,7 @@
           ]
         ]
       },
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 14,
@@ -1384,6 +1387,7 @@
       "callback_binding_position": null,
       "complete": false,
       "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 15,
@@ -2590,7 +2594,7 @@
       "name": "required",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required"
+        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#missing?:entry:0:19:2:place:MIRLoweringControlFlow#missing?:local:required"
       ],
       "resolved": true,
       "span": [
@@ -2614,7 +2618,7 @@
       "name": "facts",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts"
+        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:entry:0:11:2:place:MIRLoweringControlFlow#union_match_default_body:local:facts"
       ],
       "resolved": true,
       "span": [
@@ -2638,7 +2642,7 @@
       "name": "schema",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema"
+        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4:place:MIRLoweringControlFlow#union_match_default_body:local:schema"
       ],
       "resolved": false,
       "span": [
@@ -2660,7 +2664,7 @@
       "name": "all_variants",
       "owner": "MIRLoweringControlFlow",
       "requirements": [
-        "type-definition:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants"
+        "type-definition:examples/profile/ruby_safe_navigation_nil_kill.rb:cfg:MIRLoweringControlFlow#union_match_default_body:stmt:3:14:4:place:MIRLoweringControlFlow#union_match_default_body:local:all_variants"
       ],
       "resolved": false,
       "span": [

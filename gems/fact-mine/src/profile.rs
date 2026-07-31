@@ -11789,6 +11789,13 @@ impl<'a> StateParamVisitor<'a> {
 }
 
 fn normalize_string(s: &str, root: &std::path::Path) -> String {
+    // A prose blocker reads "unknown return expression ARGS at <path>:13", so
+    // the root can sit anywhere in the string rather than at its start. Strip
+    // it wherever it appears before the structural passes below.
+    let root_prefix = format!("{}/", root.to_string_lossy());
+    if s.contains(&root_prefix) {
+        return normalize_string(&s.replace(&root_prefix, ""), root);
+    }
     if s.contains('\x00') {
         let parts: Vec<String> = s
             .split('\x00')
@@ -11821,20 +11828,19 @@ fn normalize_string(s: &str, root: &std::path::Path) -> String {
 }
 
 pub fn normalize_paths(v: &mut serde_json::Value, root: &std::path::Path) {
+    // Any string carrying the checkout root is machine-specific, whatever
+    // holds it. Allow-listing keys meant identities kept working while
+    // `domain_id`, `symbol_owner`, and bare strings inside `requirements` and
+    // `blockers` arrays carried one developer's home directory into the
+    // committed oracles -- portable everywhere except the machine that had to
+    // run them.
     match v {
+        serde_json::Value::String(s) => {
+            *v = serde_json::Value::String(normalize_string(s, root));
+        }
         serde_json::Value::Object(map) => {
-            for (key, val) in map.iter_mut() {
-                // Stable identities can embed paths in a compound key (for
-                // example hidden-enum local keys use NUL-separated fields).
-                // Normalize those exactly as IDs so profile oracles remain
-                // portable across checkouts.
-                if key == "path" || key == "file" || key == "id" || key == "key" {
-                    if let serde_json::Value::String(s) = val {
-                        *val = serde_json::Value::String(normalize_string(s, root));
-                    }
-                } else {
-                    normalize_paths(val, root);
-                }
+            for (_key, val) in map.iter_mut() {
+                normalize_paths(val, root);
             }
         }
         serde_json::Value::Array(arr) => {

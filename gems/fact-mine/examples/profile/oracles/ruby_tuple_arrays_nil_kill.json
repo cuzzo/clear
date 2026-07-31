@@ -693,6 +693,7 @@
       "callback_binding_position": null,
       "complete": true,
       "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
       "line": 9,
@@ -723,6 +724,7 @@
       "callback_binding_position": null,
       "complete": true,
       "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_tuple_arrays_nil_kill.rb",
       "function": "build",
       "line": 9,
@@ -1304,7 +1306,7 @@
     {
       "array_element_shape": null,
       "blockers": [
-        "unknown return expression ARGS at /home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:13"
+        "unknown return expression ARGS at examples/profile/ruby_tuple_arrays_nil_kill.rb:13"
       ],
       "candidate_type": {
         "kind": "Untyped"
@@ -1625,7 +1627,7 @@
       "name": "name",
       "owner": "TupleArrayEvidence",
       "requirements": [
-        "type-definition:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name"
+        "type-definition:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:name"
       ],
       "resolved": true,
       "span": [
@@ -1649,7 +1651,7 @@
       "name": "node",
       "owner": "TupleArrayEvidence",
       "requirements": [
-        "type-definition:/home/yahn/easy-vm/gems/fact-mine/examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node"
+        "type-definition:examples/profile/ruby_tuple_arrays_nil_kill.rb:cfg:TupleArrayEvidence#build:entry:0:7:2:place:TupleArrayEvidence#build:local:node"
       ],
       "resolved": true,
       "span": [

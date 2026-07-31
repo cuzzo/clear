@@ -4889,7 +4889,13 @@ fn assert_oracle_paths_are_relative(value: &Value, oracle_path: &std::path::Path
     match value {
         Value::Object(map) => {
             for (key, child) in map {
-                if matches!(key.as_str(), "path" | "file" | "id" | "key") {
+                if key == "path"
+                    || key == "file"
+                    || key == "key"
+                    || key == "symbol"
+                    || key == "symbol_owner"
+                    || key.ends_with("id")
+                {
                     if let Value::String(identity) = child {
                         for component in identity
                             .split('\0')
