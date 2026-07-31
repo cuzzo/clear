@@ -114,7 +114,7 @@ module SemanticMutants
       schema: 'semantic-mutant-delta/v1',
       generated_at: Time.now.utc.iso8601,
       subject: subject,
-      source: 'gems/lineage/tools/mutant-converters/semantic_mutant.rb',
+      source: 'gems/gigasail/tools/mutant-converters/semantic_mutant.rb',
       semantic_specs: SEMANTIC_SPECS,
     }.merge(comparison)
     File.write(File.join(out, 'facts.json'), JSON.pretty_generate(facts))

@@ -163,7 +163,7 @@ interfaces.
 
 Espalier's Big-O bounds are static. Feed a runtime profile through Lineage
 to rank them by what actually runs hot: convert profiler output with
-`gems/lineage/tools/pprof_to_hotness.rb`, ingest with `lineage
+`gems/gigasail/tools/pprof_to_hotness.rb`, ingest with `lineage
 ingest-hotness`, and the Expensive Operations view sorts by Big-O first,
 then measured share; critical functions get a flame icon in the file view.
 Profile representative workloads, not unit tests, and build perf-profiled

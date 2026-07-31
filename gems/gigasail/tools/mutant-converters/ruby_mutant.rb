@@ -166,7 +166,7 @@ module RubySpecMutants
   def self.parse_options(argv)
     opts = Options.new(subject: nil, since: nil, shard: nil, out: '/tmp/clear-ruby-mutants', facts: nil, list: false)
     OptionParser.new do |o|
-      o.banner = 'Usage: ruby gems/lineage/tools/mutant-converters/ruby_mutant.rb [--subject NAME] [--since REV] [--shard INDEX/COUNT] [--out DIR] [--facts FILE] [--list]'
+      o.banner = 'Usage: ruby gems/gigasail/tools/mutant-converters/ruby_mutant.rb [--subject NAME] [--since REV] [--shard INDEX/COUNT] [--out DIR] [--facts FILE] [--list]'
       o.on('--subject NAME') { |v| opts.subject = v }
       o.on('--since REV') { |v| opts.since = v }
       o.on('--shard INDEX/COUNT') { |v| opts.shard = MutationTesting.parse_shard(v) }
@@ -213,7 +213,7 @@ module RubySpecMutants
     body = {
       schema: 'mutant-facts/v1',
       generated_at: Time.now.utc.iso8601,
-      source: 'gems/lineage/tools/mutant-converters/ruby_mutant.rb',
+      source: 'gems/gigasail/tools/mutant-converters/ruby_mutant.rb',
       language: 'ruby',
       mutation_kind: 'stochastic',
       subjects: results.filter_map { |result| fact_for_result(result) },

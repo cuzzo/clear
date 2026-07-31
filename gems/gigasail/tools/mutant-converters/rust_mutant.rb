@@ -22,7 +22,7 @@ module Lineage
         input = T.let(nil, T.nilable(String))
         output = T.let(nil, T.nilable(String))
         OptionParser.new do |o|
-          o.banner = "Usage: ruby gems/lineage/tools/mutant-converters/rust_mutant.rb --input PATH --output PATH"
+          o.banner = "Usage: ruby gems/gigasail/tools/mutant-converters/rust_mutant.rb --input PATH --output PATH"
           o.on("--input PATH") { |v| input = v }
           o.on("--output PATH") { |v| output = v }
           o.on("-h", "--help") { puts o; exit 0 }
@@ -36,7 +36,7 @@ module Lineage
 
       PACKAGE_PATHS = T.let({
         "sql-cov" => "gems/sql-cov",
-        "lineage" => "gems/lineage",
+        "gigasail" => "gems/gigasail",
         "fact-mine-rust" => "gems/fact-mine",
         "decomplex-rust" => "gems/decomplex"
       }.freeze, T::Hash[String, String])
@@ -112,7 +112,7 @@ module Lineage
 
         result = {
           "schema" => "mutant-facts/v1",
-          "source" => "gems/lineage/tools/mutant-converters/rust_mutant.rb",
+          "source" => "gems/gigasail/tools/mutant-converters/rust_mutant.rb",
           "language" => "rust",
           "mutation_kind" => "stochastic",
           "subjects" => subjects

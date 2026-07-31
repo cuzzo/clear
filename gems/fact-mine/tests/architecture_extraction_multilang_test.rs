@@ -1,7 +1,7 @@
 // Minimal, in-repo fixtures for Espalier-consumed architecture extraction
 // (owner/function/state facts) across languages, replacing the need to
 // clone large external OSS repos to validate this specific concern. See
-// gems/lineage/docs/agents/lang-support-quality.md for the original
+// gems/gigasail/docs/agents/lang-support-quality.md for the original
 // large-repo validation pass this narrows down to reproducible unit-level
 // fixtures.
 //

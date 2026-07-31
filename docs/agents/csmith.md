@@ -1049,7 +1049,7 @@ paired with much stronger mutation evidence.
 The permanent command is:
 
 ```text
-bundle exec ruby gems/lineage/tools/mutant-converters/semantic_mutant.rb \
+bundle exec ruby gems/gigasail/tools/mutant-converters/semantic_mutant.rb \
   --out /tmp/clear-semantic-mutants --jobs 32 --timeout 60 --min-new-kills 1
 ```
 
@@ -1233,7 +1233,7 @@ the semantic adapter and historical template as independent coverage.
 The permanent differential command is:
 
 ```text
-bundle exec ruby gems/lineage/tools/mutant-converters/semantic_mutant.rb \
+bundle exec ruby gems/gigasail/tools/mutant-converters/semantic_mutant.rb \
   --out /tmp/clear-semantic-mutants-final-148 \
   --jobs 32 --timeout 60 --min-new-kills 1
 ```

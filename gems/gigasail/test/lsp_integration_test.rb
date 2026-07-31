@@ -15,7 +15,7 @@ class LspIntegrationTest < Minitest::Test
   LINEAGE_BIN = File.expand_path("../target/release/lineage", __dir__)
 
   def setup
-    skip "lineage binary missing; build gems/lineage first" unless File.executable?(LINEAGE_BIN)
+    skip "gigasail binary missing; build gems/gigasail first" unless File.executable?(LINEAGE_BIN)
   end
 
   def test_definition_and_hotness_over_lsp_stdio

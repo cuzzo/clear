@@ -34,7 +34,7 @@ mutation and Weak Tests views without teaching Lineage to read compressed
 corpus envelopes directly.
 
 The checkpoint -> ledger path is wired:
-`gems/lineage/tools/ingest_mutation_corpus.rb` accepts either the canonical
+`gems/gigasail/tools/ingest_mutation_corpus.rb` accepts either the canonical
 `mutation-corpus.json.zst` envelope (materializing it via
 `test-miser-artifact materialize`) or an already-materialized directory, then
 runs `ingest-mutants` per suite and `ingest-sarif` for the combined Weak

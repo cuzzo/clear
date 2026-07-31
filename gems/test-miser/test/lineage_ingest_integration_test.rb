@@ -9,7 +9,7 @@ require "tmpdir"
 # Round-trip for the checkpoint -> ledger path described in
 # docs/agents/lineage-sync.md: a materialized mutation corpus (per-suite
 # mutant-facts/v1 plus the combined Weak Tests SARIF) ingests into lineage.db
-# through gems/lineage/tools/ingest_mutation_corpus.rb.
+# through gems/gigasail/tools/ingest_mutation_corpus.rb.
 class LineageIngestIntegrationTest < Minitest::Test
   LINEAGE_BIN = File.expand_path("../../gigasail/target/release/giga", __dir__)
   INGEST_TOOL = File.expand_path("../../gigasail/tools/ingest_mutation_corpus.rb", __dir__)
