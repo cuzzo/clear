@@ -870,6 +870,7 @@ RSpec.describe "NilKill coverage hardening" do
         },
       }
       allow(described_class).to receive(:trace_plan).and_return(plan)
+      NilKillTraceNative.configure_struct_fields(plan.fetch("struct_fields"))
 
       props_calls = 0
       klass = Class.new do
@@ -891,9 +892,12 @@ RSpec.describe "NilKill coverage hardening" do
         described_class.record_tstruct_instance(klass.new(known: "typed", raw: "observed"))
       end
 
+      observed = NilKillTraceNative.struct_observations
+        .select { |row| row.fetch(:path) == File.expand_path(target_file, described_class::ROOT) }
       expect(props_calls).to eq(1)
-      expect(described_class.structs.keys.map { |key| key[1] }).to eq(["raw"])
-      expect(described_class.structs.values.first[:calls]).to eq(2)
+      # `known` is resolved in the plan, so only `raw` is worth observing.
+      expect(observed.map { |row| row.fetch(:field) }).to eq(["raw"])
+      expect(observed.first.fetch(:calls)).to eq(2)
     ensure
       FileUtils.rm_f(target_file)
     end

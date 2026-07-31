@@ -22,6 +22,7 @@
 #include "collections.h"
 #include "declarations.h"
 #include "identity.h"
+#include "records.h"
 #include "value_domain.h"
 
 #define MAX_FRAMES 1024
@@ -1193,6 +1194,7 @@ void Init_nil_kill_trace(void) {
     nk_identity_init(mod);
     nk_declarations_init(mod);
     nk_collections_init(mod);
+    nk_records_init(mod);
 
     path_cache = st_init_numtable();
     demand = st_init_numtable();

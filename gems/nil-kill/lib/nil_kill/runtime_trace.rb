@@ -849,35 +849,10 @@ module NilKillRuntimeTrace
     record_struct_field(shim, klass_name, field, value)
   end
 
+  # The collector owns the record tables; this is the one call the declaration
+  # hooks make into them.
   def self.record_struct_field(klass, klass_name, field, value)
-    path = klass.instance_variable_get(:@__nil_kill_struct_path)
-    line = klass.instance_variable_get(:@__nil_kill_struct_line)
-    return unless path && line
-    return unless sample_struct_field?(klass_name, field)
-    # Normalize the caller path to an absolute real-src path (in-place
-    # instrumentation keeps it at the real path; abs_path is now just a
-    # cached expand) so the separate `infer` process ingests the row.
-    path = abs_path(path)
-    key = [klass_name, field.to_s, path, line]
-    shape = container_shape(value)
-    with_collection_hooks_disabled do
-      @lock.synchronize do
-        rec = (@structs[key] ||= { calls: 0, classes: NKSet.new, elem_classes: NKSet.new, key_classes: NKSet.new, value_classes: NKSet.new, array_calls: 0, hash_calls: 0 })
-        rec[:calls] += 1
-        rec[:classes] << class_name(value)
-        if shape&.first == :array
-          rec[:array_calls] += 1
-          rec[:elem_classes].merge(shape[1])
-          record_tuple("struct_field", path, line, "#{klass_name}.#{field}", value)
-          NilKillTraceNative.register_collection_owner(value, { owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line })
-        elsif shape&.first == :hash
-          rec[:hash_calls] += 1
-          rec[:key_classes].merge(shape[1][0])
-          rec[:value_classes].merge(shape[1][1])
-          NilKillTraceNative.register_collection_owner(value, { owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line })
-        end
-      end
-    end
+    NilKillTraceNative.record_struct_field(klass, klass_name, field, value)
   end
 
   def self.record_tuple(kind, path, line, slot, value)
@@ -899,17 +874,7 @@ module NilKillRuntimeTrace
     pid = Process.pid
     dump_native_runtime_scip(pid) if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
     File.open(File.join(OUT_DIR, "structs-#{pid}.jsonl"), "w") do |file|
-      @structs.each do |(klass, field, path, line), rec|
-        file.puts JSON.generate(
-          class: klass, field: field, path: path, line: line, calls: rec[:calls],
-          classes: rec[:classes].to_a.sort,
-          elem_classes: rec[:elem_classes].to_a.sort,
-          key_classes: rec[:key_classes].to_a.sort,
-          value_classes: rec[:value_classes].to_a.sort,
-          array_calls: rec[:array_calls],
-          hash_calls: rec[:hash_calls],
-        )
-      end
+      NilKillTraceNative.struct_observations.each { |row| file.puts JSON.generate(row) }
     end
     File.open(File.join(OUT_DIR, "ivars-#{pid}.jsonl"), "w") do |file|
       @ivar_runtime.each do |(klass, name), rec|
@@ -929,10 +894,7 @@ module NilKillRuntimeTrace
       end
     end
     File.open(File.join(OUT_DIR, "tuples-#{pid}.jsonl"), "w") do |file|
-      @tuples.each do |(kind, path, line, slot, size, types), rec|
-        file.puts JSON.generate(kind: kind, path: path, line: line, slot: slot, size: size, types: types,
-          complete: rec[:complete], mixed: rec[:mixed], calls: rec[:calls])
-      end
+      NilKillTraceNative.tuple_observations.each { |row| file.puts JSON.generate(row) }
     end
     File.open(File.join(OUT_DIR, "collections-#{pid}.jsonl"), "w") do |file|
       NilKillTraceNative.collection_observations.each do |row|
@@ -1061,6 +1023,7 @@ if ENV["NIL_KILL_TRACE"] == "1"
   rescue LoadError
     nil
   end
+  NilKillTraceNative.configure_struct_fields(Hash(NilKillRuntimeTrace.trace_plan&.fetch("struct_fields", nil)))
   NilKillTraceNative.configure_tlet_sites(Hash(NilKillRuntimeTrace.trace_plan&.fetch("tlets", nil)))
   NilKillTraceNative.install_tlet_hook
   NilKillRuntimeTrace.install_struct_hook
