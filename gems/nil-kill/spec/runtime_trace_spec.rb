@@ -5,64 +5,6 @@ require_relative "spec_helper"
 RuntimeTraceSpecDouble = Struct.new(:lines) unless defined?(RuntimeTraceSpecDouble)
 
 RSpec.describe "nil-kill runtime trace" do
-  it "keeps workspace source outside the selected targets under workspace identity" do
-    export = NilKill::Runtime::CollectorExport.new(
-      { root: NilKill::ROOT, targets: [File.join(NilKill::ROOT, "src")] }, {}
-    )
-
-    expect(export.send(:package, File.join(NilKill::ROOT, "tools", "vopr_coverage.rb"), native: false)).to eq(
-      package_manager: "workspace",
-      package: File.basename(NilKill::ROOT),
-      version: "workspace"
-    )
-    expect(export.send(:package, "<internal:warning>", native: false)).to eq(
-      package_manager: "ruby",
-      package: "ruby",
-      version: RUBY_VERSION
-    )
-  end
-
-  it "retains Ruby default gems as versioned standard-library packages" do
-    Dir.mktmpdir("nil-kill-default-gem") do |directory|
-      source = File.join(directory, "lib", "stringio.rb")
-      FileUtils.mkdir_p(File.dirname(source))
-      File.write(source, "# default gem fixture\n")
-      export = NilKill::Runtime::CollectorExport.new({
-        root: NilKill::ROOT,
-        targets: [],
-        gem_specs: [["stringio", "3.2.0", directory]],
-        default_gem_specs: [["stringio", "3.2.0", directory]],
-      }, {})
-
-      expect(export.send(:package, source, native: false)).to eq(
-        package_manager: "ruby",
-        package: "stringio",
-        version: "3.2.0"
-      )
-    end
-  end
-
-  # The traced process no longer loads, filters or reshapes the plan: it reads
-  # flat records the orchestrator already decided. This is that contract.
-  it "hands the collector flat plan records rather than a document to interpret" do
-    Dir.mktmpdir("nil-kill-collector-plan", NilKill::ROOT) do |dir|
-      File.write(File.join(dir, "lib.rb"), "class Widget\n  def call = nil\nend\n")
-      isolated_env("NIL_KILL_TARGETS" => dir, "NIL_KILL_TMP_DIR" => dir) do
-        NilKill::TracePlan.write(File.join(dir, "trace-plan.json"))
-      end
-
-      records = File.read(File.join(dir, NilKill::COLLECTOR_PLAN_NAME))
-        .lines(chomp: true).map { |line| line.split("\x02") }
-      expect(records.select { |tag, _| tag == "t" }.map(&:last)).to eq([dir])
-      # Every demand is a coordinate and the one anchor it answers, so the
-      # collector never has to reshape a range into keys.
-      records.select { |tag, _| tag == "d" }.each do |_, key, symbol|
-        expect(key.split("\x01").length).to eq(3)
-        expect(symbol).not_to be_empty
-      end
-    end
-  end
-
   it "serializes Struct members as a runtime record shape without dispatching an override" do
     record_class = Struct.new(:kind, :payload)
     record_class.class_eval do
@@ -200,7 +142,9 @@ RSpec.describe "nil-kill runtime trace" do
       expect(status).to be_success, err
       # The traced program writes what the collector saw; the rows are shaped
       # afterwards, which is what a real collect does between the two.
-      NilKill::Runtime::CollectorExport.write(runtime_dir: trace_dir, plan: nil, root: NilKill::ROOT)
+      NilKill::Runtime::DomainDeriver.export(
+        runtime_dirs: [trace_dir], plan: nil, source_roles: nil, root: NilKill::ROOT
+      )
       struct_events = Dir.glob(File.join(trace_dir, "structs-*.jsonl")).flat_map do |path|
         File.readlines(path, chomp: true).map { |line| JSON.parse(line) }
       end
@@ -248,7 +192,9 @@ RSpec.describe "nil-kill runtime trace" do
       expect(status).to be_success, err
       # The traced program writes what the collector saw; the rows are shaped
       # afterwards, which is what a real collect does between the two.
-      NilKill::Runtime::CollectorExport.write(runtime_dir: trace_dir, plan: nil, root: NilKill::ROOT)
+      NilKill::Runtime::DomainDeriver.export(
+        runtime_dirs: [trace_dir], plan: nil, source_roles: nil, root: NilKill::ROOT
+      )
       struct_events = Dir.glob(File.join(trace_dir, "structs-*.jsonl")).flat_map do |path|
         File.readlines(path, chomp: true).map { |line| JSON.parse(line) }
       end

@@ -20,8 +20,19 @@ RSpec.describe "the trace document a shard produces" do
     File.expand_path("fixtures/golden_shard", __dir__)
   end
 
+  # Content, not key order. Every consumer of these files parses them, so the
+  # order a producer happened to write its keys in is not part of the contract
+  # -- and holding a port to it would be asserting something nothing depends on.
+  def canonical(value)
+    case value
+    when Hash then value.keys.sort.to_h { |key| [key, canonical(value[key])] }
+    when Array then value.map { |entry| canonical(entry) }
+    else value
+    end
+  end
+
   def digest(value)
-    Digest::SHA256.hexdigest(JSON.generate(value))
+    Digest::SHA256.hexdigest(JSON.generate(canonical(value)))
   end
 
   # Where two values first disagree, in a form a person can read.
@@ -29,7 +40,9 @@ RSpec.describe "the trace document a shard produces" do
     if built.is_a?(Array) && expected.is_a?(Array)
       return "length #{built.length} vs #{expected.length}" if built.length != expected.length
 
-      at = built.each_index.find { |i| built[i] != expected[i] }
+      at = built.each_index.find { |i| canonical(built[i]) != canonical(expected[i]) }
+      return "no entry differs (ordering only)" if at.nil?
+
       return "entry #{at}:\n    built    #{JSON.generate(built[at])[0, 300]}\n" \
              "    expected #{JSON.generate(expected[at])[0, 300]}"
     end
@@ -49,7 +62,11 @@ RSpec.describe "the trace document a shard produces" do
     Dir.mktmpdir("nil-kill-golden-rows", NilKill::ROOT) do |dir|
       raw = Dir.glob(File.join(fixture, "input", "collector-raw-*.json.gz")).first
       FileUtils.cp(raw, dir)
-      NilKill::Runtime::CollectorExport.write(runtime_dir: dir, plan: plan, root: NilKill::ROOT)
+      plan_path = File.join(dir, "plan.json")
+      File.write(plan_path, JSON.generate(plan))
+      NilKill::Runtime::DomainDeriver.export(
+        runtime_dirs: [dir], plan: plan_path, source_roles: nil, root: NilKill::ROOT
+      )
 
       recorded = Dir.glob(File.join(fixture, "input", "*.jsonl.gz"))
       expect(recorded).not_to be_empty

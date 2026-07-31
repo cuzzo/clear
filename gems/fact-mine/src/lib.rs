@@ -16,6 +16,7 @@ pub mod runtime_trace;
 pub mod scip;
 pub mod sorbet_sig;
 pub mod trace_plan;
+pub mod collector_export;
 pub mod value_domain;
 pub mod syntax;
 pub mod syntax_oracle;

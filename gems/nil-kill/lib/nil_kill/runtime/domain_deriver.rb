@@ -3,7 +3,7 @@
 
 module NilKill
   module Runtime
-    # Turning what the collector saw into value domains.
+    # Turning what the collector saw into the rows the pipeline reads.
     #
     # The traced program reports the answers only an interpreter can give --
     # this object's class, a sample of its container, a record's fields, the
@@ -15,12 +15,29 @@ module NilKill
       def self.run(documents:, source_roles:, root:)
         return if documents.empty?
 
-        binary = NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY
-        args = [binary, "nil-kill-derive-domains", "--root", root.to_s]
+        call("nil-kill-derive-domains", root: root, source_roles: source_roles) do |args|
+          documents.each { |path| args.concat(["--input", path]) }
+        end
+      end
+
+      # Shaping the documents into rows: the same inputs, the same non-production
+      # roles, and no VM needed for either.
+      def self.export(runtime_dirs:, plan:, source_roles:, root:)
+        return if runtime_dirs.empty?
+
+        call("nil-kill-collector-export", root: root, source_roles: source_roles) do |args|
+          args.concat(["--plan", plan.to_s]) if plan && File.file?(plan.to_s)
+          runtime_dirs.each { |dir| args.concat(["--runtime-dir", dir.to_s]) }
+        end
+      end
+
+      def self.call(subcommand, root:, source_roles:)
+        args = [NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY, subcommand,
+                "--root", root.to_s]
         args.concat(["--source-roles", source_roles.to_s]) if source_roles
-        documents.each { |path| args.concat(["--input", path]) }
+        yield args
         _out, err, status = Open3.capture3(*args)
-        raise "fact-mine nil-kill-derive-domains failed: #{err}" unless status.success?
+        raise "fact-mine #{subcommand} failed: #{err}" unless status.success?
       end
     end
   end

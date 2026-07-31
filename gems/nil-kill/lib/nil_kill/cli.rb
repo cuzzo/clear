@@ -345,21 +345,17 @@ module NilKill
         Runtime::DomainDeriver.run(
           documents: selected.flat_map do |shard|
             Dir.glob(File.join(working_runtime_dir, shard.fetch("id"),
-                               Runtime::CollectorExport::RAW_GLOB))
+                               "collector-raw-*.json.gz"))
           end,
           source_roles: source_roles_path,
           root: ROOT
         )
       end
-      # The traced programs wrote what the collector saw; shaping it into rows
-      # needs no VM, so it happens here.
       stage("collector-export") do
-        selected.each do |shard|
-          Runtime::CollectorExport.write(
-            runtime_dir: File.join(working_runtime_dir, shard.fetch("id")),
-            plan: trace_plan, root: ROOT
-          )
-        end
+        Runtime::DomainDeriver.export(
+          runtime_dirs: selected.map { |shard| File.join(working_runtime_dir, shard.fetch("id")) },
+          plan: TRACE_PLAN_PATH, source_roles: source_roles_path, root: ROOT
+        )
       end
       staged_traces = {}
       stage("shard-bookkeeping") { selected.each do |shard|

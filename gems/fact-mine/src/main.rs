@@ -301,26 +301,65 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillCollectorExport { runtime_dirs, plan, source_roles, root } => {
+            let plan = plan
+                .as_deref()
+                .map(|path| -> Result<serde_json::Value> {
+                    let raw = fact_mine_rust::runtime_protocol::read_json(path)
+                        .with_context(|| format!("unreadable plan {}", path.display()))?;
+                    Ok(serde_json::from_str(&raw)?)
+                })
+                .transpose()?;
+            let anchors = fact_mine_rust::collector_export::anchors_by_key(plan.as_ref(), &root);
+            let nonproduction = read_nonproduction(source_roles.as_deref(), &root);
+            let project_name = std::env::var("NIL_KILL_PROJECT_NAME").unwrap_or_else(|_| {
+                root.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default()
+            });
+            let project_version = std::env::var("NIL_KILL_PROJECT_VERSION")
+                .unwrap_or_else(|_| "workspace".to_string());
+            let shaped = fact_mine_rust::parallel::map_ordered(&runtime_dirs, |directory| {
+                let mut written = 0;
+                let mut documents = std::fs::read_dir(directory)
+                    .with_context(|| format!("unreadable shard {}", directory.display()))?
+                    .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                    .filter(|path| {
+                        path.file_name().is_some_and(|name| {
+                            let name = name.to_string_lossy();
+                            name.starts_with("collector-raw-") && name.ends_with(".json.gz")
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                documents.sort();
+                for path in documents {
+                    let raw = fact_mine_rust::runtime_protocol::read_json(&path)
+                        .with_context(|| format!("unreadable {}", path.display()))?;
+                    let document: fact_mine_rust::collector_export::CollectorDocument =
+                        serde_json::from_str(&raw)
+                            .with_context(|| format!("invalid {}", path.display()))?;
+                    fact_mine_rust::collector_export::Export::new(
+                        &document,
+                        &anchors,
+                        nonproduction.clone(),
+                        project_name.clone(),
+                        project_version.clone(),
+                    )
+                    .write(directory)?;
+                    written += 1;
+                }
+                Ok(written)
+            })?;
+            eprintln!(
+                "Shaped {} collector documents across {} shards",
+                shaped.iter().sum::<usize>(),
+                runtime_dirs.len()
+            );
+        }
         Command::NilKillDeriveDomains { inputs, source_roles, root } => {
             // Which files hold non-production code is a fact about the collect,
             // not about the traced program, so it is read here rather than
             // carried through every observation.
-            let nonproduction = source_roles
-                .as_deref()
-                .and_then(|path| std::fs::read_to_string(path).ok())
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-                .map(|roles| {
-                    roles["nonproduction"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|entry| entry.as_str())
-                        .map(|entry| {
-                            root.join(entry).to_string_lossy().to_string()
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+            let nonproduction =
+                read_nonproduction(source_roles.as_deref(), &root).into_iter().collect::<Vec<_>>();
             let derived = fact_mine_rust::parallel::map_ordered(&inputs, |path| {
                 let raw = fact_mine_rust::runtime_protocol::read_json(path)
                     .with_context(|| format!("unreadable collector document {}", path.display()))?;
@@ -686,6 +725,27 @@ fn build_profile(
 /// The analysis profile and the trace-plan profile are extracted from the same
 /// sources, so parse each file once and run both extractions over it. Building
 /// them separately parsed the whole snapshot twice.
+/// Which files this collect was told hold non-production code. A fact about the
+/// collect, not about any traced program, so it is read once here.
+fn read_nonproduction(
+    source_roles: Option<&std::path::Path>,
+    root: &std::path::Path,
+) -> std::collections::BTreeSet<String> {
+    source_roles
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|roles| {
+            roles["nonproduction"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.as_str())
+                .map(|entry| root.join(entry).to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn build_profile_pair(
     analysis_files: &[PathBuf],
     plan_files: &[PathBuf],
@@ -905,6 +965,13 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Shape the collector's documents into the rows the pipeline reads.
+    NilKillCollectorExport {
+        runtime_dirs: Vec<PathBuf>,
+        plan: Option<PathBuf>,
+        source_roles: Option<PathBuf>,
+        root: PathBuf,
+    },
     /// Turn the collector's raw observations into value domains.
     NilKillDeriveDomains {
         inputs: Vec<PathBuf>,
@@ -1018,6 +1085,34 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-collector-export" => {
+            let mut runtime_dirs = Vec::new();
+            let mut plan = None;
+            let mut source_roles = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--runtime-dir" => {
+                        runtime_dirs.push(PathBuf::from(iter.next().context("--runtime-dir")?));
+                    }
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--source-roles" => {
+                        source_roles = Some(PathBuf::from(iter.next().context("--source-roles")?));
+                    }
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            if runtime_dirs.is_empty() {
+                bail!("nil-kill-collector-export requires at least one --runtime-dir");
+            }
+            Ok(Command::NilKillCollectorExport {
+                runtime_dirs,
+                plan,
+                source_roles,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "nil-kill-derive-domains" => {

@@ -79,14 +79,13 @@ module MiniCollect
     # observations mean, and then shaping them into rows, is the collector
     # process's job -- which this helper is standing in for.
     NilKill::Runtime::DomainDeriver.run(
-      documents: Dir.glob(File.join(rd, NilKill::Runtime::CollectorExport::RAW_GLOB)),
+      documents: Dir.glob(File.join(rd, "collector-raw-*.json.gz")),
       source_roles: ENV["NIL_KILL_SOURCE_ROLES"],
       root: NilKill::ROOT
     )
-    NilKill::Runtime::CollectorExport.write(
-      runtime_dir: rd,
-      plan: (JSON.parse(File.read(NilKill::TRACE_PLAN_PATH)) if File.file?(NilKill::TRACE_PLAN_PATH)),
-      root: NilKill::ROOT
+    NilKill::Runtime::DomainDeriver.export(
+      runtime_dirs: [rd], plan: NilKill::TRACE_PLAN_PATH,
+      source_roles: ENV["NIL_KILL_SOURCE_ROLES"], root: NilKill::ROOT
     )
     glob = lambda do |k|
       Dir.glob(File.join(rd, "#{k}-*.jsonl")).flat_map do |p|
