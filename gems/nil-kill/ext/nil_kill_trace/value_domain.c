@@ -187,6 +187,7 @@ static int vd_is_collection(VALUE value) {
 }
 
 static VALUE vd_abs_path(VALUE path);
+static VALUE vd_value_source_location(VALUE value);
 static VALUE vd_class_name(VALUE value);
 static VALUE vd_shape_payload(VALUE key);
 static VALUE vd_record_shape_key(VALUE value, long depth);
@@ -200,6 +201,7 @@ static VALUE vd_class_name(VALUE value);
 
 VALUE nk_abs_path(VALUE path) { return vd_abs_path(path); }
 VALUE nk_root_path(void) { return root_path; }
+VALUE nk_value_source_path(VALUE value) { return vd_value_source_location(value); }
 VALUE nk_shape_payload(VALUE key) { return vd_shape_payload(key); }
 int nk_nonproduction_path(VALUE path) { return vd_nonproduction_path(path); }
 

@@ -14,6 +14,9 @@ VALUE nk_value_domain(VALUE value);
 // about a class and must answer them the same way.
 VALUE nk_abs_path(VALUE path);
 VALUE nk_root_path(void);
+
+// The file the value's class was declared in, or nil.
+VALUE nk_value_source_path(VALUE value);
 VALUE nk_guard(VALUE (*fn)(VALUE), VALUE arg, VALUE fallback);
 VALUE nk_type_name(VALUE value);
 

@@ -24,6 +24,7 @@
 #include "identity.h"
 #include "records.h"
 #include "bootstrap.h"
+#include "raw_observation.h"
 #include "value_domain.h"
 
 #define MAX_FRAMES 1024
@@ -1241,6 +1242,7 @@ void Init_nil_kill_trace(void) {
     nk_declarations_init(mod);
     nk_collections_init(mod);
     nk_records_init(mod);
+    nk_raw_observation_init(mod);
     rb_define_singleton_method(mod, "configure_targets", nk_configure_targets, 1);
     nk_bootstrap_init(mod);
 
