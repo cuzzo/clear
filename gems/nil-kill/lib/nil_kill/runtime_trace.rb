@@ -427,85 +427,12 @@ module NilKillRuntimeTrace
     "#{frames.join("|")}:#{cls}"
   end
 
-  def self.install_open_struct_hook
-    require "ostruct"
-    return if OpenStruct.instance_variable_get(:@__nil_kill_attached)
-    OpenStruct.instance_variable_set(:@__nil_kill_attached, true)
-    original_locations = %i[initialize []=].to_h do |method_id|
-      [method_id, OpenStruct.instance_method(method_id).source_location]
-    end
-    wrapper = Module.new do
-      define_method(:initialize) do |hash = nil|
-        super(hash)
-        NilKillRuntimeTrace.record_open_struct(self)
-      end
-
-      define_method(:[]=) do |name, value|
-        result = super(name, value)
-        NilKillRuntimeTrace.record_open_struct_field(self, name, value)
-        result
-      end
-    end
-    OpenStruct.prepend(wrapper)
-    %i[initialize []=].each do |method_id|
-      path, line = original_locations.fetch(method_id)
-      register_runtime_scip_transparent_wrapper(
-        wrapper,
-        method_id,
-        owner: "OpenStruct",
-        name: method_id.to_s,
-        kind: "instance",
-        native: false,
-        path: path,
-        line: line
-      )
-    end
-  rescue LoadError
-    nil
-  end
-
   # NOTE: the parallel instrumented tree and its require/require_relative
   # redirect (instrumented_copy_for / resolve_required_source /
   # install_instrumented_require_hook) were DELETED. In-place
   # instrumentation puts the single wrapped copy at the real src path,
   # so every load mechanism loads instrumented code with no redirect --
   # which is exactly what made collect_ran_untraced non-convergent.
-
-  def self.record_open_struct(instance)
-    table = instance.instance_variable_get(:@table) rescue nil
-    return unless table.respond_to?(:each)
-    table.each { |field, value| record_open_struct_field(instance, field, value) }
-  end
-
-  def self.record_open_struct_field(instance, field, value)
-    loc = nil
-    seen = 0
-    Thread.each_caller_location do |c|
-      seen += 1
-      next if seen == 1
-      break if seen > 21
-
-      raw = c.absolute_path || c.path
-      next unless raw && target_path?(raw)
-      next if abs_path(raw) == SELF_ABS
-
-      loc = c
-      break
-    end
-    return unless loc
-    singleton_name = NilKillRuntimeTrace.safe_module_name(instance.class)
-    klass_name = singleton_name && singleton_name != "OpenStruct" ? singleton_name : "OpenStruct"
-    shim = Object.new
-    shim.instance_variable_set(:@__nil_kill_struct_path, File.expand_path(loc.absolute_path || loc.path, ROOT))
-    shim.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
-    record_struct_field(shim, klass_name, field, value)
-  end
-
-  # The collector owns the record tables; this is the one call the declaration
-  # hooks make into them.
-  def self.record_struct_field(klass, klass_name, field, value)
-    NilKillTraceNative.record_struct_field(klass, klass_name, field, value)
-  end
 
   def self.dump
     FileUtils.mkdir_p(OUT_DIR)
@@ -666,7 +593,12 @@ if ENV["NIL_KILL_TRACE"] == "1"
   NilKillTraceNative.configure_tlet_sites(Hash(NilKillRuntimeTrace.trace_plan&.fetch("tlets", nil)))
   NilKillTraceNative.install_tlet_hook
   NilKillTraceNative.install_record_hooks
-  NilKillRuntimeTrace.install_open_struct_hook
+  begin
+    require "ostruct"
+  rescue LoadError
+    nil
+  end
+  NilKillTraceNative.install_open_struct_hook
   NilKillTraceNative.install_tstruct_hook
   NilKillTraceNative.install_collection_hook unless ENV["NIL_KILL_TRACE_COLLECTIONS"] == "0"
   # Sorbet may be required after the collector starts, so `T` is looked for

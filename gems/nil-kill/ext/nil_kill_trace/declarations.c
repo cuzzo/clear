@@ -606,6 +606,76 @@ static VALUE nk_attach_tstruct(VALUE self, VALUE klass) {
     return Qnil;
 }
 
+// An OpenStruct has no declared fields at all: every assignment invents one,
+// and the site that matters is the code doing the assigning rather than where
+// OpenStruct itself is defined. The record is therefore keyed to the caller,
+// through a stand-in carrying that site.
+static VALUE ostruct_subject(VALUE instance) {
+    VALUE site = caller_site();
+    if (!RB_TYPE_P(site, T_ARRAY) || !nk_analyzed_path(RARRAY_AREF(site, 0))) return Qnil;
+
+    VALUE subject = rb_obj_alloc(rb_cObject);
+    rb_ivar_set(subject, id_struct_path, RARRAY_AREF(site, 0));
+    rb_ivar_set(subject, id_struct_line, RARRAY_AREF(site, 1));
+    return subject;
+}
+
+static VALUE ostruct_owner(VALUE instance) {
+    VALUE name = rb_mod_name(rb_obj_class(instance));
+    return NIL_P(name) ? rb_str_new_cstr("OpenStruct") : name;
+}
+
+static void observe_ostruct_field(VALUE instance, VALUE field, VALUE value) {
+    VALUE subject = ostruct_subject(instance);
+    if (NIL_P(subject)) return;
+
+    nk_record_struct_field(subject, ostruct_owner(instance), rb_obj_as_string(field), value);
+}
+
+static int observe_ostruct_entry(VALUE key, VALUE value, VALUE instance) {
+    observe_ostruct_field(instance, key, value);
+    return ST_CONTINUE;
+}
+
+static VALUE observe_ostruct_init(int argc, VALUE *argv, VALUE self) {
+    VALUE result = rb_call_super_kw(argc, argv, RB_PASS_CALLED_KEYWORDS);
+    VALUE table = rb_attr_get(self, rb_intern("@table"));
+    if (RB_TYPE_P(table, T_HASH)) rb_hash_foreach(table, observe_ostruct_entry, self);
+    return result;
+}
+
+static VALUE observe_ostruct_set(int argc, VALUE *argv, VALUE self) {
+    VALUE result = rb_call_super_kw(argc, argv, RB_PASS_CALLED_KEYWORDS);
+    if (argc >= 2) observe_ostruct_field(self, argv[0], argv[1]);
+    return result;
+}
+
+void nk_install_open_struct_hook(void) {
+    static int installed = 0;
+    if (installed) return;
+    if (!rb_const_defined(rb_cObject, rb_intern("OpenStruct"))) return;
+
+    VALUE klass = rb_const_get(rb_cObject, rb_intern("OpenStruct"));
+    if (!RB_TYPE_P(klass, T_CLASS)) return;
+
+    installed = 1;
+    VALUE module = rb_module_new();
+    rb_ary_push(record_wrappers, module);
+    rb_define_method(module, "initialize", observe_ostruct_init, -1);
+    rb_define_method(module, "[]=", observe_ostruct_set, -1);
+    rb_prepend_module(klass, module);
+
+    ID owner = rb_intern("OpenStruct");
+    ID kind = rb_intern("instance");
+    nk_register_wrapper(module, rb_intern("initialize"), owner, kind, 0, 0, 0);
+    nk_register_wrapper(module, rb_intern("[]="), owner, kind, 0, 0, 0);
+}
+
+static VALUE nk_install_open_struct(VALUE self) {
+    nk_install_open_struct_hook();
+    return Qnil;
+}
+
 static VALUE nk_install_records(VALUE self) {
     nk_install_record_hooks();
     return Qnil;
@@ -654,6 +724,7 @@ void nk_declarations_init(VALUE mod) {
     rb_define_singleton_method(mod, "install_record_hooks", nk_install_records, 0);
     rb_define_singleton_method(mod, "attach_record", nk_attach, 1);
     rb_define_singleton_method(mod, "attach_tstruct", nk_attach_tstruct, 1);
+    rb_define_singleton_method(mod, "install_open_struct_hook", nk_install_open_struct, 0);
     rb_define_singleton_method(mod, "install_tstruct_hook", nk_install_tstruct, 0);
     rb_define_singleton_method(mod, "configure_tlet_sites", nk_configure_tlet_sites, 1);
     rb_define_singleton_method(mod, "tlet_observations", nk_tlet_observations, 0);
