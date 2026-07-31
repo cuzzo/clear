@@ -272,6 +272,13 @@ module NilKill
         # makes, is relative to this root. It used to be rederived from the
         # tracer file's own location, which only worked while a Ruby tracer
         # was being loaded to do the rederiving.
+        # A workload that runs its tests in a different order every time
+        # observes different program states, and the evidence differs for
+        # reasons that have nothing to do with the code under test. Minitest
+        # and RSpec both seed from the environment, so pinning it makes a
+        # collect reproducible -- which is what lets a change in the evidence
+        # be read as a change in the collector.
+        "SEED" => ENV.fetch("NIL_KILL_WORKLOAD_SEED", "0"),
         "NIL_KILL_ROOT" => ROOT,
         "NIL_KILL_PROJECT_NAME" => ENV["NIL_KILL_PROJECT_NAME"] || File.basename(ROOT),
         "NIL_KILL_PROJECT_VERSION" => ENV["NIL_KILL_PROJECT_VERSION"] ||
