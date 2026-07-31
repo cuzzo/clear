@@ -45,12 +45,13 @@ INERT = %w[
   bencherdev/bencher actions/github-script
 ].freeze
 
-options = { jobs: 2, only: nil, list: false, keep_going: true }
+options = { jobs: 2, only: nil, list: false, keep_going: true, reclaim: true }
 OptionParser.new do |parser|
   parser.on("--jobs N", Integer) { |v| options[:jobs] = v }
   parser.on("--job NAME") { |v| (options[:only] ||= []) << v }
   parser.on("--list") { options[:list] = true }
   parser.on("--stop-on-failure") { options[:keep_going] = false }
+  parser.on("--keep-coverage-trees") { options[:reclaim] = false }
 end.parse!
 
 WORKFLOW = YAML.load_file(File.join(ROOT, ".github/workflows/ci.yml"), aliases: true)
@@ -277,8 +278,25 @@ def provisioning?(script)
   end
 end
 
+# A step that only reports to GitHub -- a commit status, a PR comment. There
+# is no GitHub here to report to, and nothing about the code is being checked.
+def reporting?(script)
+  lines = script.lines.map(&:strip).reject { |line| line.empty? || line.start_with?("#") }
+  return false if lines.empty?
+  return false unless lines.any? { |line| line.start_with?("gh ") }
+
+  # Assignments and shell control around the `gh` call are still reporting.
+  lines.none? do |line|
+    line.match?(/\A(bundle|cargo|zig|ruby|rake|go|npm|python|pytest|make|\.\/)/)
+  end
+end
+
 def run_script(step, scope, env, cpus, log)
   script = expand(step["run"], scope)
+  if reporting?(script)
+    log.puts("--- GitHub reporting step skipped (no GitHub here):\n#{script}")
+    return [true, {}, {}]
+  end
   if provisioning?(script)
     log.puts("--- provisioning step skipped (toolchains are installed here):\n#{script}")
     return [true, {}, {}]
