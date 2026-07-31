@@ -220,7 +220,30 @@ const RUST_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
 };
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
-    nominal::parse(source, &RUST_NOMINAL_TYPE_SYNTAX)
+    nominal::parse(&without_lifetimes(source), &RUST_NOMINAL_TYPE_SYNTAX)
+}
+
+/// A lifetime names how long a borrow lives, not what is borrowed. Leaving it in
+/// makes `&'static str` a type of its own, so nothing recognises the `str`.
+fn without_lifetimes(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some(index) = rest.find('\'') {
+        out.push_str(&rest[..index]);
+        let after = &rest[index + 1..];
+        let end = after
+            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .unwrap_or(after.len());
+        // A character literal is not a lifetime: `'a'` closes with a quote.
+        if after[end..].starts_with('\'') {
+            out.push_str(&rest[index..index + 1 + end + 1]);
+            rest = &after[end + 1..];
+            continue;
+        }
+        rest = after[end..].trim_start();
+    }
+    out.push_str(rest);
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn rust_scalar_primitive(name: &str) -> bool {
