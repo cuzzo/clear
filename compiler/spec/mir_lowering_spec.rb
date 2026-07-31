@@ -4577,10 +4577,13 @@ RSpec.describe MIRLowering do
 
       zig = emit(mir)
       expect(zig).to include("concurrentListSelect")
-      # The concurrent pipeline's source binding is stamped :heap by the
-      # annotator (fibers borrow it across suspension); pipeline_alloc reads
-      # that stamp (INV-16), so its paired cleanup is heap-allocated too.
-      expect(zig).to match(/CheatLib\.cleanup\([^,]+,\s*__clear_heap_alloc,\s*&pipe_src_list_\w+\)/)
+      # INV-1: the source binding's cleanup frees it through the allocator the
+      # pipeline builder allocated it with. concurrentListSelect builds the
+      # result with pipeline_result_alloc -- here the frame allocator -- so a
+      # heap-allocator cleanup would abort at scope exit on the alignment
+      # mismatch. The :heap storage stamp does not move that allocation.
+      expect(zig).to match(/concurrentListSelect\([^;]*rt\.frameAlloc\(\)/)
+      expect(zig).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.frameAlloc\(\),\s*&pipe_src_list_\w+\)/)
     end
 
   end

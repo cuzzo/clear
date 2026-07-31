@@ -684,7 +684,14 @@ class PipelineHost
   # pipeline domain owns the annotator's storage stamp (INV-16).
   sig { params(smooth_node: AST::BinaryOp).returns(T::Boolean) }
   def pipeline_result_heap?(smooth_node)
-    pipeline_alloc(smooth_node) == :heap
+    # The sink allocator frees what the lowered block allocated, so this
+    # answers where the result actually landed -- not only where the storage
+    # stamp asked for it. The builders allocate the result with
+    # pipeline_result_alloc; when that is the frame allocator, a :heap stamp
+    # has not moved the allocation, and reporting heap here would free
+    # frame memory through the heap allocator (INV-1), aborting at scope exit
+    # with an alignment mismatch.
+    pipeline_alloc(smooth_node) == :heap && pipeline_result_alloc == :heap
   end
 
   # MIR entry point: returns MIR node tree for migrated pipeline operators.
