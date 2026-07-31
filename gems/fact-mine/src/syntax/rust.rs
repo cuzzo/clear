@@ -1222,6 +1222,31 @@ mod tests {
     }
 
     #[test]
+    fn a_widely_used_dependency_is_modelled_where_its_cost_is_stable() {
+        // A dependency needs no analysis of its own where what it costs is
+        // fixed by its contract. serde_json's `Value` is a tagged union and its
+        // `Map` a sorted map; regex scans its input once.
+        let cases: &[(&str, &str, &str)] = &[
+            ("rust-analyzer cargo serde_json 1.0.150 value/impl#[Value]as_i64().", "as_i64", "O(1)"),
+            ("rust-analyzer cargo serde_json 1.0.150 value/impl#[Value]is_object().", "is_object", "O(1)"),
+            ("rust-analyzer cargo serde_json 1.0.150 value/impl#[Value]is_null().", "is_null", "O(1)"),
+            ("rust-analyzer cargo serde_json 1.0.150 number/impl#[Number]as_u64().", "as_u64", "O(1)"),
+            ("rust-analyzer cargo serde_json 1.0.150 map/impl#[`Map<String, Value>`]keys().", "keys", "O(1)"),
+            ("rust-analyzer cargo serde_json 1.0.150 map/impl#[`Map<String, Value>`]iter().", "iter", "O(1)"),
+            ("rust-analyzer cargo serde_json 1.0.150 map/impl#[`Map<String, Value>`]get_mut().", "get_mut", "O(log N)"),
+            ("rust-analyzer cargo regex 1.12.4 regex/string/impl#[Regex]find_iter().", "find_iter", "O(1)"),
+            ("rust-analyzer cargo regex 1.12.4 regex/string/impl#[Regex]captures().", "captures", "O(N)"),
+        ];
+        for (symbol, message, expected) in cases {
+            assert_eq!(
+                external_symbol_call_complexity(symbol, message).map(|c| c.time),
+                Some(*expected),
+                "{symbol} is unpriced"
+            );
+        }
+    }
+
+    #[test]
     fn an_impl_item_states_the_trait_its_type_provides() {
         assert_eq!(
             rust_impl_trait("impl Dialect for RubyDialect {"),

@@ -415,6 +415,43 @@ JoinHandle:
   is_finished: constant
 
 SemanticSymbol:
+  # serde_json. `Value` is a tagged union, so asking what tag it carries or
+  # reading the scalar behind one reads a word. `Map` is a sorted map, so a
+  # keyed read is logarithmic and handing back an iterator touches nothing;
+  # `pointer_mut` walks the path it is given.
+  'value/impl#[Value]as_i64().': constant
+  'value/impl#[Value]as_u64().': constant
+  'value/impl#[Value]as_f64().': constant
+  'value/impl#[Value]as_bool().': constant
+  'value/impl#[Value]as_str().': constant
+  'value/impl#[Value]is_object().': constant
+  'value/impl#[Value]is_array().': constant
+  'value/impl#[Value]is_null().': constant
+  'value/impl#[Value]is_string().': constant
+  'value/impl#[Value]pointer_mut().': linear_argument
+  'number/impl#[Number]as_i64().': constant
+  'number/impl#[Number]as_u64().': constant
+  'number/impl#[Number]as_f64().': constant
+  'map/impl#[`Map<String, Value>`]keys().': constant
+  'map/impl#[`Map<String, Value>`]values().': constant
+  'map/impl#[`Map<String, Value>`]iter().': constant
+  'map/impl#[`Map<String, Value>`]len().': constant
+  'map/impl#[`Map<String, Value>`]is_empty().': constant
+  'map/impl#[`Map<String, Value>`]get().': logarithmic
+  'map/impl#[`Map<String, Value>`]get_mut().': logarithmic
+  'map/impl#[`Map<String, Value>`]contains_key().': logarithmic
+  'map/impl#[`Map<String, Value>`]insert().': logarithmic
+  'map/impl#[`Map<String, Value>`]remove().': logarithmic
+  # regex. Compiling is done once at construction; matching scans the haystack,
+  # and the lazy iterators scan it as they are consumed rather than here.
+  'regex/string/impl#[Regex]find_iter().': constant
+  'regex/string/impl#[Regex]captures_iter().': constant
+  'regex/string/impl#[Regex]split().': constant
+  'regex/string/impl#[Regex]is_match().': linear_scan
+  'regex/string/impl#[Regex]find().': linear_scan
+  'regex/string/impl#[Regex]captures().': linear_scan
+  'regex/string/impl#[Regex]replace().': linear_materialize
+  'regex/string/impl#[Regex]replace_all().': linear_materialize
   # A reference conversion, a wrapper and an iterator handover read nothing,
   # whichever implementation runs. Rendering a value reads that value.
   'convert/AsRef#as_ref().': constant
