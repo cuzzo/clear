@@ -199,6 +199,318 @@ pub fn select(input: &Increment<'_>) -> Value {
     Value::Object(out)
 }
 
+
+// ------------------------------------------------------------- the manifest
+//
+// What a collect has to remember so the next one can be incremental: the
+// fingerprints it decided from, the workload it ran, and which functions and
+// callsites each shard reached.
+
+use anyhow::{bail, Context, Result};
+use std::path::{Path, PathBuf};
+
+pub const MANIFEST: &str = "runtime-snapshot.json.gz";
+pub const SCHEMA: &str = "nil-kill.runtime-snapshot.v1";
+
+fn manifest_path(runtime_dir: &Path) -> PathBuf {
+    runtime_dir.join(MANIFEST)
+}
+
+/// The stored manifest, or why it cannot be used. A snapshot written under a
+/// different fingerprint scheme is not stale, it is unreadable: its digests
+/// mean something else, and comparing them would skip shards that changed.
+pub fn load(runtime_dir: &Path) -> Result<Value> {
+    let path = manifest_path(runtime_dir);
+    if !path.is_file() {
+        bail!("no runtime snapshot at {}; run a full collect first", path.display());
+    }
+    let manifest: Value = serde_json::from_str(&read_gz(&path)?)
+        .with_context(|| format!("{} is not readable", path.display()))?;
+    if manifest["schema"] != json!(SCHEMA)
+        || manifest["fingerprint_scheme"] != json!(crate::source_fingerprint::SCHEME)
+    {
+        bail!("runtime snapshot fingerprint contract is unsupported; run a full collect");
+    }
+    Ok(manifest)
+}
+
+fn read_gz(path: &Path) -> Result<String> {
+    use std::io::Read;
+    let bytes = std::fs::read(path)?;
+    let mut text = String::new();
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        flate2::read::GzDecoder::new(&bytes[..]).read_to_string(&mut text)?;
+    } else {
+        text = String::from_utf8(bytes)?;
+    }
+    Ok(text)
+}
+
+fn write_gz(path: &Path, text: &str) -> Result<()> {
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension("tmp");
+    let file = std::fs::File::create(&temporary)?;
+    let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    encoder.write_all(text.as_bytes())?;
+    encoder.finish()?;
+    std::fs::rename(&temporary, path)?;
+    Ok(())
+}
+
+pub fn relative(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .map(|rest| rest.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string_lossy().to_string())
+}
+
+/// What each source file says, keyed by its path relative to the root.
+pub fn source_hashes(files: &[PathBuf], root: &Path) -> Value {
+    let mut hashes = Map::new();
+    let mut sorted_files = files.to_vec();
+    sorted_files.sort();
+    for path in sorted_files {
+        if !path.is_file() {
+            continue;
+        }
+        if let Some(fingerprint) = crate::source_fingerprint::of_file(&path) {
+            hashes.insert(relative(&path, root), json!(fingerprint));
+        }
+    }
+    Value::Object(hashes)
+}
+
+/// The runtime the evidence was collected against.
+///
+/// Ruby answered this with its own `RUBY_VERSION`, which needed a Ruby to ask.
+/// The interpreter the workload actually runs is on disk, so digesting it says
+/// the same thing without one -- and says it more exactly: a rebuilt patch
+/// release is a different binary, and re-collecting is the conservative answer.
+pub fn environment(root: &Path, commands: &[Vec<String>]) -> Value {
+    use sha2::{Digest, Sha256};
+    let mut claims = Map::new();
+    claims.insert("runtime.language".into(), json!("ruby"));
+    if let Some(interpreter) = commands.iter().find_map(|command| interpreter_of(command)) {
+        if let Ok(bytes) = std::fs::read(&interpreter) {
+            claims.insert(
+                "runtime.interpreter.sha256".into(),
+                json!(format!("sha256:{:x}", Sha256::digest(&bytes))),
+            );
+        }
+    }
+    if let Ok(bytes) = std::fs::read(root.join("Gemfile.lock")) {
+        claims.insert(
+            "runtime.lockfile.Gemfile.lock.sha256".into(),
+            json!(format!("sha256:{:x}", Sha256::digest(&bytes))),
+        );
+    }
+    Value::Object(claims)
+}
+
+/// The interpreter a command runs under, resolved the way the shell would.
+fn interpreter_of(command: &[String]) -> Option<PathBuf> {
+    let name = command.iter().find(|part| {
+        let base = Path::new(part).file_name().map(|n| n.to_string_lossy().to_string());
+        base.is_some_and(|base| base == "ruby" || base.starts_with("ruby"))
+    })?;
+    let path = Path::new(name);
+    if path.is_absolute() {
+        return path.is_file().then(|| path.to_path_buf());
+    }
+    std::env::var("PATH").ok()?.split(':').map(|dir| Path::new(dir).join(path)).find(|candidate| candidate.is_file())
+}
+
+fn identity(parts: &[&Value]) -> String {
+    use sha2::{Digest, Sha256};
+    let joined = parts
+        .iter()
+        .map(|part| serde_json::to_string(part).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\u{0}");
+    format!("sha256:{:x}", Sha256::digest(joined.as_bytes()))
+}
+
+pub struct Written<'a> {
+    pub runtime_dir: &'a Path,
+    pub root: &'a Path,
+    pub evidence: &'a Path,
+    pub dependencies: Value,
+    pub callsites: Value,
+}
+
+pub fn write_full(into: &Written<'_>, selection: &Value, created_at: &str) -> Result<Value> {
+    let hashes = selection["current_hashes"].clone();
+    let environment = selection["environment"].clone();
+    let workload_digest = selection["workload"]["command_digest"].clone();
+    let evidence_digest = {
+        use sha2::{Digest, Sha256};
+        json!(format!("{:x}", Sha256::digest(std::fs::read(into.evidence)?)))
+    };
+    let snapshot_id = identity(&[
+        &json!("full"),
+        &hashes,
+        &environment,
+        &workload_digest,
+        &evidence_digest,
+    ]);
+    let mut changed_paths = hashes
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    changed_paths.sort();
+    let manifest = json!({
+        "schema": SCHEMA,
+        "fingerprint_scheme": crate::source_fingerprint::SCHEME,
+        "snapshot_id": snapshot_id,
+        "base_full_snapshot_id": snapshot_id,
+        "parent_snapshot_id": Value::Null,
+        "generation": 0,
+        "mode": "full",
+        "complete": true,
+        "potentially_stale": false,
+        "source_hashes": hashes,
+        "environment": environment,
+        "workload_digest": workload_digest,
+        "trace_plan_digest": selection["trace_plan_digest"],
+        "functions": selection["functions"],
+        "workload": selection["workload"],
+        "dependencies": into.dependencies,
+        "callsites": into.callsites,
+        "changed_paths": changed_paths,
+        "deleted_paths": [],
+        "created_at": created_at,
+        "evidence": relative(into.evidence, into.root),
+    });
+    write_manifest(into.runtime_dir, &manifest)?;
+    Ok(manifest)
+}
+
+pub fn write_incremental(
+    into: &Written<'_>,
+    previous: &Value,
+    selection: &Value,
+    created_at: &str,
+) -> Result<Value> {
+    let parent = previous["snapshot_id"].clone();
+    let generation = previous["generation"].as_i64().unwrap_or_default() + 1;
+    let snapshot_id = identity(&[
+        &json!("fast"),
+        &selection["current_hashes"],
+        &selection["functions"],
+        &selection["workload"],
+        &parent,
+        &json!(generation),
+    ]);
+    let uncertain = selection["uncertain_closure"].as_bool().unwrap_or(false);
+    let manifest = json!({
+        "schema": SCHEMA,
+        "fingerprint_scheme": crate::source_fingerprint::SCHEME,
+        "snapshot_id": snapshot_id,
+        "base_full_snapshot_id": previous["base_full_snapshot_id"],
+        "parent_snapshot_id": parent,
+        "generation": generation,
+        "mode": "fast",
+        "complete": !uncertain,
+        "potentially_stale": uncertain,
+        "source_hashes": selection["current_hashes"],
+        "environment": selection["environment"],
+        "workload_digest": selection["workload"]["command_digest"],
+        "trace_plan_digest": selection["trace_plan_digest"],
+        "functions": selection["functions"],
+        "workload": selection["workload"],
+        "dependencies": into.dependencies,
+        "callsites": into.callsites,
+        "changed_functions": selection["changed_functions"],
+        "added_functions": selection["added_functions"],
+        "deleted_functions": selection["deleted_functions"],
+        "changed_tests": selection["changed_tests"],
+        "deleted_tests": selection["deleted_tests"],
+        "changed_files": selection["changed_files"],
+        "deleted_files": selection["deleted_files"],
+        "residual_source_changes": selection["residual_source_changes"],
+        "selected_shards": selection["selected_shards"],
+        "fallback_full": selection["fallback_full"],
+        "support_changed": selection["support_changed"],
+        "created_at": created_at,
+        "evidence": relative(into.evidence, into.root),
+    });
+    write_manifest(into.runtime_dir, &manifest)?;
+    Ok(manifest)
+}
+
+/// A collect that could not finish leaves the previous evidence in place and
+/// says so on the manifest, so the next reader knows it is looking at evidence
+/// older than the source beside it.
+pub fn mark_stale(
+    runtime_dir: &Path,
+    previous: &Value,
+    reason: &str,
+    selection: &Value,
+    stale_at: &str,
+) -> Result<()> {
+    let mut manifest = previous.clone();
+    let entries = manifest.as_object_mut().context("manifest is not an object")?;
+    entries.insert("complete".into(), json!(false));
+    entries.insert("potentially_stale".into(), json!(true));
+    entries.insert("stale_reason".into(), json!(reason));
+    entries.insert(
+        "attempted_changed_functions".into(),
+        selection["changed_functions"].clone(),
+    );
+    entries.insert("attempted_changed_tests".into(), selection["changed_tests"].clone());
+    entries.insert("attempted_selected_shards".into(), selection["selected_shards"].clone());
+    entries.insert("stale_at".into(), json!(stale_at));
+    write_manifest(runtime_dir, &manifest)
+}
+
+fn write_manifest(runtime_dir: &Path, manifest: &Value) -> Result<()> {
+    write_gz(
+        &manifest_path(runtime_dir),
+        &(serde_json::to_string_pretty(manifest)? + "\n"),
+    )
+}
+
+/// What a full collect claims, in the shape `select` would have produced: every
+/// shard runs, every function is new, and nothing was carried over.
+pub fn full_selection(
+    files: &[PathBuf],
+    root: &Path,
+    functions: &Value,
+    workload: &Value,
+    trace_plan_digest: &str,
+    commands: &[Vec<String>],
+) -> Value {
+    json!({
+        "selected_shards": strings(&workload["shards"]),
+        "deleted_shards": [],
+        "changed_functions": strings(functions),
+        "added_functions": [],
+        "deleted_functions": [],
+        "changed_tests": strings(&workload["tests"]),
+        "deleted_tests": [],
+        "changed_files": [],
+        "deleted_files": [],
+        "residual_source_changes": [],
+        "support_changed": false,
+        "environment_changed": false,
+        "command_changed": false,
+        "trace_plan_changed": false,
+        "unexplained_trace_plan_changed": false,
+        "uncertain_closure": false,
+        "fallback_full": true,
+        "rebuild": true,
+        "current_hashes": source_hashes(files, root),
+        "environment": environment(root, commands),
+        "functions": functions,
+        "workload": workload,
+        "trace_plan_digest": trace_plan_digest,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

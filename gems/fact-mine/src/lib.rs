@@ -18,6 +18,7 @@ pub mod scip;
 pub mod scip_emit;
 pub mod shard_runner;
 pub mod snapshot;
+pub mod source_fingerprint;
 pub mod sorbet_sig;
 pub mod trace_document;
 pub mod workload_plan;
