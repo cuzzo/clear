@@ -667,13 +667,33 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
     }
 
     fn declarative_owner(&self, node: &Node, _current_owner: &str) -> Option<NormalizedOwner> {
-        (node.r#type == "STRUCT_ITEM")
-            .then(|| owner_after_keyword(&node.text, "struct"))
-            .flatten()
-            .map(|name| NormalizedOwner {
+        match node.r#type.as_str() {
+            "STRUCT_ITEM" => owner_after_keyword(&node.text, "struct").map(|name| NormalizedOwner {
                 name,
                 kind: "struct".to_string(),
-            })
+            }),
+            // A trait declares what its implementors provide and carries no
+            // bodies of its own, which is what every language's interface is.
+            "TRAIT_ITEM" => owner_after_keyword(&node.text, "trait").map(|name| NormalizedOwner {
+                name,
+                kind: "interface".to_string(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Rust states conformance in an item of its own - `impl Trait for Type` -
+    /// rather than in the type's header. The owner that item produces is the
+    /// concrete type, so the trait it names is that type's supertype.
+    fn owner_supertypes(&self, node: &Node) -> Vec<String> {
+        rust_impl_trait(&node.text).into_iter().collect()
+    }
+
+    fn abstract_type_requirements(&self, node: &Node) -> Vec<String> {
+        if node.r#type != "TRAIT_ITEM" {
+            return Vec::new();
+        }
+        rust_declared_method_names(&node.text)
     }
 
     fn owner_name_span(&self, _name: &str, _node: &Node, default_span: Span) -> Option<Span> {
@@ -866,6 +886,55 @@ pub(crate) fn simple_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+/// The trait an `impl` item states its type provides. An inherent `impl Type`
+/// names none, and the trait is what sits between the header's generics and
+/// the `for` that introduces the type.
+fn rust_impl_trait(text: &str) -> Option<String> {
+    let header = text.split(['{', ';']).next().unwrap_or(text).trim();
+    let rest = header.strip_prefix("impl")?;
+    // `impl<'a, T: Bound>` - the generics belong to the item, not the trait.
+    let rest = match rest.trim_start().strip_prefix('<') {
+        Some(generics) => {
+            let mut depth = 1usize;
+            let mut end = None;
+            for (index, character) in generics.char_indices() {
+                match character {
+                    '<' => depth += 1,
+                    '>' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = Some(index);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            &generics[end? + 1..]
+        }
+        None => rest,
+    };
+    let (trait_name, _type_name) = rest.split_once(" for ")?;
+    let trait_name = trait_name.trim().trim_start_matches('!').trim();
+    // The nominal name, without its generic arguments or path.
+    let bare = trait_name.split('<').next().unwrap_or(trait_name).trim();
+    let bare = bare.rsplit("::").next().unwrap_or(bare).trim();
+    (!bare.is_empty() && is_simple_name(bare)).then(|| bare.to_string())
+}
+
+/// The methods a trait states its implementors provide.
+fn rust_declared_method_names(text: &str) -> Vec<String> {
+    text.split("fn ")
+        .skip(1)
+        .filter_map(|rest| {
+            let name = rest
+                .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+                .next()?;
+            (!name.is_empty()).then(|| name.to_string())
+        })
+        .collect()
 }
 
 fn owner_after_keyword(text: &str, keyword: &str) -> Option<String> {
@@ -1150,6 +1219,47 @@ mod tests {
         assert_eq!(behavior.format_nilable_type("i32"), "Option<i32>");
         assert_eq!(behavior.parameter_name_from_signature("invalid_sig"), None);
         assert_eq!(behavior.untyped_type(), "Value");
+    }
+
+    #[test]
+    fn an_impl_item_states_the_trait_its_type_provides() {
+        assert_eq!(
+            rust_impl_trait("impl Dialect for RubyDialect {"),
+            Some("Dialect".to_string())
+        );
+        // The generics belong to the item, not to the trait.
+        assert_eq!(
+            rust_impl_trait("impl<'a, T: Clone> Dialect<T> for Vec<T> {"),
+            Some("Dialect".to_string())
+        );
+        assert_eq!(
+            rust_impl_trait("impl std::fmt::Display for Report {"),
+            Some("Display".to_string())
+        );
+        // An inherent impl states no conformance.
+        assert_eq!(rust_impl_trait("impl RubyDialect {"), None);
+        assert_eq!(rust_impl_trait("impl<T> Vec<T> {"), None);
+    }
+
+    #[test]
+    fn a_trait_states_what_its_implementors_provide() {
+        let behavior = RustNormalizedBehavior;
+        let trait_item = Node {
+            r#type: "TRAIT_ITEM".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 3,
+            last_column: 1,
+            text: "pub trait Dialect: Send {\n    fn clean(&self, t: &str) -> String;\n    fn is_ivar(&self, t: &str) -> bool;\n}".to_string(),
+        };
+        let owner = behavior.declarative_owner(&trait_item, "").expect("owner");
+        assert_eq!(owner.name, "Dialect");
+        assert_eq!(owner.kind, "interface");
+        assert_eq!(
+            behavior.abstract_type_requirements(&trait_item),
+            vec!["clean".to_string(), "is_ivar".to_string()]
+        );
     }
 
     #[test]
