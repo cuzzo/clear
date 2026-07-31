@@ -35,11 +35,11 @@ class RubyStdlibMapTest < Minitest::Test
   )
   MANIFEST = File.join(ROOT, "fact-mine", "config", "stdlib_maps", "ruby-3.2.3.yml")
 
-  def test_cruby_core_a_profiles_the_indexed_regexp_implementation_surface
+  def test_cruby_core_a_profiles_the_indexed_regexp_and_struct_implementation_surfaces
     manifest = YAML.safe_load(File.read(MANIFEST))
     includes = manifest.fetch("source").fetch("include")
 
-    assert_includes includes, "{array,dir,enum,error,file,hash,io,math,numeric,re,string}.c"
+    assert_includes includes, "{array,dir,enum,error,file,hash,io,math,numeric,re,string,struct}.c"
   end
 
   def test_cruby_registration_bridge_preserves_exact_aliases_and_rejects_unproven_bodies
@@ -52,18 +52,23 @@ class RubyStdlibMapTest < Minitest::Test
         define_filetest_function("executable?", rb_file_executable_p, 1);
         rb_define_singleton_method(rb_cFile, "realpath", rb_file_s_realpath, -1);
       C
+      File.write(File.join(directory, "struct.c"), <<~C)
+        rb_define_singleton_method(rb_cStruct, "new", rb_struct_s_def, -1);
+      C
       producer = File.join(directory, "producer.json.gz")
       profile = File.join(directory, "profile.json")
       output = File.join(directory, "bridge.json")
       exact = "cxx . . $ math_exp(1)."
       executable = "cxx . . $ rb_file_executable_p(1)."
       realpath = "cxx . . $ rb_file_s_realpath(1)."
+      struct_new = "cxx . . $ rb_struct_s_def(1)."
       Zlib::GzipWriter.open(producer) do |gzip|
         gzip.write(JSON.generate({
           "symbols" => {
             exact => { "bound_quality" => "upper_bound_exact_symbol" },
             executable => { "bound_quality" => "upper_bound_exact_symbol" },
             realpath => { "bound_quality" => "upper_bound_exact_symbol" },
+            struct_new => { "bound_quality" => "upper_bound_exact_symbol" },
             "cxx . . $ math_log(1)." => { "bound_quality" => "upper_bound_modeled_world" }
           }
         }))
@@ -73,7 +78,8 @@ class RubyStdlibMapTest < Minitest::Test
           { "path" => File.join(directory, "math.c"), "name" => "math_exp", "semantic_symbol" => exact },
           { "path" => File.join(directory, "math.c"), "name" => "math_log", "semantic_symbol" => "cxx . . $ math_log(1)." },
           { "path" => File.join(directory, "file.c"), "name" => "rb_file_executable_p", "semantic_symbol" => executable },
-          { "path" => File.join(directory, "file.c"), "name" => "rb_file_s_realpath", "semantic_symbol" => realpath }
+          { "path" => File.join(directory, "file.c"), "name" => "rb_file_s_realpath", "semantic_symbol" => realpath },
+          { "path" => File.join(directory, "struct.c"), "name" => "rb_struct_s_def", "semantic_symbol" => struct_new }
         ]
       }))
 
@@ -97,6 +103,7 @@ class RubyStdlibMapTest < Minitest::Test
         symbols.fetch(executable)
       )
       assert_equal ["nil-kill-runtime ruby ruby 3.2.3 File.realpath()."], symbols.fetch(realpath)
+      assert_equal ["nil-kill-runtime ruby ruby 3.2.3 Struct.new()."], symbols.fetch(struct_new)
       refute symbols.key?("cxx . . $ math_log(1).")
     end
   end
