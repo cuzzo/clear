@@ -819,6 +819,58 @@ fn is_vacuous(anchor: &serde_json::Value) -> bool {
 /// collector's, ported rather than reinvented: the worst status wins, run ids
 /// union, execution counts add, and a kind is complete only if every
 /// contributing shard found it complete.
+/// Bring a shard collected under an older plan onto the current one.
+///
+/// An anchor the shard has no entry for was not executed in it, which is what
+/// absence already means. STALE exists for the other case: an entry that IS
+/// present and describes source that has since changed.
+///
+/// Rehydrating an entry for every planned anchor instead made each shard's
+/// contribution scale with the plan rather than with the run -- thirteen shards
+/// of a 0.65s suite merged to 46MB, nearly all of it saying nothing happened.
+pub fn rebase_evidence(
+    bundle: &runtime_protocol::RuntimeEvidence,
+    plan: &runtime_protocol::TracePlan,
+) -> runtime_protocol::RuntimeEvidence {
+    use runtime_protocol::{AnchorEvidence, CaptureStatus, CaptureSummary};
+
+    let existing: BTreeMap<&str, &AnchorEvidence> = bundle
+        .anchors
+        .iter()
+        .map(|anchor| (anchor.anchor_symbol.as_str(), anchor))
+        .collect();
+    let run_ids = bundle.runs.iter().map(|run| run.id.clone()).collect::<Vec<_>>();
+
+    let mut rebased = bundle.clone();
+    rebased.anchors = plan
+        .requests
+        .iter()
+        .filter_map(|request| {
+            let anchor = request.anchor.as_ref()?;
+            let row = existing.get(anchor.symbol.as_str())?;
+            if row.anchor_semantic_digest == anchor.semantic_digest {
+                return Some((*row).clone());
+            }
+            Some(AnchorEvidence {
+                anchor_symbol: anchor.symbol.clone(),
+                anchor_semantic_digest: anchor.semantic_digest.clone(),
+                capture: protobuf::MessageField::some(CaptureSummary {
+                    status: protobuf::EnumOrUnknown::new(CaptureStatus::STALE),
+                    run_ids: run_ids.clone(),
+                    observed_executions: 0,
+                    dropped_executions: 0,
+                    reason: "source semantics changed after this shard was collected".to_string(),
+                    ..Default::default()
+                }),
+                executions: Vec::new(),
+                ..Default::default()
+            })
+        })
+        .collect();
+    rebased.trace_plan_digest = plan.plan_digest.clone();
+    rebased
+}
+
 pub fn merge_evidence(
     documents: &[runtime_protocol::RuntimeEvidence],
 ) -> Result<runtime_protocol::RuntimeEvidence> {

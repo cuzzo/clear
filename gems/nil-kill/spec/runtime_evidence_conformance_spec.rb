@@ -780,6 +780,13 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     File.join(shard, NilKill::Runtime::TraceArtifact::EVIDENCE_NAME)
   end
 
+  # The merge under test is the one a collect performs.
+  def merge(paths)
+    output = File.join(NilKill::TMP_DIR, "merged-#{paths.length}-#{paths.hash.abs}.json.gz")
+    NilKill::Runtime::DomainDeriver.merge_evidence(inputs: paths, output: output)
+    NilKill::Runtime::JsonIO.parse(output)
+  end
+
   def join(shard, run_id)
     binary = NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY
     trace = File.join(shard, NilKill::Runtime::TraceArtifact::DEFAULT_NAME)
@@ -796,7 +803,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     paths = %w[run-a run-b].map do |run_id|
       evidence_for(run_id, @collector.fetch(:runtime_calls))
     end
-    merged = NilKill::Runtime::EvidenceMerger.merge(paths)
+    merged = merge(paths)
     repeated = catalog.fetch("merge_cases").find do |row|
       row.fetch("id") == "repeated_runs_are_additive"
     end
@@ -805,7 +812,8 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     row = merged.fetch("anchors").find do |candidate|
       candidate.fetch("anchor_symbol") == request.dig("anchor", "symbol")
     end
-    expect(row.dig("capture", "observed_executions"))
+    # ProtoJSON spells an int64 as a string; the claim is about the count.
+    expect(row.dig("capture", "observed_executions").to_i)
       .to eq(repeated.fetch("expected_count"))
 
     mixed_case = catalog.fetch("cases").find do |candidate|
@@ -827,7 +835,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     ].map do |run_id, shard_events|
       evidence_for(run_id, shard_events)
     end
-    split = NilKill::Runtime::EvidenceMerger.merge(split_paths)
+    split = merge(split_paths)
     split_contract = catalog.fetch("merge_cases").find do |candidate|
       candidate.fetch("id") == "production_and_replacement_shards_remain_complete"
     end
@@ -861,7 +869,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     ].map do |run_id, shard_events|
       evidence_for(run_id, shard_events)
     end
-    anonymous_split = NilKill::Runtime::EvidenceMerger.merge(anonymous_paths)
+    anonymous_split = merge(anonymous_paths)
     anonymous_contract = catalog.fetch("merge_cases").find do |candidate|
       candidate.fetch("id") ==
         "production_and_anonymous_replacement_shards_remain_complete"
@@ -881,7 +889,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     end
     replacement_run = replacement.fetch("expected_runs").fetch(0)
     replacement_path = evidence_for(replacement_run, @collector.fetch(:runtime_calls))
-    replaced = NilKill::Runtime::EvidenceMerger.merge([replacement_path])
+    replaced = merge([replacement_path])
     expect(replaced.fetch("runs").map { |run| run.fetch("id") })
       .to eq(replacement.fetch("expected_runs"))
     expect(replaced.fetch("runs").map { |run| run.fetch("id") })

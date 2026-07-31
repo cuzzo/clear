@@ -418,8 +418,8 @@ module NilKill
             FileUtils.cp(merged_candidate, canonical_target)
             canonical_target
           else
-            Runtime::EvidenceMerger.write(
-              effective, canonical_target, plan: Runtime::EvidenceProtocol.plan
+            Runtime::DomainDeriver.merge_evidence(
+              inputs: effective, output: canonical_target, plan: TRACE_PLAN_PATH
             )
           end
         end

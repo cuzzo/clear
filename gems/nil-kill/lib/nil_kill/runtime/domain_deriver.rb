@@ -43,6 +43,20 @@ module NilKill
         end
       end
 
+      # Merging shards into one canonical document. A shard contributes what it
+      # observed, so shards legitimately cover different anchors; the rules for
+      # reconciling them are the same rules the join already applies.
+      def self.merge_evidence(inputs:, output:, plan: nil)
+        binary = NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY
+        args = [binary, "nil-kill-merge-evidence", "--output", output.to_s]
+        args.concat(["--plan", plan.to_s]) if plan
+        inputs.each { |path| args.concat(["--input", path.to_s]) }
+        _out, err, status = Open3.capture3(*args)
+        raise "fact-mine nil-kill-merge-evidence failed: #{err}" unless status.success?
+
+        output.to_s
+      end
+
       def self.call(subcommand, root:, source_roles:)
         args = [NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY, subcommand,
                 "--root", root.to_s]

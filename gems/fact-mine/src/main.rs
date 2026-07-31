@@ -301,6 +301,30 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillMergeEvidence { inputs, output, plan } => {
+            let mut documents = inputs
+                .iter()
+                .map(|path| fact_mine_rust::runtime_protocol::read_runtime_evidence(path))
+                .collect::<Result<Vec<_>>>()?;
+            // An incremental collect mixes shards stored under an older plan
+            // with ones just collected, so each is brought onto the plan the
+            // merged document will claim.
+            if let Some(plan) = plan {
+                let plan = fact_mine_rust::runtime_trace::read_plan(&plan)?;
+                documents = documents
+                    .iter()
+                    .map(|document| {
+                        fact_mine_rust::runtime_trace::rebase_evidence(document, &plan)
+                    })
+                    .collect();
+            }
+            let merged = fact_mine_rust::runtime_trace::merge_evidence(&documents)?;
+            fact_mine_rust::runtime_trace::write_json(
+                &output,
+                &(fact_mine_rust::runtime_protocol::to_json_with_defaults(&merged)? + "\n"),
+            )?;
+            eprintln!("Merged {} evidence documents", inputs.len());
+        }
         Command::NilKillScipIndex {
             runtime_dir,
             evidence,
@@ -1073,6 +1097,12 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Merge evidence documents into one canonical document.
+    NilKillMergeEvidence {
+        inputs: Vec<PathBuf>,
+        output: PathBuf,
+        plan: Option<PathBuf>,
+    },
     /// Emit the runtime SCIP index for a collect, and attest what it covers.
     NilKillScipIndex {
         runtime_dir: PathBuf,
@@ -1217,6 +1247,27 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-merge-evidence" => {
+            let mut inputs = Vec::new();
+            let mut output = None;
+            let mut plan = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--input" => inputs.push(PathBuf::from(iter.next().context("--input")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            if inputs.is_empty() {
+                bail!("nil-kill-merge-evidence requires at least one --input");
+            }
+            Ok(Command::NilKillMergeEvidence {
+                inputs,
+                output: output.context("--output is required")?,
+                plan,
             })
         }
         "nil-kill-scip-index" => {
