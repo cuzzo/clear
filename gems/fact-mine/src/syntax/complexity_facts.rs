@@ -700,6 +700,7 @@ fn fact_for_method(
         type_aliases,
         &type_names,
         &field_types,
+        path,
         language,
         behavior,
         &mut domain_registry,
@@ -1282,6 +1283,7 @@ fn visit_loops(
     type_aliases: &BTreeMap<String, String>,
     type_names: &BTreeSet<String>,
     field_types: &BTreeMap<String, BTreeMap<String, TypeExpr>>,
+    path: &str,
     language: &str,
     behavior: &dyn NormalizedLanguageBehavior,
     domain_registry: &mut DomainRegistry,
@@ -1332,6 +1334,7 @@ fn visit_loops(
                 type_aliases,
                 type_names,
                 field_types,
+                path,
                 language,
                 behavior,
                 domain_registry,
@@ -1366,6 +1369,7 @@ fn visit_loops(
                 type_aliases,
                 type_names,
                 field_types,
+                path,
                 language,
                 behavior,
                 domain_registry,
@@ -1708,6 +1712,7 @@ fn visit_loops(
                 type_aliases,
                 type_names,
                 field_types,
+                path,
                 language,
                 behavior,
                 domain_registry,
@@ -1733,6 +1738,7 @@ fn visit_loops(
                 type_aliases,
                 type_names,
                 field_types,
+                path,
                 language,
                 behavior,
                 domain_registry,
@@ -1758,6 +1764,7 @@ fn visit_loops(
             type_aliases,
             type_names,
             field_types,
+            path,
             language,
             behavior,
             domain_registry,
@@ -1938,6 +1945,8 @@ fn visit_loops(
                 .or_else(|| {
                     let operand_type =
                         operator_operand_type(
+                            path,
+                            language,
                             node,
                             parameter_types,
                             state_types,
@@ -1983,6 +1992,8 @@ fn visit_loops(
                 .or_else(|| {
                     let operand_type =
                         operator_operand_type(
+                            path,
+                            language,
                             node,
                             parameter_types,
                             state_types,
@@ -2098,6 +2109,7 @@ fn visit_loops(
                 type_aliases,
                 type_names,
                 field_types,
+                path,
                 language,
                 behavior,
                 domain_registry,
@@ -2770,7 +2782,81 @@ fn call_receiver(node: &Node) -> Option<&Node> {
     node.children.first().and_then(ast::node)
 }
 
+/// The type the index gives an expression, found by asking at the position its
+/// head occupies: for `row.name` the field, for `x.len()` the method, for
+/// `xs[i]` the collection being read. Scanning the whole expression instead
+/// finds whatever sits furthest right, which in a call is its last argument.
+fn indexed_operand_type(path: &str, language: &str, operand: &Node) -> Option<TypeExpr> {
+    let text = operand.text.trim_end();
+    if text.contains('\n') {
+        return None;
+    }
+    let (offset, element_read) = operand_head(text)?;
+    let signature = crate::scip::indexed_signature_at(
+        path,
+        operand.first_lineno,
+        operand.first_column + offset,
+    )?;
+    let declared = TypeExpr::parse(&crate::scip::declared_result_type(signature)?, language);
+    if !element_read {
+        return Some(declared);
+    }
+    match declared.strip_nilable() {
+        TypeExpr::Array(element) | TypeExpr::Set(element) => Some(*element),
+        TypeExpr::Hash { value, .. } => Some(*value),
+        _ => None,
+    }
+}
+
+/// Where an expression's head sits within it, and whether the expression reads
+/// an element out of what that head names.
+fn operand_head(text: &str) -> Option<(usize, bool)> {
+    let text = text.trim_end();
+    if let Some(open) = closing_pair(text, b'[', b']') {
+        return operand_head(&text[..open]).map(|(offset, _)| (offset, true));
+    }
+    if let Some(open) = closing_pair(text, b'(', b')') {
+        return last_identifier_offset(&text[..open]).map(|offset| (offset, false));
+    }
+    last_identifier_offset(text).map(|offset| (offset, false))
+}
+
+/// The opening byte matching a trailing close, if the text ends with one.
+fn closing_pair(text: &str, open: u8, close: u8) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes.last() != Some(&close) {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (index, byte) in bytes.iter().enumerate().rev() {
+        if *byte == close {
+            depth += 1;
+        } else if *byte == open {
+            depth -= 1;
+            if depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
+fn last_identifier_offset(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let end = bytes
+        .iter()
+        .rposition(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')?;
+    let start = bytes[..=end]
+        .iter()
+        .rposition(|byte| !(byte.is_ascii_alphanumeric() || *byte == b'_'))
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    Some(start)
+}
+
 fn operator_operand_type(
+    path: &str,
+    language: &str,
     node: &Node,
     local_types: &BTreeMap<String, TypeExpr>,
     state_types: &BTreeMap<String, TypeExpr>,
@@ -2780,6 +2866,9 @@ fn operator_operand_type(
 ) -> Option<TypeExpr> {
     let operands = child_nodes(node);
     let resolve = |operand: &Node| {
+        if let Some(declared) = indexed_operand_type(path, language, operand) {
+            return Some(declared);
+        }
         // The whole expression first: `row.line` is the field's type and
         // `name.is_empty()` is what the call returns. Reading the operand's
         // base local instead types both as whatever holds them, which no rule

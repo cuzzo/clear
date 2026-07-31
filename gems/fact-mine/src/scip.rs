@@ -223,6 +223,36 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
         }
     }
     let _ = INDEXED_LOCALS.set(rows);
+
+    let mut signatures: BTreeMap<(String, usize, usize), String> = BTreeMap::new();
+    for path in index_paths {
+        let Ok(index) = read_index(path) else {
+            continue;
+        };
+        for document in &index.documents {
+            let declarations = document
+                .symbols
+                .iter()
+                .filter_map(|information| {
+                    let text = information.signature_documentation.as_ref()?.text.trim();
+                    (!text.is_empty()).then(|| (information.symbol.as_str(), text.to_string()))
+                })
+                .collect::<BTreeMap<_, _>>();
+            for occurrence in &document.occurrences {
+                let (Some(line), Some(column)) =
+                    (occurrence_line(occurrence), occurrence.range.get(1).copied())
+                else {
+                    continue;
+                };
+                if let Some(text) = declarations.get(occurrence.symbol.as_str()) {
+                    signatures
+                        .entry((document.relative_path.clone(), line, column))
+                        .or_insert_with(|| text.clone());
+                }
+            }
+        }
+    }
+    let _ = INDEXED_SIGNATURES.set(signatures);
 }
 
 /// The bindings the index typed inside one span of one file.
@@ -236,6 +266,35 @@ pub(crate) fn indexed_local_types(path: &str, first: usize, last: usize) -> Vec<
         })
         .map(|(_, _, name, declared)| (name.clone(), declared.clone()))
         .collect()
+}
+
+static INDEXED_SIGNATURES: OnceLock<BTreeMap<(String, usize, usize), String>> = OnceLock::new();
+
+/// The declaration the index attaches to an exact source position. A field, a
+/// method, a parameter and a binding are each a symbol the compiler resolved;
+/// asking at the position the expression's head occupies is what tells them
+/// apart, where scanning a span only finds whatever sits furthest right.
+pub(crate) fn indexed_signature_at(path: &str, line: usize, column: usize) -> Option<&'static str> {
+    let indexed = INDEXED_SIGNATURES.get()?;
+    indexed
+        .iter()
+        .find(|((indexed_path, indexed_line, indexed_column), _)| {
+            *indexed_line == line && *indexed_column == column && path.ends_with(indexed_path.as_str())
+        })
+        .map(|(_, text)| text.as_str())
+}
+
+/// What a declaration states its result is: a callable hands back what follows
+/// the arrow, anything else holds what follows the colon.
+pub(crate) fn declared_result_type(text: &str) -> Option<String> {
+    if let Some((_, returned)) = text.rsplit_once("->") {
+        let returned = returned.trim().trim_end_matches(['{', ';']).trim();
+        return (!returned.is_empty()).then(|| returned.to_string());
+    }
+    if text.contains('(') {
+        return None;
+    }
+    binding_signature(text).map(|(_, declared)| declared.to_string())
 }
 
 /// Local bindings the indexer has already typed, as (relative path, line,
