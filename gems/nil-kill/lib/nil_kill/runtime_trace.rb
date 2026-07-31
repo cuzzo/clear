@@ -31,10 +31,8 @@ module NilKillRuntimeTrace
   ELEMENT_SAMPLE = ENV.fetch("NIL_KILL_ELEMENT_SAMPLE", "20").to_i
   TRACE_PARAM_CLASSES = ENV.fetch("NIL_KILL_TRACE_PARAM_CLASSES", "String,Symbol").split(",").map(&:strip).reject(&:empty?).to_set
 
-  @structs = {}
   @ivar_runtime = {}
   @runtime_state_values = {}
-  @tuples = {}
   @shape_lookup = {}
 
   # ---- non-hooked recorder-internal accumulators (Fix 2) ----
@@ -99,7 +97,6 @@ module NilKillRuntimeTrace
   @cshape = {}
   @ctsk = {}
   @cls_name = {}
-  @sampled_tstruct_fields = {}
   @trace_plan_loaded = false
   @trace_plan = nil
   @lock = Mutex.new
@@ -121,23 +118,6 @@ module NilKillRuntimeTrace
     @trace_plan
   rescue JSON::ParserError
     @trace_plan = nil
-  end
-
-  def self.sample_struct_field?(klass_name, field)
-    plan = trace_plan
-    return true unless plan
-    
-    parts = klass_name.to_s.split("::")
-    parts.length.downto(1) do |i|
-      suffix = parts[-i..-1].join("::")
-      value = plan.dig("struct_fields", [suffix, field.to_s].join("\0"))
-      return value unless value.nil?
-    end
-    
-    # Struct/Data declarations can be created dynamically or hidden behind
-    # unsupported syntax. Absence from the static plan is therefore not proof
-    # that a field is resolved; only an explicit false may elide observation.
-    true
   end
 
   # In-place instrumentation: the wrapped file IS at its real src
@@ -415,30 +395,6 @@ module NilKillRuntimeTrace
     end
   end
 
-  def self.with_collection_hooks_disabled
-    # Already disabled (re-entrant -- the wrapped recorder paths nest):
-    # set-true + restore is a no-op, so skip both TLS writes and the
-    # ensure frame. The begin/ensure below runs ONLY on the slow path,
-    # which is reached ONLY when the flag was falsy -> restoring to nil
-    # is indistinguishable from the prior falsy for every truthiness
-    # read. Mirrors with_collection_hook_guard's early-return idiom.
-    return yield if Thread.current[:__nil_kill_collection_hook]
-
-    begin
-      Thread.current[:__nil_kill_collection_hook] = true
-      yield
-    ensure
-      Thread.current[:__nil_kill_collection_hook] = nil
-    end
-  end
-
-  def self.source_location_for_class(klass)
-    return nil unless klass.respond_to?(:instance_method)
-    init = klass.instance_method(:initialize) rescue nil
-    loc = init&.source_location
-    loc && [File.expand_path(loc[0], ROOT), loc[1]]
-  end
-
   def self.method_owner(defined_class)
     return nil unless defined_class
     if defined_class.respond_to?(:singleton_class?) && defined_class.singleton_class?
@@ -469,73 +425,6 @@ module NilKillRuntimeTrace
     end
     return nil if frames.empty?
     "#{frames.join("|")}:#{cls}"
-  end
-
-  def self.install_struct_hook
-    return if Struct.singleton_class.method_defined?(:__nil_kill_orig_new)
-    Struct.singleton_class.alias_method(:__nil_kill_orig_new, :new)
-    Struct.singleton_class.define_method(:new) do |*fields, **opts, &blk|
-      loc = caller_locations(1, 1)&.first
-      klass = __nil_kill_orig_new(*fields, **opts, &blk)
-      path = loc && File.expand_path(loc.absolute_path || loc.path, ROOT)
-      if path && klass.is_a?(Class) && klass < Struct &&
-          (NilKillRuntimeTrace.target_path?(path) || ENV["NIL_KILL_RUNTIME_SCIP"] == "1")
-        klass.instance_variable_set(:@__nil_kill_struct_path, path)
-        klass.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
-        NilKillRuntimeTrace.attach_struct(klass)
-      end
-      klass
-    end
-    register_runtime_scip_transparent_wrapper(
-      Struct.singleton_class,
-      :new,
-      owner: "Struct",
-      name: "new",
-      kind: "class",
-      native: true
-    )
-
-    Module.prepend(Module.new do
-      def const_added(name)
-        super
-        # `const_added` also fires for `autoload`. Loading that constant from
-        # inside the hook forces arbitrary files during require-time, which can
-        # reorder unrelated namespaces (notably project AST vs the external
-        # `ast` gem) and crash the traced process.
-        return if autoload?(name, false)
-
-        value = const_get(name, false)
-        NilKillRuntimeTrace.attach_struct(value) if value.is_a?(Class) && value < Struct
-        NilKillRuntimeTrace.attach_data(value) if defined?(Data) && value.is_a?(Class) && value < Data
-      rescue NameError
-        nil
-      end
-    end)
-  end
-
-  def self.install_data_hook
-    return unless defined?(Data) && Data.respond_to?(:define)
-    return if Data.singleton_class.method_defined?(:__nil_kill_orig_define)
-    Data.singleton_class.alias_method(:__nil_kill_orig_define, :define)
-    Data.singleton_class.define_method(:define) do |*fields, &blk|
-      loc = caller_locations(1, 1)&.first
-      klass = __nil_kill_orig_define(*fields, &blk)
-      path = loc && File.expand_path(loc.absolute_path || loc.path, ROOT)
-      if path && NilKillRuntimeTrace.target_path?(path) && klass.is_a?(Class)
-        klass.instance_variable_set(:@__nil_kill_struct_path, path)
-        klass.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
-        NilKillRuntimeTrace.attach_data(klass)
-      end
-      klass
-    end
-    register_runtime_scip_transparent_wrapper(
-      Data.singleton_class,
-      :define,
-      owner: "Data",
-      name: "define",
-      kind: "class",
-      native: true
-    )
   end
 
   def self.install_open_struct_hook
@@ -575,249 +464,12 @@ module NilKillRuntimeTrace
     nil
   end
 
-  def self.install_tstruct_hook
-    return unless defined?(T::Struct)
-    return if T::Struct.instance_variable_get(:@__nil_kill_attached)
-    T::Struct.instance_variable_set(:@__nil_kill_attached, true)
-
-    T::Struct.singleton_class.prepend(Module.new do
-      def inherited(child)
-        super
-        loc = caller_locations(1, 1)&.first
-        path = loc && File.expand_path(loc.absolute_path || loc.path, NilKillRuntimeTrace::ROOT)
-        if path && NilKillRuntimeTrace.target_path?(path)
-          child.instance_variable_set(:@__nil_kill_struct_path, path)
-          child.instance_variable_set(:@__nil_kill_struct_line, loc.lineno)
-          NilKillRuntimeTrace.attach_tstruct(child)
-        end
-      end
-    end)
-  end
-
-  # Observe construction above #initialize, but only for T::Struct subclasses
-  # declared in a target file. A global T::Struct.new wrapper charged every
-  # typed object in the process for telemetry that record_tstruct_instance
-  # immediately discarded because the class had no target source location.
-  # The inherited hook runs for named and anonymous subclasses before their
-  # first possible instance; prepending their singleton class remains robust
-  # when Sorbet later synthesizes/replaces the instance initializer.
-  def self.attach_tstruct(klass)
-    return if klass.instance_variable_get(:@__nil_kill_tstruct_attached)
-
-    klass.instance_variable_set(:@__nil_kill_tstruct_attached, true)
-    fields = klass.respond_to?(:props) ? klass.props.keys.map(&:to_s) : []
-    klass.instance_variable_set(:@__nil_kill_struct_fields, fields.freeze)
-    klass.instance_variable_set(:@__nil_kill_record_family, "TStruct")
-    wrapper = Module.new do
-      def new(*args, **kw, &blk)
-        instance = super
-        NilKillRuntimeTrace.record_tstruct_instance(instance, kw)
-        instance
-      end
-    end
-    klass.singleton_class.prepend(wrapper)
-    @runtime_generated_wrapper_methods << [wrapper, :new]
-    register_runtime_scip_transparent_wrapper(
-      wrapper,
-      :new,
-      owner: safe_module_name(klass),
-      name: "new",
-      kind: "class",
-      native: false,
-      path: klass.instance_variable_get(:@__nil_kill_struct_path),
-      line: klass.instance_variable_get(:@__nil_kill_struct_line)
-    )
-    fields.each do |field|
-      method_id = field.to_sym
-      defined_class = klass.instance_method(method_id).owner
-      register_runtime_scip_transparent_wrapper(
-        defined_class,
-        method_id,
-        owner: safe_module_name(klass),
-        name: field,
-        kind: "instance",
-        native: false,
-        path: klass.instance_variable_get(:@__nil_kill_struct_path),
-        line: klass.instance_variable_get(:@__nil_kill_struct_line)
-      )
-    rescue NameError
-      next
-    end
-  end
-
-  def self.record_tstruct_instance(instance, keyword_values = {})
-    klass = instance.class
-    class_name = safe_module_name(klass) || "AnonymousTStruct"
-    if klass.respond_to?(:props)
-      fields = sampled_tstruct_fields(klass, class_name)
-      fields = klass.props.each_key unless fields
-      fields.each do |field|
-        value = instance.send(field) rescue nil
-        record_struct_field(klass, class_name, field, value)
-      end
-    else
-      keyword_values.each do |field, value|
-        record_struct_field(klass, class_name, field, value)
-      end
-    end
-  end
-
-  # T::Struct props are fixed once instances can be constructed. Resolve the
-  # trace-plan decision once per class instead of walking every known prop on
-  # every allocation. nil means there is no valid plan and preserves the
-  # exhaustive fallback; an empty array means the plan proved every prop.
-  def self.sampled_tstruct_fields(klass, class_name)
-    plan = trace_plan
-    return nil unless plan
-    return @sampled_tstruct_fields[klass] if @sampled_tstruct_fields.key?(klass)
-
-    fields = klass.props.each_key.select { |field| sample_struct_field?(class_name, field) }.freeze
-    ORIG_HASH_STORE.bind_call(@sampled_tstruct_fields, klass, fields)
-    fields
-  end
-
   # NOTE: the parallel instrumented tree and its require/require_relative
   # redirect (instrumented_copy_for / resolve_required_source /
   # install_instrumented_require_hook) were DELETED. In-place
   # instrumentation puts the single wrapped copy at the real src path,
   # so every load mechanism loads instrumented code with no redirect --
   # which is exactly what made collect_ran_untraced non-convergent.
-
-  def self.attach_struct(klass)
-    return unless klass.is_a?(Class) && klass < Struct
-    if klass.instance_variable_get(:@__nil_kill_attached)
-      register_generated_constructor_wrapper(klass, native: true)
-      Array(klass.instance_variable_get(:@__nil_kill_struct_fields)).each do |field|
-        register_runtime_scip_generated_record_wrapper(klass, field, kind: "instance")
-        register_runtime_scip_generated_record_wrapper(
-          klass,
-          "#{field}=",
-          kind: "instance"
-        )
-      end
-      return
-    end
-    path = klass.instance_variable_get(:@__nil_kill_struct_path)
-    line = klass.instance_variable_get(:@__nil_kill_struct_line)
-    unless path && line
-      loc = source_location_for_class(klass)
-      path, line = loc if loc
-      klass.instance_variable_set(:@__nil_kill_struct_path, path) if path
-      klass.instance_variable_set(:@__nil_kill_struct_line, line) if line
-    end
-    production_struct = path && target_path?(path)
-    return unless production_struct || ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
-    fields = klass.members
-    return if fields.empty?
-    klass.instance_variable_set(:@__nil_kill_struct_fields, fields.map(&:to_s).freeze)
-    klass.instance_variable_set(:@__nil_kill_record_family, "Struct")
-    klass.instance_variable_set(:@__nil_kill_attached, true)
-    # Do not prepend #initialize. A Struct is often assigned to a constant and
-    # reopened immediately with a Sorbet-signed initializer; Sorbet cannot
-    # replace a method hidden behind a prepended module. Observing Class#new
-    # captures the same initial values after construction without constraining
-    # how the generated class may subsequently define its initializer.
-    original_new = klass.method(:new)
-    klass.define_singleton_method(:new) do |*args, **kw, &blk|
-      instance = original_new.call(*args, **kw, &blk)
-      NilKillRuntimeTrace.record_struct_instance(instance, fields) if production_struct
-      instance
-    end
-    register_generated_constructor_wrapper(klass, native: true)
-
-    if production_struct && klass.method_defined?(:[]=)
-      original_index_set = klass.instance_method(:[]=)
-      klass.define_method(:[]=) do |field, value|
-        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
-        field_sym = field.to_sym rescue nil
-        if field_sym && fields.include?(field_sym)
-          NilKillRuntimeTrace.record_struct_field(self.class, class_name, field_sym, value)
-        end
-        original_index_set.bind_call(self, field, value)
-      end
-    end
-
-    fields.each do |field|
-      if !klass.method_defined?(field) || klass.instance_method(field).source_location.nil?
-        original_getter = klass.instance_method(field) if klass.method_defined?(field)
-        klass.define_method(field, struct_field_getter(field, original_getter))
-        @runtime_generated_wrapper_methods << [klass, field.to_sym]
-        register_runtime_scip_generated_record_wrapper(klass, field, kind: "instance")
-      end
-
-      setter = "#{field}="
-      if !klass.method_defined?(setter) || klass.instance_method(setter).source_location.nil?
-        original_setter = klass.instance_method(setter) if klass.method_defined?(setter)
-        klass.define_method(
-          setter,
-          struct_field_setter(field, original_setter, record_field: production_struct)
-        )
-        @runtime_generated_wrapper_methods << [klass, setter.to_sym]
-        register_runtime_scip_generated_record_wrapper(klass, setter, kind: "instance")
-      end
-    end
-  end
-
-  def self.register_generated_constructor_wrapper(klass, native: true)
-    register_runtime_scip_generated_record_wrapper(klass, :new, kind: "class")
-  end
-
-  def self.struct_field_getter(field, original_getter)
-    proc do
-      if original_getter
-        original_getter.bind_call(self)
-      else
-        self[field]
-      end
-    end
-  end
-
-  def self.struct_field_setter(field, original_setter, record_field: true)
-    proc do |value|
-      if record_field
-        class_name = NilKillRuntimeTrace.safe_module_name(self.class) || "AnonymousStruct"
-        NilKillRuntimeTrace.record_struct_field(self.class, class_name, field, value)
-      end
-      if original_setter
-        original_setter.bind_call(self, value)
-      else
-        self[field] = value
-      end
-    end
-  end
-
-  def self.record_struct_instance(instance, fields)
-    class_name = safe_module_name(instance.class) || "AnonymousStruct"
-    fields.each do |field|
-      record_struct_field(instance.class, class_name, field, ORIG_STRUCT_FETCH.bind_call(instance, field))
-    end
-  end
-
-  def self.attach_data(klass)
-    return unless klass.is_a?(Class)
-    if klass.instance_variable_get(:@__nil_kill_attached)
-      register_generated_constructor_wrapper(klass, native: true)
-      return
-    end
-    path = klass.instance_variable_get(:@__nil_kill_struct_path)
-    line = klass.instance_variable_get(:@__nil_kill_struct_line)
-    return unless path && line && target_path?(path)
-    fields = klass.respond_to?(:members) ? klass.members : []
-    return if fields.empty?
-    klass.instance_variable_set(:@__nil_kill_struct_fields, fields.map(&:to_s).freeze)
-    klass.instance_variable_set(:@__nil_kill_record_family, "Data")
-    klass.instance_variable_set(:@__nil_kill_attached, true)
-    original_new = klass.method(:new)
-    klass.define_singleton_method(:new) do |*args, **kw, &blk|
-      instance = original_new.call(*args, **kw, &blk)
-      class_name = NilKillRuntimeTrace.safe_module_name(instance.class) || "AnonymousData"
-      fields.each do |field|
-        NilKillRuntimeTrace.record_struct_field(instance.class, class_name, field, instance.public_send(field))
-      end
-      instance
-    end
-    register_generated_constructor_wrapper(klass, native: true)
-  end
 
   def self.record_open_struct(instance)
     table = instance.instance_variable_get(:@table) rescue nil
@@ -853,20 +505,6 @@ module NilKillRuntimeTrace
   # hooks make into them.
   def self.record_struct_field(klass, klass_name, field, value)
     NilKillTraceNative.record_struct_field(klass, klass_name, field, value)
-  end
-
-  def self.record_tuple(kind, path, line, slot, value)
-    return unless value.is_a?(Array) && value.size >= 2
-    sampled = value.first(ELEMENT_SAMPLE)
-    types = sampled.map { |item| class_name(item) }
-    complete = sampled.size == value.size
-    mixed = types.uniq.size > 1
-    return unless complete || mixed
-    key = [kind, abs_path(path), line, slot.to_s, complete ? value.size : ">=#{ELEMENT_SAMPLE}", types]
-    rec = (@tuples[key] ||= { calls: 0, complete: complete, mixed: mixed })
-    rec[:calls] += 1
-    rec[:complete] &&= complete
-    rec[:mixed] ||= mixed
   end
 
   def self.dump
@@ -1017,6 +655,7 @@ if ENV["NIL_KILL_TRACE"] == "1"
   # The collector owns every per-event observation and the declaration hooks
   # that are already native, so it is loaded whether or not runtime SCIP is on.
   NilKillRuntimeTrace.require_native_scip!
+  NilKillTraceNative.configure_targets(Array(NilKillRuntimeTrace::TARGETS).map(&:to_s))
   NilKillRuntimeTrace.install_native_runtime_scip_trace if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
   begin
     require "sorbet-runtime"
@@ -1026,17 +665,13 @@ if ENV["NIL_KILL_TRACE"] == "1"
   NilKillTraceNative.configure_struct_fields(Hash(NilKillRuntimeTrace.trace_plan&.fetch("struct_fields", nil)))
   NilKillTraceNative.configure_tlet_sites(Hash(NilKillRuntimeTrace.trace_plan&.fetch("tlets", nil)))
   NilKillTraceNative.install_tlet_hook
-  NilKillRuntimeTrace.install_struct_hook
-  NilKillRuntimeTrace.install_data_hook
+  NilKillTraceNative.install_record_hooks
   NilKillRuntimeTrace.install_open_struct_hook
-  NilKillRuntimeTrace.install_tstruct_hook
+  NilKillTraceNative.install_tstruct_hook
   NilKillTraceNative.install_collection_hook unless ENV["NIL_KILL_TRACE_COLLECTIONS"] == "0"
   # Sorbet may be required after the collector starts, so `T` is looked for
   # again whenever a class or module body finishes.
   TracePoint.new(:end) { NilKillTraceNative.install_tlet_hook }.enable
-  TracePoint.new(:end) do
-    NilKillRuntimeTrace.install_data_hook
-  end.enable
   at_exit do
     NilKillRuntimeTrace.dump
   end

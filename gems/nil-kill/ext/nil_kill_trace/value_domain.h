@@ -25,4 +25,7 @@ VALUE nk_container_shape(VALUE value);
 VALUE nk_shape_payload(VALUE key);
 VALUE nk_nested_shape(VALUE value);
 
+// Whether the source roles this collect was given call the file non-production.
+int nk_nonproduction_path(VALUE path);
+
 #endif

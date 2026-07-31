@@ -770,9 +770,6 @@ RSpec.describe "NilKill coverage hardening" do
       File.write(described_class::TRACE_PLAN_PATH, JSON.dump(plan))
 
       expect(described_class.trace_plan).to eq(plan)
-      expect(described_class.sample_struct_field?("Models::User", "name")).to be(true)
-      expect(described_class.sample_struct_field?("Models::User", "missing")).to be(true)
-      expect(described_class.sample_struct_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)
     end
 
     it "normalizes paths, target membership, class names, and collection shapes" do
@@ -849,7 +846,7 @@ RSpec.describe "NilKill coverage hardening" do
       dataset_class.instance_variable_set(:@__nil_kill_struct_path, target_file)
       dataset_class.instance_variable_set(:@__nil_kill_struct_line, 10)
 
-      described_class.attach_struct(dataset_class)
+      NilKillTraceNative.attach_record(dataset_class)
 
       expect do
         dataset_class.new(path: "/tmp/coverage.json", files: {})
@@ -888,9 +885,8 @@ RSpec.describe "NilKill coverage hardening" do
       klass.instance_variable_set(:@__nil_kill_struct_path, target_file)
       klass.instance_variable_set(:@__nil_kill_struct_line, 10)
 
-      2.times do
-        described_class.record_tstruct_instance(klass.new(known: "typed", raw: "observed"))
-      end
+      NilKillTraceNative.attach_tstruct(klass)
+      2.times { klass.new(known: "typed", raw: "observed") }
 
       observed = NilKillTraceNative.struct_observations
         .select { |row| row.fetch(:path) == File.expand_path(target_file, described_class::ROOT) }

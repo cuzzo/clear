@@ -134,6 +134,20 @@ static ID class_name_id(VALUE klass);
 static int path_analyzed(VALUE path);
 
 int nk_analyzed_path(VALUE path) { return path_analyzed(path); }
+
+// The declaration hooks run whether or not runtime SCIP was asked for, so the
+// analyzed roots cannot wait for `configure` to supply them.
+static VALUE nk_configure_targets(VALUE self, VALUE roots) {
+    if (!RB_TYPE_P(roots, T_ARRAY)) return Qnil;
+    if (RARRAY_LEN(roots_ary) > 0) return Qnil;
+
+    for (long i = 0; i < RARRAY_LEN(roots); i++) {
+        VALUE root = RARRAY_AREF(roots, i);
+        if (RB_TYPE_P(root, T_STRING)) rb_ary_push(roots_ary, rb_str_new_frozen(root));
+    }
+    st_clear(path_cache);
+    return Qnil;
+}
 static unsigned long counts[8];
 
 static thread_state_t *current_state(void) {
@@ -1195,6 +1209,7 @@ void Init_nil_kill_trace(void) {
     nk_declarations_init(mod);
     nk_collections_init(mod);
     nk_records_init(mod);
+    rb_define_singleton_method(mod, "configure_targets", nk_configure_targets, 1);
 
     path_cache = st_init_numtable();
     demand = st_init_numtable();
