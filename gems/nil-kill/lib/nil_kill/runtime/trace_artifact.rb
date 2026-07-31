@@ -23,9 +23,21 @@ module NilKill
         languages = Array(languages).compact.uniq.sort
         emitter = ScipEmitter.new(root: root, runtime_dir: runtime_dir)
         events, invalid_events = emitter.send(:load_events)
+        # Decoded per language in one pass, then put back in the order the
+        # events were observed in: the join reads calls positionally.
+        decoded = {}
+        events.group_by { |event| event.fetch("language") }
+          .each do |language, language_events|
+            provider = Languages.provider_for(language)
+            rows = provider.runtime_scip_call_evidence_batch(
+              events: language_events, root: root
+            )
+            language_events.each_with_index do |event, index|
+              decoded[event.object_id] = [rows[index], provider]
+            end
+          end
         calls = events.map do |event|
-          provider = Languages.provider_for(event.fetch("language"))
-          row = provider.runtime_scip_call_evidence(event: event, root: root)
+          row, provider = decoded.fetch(event.object_id)
           { "row" => row, "bucket" => call_bucket(row, event, provider) }.compact
         end
         observations = languages.flat_map do |language|
@@ -55,6 +67,17 @@ module NilKill
           "function_entries" => jsonl(runtime_dir, "function-entries-*.jsonl"),
           "coverage" => jsonl(runtime_dir, "coverage-*.jsonl"),
         }
+      end
+
+      # The document a shard directory adds up to, beside the observations it
+      # was built from.
+      def self.write(root:, runtime_dir:, plan:, languages:, run_ids:)
+        path = File.join(runtime_dir, DEFAULT_NAME)
+        JsonIO.write(path, JSON.generate(
+          build(root: root, runtime_dir: runtime_dir, plan: plan,
+                languages: languages, run_ids: run_ids)
+        ))
+        path
       end
 
       # Minting a protocol value from an observed one needs the language's own

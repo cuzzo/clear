@@ -5,6 +5,8 @@ require_relative "../../runtime/environment_claims"
 require_relative "ruby/sorbet"
 require_relative "ruby/runtime_value_evidence"
 require "ripper"
+require "open3"
+require "tempfile"
 
 module NilKill
   module Languages
@@ -81,6 +83,26 @@ module NilKill
 
         def runtime_scip_call_evidence(event:, root:)
           RuntimeValueEvidence.call(event: event, root: root)
+        end
+
+        # The whole file at once, decoded by FactMine. The translation from what
+        # a VM saw into what SCIP names is mechanical -- it renames and regroups
+        # and infers nothing -- so it belongs with the rest of the join rather
+        # than in a Ruby process per shard.
+        def runtime_scip_call_evidence_batch(events:, root:)
+          return [] if events.empty?
+
+          Tempfile.create(["nil-kill-runtime-calls", ".jsonl"]) do |file|
+            events.each { |event| file.puts(JSON.generate(event)) }
+            file.flush
+            stdout, stderr, status = Open3.capture3(
+              NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY,
+              "nil-kill-decode-calls", "--input", file.path, "--root", root.to_s
+            )
+            raise "fact-mine nil-kill-decode-calls failed: #{stderr.strip}" unless status.success?
+
+            JSON.parse(stdout)
+          end
         end
 
         def runtime_evidence_type_symbol(type)

@@ -347,6 +347,37 @@ module NilKill
         staged_evidence[shard_id] =
           File.join(shard_dir, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
       end }
+      # A traced program writes what it saw and nothing else. Turning those
+      # observations into the trace document needs no VM, so it happens here --
+      # which is what lets a traced process load the collector and no other
+      # nil-kill code at all. Shards are independent, so they build together.
+      stage("trace-documents") do
+        trace_plan_document = Runtime::EvidenceProtocol.plan
+        queue = Queue.new
+        selected.each { |shard| queue << shard.fetch("id") }
+        errors = Queue.new
+        Array.new(shard_jobs) do
+          Thread.new do
+            loop do
+              shard_id = queue.pop(true)
+              Runtime::TraceArtifact.write(
+                root: ROOT,
+                runtime_dir: File.join(working_runtime_dir, shard_id),
+                plan: trace_plan_document,
+                languages: ["ruby"],
+                run_ids: [shard_run_ids[shard_id]].compact
+              )
+            rescue ThreadError
+              break
+            rescue StandardError => error
+              errors << "#{shard_id}: #{error.message}"
+              break
+            end
+          end
+        end.each(&:join)
+        abort "nil-kill: could not build trace documents: #{errors.size} shard(s)" \
+          " (#{errors.pop})" unless errors.empty?
+      end
       # FactMine already holds every shard's evidence in memory at the end of the
       # join, so it can merge there instead of writing each document out for
       # this process to read them all back. Only valid when the canonical set is

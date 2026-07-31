@@ -117,6 +117,12 @@ module NilKill
           "#{display_name} does not implement runtime call evidence decoding"
       end
 
+      # Decoding a whole trace at once. A provider that can do it in one pass
+      # overrides this; the rest are asked one event at a time.
+      def runtime_scip_call_evidence_batch(events:, root:)
+        events.map { |event| runtime_scip_call_evidence(event: event, root: root) }
+      end
+
       # Serialize tracer-owned value observations into the shared FactMine
       # runtime evidence contract. Providers may decode their own trace storage
       # here, but must not inspect source or infer flow relationships.
