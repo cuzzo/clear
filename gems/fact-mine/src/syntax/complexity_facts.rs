@@ -2025,7 +2025,7 @@ fn visit_loops(
                                 behavior,
                             )
                         })
-                        .or_else(|| tag_comparison_complexity(message, node))
+                        .or_else(|| fixed_side_comparison_complexity(message, node))
                         .or_else(|| negation_complexity(message))
                 })
                 // A record's shape is known, so an operation over that shape is
@@ -2790,20 +2790,30 @@ fn negation_complexity(
         .then(|| NormalizedCollectionOperation::Constant.complexity())
 }
 
-/// Comparing a value against a named variant is a tag check: either the tags
-/// differ and nothing else is read, or they match and what a unit variant
-/// carries is nothing. A variant built from constant-size parts costs those
-/// parts, which no input grows.
-fn tag_comparison_complexity(
+/// A comparison reads at most what its smaller side holds. One side stating a
+/// named variant is the tag-check case: either the tags differ and nothing else
+/// is read, or they match and a unit variant carries nothing. One side holding a
+/// fixed amount - a literal, a constant, a variant built from parts no input
+/// grows - is the same argument: whatever the other side turns out to be, the
+/// comparison stops once the fixed side is exhausted.
+///
+/// This is what types the largest class of comparison in every language, and it
+/// needs no operand type at all, which is why it holds where inference does not
+/// reach: a value read out of an external call, checked against a spelling the
+/// source states.
+fn fixed_side_comparison_complexity(
     message: &str,
     node: &Node,
 ) -> Option<crate::syntax::normalized_behavior::NormalizedCallComplexity> {
-    if !matches!(message, "==" | "!=") {
+    if !matches!(
+        message,
+        "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">="
+    ) {
         return None;
     }
     child_nodes(node)
         .into_iter()
-        .any(|operand| named_variant(operand))
+        .any(|operand| named_variant(operand) || constant_size_node(operand))
         .then(|| NormalizedCollectionOperation::Constant.complexity())
 }
 
@@ -3901,6 +3911,57 @@ fn overloaded(left: Vec<i32>, right: Vec<i32>) -> bool {
             None,
             "Vec equality dispatches through PartialEq and is not scalar"
         );
+    }
+
+    #[test]
+    fn a_comparison_against_a_literal_costs_that_literal_however_big_the_other_side_is() {
+        // Equality reads at most what the smaller side holds, and a literal
+        // holds the same amount whatever the input is. This is what types the
+        // largest class of comparison in every language: a value read out of an
+        // external call, checked against a spelling the source states.
+        let rust = language_facts(
+            r#"
+fn kind_is_block(node: &Node) -> bool {
+    node.kind() == "block"
+}
+"#,
+            Language::Rust,
+            ".rs",
+        );
+        let typescript = language_facts(
+            r#"
+export function isText(value: unknown): boolean {
+  return typeof value === "string";
+}
+"#,
+            Language::TypeScript,
+            ".ts",
+        );
+        let python = language_facts(
+            r#"
+def is_fold(entry):
+    return entry.kind != "fold"
+"#,
+            Language::Python,
+            ".py",
+        );
+        let priced = |rows: &[MethodComplexityFacts], function: &str, message: &str| {
+            rows.iter()
+                .find(|row| row.function == function)
+                .unwrap()
+                .call_contexts
+                .iter()
+                .find(|call| call.message == message)
+                .unwrap()
+                .known_time_complexity
+                .clone()
+        };
+        assert_eq!(priced(&rust, "kind_is_block", "==").as_deref(), Some("O(1)"));
+        assert_eq!(
+            priced(&typescript, "isText", "===").as_deref(),
+            Some("O(1)")
+        );
+        assert_eq!(priced(&python, "is_fold", "!=").as_deref(), Some("O(1)"));
     }
 
     #[test]
