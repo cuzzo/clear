@@ -2026,6 +2026,7 @@ fn visit_loops(
                             )
                         })
                         .or_else(|| tag_comparison_complexity(message, node))
+                        .or_else(|| negation_complexity(message))
                 })
                 // A record's shape is known, so an operation over that shape is
                 // priced even where no library contract names the type.
@@ -2776,6 +2777,17 @@ fn declared_empty_collection_name(
             })
     });
     empty.then(|| name.to_string())
+}
+
+/// Negation reads one value and writes one. Whatever produced that value is an
+/// operation in its own right, priced where it happens, so the negation adds a
+/// step rather than repeating that work. Every language spells it `!` or `not`,
+/// and in none of them does it depend on the operand's type being known.
+fn negation_complexity(
+    message: &str,
+) -> Option<crate::syntax::normalized_behavior::NormalizedCallComplexity> {
+    matches!(message.strip_suffix('@').unwrap_or(message), "!" | "not")
+        .then(|| NormalizedCollectionOperation::Constant.complexity())
 }
 
 /// Comparing a value against a named variant is a tag check: either the tags
