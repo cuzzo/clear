@@ -36,8 +36,39 @@ RSpec.describe "the trace document a shard produces" do
     "built    #{JSON.generate(built)[0, 300]}\n    expected #{JSON.generate(expected)[0, 300]}"
   end
 
+  # The rows the collector document shapes into, before anything joins them.
+  # Recorded from the same shard, so the two tests together pin the whole
+  # transformation from what the VM saw to what the join reads.
+  # The plan as the collector receives it, not a projection: a port tested
+  # against a hand-trimmed plan is tested against something that never occurs.
+  def plan
+    @plan ||= JSON.parse(Zlib::GzipReader.open(File.join(fixture, "plan.json.gz"), &:read))
+  end
+
+  it "shapes the collector document into exactly the recorded rows" do
+    Dir.mktmpdir("nil-kill-golden-rows", NilKill::ROOT) do |dir|
+      raw = Dir.glob(File.join(fixture, "input", "collector-raw-*.json.gz")).first
+      FileUtils.cp(raw, dir)
+      NilKill::Runtime::CollectorExport.write(runtime_dir: dir, plan: plan, root: NilKill::ROOT)
+
+      recorded = Dir.glob(File.join(fixture, "input", "*.jsonl.gz"))
+      expect(recorded).not_to be_empty
+      differing = recorded.filter_map do |path|
+        name = File.basename(path, ".gz")
+        built = File.join(dir, name)
+        next "#{name}: not written" unless File.file?(built)
+
+        expected = Zlib::GzipReader.open(path, &:readlines).map { |line| JSON.parse(line) }
+        actual = File.readlines(built).map { |line| JSON.parse(line) }
+        next if digest(actual) == digest(expected)
+
+        "#{name}: #{first_difference(actual, expected)}"
+      end
+      expect(differing).to be_empty, -> { differing.join("\n") }
+    end
+  end
+
   it "is exactly what the recorded shard produced" do
-    plan = JSON.parse(File.read(File.join(fixture, "plan-digest.json")))
     expected = JSON.parse(
       Zlib::GzipReader.open(File.join(fixture, "expected-runtime-trace.json.gz"), &:read)
     )
@@ -45,7 +76,7 @@ RSpec.describe "the trace document a shard produces" do
     Dir.mktmpdir("nil-kill-golden", NilKill::ROOT) do |dir|
       FileUtils.cp_r(Dir.glob(File.join(fixture, "input", "*")), dir)
       built = NilKill::Runtime::TraceArtifact.build(
-        root: NilKill::ROOT, runtime_dir: dir, plan: plan,
+        root: NilKill::ROOT, runtime_dir: dir, plan: { "plan_digest" => plan.fetch("plan_digest") },
         languages: expected.fetch("languages"), run_ids: expected.fetch("run_ids")
       )
 

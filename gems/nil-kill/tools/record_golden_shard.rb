@@ -29,9 +29,13 @@ Dir.glob(File.join(widest, "*.jsonl.gz")).each { |path| FileUtils.cp(path, File.
 FileUtils.cp(Dir.glob(File.join(widest, "collector-raw-*.json.gz")).first, File.join(fixture, "input"))
 FileUtils.cp(File.join(widest, "runtime-trace.json.gz"), File.join(fixture, "expected-runtime-trace.json.gz"))
 
-# Only the digest is read from the plan, and the plan itself is ten megabytes.
+# The runtime-evidence contract as the collector receives it. The private
+# instrumentation controls beside it in the plan file are ten megabytes and
+# nothing downstream of the collector reads them.
 plan = JSON.parse(File.read(NilKill::TRACE_PLAN_PATH))
-digest = plan.dig("runtime_evidence", "plan_digest") || plan["plan_digest"]
-File.write(File.join(fixture, "plan-digest.json"), JSON.generate("plan_digest" => digest))
+evidence = plan.fetch("runtime_evidence")
+Zlib::GzipWriter.open(File.join(fixture, "plan.json.gz")) do |gz|
+  gz.write(JSON.generate("runtime_evidence" => evidence, "plan_digest" => evidence["plan_digest"]))
+end
 
 puts "recorded #{File.basename(widest)} to #{fixture}"
