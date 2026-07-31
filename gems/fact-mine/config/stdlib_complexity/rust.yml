@@ -419,6 +419,10 @@ SemanticSymbol:
   # whichever implementation runs. Rendering a value reads that value.
   'convert/AsRef#as_ref().': constant
   'path/impl#[Path]new().': constant
+  # `PathBuf` is an `OsString`, so taking ownership of one moves it and
+  # copies nothing. Building from borrowed text does copy, which is what
+  # the owner-keyed fallback states for every other `from`.
+  'path/impl#[PathBuf][`From<OsString>`]from().': constant
   'iter/traits/collect/impl#[I][IntoIterator]into_iter().': constant
   'string/impl#[T][ToString]to_string().': linear_materialize
   'borrow/impl#[`Cow<''_, B>`]into_owned().': linear_materialize
