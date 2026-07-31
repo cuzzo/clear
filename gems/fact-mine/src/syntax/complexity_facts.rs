@@ -621,6 +621,18 @@ fn fact_for_method(
             TypeExpr::parse(declared, language),
         );
     }
+    // A record declared elsewhere is still read here, so its shape comes from
+    // the index rather than from whichever file happens to declare it.
+    if let Some(indexed) = crate::scip::indexed_field_types() {
+        for (owner_name, members) in indexed {
+            let entry = field_types.entry(owner_name.clone()).or_default();
+            for (member, declared) in members {
+                entry
+                    .entry(member.clone())
+                    .or_insert_with(|| TypeExpr::parse(declared, language));
+            }
+        }
+    }
     // Bind explicit method receiver variables to the owner type and augment
     // types only through language-owned, proven flow/declaration contracts.
     let mut augmented_parameter_types = parameter_types.clone();
@@ -1968,6 +1980,26 @@ fn visit_loops(
                             )
                         })
                 })
+                // A record's shape is known, so an operation over that shape is
+                // priced even where no library contract names the type.
+                .or_else(|| {
+                    let receiver_type = call_receiver(node).and_then(|receiver| {
+                        indexed_operand_type(path, language, receiver).or_else(|| {
+                            resolve_expr_type(
+                                receiver.text.trim(),
+                                parameter_types,
+                                state_types,
+                                field_types,
+                            )
+                        })
+                    });
+                    record_operator_complexity(
+                        message,
+                        receiver_type.as_ref(),
+                        field_types,
+                        behavior,
+                    )
+                })
                 .or_else(|| {
                     behavior.intrinsic_call_complexity(
                         call_receiver(node).map(|receiver| receiver.text.trim()),
@@ -2710,7 +2742,14 @@ fn record_operator_complexity(
     behavior: &dyn NormalizedLanguageBehavior,
 ) -> Option<crate::syntax::normalized_behavior::NormalizedCallComplexity> {
     let operator = message.strip_suffix('@').unwrap_or(message);
-    if !matches!(operator, "==" | "!=" | "<" | "<=" | ">" | ">=") {
+    // Copying a record costs what copying its parts costs, exactly as comparing
+    // one does: both walk the shape the declaration fixes, so neither grows
+    // with any input.
+    if !matches!(
+        operator,
+        "==" | "!=" | "<" | "<=" | ">" | ">=" | "clone" | "to_owned" | "cmp" | "partial_cmp" | "eq"
+            | "hash" | "ne"
+    ) {
         return None;
     }
     let owner = type_owner_name(operand_type?)?;
@@ -2722,7 +2761,7 @@ fn record_operator_complexity(
         .values()
         .all(|field| {
             behavior
-                .scalar_operator_complexity(operator, Some(field))
+                .scalar_operator_complexity("==", Some(field))
                 .is_some()
         })
         .then(|| NormalizedCollectionOperation::Constant.complexity())

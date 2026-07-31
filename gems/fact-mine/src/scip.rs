@@ -253,6 +253,36 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
         }
     }
     let _ = INDEXED_SIGNATURES.set(signatures);
+
+    let mut fields: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    for path in index_paths {
+        let Ok(index) = read_index(path) else {
+            continue;
+        };
+        for document in &index.documents {
+            for information in &document.symbols {
+                let Some(text) = information
+                    .signature_documentation
+                    .as_ref()
+                    .map(|signature| signature.text.trim())
+                else {
+                    continue;
+                };
+                let Some((owner, member)) = owner_and_member(&information.symbol) else {
+                    continue;
+                };
+                let Some((_, declared)) = binding_signature(text) else {
+                    continue;
+                };
+                fields
+                    .entry(owner)
+                    .or_default()
+                    .entry(member)
+                    .or_insert_with(|| declared.to_string());
+            }
+        }
+    }
+    let _ = INDEXED_FIELDS.set(fields);
 }
 
 /// The bindings the index typed inside one span of one file.
@@ -269,6 +299,26 @@ pub(crate) fn indexed_local_types(path: &str, first: usize, last: usize) -> Vec<
 }
 
 static INDEXED_SIGNATURES: OnceLock<BTreeMap<(String, usize, usize), String>> = OnceLock::new();
+static INDEXED_FIELDS: OnceLock<BTreeMap<String, BTreeMap<String, String>>> = OnceLock::new();
+
+/// The shape of every record the index resolved, by owner. A record declared in
+/// one file is read in another, so a per-file view of its fields cannot price a
+/// copy, a comparison or a field read of it anywhere but where it was declared.
+pub(crate) fn indexed_field_types() -> Option<&'static BTreeMap<String, BTreeMap<String, String>>> {
+    INDEXED_FIELDS.get()
+}
+
+/// The owner and member a symbol names, if it names a member of one. Every
+/// indexer spells this the same way: the descriptor path, then `#`, then the
+/// member.
+fn owner_and_member(symbol: &str) -> Option<(String, String)> {
+    let descriptor = symbol.split_whitespace().last()?;
+    let (owner, member) = descriptor.split_once('#')?;
+    let owner = owner.rsplit(['/', '.', ':']).next()?.trim();
+    let member = member.trim_end_matches(['.', '(', ')']).trim();
+    (!owner.is_empty() && !member.is_empty() && !member.contains('#'))
+        .then(|| (owner.to_string(), member.to_string()))
+}
 
 /// The declaration the index attaches to an exact source position. A field, a
 /// method, a parameter and a binding are each a symbol the compiler resolved;

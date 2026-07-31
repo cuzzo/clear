@@ -613,3 +613,22 @@ Returns.char:
   is_uppercase: bool
   is_lowercase: bool
   is_whitespace: bool
+
+# Free and associated calls, keyed by the type that owns them. A static call
+# names its type where a method would name its receiver, so it needs its own
+# section to be found at all.
+Intrinsic:
+  Instant.now: constant
+  SystemTime.now: constant
+  String.new: constant
+  String.from: linear_materialize
+  String.with_capacity: constant
+  Vec.new: constant
+  Vec.with_capacity: constant
+  PathBuf.from: linear_materialize
+  PathBuf.new: constant
+  Command.new: constant
+  HashMap.new: constant
+  HashSet.new: constant
+  BTreeMap.new: constant
+  BTreeSet.new: constant
