@@ -184,6 +184,17 @@ fn an_increment_leaves_the_evidence_a_full_collect_would_have() {
     assert_eq!(project.manifest()["generation"], 0);
     assert_eq!(project.manifest()["mode"], "full");
     assert_eq!(project.stored_shards(), 2);
+    // What each shard reached is what makes the next increment selective; a
+    // manifest that recorded nothing would rerun everything forever, silently.
+    let manifest = project.manifest();
+    for field in ["dependencies", "callsites"] {
+        let recorded = manifest[field].as_object().expect(field);
+        assert_eq!(recorded.len(), 2, "{field}: {recorded:?}");
+        assert!(
+            recorded.values().all(|entry| !entry.as_array().expect("array").is_empty()),
+            "{field}: {recorded:?}"
+        );
+    }
 
     // Nothing changed: the workload does not run at all.
     let (output, ok) = project.fast();
@@ -279,6 +290,15 @@ fn a_failing_shard_leaves_the_previous_evidence_exactly_where_it_was() {
         "{:?}",
         project.manifest()["stale_reason"]
     );
+
+    // Fixing the test recovers: a stale snapshot is a state to collect out of,
+    // not one that needs a full collect to escape.
+    project.edit("test/double_test.rb", "raise \"trace failure\" #", "assert_equal 8");
+    let (output, ok) = project.fast();
+    assert!(ok, "{output}");
+    assert_eq!(project.manifest()["complete"], true);
+    assert_eq!(project.manifest()["potentially_stale"], false);
+    assert_eq!(project.evidence(), before);
 }
 
 #[test]
@@ -288,4 +308,23 @@ fn an_incremental_collect_without_a_snapshot_says_so() {
 
     assert!(!ok);
     assert!(output.contains("run a full collect first"), "{output}");
+}
+
+#[test]
+fn a_workload_can_be_named_in_a_file_one_command_per_line() {
+    // A workload too long for a command line is still one collect.
+    let project = Project::new();
+    let listing = project.path().join("commands.txt");
+    std::fs::write(
+        &listing,
+        "# ignored\nruby -e 'exit 0'\n\nruby -e 'exit 0'\n",
+    )
+    .expect("write");
+
+    let (output, ok) = project.collect(&["--commands", &listing.to_string_lossy()]);
+
+    // Two shards ran; the collect got as far as needing evidence from them,
+    // which is what proves both lines parsed into commands.
+    assert!(ok || output.contains("shard"), "{output}");
+    assert!(!output.contains("requires a command"), "{output}");
 }

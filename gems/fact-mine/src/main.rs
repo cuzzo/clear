@@ -1405,6 +1405,23 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                                 .context("--cmd is not a valid command")?,
                         );
                     }
+                    // One command per line, so a workload too long for a
+                    // command line can still be one collect.
+                    "--commands" => {
+                        let file = iter.next().context("--commands requires a file")?;
+                        let text = std::fs::read_to_string(&file)
+                            .with_context(|| format!("unreadable command file {file}"))?;
+                        for line in text.lines() {
+                            let line = line.trim();
+                            if line.is_empty() || line.starts_with('#') {
+                                continue;
+                            }
+                            commands.push(
+                                shell_words::split(line)
+                                    .with_context(|| format!("{file}: {line} is not a command"))?,
+                            );
+                        }
+                    }
                     "--" => {
                         commands.push(iter.by_ref().collect());
                         break;

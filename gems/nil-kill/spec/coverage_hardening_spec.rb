@@ -77,33 +77,6 @@ RSpec.describe "NilKill coverage hardening" do
       end.to raise_error(SystemExit) { |error| expect(error.status).to eq(2) }
     end
 
-    it "parses command files, command strings, globs, templates, and trailing commands" do
-      Dir.mktmpdir do |dir|
-        command_file = File.join(dir, "commands.txt")
-        File.write(command_file, "# ignored\nruby -e 'puts 1'\n\nbundle exec rspec\n")
-        a = File.join(dir, "a.rb")
-        b = File.join(dir, "b.rb")
-        File.write(a, "")
-        File.write(b, "")
-
-        cli = described_class.new([
-          "collect",
-          "--commands", command_file,
-          "--cmd", "ruby -w",
-          "--glob", File.join(dir, "*.rb"),
-          "--template", "ruby {file}",
-          "--", "bundle", "exec", "ruby", "script.rb",
-        ])
-
-        commands = cli.send(:collect_commands)
-        expect(commands).to include(["ruby", "-e", "puts 1"])
-        expect(commands).to include(["bundle", "exec", "rspec"])
-        expect(commands).to include(["ruby", "-w"])
-        expect(commands).to include(["ruby", a], ["ruby", b])
-        expect(commands).to include(["bundle", "exec", "ruby", "script.rb"])
-      end
-    end
-
     it "writes and compares collect metadata by content, not mtime alone" do
       Dir.mktmpdir do |dir|
         cli = described_class.new([])

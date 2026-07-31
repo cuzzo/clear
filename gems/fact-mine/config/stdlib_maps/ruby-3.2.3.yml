@@ -10,7 +10,7 @@ source:
     # `index_cruby.rb` indexes the complete core-A frontier. Keep the
     # producer profile aligned with that frontier: `re.c` owns Regexp.escape
     # and Regexp#match?, both of which are emitted by NilKill consumers.
-    - "{array,dir,enum,error,file,hash,io,math,numeric,re,string}.c"
+    - "{array,dir,enum,error,file,hash,io,math,numeric,re,string,struct}.c"
 
 index:
   command:
