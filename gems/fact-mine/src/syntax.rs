@@ -773,7 +773,12 @@ pub struct SimilarityFinding {
 }
 
 pub fn parse_file(file: PathBuf, language: Language) -> Result<Document> {
-    tree_sitter_adapter::parse_file(file, language)
+    let document = tree_sitter_adapter::parse_file(file, language)?;
+    // Every record shape a parse produces, kept for the files parsed after it: a
+    // record is declared in one file and read in others, and only its own
+    // declaration states what it holds.
+    complexity_facts::record_project_fields(std::slice::from_ref(&document));
+    Ok(document)
 }
 
 pub fn parse_file_for_report(file: PathBuf, language: Language) -> Result<Document> {

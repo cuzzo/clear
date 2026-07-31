@@ -359,6 +359,39 @@ impl Default for LoopContext {
     }
 }
 
+static PROJECT_FIELDS: std::sync::OnceLock<
+    std::sync::RwLock<BTreeMap<String, BTreeMap<String, String>>>,
+> = std::sync::OnceLock::new();
+
+/// Record the shape of every record a parse produced. A record is declared in
+/// one file and read in every other, and nothing else states its fields: a
+/// compiler index carries no signature for them.
+pub(crate) fn record_project_fields(documents: &[Document]) {
+    let table = PROJECT_FIELDS.get_or_init(|| std::sync::RwLock::new(BTreeMap::new()));
+    let Ok(mut fields) = table.write() else {
+        return;
+    };
+    for document in documents {
+        for state in &document.state_declarations {
+            let Some(declared) = state.r#type.as_deref() else {
+                continue;
+            };
+            fields
+                .entry(state.owner.clone())
+                .or_default()
+                .entry(state.field.trim_start_matches('@').to_string())
+                .or_insert_with(|| declared.to_string());
+        }
+    }
+}
+
+fn project_fields() -> BTreeMap<String, BTreeMap<String, String>> {
+    PROJECT_FIELDS
+        .get()
+        .and_then(|table| table.read().ok().map(|fields| fields.clone()))
+        .unwrap_or_default()
+}
+
 pub(crate) fn facts(document: &Document) -> Vec<MethodComplexityFacts> {
     let behavior = super::normalized_behavior::behavior(document.language);
     let block_summaries = preliminary_block_summaries(document, behavior);
@@ -631,6 +664,19 @@ fn fact_for_method(
                     .entry(member.clone())
                     .or_insert_with(|| TypeExpr::parse(declared, language));
             }
+        }
+    }
+    // A record declared in another file is still read here, and only the parse
+    // of that file states what it holds.
+    for (owner_name, members) in project_fields() {
+        let Some(owner_key) = type_owner_name(&TypeExpr::parse(&owner_name, language)) else {
+            continue;
+        };
+        let entry = field_types.entry(owner_key).or_default();
+        for (member, declared) in members {
+            entry
+                .entry(member)
+                .or_insert_with(|| TypeExpr::parse(&declared, language));
         }
     }
     // Bind explicit method receiver variables to the owner type and augment
