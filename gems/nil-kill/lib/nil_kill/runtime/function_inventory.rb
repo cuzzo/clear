@@ -36,16 +36,6 @@ module NilKill
         functions.sort.to_h
       end
 
-      def keys_for_coverage(path, lines)
-        relative_path = relative(path)
-        covered = Array(lines).map(&:to_i).to_set
-        functions.values.filter_map do |function|
-          next unless function["path"] == relative_path
-          first_line, last_line = function.fetch("span", []).values_at(0, 2).map(&:to_i).minmax
-          function["key"] if covered.any? { |line| line.between?(first_line, last_line) }
-        end
-      end
-
       def key_for_entry(path:, owner:, name:, kind:, line: nil)
         relative_path = relative(path)
         candidates = functions.values.select do |function|
