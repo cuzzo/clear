@@ -358,6 +358,13 @@ def run_instance(instance, scope, cpus)
     env["GITHUB_ACTIONS"] = "true"
     env["GITHUB_WORKSPACE"] = ROOT
 
+    # A hosted runner checks out fresh, so SimpleCov starts with no resultset.
+    # Here every job shares one working tree, and SimpleCov merges whatever an
+    # earlier job left in coverage/ -- which is how a step that tracks one
+    # directory came to report 49% over the whole repository.
+    FileUtils.rm_f(File.join(ROOT, "coverage", ".resultset.json"))
+    FileUtils.rm_f(File.join(ROOT, "coverage", ".last_run.json"))
+
     steps = instance.job["steps"] || []
     step_scope["steps"] = {}
     steps.each_with_index do |step, index|
