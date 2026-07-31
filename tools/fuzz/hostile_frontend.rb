@@ -9,8 +9,17 @@ require "timeout"
 ROOT = File.expand_path("../..", __dir__)
 FAILURE_DIR = File.join(ROOT, "compiler/spec/integration/fixtures/hostile_frontend")
 
+# The worker exceeded its parse budget, as distinct from crashing.
+PARSE_TIMEOUT_EXIT = 75
+
 class HostileFrontend
   Result = Struct.new(:ok, :reason, :status, keyword_init: true)
+
+  # A worker that exceeds its parse budget says so and exits; the wall
+  # timeout here is only for one wedged before it can. Charging interpreter
+  # startup to the parse budget made a one-byte input "time out" on a loaded
+  # runner -- the budget was gone before the parser saw anything.
+  SPAWN_GRACE = 30
 
   def initialize(timeout:, memory_mb:)
     @timeout = timeout
@@ -20,10 +29,12 @@ class HostileFrontend
   def run(source)
     reader, writer = IO.pipe
     pid = Process.spawn(
+      { "HOSTILE_FRONTEND_PARSE_TIMEOUT" => @timeout.to_s },
       RbConfig.ruby, __FILE__, "--worker",
       in: reader, out: File::NULL, err: File::NULL,
       rlimit_as: @memory_bytes,
-      rlimit_cpu: [2, 2],
+      # CPU time, not wall time, so a contended runner does not spend it.
+      rlimit_cpu: [@timeout.ceil + 2, @timeout.ceil + 2],
     )
     reader.close
     writer.binmode
@@ -31,8 +42,11 @@ class HostileFrontend
     writer.close
 
     status = nil
-    Timeout.timeout(@timeout) { _, status = Process.wait2(pid) }
+    Timeout.timeout(@timeout + SPAWN_GRACE) { _, status = Process.wait2(pid) }
     return Result.new(ok: false, reason: "signal #{status.termsig}", status: status) if status.signaled?
+    if status.exitstatus == PARSE_TIMEOUT_EXIT
+      return Result.new(ok: false, reason: "parse timeout", status: status)
+    end
     return Result.new(ok: false, reason: "internal exception (exit #{status.exitstatus})", status: status) unless status.success?
 
     Result.new(ok: true, reason: "diagnostic or successful parse", status: status)
@@ -58,9 +72,17 @@ def worker!
     max_tokens: 200_000,
     max_source_bytes: 2 * 1024 * 1024,
   )
-  tokens = Lexer.new(source, file: "<hostile>", budget: budget).tokenize
-  ClearParser.new(tokens, source, budget: budget).parse
+  # Timed here rather than around the whole process: everything above is
+  # interpreter startup and requiring the compiler, which is ~0.2s and has
+  # nothing to do with how hostile the input is.
+  parse_timeout = Float(ENV.fetch("HOSTILE_FRONTEND_PARSE_TIMEOUT", "1.0"))
+  Timeout.timeout(parse_timeout) do
+    tokens = Lexer.new(source, file: "<hostile>", budget: budget).tokenize
+    ClearParser.new(tokens, source, budget: budget).parse
+  end
   exit 0
+rescue Timeout::Error
+  exit PARSE_TIMEOUT_EXIT
 rescue Lexer::Error, ParserError
   exit 0
 rescue StandardError => error
