@@ -261,6 +261,12 @@ impl NormalizedSignature {
     }
 }
 
+/// A binding names one thing. Anything else in that position is a fragment of
+/// some larger declaration that was split in the wrong place.
+pub(crate) fn usable_binding_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
 /// Default signature grammar: `name(a: T, b: U) -> Ret` or `... : Ret`, which
 /// covers Rust/Go/Swift/Kotlin/TypeScript-shaped declarations. Adapters whose
 /// grammar differs override `parse_signature`.
@@ -2319,11 +2325,24 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// `var uc *unleashCmd`, Java `Foo x`). Grammar is language-specific; the
     /// returned type name is not. The default handles the `let x: T` / `var x: T`
     /// colon form.
-    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+    fn parse_variable_binding(&self, text: &str) -> Option<(String, String)> {
         let text = text.trim().trim_end_matches(';').trim();
-        let (_binding, declared) = text.split_once(':')?;
-        let declared = declared.trim();
-        (!declared.is_empty()).then(|| declared.to_string())
+        let (binding, declared) = text.split_once(':')?;
+        // A callable states parameters, not a binding, and a path separator is
+        // not an ascription: neither is a declaration of one name. Only what
+        // precedes the colon decides that - a tuple or function type after it
+        // is the declared type, parentheses and all.
+        if binding.contains('(') || declared.starts_with(':') {
+            return None;
+        }
+        let name = binding.split_whitespace().last()?;
+        let declared = declared.trim().trim_end_matches(['=', ';']).trim();
+        (!name.is_empty() && !declared.is_empty() && usable_binding_name(name))
+            .then(|| (name.to_string(), declared.to_string()))
+    }
+
+    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+        self.parse_variable_binding(text).map(|(_, declared)| declared)
     }
 
     /// Whether SCIP occurrence selection should prefer the first *semantic*
@@ -2976,6 +2995,19 @@ pub(crate) fn type_after_local_colon(source: &str, name: &str) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_binding_keeps_a_type_that_has_parentheses_of_its_own() {
+        let rust = behavior(crate::syntax::Language::Rust);
+        assert_eq!(
+            rust.parse_variable_binding("let pair: (usize, usize)"),
+            Some(("pair".to_string(), "(usize, usize)".to_string()))
+        );
+        assert_eq!(
+            rust.parse_variable_binding("let check: fn(usize) -> bool"),
+            Some(("check".to_string(), "fn(usize) -> bool".to_string()))
+        );
+    }
 
     #[test]
     fn a_path_separator_is_not_a_type_ascription() {

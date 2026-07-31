@@ -78,6 +78,10 @@ impl TextDocumentEncoding {
 struct Document {
     #[serde(alias = "relativePath")]
     relative_path: String,
+    /// What the indexer says this file is. Reading a declaration it wrote
+    /// requires knowing whose grammar wrote it.
+    #[serde(default)]
+    language: String,
     #[serde(default)]
     occurrences: Vec<Occurrence>,
     #[serde(default)]
@@ -106,6 +110,16 @@ struct SymbolInformation {
 struct SignatureDocumentation {
     #[serde(default)]
     text: String,
+}
+
+impl SignatureDocumentation {
+    /// The declaration as its own language spells it, with the indexer's
+    /// rendering removed. Everything downstream reads grammar, and the kind an
+    /// indexer leads with - `(property)`, `(variable)` - is not grammar. This
+    /// is the one place it comes off.
+    fn declaration(&self) -> &str {
+        without_declaration_kind(self.text.trim())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -290,7 +304,7 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
             .flat_map(|document| document.symbols.iter())
             .filter(|information| !information.symbol.starts_with("local "))
             .filter_map(|information| {
-                let text = information.signature_documentation.as_ref()?.text.trim();
+                let text = information.signature_documentation.as_ref()?.declaration();
                 (!text.is_empty()).then(|| (information.symbol.as_str(), text.to_string()))
             })
             .collect::<BTreeMap<_, _>>();
@@ -299,7 +313,7 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
                 .symbols
                 .iter()
                 .filter_map(|information| {
-                    let text = information.signature_documentation.as_ref()?.text.trim();
+                    let text = information.signature_documentation.as_ref()?.declaration();
                     (!text.is_empty()).then(|| (information.symbol.as_str(), text.to_string()))
                 })
                 .collect::<BTreeMap<_, _>>();
@@ -332,14 +346,14 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
                 let Some(text) = information
                     .signature_documentation
                     .as_ref()
-                    .map(|signature| signature.text.trim())
+                    .map(SignatureDocumentation::declaration)
                 else {
                     continue;
                 };
                 let Some((owner, member)) = owner_and_member(&information.symbol) else {
                     continue;
                 };
-                let Some((_, declared)) = binding_signature(text) else {
+                let Some((_, declared)) = binding_signature(document, text) else {
                     continue;
                 };
                 fields
@@ -418,18 +432,16 @@ pub(crate) fn indexed_signature_at(path: &str, line: usize, column: usize) -> Op
         .map(|(_, text)| text.as_str())
 }
 
-/// What a declaration states its result is: a callable hands back what follows
-/// the arrow, anything else holds what follows the colon.
-pub(crate) fn declared_result_type(text: &str) -> Option<String> {
-    let text = without_declaration_kind(text);
-    if let Some((_, returned)) = text.rsplit_once("->") {
-        let returned = returned.trim().trim_end_matches(['{', ';']).trim();
-        return (!returned.is_empty()).then(|| returned.to_string());
-    }
-    if text.contains('(') {
-        return None;
-    }
-    binding_signature(text).map(|(_, declared)| declared.to_string())
+/// What a declaration states its result is: a callable hands back its return
+/// type, anything else holds what it is declared as. Both are grammar, so both
+/// are the owning adapter's to read.
+pub(crate) fn declared_result_type(language: &str, text: &str) -> Option<String> {
+    let language = crate::syntax::Language::parse(language).ok()?;
+    let behavior = crate::syntax::normalized_behavior::behavior(language);
+    behavior
+        .parse_signature(text)
+        .return_type
+        .or_else(|| behavior.parse_variable_binding(text).map(|(_, t)| t))
 }
 
 /// An indexer may lead a declaration with what kind of declaration it is:
@@ -470,11 +482,11 @@ pub fn local_binding_types(index_path: &Path) -> Result<Vec<(String, usize, Stri
             let Some(text) = information
                 .signature_documentation
                 .as_ref()
-                .map(|signature| signature.text.trim())
+                .map(SignatureDocumentation::declaration)
             else {
                 continue;
             };
-            let Some((name, declared)) = binding_signature(text) else {
+            let Some((name, declared)) = binding_signature(document, text) else {
                 continue;
             };
             let Some(line) = definitions.get(information.symbol.as_str()) else {
@@ -483,8 +495,8 @@ pub fn local_binding_types(index_path: &Path) -> Result<Vec<(String, usize, Stri
             out.push((
                 document.relative_path.clone(),
                 *line,
-                name.to_string(),
-                declared.to_string(),
+                name,
+                declared,
             ));
         }
     }
@@ -494,20 +506,27 @@ pub fn local_binding_types(index_path: &Path) -> Result<Vec<(String, usize, Stri
 /// A binding's declaration reduced to name and type. Indexers render it with
 /// the language's own binding keyword, so the keyword is whatever precedes the
 /// name and is not part of either.
-fn binding_signature(text: &str) -> Option<(&str, &str)> {
-    let (head, declared) = text.split_once(':')?;
-    // A callable states its parameters, not a binding: splitting on the first
-    // colon reads its first parameter as one and hands it the rest of the
-    // signature as a type. A path separator is not an ascription either.
-    if head.contains('(') || declared.starts_with(':') {
-        return None;
-    }
-    let name = head.split_whitespace().last()?;
-    let declared = declared.trim().trim_end_matches(['=', ';']).trim();
-    (!name.is_empty()
-        && !declared.is_empty()
-        && name.chars().all(|c| c.is_alphanumeric() || c == '_'))
-    .then_some((name, declared))
+/// The binding a declaration states, read through the adapter that owns the
+/// grammar it was written in. A document says which that is; without it this
+/// had its own idea of what a declaration looks like, and disagreed with the
+/// six adapters that already knew.
+fn binding_signature(document: &Document, text: &str) -> Option<(String, String)> {
+    document_behavior(document)?.parse_variable_binding(text)
+}
+
+/// Which adapter owns the grammar a document was written in. An indexer states
+/// it - rust-analyzer and scip-go do - and where one does not, the path it
+/// indexed still names the file.
+fn document_behavior(
+    document: &Document,
+) -> Option<&'static dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior> {
+    let language = crate::syntax::Language::parse(&document.language.to_ascii_lowercase())
+        .ok()
+        .or_else(|| {
+            let extension = document.relative_path.rsplit_once('.')?.1;
+            crate::syntax::Language::for_extension(&extension.to_ascii_lowercase())
+        })?;
+    Some(crate::syntax::normalized_behavior::behavior(language))
 }
 
 fn occurrence_line(occurrence: &Occurrence) -> Option<usize> {
@@ -1122,6 +1141,7 @@ fn index_from_protobuf(index: scip::types::Index) -> Result<Index> {
                 .collect();
             Ok(Document {
                 relative_path: document.relative_path,
+                language: document.language,
                 occurrences,
                 symbols,
             })
@@ -1340,7 +1360,7 @@ fn apply_signature_types(output: &mut ProfileOutput, index: &Index) -> usize {
         .iter()
         .flat_map(|document| &document.symbols)
         .filter_map(|information| {
-            let text = information.signature_documentation.as_ref()?.text.trim();
+            let text = information.signature_documentation.as_ref()?.declaration();
             (!text.is_empty()).then(|| (information.symbol.as_str(), text))
         })
         .collect::<BTreeMap<_, _>>();
@@ -1507,7 +1527,7 @@ fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usiz
                     .find(|information| information.symbol == symbol)
             })
             .and_then(|information| information.signature_documentation.as_ref())
-            .map(|documentation| documentation.text.trim())
+            .map(SignatureDocumentation::declaration)
             .filter(|text| !text.is_empty());
         let Some(declaration) = declaration else {
             continue;
@@ -1648,7 +1668,7 @@ fn apply_scalar_operator_types(output: &mut ProfileOutput, index: &Index) -> usi
                         .find(|information| information.symbol == occurrence.symbol)
                 })
                 .and_then(|information| information.signature_documentation.as_ref())
-                .map(|documentation| documentation.text.trim())
+                .map(SignatureDocumentation::declaration)
                 .filter(|text| !text.is_empty());
             let Some(declared) =
                 declaration.and_then(|text| behavior.parse_variable_declaration(text))
@@ -2910,11 +2930,13 @@ mod tests {
     fn longest_relative_document_path_wins_suffix_collisions() {
         let documents = vec![
             Document {
+                language: "rust".to_string(),
                 relative_path: "lru.go".into(),
                 occurrences: Vec::new(),
                 symbols: Vec::new(),
             },
             Document {
+                language: "rust".to_string(),
                 relative_path: "simplelru/lru.go".into(),
                 occurrences: Vec::new(),
                 symbols: Vec::new(),
@@ -4892,16 +4914,22 @@ mod local_binding_type_tests {
     #[test]
     fn a_binding_signature_is_split_into_name_and_type() {
         assert_eq!(
-            binding_signature("let kept: Vec<String>"),
-            Some(("kept", "Vec<String>"))
+            crate::syntax::normalized_behavior::behavior(crate::syntax::Language::Rust)
+                .parse_variable_binding("let kept: Vec<String>"),
+            Some(("kept".to_string(), "Vec<String>".to_string()))
         );
+        let rust = crate::syntax::normalized_behavior::behavior(crate::syntax::Language::Rust);
+        let kotlin =
+            crate::syntax::normalized_behavior::behavior(crate::syntax::Language::Kotlin);
         // Another language's binding keyword is still just what precedes the name.
-        assert_eq!(binding_signature("var total: int"), Some(("total", "int")));
-        assert_eq!(binding_signature("val rows: List<Row>"), Some(("rows", "List<Row>")));
+        assert_eq!(
+            kotlin.parse_variable_binding("val rows: List<Row>"),
+            Some(("rows".to_string(), "List<Row>".to_string()))
+        );
         // A declaration that names no type states nothing about one.
-        assert_eq!(binding_signature("let kept"), None);
+        assert_eq!(rust.parse_variable_binding("let kept"), None);
         // A function signature is not a binding.
-        assert_eq!(binding_signature("fn find(x: usize) -> usize"), None);
+        assert_eq!(rust.parse_variable_binding("fn find(x: usize) -> usize"), None);
     }
 
     #[test]
@@ -4909,6 +4937,7 @@ mod local_binding_type_tests {
         let index = serde_json::json!({
             "documents": [{
                 "relativePath": "src/lib.rs",
+                "language": "rust",
                 "occurrences": [{"range": [11, 8, 12], "symbol": "local 0", "symbolRoles": 1}],
                 "symbols": [{
                     "symbol": "local 0",
@@ -4924,30 +4953,35 @@ mod local_binding_type_tests {
         let signature = document.symbols[0]
             .signature_documentation
             .as_ref()
-            .map(|signature| signature.text.trim())
-            .and_then(binding_signature);
-        assert_eq!(signature, Some(("kept", "Vec<String>")));
+            .map(SignatureDocumentation::declaration)
+            .and_then(|text| binding_signature(document, text));
+        assert_eq!(
+            signature,
+            Some(("kept".to_string(), "Vec<String>".to_string()))
+        );
     }
 
     #[test]
     fn a_callable_signature_states_no_binding() {
         // Splitting on the first colon reads a function's first parameter as a
-        // binding and hands it the rest of the signature as its type.
+        // binding and hands it the rest of the signature as its type. The
+        // grammar is the adapter's, so the guard belongs with it.
+        let rust = crate::syntax::normalized_behavior::behavior(crate::syntax::Language::Rust);
         assert_eq!(
-            binding_signature(
+            rust.parse_variable_binding(
                 "fn reset_at(&self, boundary: &Boundary, ranges: &BTreeMap<String, RangeInfo>) -> Option<ResetPoint>"
             ),
             None
         );
-        assert_eq!(binding_signature("fn new() -> Vec<String>"), None);
-        // A binding still reads, including one whose type is a path.
+        assert_eq!(rust.parse_variable_binding("fn new() -> Vec<String>"), None);
+        assert_eq!(rust.parse_variable_binding("let mut dead = Vec::new()"), None);
         assert_eq!(
-            binding_signature("let mut dead: Vec<String>"),
-            Some(("dead", "Vec<String>"))
+            rust.parse_variable_binding("let mut dead: Vec<String>"),
+            Some(("dead".to_string(), "Vec<String>".to_string()))
         );
         assert_eq!(
-            binding_signature("boundary: &local_flow::Boundary"),
-            Some(("boundary", "&local_flow::Boundary"))
+            rust.parse_variable_binding("boundary: &local_flow::Boundary"),
+            Some(("boundary".to_string(), "&local_flow::Boundary".to_string()))
         );
     }
 
@@ -4972,24 +5006,36 @@ mod local_binding_type_tests {
 
     #[test]
     fn a_declaration_states_its_type_behind_the_kind_the_indexer_names() {
-        // scip-typescript leads every member and parameter with what kind of
-        // declaration it is. The kind is not part of the type it states.
+        // scip-typescript and scip-python lead every member and parameter with
+        // what kind of declaration it is. That is the indexer's rendering, not
+        // the language's grammar, so it comes off as the text leaves the index
+        // and no adapter ever has to know about it.
+        let rendered = SignatureDocumentation {
+            text: "(property) code: \"invalid_type\" | \"too_big\"".to_string(),
+        };
+        assert_eq!(rendered.declaration(), "code: \"invalid_type\" | \"too_big\"");
         assert_eq!(
-            declared_result_type("(property) code: \"invalid_type\" | \"too_big\""),
+            SignatureDocumentation { text: "(parameter) count: number".to_string() }.declaration(),
+            "count: number"
+        );
+        // A declaration carrying no such marker is untouched.
+        assert_eq!(
+            SignatureDocumentation { text: "pub union_width: usize".to_string() }.declaration(),
+            "pub union_width: usize"
+        );
+        // What the adapter then reads is a result or a binding, by its grammar.
+        assert_eq!(
+            declared_result_type("typescript", rendered.declaration()),
             Some("\"invalid_type\" | \"too_big\"".to_string())
         );
+        // A method states its result after the parameter list, which the
+        // adapter's own signature grammar reads.
         assert_eq!(
-            declared_result_type("(parameter) count: number"),
-            Some("number".to_string())
-        );
-        // A callable still states its result after the arrow, and a call
-        // signature with no arrow still states no binding.
-        assert_eq!(
-            declared_result_type("(method) Array<T>.slice(start?: number): T[]"),
-            None
+            declared_result_type("typescript", "(method) Array<T>.slice(start?: number): T[]"),
+            Some("T[]".to_string())
         );
         assert_eq!(
-            declared_result_type("fn kind(&self) -> &'static str"),
+            declared_result_type("rust", "fn kind(&self) -> &'static str"),
             Some("&'static str".to_string())
         );
     }

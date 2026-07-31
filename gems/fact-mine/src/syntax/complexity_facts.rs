@@ -2986,7 +2986,7 @@ fn indexed_operand_type(path: &str, language: &str, operand: &Node) -> Option<Ty
         operand.first_lineno,
         operand.first_column + offset,
     )?;
-    let declared = TypeExpr::parse(&crate::scip::declared_result_type(signature)?, language);
+    let declared = TypeExpr::parse(&crate::scip::declared_result_type(language, signature)?, language);
     if !element_read {
         return Some(declared);
     }

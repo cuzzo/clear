@@ -369,11 +369,14 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     }
 
     // The Go indexer renders a local as `var name Type` - the type trails.
-    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+    fn parse_variable_binding(&self, text: &str) -> Option<(String, String)> {
         let text = text.trim().trim_start_matches("var ").trim();
-        let (_name, declared) = text.split_once(char::is_whitespace)?;
+        let (name, declared) = text.split_once(char::is_whitespace)?;
         let declared = declared.trim();
-        (!declared.is_empty() && !declared.contains('=')).then(|| declared.to_string())
+        (!declared.is_empty()
+            && !declared.contains('=')
+            && super::normalized_behavior::usable_binding_name(name))
+        .then(|| (name.to_string(), declared.to_string()))
     }
 
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
