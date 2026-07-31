@@ -2447,6 +2447,34 @@ fn collect_assignments(
     if deferred_block(node, behavior) {
         return;
     }
+    // A loop binds its name to one element of what it walks, which is an
+    // assignment from that collection however the language spells the loop.
+    // Without it a copy made inside the loop names a binding that leads back to
+    // no parameter, and a function copying while iterating can never close.
+    if let Some(control) = loop_control(node) {
+        let iterated = cardinality_names(control, behavior);
+        if !iterated.is_empty() {
+            for binding in loop_binding_names(node, behavior) {
+                if iterated.contains(&binding) {
+                    continue;
+                }
+                output
+                    .entry(binding)
+                    .or_default()
+                    .push(Assignment {
+                        line: node.first_lineno,
+                        column: node.first_column,
+                        dependencies: iterated.clone(),
+                        cardinality_dependencies: iterated.clone(),
+                        shrinking: false,
+                        halving: false,
+                        structural_descent: false,
+                        empty_collection: false,
+                        fixed_collection: false,
+                    });
+            }
+        }
+    }
     if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
         if let Some(name) = child_string(node.children.first()) {
             let dependencies = node
@@ -3972,6 +4000,69 @@ fn overloaded(left: Vec<i32>, right: Vec<i32>) -> bool {
             context("overloaded", "==").known_time_complexity,
             None,
             "Vec equality dispatches through PartialEq and is not scalar"
+        );
+    }
+
+    #[test]
+    fn a_copy_made_while_iterating_is_bounded_by_what_is_iterated() {
+        // `d.file.clone()` costs the same whether `d` is a parameter or the
+        // binding a loop hands over: in both cases it copies one element of
+        // what the caller supplied. Only the second was left unbounded, so a
+        // function copying inside a loop could never close its bound.
+        let rows = language_facts(
+            r#"
+pub struct Doc { pub file: String }
+
+fn field_of_param(d: &Doc) -> String {
+    d.file.clone()
+}
+
+fn field_in_loop(docs: &[Doc]) -> Vec<String> {
+    let mut out = Vec::new();
+    for d in docs {
+        out.push(d.file.clone());
+    }
+    out
+}
+
+fn field_in_closure(docs: &[Doc]) -> Vec<String> {
+    docs.iter().map(|d| d.file.clone()).collect()
+}
+"#,
+            Language::Rust,
+            ".rs",
+        );
+        let relation = |function: &str| {
+            rows.iter()
+                .find(|row| row.function == function)
+                .unwrap_or_else(|| panic!("no facts for {function}"))
+                .allocations
+                .iter()
+                .find(|allocation| allocation.kind == "clone")
+                .map(|allocation| allocation.cardinality_relation.clone())
+        };
+        assert_eq!(relation("field_of_param").as_deref(), Some("same"));
+        assert_eq!(
+            relation("field_in_loop").as_deref(),
+            Some("same"),
+            "a copy of a loop binding is bounded by the collection the loop walks"
+        );
+        // A closure is analysed as its own function, and the name in its header
+        // is that function's parameter. Without it the copy inside names a
+        // binding that belongs to nothing.
+        let closure = rows
+            .iter()
+            .find(|row| row.function.starts_with("<lambda@"))
+            .expect("the closure is analysed as its own function");
+        assert_eq!(closure.parameters, vec!["d".to_string()]);
+        assert_eq!(
+            closure
+                .allocations
+                .iter()
+                .find(|allocation| allocation.kind == "clone")
+                .map(|allocation| allocation.cardinality_relation.as_str()),
+            Some("same"),
+            "a copy of a closure's own parameter is bounded by what it is handed"
         );
     }
 
