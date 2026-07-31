@@ -14,6 +14,7 @@ pub mod runtime_evidence;
 pub mod runtime_protocol;
 pub mod runtime_trace;
 pub mod scip;
+pub mod scip_emit;
 pub mod sorbet_sig;
 pub mod trace_document;
 pub mod trace_plan;

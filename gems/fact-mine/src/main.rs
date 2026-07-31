@@ -301,6 +301,62 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillScipIndex {
+            runtime_dir,
+            evidence,
+            plan,
+            output,
+            attestation,
+            files,
+            environment,
+            root,
+        } => {
+            let raw = fact_mine_rust::runtime_protocol::read_json(&plan)
+                .with_context(|| format!("unreadable plan {}", plan.display()))?;
+            let document: serde_json::Value = serde_json::from_str(&raw)?;
+            let runtime_plan = document
+                .get("runtime_evidence")
+                .filter(|value| value.is_object())
+                .cloned()
+                .unwrap_or(document);
+            let environment = environment
+                .iter()
+                .filter_map(|claim| claim.split_once('='))
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect::<std::collections::BTreeMap<_, _>>();
+
+            let emitted = fact_mine_rust::scip_emit::emit(
+                &root,
+                &runtime_dir,
+                &evidence,
+                &runtime_plan,
+                &files,
+                &environment,
+                |evidence_path, sources| {
+                    Ok(runtime_scip_overlay(&root, sources, &plan, evidence_path)?.index)
+                },
+            )?;
+            fs::write(&output, serde_json::to_string(&emitted.index)? + "\n")?;
+            fact_mine_rust::runtime_trace::write_json(
+                &attestation,
+                &(serde_json::to_string_pretty(&emitted.attestation)? + "\n"),
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "index": output,
+                    "attestation": attestation,
+                    "events": emitted.events,
+                    "inferred_events": emitted.inferred_events,
+                    "documents": emitted.documents,
+                    "occurrences": emitted.occurrences,
+                    "invalid_events": emitted.invalid_events,
+                    "excluded_events": 0,
+                    "runtime_evidence": evidence,
+                    "runtime_value_observations": emitted.observations,
+                }))?
+            );
+        }
         Command::NilKillTraceDocument { runtime_dirs, plan, root } => {
             let raw = fact_mine_rust::runtime_protocol::read_json(&plan)
                 .with_context(|| format!("unreadable plan {}", plan.display()))?;
@@ -770,6 +826,34 @@ fn read_nonproduction(
         .unwrap_or_default()
 }
 
+/// The overlay itself: parse the sources, rebuild the plan they describe, check
+/// it still names the same snapshot, and lay the observed values over it.
+fn runtime_scip_overlay(
+    root: &std::path::Path,
+    files: &[PathBuf],
+    plan: &std::path::Path,
+    evidence: &std::path::Path,
+) -> Result<fact_mine_rust::runtime_evidence::RuntimeScipOverlay> {
+    let files = canonical_runtime_sources(files, root)?;
+    let supplied = fact_mine_rust::runtime_protocol::read_trace_plan(plan)?;
+    let plan_files = supplied
+        .documents
+        .iter()
+        .map(|document| root.join(&document.relative_path))
+        .collect::<Vec<_>>();
+    let (mut profile, plan_profile) = build_profile_pair(&files, &plan_files, None)?;
+    let rebuilt = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+        &plan_profile,
+        &plan_files,
+        root,
+    )?;
+    if supplied.plan_digest != rebuilt.plan.plan_digest {
+        bail!("supplied runtime trace plan does not describe the current source snapshot");
+    }
+    let evidence = fact_mine_rust::runtime_protocol::read_runtime_evidence(evidence)?;
+    fact_mine_rust::runtime_evidence::apply_protocol_to_profile(&mut profile, &rebuilt, &evidence)
+}
+
 fn build_profile_pair(
     analysis_files: &[PathBuf],
     plan_files: &[PathBuf],
@@ -989,6 +1073,17 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Emit the runtime SCIP index for a collect, and attest what it covers.
+    NilKillScipIndex {
+        runtime_dir: PathBuf,
+        evidence: PathBuf,
+        plan: PathBuf,
+        output: PathBuf,
+        attestation: PathBuf,
+        files: Vec<PathBuf>,
+        environment: Vec<String>,
+        root: PathBuf,
+    },
     /// Build each shard's trace document from the rows it holds.
     NilKillTraceDocument {
         runtime_dirs: Vec<PathBuf>,
@@ -1122,6 +1217,45 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-scip-index" => {
+            let mut runtime_dir = None;
+            let mut evidence = None;
+            let mut plan = None;
+            let mut output = None;
+            let mut attestation = None;
+            let mut files = Vec::new();
+            let mut environment = Vec::new();
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--runtime-dir" => {
+                        runtime_dir = Some(PathBuf::from(iter.next().context("--runtime-dir")?));
+                    }
+                    "--evidence" => {
+                        evidence = Some(PathBuf::from(iter.next().context("--evidence")?));
+                    }
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--attestation" => {
+                        attestation = Some(PathBuf::from(iter.next().context("--attestation")?));
+                    }
+                    "--file" => files.push(PathBuf::from(iter.next().context("--file")?)),
+                    "--environment" => environment.push(iter.next().context("--environment")?),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillScipIndex {
+                runtime_dir: runtime_dir.context("--runtime-dir is required")?,
+                evidence: evidence.context("--evidence is required")?,
+                plan: plan.context("--plan is required")?,
+                output: output.context("--output is required")?,
+                attestation: attestation.context("--attestation is required")?,
+                files,
+                environment,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "nil-kill-trace-document" => {

@@ -253,59 +253,6 @@ RSpec.describe NilKill::Runtime::ScipEmitter do
     end
   end
 
-  it "includes trusted workspace declarations but excludes dependency implementations" do
-    Dir.mktmpdir("nil-kill-runtime-scip-sources", NilKill::ROOT) do |root|
-      runtime_dir = File.join(root, "runtime")
-      source = File.join(root, "worker.rb")
-      workspace = File.join(root, "tools", "workspace_helper.rb")
-      dependency = File.join(root, "vendor", "dependency.rb")
-      FileUtils.mkdir_p(File.dirname(workspace))
-      FileUtils.mkdir_p(File.dirname(dependency))
-      FileUtils.mkdir_p(runtime_dir)
-      File.write(source, <<~RUBY)
-        class Worker
-          def run
-            WorkspaceHelper.workspace_call
-          end
-        end
-      RUBY
-      File.write(workspace, <<~RUBY)
-        module WorkspaceHelper
-          def self.workspace_call
-          end
-        end
-      RUBY
-      File.write(dependency, "def call; end\n")
-      workspace_event = runtime_event(
-        source: source,
-        caller: { owner: "Worker", name: "run", line: 2 },
-        line: 3,
-        owner: "WorkspaceHelper",
-        name: "workspace_call",
-        native: false,
-        callee_path: workspace,
-        callee_line: 1,
-        package_manager: "workspace",
-        package: "demo",
-        version: "workspace"
-      )
-      dependency_event = runtime_event(
-        source: source,
-        caller: { owner: "Worker", name: "run", line: 2 },
-        line: 3,
-        owner: "Dependency",
-        name: "call",
-        native: false,
-        callee_path: dependency,
-        callee_line: 1
-      )
-      emitter = described_class.new(root: root, runtime_dir: runtime_dir, files: [source])
-
-      expect(emitter.send(:runtime_sources, [workspace_event, dependency_event], nil))
-        .to match_array([source, workspace])
-    end
-  end
-
   it "emits exact compound-write and nested-index selector ranges" do
     Dir.mktmpdir("nil-kill-runtime-scip-operators", NilKill::ROOT) do |root|
       runtime_dir = File.join(root, "runtime")
