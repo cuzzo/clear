@@ -60,6 +60,32 @@ Measured on espalier, with GC pinned: dropping `install_struct_hook` loses 63
 anchors, dropping `install_collection_hook` loses 31. The other three lose
 nothing there -- but see below.
 
+## A C wrapper is not a drop-in for a `define_method` wrapper
+
+The collection hook was ported and reverted, and the reason is worth keeping.
+
+Ruby installs its mutation wrappers with `define_method`, which produces a
+bmethod: a Ruby frame. The wrapper fires `:call` at the callsite and is counted
+once; its `super` then fires `:c_call` for the real `Array#push`, but attributed
+to the wrapper's own file, which is not analyzed source, so it is dropped.
+
+A wrapper defined with `rb_define_method` is a cfunc and pushes no Ruby frame.
+It fires `:c_call` at the callsite, and `rb_call_super` fires a second
+`:c_call` still attributed to that same callsite. Every affected anchor is then
+counted exactly twice -- measured on espalier as 471 anchors, all at a ratio of
+precisely 2.0, with the anchor set otherwise unchanged.
+
+So the collection hook should not be ported as a prepended wrapper at all. The
+collector already sees every `Array#push` as a `c_call` with its receiver; it
+can record the mutation from that event directly, with no wrapper, no wrapper
+identity registration, and no double count. That is the design the port should
+take, and it removes the `register_collection_wrapper_targets` machinery with
+it.
+
+The same hazard applies to any hook whose wrapper wraps a C-implemented method.
+`Struct.new`, `Data.define` and `OpenStruct#[]=` are all in that category;
+`T.let` is not, which is part of why it ported cleanly.
+
 ## How to verify a port
 
 **The conformance and capability suites are the oracle, not a corpus diff.**
