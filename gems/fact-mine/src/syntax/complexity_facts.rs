@@ -1966,24 +1966,28 @@ fn visit_loops(
             // A bound that reads its receiver sums over a partitioned receiver
             // however many other operands the call takes: an operand the bound
             // never touches cannot add a dimension to it.
-            let receiver_partitions = !argument_sized
-                && call_receiver_type(
-                    node,
-                    parameter_types,
-                    assignments,
-                    state_types,
-                    field_types,
-                    (node.first_lineno, node.first_column),
-                    behavior,
-                )
-                .is_some_and(|receiver_type| {
-                    behavior.call_cost_is_receiver_sized(&receiver_type, message)
-                })
-                && {
-                    let receiver_names = call_receiver(node).map(local_names).unwrap_or_default();
-                    !receiver_names.is_empty()
-                        && receiver_names.is_subset(&parent.partition_locals)
-                };
+            // What a call costs is paid over the receiver it is handed. Where
+            // that receiver is a piece of some whole the enclosing loop walks,
+            // the pieces sum to the whole rather than multiplying it - whether
+            // the cost is the receiver's own, or a callback's run on it, which
+            // is the same work seen through a closure.
+            let cost_is_paid_per_element = call_receiver_type(
+                node,
+                parameter_types,
+                assignments,
+                state_types,
+                field_types,
+                (node.first_lineno, node.first_column),
+                behavior,
+            )
+            .is_some_and(|receiver_type| {
+                behavior.call_cost_is_receiver_sized(&receiver_type, message)
+            }) || runs_closure_literal(node);
+            let receiver_partitions = !argument_sized && cost_is_paid_per_element && {
+                let receiver_names = call_receiver(node).map(size_source_names).unwrap_or_default();
+                !receiver_names.is_empty()
+                    && receiver_names.is_subset(&parent.partition_locals)
+            };
             let argument_cardinality_relation = if parent.power == 0 {
                 "same"
             } else if receiver_partitions
@@ -2981,6 +2985,28 @@ fn constant_size_node(node: &Node) -> bool {
         ) || child_nodes(node).into_iter().any(computes)
     }
     !computes(node)
+}
+
+/// Whether a call is handed a closure written at the call site. Its cost is
+/// that closure's, paid once per whatever the call is applied to.
+/// What a value's size comes from. `path.strip_prefix(root)` is a piece of
+/// `path`; `root` decides where the piece starts, not how large the whole is,
+/// so an argument names no size the result carries.
+fn size_source_names(node: &Node) -> BTreeSet<String> {
+    match call_receiver(node) {
+        Some(receiver) => size_source_names(receiver),
+        None => local_names(node),
+    }
+}
+
+/// Whether a closure written at the call site is run under this call. In
+/// `xs.strip(r).map(|x| ...).unwrap_or(0)` the parametric cost sits on the
+/// outermost call while the closure is lexically an argument of `map`, so the
+/// question is asked of the whole expression the call heads.
+fn runs_closure_literal(node: &Node) -> bool {
+    child_nodes(node)
+        .into_iter()
+        .any(|child| child.r#type == "LAMBDA" || runs_closure_literal(child))
 }
 
 fn call_argument_nodes(node: &Node) -> Vec<&Node> {
@@ -4047,18 +4073,48 @@ fn field_in_closure(docs: &[Doc]) -> Vec<String> {
             Some("same"),
             "a copy of a loop binding is bounded by the collection the loop walks"
         );
-        // A closure's copy is still unbounded. Naming the closure's own
-        // parameter is what would bind it, and doing that made a bound wrong:
-        // `|rest| rest.components().count()` inside a loop over paths became a
-        // product with the element rather than a partition of it, so
-        // `strip_paths` read O(N*M) instead of O(N). The parameter is only
-        // usable once a closure parameter derived from the element it is handed
-        // partitions with that element, which is not modelled yet.
+        // A closure's copy is still unbounded: binding it needs the closure to
+        // name its own parameter, and espalier still composes that parameter as
+        // a second dimension rather than a piece of the first.
         let closure = rows
             .iter()
             .find(|row| row.function.starts_with("<lambda@"))
             .expect("the closure is analysed as its own function");
         assert!(closure.parameters.is_empty());
+    }
+
+    #[test]
+    fn work_done_on_a_piece_of_the_input_sums_over_the_pieces() {
+        // The closure runs on one element of what the loop walks, so its cost
+        // is a piece of the input rather than a second dimension of it: the
+        // pieces sum to the whole. Reading it as a product makes a function
+        // that scans each element once look quadratic.
+        let rows = language_facts(
+            r#"
+fn total(paths: &[String], root: &str) -> usize {
+    let mut total = 0;
+    for path in paths {
+        total += path.strip_prefix(root).map(|rest| rest.len()).unwrap_or(0);
+    }
+    total
+}
+"#,
+            Language::Rust,
+            ".rs",
+        );
+        let relation = rows
+            .iter()
+            .find(|row| row.function == "total")
+            .unwrap()
+            .call_contexts
+            .iter()
+            .find(|call| call.message == "map")
+            .map(|call| call.argument_cardinality_relation.clone());
+        assert_eq!(
+            relation.as_deref(),
+            Some("partition_of"),
+            "the closure runs on a piece of what the loop walks"
+        );
     }
 
     #[test]

@@ -1278,6 +1278,13 @@ module Espalier
 
     # An opaque per-invocation cost is incurred once per execution of the call
     # site, so it carries that site's multiplicity like any other cost.
+    #
+    # A closure run on a piece of what the site walks is not opaque: it does
+    # element-sized work, and summing that over the collection is the
+    # collection's total size rather than its square - the same rule a
+    # receiver-sized cost already follows. The closure states its cost in its
+    # own parameter, so that parameter is first re-expressed as the thing it is
+    # handed, exactly as a callee's parameters are at any other call.
     def per_invocation_cost(cost, context)
       return nil unless cost
 
@@ -1287,7 +1294,32 @@ module Espalier
       )
       return cost unless execution
 
+      if context["argument_cardinality_relation"] == "partition_of" &&
+         !Espalier::SymbolicComplexity.opaque_cost?(cost)
+        return Espalier::SymbolicComplexity.sum(
+          execution, over_the_collection(cost, context)
+        )
+      end
       Espalier::SymbolicComplexity.multiply(execution, cost)
+    end
+
+    # Re-express a per-piece cost in terms of the collection the pieces came
+    # from. A cost domain is left alone: a callback within a callback is not a
+    # piece of anything this site holds.
+    def over_the_collection(cost, context)
+      receiver = Array(context["receiver_size_domains"]).compact.reject { |id| id.to_s.empty? }
+      return cost if receiver.empty?
+
+      domains = cost[:domains] || {}
+      mapping = Array(cost[:terms]).flat_map { |term| term[:factors].keys + term[:logs].keys }
+                                   .uniq
+                                   .reject do |id|
+        kind = (domains[id] || {}).then { |d| (d["source_kind"] || d[:source_kind]).to_s }
+        kind.end_with?("_cost")
+      end.to_h { |id| [id, receiver] }
+      return cost if mapping.empty?
+
+      Espalier::SymbolicComplexity.substitute(cost, mapping)
     end
 
     def parametric_call_symbolic(delegation, context)
