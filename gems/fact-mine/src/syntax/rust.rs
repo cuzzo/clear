@@ -217,6 +217,8 @@ const RUST_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     suffix_array: false,
     // A slice is Rust's idiomatic collection parameter.
     bracket_array: true,
+    // `[T; N]` states how many after the element.
+    bracket_array_length: Some(';'),
 };
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {

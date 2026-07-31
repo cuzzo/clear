@@ -127,4 +127,22 @@ mod tests {
         ));
         assert!(matches!(parse("array", "php"), TypeExpr::Array(_)));
     }
+
+    #[test]
+    fn a_fixed_length_array_holds_the_element_its_length_follows() {
+        // `[T; N]` is Rust's array; the length is how many, not part of what.
+        assert_eq!(
+            parse("[usize; 4]", "rust"),
+            TypeExpr::Array(Box::new(TypeExpr::Primitive("usize".into())))
+        );
+        assert_eq!(
+            parse("&[u8; 1024]", "rust"),
+            TypeExpr::Array(Box::new(TypeExpr::Primitive("u8".into())))
+        );
+        // A slice states no length and is unchanged.
+        assert_eq!(
+            parse("[String]", "rust"),
+            TypeExpr::Array(Box::new(TypeExpr::Primitive("String".into())))
+        );
+    }
 }

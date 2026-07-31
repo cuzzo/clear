@@ -14,6 +14,10 @@ pub(crate) struct NominalTypeSyntax {
     pub(crate) bare_array_names: &'static [&'static str],
     pub(crate) suffix_array: bool,
     pub(crate) bracket_array: bool,
+    /// What separates a bracketed array's element from its length, where the
+    /// language states one. The length is how many the array holds, not part
+    /// of what it holds, so nothing downstream should see it.
+    pub(crate) bracket_array_length: Option<char>,
 }
 
 pub(crate) fn parse(source: &str, syntax: &NominalTypeSyntax) -> TypeExpr {
@@ -23,7 +27,12 @@ pub(crate) fn parse(source: &str, syntax: &NominalTypeSyntax) -> TypeExpr {
             .strip_prefix('[')
             .and_then(|value| value.strip_suffix(']'))
         {
-            return TypeExpr::Array(Box::new(parse(inner, syntax)));
+            let element = syntax
+                .bracket_array_length
+                .and_then(|separator| inner.rsplit_once(separator))
+                .map(|(element, _)| element)
+                .unwrap_or(inner);
+            return TypeExpr::Array(Box::new(parse(element, syntax)));
         }
     }
     if syntax.suffix_array {
@@ -142,6 +151,7 @@ mod tests {
         bare_array_names: &["sequence"],
         suffix_array: true,
         bracket_array: true,
+        bracket_array_length: Some(';'),
     };
 
     #[test]

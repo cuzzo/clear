@@ -29,6 +29,7 @@ const PHP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     bare_array_names: &["array"],
     suffix_array: false,
     bracket_array: false,
+    bracket_array_length: None,
 };
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {

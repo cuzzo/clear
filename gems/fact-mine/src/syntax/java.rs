@@ -32,6 +32,7 @@ const JAVA_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     bare_array_names: &[],
     suffix_array: true,
     bracket_array: false,
+    bracket_array_length: None,
 };
 
 /// Java-specific declaration spelling normalization. Interface types (List,
