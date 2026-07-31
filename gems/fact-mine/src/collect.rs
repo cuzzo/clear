@@ -40,8 +40,7 @@ impl Config {
         Self {
             runtime_dir: tmp_dir.join("runtime"),
             trace_plan: tmp_dir.join("trace-plan.json"),
-            collector_extension: root
-                .join("gems/nil-kill/ext/nil_kill_trace/nil_kill_trace.so"),
+            collector_extension: collector_extension(),
             tmp_dir,
             root,
             targets,
@@ -63,6 +62,25 @@ impl Config {
         found.dedup();
         found
     }
+}
+
+/// The collector object the traced program loads.
+///
+/// It ships beside this binary, not inside the project being collected, so it
+/// is found from where nil-kill is installed rather than from the analyzed
+/// root -- a collect of any repository but nil-kill's own would otherwise look
+/// for it under that repository.
+fn collector_extension() -> PathBuf {
+    const RELATIVE: &str = "gems/nil-kill/ext/nil_kill_trace/nil_kill_trace.so";
+    if let Ok(path) = std::env::var("NIL_KILL_COLLECTOR_EXTENSION") {
+        return PathBuf::from(path);
+    }
+    // target/<profile>/fact-mine-rust -> the workspace holding both gems.
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.ancestors().nth(5).map(|root| root.join(RELATIVE)))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from(RELATIVE))
 }
 
 fn collect_ruby(path: &Path, into: &mut Vec<PathBuf>) {
@@ -107,8 +125,19 @@ fn opaque_shards(commands: &[Vec<String>]) -> Vec<Value> {
 }
 
 pub fn run(config: &Config) -> Result<()> {
-    if config.commands.is_empty() && !config.fast {
-        bail!("nil-kill collect requires a command: collect [--fast] -- <command...>");
+    // Incremental collect is still the Ruby CLI's: it needs the snapshot
+    // manifest, the stored per-shard evidence and the rebase onto the current
+    // plan, none of which this drives yet. Saying so is the point -- a `--fast`
+    // that quietly ran a full collect would report a generation it never made,
+    // and one that ran no shards would publish empty evidence as current.
+    if config.fast {
+        bail!(
+            "nil-kill collect --fast is not implemented here yet; \
+             run a full collect, or use the Ruby CLI for an incremental one"
+        );
+    }
+    if config.commands.is_empty() {
+        bail!("nil-kill collect requires a command: collect -- <command...>");
     }
     std::fs::create_dir_all(&config.runtime_dir)?;
 
@@ -145,18 +174,47 @@ pub fn run(config: &Config) -> Result<()> {
     })?;
 
     // ---- the workload ----------------------------------------------------
-    let shards = opaque_shards(&config.commands);
+    // One shard per test file where the command names a runner, one opaque
+    // shard per command where it does not.
+    let planned = config
+        .commands
+        .iter()
+        .find_map(|command| crate::workload_plan::build(&files, command, &config.root));
+    let shards = match &planned {
+        Some(plan) => plan
+            .shards
+            .iter()
+            .map(|shard| json!({
+                "id": shard.id,
+                "command": shard.command,
+                "test_path": shard.test_path,
+            }))
+            .collect(),
+        None => opaque_shards(&config.commands),
+    };
     let generation = 0;
     let working = config.runtime_dir.join("runs").join(format!("{generation:06}"));
     let _ = std::fs::remove_dir_all(&working);
     std::fs::create_dir_all(&working)?;
 
     // Tests and their support files are what a collect must not report as
-    // production code.
+    // production code. Getting this wrong does not fail a collect -- it
+    // publishes the test suite's own methods as observed production evidence.
     let roles = working.join("source-roles.json");
-    std::fs::write(&roles, serde_json::to_string(&json!({"nonproduction": []}))?)?;
+    let mut nonproduction = planned
+        .as_ref()
+        .map(|plan| {
+            plan.test_paths.iter().chain(&plan.support_paths).cloned().collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    nonproduction.sort();
+    nonproduction.dedup();
+    std::fs::write(&roles, serde_json::to_string(&json!({"nonproduction": nonproduction}))?)?;
 
     // ---- run them --------------------------------------------------------
+    // No more workers than there is work for them to do; what is left over is
+    // the parallelism each shard's own workload may use.
+    let shard_jobs = config.shard_jobs.max(1).min(shards.len().max(1));
     let mut run_ids = BTreeMap::new();
     let runs = shards
         .iter()
@@ -186,7 +244,7 @@ pub fn run(config: &Config) -> Result<()> {
             // The workload's own parallelism, divided by how many shards run at
             // once. A workload that picks its own thread count observes
             // different interleavings and records different values.
-            let inner = (config.shard_jobs.max(1) / config.shard_jobs.max(1)).max(1).to_string();
+            let inner = (config.shard_jobs.max(1) / shard_jobs.max(1)).max(1).to_string();
             for key in ["WORKERS", "NK_JOBS", "NIL_KILL_JOBS"] {
                 if std::env::var(key).is_err() {
                     env.insert(key.into(), Some(inner.clone()));
@@ -221,7 +279,7 @@ pub fn run(config: &Config) -> Result<()> {
 
     let failed = crate::shard_runner::run(&crate::shard_runner::Plan {
         shards: runs,
-        jobs: config.shard_jobs,
+        jobs: shard_jobs,
         continue_on_error: config.continue_on_error,
         banner: String::new(),
     })?;

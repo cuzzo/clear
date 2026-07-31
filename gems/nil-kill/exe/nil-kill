@@ -9,8 +9,17 @@ self="$(readlink -f "${BASH_SOURCE[0]}")"
 here="$(dirname "$self")"
 root="$(cd "$here/../../.." && pwd)"
 
-if [ "${1-}" = "collect" ]; then
+# An incremental collect still runs through the Ruby CLI: it needs the snapshot
+# manifest, the stored per-shard evidence and the rebase onto the current plan,
+# and FactMine does not drive those yet. A full collect loads no Ruby at all.
+incremental=""
+for arg in "$@"; do
+  [ "$arg" = "--fast" ] && incremental=1
+done
+
+if [ "${1-}" = "collect" ] && [ -z "$incremental" ]; then
   shift
+  export NIL_KILL_COLLECTOR_EXTENSION="${NIL_KILL_COLLECTOR_EXTENSION:-$here/../ext/nil_kill_trace/nil_kill_trace.so}"
   for candidate in release debug; do
     binary="$root/gems/fact-mine/target/$candidate/fact-mine-rust"
     [ -x "$binary" ] && exec "$binary" nil-kill-collect --root "${NIL_KILL_ROOT:-$root}" "$@"

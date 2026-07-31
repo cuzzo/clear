@@ -198,3 +198,202 @@ pub fn select(input: &Increment<'_>) -> Value {
     out.insert("trace_plan_digest".into(), json!(input.trace_plan_digest));
     Value::Object(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn function(path: &str, fingerprint: &str) -> Value {
+        json!({"path": path, "fingerprint": fingerprint})
+    }
+
+    fn manifest(digest: &str) -> Value {
+        json!({
+            "source_hashes": {"lib/app.rb": "a"},
+            "functions": {"f": function("lib/app.rb", "1")},
+            "dependencies": {"shard-a": ["f"]},
+            "environment": {},
+            "trace_plan_digest": digest,
+            "workload": {
+                "mode": "test_files",
+                "command_digest": "w",
+                "tests": {"test/app_test.rb": "t"},
+                "support_files": {},
+                "shards": {"shard-a": {"test_path": "test/app_test.rb"}},
+            },
+        })
+    }
+
+    fn select_with(manifest: &Value, hashes: Value, functions: Value, digest: &str) -> Value {
+        select(&Increment {
+            manifest,
+            current_hashes: &hashes,
+            current_environment: &json!({}),
+            functions: &functions,
+            workload: &manifest["workload"],
+            trace_plan_digest: digest,
+        })
+    }
+
+    #[test]
+    fn nothing_changed_means_nothing_to_rerun() {
+        let stored = manifest("plan");
+        let out = select_with(
+            &stored,
+            json!({"lib/app.rb": "a"}),
+            json!({"f": function("lib/app.rb", "1")}),
+            "plan",
+        );
+
+        assert_eq!(out["rebuild"], json!(false));
+        assert_eq!(out["selected_shards"], json!([]));
+        assert_eq!(out["fallback_full"], json!(false));
+    }
+
+    #[test]
+    fn a_changed_function_reruns_only_the_shards_that_depended_on_it() {
+        let mut stored = manifest("plan");
+        stored["workload"]["shards"]["shard-b"] = json!({"test_path": "test/other_test.rb"});
+        stored["dependencies"]["shard-b"] = json!(["other"]);
+
+        let out = select_with(
+            &stored,
+            json!({"lib/app.rb": "b"}),
+            json!({"f": function("lib/app.rb", "2")}),
+            "plan",
+        );
+
+        // The source edit is explained by the function whose fingerprint moved,
+        // so it is not a residual change and does not force a full collect.
+        assert_eq!(out["changed_functions"], json!(["f"]));
+        assert_eq!(out["residual_source_changes"], json!([]));
+        assert_eq!(out["fallback_full"], json!(false));
+        assert_eq!(out["selected_shards"], json!(["shard-a"]));
+    }
+
+    #[test]
+    fn a_plan_that_moved_with_no_source_change_reruns_everything() {
+        // The analyzer's demand moved and no source dependency says which
+        // shards it touched, so none of them can be trusted.
+        let stored = manifest("plan");
+        let out = select_with(
+            &stored,
+            json!({"lib/app.rb": "a"}),
+            json!({"f": function("lib/app.rb", "1")}),
+            "different-plan",
+        );
+
+        assert_eq!(out["trace_plan_changed"], json!(true));
+        assert_eq!(out["unexplained_trace_plan_changed"], json!(true));
+        assert_eq!(out["fallback_full"], json!(true));
+        assert_eq!(out["selected_shards"], json!(["shard-a"]));
+    }
+
+    #[test]
+    fn a_plan_change_a_source_edit_explains_is_not_a_full_retrace() {
+        let stored = manifest("plan");
+        let out = select_with(
+            &stored,
+            json!({"lib/app.rb": "b"}),
+            json!({"f": function("lib/app.rb", "2")}),
+            "source-updated-plan",
+        );
+
+        assert_eq!(out["trace_plan_changed"], json!(true));
+        assert_eq!(out["unexplained_trace_plan_changed"], json!(false));
+        assert_eq!(out["fallback_full"], json!(false));
+    }
+
+    #[test]
+    fn a_source_edit_no_function_explains_forces_a_full_collect() {
+        // Something moved that shard selection cannot attribute -- a constant,
+        // a require, top-level code -- so every shard is suspect.
+        let stored = manifest("plan");
+        let out = select_with(
+            &stored,
+            json!({"lib/app.rb": "b"}),
+            json!({"f": function("lib/app.rb", "1")}),
+            "plan",
+        );
+
+        assert_eq!(out["residual_source_changes"], json!(["lib/app.rb"]));
+        assert_eq!(out["fallback_full"], json!(true));
+        assert_eq!(out["selected_shards"], json!(["shard-a"]));
+    }
+
+    #[test]
+    fn a_changed_test_reruns_its_own_shard() {
+        let stored = manifest("plan");
+        let mut workload = stored["workload"].clone();
+        workload["tests"]["test/app_test.rb"] = json!("t2");
+        let out = select(&Increment {
+            manifest: &stored,
+            current_hashes: &json!({"lib/app.rb": "a"}),
+            current_environment: &json!({}),
+            functions: &json!({"f": function("lib/app.rb", "1")}),
+            workload: &workload,
+            trace_plan_digest: "plan",
+        });
+
+        assert_eq!(out["changed_tests"], json!(["test/app_test.rb"]));
+        assert_eq!(out["selected_shards"], json!(["shard-a"]));
+        assert_eq!(out["fallback_full"], json!(false));
+    }
+
+    #[test]
+    fn a_changed_support_file_reruns_every_shard() {
+        let stored = manifest("plan");
+        let mut workload = stored["workload"].clone();
+        workload["support_files"] = json!({"test/test_helper.rb": "h"});
+        let out = select(&Increment {
+            manifest: &stored,
+            current_hashes: &json!({"lib/app.rb": "a"}),
+            current_environment: &json!({}),
+            functions: &json!({"f": function("lib/app.rb", "1")}),
+            workload: &workload,
+            trace_plan_digest: "plan",
+        });
+
+        assert_eq!(out["support_changed"], json!(true));
+        assert_eq!(out["fallback_full"], json!(true));
+    }
+
+    #[test]
+    fn a_deleted_test_drops_its_shard_without_rerunning_it() {
+        let stored = manifest("plan");
+        let mut workload = stored["workload"].clone();
+        workload["tests"] = json!({});
+        workload["shards"] = json!({});
+        let out = select(&Increment {
+            manifest: &stored,
+            current_hashes: &json!({"lib/app.rb": "a"}),
+            current_environment: &json!({}),
+            functions: &json!({"f": function("lib/app.rb", "1")}),
+            workload: &workload,
+            trace_plan_digest: "plan",
+        });
+
+        assert_eq!(out["deleted_tests"], json!(["test/app_test.rb"]));
+        assert_eq!(out["deleted_shards"], json!(["shard-a"]));
+        assert_eq!(out["selected_shards"], json!([]));
+        assert_eq!(out["rebuild"], json!(true));
+    }
+
+    #[test]
+    fn an_opaque_workload_reruns_everything_any_change_touches() {
+        // No test-to-shard mapping exists, so nothing says a change missed a
+        // given command.
+        let mut stored = manifest("plan");
+        stored["workload"]["mode"] = json!("opaque");
+        let out = select_with(
+            &stored,
+            json!({"lib/app.rb": "b"}),
+            json!({"f": function("lib/app.rb", "2")}),
+            "plan",
+        );
+
+        assert_eq!(out["fallback_full"], json!(true));
+        assert_eq!(out["selected_shards"], json!(["shard-a"]));
+    }
+}

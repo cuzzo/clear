@@ -273,3 +273,146 @@ fn key_for_entry(
         .and_then(|function| function["key"].as_str())
         .map(str::to_string)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn method(owner: &str, name: &str, line: i64, source: &str) -> Value {
+        json!({
+            "language": "ruby",
+            "path": "lib/app.rb",
+            "owner": owner,
+            "name": name,
+            "kind": "instance",
+            "line": line,
+            "span": [line, 0, line + 2, 0],
+            "normalized_source": source,
+        })
+    }
+
+    fn root() -> &'static Path {
+        Path::new("/repo")
+    }
+
+    #[test]
+    fn two_definitions_with_one_identity_stay_distinct() {
+        // A file may define the same method twice. Keying on the identity
+        // alone would collapse them and lose one of the two fingerprints, so
+        // an edit to the second would look like no change at all.
+        let methods = vec![
+            method("App", "value", 2, "def value; 1; end"),
+            method("App", "value", 6, "def value; 2; end"),
+        ];
+
+        let built = build(&methods, &json!({}), root());
+
+        assert_eq!(built.len(), 2);
+        let occurrences: Vec<i64> =
+            built.values().filter_map(|f| f["occurrence"].as_i64()).collect();
+        assert_eq!(occurrences, vec![0, 1]);
+        let fingerprints: Vec<&str> =
+            built.values().filter_map(|f| f["fingerprint"].as_str()).collect();
+        assert_ne!(fingerprints[0], fingerprints[1]);
+    }
+
+    #[test]
+    fn a_reformat_above_a_function_is_not_a_change_to_it() {
+        // Identity is the (language, path, owner, name, kind) tuple plus its
+        // occurrence, never the line -- every edit above a function moves that.
+        let before = build(&[method("App", "value", 2, "def value; 1; end")], &json!({}), root());
+        let after = build(&[method("App", "value", 40, "def value; 1; end")], &json!({}), root());
+
+        assert_eq!(before.keys().collect::<Vec<_>>(), after.keys().collect::<Vec<_>>());
+        let fingerprint = |set: &BTreeMap<String, Value>| {
+            set.values().next().unwrap()["fingerprint"].as_str().unwrap().to_string()
+        };
+        assert_eq!(fingerprint(&before), fingerprint(&after));
+        // The line still moves; it is recorded, just not part of identity.
+        assert_eq!(after.values().next().unwrap()["line"], json!(40));
+    }
+
+    #[test]
+    fn an_absolute_path_is_recorded_relative_to_the_root() {
+        let mut method = method("App", "value", 2, "def value; end");
+        method["path"] = json!("/repo/lib/app.rb");
+
+        let built = build(&[method], &json!({}), root());
+
+        assert_eq!(built.values().next().unwrap()["path"], json!("lib/app.rb"));
+    }
+
+    #[test]
+    fn demand_follows_the_plan_and_not_the_source() {
+        let plain = method("App", "value", 2, "def value; end");
+        let unwatched = build(&[plain.clone()], &json!({}), root());
+        assert_eq!(unwatched.values().next().unwrap()["runtime_demand"], json!(false));
+
+        // Asked for by name: the plan keys methods on the absolute path.
+        let key = ["App", "value", "instance", "/repo/lib/app.rb", "2"].join("\u{0}");
+        let by_name = build(&[plain.clone()], &json!({"methods": {key: {"sample": true}}}), root());
+        assert_eq!(by_name.values().next().unwrap()["runtime_demand"], json!(true));
+
+        // Asked for by coordinate: a watched line inside the function's span.
+        let inside = format!("/repo/lib/app.rb\u{0}3\u{0}call");
+        let by_site =
+            build(&[plain.clone()], &json!({"runtime_call_sites": {inside: {}}}), root());
+        assert_eq!(by_site.values().next().unwrap()["runtime_demand"], json!(true));
+
+        // A coordinate past the end of the span is some other function's.
+        let outside = format!("/repo/lib/app.rb\u{0}99\u{0}call");
+        let beyond =
+            build(&[plain], &json!({"runtime_call_sites": {outside: {}}}), root());
+        assert_eq!(beyond.values().next().unwrap()["runtime_demand"], json!(false));
+    }
+
+    #[test]
+    fn a_recorded_entry_resolves_to_the_definition_its_line_falls_in() {
+        let methods = vec![
+            method("App", "value", 2, "def value; 1; end"),
+            method("App", "value", 6, "def value; 2; end"),
+        ];
+        let built = build(&methods, &json!({}), root());
+        let expected = |occurrence: i64| {
+            built
+                .values()
+                .find(|f| f["occurrence"] == json!(occurrence))
+                .and_then(|f| f["key"].as_str())
+                .map(str::to_string)
+        };
+
+        // Exactly on the definition line.
+        assert_eq!(
+            key_for_entry(&built, "lib/app.rb", "App", "value", "instance", Some(6), root()),
+            expected(1)
+        );
+        // Inside the second definition's span but not on its first line.
+        assert_eq!(
+            key_for_entry(&built, "lib/app.rb", "App", "value", "instance", Some(7), root()),
+            expected(1)
+        );
+        assert_eq!(
+            key_for_entry(&built, "lib/app.rb", "App", "value", "instance", Some(2), root()),
+            expected(0)
+        );
+        assert_eq!(
+            key_for_entry(&built, "lib/app.rb", "Other", "value", "instance", Some(2), root()),
+            None
+        );
+    }
+
+    #[test]
+    fn coverage_attributes_an_executed_line_to_every_function_spanning_it() {
+        let methods = vec![
+            method("App", "first", 2, "def first; end"),
+            method("App", "second", 10, "def second; end"),
+        ];
+        let built = build(&methods, &json!({}), root());
+
+        let covered = keys_for_coverage(&built, "/repo/lib/app.rb", &[3], root());
+
+        assert_eq!(covered.len(), 1);
+        assert!(covered[0].contains("first"), "{covered:?}");
+        assert!(keys_for_coverage(&built, "/repo/lib/app.rb", &[100], root()).is_empty());
+    }
+}
