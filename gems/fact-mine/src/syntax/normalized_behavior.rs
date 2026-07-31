@@ -1668,6 +1668,44 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     ) -> Option<NormalizedCallComplexity> {
         self.collection_operation(receiver_type, message)
             .map(NormalizedCollectionOperation::complexity)
+            .or_else(|| self.scalar_message_complexity(receiver_type, message))
+    }
+
+    /// An operator spelled as the method it dispatches to. Every language has
+    /// both spellings - `a < b` and `a.cmp(b)`, `a == b` and `a.equals(b)` -
+    /// and they cost the same thing for the same reason, so a scalar receiver
+    /// answers here exactly as a scalar operand does for the operator. A
+    /// sequence receiver is not covered: it compares element by element, and
+    /// the collection registry prices it.
+    fn scalar_message_complexity(
+        &self,
+        receiver_type: &TypeExpr,
+        message: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        const SCALAR_MESSAGES: &[&str] = &[
+            "cmp",
+            "partial_cmp",
+            "compare",
+            "compareTo",
+            "eq",
+            "ne",
+            "equals",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "min",
+            "max",
+            "clone",
+            "to_owned",
+            "copy",
+            "abs",
+            "signum",
+            "pow",
+            "hash",
+        ];
+        (SCALAR_MESSAGES.contains(&message) && scalar_operand(receiver_type, self))
+            .then_some(NormalizedCollectionOperation::Constant.complexity())
     }
 
     /// Whether this call's cost is linear in its argument rather than its

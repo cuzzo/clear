@@ -1,4 +1,5 @@
 Array:
+  concat: linear_materialize
   len: constant
   is_empty: constant
   capacity: constant
@@ -41,6 +42,11 @@ Array:
   with_capacity: linear_materialize
   sort_unstable: sort
 Hash:
+  values: constant
+  values_mut: constant
+  keys: constant
+  into_iter: constant
+  retain: linear_scan
   len: constant
   is_empty: constant
   get: constant
@@ -53,6 +59,12 @@ Hash:
   entry: constant
   clone: linear_materialize
 Set:
+  union: constant
+  intersection: constant
+  difference: constant
+  symmetric_difference: constant
+  iter: constant
+  into_iter: constant
   len: constant
   is_empty: constant
   contains: constant
@@ -60,6 +72,9 @@ Set:
   remove: constant
   new: constant
 String:
+  to_uppercase: linear_materialize
+  repeat: linear_argument
+  eq_ignore_ascii_case: linear_scan
   len: constant
   is_empty: constant
   contains: linear_scan
@@ -112,6 +127,7 @@ String:
   rsplitn: constant
   split_inclusive: constant
 BTreeMap:
+  retain: linear_scan
   len: constant
   is_empty: constant
   get: logarithmic
@@ -132,6 +148,9 @@ BTreeMap:
   # `From<[(K, V); N]>` builds the tree from an unsorted array.
   from: sort
 BTreeSet:
+  # Lazy set adapters walk on iteration, not here.
+  union: constant
+  symmetric_difference: constant
   len: constant
   is_empty: constant
   contains: logarithmic
@@ -180,6 +199,20 @@ Result:
   unwrap_or: constant
   unwrap_or_default: constant
 Iterator:
+  min_by: linear_scan
+  max_by: linear_scan
+  min_by_key: linear_scan
+  max_by_key: linear_scan
+  fold: linear_scan
+  sum: linear_scan
+  count: linear_scan
+  last: linear_scan
+  position: linear_scan
+  zip: constant
+  peekable: constant
+  take: constant
+  skip: constant
+  step_by: constant
   iter: constant
   into_iter: constant
   next: constant
@@ -219,8 +252,17 @@ Box:
   as_ref: constant
   clone: linear_materialize
 Entry:
+  or_insert_with: constant
+  or_insert_with_key: constant
+  or_default: constant
+  and_modify: constant
+  key: constant
   or_insert: constant
 Path:
+  # A borrow of the existing bytes, validated as UTF-8.
+  to_str: linear_scan
+  with_extension: linear_materialize
+  display: constant
   new: constant
   parent: constant
   join: linear_materialize
@@ -236,6 +278,8 @@ Path:
   components: constant
   is_absolute: constant
 PathBuf:
+  push: linear_materialize
+  as_path: constant
   from: linear_materialize
   clone: linear_materialize
   pop: linear_scan
@@ -285,6 +329,14 @@ u64:
   from: constant
   wrapping_mul: constant
 f64:
+  ceil: constant
+  floor: constant
+  trunc: constant
+  sqrt: constant
+  powi: constant
+  powf: constant
+  max: constant
+  min: constant
   round: constant
   abs: constant
 VecDeque:
@@ -337,6 +389,30 @@ Sha512:
   update: linear_argument
   finalize: constant
   new: constant
+
+# A subprocess builder stores what it is handed; running it is external latency,
+# priced separately, and its exit status is a word.
+Command:
+  new: constant
+  arg: linear_argument
+  args: linear_argument
+  env: linear_argument
+  current_dir: linear_argument
+  stdout: constant
+  stderr: constant
+ExitStatus:
+  success: constant
+  code: constant
+# A scope hands a closure to a thread; the closure's own cost is accounted where
+# it is invoked, and joining waits rather than computes.
+Scope:
+  spawn: constant
+ScopedJoinHandle:
+  join: constant
+  is_finished: constant
+JoinHandle:
+  join: constant
+  is_finished: constant
 
 SemanticSymbol:
   # A reference conversion, a wrapper and an iterator handover read nothing,

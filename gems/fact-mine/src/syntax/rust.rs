@@ -1151,6 +1151,28 @@ mod tests {
         );
         assert_eq!(external_symbol_metadata(vec_len).scope, "stdlib");
         assert_eq!(external_symbol_metadata(tree_kind).scope, "dependency");
+        // Comparing two machine scalars is one instruction whether the source
+        // spells it as an operator or as the method the operator dispatches to.
+        for symbol in [
+            "rust-analyzer cargo core https://x/core cmp/impls/impl#[f64][`PartialOrd<Self>`]partial_cmp().",
+            "rust-analyzer cargo core https://x/core cmp/impls/impl#[i64][Ord]cmp().",
+            "rust-analyzer cargo core https://x/core cmp/impls/impl#[isize][Ord]cmp().",
+        ] {
+            let message = symbol.rsplit_once(']').unwrap().1.trim_end_matches("().");
+            assert_eq!(
+                external_symbol_call_complexity(symbol, message).map(|c| c.time),
+                Some("O(1)"),
+                "{symbol} left unpriced"
+            );
+        }
+        // A sequence compares element by element, so its cost is the
+        // element's and stays parametric rather than collapsing to O(1).
+        let vec_cmp = "rust-analyzer cargo alloc https://x/alloc vec/impl#[`Vec<T, A>`][Ord]cmp().";
+        assert!(external_symbol_call_complexity(vec_cmp, "cmp").is_none());
+        assert_eq!(
+            external_symbol_metadata(vec_cmp).parametric_cost.as_deref(),
+            Some("callback_linear")
+        );
         assert_eq!(
             external_symbol_call_complexity(tempfile, "tempfile")
                 .and_then(|complexity| complexity.assumption),
