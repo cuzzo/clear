@@ -107,15 +107,19 @@ placements were tried:
 
 The C backtrace is the same each time: `rb_id_table_lookup` ->
 `rb_callable_method_entry` -> `rb_vm_search_method_slowpath`, a method lookup
-against a class whose method table is null. The prime suspect is the
-`Module#const_added` prepend, which after installation is reached by every
-constant assignment in the process including the VM's own startup. Ruby reaches
-the same prepend later, after `require` has unwound differently, which is
-probably why the same code is safe there.
+against a class whose method table is null -- the signature of a VALUE that was
+never a valid object.
 
-Anyone picking this up should start by bisecting `nk_bootstrap` -- skip
-`nk_install_record_hooks` first, since it is the only step that touches every
-class in the VM -- rather than by rewriting the port.
+The hook installers are not the suspect. `nk_install_record_hooks` and its
+siblings are called from Ruby today and are fine, so what crashes is something
+only the C bootstrap does: resolving the layout, parsing the plan, or building
+the demand tables. A truncated VALUE from an undeclared function would produce
+exactly this backtrace, so the first thing to check is that every Ruby C API
+the bootstrap calls is actually declared -- an implicit declaration returns
+`int`, which silently discards the top half of a VALUE on 64-bit.
+
+Bisect `nk_bootstrap` by returning early after each step rather than rewriting
+the port; the crash is in the first few.
 
 ## How to verify a port
 
