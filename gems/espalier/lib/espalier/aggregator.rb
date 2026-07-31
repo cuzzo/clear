@@ -484,10 +484,12 @@ module Espalier
           key = "#{mod[:name]}##{method[:name]}"
           sig = @nil_kill_data[key] || method[:signature]
           nodes = substitute_callback_arguments(
-            base_nodes.fetch(graph_identity), mod, symbolic_time, complexities, time_complete,
-            excluded_callable_ids: recursive_members
-          ) +
-            structural_big_o.hints_for(mod[:file], method, mod[:name])
+            base_nodes.fetch(graph_identity) +
+              structural_big_o.hints_for(mod[:file], method, mod[:name]),
+            mod, symbolic_time, complexities, time_complete,
+            excluded_callable_ids: recursive_members,
+            method_span: normalized_call_span(method[:span])
+          )
           result = local_analyzer.analyze_method(key, nodes, local_types: local_types_for_signature(sig))
           @structural_big_o_results[graph_identity] = result
           method_identity = method[:id].to_s.empty? ? nil : method[:id].to_s
@@ -788,14 +790,25 @@ module Espalier
     # substitute the costliest of them. Runs per fixpoint iteration, on the
     # current summaries, rather than on the cached base nodes.
     def substitute_callback_arguments(
-      nodes, mod, symbolic_time, complexities, time_complete, excluded_callable_ids: Set.new
+      nodes, mod, symbolic_time, complexities, time_complete, excluded_callable_ids: Set.new,
+      method_span: nil
     )
       return nodes if @callback_arg_by_call.nil? || @callback_arg_by_call.empty?
 
       nodes.map do |node|
         expression = node[:symbolic_time]
-        next node if expression.nil? ||
-          Espalier::SymbolicComplexity.callback_domain_ids(expression).empty?
+        # A summary states its bound as text and carries no expression to
+        # substitute into, so the parameter has to be closed in the text.
+        if expression.nil?
+          next node unless node[:complexity].to_s.match?(/\bC\d*\b/)
+
+          ids = enclosed_callable_ids(mod, method_span, excluded_callable_ids)
+          resolved = worst_callable(ids, symbolic_time, complexities, time_complete)
+          next node unless resolved && resolved.fetch(:constant)
+
+          next node.merge(complexity: without_callback_factors(node[:complexity].to_s))
+        end
+        next node if Espalier::SymbolicComplexity.callback_domain_ids(expression).empty?
 
         callable_ids = Array(@callback_arg_by_call[[mod[:file], node[:span]]]).reject do |id|
           excluded_callable_ids.include?(id)
@@ -814,6 +827,23 @@ module Espalier
             node[:known_time_complexity]
         )
       end
+    end
+
+    # Every closure handed over inside the method: what a summary of its calls
+    # may run.
+    def enclosed_callable_ids(mod, method_span, excluded_callable_ids)
+      return [] unless method_span
+
+      @callback_arg_by_call.filter_map { |(file, span), ids|
+        ids if file == mod[:file] && span_contains?(method_span, span)
+      }.flatten.uniq.reject { |id| excluded_callable_ids.include?(id) }
+    end
+
+    # Running a constant callable multiplies by one, so its symbol leaves.
+    def without_callback_factors(text)
+      stripped = text.gsub(/\s*\*\s*C\d*\b/, "").gsub(/\bC\d*\s*\*\s*/, "")
+      stripped = stripped.gsub(/\bC\d*\b/, "1")
+      stripped == "O()" ? "O(1)" : stripped
     end
 
     def worst_callable(ids, symbolic_time, complexities, time_complete)
