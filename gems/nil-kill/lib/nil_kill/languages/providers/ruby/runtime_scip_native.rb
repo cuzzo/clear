@@ -123,210 +123,44 @@ module NilKillRuntimeTrace
       source_role: (path && runtime_nonproduction_source_path?(path) ? "nonproduction" : nil),
     }.merge(runtime_package(path, native: native))
   end
-
-  def self.native_scip_call_rows
-    run_id = ENV.fetch("NIL_KILL_RUN_ID", "")
-    NilKillTraceNative.records.flat_map do |row|
-      callee = row.fetch(:callee)
-      path = native_scip_definition_path(callee[:path])
-      callsite = row.fetch(:callsite)
-      symbols = native_scip_symbols_for(
-        callsite.fetch(:path), callsite.fetch(:line), callsite.fetch(:selector)
-      )
-      symbols = [nil] if symbols.empty?
-      symbols.map do |anchor_symbol|
-      {
-        schema_version: 1,
-        event: "runtime_call",
-        language: "ruby",
-        run_id: run_id,
-        caller: row.fetch(:caller),
-        callsite: callsite.slice(:path, :line).merge(anchor_symbol: anchor_symbol),
-        # A known definition site outranks the C-implementation flag for package
-        # attribution: a generated accessor on a workspace class is workspace
-        # code, not CRuby, even though the VM reported it as a native call.
-        callee: callee.merge(path: path, line: (path ? callee[:line] : nil))
-          .merge(native_scip_callee_facts(path, callee.fetch(:native) && path.nil?)),
-        receiver_domain: native_scip_domain(
-          row.fetch(:receiver_types), row.fetch(:receiver_domain_indices),
-          production_only: true
-        ),
-        result_domain: native_scip_domain(
-          row.fetch(:result_types), row.fetch(:result_domain_indices),
-          production_only: true
-        ),
-        result_truths: row.fetch(:result_truths),
-        count: row.fetch(:count),
-      }
-      end
-    end
-  end
-
-  # The evidence emitter reads parameter and return domains from methods-*.jsonl,
-  # which the Ruby type tier used to produce. The collector already observes both
-  # -- parameters at analyzed method entry, returns under the "return" selector --
-  # so this regroups those records per function in the shape the emitter expects.
-  def self.native_scip_method_rows
-    records = NilKillTraceNative.records
-    by_site = records.group_by do |row|
-      [row.dig(:callsite, :path), row.dig(:callsite, :line)]
-    end
-    NilKillTraceNative.function_entries.map do |path, owner, name, line, count|
-      rows = by_site.fetch([path, line], [])
-      params = rows.reject { |row| row.dig(:callsite, :selector) == "return" }
-      returned = rows.find { |row| row.dig(:callsite, :selector) == "return" }
-      row = {
-        class: owner, method: name, kind: "instance", path: path, line: line,
-        calls: count, ok_calls: count, raised_calls: 0,
-        params_by_name: {}, param_singleton_types: {}, param_value_shapes: {},
-        param_elem: {}, param_elem_shapes: {}, param_kv: {}, param_kv_shapes: {},
-        params_ok: {}, params_raised: {}, param_sites: {},
-        returns: [], return_singleton_types: [], return_value_shapes: [],
-        return_elem: [], return_elem_shapes: [], return_kv: [[], []],
-        return_kv_shapes: [[], []],
-      }
-      params.each do |param|
-        slot = param.dig(:callsite, :selector)
-        domain = native_scip_domain(
-          param.fetch(:receiver_types), param.fetch(:receiver_domain_indices)
-        )
-        row[:params_by_name][slot] = domain.fetch(:types)
-        row[:param_singleton_types][slot] = domain.fetch(:singletons)
-        row[:param_value_shapes][slot] = domain.fetch(:shapes)
-        row[:param_elem][slot] = domain.fetch(:elements)
-        row[:param_elem_shapes][slot] = []
-        row[:param_kv][slot] = [domain.fetch(:keys), domain.fetch(:values)]
-        row[:param_kv_shapes][slot] = [[], []]
-      end
-      if returned
-        domain = native_scip_domain(
-          returned.fetch(:result_types), returned.fetch(:result_domain_indices)
-        )
-        row[:returns] = domain.fetch(:types)
-        row[:return_singleton_types] = domain.fetch(:singletons)
-        row[:return_value_shapes] = domain.fetch(:shapes)
-        row[:return_elem] = domain.fetch(:elements)
-        row[:return_kv] = [domain.fetch(:keys), domain.fetch(:values)]
-      end
-      row
-    end
-  end
-
-  COLLECTION_KINDS = { "Array" => "array", "Hash" => "hash", "Set" => "set" }.freeze
-
-  # A collection observation is keyed by the slot it came from, at that slot's
-  # definition line, which is what FactMine links to a COLLECTION_OPERATION
-  # anchor through its own flow facts. A reader whose result is a collection is
-  # exactly such a slot, and the callee definition site the collector records is
-  # its location.
-  def self.native_scip_collection_rows
-    NilKillTraceNative.records.filter_map do |row|
-      callee = row.fetch(:callee)
-      path = native_scip_definition_path(callee[:path])
-      owner = callee[:owner]
-      next unless path && owner && callee[:name]
-
-      domain = native_scip_domain(
-        row.fetch(:result_types), row.fetch(:result_domain_indices)
-      )
-      kind = domain.fetch(:types).filter_map { |type| COLLECTION_KINDS[type] }.first
-      next unless kind
-
-      {
-        owner_kind: "struct_field",
-        name: "#{owner}.#{callee[:name]}",
-        path: path,
-        line: callee[:line].to_i,
-        kind: kind,
-        calls: row.fetch(:count),
-        classes: domain.fetch(:types),
-        elem_classes: domain.fetch(:elements),
-        key_classes: domain.fetch(:keys),
-        value_classes: domain.fetch(:values),
-        elem_shapes: [], key_shapes: [], value_shapes: [],
-        mutation_sites: {},
-      }
-    end
-  end
-
-  # The same observations answer two questions: which classes a member holds
-  # anywhere (ivars) and which it holds at one write site (state-values).
-  def self.native_scip_state_rows
-    NilKillTraceNative.state_values.map do |path, line, owner, name, classes, calls|
-      { path: path, line: line, class: owner, name: name,
-        classes: classes.compact.sort, calls: calls }
-    end
-  end
-
-  # `dump` owns the ivars/state-values files for every tier, so the observations
-  # are handed to the tables it serialises rather than written a second time.
-  def self.publish_native_state_observations!
-    native_scip_state_rows.each do |row|
-      owner = row.fetch(:class)
-      name = row.fetch(:name)
-      classes = row.fetch(:classes)
-      calls = row.fetch(:calls)
-      field = (@ivar_runtime[[owner, "@#{name}"]] ||= { calls: 0, classes: NKSet.new })
-      field[:calls] += calls
-      classes.each { |type| field[:classes] << type }
-      site = (
-        @runtime_state_values[[row.fetch(:path), row.fetch(:line), owner, name]] ||=
-          { calls: 0, classes: NKSet.new }
-      )
-      site[:calls] += calls
-      classes.each { |type| site[:classes] << type }
-    end
-  end
-
-  # An edge is a fact about the call graph, not evidence about a requested
-  # value, so it is recorded for every call between two analyzed methods rather
-  # than only for callsites the plan demanded. Both endpoints are function
-  # entries, so their owner and name are read back from those.
-  def self.native_scip_method_edge_rows
-    entries = NilKillTraceNative.function_entries.to_h do |path, owner, name, line, _count|
-      [[path, line], { class: owner, method: name, kind: "instance", path: path, line: line }]
-    end
-    NilKillTraceNative.method_edges.filter_map do |caller_path, caller_line, callee_path, callee_line, calls|
-      from = entries[[caller_path, caller_line]]
-      to = entries[[callee_path, callee_line]]
-      next unless from && to
-
-      { caller: from, callee: to, calls: calls, ok_calls: calls, raised_calls: 0 }
-    end
-  end
-
+  # Everything the collector saw, written once so the shaping can happen
+  # outside the traced program. The package table is the one part only this
+  # process could produce: which gem or workspace file a path came from is a
+  # fact about the VM that observed it.
   def self.dump_native_runtime_scip(pid)
     NilKillTraceNative.stop
-    write_jsonl("runtime-calls-#{pid}.jsonl", native_scip_call_rows)
-    write_jsonl("methods-#{pid}.jsonl", native_scip_method_rows)
-    write_jsonl("collections-#{pid}.jsonl", native_scip_collection_rows)
-    publish_native_state_observations!
-    write_jsonl("method-edges-#{pid}.jsonl", native_scip_method_edge_rows)
-    write_jsonl(
-      "executed-callsites-#{pid}.jsonl",
-      NilKillTraceNative.executed_callsites.sort_by { |row| row.map(&:to_s) }.map do |path, line, selector, count|
-        { path: path, line: line, selector: selector, count: count }
-      end
-    )
-    write_jsonl(
-      "exact-anchor-executions-#{pid}.jsonl",
-      NilKillTraceNative.executed_callsites
-        .each_with_object(Hash.new(0)) do |(path, line, selector, count), tally|
-          native_scip_symbols_for(path, line, selector).each { |symbol| tally[symbol] += count }
-        end
-        .sort.map { |symbol, count| { symbol: symbol, count: count } }
-    )
-    write_jsonl(
-      "function-entries-#{pid}.jsonl",
-      NilKillTraceNative.function_entries.sort_by { |row| row.map(&:to_s) }.map do |path, owner, name, line, count|
-        { path: path, owner: owner, name: name, kind: "instance", line: line, count: count }
-      end
-    )
+    records = NilKillTraceNative.records
+    write_json("collector-raw-#{pid}.json.gz", {
+      pid: pid,
+      run_id: ENV.fetch("NIL_KILL_RUN_ID", ""),
+      records: records,
+      domains: NilKillTraceNative.domains,
+      executed_callsites: NilKillTraceNative.executed_callsites,
+      function_entries: NilKillTraceNative.function_entries,
+      state_values: NilKillTraceNative.state_values,
+      method_edges: NilKillTraceNative.method_edges,
+      collections: NilKillTraceNative.collection_observations,
+      structs: NilKillTraceNative.struct_observations,
+      tuples: NilKillTraceNative.tuple_observations,
+      tlets: NilKillTraceNative.tlet_observations,
+      packages: package_facts(records),
+    })
   end
 
-  def self.write_jsonl(name, rows)
-    File.open(File.join(OUT_DIR, name), "w") do |file|
-      rows.each { |row| file.puts JSON.generate(row) }
+  # Asked once per distinct definition site rather than once per row.
+  def self.package_facts(records)
+    records.each_with_object({}) do |row, facts|
+      callee = row.fetch(:callee)
+      path = native_scip_definition_path(callee[:path])
+      native = callee.fetch(:native) && path.nil?
+      facts["#{path}\x01#{native ? 1 : 0}"] ||= native_scip_callee_facts(path, native)
     end
+  end
+
+  def self.write_json(name, payload)
+    require "zlib"
+    path = File.join(OUT_DIR, name)
+    Zlib::GzipWriter.open(path) { |io| io.write(JSON.generate(payload)) }
+    path
   end
 end

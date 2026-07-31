@@ -188,49 +188,12 @@ module NilKillRuntimeTrace
   # so every load mechanism loads instrumented code with no redirect --
   # which is exactly what made collect_ran_untraced non-convergent.
 
+  # The collector writes what it saw and nothing else; turning that into rows
+  # is the collector process's job, not the traced program's.
   def self.dump
     FileUtils.mkdir_p(OUT_DIR)
     pid = Process.pid
-    dump_native_runtime_scip(pid) if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
-    File.open(File.join(OUT_DIR, "structs-#{pid}.jsonl"), "w") do |file|
-      NilKillTraceNative.struct_observations.each { |row| file.puts JSON.generate(row) }
-    end
-    File.open(File.join(OUT_DIR, "ivars-#{pid}.jsonl"), "w") do |file|
-      @ivar_runtime.each do |(klass, name), rec|
-        file.puts JSON.generate(class: klass, name: name, calls: rec[:calls], classes: rec[:classes].to_a.sort)
-      end
-    end
-    File.open(File.join(OUT_DIR, "state-values-#{pid}.jsonl"), "w") do |file|
-      @runtime_state_values.each do |(path, line, klass, name), rec|
-        file.puts JSON.generate(
-          path: path,
-          line: line,
-          class: klass,
-          name: name,
-          calls: rec[:calls],
-          classes: rec[:classes].to_a.sort
-        )
-      end
-    end
-    File.open(File.join(OUT_DIR, "tuples-#{pid}.jsonl"), "w") do |file|
-      NilKillTraceNative.tuple_observations.each { |row| file.puts JSON.generate(row) }
-    end
-    File.open(File.join(OUT_DIR, "collections-#{pid}.jsonl"), "w") do |file|
-      NilKillTraceNative.collection_observations.each do |row|
-        file.puts JSON.generate(row.merge(
-          mutation_sites: row.fetch(:mutation_sites)
-            .sort_by { |site, count| [-count, site.to_s] }.to_h
-        ))
-      end
-    end
-    File.open(File.join(OUT_DIR, "tlets-#{pid}.jsonl"), "w") do |file|
-      NilKillTraceNative.tlet_observations.each do |row|
-        file.puts JSON.generate(
-          path: row.fetch(:path), line: row.fetch(:line),
-          calls: row.fetch(:calls), classes: row.fetch(:classes)
-        )
-      end
-    end
+    dump_native_runtime_scip(pid)
     dump_coverage(pid)
   end
 

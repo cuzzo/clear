@@ -74,6 +74,13 @@ module MiniCollect
       MESSAGE
     end
     rd = NilKill::RUNTIME_DIR
+    # The traced program writes what the collector saw; shaping it into rows is
+    # the collector process's job, which this helper is standing in for.
+    NilKill::Runtime::CollectorExport.write(
+      runtime_dir: rd,
+      plan: (JSON.parse(File.read(NilKill::TRACE_PLAN_PATH)) if File.file?(NilKill::TRACE_PLAN_PATH)),
+      root: NilKill::ROOT
+    )
     glob = lambda do |k|
       Dir.glob(File.join(rd, "#{k}-*.jsonl")).flat_map do |p|
         File.readlines(p, chomp: true).map { |l| JSON.parse(l) }

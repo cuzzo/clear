@@ -335,6 +335,16 @@ module NilKill
         abort "nil-kill: required trace shard(s) failed; canonical evidence was not replaced: " \
           "#{failed_shards.join(", ")}"
       end
+      # The traced programs wrote what the collector saw; shaping it into rows
+      # needs no VM, so it happens here.
+      stage("collector-export") do
+        selected.each do |shard|
+          Runtime::CollectorExport.write(
+            runtime_dir: File.join(working_runtime_dir, shard.fetch("id")),
+            plan: trace_plan, root: ROOT
+          )
+        end
+      end
       staged_traces = {}
       stage("shard-bookkeeping") { selected.each do |shard|
         shard_id = shard.fetch("id")

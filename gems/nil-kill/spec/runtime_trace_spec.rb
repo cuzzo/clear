@@ -190,6 +190,9 @@ RSpec.describe "nil-kill runtime trace" do
       _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
 
       expect(status).to be_success, err
+      # The traced program writes what the collector saw; the rows are shaped
+      # afterwards, which is what a real collect does between the two.
+      NilKill::Runtime::CollectorExport.write(runtime_dir: trace_dir, plan: nil, root: NilKill::ROOT)
       struct_events = Dir.glob(File.join(trace_dir, "structs-*.jsonl")).flat_map do |path|
         File.readlines(path, chomp: true).map { |line| JSON.parse(line) }
       end
@@ -235,6 +238,9 @@ RSpec.describe "nil-kill runtime trace" do
       _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", source, chdir: NilKill::ROOT)
 
       expect(status).to be_success, err
+      # The traced program writes what the collector saw; the rows are shaped
+      # afterwards, which is what a real collect does between the two.
+      NilKill::Runtime::CollectorExport.write(runtime_dir: trace_dir, plan: nil, root: NilKill::ROOT)
       struct_events = Dir.glob(File.join(trace_dir, "structs-*.jsonl")).flat_map do |path|
         File.readlines(path, chomp: true).map { |line| JSON.parse(line) }
       end
