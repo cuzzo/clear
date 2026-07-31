@@ -235,20 +235,12 @@ impl NormalizedLanguageBehavior for TypeScriptNormalizedBehavior {
         }
     }
 
-    fn scalar_operator_complexity(
-        &self,
-        message: &str,
-        operand_type: Option<&crate::type_inference::TypeExpr>,
-    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
-        const SCALAR_TYPES: &[&str] = &["number", "boolean", "bigint", "symbol"];
-        let operator = message.strip_suffix('@').unwrap_or(message);
-        if !TYPESCRIPT_OPERATORS.contains(&operator) {
-            return None;
-        }
-        matches!(operand_type, Some(crate::type_inference::TypeExpr::Primitive(name)) if SCALAR_TYPES.contains(&name.as_str()))
-            .then_some(
-                super::normalized_behavior::NormalizedCollectionOperation::Constant.complexity(),
-            )
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        &["number", "boolean", "bigint", "symbol"]
+    }
+
+    fn scalar_operator_names(&self) -> &'static [&'static str] {
+        TYPESCRIPT_OPERATORS
     }
 
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {

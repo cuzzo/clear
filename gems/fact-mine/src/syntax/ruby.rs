@@ -571,24 +571,14 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             .unwrap_or_default()
     }
 
-    fn scalar_operator_complexity(
-        &self,
-        message: &str,
-        operand_type: Option<&TypeExpr>,
-    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
-        const RUBY_SCALAR_TYPES: &[&str] = &[
-            "Symbol", "Integer", "Float", "TrueClass", "FalseClass", "NilClass",
-        ];
-        // Equality on a value type is identity or a word comparison. Ruby
-        // dispatches `==` on the receiver, so only a proven scalar receiver is
-        // constant: Array#== and String#== are not.
-        if !matches!(message, "==" | "!=" | "equal?") {
-            return None;
-        }
-        matches!(operand_type, Some(TypeExpr::Primitive(name)) if RUBY_SCALAR_TYPES.contains(&name.as_str()))
-            .then_some(
-                super::normalized_behavior::NormalizedCollectionOperation::Constant.complexity(),
-            )
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        &["Symbol", "Integer", "Float", "TrueClass", "FalseClass", "NilClass"]
+    }
+
+    // Ruby dispatches every operator on its receiver, so only equality on a
+    // proven scalar is constant: `Array#==` and `String#==` are not.
+    fn scalar_operator_names(&self) -> &'static [&'static str] {
+        &["==", "!=", "equal?"]
     }
 
     fn stdlib_language(&self) -> Option<&'static str> {

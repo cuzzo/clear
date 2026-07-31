@@ -235,6 +235,10 @@ const JAVASCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        &["number", "boolean", "bigint", "symbol"]
+    }
+
     fn parse_signature(
         &self,
         signature: &str,

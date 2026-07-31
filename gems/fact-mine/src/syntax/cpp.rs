@@ -723,7 +723,9 @@ fn cpp_lambda_parameter_types(source: &str) -> Vec<(String, String)> {
     parameters
 }
 
-fn cpp_scalar_primitive(name: &str) -> bool {
+/// C and C++ share this set of spellings, so C's adapter asks the same
+/// question here rather than restating it.
+pub(crate) fn cpp_scalar_primitive(name: &str) -> bool {
     let bare = name
         .trim()
         .trim_start_matches("const ")
@@ -1665,20 +1667,12 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         Some("cpp")
     }
 
-    fn scalar_operator_complexity(
-        &self,
-        message: &str,
-        operand_type: Option<&TypeExpr>,
-    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
-        let operator = message.strip_suffix('@').unwrap_or(message);
-        if !CPP_PRIMITIVE_OPERATORS.contains(&operator) {
-            return None;
-        }
-        matches!(operand_type, Some(TypeExpr::Primitive(name)) if cpp_scalar_primitive(name))
-            .then_some(super::normalized_behavior::NormalizedCallComplexity {
-                time: "O(1)",
-                space: "O(1)",
-            })
+    fn scalar_type_name(&self, name: &str) -> bool {
+        cpp_scalar_primitive(name)
+    }
+
+    fn scalar_operator_names(&self) -> &'static [&'static str] {
+        CPP_PRIMITIVE_OPERATORS
     }
 
     // CFG-SPECIFIC START: expose the C++ CFG profile.

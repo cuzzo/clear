@@ -190,6 +190,15 @@ const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct KotlinNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        // Kotlin overloads operators on declared types, never on these: each
+        // compiles to the JVM instruction for the primitive behind it.
+        &[
+            "Int", "Long", "Short", "Byte", "Char", "Float", "Double", "Boolean", "UInt", "ULong",
+            "UShort", "UByte",
+        ]
+    }
+
     fn function_has_executable_body(&self, node: &Node) -> bool {
         let source = node.text.trim_end();
         source.ends_with('}')

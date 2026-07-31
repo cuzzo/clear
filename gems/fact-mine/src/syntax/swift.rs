@@ -181,6 +181,13 @@ const SWIFT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct SwiftNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        &[
+            "Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16", "UInt32",
+            "UInt64", "Float", "Float32", "Float64", "Float80", "Double", "Bool", "Character",
+        ]
+    }
+
     fn function_has_executable_body(&self, node: &Node) -> bool {
         node.text.trim_end().ends_with('}')
     }

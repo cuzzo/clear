@@ -77,6 +77,14 @@ const PYTHON_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PythonNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        // CPython's int is arbitrary-precision, so this holds for a value the
+        // input does not widen - the same assumption a fixed-width language
+        // makes by construction. A program that grows an integer's width with
+        // its input is outside this model.
+        &["int", "float", "bool", "complex"]
+    }
+
     fn parse_signature(
         &self,
         signature: &str,

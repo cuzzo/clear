@@ -3914,6 +3914,68 @@ fn overloaded(left: Vec<i32>, right: Vec<i32>) -> bool {
     }
 
     #[test]
+    fn every_language_prices_an_operator_over_its_own_machine_scalars() {
+        // Arithmetic on a declared scalar is one instruction wherever the
+        // language has one. An adapter that names no scalar prices no operator
+        // at all, which is how a function doing nothing but arithmetic on two
+        // declared integers came to have no bound.
+        //
+        // Swift is absent because its adapter emits no call fact for an
+        // operator at all, so there is nothing here to price; JavaScript and
+        // Lua because neither spells a declared scalar in the source.
+        let cases: &[(Language, &str, &str)] = &[
+            (
+                Language::Java,
+                ".java",
+                "class A { int scale(int n, int m) { return n * m; } }",
+            ),
+            (
+                Language::Kotlin,
+                ".kt",
+                "class B { fun scale(n: Int, m: Int): Int { return n * m } }",
+            ),
+            (
+                Language::Python,
+                ".py",
+                "def scale(n: int, m: int) -> int:\n    return n * m\n",
+            ),
+            (
+                Language::Php,
+                ".php",
+                "<?php\nfunction scale(int $n, int $m): int { return $n * $m; }\n",
+            ),
+            (
+                Language::Zig,
+                ".zig",
+                "fn scale(n: usize, m: usize) usize { return n * m; }",
+            ),
+            (
+                Language::C,
+                ".c",
+                "int scale(int n, int m) { return n * m; }",
+            ),
+        ];
+        for (language, extension, source) in cases {
+            let rows = language_facts(source, *language, extension);
+            let priced = rows
+                .iter()
+                .find(|row| row.function == "scale")
+                .unwrap_or_else(|| panic!("{language:?} produced no facts for scale"))
+                .call_contexts
+                .iter()
+                .find(|call| call.message == "*")
+                .unwrap_or_else(|| panic!("{language:?} produced no `*` call context"))
+                .known_time_complexity
+                .clone();
+            assert_eq!(
+                priced.as_deref(),
+                Some("O(1)"),
+                "{language:?} left `n * m` on declared scalars unpriced"
+            );
+        }
+    }
+
+    #[test]
     fn a_comparison_against_a_literal_costs_that_literal_however_big_the_other_side_is() {
         // Equality reads at most what the smaller side holds, and a literal
         // holds the same amount whatever the input is. This is what types the

@@ -143,6 +143,10 @@ const LUA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct LuaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for LuaNormalizedBehavior {
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        &["number", "boolean", "integer"]
+    }
+
     fn native_profile_literal_type(&self, value: &str) -> Option<String> {
         value
             .parse::<f64>()

@@ -148,6 +148,10 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn scalar_type_name(&self, name: &str) -> bool {
+        super::cpp::cpp_scalar_primitive(name)
+    }
+
     fn constant_condition_truth(&self, node: &Node) -> Option<bool> {
         match node.text.trim().trim_matches(['(', ')']).trim() {
             "0" => Some(false),

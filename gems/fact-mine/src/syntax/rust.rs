@@ -518,20 +518,12 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         }
     }
 
-    fn scalar_operator_complexity(
-        &self,
-        message: &str,
-        operand_type: Option<&TypeExpr>,
-    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
-        let operator = message.strip_suffix('@').unwrap_or(message);
-        if !RUST_PRIMITIVE_OPERATORS.contains(&operator) {
-            return None;
-        }
-        matches!(operand_type, Some(TypeExpr::Primitive(name)) if rust_scalar_primitive(name))
-            .then_some(super::normalized_behavior::NormalizedCallComplexity {
-                time: "O(1)",
-                space: "O(1)",
-            })
+    fn scalar_type_name(&self, name: &str) -> bool {
+        rust_scalar_primitive(name)
+    }
+
+    fn scalar_operator_names(&self) -> &'static [&'static str] {
+        RUST_PRIMITIVE_OPERATORS
     }
 
     // CFG-SPECIFIC START: expose the Rust CFG profile.

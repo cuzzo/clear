@@ -13,10 +13,21 @@ Each corpus is production code only, its own SCIP index attached, measured with
 | --- | --- | --- | ---: | ---: | ---: |
 | `gems/decomplex` | Rust | rust-analyzer | 1144 | 75.2% | 77.3% |
 | `gems/decomplex` + dependency indexes | Rust | rust-analyzer | 1144 | 76.3% | 78.1% |
-| zod `src/v4/{core,classic}` | TypeScript | scip-typescript | 1305 | 48.2% | 72.5% |
-| rich `rich/` | Python | scip-python | 877 | 28.7% | 29.0% |
+| zod `src/v4/{core,classic}` | TypeScript | scip-typescript | 1305 | 48.2% | 72.6% |
+| rich `rich/` | Python | scip-python | 877 | 28.7% | 29.2% |
 | unslop | Go | scip-go | 145 | 93.1% | 93.1% |
 | gremlins | Go | scip-go | 200 | 60.5% | 60.5% |
+
+Function-level completion understates the operator work, because a function
+usually carries several blockers and clearing one class rarely flips it. The
+operator call facts themselves:
+
+| Corpus | Priced before | Priced now |
+| --- | ---: | ---: |
+| rich | 7/701 (1.0%) | 276/701 (39.4%) |
+| zod | 160/788 (20.3%) | 691/788 (87.7%) |
+| decomplex | 397/550 (72.2%) | 463/550 (84.2%) |
+| unslop | 661/661 (100%) | 661/661 (100%) |
 
 Reproduce:
 
@@ -39,21 +50,30 @@ them is the dependency cost model, not the language - quoting one number for
 An operator is emitted as a call fact in every language. Whether it is ever
 priced is decided per adapter, and the adapters disagree:
 
-| Adapter | How an operator is priced |
+| Adapter | How an operator was priced |
 | --- | --- |
 | Go | a hardcoded operator list, type-blind: `==`, `<`, `+` are O(1) |
-| Rust, TypeScript, C++, Ruby | only against an operand type proven to be a scalar |
+| Rust, TypeScript, C++, Ruby | a hand-rolled copy of the shared rule, each with its own names |
 | C# | the shared rule, via `scalar_type_names` |
 | Java, Kotlin, Python, JavaScript, Swift, PHP, Lua, C, Zig | not at all |
 
 No language configures operators in `config/stdlib_complexity/*.yml`; the shared
 `scalar_operator_complexity` in `normalized_behavior.rs` was dead code for every
-adapter but C#, since `scalar_type_names` defaults to empty and only C#
-overrides it.
+adapter but C#, since `scalar_type_names` defaults to empty and the four
+adapters that did price operators had each overridden the rule rather than
+feeding it.
 
-So the languages that demand an operand type are exactly the ones where a hole
-in type resolution shows up as an unpriced operator, and Go's advantage is that
-it asks no question it cannot answer. Measured ceiling, pricing every operator
+Fixed. There is now one rule and no override of it. An adapter contributes
+exactly two things - which names are its machine scalars, and which operators it
+dispatches differently - and the shared rule owns everything structural: a
+nilable scalar is a scalar, alternatives price as the worst of them, a type
+spelled as a literal holds what the spelling fixes. Nine adapters that priced no
+operator at all now do.
+
+The languages that demand an operand type are exactly the ones where a hole in
+type resolution shows up as an unpriced operator, and Go's advantage was that it
+asks no question it cannot answer - at the cost of pricing `s1 + s2` on two Go
+strings as O(1), which is wrong and is why the shared rule does not copy it. Measured ceiling, pricing every operator
 unconditionally: Rust 75.2 -> 79.5%, TypeScript 48.2 -> **74.1%**, Python
 28.7 -> 30.0%. TypeScript's whole deficit against Go was operators.
 
@@ -109,7 +129,7 @@ Ranked by the diagnostic's primary root-cause partition.
 Attaching the whole Rust stdlib index is worth +1.1 points, not the dominant
 lever [`rust-completion.md`](rust-completion.md) took it for.
 
-### TypeScript - zod, 72.5%
+### TypeScript - zod, 72.6%
 
 - `semantic_identity_missing`, 158 functions: `project_lexical_binding_missing`
   36, `reflection_or_dynamic_dispatch` 21,
@@ -118,11 +138,10 @@ lever [`rust-completion.md`](rust-completion.md) took it for.
   is 105 lines against Go's 735: no `Promise` at all (`Promise#then` alone
   blocks 29 functions, `Promise.all` 11), no `String#replace`, no `Number`, no
   `BigInt`, no `Object` statics.
-- Remaining operand types that resolve but do not price: a union (73 sites), a
-  nilable scalar (42), a string-literal type (30), `typeof e` (the operand
-  resolves to the type of `e`, when what `typeof` yields is a string).
+- `typeof e` still resolves to the type of `e`, when what `typeof` yields is a
+  string; 196 sites. Unions, nilable scalars and literal types now price.
 
-### Python - rich, 29.0%
+### Python - rich, 29.2%
 
 Python is not blocked on operators, and the operator ceiling is worth 1.3
 points. It is blocked before that:
@@ -143,21 +162,20 @@ points. It is blocked before that:
 - Annotation spellings survive into the type: `Primitive("\"ConsoleOptions\"")`
   from a quoted forward reference, `Primitive("int:")` from a trailing colon.
 
+Two adapter gaps found along the way, neither an operator-pricing problem:
+Swift emits no call fact for an operator at all, so there is nothing to price;
+JavaScript and Lua spell no declared scalar in source, so their names only take
+effect where a flow hint or annotation supplies one.
+
 ## Plan
 
 Ordered by measured yield per unit of work. Each step is verifiable against the
 table above; re-measure all six corpora after each, since a fix that helps one
 language must not move Go.
 
-1. **Give every adapter the shared operator rule.** Populate `scalar_type_names`
-   for Java, Kotlin, Python, JavaScript, Swift, PHP, C and Zig, and collapse the
-   Rust/TypeScript/C++/Ruby overrides onto it so there is one rule and a list of
-   names per language. Java and Kotlin cannot overload arithmetic on primitives,
-   so they price like Go once the names exist.
-2. **Price an operator over a wrapped or alternative type.** Reduce `Nilable(T)`
-   to `T`, and price a `Union` as the worst of its alternatives, unknown if any
-   alternative is unknown. Treat a literal type as what it is: fixed size.
-   Measured 145 further sites in zod alone.
+1. ~~Give every adapter the shared operator rule.~~ Done.
+2. ~~Price an operator over a wrapped or alternative type.~~ Done, in the same
+   rule.
 3. **Resolve an operand by its form, not by a local it mentions.** Replace the
    base-local fallback in `operator_operand_type` with a recursion over the
    expression: literal, cast, index, member read, call, parenthesised, unary.

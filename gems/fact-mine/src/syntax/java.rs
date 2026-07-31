@@ -225,6 +225,15 @@ const JAVA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        // Java has no operator overloading: an operator on a primitive is a
+        // bytecode instruction, and on a boxed value it unboxes to one.
+        &[
+            "int", "long", "short", "byte", "char", "float", "double", "boolean", "Integer",
+            "Long", "Short", "Byte", "Character", "Float", "Double", "Boolean",
+        ]
+    }
+
     fn uses_source_declaration_header(&self) -> bool {
         true
     }

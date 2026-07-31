@@ -986,6 +986,51 @@ pub(crate) fn native_pointer_nullability_contract(type_name: &str) -> Option<&'s
     }
 }
 
+/// What an operator means where it reduces to a machine instruction. Every
+/// language that has these spells them the same way; the two exceptions state
+/// their own list.
+const SCALAR_OPERATORS: &[&str] = &[
+    "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&", "|", "^", "<<", ">>", "&&",
+    "||", "~",
+];
+
+/// Whether an operand holds an amount no input grows, so that an operator over
+/// it is one instruction. A language contributes the names of its own machine
+/// scalars; everything around those names holds in all of them:
+///
+/// - a nilable scalar is a scalar, the nil case being a tag check;
+/// - alternatives price as the worst of them, so a value that is one of several
+///   scalars is a scalar, and one that might be a sequence is not;
+/// - a type spelled as a literal holds exactly that literal, whose size the
+///   declaration fixes.
+fn scalar_operand<B: NormalizedLanguageBehavior + ?Sized>(
+    operand_type: &TypeExpr,
+    behavior: &B,
+) -> bool {
+    match operand_type {
+        TypeExpr::Nilable(inner) => scalar_operand(inner, behavior),
+        TypeExpr::Union(alternatives) => {
+            !alternatives.is_empty()
+                && alternatives
+                    .iter()
+                    .all(|alternative| scalar_operand(alternative, behavior))
+        }
+        TypeExpr::Primitive(name) => {
+            behavior.scalar_type_name(name.trim()) || literal_type_name(name.trim())
+        }
+        _ => false,
+    }
+}
+
+/// Whether a type is spelled as the one value it admits. An indexer states a
+/// narrowed type this way - `"draft-07"`, `404` - and what it holds is fixed by
+/// the spelling, however large the value compared against it turns out to be.
+fn literal_type_name(name: &str) -> bool {
+    let quoted = (name.starts_with('"') && name.ends_with('"') && name.len() >= 2)
+        || (name.starts_with('\'') && name.ends_with('\'') && name.len() >= 2);
+    quoted || name.parse::<f64>().is_ok()
+}
+
 pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// Resolve a compile-time condition literal using native truthiness rules.
     /// The shared extractor uses this only to omit a syntactically present but
@@ -1290,24 +1335,37 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         &[]
     }
 
+    /// Whether a declared name is one of this language's machine scalars. Most
+    /// languages state a list; the two that spell a scalar more than one way
+    /// answer for themselves. This is the whole of what an adapter contributes
+    /// to operator pricing - the rule built on it is shared.
+    fn scalar_type_name(&self, name: &str) -> bool {
+        self.scalar_type_names().contains(&name.trim())
+    }
+
+    /// The operators that reduce to a machine instruction on a scalar. Every
+    /// language that has an operator at all means the same thing by it; a
+    /// language states its own list only where it spells one differently, or
+    /// where it dispatches an operator the others do not.
+    fn scalar_operator_names(&self) -> &'static [&'static str] {
+        SCALAR_OPERATORS
+    }
+
     /// An operator applied to a proven machine scalar is a single instruction in
     /// every language. Only the type names differ, so the rule lives here and
-    /// each language contributes its own names.
+    /// each language contributes its own names. No adapter overrides this: an
+    /// adapter that answered it for itself is an adapter the shared rule stopped
+    /// reaching, which is how nine languages came to price no operator at all.
     fn scalar_operator_complexity(
         &self,
         message: &str,
         operand_type: Option<&TypeExpr>,
     ) -> Option<NormalizedCallComplexity> {
-        const SCALAR_OPERATORS: &[&str] = &[
-            "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&", "|", "^", "<<", ">>",
-            "&&", "||",
-        ];
         let operator = message.strip_suffix('@').unwrap_or(message);
-        if !SCALAR_OPERATORS.contains(&operator) {
+        if !self.scalar_operator_names().contains(&operator) {
             return None;
         }
-        let names = self.scalar_type_names();
-        matches!(operand_type, Some(TypeExpr::Primitive(name)) if names.contains(&name.as_str()))
+        scalar_operand(operand_type?, self)
             .then_some(NormalizedCollectionOperation::Constant.complexity())
     }
 

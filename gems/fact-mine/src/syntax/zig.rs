@@ -99,6 +99,14 @@ const ZIG_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct ZigNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for ZigNormalizedBehavior {
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        &[
+            "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128",
+            "usize", "f16", "f32", "f64", "f80", "f128", "bool", "comptime_int", "comptime_float",
+            "c_int", "c_uint", "c_long", "c_ulong", "c_short", "c_ushort", "c_char",
+        ]
+    }
+
     fn uses_source_declaration_header(&self) -> bool {
         true
     }

@@ -167,6 +167,10 @@ const PHP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PhpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
+    fn scalar_type_names(&self) -> &'static [&'static str] {
+        &["int", "float", "bool"]
+    }
+
     fn uses_source_declaration_header(&self) -> bool {
         true
     }
