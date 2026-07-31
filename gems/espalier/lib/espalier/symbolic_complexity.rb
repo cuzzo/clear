@@ -142,33 +142,60 @@ module Espalier
       @expression_pool[key] ||= canonical
     end
 
-    def substitute(expression, mapping, caller_domains: {})
+    # Re-express a callee's bound in the caller's terms.
+    #
+    # A domain the callee names is one of three things. Its parameter, which
+    # `mapping` binds to the caller's argument at this call site. Something the
+    # caller already names, which passes through. Or something private to the
+    # callee - a loop of its own, a call-input size, a nested closure's
+    # parameter - which the caller cannot vary and must not inherit: with
+    # `unmappable_atom` those fold into one atom standing for what this call
+    # costs, so composing adds one symbol per call rather than one per
+    # quantity anywhere beneath it.
+    def substitute(expression, mapping, caller_domains: {}, unmappable_atom: nil)
       return nil unless expression
 
+      atom_id = unmappable_atom && (unmappable_atom["id"] || unmappable_atom[:id]).to_s
+      known = ->(id) { mapping.key?(id) || caller_domains.key?(id) }
+      fold = lambda do |entries|
+        folded = {}
+        entries.each do |id, exponent|
+          replacements = Array(mapping[id])
+          if replacements.empty?
+            # An unmappable domain contributes the atom once however many
+            # factors it stood for: the atom denotes their product.
+            replacements = if atom_id && !known.call(id) then [atom_id] else [id] end
+            exponent = 1 if atom_id && !known.call(id)
+          end
+          replacements.each do |replacement|
+            folded[replacement] = if replacement == atom_id
+                                    [folded.fetch(replacement, 0), exponent].max
+                                  else
+                                    folded.fetch(replacement, 0) + exponent
+                                  end
+          end
+        end
+        folded
+      end
       terms = Array(expression[:terms]).map do |term|
-        factors = {}
-        term[:factors].each do |id, exponent|
-          replacements = Array(mapping[id])
-          replacements = [id] if replacements.empty?
-          replacements.each do |replacement|
-            factors[replacement] = factors.fetch(replacement, 0) + exponent
-          end
-        end
-        logs = {}
-        term[:logs].each do |id, exponent|
-          replacements = Array(mapping[id])
-          replacements = [id] if replacements.empty?
-          replacements.each do |replacement|
-            logs[replacement] = logs.fetch(replacement, 0) + exponent
-          end
-        end
-        { factors: factors, logs: logs }
+        { factors: fold.call(term[:factors]), logs: fold.call(term[:logs]) }
+      end
+      domains = (expression[:domains] || {}).merge(caller_domains)
+      if atom_id
+        # The callee's private domains are no longer named, so their records go
+        # with them; the atom's takes their place.
+        domains = domains.reject { |id, _| !known.call(id) }
+        domains = domains.merge(atom_id => stringify_domain(unmappable_atom))
       end
       normalize(
         terms: terms,
-        domains: (expression[:domains] || {}).merge(caller_domains),
+        domains: domains,
         complete: expression.fetch(:complete, true)
       )
+    end
+
+    def stringify_domain(domain)
+      domain.each_with_object({}) { |(key, value), out| out[key.to_s] = value }
     end
 
     # Drop the given domain ids from an expression, treating them as constant.

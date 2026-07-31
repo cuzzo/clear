@@ -356,10 +356,33 @@ module Espalier
           callee_symbolic, callable.fetch(:expression), callable_constant: callable.fetch(:constant)
         )
       end
+      # Whatever the callee's bound names beyond its own parameters is private
+      # to it - a loop of its own, a nested closure's parameter, a call-input
+      # size - and the caller can neither vary it nor bind it. It is carried as
+      # one atom standing for what this call costs, so a caller's bound grows
+      # with the calls it makes rather than with everything beneath them.
+      atom_key = callee_id.to_s.empty? ? "#{owner}##{callee}" : callee_id.to_s
       substituted = Espalier::SymbolicComplexity.substitute(
         callee_symbolic,
         mapping,
-        caller_domains: caller_domains
+        caller_domains: caller_domains,
+        unmappable_atom: {
+          "id" => "callee:#{atom_key}",
+          "name" => "work done by #{callee}",
+          "source_kind" => "callee_internal_size",
+          "path" => caller_fact["path"],
+          "span" => context["span"],
+          # The atom is what was propagated, so it carries the provenance the
+          # callee's own domains used to carry.
+          "origin_owner" => owner,
+          "origin_function" => callee,
+          "propagated_via" => {
+            "owner" => caller_fact["owner"],
+            "function" => caller_fact["function"],
+            "message" => context["message"],
+            "line" => context["line"]
+          }.compact
+        }
       )
       substituted = annotate_propagated_domains(
         substituted,

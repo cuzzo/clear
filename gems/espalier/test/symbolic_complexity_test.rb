@@ -49,6 +49,38 @@ class SymbolicComplexityTest < Minitest::Test
     assert_equal "O(N^2)", Espalier::SymbolicComplexity.render(product).first
   end
 
+  def test_a_callees_own_quantities_do_not_leak_into_its_caller
+    # A callee's bound names its parameter, a loop of its own, and a cost of
+    # its own. Only the parameter is something the caller can vary; the rest is
+    # what that call costs, and the caller carries it as one atom rather than
+    # inheriting the callee's private domains one by one.
+    xs = domain("param:caller:xs", "xs", 1)
+    callee_param = domain("param:callee:items", "items", 8)
+    callee_loop = { "id" => "loop:callee.rb:12:4", "name" => "loop", "source_kind" => "loop",
+                    "path" => "callee.rb", "span" => [12, 4, 14, 5] }
+    callee_edge = { "id" => "input:edge:abc", "name" => "input to collect",
+                    "source_kind" => "call_input_size", "path" => "callee.rb", "span" => [13, 0, 13, 9] }
+    callee = expression(
+      { callee_param["id"] => 1, callee_loop["id"] => 1, callee_edge["id"] => 1 },
+      [callee_param, callee_loop, callee_edge]
+    )
+    assert_equal "O(N*M*K)", Espalier::SymbolicComplexity.render(callee).first
+
+    substituted = Espalier::SymbolicComplexity.substitute(
+      callee,
+      { callee_param["id"] => [xs["id"]] },
+      caller_domains: { xs["id"] => xs },
+      unmappable_atom: { "id" => "callee:cost:c1", "name" => "work done by callee",
+                         "source_kind" => "callee_internal_size" }
+    )
+    ids = Array(substituted[:terms]).flat_map { |term| term[:factors].keys }.uniq.sort
+    assert_equal ["callee:cost:c1", xs["id"]].sort, ids,
+                 "the caller names its own argument and one atom for the call"
+    assert_equal "O(N*M)", Espalier::SymbolicComplexity.render(substituted).first
+    # And the atom is a size, not a cost, so the bound does not become opaque.
+    refute Espalier::SymbolicComplexity.opaque_cost?(substituted)
+  end
+
   def test_assigns_n_to_the_highest_exponent_and_renders_canonical_factor_order
     outer = domain("param:f:outer", "outer", 1)
     inner = domain("param:f:inner", "inner", 2)
