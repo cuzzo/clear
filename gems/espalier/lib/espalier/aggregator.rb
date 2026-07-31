@@ -800,13 +800,19 @@ module Espalier
         # A summary states its bound as text and carries no expression to
         # substitute into, so the parameter has to be closed in the text.
         if expression.nil?
-          next node unless node[:complexity].to_s.match?(/\bC\d*\b/)
+          unless "#{node[:complexity]} #{node[:space]}".match?(/\b[CS]\d*\b/)
+            next node
+          end
 
           ids = enclosed_callable_ids(mod, method_span, excluded_callable_ids)
           resolved = worst_callable(ids, symbolic_time, complexities, time_complete)
           next node unless resolved && resolved.fetch(:constant)
 
-          next node.merge(complexity: without_callback_factors(node[:complexity].to_s))
+          # A constant callable needs constant space, so its space parameter
+          # closes with its cost.
+          merged = { complexity: without_callback_factors(node[:complexity].to_s) }
+          merged[:space] = without_callback_factors(node[:space].to_s) if node[:space]
+          next node.merge(merged)
         end
         next node if Espalier::SymbolicComplexity.callback_domain_ids(expression).empty?
 
@@ -821,11 +827,16 @@ module Espalier
         )
         next node if substituted.equal?(expression)
 
-        node.merge(
+        merged = {
           symbolic_time: substituted,
           known_time_complexity: Espalier::SymbolicComplexity.render(substituted)&.first ||
             node[:known_time_complexity]
-        )
+        }
+        if callable.fetch(:constant) && node[:known_space_complexity].to_s.match?(/\bS\d*\b/)
+          merged[:known_space_complexity] =
+            without_callback_factors(node[:known_space_complexity].to_s)
+        end
+        node.merge(merged)
       end
     end
 
@@ -839,11 +850,17 @@ module Espalier
       }.flatten.uniq.reject { |id| excluded_callable_ids.include?(id) }
     end
 
-    # Running a constant callable multiplies by one, so its symbol leaves.
+    # Running a constant callable multiplies by one, so its symbol leaves. A
+    # cost names that parameter C and a space names it S.
     def without_callback_factors(text)
-      stripped = text.gsub(/\s*\*\s*C\d*\b/, "").gsub(/\bC\d*\s*\*\s*/, "")
-      stripped = stripped.gsub(/\bC\d*\b/, "1")
-      stripped == "O()" ? "O(1)" : stripped
+      stripped = text.gsub(/\s*\*\s*[CS]\d*\b/, "").gsub(/\b[CS]\d*\s*\*\s*/, "")
+      stripped = stripped.gsub(/\b[CS]\d*\b/, "1")
+      return "O(1)" if stripped == "O()"
+
+      # A constant term adds nothing beside a term that grows.
+      body = stripped.sub(/\AO\((.*)\)\z/m, "\\1")
+      terms = body.split(/\s*\+\s*/).reject { |term| term.strip == "1" }
+      terms.empty? ? "O(1)" : "O(#{terms.join(' + ')})"
     end
 
     def worst_callable(ids, symbolic_time, complexities, time_complete)
