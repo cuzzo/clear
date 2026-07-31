@@ -2031,6 +2031,7 @@ fn visit_loops(
                             )
                         })
                         .or_else(|| fixed_side_comparison_complexity(message, node))
+                        .or_else(|| input_independent_operator_complexity(node))
                         .or_else(|| negation_complexity(message))
                 })
                 // A record's shape is known, so an operation over that shape is
@@ -2806,6 +2807,36 @@ fn negation_complexity(
 /// needs no operand type at all, which is why it holds where inference does not
 /// reach: a value read out of an external call, checked against a spelling the
 /// source states.
+/// An operator reading nothing the input supplies cannot grow with it. This
+/// holds without any operand's type, so it holds in the languages whose
+/// operators dispatch on one - and it is the whole of what `64 * 1024 * 1024`
+/// needs.
+///
+/// Only an operator. What a call costs is its body's, not its arguments': a
+/// method handed two literals may still walk the whole of something else.
+fn input_independent_operator_complexity(
+    node: &Node,
+) -> Option<crate::syntax::normalized_behavior::NormalizedCallComplexity> {
+    if node.r#type != "OPCALL" {
+        return None;
+    }
+    fn fixed(node: &Node) -> bool {
+        if !local_names(node).is_empty() || !state_names(node).is_empty() {
+            return false;
+        }
+        if matches!(
+            node.r#type.as_str(),
+            "CALL" | "QCALL" | "FCALL" | "VCALL" | "ITER" | "LAMBDA" | "YIELD"
+        ) {
+            return false;
+        }
+        child_nodes(node).into_iter().all(fixed)
+    }
+    let operands = child_nodes(node);
+    (!operands.is_empty() && operands.into_iter().all(fixed))
+        .then(|| NormalizedCollectionOperation::Constant.complexity())
+}
+
 fn fixed_side_comparison_complexity(
     message: &str,
     node: &Node,
@@ -3916,6 +3947,38 @@ fn overloaded(left: Vec<i32>, right: Vec<i32>) -> bool {
             None,
             "Vec equality dispatches through PartialEq and is not scalar"
         );
+    }
+
+    #[test]
+    fn an_operation_over_things_no_input_grows_is_constant() {
+        // Nothing here reads the input, so nothing here can grow with it -
+        // which holds without knowing any operand's type, and so holds in a
+        // language whose operators dispatch on one.
+        let rust = language_facts(
+            "fn stack_bytes() -> usize {\n    64 * 1024 * 1024\n}\n",
+            Language::Rust,
+            ".rs",
+        );
+        let python = language_facts(
+            "def stack_bytes():\n    return 64 * 1024 * 1024\n",
+            Language::Python,
+            ".py",
+        );
+        for (label, rows) in [("rust", &rust), ("python", &python)] {
+            let unpriced = rows
+                .iter()
+                .find(|row| row.function == "stack_bytes")
+                .unwrap()
+                .call_contexts
+                .iter()
+                .filter(|call| call.known_time_complexity.is_none())
+                .map(|call| call.message.clone())
+                .collect::<Vec<_>>();
+            assert!(
+                unpriced.is_empty(),
+                "{label} left arithmetic over literals unpriced: {unpriced:?}"
+            );
+        }
     }
 
     #[test]
