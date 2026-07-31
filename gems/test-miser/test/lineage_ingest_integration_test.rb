@@ -103,8 +103,17 @@ class LineageIngestIntegrationTest < Minitest::Test
         ["test-miser-evidence", "test-miser.evidence.persists_without_oracle", "src/worker_test.rb", "test-miser.evidence.sarif.v1"],
       ], rows
 
-      exposure = SQLite3::Database.new(db).execute("SELECT COUNT(*) FROM test_exposure_events").first.first
-      assert_equal 3, exposure
+      # Two ingests write exposure events and the reported count covers only
+      # one of them, so count them apart. A single total hid which side moved:
+      # it read as three mutant exposures until audit tests started carrying
+      # their own event, and then as a mutant exposure going missing.
+      exposure = SQLite3::Database.new(db).execute(
+        "SELECT test_id, COUNT(*) FROM test_exposure_events GROUP BY test_id ORDER BY test_id"
+      ).to_h
+      assert_equal 3, exposure.fetch("mutant:ruby:test-miser-corpus:Worker#run"),
+        "mutant exposure events, which is what exposure_events= reports"
+      assert_equal 1, exposure.fetch("test:test_run"),
+        "the audit test's own exposure event"
     end
   end
 
