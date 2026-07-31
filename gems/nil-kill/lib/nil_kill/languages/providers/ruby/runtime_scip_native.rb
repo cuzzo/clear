@@ -79,10 +79,6 @@ module NilKillRuntimeTrace
         end
   end
 
-  def self.native_state_owner(klass)
-    safe_module_name(klass)
-  end
-
   def self.native_scip_symbols_for(path, line, selector)
     native_scip_anchors_by_key.fetch("#{path}\x01#{line}\x01#{selector}", [])
   end
@@ -195,17 +191,11 @@ module NilKillRuntimeTrace
   def self.install_native_runtime_scip_trace
     require_native_scip!
     NilKillTraceNative.value_domain_owner = self
+    NilKillTraceNative.value_domain_root = ROOT
     NilKillTraceNative.configure(
       Array(TARGETS).map(&:to_s), native_scip_demand_map, native_scip_state_demand_map
     )
     NilKillTraceNative.start
-  end
-
-  # One derivation serves both consumers: the source role is recorded alongside
-  # the observation instead of deriving the value twice under two policies.
-  def self.native_runtime_value_domain(value)
-    observed_runtime_value_domain(value)
-      .merge(nonproduction: runtime_nonproduction_value?(value))
   end
 
   def self.native_scip_domain(types, indices, production_only: false)

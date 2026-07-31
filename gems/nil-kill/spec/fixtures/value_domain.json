@@ -1,0 +1,1457 @@
+{
+  "cases": [
+    {
+      "case": "nil",
+      "domain": {
+        "types": [
+          "NilClass"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "true",
+      "domain": {
+        "types": [
+          "TrueClass"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "false",
+      "domain": {
+        "types": [
+          "FalseClass"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "integer",
+      "domain": {
+        "types": [
+          "Integer"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "bignum",
+      "domain": {
+        "types": [
+          "Integer"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "float",
+      "domain": {
+        "types": [
+          "Float"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "string",
+      "domain": {
+        "types": [
+          "String"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "symbol",
+      "domain": {
+        "types": [
+          "Symbol"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "range",
+      "domain": {
+        "types": [
+          "Range"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "object",
+      "domain": {
+        "types": [
+          "Object"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "class",
+      "domain": {
+        "types": [
+          "Class"
+        ],
+        "singletons": [
+          "String"
+        ],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "module",
+      "domain": {
+        "types": [
+          "Module"
+        ],
+        "singletons": [
+          "ValueDomainCorpus::Strategy"
+        ],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "interface",
+      "domain": {
+        "types": [
+          "Module"
+        ],
+        "singletons": [
+          "Comparable"
+        ],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "anonymous class",
+      "domain": {
+        "types": [
+          "Class"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "anonymous module",
+      "domain": {
+        "types": [
+          "Module"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "anonymous error",
+      "domain": {
+        "types": [
+          "Class"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "empty array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": []
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "integer array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "Integer"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "Integer"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "string array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "String"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "mixed array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "Integer",
+          "String",
+          "Symbol"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "Integer"
+              },
+              {
+                "kind": "class",
+                "name": "String"
+              },
+              {
+                "kind": "class",
+                "name": "Symbol"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "oversampled array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "Integer"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "Integer"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "oversampled strings",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "String"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "nested array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "Array"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "array",
+                "elements": [
+                  {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "array of hashes",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "Hash"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "hash",
+                "keys": [
+                  {
+                    "kind": "class",
+                    "name": "String"
+                  }
+                ],
+                "values": [
+                  {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "nil array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "NilClass"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "NilClass"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "empty hash",
+      "domain": {
+        "types": [
+          "Hash"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "hash",
+            "keys": [],
+            "values": []
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "string hash",
+      "domain": {
+        "types": [
+          "Hash"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [
+          "String"
+        ],
+        "values": [
+          "Integer"
+        ],
+        "shapes": [
+          {
+            "kind": "hash",
+            "keys": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ],
+            "values": [
+              {
+                "kind": "class",
+                "name": "Integer"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "symbol hash",
+      "domain": {
+        "types": [
+          "Hash"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [
+          "Symbol"
+        ],
+        "values": [
+          "String"
+        ],
+        "shapes": [
+          {
+            "kind": "hash",
+            "keys": [
+              {
+                "kind": "class",
+                "name": "Symbol"
+              }
+            ],
+            "values": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "mixed hash",
+      "domain": {
+        "types": [
+          "Hash"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [
+          "String",
+          "Symbol"
+        ],
+        "values": [
+          "Integer",
+          "String"
+        ],
+        "shapes": [
+          {
+            "kind": "hash",
+            "keys": [
+              {
+                "kind": "class",
+                "name": "String"
+              },
+              {
+                "kind": "class",
+                "name": "Symbol"
+              }
+            ],
+            "values": [
+              {
+                "kind": "class",
+                "name": "Integer"
+              },
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "nested hash",
+      "domain": {
+        "types": [
+          "Hash"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [
+          "String"
+        ],
+        "values": [
+          "Hash"
+        ],
+        "shapes": [
+          {
+            "kind": "hash",
+            "keys": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ],
+            "values": [
+              {
+                "kind": "hash",
+                "keys": [
+                  {
+                    "kind": "class",
+                    "name": "String"
+                  }
+                ],
+                "values": [
+                  {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "hash of arrays",
+      "domain": {
+        "types": [
+          "Hash"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [
+          "String"
+        ],
+        "values": [
+          "Array"
+        ],
+        "shapes": [
+          {
+            "kind": "hash",
+            "keys": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ],
+            "values": [
+              {
+                "kind": "array",
+                "elements": [
+                  {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "oversampled hash",
+      "domain": {
+        "types": [
+          "Hash"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [
+          "String"
+        ],
+        "values": [
+          "Integer"
+        ],
+        "shapes": [
+          {
+            "kind": "hash",
+            "keys": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ],
+            "values": [
+              {
+                "kind": "class",
+                "name": "Integer"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "empty set",
+      "domain": {
+        "types": [
+          "Set"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "set",
+            "elements": []
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "integer set",
+      "domain": {
+        "types": [
+          "Set"
+        ],
+        "singletons": [],
+        "elements": [
+          "Integer"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "set",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "Integer"
+              }
+            ]
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "string set",
+      "domain": {
+        "types": [
+          "Set"
+        ],
+        "singletons": [],
+        "elements": [
+          "String"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "set",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ]
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "mixed set",
+      "domain": {
+        "types": [
+          "Set"
+        ],
+        "singletons": [],
+        "elements": [
+          "Integer",
+          "String"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "set",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "Integer"
+              },
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ]
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "nested set",
+      "domain": {
+        "types": [
+          "Set"
+        ],
+        "singletons": [],
+        "elements": [
+          "Array"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "set",
+            "elements": [
+              {
+                "kind": "array",
+                "elements": [
+                  {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "record",
+      "domain": {
+        "types": [
+          "ValueDomainCorpus::Point"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "record",
+            "name": "ValueDomainCorpus::Point",
+            "members": {
+              "x": {
+                "kind": "class",
+                "name": "Integer"
+              },
+              "y": {
+                "kind": "class",
+                "name": "Integer"
+              }
+            }
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "record of strings",
+      "domain": {
+        "types": [
+          "ValueDomainCorpus::Point"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "record",
+            "name": "ValueDomainCorpus::Point",
+            "members": {
+              "x": {
+                "kind": "class",
+                "name": "String"
+              },
+              "y": {
+                "kind": "class",
+                "name": "String"
+              }
+            }
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "nested record",
+      "domain": {
+        "types": [
+          "ValueDomainCorpus::Nested"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "record",
+            "name": "ValueDomainCorpus::Nested",
+            "members": {
+              "point": {
+                "kind": "record",
+                "name": "ValueDomainCorpus::Point",
+                "members": {
+                  "x": {
+                    "kind": "class",
+                    "name": "Integer"
+                  },
+                  "y": {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                }
+              },
+              "tags": {
+                "kind": "array",
+                "elements": [
+                  {
+                    "kind": "class",
+                    "name": "String"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "record with empties",
+      "domain": {
+        "types": [
+          "ValueDomainCorpus::Nested"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "record",
+            "name": "ValueDomainCorpus::Nested",
+            "members": {
+              "point": {
+                "kind": "class",
+                "name": "NilClass"
+              },
+              "tags": {
+                "kind": "hash",
+                "keys": [],
+                "values": []
+              }
+            }
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "single field record",
+      "domain": {
+        "types": [
+          "ValueDomainCorpus::Solo"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "record",
+            "name": "ValueDomainCorpus::Solo",
+            "members": {
+              "only": {
+                "kind": "class",
+                "name": "NilClass"
+              }
+            }
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "array of records",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "ValueDomainCorpus::Point"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "record",
+                "name": "ValueDomainCorpus::Point",
+                "members": {
+                  "x": {
+                    "kind": "class",
+                    "name": "Integer"
+                  },
+                  "y": {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "hash of records",
+      "domain": {
+        "types": [
+          "Hash"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [
+          "String"
+        ],
+        "values": [
+          "ValueDomainCorpus::Point"
+        ],
+        "shapes": [
+          {
+            "kind": "hash",
+            "keys": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ],
+            "values": [
+              {
+                "kind": "record",
+                "name": "ValueDomainCorpus::Point",
+                "members": {
+                  "x": {
+                    "kind": "class",
+                    "name": "Integer"
+                  },
+                  "y": {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "set of records",
+      "domain": {
+        "types": [
+          "Set"
+        ],
+        "singletons": [],
+        "elements": [
+          "ValueDomainCorpus::Point"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "set",
+            "elements": [
+              {
+                "kind": "record",
+                "name": "ValueDomainCorpus::Point",
+                "members": {
+                  "x": {
+                    "kind": "class",
+                    "name": "Integer"
+                  },
+                  "y": {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "reused record layout",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "ValueDomainCorpus::Point"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "record",
+                "name": "ValueDomainCorpus::Point",
+                "members": {
+                  "x": {
+                    "kind": "class",
+                    "name": "Integer"
+                  },
+                  "y": {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "reused record layout again",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "ValueDomainCorpus::Point"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "record",
+                "name": "ValueDomainCorpus::Point",
+                "members": {
+                  "x": {
+                    "kind": "class",
+                    "name": "Integer"
+                  },
+                  "y": {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "deep array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "Array"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "array",
+                "elements": [
+                  {
+                    "kind": "array",
+                    "elements": [
+                      {
+                        "kind": "class",
+                        "name": "Float"
+                      },
+                      {
+                        "kind": "class",
+                        "name": "NilClass"
+                      },
+                      {
+                        "kind": "class",
+                        "name": "String"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "deep set",
+      "domain": {
+        "types": [
+          "Set"
+        ],
+        "singletons": [],
+        "elements": [
+          "Array"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "set",
+            "elements": [
+              {
+                "kind": "array",
+                "elements": [
+                  {
+                    "kind": "array",
+                    "elements": [
+                      {
+                        "kind": "class",
+                        "name": "FalseClass"
+                      },
+                      {
+                        "kind": "class",
+                        "name": "Float"
+                      },
+                      {
+                        "kind": "class",
+                        "name": "TrueClass"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": false
+      }
+    },
+    {
+      "case": "oversampled nested array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "Array"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "array",
+                "elements": [
+                  {
+                    "kind": "class",
+                    "name": "Integer"
+                  },
+                  {
+                    "kind": "class",
+                    "name": "String"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "oversampled deep array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "Array"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "array",
+                "elements": [
+                  {
+                    "kind": "array",
+                    "elements": [
+                      {
+                        "kind": "class",
+                        "name": "Hash"
+                      },
+                      {
+                        "kind": "class",
+                        "name": "Integer"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "oversampled hash of nested",
+      "domain": {
+        "types": [
+          "Hash"
+        ],
+        "singletons": [],
+        "elements": [],
+        "keys": [
+          "String"
+        ],
+        "values": [
+          "Array"
+        ],
+        "shapes": [
+          {
+            "kind": "hash",
+            "keys": [
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ],
+            "values": [
+              {
+                "kind": "array",
+                "elements": [
+                  {
+                    "kind": "array",
+                    "elements": [
+                      {
+                        "kind": "class",
+                        "name": "Integer"
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "class",
+                    "name": "Integer"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    },
+    {
+      "case": "long mixed array",
+      "domain": {
+        "types": [
+          "Array"
+        ],
+        "singletons": [],
+        "elements": [
+          "Integer",
+          "String"
+        ],
+        "keys": [],
+        "values": [],
+        "shapes": [
+          {
+            "kind": "array",
+            "elements": [
+              {
+                "kind": "class",
+                "name": "Integer"
+              },
+              {
+                "kind": "class",
+                "name": "String"
+              }
+            ]
+          }
+        ],
+        "nonproduction": null
+      }
+    }
+  ]
+}

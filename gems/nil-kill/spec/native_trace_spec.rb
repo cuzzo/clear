@@ -55,21 +55,15 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     File.readlines(FIXTURE).index { |line| line.include?(pattern) } + 1
   end
 
-  # Stands in for NilKillRuntimeTrace's two delegations so the extension can be
-  # exercised without loading the whole tracer. Identity answers owner, kind,
-  # nativeness, and the callee's declaration site; the domain answers the value.
+  # Stands in for the one delegation left: the record-wrapper registry, which
+  # answers a callee's owner, kind, nativeness and declaration site. The value
+  # domain is the collector's own.
   before do
     NilKillTraceNative.value_domain_owner = Object.new.tap do |owner|
       owner.define_singleton_method(:native_callee_identity) do |defined_class, method_id, native|
         name = defined_class.respond_to?(:name) ? defined_class.name : nil
         [name, "instance", nil, nil, nil]
       end
-      owner.define_singleton_method(:native_runtime_value_domain) do |value|
-        elements = value.is_a?(Enumerable) ? value.map { |item| item.class.name }.uniq : []
-        { types: [value.class.name], singletons: [], elements: elements,
-          keys: [], values: [], shapes: [], nonproduction: false }
-      end
-      owner.define_singleton_method(:native_state_owner) { |klass| klass.name }
     end
   end
 
@@ -404,10 +398,6 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     NilKillTraceNative.value_domain_owner = Object.new.tap do |owner|
       owner.define_singleton_method(:native_callee_identity) do |_defined_class, _method_id, native|
         native ? ["Record", "instance", true, "/declared/record.rb", 12] : [nil, nil, nil, nil, nil]
-      end
-      owner.define_singleton_method(:native_runtime_value_domain) do |value|
-        { types: [value.class.name], singletons: [], elements: [],
-          keys: [], values: [], shapes: [], nonproduction: false }
       end
     end
 

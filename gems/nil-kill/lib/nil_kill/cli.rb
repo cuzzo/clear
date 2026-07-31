@@ -266,6 +266,11 @@ module NilKill
         "NIL_KILL_TRACE" => "1",
         "NIL_KILL_RUNTIME_SCIP" => "1",
         "NIL_KILL_SOURCE_ROLES" => source_roles_path,
+        # Every path the collector reports, and every source-role lookup it
+        # makes, is relative to this root. It used to be rederived from the
+        # tracer file's own location, which only worked while a Ruby tracer
+        # was being loaded to do the rederiving.
+        "NIL_KILL_ROOT" => ROOT,
         "NIL_KILL_PROJECT_NAME" => ENV["NIL_KILL_PROJECT_NAME"] || File.basename(ROOT),
         "NIL_KILL_PROJECT_VERSION" => ENV["NIL_KILL_PROJECT_VERSION"] ||
           git_capture("rev-parse", "HEAD")&.strip || "workspace",

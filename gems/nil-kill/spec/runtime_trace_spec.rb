@@ -57,7 +57,7 @@ RSpec.describe "nil-kill runtime trace" do
       end
     end
 
-    domain = NilKillRuntimeTrace.runtime_value_domain(record_class.new(:ok, 1))
+    domain = NilKillTraceNative.value_domain(record_class.new(:ok, 1))
     record = domain.fetch(:shapes).find { |shape| shape.fetch(:kind) == "record" }
 
     expect(record.fetch(:members)).to include(
@@ -84,10 +84,15 @@ RSpec.describe "nil-kill runtime trace" do
       isolated_env("NIL_KILL_SOURCE_ROLES" => roles) do
         NilKillRuntimeTrace.instance_variable_set(:@runtime_nonproduction_source_paths, nil)
 
-        expect(NilKillRuntimeTrace.runtime_value_domain(RuntimeTraceSpecDouble.new([])))
-          .to eq(NilKillRuntimeTrace.empty_runtime_value_domain)
+        NilKillTraceNative.reset_value_domain
 
-        domain = NilKillRuntimeTrace.runtime_value_domain(
+        # The observation is kept whatever declared it, with the verdict beside
+        # it: the shape a function was handed is real evidence, and it is the
+        # exporter that must not present a test double as a call target.
+        expect(NilKillTraceNative.value_domain(RuntimeTraceSpecDouble.new([]))
+          .fetch(:nonproduction)).to be(true)
+
+        domain = NilKillTraceNative.value_domain(
           [RuntimeTraceSpecDouble.new([]), "production"]
         )
         expect(domain.fetch(:types)).to eq(["Array"])

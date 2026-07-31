@@ -205,38 +205,6 @@ module NilKillRuntimeTrace
     @runtime_nonproduction_source_paths[:paths]
   end
 
-  def self.runtime_value_source_location(value)
-    klass = value.is_a?(Module) ? value : value.class
-    return unless klass.is_a?(Module)
-
-    @runtime_value_source_locations ||= {}
-    return @runtime_value_source_locations[klass] if
-      @runtime_value_source_locations.key?(klass)
-
-    name = safe_module_name(klass).to_s
-    location = name.empty? ? nil : Object.const_source_location(name)
-    if !location && name.empty?
-      locations = klass.instance_methods(false).filter_map do |method_name|
-        klass.instance_method(method_name).source_location
-      rescue StandardError
-        nil
-      end
-      location = locations.first
-    end
-    path = location && location.first
-    absolute = path && !path.start_with?("<") ? abs_path(path) : nil
-    @runtime_value_source_locations[klass] =
-      absolute && File.file?(absolute) ? absolute : nil
-  rescue StandardError
-    @runtime_value_source_locations[klass] = nil if defined?(klass) && klass
-    nil
-  end
-
-  def self.runtime_nonproduction_value?(value)
-    path = runtime_value_source_location(value)
-    path && runtime_nonproduction_source_path?(path)
-  end
-
   # Ruby exposes singleton methods on constant objects such as ENV through an
   # anonymous singleton class. TracePoint therefore has an exact receiver but
   # `Module#name` cannot provide its source-level owner. Preserve the loaded
@@ -274,87 +242,6 @@ module NilKillRuntimeTrace
       values: [],
       shapes: [],
     }
-  end
-
-  def self.runtime_value_domain(value)
-    return empty_runtime_value_domain if runtime_nonproduction_value?(value)
-
-    observed_runtime_value_domain(value)
-  end
-
-  # The observation itself, with no source-role policy applied. Call evidence
-  # must not export a test double as a call target, but the shape a function was
-  # actually handed is real evidence about that function whatever declared it,
-  # so the two consumers apply the policy separately.
-  def self.observed_runtime_value_domain(value)
-    domain = empty_runtime_value_domain
-    domain[:types] << class_name(value)
-    singleton = semantic_value_type_name(value)
-    domain[:singletons] << singleton if singleton
-    record_key = runtime_record_shape_key(value)
-    if record_key
-      record_shape = shape_payload(record_key)
-      domain[:shapes] << record_shape
-      record_name = record_shape[:name] || record_shape["name"]
-      domain[:types] = [record_name] if record_name && domain[:types] == ["T.untyped"]
-    end
-    shape = container_shape(value)
-    if shape
-      if shape[0] == :array
-        domain[:elements].concat(
-          shape[1].reject { |type| runtime_nonproduction_type_name?(type) }.to_a
-        )
-      else
-        domain[:keys].concat(
-          shape[1][0].reject { |type| runtime_nonproduction_type_name?(type) }.to_a
-        )
-        domain[:values].concat(
-          shape[1][1].reject { |type| runtime_nonproduction_type_name?(type) }.to_a
-        )
-      end
-      production_shape = runtime_production_shape(shape_payload(collection_type_shape_key(value)))
-      domain[:shapes] << production_shape if production_shape
-    end
-    %i[types singletons elements keys values].each { |field| domain[field].sort! }
-    domain[:shapes].sort_by! { |value_shape| JSON.generate(value_shape) }
-    domain
-  end
-
-  def self.runtime_nonproduction_type_name?(name)
-    return false if name.to_s.empty? || name == "T.untyped" ||
-      name.start_with?("AnonymousStruct(")
-
-    constant = name.split("::").reject(&:empty?).reduce(Object) do |scope, part|
-      break unless scope.is_a?(Module) && scope.const_defined?(part, false)
-
-      scope.const_get(part, false)
-    end
-    constant.is_a?(Module) && runtime_nonproduction_value?(constant)
-  rescue StandardError
-    false
-  end
-
-  def self.runtime_production_shape(shape)
-    return shape unless shape.is_a?(Hash)
-
-    kind = shape[:kind] || shape["kind"]
-    name = shape[:name] || shape["name"]
-    return nil if %w[class record].include?(kind) &&
-      runtime_nonproduction_type_name?(name)
-
-    filtered = shape.each_with_object({}) do |(key, value), out|
-      if %w[elements keys values].include?(key.to_s)
-        out[key] = Array(value).filter_map { |member| runtime_production_shape(member) }
-      elsif key.to_s == "members"
-        out[key] = value.each_with_object({}) do |(member_name, member_shape), members|
-          production = runtime_production_shape(member_shape)
-          members[member_name] = production if production
-        end
-      else
-        out[key] = value
-      end
-    end
-    filtered
   end
 
   # A runtime record is an observation about the value itself, rather than a

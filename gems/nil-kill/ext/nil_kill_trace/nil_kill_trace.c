@@ -1,19 +1,25 @@
 // Hot observation loop for the Ruby runtime-SCIP collector.
 //
-// Division of labour: C decides which events matter and builds the scalar
-// majority of each observation; Ruby keeps the trace plan, the container/record
-// value-domain derivation, and all serialisation. So the semantics that are hard
-// to get right stay in the already-tested Ruby, and C only removes the
-// per-event interpreter cost that made the collector unusable.
+// Division of labour: C decides which events matter, builds every observation,
+// and derives the value domain (see value_domain.c). Ruby keeps the trace plan
+// and the record-wrapper registry, and is asked once per class rather than once
+// per event.
+//
+// Nothing here may call a method the traced program could define. Dispatching
+// from inside the hook re-enters the interpreter underneath the event being
+// handled, and the collector then corrupts the program it is observing --
+// `Array#sort` over a list of shape keys was enough to do it.
 //
 // Every identity C retains is an interned ID, which is immortal, so the hot path
 // allocates no Ruby object and needs no GC marking. The one exception is a
-// domain Hash produced by Ruby for a container receiver; those are held in a
-// registered Array and referenced by index.
+// domain Hash built for a container receiver; those are held in a registered
+// Array and referenced by index.
 
 #include <ruby.h>
 #include <ruby/debug.h>
 #include <ruby/st.h>
+
+#include "value_domain.h"
 
 #define MAX_FRAMES 1024
 #define MAX_ALTS 8
@@ -111,8 +117,8 @@ static VALUE roots_ary;          // analyzed-source path prefixes
 static VALUE domains_ary;        // Ruby domain Hashes, referenced by index
 static VALUE tracepoint;
 static VALUE ruby_owner;         // NilKillRuntimeTrace, for delegation
-static ID id_runtime_value_domain, id_call, id_instance, id_return;
-static ID id_local_variables, id_local_variable_get, id_callee_identity, id_state_owner;
+static ID id_call, id_instance, id_return;
+static ID id_local_variables, id_local_variable_get, id_callee_identity;
 
 static ID class_name_id(VALUE klass);
 static unsigned long counts[8];
@@ -217,16 +223,15 @@ static identity_t *cached_identity(VALUE defined, ID selector, int native) {
     return identity;
 }
 
-// An anonymous class has no name the evidence can join on, and Ruby already
-// owns that rule. Ask once per class; the answer cannot change.
+// An anonymous class has no name the evidence can join on. Module#name itself,
+// never an override, and asked once per class because the answer cannot change.
 static ID cached_state_owner(VALUE klass) {
     st_data_t found;
     if (st_lookup(state_owners, (st_data_t)klass, &found)) return (ID)found;
 
-    if (NIL_P(ruby_owner)) {
-        ruby_owner = rb_const_get(rb_cObject, rb_intern("NilKillRuntimeTrace"));
-    }
-    VALUE name = rb_funcall(ruby_owner, id_state_owner, 1, klass);
+    VALUE name = (RB_TYPE_P(klass, T_CLASS) || RB_TYPE_P(klass, T_MODULE))
+                     ? rb_mod_name(klass)
+                     : Qnil;
     ID owner = RB_TYPE_P(name, T_STRING) ? rb_intern_str(name) : 0;
     st_insert(state_owners, (st_data_t)klass, (st_data_t)owner);
     return owner;
@@ -361,13 +366,8 @@ static void add_alt(ID *alts, int *count, ID value) {
     if (*count < MAX_ALTS) alts[(*count)++] = value;
 }
 
-static long push_ruby_domain(VALUE value) {
-    if (NIL_P(ruby_owner)) {
-        ruby_owner = rb_const_get(rb_cObject, rb_intern("NilKillRuntimeTrace"));
-    }
-
-    VALUE domain = rb_funcall(ruby_owner, id_runtime_value_domain, 1, value);
-    rb_ary_push(domains_ary, domain);
+static long push_domain(VALUE value) {
+    rb_ary_push(domains_ary, nk_value_domain(value));
     return RARRAY_LEN(domains_ary) - 1;
 }
 
@@ -484,7 +484,7 @@ static void record_value(call_record_t *record, VALUE value, int is_result) {
 
     long *slots = is_result ? record->result_domain_index : record->domain_index;
     int *count = is_result ? &record->n_result_domains : &record->n_domains;
-    if (*count < MAX_ALTS) slots[(*count)++] = push_ruby_domain(value);
+    if (*count < MAX_ALTS) slots[(*count)++] = push_domain(value);
 }
 
 static void record_receiver(call_record_t *record, VALUE receiver) {
@@ -1169,6 +1169,7 @@ void Init_nil_kill_trace(void) {
     rb_define_singleton_method(mod, "stats", nk_stats, 0);
     rb_define_singleton_method(mod, "reset", nk_reset, 0);
     rb_define_singleton_method(mod, "value_domain_owner=", nk_set_owner, 1);
+    nk_value_domain_init(mod);
 
     path_cache = st_init_numtable();
     demand = st_init_numtable();
@@ -1191,14 +1192,12 @@ void Init_nil_kill_trace(void) {
     rb_global_variable(&roots_ary);
     rb_global_variable(&domains_ary);
 
-    id_runtime_value_domain = rb_intern("native_runtime_value_domain");
     id_call = rb_intern("call");
     id_instance = rb_intern("instance");
     id_return = rb_intern("return");
     id_local_variables = rb_intern("local_variables");
     id_local_variable_get = rb_intern("local_variable_get");
     id_callee_identity = rb_intern("native_callee_identity");
-    id_state_owner = rb_intern("native_state_owner");
     ruby_owner = Qnil;
     rb_global_variable(&ruby_owner);
 }
