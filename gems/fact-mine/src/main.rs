@@ -301,6 +301,19 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillCanonical { restore, state, paths } => {
+            if restore {
+                let raw = std::fs::read_to_string(&state)
+                    .with_context(|| format!("unreadable {}", state.display()))?;
+                fact_mine_rust::canonical_transaction::restore(&serde_json::from_str(&raw)?)?;
+            } else {
+                let saved = fact_mine_rust::canonical_transaction::save(
+                    &paths,
+                    &state.with_extension("d"),
+                )?;
+                fs::write(&state, serde_json::to_string(&saved)?)?;
+            }
+        }
         Command::NilKillWorkloadPlan { targets, command, output, root } => {
             // Null when no runner is recognizable: the caller then keeps one
             // opaque shard per command, which is correct rather than a
@@ -1169,6 +1182,12 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Preserve a collect's canonical artifacts, or put them back.
+    NilKillCanonical {
+        restore: bool,
+        state: PathBuf,
+        paths: Vec<PathBuf>,
+    },
     /// Split a workload into one shard per test file.
     NilKillWorkloadPlan {
         targets: Vec<PathBuf>,
@@ -1350,6 +1369,24 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-canonical" => {
+            let mut restore = false;
+            let mut state = None;
+            let mut paths = Vec::new();
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--restore" => restore = true,
+                    "--state" => state = Some(PathBuf::from(iter.next().context("--state")?)),
+                    "--path" => paths.push(PathBuf::from(iter.next().context("--path")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillCanonical {
+                restore,
+                state: state.context("--state is required")?,
+                paths,
             })
         }
         "nil-kill-workload-plan" => {

@@ -540,16 +540,11 @@ module NilKill
         File.join(RUNTIME_DIR, "runtime-attestation.json.gz"),
         *Array(extra_paths),
       ].uniq
-      before = paths.to_h { |path| [path, File.file?(path) ? Runtime::JsonIO.read(path) : nil] }
+      state = File.join(TMP_DIR, "canonical-transaction.json")
+      Runtime::DomainDeriver.canonical(state: state, paths: paths)
       yield
     rescue Exception # rubocop:disable Lint/RescueException -- rollback before preserving exits/signals
-      before.each do |path, contents|
-        if contents
-          Runtime::JsonIO.write(path, contents)
-        elsif File.file?(path)
-          File.delete(path)
-        end
-      end
+      Runtime::DomainDeriver.canonical(state: state, restore: true)
       raise
     end
 

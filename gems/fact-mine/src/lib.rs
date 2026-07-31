@@ -22,6 +22,7 @@ pub mod sorbet_sig;
 pub mod trace_document;
 pub mod workload_plan;
 pub mod trace_plan;
+pub mod canonical_transaction;
 pub mod collector_export;
 pub mod collector_plan;
 pub mod value_domain;

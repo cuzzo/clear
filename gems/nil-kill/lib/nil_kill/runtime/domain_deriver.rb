@@ -101,6 +101,17 @@ module NilKill
         end
       end
 
+      # A collect rewrites several artifacts that are only meaningful together.
+      # Preserve them before, put them back if anything fails.
+      def self.canonical(state:, paths: [], restore: false)
+        args = [NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY,
+                "nil-kill-canonical", "--state", state.to_s]
+        args << "--restore" if restore
+        Array(paths).each { |path| args.concat(["--path", path.to_s]) }
+        _out, err, status = Open3.capture3(*args)
+        raise "fact-mine nil-kill-canonical failed: #{err}" unless status.success?
+      end
+
       def self.call(subcommand, root:, source_roles:)
         args = [NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY, subcommand,
                 "--root", root.to_s]
