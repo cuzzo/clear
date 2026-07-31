@@ -9,6 +9,7 @@ pub mod lsp_scip;
 pub mod lua_scip;
 pub mod parallel;
 pub mod profile;
+pub mod runtime_decode;
 pub mod runtime_evidence;
 pub mod runtime_protocol;
 pub mod runtime_trace;

@@ -301,6 +301,15 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillDecodeCalls { input, root } => {
+            let text = std::fs::read_to_string(&input)?;
+            let rows: Vec<serde_json::Value> = text
+                .lines()
+                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .map(|event| fact_mine_rust::runtime_decode::call(&event, &root))
+                .collect();
+            println!("{}", serde_json::to_string(&rows)?);
+        }
         Command::RuntimePlan {
             files,
             output,
@@ -784,6 +793,10 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    NilKillDecodeCalls {
+        input: PathBuf,
+        root: PathBuf,
+    },
     SyntaxFacts {
         language: Option<String>,
         files: Vec<PathBuf>,
@@ -887,6 +900,21 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-decode-calls" => {
+            let mut input = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--input" => input = Some(PathBuf::from(iter.next().context("--input")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillDecodeCalls {
+                input: input.context("--input is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "runtime-plan" => {
