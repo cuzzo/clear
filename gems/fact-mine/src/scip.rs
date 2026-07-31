@@ -321,6 +321,22 @@ static INDEXED_FIELDS: OnceLock<BTreeMap<String, BTreeMap<String, String>>> = On
 /// The shape of every record the index resolved, by owner. A record declared in
 /// one file is read in another, so a per-file view of its fields cannot price a
 /// copy, a comparison or a field read of it anywhere but where it was declared.
+/// The type of a member read, when the whole index knows exactly one record
+/// with that member. Ambiguity is left unresolved rather than guessed at.
+pub(crate) fn unambiguous_member_type(member: &str) -> Option<&'static str> {
+    let fields = INDEXED_FIELDS.get()?;
+    let mut found = None;
+    for members in fields.values() {
+        if let Some(declared) = members.get(member) {
+            if found.is_some_and(|existing| existing != declared.as_str()) {
+                return None;
+            }
+            found = Some(declared.as_str());
+        }
+    }
+    found
+}
+
 pub(crate) fn indexed_field_types() -> Option<&'static BTreeMap<String, BTreeMap<String, String>>> {
     INDEXED_FIELDS.get()
 }
@@ -746,6 +762,15 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
             } else if let Some(complexity) = call
                 .receiver_type
                 .as_deref()
+                .or_else(|| {
+                    // A member read names its record's field, and the index
+                    // states that field's type wherever the record was declared.
+                    call.receiver
+                        .rsplit('.')
+                        .next()
+                        .filter(|member| !member.is_empty())
+                        .and_then(unambiguous_member_type)
+                })
                 .filter(|_| parametric_cost.is_some())
                 .and_then(|declared| {
                     // A blanket symbol proves which trait method runs, not what
