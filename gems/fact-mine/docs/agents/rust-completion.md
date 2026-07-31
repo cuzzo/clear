@@ -30,7 +30,15 @@ Also measure blockers *per function*: of 2907 incomplete, 1390 have no unpriced
 call of their own (purely transitive - they resolve as their callees resolve)
 and ~1000 have exactly one.
 
-## The dominant cause: dependency declarations are absent
+The heading below overstates its case. Measured since: attaching the whole Rust
+stdlib index is worth +1.1 points on `gems/decomplex`, and indexing the sibling
+crate it calls most is worth +2.4. Both are real; neither is dominant, and the
+category they were meant to clear does not move, because what a dependency index
+supplies is declarations and what that category is missing is costs. See
+[`inference-language-completion.md`](inference-language-completion.md) for the
+cross-language measurement and the ranked plan.
+
+## A contributing cause: dependency declarations are absent
 
 An index carries `SymbolInformation` only for the crate it indexes. Dependencies
 appear as bare symbol names on references, with no declaration attached, so the
