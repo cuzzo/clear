@@ -301,6 +301,13 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillCollect { commands, fast, continue_on_error, root } => {
+            let root = root.canonicalize().unwrap_or(root);
+            let mut config = fact_mine_rust::collect::Config::from_env(root, commands);
+            config.fast = fast;
+            config.continue_on_error = continue_on_error;
+            fact_mine_rust::collect::run(&config)?;
+        }
         Command::NilKillCanonical { restore, state, paths } => {
             if restore {
                 let raw = std::fs::read_to_string(&state)
@@ -1182,6 +1189,13 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Collect runtime evidence: plan, trace, join, index.
+    NilKillCollect {
+        commands: Vec<Vec<String>>,
+        fast: bool,
+        continue_on_error: bool,
+        root: PathBuf,
+    },
     /// Preserve a collect's canonical artifacts, or put them back.
     NilKillCanonical {
         restore: bool,
@@ -1369,6 +1383,53 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-collect" => {
+            let mut commands = Vec::new();
+            let mut fast = false;
+            let mut continue_on_error = false;
+            let mut root = None;
+            let mut glob = None;
+            let mut template = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--fast" => fast = true,
+                    "--continue-on-error" => continue_on_error = true,
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    "--glob" => glob = Some(iter.next().context("--glob")?),
+                    "--template" => template = Some(iter.next().context("--template")?),
+                    "--cmd" => {
+                        commands.push(
+                            shell_words::split(&iter.next().context("--cmd")?)
+                                .context("--cmd is not a valid command")?,
+                        );
+                    }
+                    "--" => {
+                        commands.push(iter.by_ref().collect());
+                        break;
+                    }
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            // One command per matched file, which is what makes a shard per
+            // test possible without the caller writing them all out.
+            if let (Some(pattern), Some(template)) = (glob, template) {
+                let mut matched = glob::glob(&pattern)
+                    .context("--glob is not a valid pattern")?
+                    .filter_map(Result::ok)
+                    .collect::<Vec<_>>();
+                matched.sort();
+                for path in matched {
+                    let filled = template.replace("{file}", &path.to_string_lossy());
+                    commands.push(shell_words::split(&filled).context("--template")?);
+                }
+            }
+            Ok(Command::NilKillCollect {
+                commands,
+                fast,
+                continue_on_error,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "nil-kill-canonical" => {
