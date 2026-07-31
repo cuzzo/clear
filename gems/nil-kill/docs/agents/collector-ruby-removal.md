@@ -86,6 +86,37 @@ The same hazard applies to any hook whose wrapper wraps a C-implemented method.
 `Struct.new`, `Data.define` and `OpenStruct#[]=` are all in that category;
 `T.let` is not, which is part of why it ported cleanly.
 
+## The bootstrap is the last Ruby, and it resists moving
+
+What remains in a traced program is ten methods: loading the trace plan and
+building the collector's demand tables, attributing a path to a gem
+(`Gem.loaded_specs`, `Gem::Specification.default_stubs`), starting and dumping
+`Coverage`, and the exit hook that writes the raw document. Every one is a fact
+about this VM rather than about nil-kill, which is why they are last.
+
+Porting them to C was attempted and reverted. The port itself is
+straightforward -- about 450 lines, all of it `rb_funcall` against Gem and
+Coverage plus plan parsing -- but installing from C crashes the VM. Three
+placements were tried:
+
+- from the extension's `Init`: segfault during `require`;
+- deferred with `rb_postponed_job_register_one`: no crash, but the job never
+  runs, so nothing installs;
+- from an explicit `NilKillTraceNative.bootstrap` call in a six-line loader:
+  segfault again.
+
+The C backtrace is the same each time: `rb_id_table_lookup` ->
+`rb_callable_method_entry` -> `rb_vm_search_method_slowpath`, a method lookup
+against a class whose method table is null. The prime suspect is the
+`Module#const_added` prepend, which after installation is reached by every
+constant assignment in the process including the VM's own startup. Ruby reaches
+the same prepend later, after `require` has unwound differently, which is
+probably why the same code is safe there.
+
+Anyone picking this up should start by bisecting `nk_bootstrap` -- skip
+`nk_install_record_hooks` first, since it is the only step that touches every
+class in the VM -- rather than by rewriting the port.
+
 ## How to verify a port
 
 **The conformance and capability suites are the oracle, not a corpus diff.**
