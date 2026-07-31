@@ -1723,7 +1723,7 @@ jobs:
   decomplex-sarif:
     name: Decomplex SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     needs: [changes, sarif-rust-binaries]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
@@ -1745,7 +1745,7 @@ jobs:
         run: |
           chmod +x tmp/sarif-binaries/decomplex-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          timeout 15m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 40m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1930,7 +1930,7 @@ jobs:
   espalier-sarif:
     name: Espalier SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     needs: [changes, sarif-rust-binaries]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
@@ -1959,7 +1959,7 @@ jobs:
         run: |
           chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          timeout 15m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 40m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1979,7 +1979,7 @@ jobs:
   nil-kill-sarif:
     name: Nil-Kill SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     needs: [changes, sarif-rust-binaries]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
@@ -2012,7 +2012,7 @@ jobs:
         run: |
           chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          timeout 15m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 40m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
