@@ -71,9 +71,9 @@ RSpec.describe "nil-kill runtime trace" do
     provider = Module.new
     stub_const("RuntimeTraceSemanticProvider", provider)
 
-    expect(NilKillRuntimeTrace.class_name(provider)).to eq("Module")
-    expect(NilKillRuntimeTrace.semantic_value_type_name(provider))
-      .to eq("RuntimeTraceSemanticProvider")
+    domain = NilKillTraceNative.value_domain(provider)
+    expect(domain.fetch(:types)).to eq(["Module"])
+    expect(domain.fetch(:singletons)).to eq(["RuntimeTraceSemanticProvider"])
   end
 
   it "removes explicitly nonproduction values from runtime SCIP domains, including containers" do
@@ -133,21 +133,6 @@ RSpec.describe "nil-kill runtime trace" do
       _out, err, status = Open3.capture3(env, "bundle", "exec", "ruby", "-e", script, source, chdir: NilKill::ROOT)
 
       expect(status).to be_success, err
-    end
-  end
-
-  it "does not re-enter source return or raise recording while collection hooks are disabled" do
-    require_relative "../lib/nil_kill/runtime_trace"
-    rt = NilKillRuntimeTrace
-    path = File.join(NilKill::ROOT, "src", "nil_kill_runtime_trace_guard_spec.rb")
-
-    rt.with_collection_hooks_disabled do
-      rt.lock.synchronize do
-        expect(rt.record_source_method_return("GuardOwner", "call", "instance", path, 1, :ok)).to eq(:ok)
-        expect do
-          rt.record_source_method_raise("GuardOwner", "call", "instance", path, 1, RuntimeError.new("boom"))
-        end.not_to raise_error
-      end
     end
   end
 

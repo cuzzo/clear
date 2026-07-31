@@ -770,21 +770,10 @@ RSpec.describe "NilKill coverage hardening" do
       File.write(described_class::TRACE_PLAN_PATH, JSON.dump(plan))
 
       expect(described_class.trace_plan).to eq(plan)
-      expect(described_class.method_plan("Worker", "perform", "instance", file, 20)).to include("return" => false)
-      expect(described_class.sample_param?(plan["methods"].values.last, "payload")).to be(true)
-      expect(described_class.sample_param?(plan["methods"].values.last, "ignored")).to be(false)
-      expect(described_class.sample_return?(plan["methods"].values.last)).to be(false)
       expect(described_class.sample_tlet?(file, 40)).to be(true)
       expect(described_class.sample_struct_field?("Models::User", "name")).to be(true)
       expect(described_class.sample_struct_field?("Models::User", "missing")).to be(true)
-      expect(described_class.sample_state_field?("Models::User", "name")).to be(true)
-      expect(described_class.sample_state_field?("Models::User", "resolved")).to be(false)
-      expect(described_class.sample_state_field?("Models::User", "unknown")).to be(true)
       expect(described_class.sample_struct_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)
-      expect(described_class.sample_state_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)
-
-      planned = described_class.planned_methods_by_class
-      expect(planned["Worker"].map { |entry| entry[:method_id] }).to eq(["targeted"])
     end
 
     it "normalizes paths, target membership, class names, and collection shapes" do
@@ -812,93 +801,22 @@ RSpec.describe "NilKill coverage hardening" do
       expect(described_class.container_shape("scalar")).to be_nil
     end
 
-    it "reuses collection shapes when registering sampled boundary owners" do
-      target_file = File.join(described_class::TARGETS.first, "shape_reuse_unit.rb")
-      FileUtils.mkdir_p(File.dirname(target_file))
-      File.write(target_file, "# trace target\n")
-      nested = [{ "id" => [1, 2, 3] }]
-
-      allow(described_class).to receive(:container_shape).and_call_original
-      described_class.record_source_method_call("Worker", "consume", "instance", target_file, 18, { "items" => nested })
-
-      expect(described_class).to have_received(:container_shape).with(nested).once
-    ensure
-      FileUtils.rm_f(target_file)
-    end
-
-    it "records forced tracepoint calls, returns, raises, and method edges" do
-      target_file = File.join(described_class::TARGETS.first, "forced_trace_unit.rb")
-      FileUtils.mkdir_p(File.dirname(target_file))
-      File.write(target_file, "# trace target\n")
-      entry = {
-        owner: "TraceTarget",
-        kind: "instance",
-        method_id: "forced",
-        path: target_file,
-        line: 8,
-        params: { "items" => true, "meta" => true },
-        sample: true,
-        frame: true,
-        return: true,
-      }
-
-      call_tp = FakeTracePoint.new(
-        path: target_file,
-        lineno: 8,
-        defined_class: Class.new,
-        method_id: :forced,
-        parameters: [[:req, :items], [:req, :meta]],
-        trace_binding: binding_for_forced_args([["a", "b"], { "id" => 1 }])
-      )
-      described_class.record_call(call_tp, forced_entry: entry)
-
-      return_tp = FakeTracePoint.new(path: target_file, lineno: 8, method_id: :forced, return_value: { "ok" => [1, 2] })
-      described_class.record_return(return_tp, forced_entry: entry)
-
-      key = ["TraceTarget", "forced", "instance", File.expand_path(target_file, described_class::ROOT), 8]
-      bucket = described_class.methods.fetch(key)
-      expect(bucket[:calls]).to eq(1)
-      expect(bucket[:ok_calls]).to eq(1)
-      expect(bucket[:param_elem]["items"].to_a).to eq(["String"])
-      expect(bucket[:return_kv][0].to_a).to eq(["String"])
-      expect(bucket[:return_kv_shapes][1].to_a.map { |shape| described_class.shape_payload(shape)["kind"] }).to include("array")
-
-      described_class.record_call(call_tp, forced_entry: entry)
-      raise_tp = FakeTracePoint.new(path: target_file, lineno: 8, method_id: :forced, raised_exception: ArgumentError.new("bad"))
-      described_class.record_raise(raise_tp, forced_entry: entry)
-      expect(bucket[:raised_calls]).to eq(1)
-      expect(bucket[:raised].to_a).to eq(["ArgumentError"])
-
-      stack = described_class.frames[Thread.current.object_id]
-      caller_frame = { method_key: ["Caller", "outer", "instance", target_file, 2], edge_key: nil }
-      callee_frame = { method_key: key, edge_key: nil }
-      stack << caller_frame
-      described_class.record_method_edge_entry(callee_frame, stack)
-      described_class.record_method_edge_outcome(callee_frame, :ok)
-      expect(described_class.method_edges.values.first[:ok_calls]).to eq(1)
-    ensure
-      FileUtils.rm_f(target_file)
-    end
-
     it "records collection mutations through Array, Hash, and Set hooks without losing owners" do
       target_file = File.join(described_class::TARGETS.first, "collection_hook_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "# trace target\n")
       described_class.install_collection_hook
 
-      array_bucket = described_class.method_bucket(["TraceTarget", "with_items", "instance", target_file, 10])
       array = []
-      described_class.register_collection_owner(array, owner_kind: "method_param", name: "items", path: target_file, line: 10, bucket: array_bucket)
+      described_class.register_collection_owner(array, owner_kind: "method_param", name: "items", path: target_file, line: 10)
       eval("array.push('a'); array.append('b'); array.unshift(:sym); array[1] = 7; array.concat(['c'], ['d'])", binding, target_file, 20)
 
-      hash_bucket = described_class.method_bucket(["TraceTarget", "with_hash", "instance", target_file, 12])
       hash = {}
-      described_class.register_collection_owner(hash, owner_kind: "method_param", name: "meta", path: target_file, line: 12, bucket: hash_bucket)
+      described_class.register_collection_owner(hash, owner_kind: "method_param", name: "meta", path: target_file, line: 12)
       eval("hash['id'] = 1; hash.store(:name, 'Ada'); hash.merge!({'age' => 42}, active: true); hash.update({'score' => 10})", binding, target_file, 30)
 
-      set_bucket = described_class.method_bucket(["TraceTarget", "with_set", "instance", target_file, 14])
       set = Set.new
-      described_class.register_collection_owner(set, owner_kind: "method_param", name: "tags", path: target_file, line: 14, bucket: set_bucket)
+      described_class.register_collection_owner(set, owner_kind: "method_param", name: "tags", path: target_file, line: 14)
       eval("set.add('one'); set << 'two'; set.merge(['three'])", binding, target_file, 40)
 
       described_class.flush_pending_mutations!
@@ -915,7 +833,7 @@ RSpec.describe "NilKill coverage hardening" do
       expect(described_class.collections.fetch(array_key)[:elem_classes].to_a).to include("String")
 
       frozen_array = [1, 2].freeze
-      described_class.register_collection_owner(frozen_array, owner_kind: "method_return", name: "frozen_items", path: target_file, line: 16, bucket: array_bucket)
+      described_class.register_collection_owner(frozen_array, owner_kind: "method_return", name: "frozen_items", path: target_file, line: 16)
       frozen_key = ["method_return", "frozen_items", File.expand_path(target_file, described_class::ROOT), 16, "array"]
       expect(described_class.collections.fetch(frozen_key)[:elem_classes].to_a).to eq(["Integer"])
     ensure

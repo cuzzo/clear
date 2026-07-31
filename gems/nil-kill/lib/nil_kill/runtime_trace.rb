@@ -31,14 +31,12 @@ module NilKillRuntimeTrace
   ELEMENT_SAMPLE = ENV.fetch("NIL_KILL_ELEMENT_SAMPLE", "20").to_i
   TRACE_PARAM_CLASSES = ENV.fetch("NIL_KILL_TRACE_PARAM_CLASSES", "String,Symbol").split(",").map(&:strip).reject(&:empty?).to_set
 
-  @methods = {}
   @tlets = {}
   @structs = {}
   @ivar_runtime = {}
   @runtime_state_values = {}
   @tuples = {}
   @collections = {}
-  @method_edges = {}
   @objects = {}
   @object_tokens = {}
   # Mutation coalescing: a tight loop mutating ONE object at ONE site
@@ -51,7 +49,6 @@ module NilKillRuntimeTrace
   # path (the differential-proof baseline).
   @coalesce = ENV["NIL_KILL_COALESCE"] != "0"
   @pending_mut = nil
-  @frames = Hash.new { |h, k| h[k] = [] }
   @shape_lookup = {}
 
   # ---- non-hooked recorder-internal accumulators (Fix 2) ----
@@ -105,15 +102,6 @@ module NilKillRuntimeTrace
   @path_cache = {}
   @target_cache = {}
   @rel_cache = {}
-  # Per-(path,line) memo of the constant-per-callsite context (abs,
-  # plan, bucket, site prefix, method-id string). The wrapper injects
-  # owner/method_id/kind/__FILE__/line as LITERALS, so all of this is
-  # invariant for a given instrumented def -- recomputing+allocating
-  # it every call was the dominant collect cost (array key + to_s +
-  # plan lookup + abs interpolation, x call/return/raise). Bucket
-  # identity stays anchored in @methods[key], so concurrent first-
-  # calls still converge on one bucket (no behaviour change).
-  @site_ctx = {}
   # Type-signature memo for collection shapes. container_shape and
   # collection_type_shape_key are PURE FUNCTIONS of the bounded
   # sampled element CLASSES (not values); the recorder only reads /
@@ -125,13 +113,8 @@ module NilKillRuntimeTrace
   @cshape = {}
   @ctsk = {}
   @cls_name = {}
-  @sym_s = Hash.new { |h, k| h[k] = (k.is_a?(String) ? k : k.to_s).freeze }
-  @method_metadata = {}
-  @planned_methods_by_class = nil
   @sampled_tstruct_fields = {}
   @tlet_site_decisions = {}
-  @targeted_tracepoints = []
-  @targeted_tracepoint_keys = Set.new
   @trace_plan_loaded = false
   @trace_plan = nil
   @lock = Mutex.new
@@ -155,96 +138,6 @@ module NilKillRuntimeTrace
     @trace_plan = nil
   end
 
-  def self.planned_methods_by_class
-    return @planned_methods_by_class if @planned_methods_by_class
-    plan = trace_plan
-    return nil unless plan
-    methods =
-      if ENV["NIL_KILL_TRACE_METHODS"] == "0"
-        plan.fetch("tracepoint_methods", {})
-      else
-        fallback = plan.fetch("tracepoint_methods", {})
-        fallback.empty? ? plan.fetch("methods", {}) : fallback
-      end
-    return nil if methods.empty?
-    index = Hash.new { |h, k| h[k] = [] }
-    methods.each do |raw_key, method_plan|
-      owner, method_id, kind, path, line = raw_key.split("\0", 5)
-      next if method_plan && method_plan["sample"] == false && method_plan["frame"] == false
-      index[owner] << {
-        owner: owner,
-        method_id: method_id,
-        kind: kind,
-        path: path,
-        line: line.to_i,
-        params: method_plan.fetch("params", {}),
-        return: method_plan["return"] != false,
-        sample: method_plan["sample"] != false,
-        frame: method_plan["frame"] != false,
-      }
-    end
-    @planned_methods_by_class = index
-  end
-
-  def self.targeted_method_tracing?
-    planned_methods_by_class
-  end
-
-  def self.install_targeted_method_traces(klass)
-    index = planned_methods_by_class
-    return unless index && klass.is_a?(Module)
-    klass_name = safe_module_name(klass)
-    return unless klass_name.is_a?(String)
-    Array(index[klass_name]).each do |entry|
-      target =
-        if entry[:kind] == "class"
-          klass.method(entry[:method_id]) rescue nil
-        else
-          klass.instance_method(entry[:method_id]) rescue nil
-        end
-      next unless target
-      trace_key = [klass_name, entry[:kind], entry[:method_id], target.object_id]
-      next unless @targeted_tracepoint_keys.add?(trace_key)
-      sample_params = entry[:sample] && entry[:params].values.any?
-      sample_return = entry[:sample] && entry[:return]
-      frame_method = entry[:frame]
-      # Ruby accepts Method targets but rejects an UnboundMethod returned for
-      # ordinary instance methods on supported Rubies. The source-instrumented
-      # collector already records those methods at their real paths, so an
-      # optional optimization must never abort loading the application.
-      begin
-        @targeted_tracepoints << TracePoint.new(:call) { |tp| record_call(tp, forced_entry: entry) }.enable(target: target) if sample_params || frame_method
-        @targeted_tracepoints << TracePoint.new(:return) { |tp| record_return(tp, forced_entry: entry) }.enable(target: target) if sample_return || frame_method
-      rescue ArgumentError
-        @targeted_tracepoint_keys.delete(trace_key)
-      end
-    end
-  end
-
-  def self.install_targeted_definition_trace
-    trace = TracePoint.new(:end) do |tp|
-      install_targeted_method_traces(tp.self)
-    end
-    @targeted_tracepoints << trace
-    trace.enable
-  end
-
-  def self.method_plan(owner, method_id, kind, path, line)
-    plan = trace_plan
-    return nil unless plan
-    plan.dig("methods", [owner, method_id.to_s, kind, abs_path(path), line].join("\0"))
-  end
-
-  def self.sample_param?(plan, name)
-    return true unless plan
-    plan.dig("params", name.to_s) != false
-  end
-
-  def self.sample_return?(plan)
-    return true unless plan
-    plan["return"] != false
-  end
-
   def self.sample_tlet?(path, line)
     plan = trace_plan
     return true unless plan
@@ -265,24 +158,6 @@ module NilKillRuntimeTrace
     # Struct/Data declarations can be created dynamically or hidden behind
     # unsupported syntax. Absence from the static plan is therefore not proof
     # that a field is resolved; only an explicit false may elide observation.
-    true
-  end
-
-  # Ordinary ivars are open-ended, unlike Struct/Data fields. A missing
-  # plan entry therefore means "not statically resolved" and must remain
-  # sampled. Only an explicit false may elide runtime observation.
-  def self.sample_state_field?(klass_name, field)
-    plan = trace_plan
-    return true unless plan
-
-    field = field.to_s.sub(/\A@/, "")
-    parts = klass_name.to_s.split("::")
-    parts.length.downto(1) do |i|
-      suffix = parts[-i..-1].join("::")
-      value = plan.dig("struct_fields", [suffix, field].join("\0"))
-      return value unless value.nil?
-    end
-
     true
   end
 
@@ -323,40 +198,6 @@ module NilKillRuntimeTrace
     return n if n
 
     @cls_name[cls] = (safe_module_name(cls) || "T.untyped")
-  end
-
-  # Keep NilKill's nominal type samples (`Module` / `Class`) intact for its
-  # ordinary type inference, while separately preserving the singleton
-  # identity needed by semantic consumers. A module used as a strategy or
-  # provider dispatches its singleton methods through its constant identity;
-  # collapsing it to `Module` makes every such call permanently open.
-  def self.semantic_value_type_name(value)
-    return unless value.is_a?(Module)
-
-    safe_module_name(value)
-  end
-
-  # Memoized constant-per-callsite context, or false if `path` is not
-  # a target (negative cached too). Anchors bucket on @methods[key]
-  # via method_bucket so racing first-calls still share one bucket.
-  def self.site_ctx(owner, method_id, kind, path, line)
-    by_line = (@site_ctx[path.to_s] ||= {})
-    c = by_line[line]
-    return c unless c.nil?
-
-    abs = abs_path(path)
-    return (by_line[line] = false) unless target_path?(abs)
-
-    ms = @sym_s[method_id]
-    key = [owner, ms, kind, abs, line]
-    plan = source_method_plan(owner, method_id, kind, abs, line)
-    sample_method = plan.nil? || plan["sample"] != false
-    frame_method = plan.nil? || plan["frame"] != false
-    by_line[line] = { abs: abs, method_s: ms, kind: kind, owner: owner, line: line,
-                      key: [owner, kind, ms, abs, line], method_key: key, plan: plan,
-                      sample_method: sample_method, frame_method: frame_method,
-                      bucket: (sample_method || frame_method) ? method_bucket(key, plan) : nil,
-                      prefix: "#{abs}:#{line}" }
   end
 
   def self.shape_payload(key)
@@ -715,31 +556,6 @@ module NilKillRuntimeTrace
       rec[:key_shapes].merge(key_shapes)
       rec[:value_shapes].merge(value_shapes)
       rec[:mutation_sites][mutation_site] += count if mutation_site
-      bucket = owner[:bucket]
-      if bucket
-        case owner[:owner_kind].to_s
-        when "method_param"
-          if kind == "hash"
-            bucket[:param_kv][owner[:name]][0].merge(key_classes)
-            bucket[:param_kv][owner[:name]][1].merge(value_classes)
-            bucket[:param_kv_shapes][owner[:name]][0].merge(key_shapes)
-            bucket[:param_kv_shapes][owner[:name]][1].merge(value_shapes)
-          else
-            bucket[:param_elem][owner[:name]].merge(elem_classes)
-            bucket[:param_elem_shapes][owner[:name]].merge(elem_shapes)
-          end
-        when "method_return"
-          if kind == "hash"
-            bucket[:return_kv][0].merge(key_classes)
-            bucket[:return_kv][1].merge(value_classes)
-            bucket[:return_kv_shapes][0].merge(key_shapes)
-            bucket[:return_kv_shapes][1].merge(value_shapes)
-          else
-            bucket[:return_elem].merge(elem_classes)
-            bucket[:return_elem_shapes].merge(elem_shapes)
-          end
-        end
-      end
     end
   end
 
@@ -891,496 +707,6 @@ module NilKillRuntimeTrace
       dn = safe_module_name(defined_class)
       dn && [dn, "instance"]
     end
-  end
-
-  def self.bucket(tp)
-    meta = method_metadata(tp)
-    return nil unless meta && meta[:target]
-    bucket_for_meta(meta)
-  end
-
-  def self.method_metadata(tp, known_target: false)
-    defined_class = tp.defined_class
-    class_key = defined_class&.object_id || 0
-    by_class = (@method_metadata[class_key] ||= {})
-    by_method = (by_class[tp.method_id] ||= {})
-    by_path = (by_method[tp.path] ||= {})
-    cached = by_path[tp.lineno]
-    return cached if cached
-
-    path = abs_path(tp.path)
-    target = known_target || target_path?(path)
-    owner = target ? method_owner(defined_class) : nil
-    method_id = tp.method_id.to_s
-    plan = owner && target ? method_plan(owner[0], tp.method_id, owner[1], path, tp.lineno) : nil
-    sample_method = plan.nil? || plan["sample"] != false
-    frame_method = target && (plan.nil? || plan["frame"] != false)
-    params = target ? (tp.parameters rescue nil) : nil
-    by_path[tp.lineno] = {
-      target: target,
-      owner: owner,
-      method_id: method_id,
-      path: path,
-      line: tp.lineno,
-      key: owner && [owner, method_id, path],
-      bucket_key: owner && [owner[0], method_id, owner[1], path, tp.lineno],
-      method_key: owner && [owner[0], method_id, owner[1], path, tp.lineno],
-      method_site: "#{path}:#{tp.lineno}",
-      plan: plan,
-      sample_method: sample_method,
-      frame_method: frame_method,
-      params: params,
-    }
-  end
-
-  def self.forced_method_metadata(tp, entry)
-    plan = {
-      "sample" => entry[:sample],
-      "params" => entry[:params],
-      "return" => entry[:return],
-      "frame" => entry[:frame],
-    }
-    path = abs_path(entry[:path])
-    params = entry[:params].keys.map { |name| [:req, name.to_sym] }
-    sample_method = entry[:sample] != false
-    {
-      target: true,
-      owner: [entry[:owner], entry[:kind]],
-      method_id: entry[:method_id].to_s,
-      path: path,
-      line: entry[:line],
-      key: [[entry[:owner], entry[:kind]], entry[:method_id].to_s, path],
-      bucket_key: [entry[:owner], entry[:method_id].to_s, entry[:kind], path, entry[:line]],
-      method_key: [entry[:owner], entry[:method_id].to_s, entry[:kind], path, entry[:line]],
-      method_site: "#{path}:#{entry[:line]}",
-      plan: plan,
-      sample_method: sample_method,
-      frame_method: entry[:frame] != false,
-      params: params,
-      forced_values: forced_param_values(tp, entry),
-    }
-  end
-
-  def self.forced_param_values(tp, entry)
-    values = {}
-    args = tp.binding.local_variable_get(:args) rescue nil
-    return values unless args.is_a?(Array)
-    entry[:params].keys.each_with_index do |name, index|
-      values[name.to_s] = args[index] if index < args.length
-    end
-    values
-  end
-
-  def self.bucket_for_meta(meta)
-    return nil unless meta[:owner]
-    key = meta[:bucket_key]
-    method_bucket(key, meta[:plan])
-  end
-
-  def self.method_bucket(key, plan = nil)
-    @methods[key] ||= {
-      calls: 0,
-      ok_calls: 0,
-      raised_calls: 0,
-      params_by_name: Hash.new { |h, k| h[k] = NKSet.new },
-      param_singleton_types: Hash.new { |h, k| h[k] = NKSet.new },
-      params_ok: Hash.new { |h, k| h[k] = NKSet.new },
-      params_raised: Hash.new { |h, k| h[k] = NKSet.new },
-      param_sites: Hash.new { |h, k| h[k] = NKTally.new },
-      param_sites_ok: Hash.new { |h, k| h[k] = NKTally.new },
-      param_sites_raised: Hash.new { |h, k| h[k] = NKTally.new },
-      param_traces: Hash.new { |h, k| h[k] = NKTally.new },
-      param_traces_ok: Hash.new { |h, k| h[k] = NKTally.new },
-      param_traces_raised: Hash.new { |h, k| h[k] = NKTally.new },
-      param_elem: Hash.new { |h, k| h[k] = NKSet.new },
-      param_kv: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
-      param_value_shapes: Hash.new { |h, k| h[k] = NKSet.new },
-      param_elem_shapes: Hash.new { |h, k| h[k] = NKSet.new },
-      param_kv_shapes: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
-      returns: NKSet.new,
-      return_singleton_types: NKSet.new,
-      return_value_shapes: NKSet.new,
-      return_elem: NKSet.new,
-      return_kv: [NKSet.new, NKSet.new],
-      return_elem_shapes: NKSet.new,
-      return_kv_shapes: [NKSet.new, NKSet.new],
-      raised: NKSet.new,
-      plan: plan,
-    }
-  end
-
-  def self.method_edge_record(caller_key, callee_key)
-    @method_edges[[caller_key, callee_key]] ||= { calls: 0, ok_calls: 0, raised_calls: 0 }
-  end
-
-  def self.record_method_edge_entry(frame, stack)
-    caller = stack.last
-    return unless caller && caller[:method_key] && frame[:method_key]
-
-    edge_key = [caller[:method_key], frame[:method_key]]
-    method_edge_record(edge_key[0], edge_key[1])[:calls] += 1
-    frame[:edge_key] = edge_key
-  end
-
-  def self.record_method_edge_outcome(frame, outcome)
-    edge_key = frame && frame[:edge_key]
-    return unless edge_key
-
-    rec = method_edge_record(edge_key[0], edge_key[1])
-    outcome == :raised ? rec[:raised_calls] += 1 : rec[:ok_calls] += 1
-  end
-
-  def self.source_method_frame(ctx)
-    {
-      key: ctx[:key],
-      method_key: ctx[:method_key],
-      bucket: ctx[:bucket],
-      sample_method: ctx[:sample_method],
-      plan: ctx[:plan],
-      method_site: ctx[:prefix],
-      edge_key: nil,
-    }
-  end
-
-  def self.source_method_plan(owner, method_id, kind, path, line)
-    method_plan(owner, method_id, kind, path, line)
-  end
-
-  def self.record_source_method_call(owner, method_id, kind, path, line, params)
-    return if Thread.current[:__nil_kill_collection_hook]
-    ctx = site_ctx(owner, method_id, kind, path, line)
-    return unless ctx
-
-    abs = ctx[:abs]
-    plan = ctx[:plan]
-    b = ctx[:bucket]
-    frame = source_method_frame(ctx)
-    with_collection_hooks_disabled do
-      @lock.synchronize do
-        stack = @frames[Thread.current.object_id]
-        record_method_edge_entry(frame, stack)
-        stack << frame if ctx[:frame_method]
-        b[:calls] += 1 if b
-        next unless ctx[:sample_method]
-
-        params.each do |name, value|
-          next unless sample_param?(plan, name)
-          cls = class_name(value)
-          name = @sym_s[name]
-          b[:params_by_name][name] << cls
-          singleton_type = semantic_value_type_name(value)
-          b[:param_singleton_types][name] << singleton_type if singleton_type
-          b[:param_sites][name]["#{ctx[:prefix]}:#{cls}"] += 1
-          record = runtime_record_shape_key(value)
-          b[:param_value_shapes][name] << record if record
-          shape = container_shape(value)
-          if shape
-            if shape[0] == :array
-              b[:param_elem][name].merge(shape[1])
-              b[:param_elem_shapes][name].merge(shape[2])
-              record_tuple("param", abs, line, name, value)
-            else
-              b[:param_kv][name][0].merge(shape[1][0])
-              b[:param_kv][name][1].merge(shape[1][1])
-              b[:param_kv_shapes][name][0].merge(shape[2][0])
-              b[:param_kv_shapes][name][1].merge(shape[2][1])
-            end
-            register_collection_owner(value, { owner_kind: "method_param", name: name, path: abs, line: line, bucket: b }, shape: shape)
-          end
-        end
-      end
-    end
-    nil
-  end
-
-  def self.record_source_method_return(owner, method_id, kind, path, line, value)
-    return value if Thread.current[:__nil_kill_collection_hook]
-
-    ctx = site_ctx(owner, method_id, kind, path, line)
-    return value unless ctx
-
-    abs = ctx[:abs]
-    b = ctx[:bucket]
-    with_collection_hooks_disabled do
-      @lock.synchronize do
-        frame = pop_frame_for_key(ctx[:key])
-        record_method_edge_outcome(frame, :ok)
-        return value if ctx[:frame_method] && frame.nil?
-        b[:ok_calls] += 1 if b
-        return value unless ctx[:sample_method] && sample_return?(ctx[:plan])
-
-          b[:returns] << class_name(value)
-          singleton_type = semantic_value_type_name(value)
-          b[:return_singleton_types] << singleton_type if singleton_type
-          record = runtime_record_shape_key(value)
-          b[:return_value_shapes] << record if record
-          shape = container_shape(value)
-        if shape
-          if shape[0] == :array
-            b[:return_elem].merge(shape[1])
-            b[:return_elem_shapes].merge(shape[2])
-            record_tuple("return", abs, line, ctx[:method_s], value)
-          else
-            b[:return_kv][0].merge(shape[1][0])
-            b[:return_kv][1].merge(shape[1][1])
-            b[:return_kv_shapes][0].merge(shape[2][0])
-            b[:return_kv_shapes][1].merge(shape[2][1])
-          end
-          register_collection_owner(value, { owner_kind: "method_return", name: ctx[:method_s], path: abs, line: line, bucket: b }, shape: shape)
-        end
-      end
-    end
-    value
-  end
-
-  def self.record_source_method_raise(owner, method_id, kind, path, line, error)
-    return if Thread.current[:__nil_kill_collection_hook]
-
-    ctx = site_ctx(owner, method_id, kind, path, line)
-    return unless ctx
-
-    mark_runtime_scip_source_method_raise(owner, method_id, kind, path, line)
-
-    b = ctx[:bucket]
-    @lock.synchronize do
-      frame = pop_frame_for_key(ctx[:key])
-      record_method_edge_outcome(frame, :raised)
-      return if ctx[:frame_method] && frame.nil?
-      return unless b
-
-      b[:raised_calls] += 1
-      b[:raised] << class_name(error)
-    end
-    nil
-  end
-
-  def self.record_call(tp, forced_entry: nil)
-    return if Thread.current[:__nil_kill_collection_hook]
-    return unless forced_entry || target_path?(tp.path)
-    with_collection_hooks_disabled do
-      meta = forced_entry ? forced_method_metadata(tp, forced_entry) : method_metadata(tp, known_target: true)
-      return unless meta
-      params = meta[:params]
-      return unless params
-      method_plan = meta[:plan]
-      sample_method = meta[:sample_method]
-      b = (sample_method || meta[:frame_method]) ? bucket_for_meta(meta) : nil
-      binding = tp.binding
-      frame = {
-        key: meta[:key],
-        method_key: meta[:method_key],
-        bucket: b,
-        sample_method: sample_method,
-        frame_method: meta[:frame_method],
-        plan: method_plan,
-        params: Hash.new { |h, k| h[k] = NKSet.new },
-        param_singleton_types: Hash.new { |h, k| h[k] = NKSet.new },
-        param_sites: Hash.new { |h, k| h[k] = NKTally.new },
-        param_traces: Hash.new { |h, k| h[k] = NKTally.new },
-        param_elem: Hash.new { |h, k| h[k] = NKSet.new },
-        param_kv: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
-        param_value_shapes: Hash.new { |h, k| h[k] = NKSet.new },
-        param_elem_shapes: Hash.new { |h, k| h[k] = NKSet.new },
-        param_kv_shapes: Hash.new { |h, k| h[k] = [NKSet.new, NKSet.new] },
-        callsite: nil,
-        trace: [],
-        method_site: meta[:method_site],
-      }
-      @lock.synchronize do
-        stack = @frames[Thread.current.object_id]
-        active_trace = stack.reverse.filter_map { |active| active[:method_site] }
-        frame[:trace] = (Array(frame[:trace]) + active_trace).uniq
-        record_method_edge_entry(frame, stack)
-        b[:calls] += 1 if b
-        params.each do |kind, name|
-          next unless name
-          next if %i[rest keyrest block].include?(kind)
-          next unless sample_method && sample_param?(method_plan, name)
-          value = meta[:forced_values]&.fetch(name.to_s, nil)
-          value = binding.local_variable_get(name) rescue nil unless meta[:forced_values]&.key?(name.to_s)
-          cls = class_name(value)
-          frame[:params][name.to_s] << cls
-          singleton_type = semantic_value_type_name(value)
-          frame[:param_singleton_types][name.to_s] << singleton_type if singleton_type
-          frame[:param_sites][name.to_s][site_key(frame[:method_site], cls)] += 1
-          record = runtime_record_shape_key(value)
-          frame[:param_value_shapes][name.to_s] << record if record
-          if TRACE_PARAM_CLASSES.include?(cls)
-            trace_key = trace_key(frame[:trace], cls)
-            frame[:param_traces][name.to_s][trace_key] += 1 if trace_key
-          end
-          shape = container_shape(value)
-          if shape
-            if shape[0] == :array
-              frame[:param_elem][name.to_s].merge(shape[1])
-              frame[:param_elem_shapes][name.to_s].merge(shape[2])
-              record_tuple("param", meta[:path], meta[:line], name.to_s, value)
-            else
-              frame[:param_kv][name.to_s][0].merge(shape[1][0])
-              frame[:param_kv][name.to_s][1].merge(shape[1][1])
-              frame[:param_kv_shapes][name.to_s][0].merge(shape[2][0])
-              frame[:param_kv_shapes][name.to_s][1].merge(shape[2][1])
-            end
-            register_collection_owner(value, { owner_kind: "method_param", name: name.to_s, path: meta[:path], line: meta[:line], bucket: b }, shape: shape)
-          end
-        end
-        if meta[:frame_method] || sample_return?(method_plan)
-          stack << frame
-        elsif b
-          commit_params_observed(b, frame)
-        end
-      end
-    end
-  end
-
-  def self.record_return(tp, forced_entry: nil)
-    return if Thread.current[:__nil_kill_collection_hook]
-    return unless forced_entry || target_path?(tp.path)
-    with_collection_hooks_disabled do
-      meta = forced_entry ? forced_method_metadata(tp, forced_entry) : method_metadata(tp, known_target: true)
-      return unless meta
-      frame = pop_frame_for_meta(meta)
-      @lock.synchronize { record_method_edge_outcome(frame, :ok) } if frame
-      b = frame ? frame[:bucket] : bucket_for_meta(meta)
-      return unless b
-      value = tp.return_value
-      @lock.synchronize do
-        commit_params(b, frame, :ok) if frame
-        b[:ok_calls] += 1
-        return if frame && !frame[:sample_method]
-
-        b[:returns] << class_name(value) if sample_return?(frame && frame[:plan])
-        next_shape = sample_return?(frame && frame[:plan])
-        return unless next_shape
-        singleton_type = semantic_value_type_name(value)
-        b[:return_singleton_types] << singleton_type if singleton_type
-        record = runtime_record_shape_key(value)
-        b[:return_value_shapes] << record if record
-        shape = container_shape(value)
-        if shape
-          if shape[0] == :array
-            b[:return_elem].merge(shape[1])
-            b[:return_elem_shapes].merge(shape[2])
-            record_tuple("return", meta[:path], meta[:line], meta[:method_id], value)
-          else
-            b[:return_kv][0].merge(shape[1][0])
-            b[:return_kv][1].merge(shape[1][1])
-            b[:return_kv_shapes][0].merge(shape[2][0])
-            b[:return_kv_shapes][1].merge(shape[2][1])
-          end
-          register_collection_owner(value, { owner_kind: "method_return", name: meta[:method_id], path: meta[:path], line: meta[:line], bucket: b }, shape: shape)
-        end
-      end
-    end
-  end
-
-  def self.record_raise(tp, forced_entry: nil)
-    return if Thread.current[:__nil_kill_collection_hook]
-    return unless forced_entry || target_path?(tp.path)
-    with_collection_hooks_disabled do
-      meta = forced_entry ? forced_method_metadata(tp, forced_entry) : method_metadata(tp, known_target: true)
-      return unless meta
-      frame = pop_frame_for_meta(meta)
-      @lock.synchronize { record_method_edge_outcome(frame, :raised) } if frame
-      b = frame ? frame[:bucket] : bucket_for_meta(meta)
-      return unless b
-      @lock.synchronize do
-        commit_params(b, frame, :raised) if frame && frame[:sample_method]
-        b[:raised_calls] += 1
-        b[:raised] << class_name(tp.raised_exception)
-      end
-    end
-  end
-
-  def self.pop_frame(tp)
-    meta = method_metadata(tp)
-    return nil unless meta
-    pop_frame_for_meta(meta)
-  end
-
-  def self.pop_frame_for_meta(meta)
-    expected = meta[:key]
-    return nil unless expected
-    stack = @frames[Thread.current.object_id]
-    idx = stack.rindex { |frame| frame[:key] == expected }
-    return nil unless idx
-    stack.delete_at(idx)
-  end
-
-  def self.pop_frame_for_key(expected)
-    return nil unless expected
-    stack = @frames[Thread.current.object_id]
-    idx = stack.rindex { |frame| frame[:key] == expected }
-    return nil unless idx
-    stack.delete_at(idx)
-  end
-
-  def self.commit_params(bucket, frame, outcome)
-    frame[:params].each do |name, classes|
-      bucket[:params_by_name][name].merge(classes)
-      target = outcome == :ok ? bucket[:params_ok] : bucket[:params_raised]
-      target[name].merge(classes)
-    end
-    frame[:param_singleton_types].each do |name, types|
-      bucket[:param_singleton_types][name].merge(types)
-    end
-    frame[:param_sites].each do |name, sites|
-      sites.each do |site, count|
-        bucket[:param_sites][name][site] += count
-        target = outcome == :ok ? bucket[:param_sites_ok] : bucket[:param_sites_raised]
-        target[name][site] += count
-      end
-    end
-    frame[:param_traces].each do |name, traces|
-      traces.each do |trace, count|
-        bucket[:param_traces][name][trace] += count
-        target = outcome == :ok ? bucket[:param_traces_ok] : bucket[:param_traces_raised]
-        target[name][trace] += count
-      end
-    end
-    frame[:param_elem].each { |name, classes| bucket[:param_elem][name].merge(classes) }
-    frame[:param_value_shapes].each { |name, shapes| bucket[:param_value_shapes][name].merge(shapes) }
-    frame[:param_elem_shapes].each { |name, shapes| bucket[:param_elem_shapes][name].merge(shapes) }
-    frame[:param_kv].each do |name, kv|
-      bucket[:param_kv][name][0].merge(kv[0])
-      bucket[:param_kv][name][1].merge(kv[1])
-    end
-    frame[:param_kv_shapes].each do |name, kv|
-      bucket[:param_kv_shapes][name][0].merge(kv[0])
-      bucket[:param_kv_shapes][name][1].merge(kv[1])
-    end
-  end
-
-  def self.commit_params_observed(bucket, frame)
-    frame[:params].each { |name, classes| bucket[:params_by_name][name].merge(classes) }
-    frame[:param_singleton_types].each do |name, types|
-      bucket[:param_singleton_types][name].merge(types)
-    end
-    frame[:param_sites].each do |name, sites|
-      sites.each { |site, count| bucket[:param_sites][name][site] += count }
-    end
-    frame[:param_traces].each do |name, traces|
-      traces.each { |trace, count| bucket[:param_traces][name][trace] += count }
-    end
-    frame[:param_elem].each { |name, classes| bucket[:param_elem][name].merge(classes) }
-    frame[:param_value_shapes].each { |name, shapes| bucket[:param_value_shapes][name].merge(shapes) }
-    frame[:param_elem_shapes].each { |name, shapes| bucket[:param_elem_shapes][name].merge(shapes) }
-    frame[:param_kv].each do |name, kv|
-      bucket[:param_kv][name][0].merge(kv[0])
-      bucket[:param_kv][name][1].merge(kv[1])
-    end
-    frame[:param_kv_shapes].each do |name, kv|
-      bucket[:param_kv_shapes][name][0].merge(kv[0])
-      bucket[:param_kv_shapes][name][1].merge(kv[1])
-    end
-  end
-
-  def self.callsite_for(tp)
-    "#{abs_path(tp.path)}:#{tp.lineno}"
-  end
-
-  def self.callstack_for(tp)
-    [callsite_for(tp)]
   end
 
   def self.site_key(loc, cls)
@@ -2064,10 +1390,6 @@ module NilKillRuntimeTrace
     rec[:mixed] ||= mixed
   end
 
-  def self.dump_hash_counts(counts)
-    counts.transform_values(&:to_h)
-  end
-
   # A mutation wrapper is prepended to the real container class, so the VM
   # reports the wrapper module -- which is NilKill's own code -- as the callee.
   # Record the method it stands in for, exactly as generated record accessors
@@ -2098,66 +1420,12 @@ module NilKillRuntimeTrace
     end
   rescue StandardError
     nil
-  end
-
-  def self.method_key_payload(key)
-    {
-      class: key[0],
-      method: key[1],
-      kind: key[2],
-      path: key[3],
-      line: key[4],
-    }
   end
 
   def self.dump
     flush_pending_mutations!
     FileUtils.mkdir_p(OUT_DIR)
     pid = Process.pid
-    File.open(File.join(OUT_DIR, "methods-#{pid}.jsonl"), "w") do |file|
-      @methods.each do |key, rec|
-        file.puts JSON.generate(
-          class: key[0], method: key[1], kind: key[2], path: key[3], line: key[4],
-          calls: rec[:calls],
-          ok_calls: rec[:ok_calls],
-          raised_calls: rec[:raised_calls],
-          params_by_name: rec[:params_by_name].transform_values { |set| set.to_a.sort },
-          param_singleton_types: rec[:param_singleton_types].transform_values { |set| set.to_a.sort },
-          params_ok: rec[:params_ok].transform_values { |set| set.to_a.sort },
-          params_raised: rec[:params_raised].transform_values { |set| set.to_a.sort },
-          param_sites: dump_hash_counts(rec[:param_sites]),
-          param_sites_ok: rec[:param_sites_raised].empty? ? {} : dump_hash_counts(rec[:param_sites_ok]),
-          param_sites_raised: dump_hash_counts(rec[:param_sites_raised]),
-          param_traces: dump_hash_counts(rec[:param_traces]),
-          param_traces_ok: rec[:param_traces_raised].empty? ? {} : dump_hash_counts(rec[:param_traces_ok]),
-          param_traces_raised: dump_hash_counts(rec[:param_traces_raised]),
-          param_elem: rec[:param_elem].transform_values { |set| set.to_a.sort },
-          param_kv: rec[:param_kv].transform_values { |kv| [kv[0].to_a.sort, kv[1].to_a.sort] },
-          param_value_shapes: rec[:param_value_shapes].transform_values { |set| set.to_a.sort.map { |shape| shape_payload(shape) } },
-          param_elem_shapes: rec[:param_elem_shapes].transform_values { |set| set.to_a.sort.map { |shape| shape_payload(shape) } },
-          param_kv_shapes: rec[:param_kv_shapes].transform_values { |kv| [kv[0].to_a.sort.map { |shape| shape_payload(shape) }, kv[1].to_a.sort.map { |shape| shape_payload(shape) }] },
-          returns: rec[:returns].to_a.sort,
-          return_singleton_types: rec[:return_singleton_types].to_a.sort,
-          return_value_shapes: rec[:return_value_shapes].to_a.sort.map { |shape| shape_payload(shape) },
-          return_elem: rec[:return_elem].to_a.sort,
-          return_kv: [rec[:return_kv][0].to_a.sort, rec[:return_kv][1].to_a.sort],
-          return_elem_shapes: rec[:return_elem_shapes].to_a.sort.map { |shape| shape_payload(shape) },
-          return_kv_shapes: [rec[:return_kv_shapes][0].to_a.sort.map { |shape| shape_payload(shape) }, rec[:return_kv_shapes][1].to_a.sort.map { |shape| shape_payload(shape) }],
-          raised: rec[:raised].to_a.sort,
-        )
-      end
-    end
-    File.open(File.join(OUT_DIR, "method-edges-#{pid}.jsonl"), "w") do |file|
-      @method_edges.each do |(caller_key, callee_key), rec|
-        file.puts JSON.generate(
-          caller: method_key_payload(caller_key),
-          callee: method_key_payload(callee_key),
-          calls: rec[:calls],
-          ok_calls: rec[:ok_calls],
-          raised_calls: rec[:raised_calls],
-        )
-      end
-    end
     dump_native_runtime_scip(pid) if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
     File.open(File.join(OUT_DIR, "tlets-#{pid}.jsonl"), "w") do |file|
       @tlets.each do |(path, line), rec|
