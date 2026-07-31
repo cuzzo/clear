@@ -21,8 +21,8 @@ RSpec.describe "MiniVM bc_run clear-build environment" do
 
   it "preserves RUBYOPT while nil-kill source instrumentation is active" do
     ENV["NIL_KILL_TRACE"] = "1"
-    ENV["RUBYOPT"] = "-r./gems/nil-kill/lib/nil_kill/runtime_trace.rb"
+    ENV["RUBYOPT"] = "-r./gems/nil-kill/ext/nil_kill_trace/nil_kill_trace.so"
 
-    expect(Object.new.send(:clear_build_env)["RUBYOPT"]).to eq("-r./gems/nil-kill/lib/nil_kill/runtime_trace.rb")
+    expect(Object.new.send(:clear_build_env)["RUBYOPT"]).to eq("-r./gems/nil-kill/ext/nil_kill_trace/nil_kill_trace.so")
   end
 end
