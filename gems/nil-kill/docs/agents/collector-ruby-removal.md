@@ -113,10 +113,23 @@ never a valid object.
 The hook installers are not the suspect. `nk_install_record_hooks` and its
 siblings are called from Ruby today and are fine, so what crashes is something
 only the C bootstrap does: resolving the layout, parsing the plan, or building
-the demand tables. A truncated VALUE from an undeclared function would produce
-exactly this backtrace, so the first thing to check is that every Ruby C API
-the bootstrap calls is actually declared -- an implicit declaration returns
-`int`, which silently discards the top half of a VALUE on 64-bit.
+the demand tables.
+
+Two candidates were considered. A truncated VALUE from an undeclared function
+would produce exactly this backtrace, but every API the bootstrap used --
+`rb_str_split`, `rb_set_end_proc`, `rb_postponed_job_register_one`, `rb_eql`,
+`rb_ary_sort`, `rb_str_plus` -- is declared in the 3.2 headers, so that is
+ruled out.
+
+What remains, and what the next attempt should assume until it is ruled out
+too: the bootstrap kept its layout in `static VALUE`s and called
+`rb_gc_register_address` on them *after* assigning, with allocating calls in
+between. `targets` was the worst -- built by a loop of `File.expand_path` calls
+and only registered once the loop finished. An unregistered static is not a GC
+root; if a collection runs mid-loop the array survives only by luck of
+conservative stack scanning, and a freed VALUE used later is exactly a method
+lookup against a null method table. Register the address before the first
+assignment, or hold the value in a local until it is registered.
 
 Bisect `nk_bootstrap` by returning early after each step rather than rewriting
 the port; the crash is in the first few.
