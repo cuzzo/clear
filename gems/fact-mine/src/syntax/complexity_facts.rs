@@ -3055,6 +3055,12 @@ fn operator_operand_type(
 ) -> Option<TypeExpr> {
     let operands = child_nodes(node);
     let resolve = |operand: &Node| {
+        // A cast states outright what its operand becomes, whatever produced
+        // the value. Nothing the index or the source says about that value can
+        // outrank the type the cast names.
+        if let Some(target) = behavior.explicit_receiver_type(operand.text.trim()) {
+            return Some(TypeExpr::parse(&target, language));
+        }
         if let Some(declared) = indexed_operand_type(path, language, operand) {
             return Some(declared);
         }
@@ -3083,6 +3089,19 @@ fn operator_operand_type(
                 })
             })
             .or_else(|| behavior.literal_receiver_type(operand))
+    };
+    // An operand that is itself an operation has the type that operation
+    // yields, which is its own governing operand's. Reading the base local
+    // instead types `xs.len() as isize * 5` as whatever `xs` holds.
+    let resolve = |operand: &Node| {
+        let mut operand = operand;
+        while operand.r#type == "OPCALL" {
+            match child_nodes(operand).first().copied() {
+                Some(first) => operand = first,
+                None => break,
+            }
+        }
+        resolve(operand)
     };
     // The governing operand decides dispatch, so only it prices the operator.
     // A later operand counts only when it is nil: comparing against nil is a
@@ -3952,6 +3971,35 @@ fn overloaded(left: Vec<i32>, right: Vec<i32>) -> bool {
             context("overloaded", "==").known_time_complexity,
             None,
             "Vec equality dispatches through PartialEq and is not scalar"
+        );
+    }
+
+    #[test]
+    fn a_cast_states_the_type_its_operand_becomes() {
+        // `mass as f64` is an f64 whatever `mass` was. The source says so
+        // outright, and without reading it the arithmetic around the cast has
+        // no operand type and so no bound.
+        let rows = language_facts(
+            r#"
+fn ratio(items: &[String], seen: &[String]) -> isize {
+    (items.len() as isize * 5) - (seen.len() as isize)
+}
+"#,
+            Language::Rust,
+            ".rs",
+        );
+        let unpriced = rows
+            .iter()
+            .find(|row| row.function == "ratio")
+            .unwrap()
+            .call_contexts
+            .iter()
+            .filter(|call| call.known_time_complexity.is_none())
+            .map(|call| call.message.clone())
+            .collect::<Vec<_>>();
+        assert!(
+            unpriced.is_empty(),
+            "arithmetic over a cast operand left unpriced: {unpriced:?}"
         );
     }
 

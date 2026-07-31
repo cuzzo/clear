@@ -248,6 +248,24 @@ fn without_lifetimes(source: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// The type a cast states its operand becomes. Rust writes it last, after
+/// `as`, and only over a type name: anything else is a different expression
+/// that happens to contain the word.
+fn rust_cast_target(receiver: &str) -> Option<String> {
+    let receiver = receiver.trim();
+    let receiver = receiver
+        .strip_prefix('(')
+        .and_then(|inner| inner.strip_suffix(')'))
+        .unwrap_or(receiver);
+    let (_, target) = receiver.trim_end().rsplit_once(" as ")?;
+    let target = target.trim();
+    (!target.is_empty()
+        && target
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | ':' | '<' | '>' | ' ')))
+    .then(|| target.to_string())
+}
+
 fn rust_scalar_primitive(name: &str) -> bool {
     let bare = name
         .trim()
@@ -520,6 +538,10 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
 
     fn scalar_type_name(&self, name: &str) -> bool {
         rust_scalar_primitive(name)
+    }
+
+    fn explicit_receiver_type(&self, receiver: &str) -> Option<String> {
+        rust_cast_target(receiver)
     }
 
     fn scalar_operator_names(&self) -> &'static [&'static str] {
