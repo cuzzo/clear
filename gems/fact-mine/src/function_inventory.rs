@@ -127,3 +127,149 @@ pub fn write(methods: &[Value], plan: &Value, root: &Path, output: &Path) -> Res
     std::fs::write(output, serde_json::to_string(&functions)?)?;
     Ok(functions.len())
 }
+
+// ------------------------------------------------------------- bookkeeping
+
+/// Which functions a shard exercised, and which callsites it reached.
+///
+/// An incremental collect reruns a shard when a function it depended on
+/// changed, so "depended on" has to be answered from what the shard actually
+/// executed -- its function entries where it recorded them, and its line
+/// coverage where it did not.
+pub fn shard_bookkeeping(
+    inventory: &BTreeMap<String, Value>,
+    runtime_dir: &Path,
+    root: &Path,
+) -> (Vec<String>, Vec<Value>) {
+    let mut keys: Vec<String> = Vec::new();
+
+    let entries = crate::trace_document::read_rows(runtime_dir, "function-entries");
+    if entries.is_empty() {
+        for row in crate::trace_document::read_rows(runtime_dir, "coverage") {
+            let path = row["path"].as_str().unwrap_or_default();
+            let lines = row["lines"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_i64)
+                .collect::<Vec<_>>();
+            for key in keys_for_coverage(inventory, path, &lines, root) {
+                push_unique(&mut keys, key);
+            }
+        }
+    } else {
+        for row in entries {
+            let found = key_for_entry(
+                inventory,
+                row["path"].as_str().unwrap_or_default(),
+                row["owner"].as_str().unwrap_or_default(),
+                row["name"].as_str().unwrap_or_default(),
+                row["kind"].as_str().unwrap_or_default(),
+                row["line"].as_i64(),
+                root,
+            );
+            if let Some(key) = found {
+                push_unique(&mut keys, key);
+            }
+        }
+    }
+    keys.sort();
+
+    // Executed callsites where the shard recorded them, the calls themselves
+    // where it did not.
+    let mut rows = crate::trace_document::read_rows(runtime_dir, "executed-callsites");
+    if rows.is_empty() {
+        rows = crate::trace_document::read_rows(runtime_dir, "runtime-calls");
+    }
+    let mut sites: Vec<Value> = Vec::new();
+    for row in rows {
+        let callsite = if row.get("callsite").is_some() { &row["callsite"] } else { &row };
+        let site = json!([
+            relative(callsite["path"].as_str().unwrap_or_default(), root),
+            callsite["line"].as_i64().unwrap_or_default(),
+            callsite["selector"].as_str().unwrap_or_default(),
+        ]);
+        if !sites.contains(&site) {
+            sites.push(site);
+        }
+    }
+    // Path, then line as a number, then selector -- a line sorts before a
+    // longer one, which sorting by text would get backwards.
+    sites.sort_by_cached_key(|site| {
+        (
+            site[0].as_str().unwrap_or_default().to_string(),
+            site[1].as_i64().unwrap_or_default(),
+            site[2].as_str().unwrap_or_default().to_string(),
+        )
+    });
+    (keys, sites)
+}
+
+fn push_unique(keys: &mut Vec<String>, key: String) {
+    if !keys.contains(&key) {
+        keys.push(key);
+    }
+}
+
+/// The functions whose span covers any executed line.
+fn keys_for_coverage(
+    inventory: &BTreeMap<String, Value>,
+    path: &str,
+    lines: &[i64],
+    root: &Path,
+) -> Vec<String> {
+    let relative_path = relative(path, root);
+    inventory
+        .values()
+        .filter(|function| function["path"].as_str() == Some(relative_path.as_str()))
+        .filter_map(|function| {
+            let span = function["span"].as_array().cloned().unwrap_or_default();
+            let (first, last) = bounds(&span);
+            lines
+                .iter()
+                .any(|line| *line >= first && *line <= last)
+                .then(|| function["key"].as_str().unwrap_or_default().to_string())
+        })
+        .collect()
+}
+
+/// The function a recorded entry belongs to. Where a file holds more than one
+/// with the same identity, the entry's line decides -- exactly, then by span.
+fn key_for_entry(
+    inventory: &BTreeMap<String, Value>,
+    path: &str,
+    owner: &str,
+    name: &str,
+    kind: &str,
+    line: Option<i64>,
+    root: &Path,
+) -> Option<String> {
+    let relative_path = relative(path, root);
+    let candidates = inventory
+        .values()
+        .filter(|function| {
+            function["path"].as_str() == Some(relative_path.as_str())
+                && function["owner"].as_str() == Some(owner)
+                && function["name"].as_str() == Some(name)
+                && function["kind"].as_str() == Some(kind)
+        })
+        .collect::<Vec<_>>();
+    if candidates.len() < 2 {
+        return candidates
+            .first()
+            .and_then(|function| function["key"].as_str())
+            .map(str::to_string);
+    }
+    let entry_line = line.unwrap_or_default();
+    candidates
+        .iter()
+        .find(|function| function["line"].as_i64() == Some(entry_line))
+        .or_else(|| {
+            candidates.iter().find(|function| {
+                let (first, last) = bounds(&function["span"].as_array().cloned().unwrap_or_default());
+                entry_line >= first && entry_line <= last
+            })
+        })
+        .and_then(|function| function["key"].as_str())
+        .map(str::to_string)
+}

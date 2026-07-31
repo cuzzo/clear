@@ -301,6 +301,29 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillShardBookkeeping { inventory, shards, output, root } => {
+            let raw = std::fs::read_to_string(&inventory)
+                .with_context(|| format!("unreadable inventory {}", inventory.display()))?;
+            let inventory: std::collections::BTreeMap<String, serde_json::Value> =
+                serde_json::from_str(&raw)?;
+            let mut answers = serde_json::Map::new();
+            for shard in &shards {
+                let (dependencies, callsites) =
+                    fact_mine_rust::function_inventory::shard_bookkeeping(
+                        &inventory, shard, &root,
+                    );
+                let id = shard
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                answers.insert(
+                    id,
+                    serde_json::json!({"dependencies": dependencies, "callsites": callsites}),
+                );
+            }
+            fs::write(&output, serde_json::to_string(&answers)?)?;
+            eprintln!("Bookkept {} shards", shards.len());
+        }
         Command::NilKillFunctionInventory { files, plan, output, root } => {
             let plan = plan
                 .as_deref()
@@ -1114,6 +1137,13 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Which functions each shard exercised, and which callsites it reached.
+    NilKillShardBookkeeping {
+        inventory: PathBuf,
+        shards: Vec<PathBuf>,
+        output: PathBuf,
+        root: PathBuf,
+    },
     /// Stable function identities and fingerprints for an incremental collect.
     NilKillFunctionInventory {
         files: Vec<PathBuf>,
@@ -1271,6 +1301,29 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-shard-bookkeeping" => {
+            let mut inventory = None;
+            let mut shards = Vec::new();
+            let mut output = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--inventory" => {
+                        inventory = Some(PathBuf::from(iter.next().context("--inventory")?));
+                    }
+                    "--shard" => shards.push(PathBuf::from(iter.next().context("--shard")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillShardBookkeeping {
+                inventory: inventory.context("--inventory is required")?,
+                shards,
+                output: output.context("--output is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "nil-kill-function-inventory" => {

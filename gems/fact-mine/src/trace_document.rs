@@ -751,6 +751,10 @@ pub struct ShardRows {
 
 /// Rows are written plain and gzipped in place afterwards, so both forms occur
 /// -- and within one shard directory, both can occur at once.
+pub fn read_rows(runtime_dir: &Path, name: &str) -> Vec<Value> {
+    read_jsonl(runtime_dir, name)
+}
+
 fn read_jsonl(runtime_dir: &Path, name: &str) -> Vec<Value> {
     let mut paths = std::fs::read_dir(runtime_dir)
         .into_iter()

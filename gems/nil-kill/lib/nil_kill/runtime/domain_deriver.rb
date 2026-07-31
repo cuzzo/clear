@@ -57,6 +57,27 @@ module NilKill
         output.to_s
       end
 
+      # Which functions each shard exercised and which callsites it reached --
+      # what an incremental collect reruns a shard on.
+      def self.shard_bookkeeping(inventory:, shard_dirs:, root:)
+        return {} if shard_dirs.empty?
+
+        Tempfile.create(["nil-kill-inventory", ".json"]) do |written|
+          written.write(JSON.generate(inventory))
+          written.flush
+          Tempfile.create(["nil-kill-bookkeeping", ".json"]) do |out|
+            args = [NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY,
+                    "nil-kill-shard-bookkeeping", "--inventory", written.path,
+                    "--output", out.path, "--root", root.to_s]
+            shard_dirs.each { |dir| args.concat(["--shard", dir.to_s]) }
+            _stdout, err, status = Open3.capture3(*args)
+            raise "fact-mine nil-kill-shard-bookkeeping failed: #{err}" unless status.success?
+
+            JSON.parse(File.read(out.path))
+          end
+        end
+      end
+
       def self.call(subcommand, root:, source_roles:)
         args = [NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY, subcommand,
                 "--root", root.to_s]

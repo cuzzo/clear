@@ -358,17 +358,25 @@ module NilKill
         )
       end
       staged_traces = {}
-      stage("shard-bookkeeping") { selected.each do |shard|
+      stage("shard-bookkeeping") do
+        bookkeeping = Runtime::DomainDeriver.shard_bookkeeping(
+          inventory: inventory.functions,
+          shard_dirs: selected.map { |shard| File.join(working_runtime_dir, shard.fetch("id")) },
+          root: ROOT
+        )
+        selected.each do |shard|
         shard_id = shard.fetch("id")
         shard_dir = File.join(working_runtime_dir, shard_id)
-        dependency_updates[shard_id] = dependencies_for_shard(shard_dir, inventory)
-        callsite_updates[shard_id] = callsites_for_shard(shard_dir)
+        answer = bookkeeping.fetch(shard_id, {})
+        dependency_updates[shard_id] = answer.fetch("dependencies", [])
+        callsite_updates[shard_id] = answer.fetch("callsites", [])
         assert_incremental_shard_sound!(shard_dir, inventory, dependency_updates[shard_id])
         compress_runtime_evidence!(shard_dir)
         staged_traces[shard_id] = File.join(shard_dir, Runtime::TraceArtifact::DEFAULT_NAME)
         staged_evidence[shard_id] =
           File.join(shard_dir, Runtime::TraceArtifact::EVIDENCE_NAME)
-      end }
+        end
+      end
       # A traced program writes what it saw and nothing else. Turning those
       # observations into the trace document needs no VM, so it happens here --
       # which is what lets a traced process load the collector and no other
@@ -510,57 +518,6 @@ module NilKill
       Dir.glob(File.join(runtime_dir, "*.jsonl")).sort.each do |path|
         Runtime::JsonIO.gzip_file(path)
       end
-    end
-
-    def dependencies_for_shard(runtime_dir, inventory)
-      keys = Set.new
-      entry_files = Runtime::JsonIO.matching(runtime_dir, "function-entries-*.jsonl")
-      entry_files.each do |path|
-        Runtime::JsonIO.foreach(path) do |line|
-          row = JSON.parse(line)
-          key = inventory.key_for_entry(
-            path: row.fetch("path"),
-            owner: row.fetch("owner"),
-            name: row.fetch("name"),
-            kind: row.fetch("kind"),
-            line: row["line"]
-          )
-          keys << key if key
-        rescue JSON::ParserError, KeyError
-          next
-        end
-      end
-      return keys.to_a.sort unless entry_files.empty?
-
-      Runtime::JsonIO.matching(runtime_dir, "coverage-*.jsonl").each do |path|
-        Runtime::JsonIO.foreach(path) do |line|
-          row = JSON.parse(line)
-          keys.merge(inventory.keys_for_coverage(row.fetch("path"), row.fetch("lines", [])))
-        rescue JSON::ParserError, KeyError
-          next
-        end
-      end
-      keys.to_a.sort
-    end
-
-    def callsites_for_shard(runtime_dir)
-      sites = Set.new
-      files = Runtime::JsonIO.matching(runtime_dir, "executed-callsites-*.jsonl")
-      files = Runtime::JsonIO.matching(runtime_dir, "runtime-calls-*.jsonl") if files.empty?
-      files.each do |path|
-        Runtime::JsonIO.foreach(path) do |line|
-          row = JSON.parse(line)
-          callsite = row["callsite"] || row
-          sites << [
-            NilKill.rel(callsite.fetch("path")),
-            callsite.fetch("line").to_i,
-            callsite["selector"].to_s,
-          ]
-        rescue JSON::ParserError, KeyError
-          next
-        end
-      end
-      sites.to_a.sort
     end
 
     # Empty runtime values are valid when the shard did not reach a function
