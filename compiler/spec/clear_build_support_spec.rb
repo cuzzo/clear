@@ -170,6 +170,90 @@ RSpec.describe ClearBuildSupport do
     end
   end
 
+  it "resolves explicitly registered packages before directory discovery" do
+    support_tree do |dir, _config|
+      src_dir = File.join(dir, "app", "src")
+      generated = write(
+        File.join(dir, "generated", "budget.clear"),
+        "PUB FN limit() RETURNS Int64 -> RETURN 1; END\n"
+      )
+      main = write(
+        File.join(src_dir, "main.clear"),
+        "REQUIRE \"pkg:rtoc_budget\";\nFN main() RETURNS Int64 -> RETURN limit(); END\n"
+      )
+
+      expect(described_class.find_package_source("rtoc_budget", start_dir: src_dir)).to be_nil
+
+      described_class.register_packages({ "rtoc_budget" => generated })
+      expect(described_class.find_package_source("rtoc_budget", start_dir: src_dir)).to eq(File.expand_path(generated))
+      expect(described_class.resolve_clear_require("pkg:rtoc_budget", caller_dir: src_dir)).to eq(File.expand_path(generated))
+      expect(described_class.collect_package_dependencies(main)).to include("rtoc_budget" => File.expand_path(generated))
+
+      expect {
+        described_class.register_packages({ "missing" => File.join(dir, "nope.clear") })
+      }.to raise_error(described_class::BuildError, /nope\.clear/)
+    ensure
+      described_class.clear_registered_packages!
+    end
+  end
+
+  it "walks every member of a multi-file package when collecting dependencies" do
+    support_tree do |dir, _config|
+      src_dir = File.join(dir, "app", "src")
+      leaf = write(File.join(dir, "generated", "leaf.clear"), "PUB FN leaf() RETURNS Int64 -> RETURN 1; END\n")
+      first = write(
+        File.join(dir, "generated", "first.clear"),
+        "REQUIRE \"pkg:rtoc_leaf\";\nPUB FN first() RETURNS Int64 -> RETURN second(); END\n"
+      )
+      second = write(
+        File.join(dir, "generated", "second.clear"),
+        "PUB FN second() RETURNS Int64 -> RETURN first(); END\n"
+      )
+      main = write(File.join(src_dir, "main.clear"), "REQUIRE \"pkg:cycle\";\n")
+
+      described_class.register_packages({ "rtoc_leaf" => leaf, "cycle" => "#{first},#{second}" })
+
+      expect(described_class.collect_clear_dependencies(main)).to eq(
+        Set[File.expand_path(main), File.expand_path(first), File.expand_path(second), File.expand_path(leaf)]
+      )
+      expect(described_class.collect_package_dependencies(main)).to eq(
+        "cycle" => "#{File.expand_path(first)},#{File.expand_path(second)}",
+        "rtoc_leaf" => File.expand_path(leaf)
+      )
+    ensure
+      described_class.clear_registered_packages!
+    end
+  end
+
+  it "collects the owning package when only a member's own package name is required" do
+    support_tree do |dir, _config|
+      src_dir = File.join(dir, "app", "src")
+      first = write(
+        File.join(dir, "generated", "first.clear"),
+        "PUB FN first() RETURNS Int64 -> RETURN second(); END\n"
+      )
+      second = write(
+        File.join(dir, "generated", "second.clear"),
+        "PUB FN second() RETURNS Int64 -> RETURN first(); END\n"
+      )
+      main = write(File.join(src_dir, "main.clear"), "REQUIRE \"pkg:rtoc_first\";\n")
+
+      described_class.register_packages(
+        { "rtoc_first" => first, "rtoc_second" => second, "cycle" => "#{first},#{second}" }
+      )
+
+      # A member never compiles alone, so its owning package is the real
+      # dependency; without it the importer sees an unregistered cycle. The
+      # member's own name stays registered so the REQUIRE still resolves.
+      expect(described_class.collect_package_dependencies(main)).to eq(
+        "rtoc_first" => File.expand_path(first),
+        "cycle" => "#{File.expand_path(first)},#{File.expand_path(second)}"
+      )
+    ensure
+      described_class.clear_registered_packages!
+    end
+  end
+
   it "collects packages reachable through packages and local REQUIRE files" do
     support_tree do |dir, _config|
       app = File.join(dir, "app")

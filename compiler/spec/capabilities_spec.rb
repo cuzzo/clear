@@ -225,10 +225,12 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Counter { value: Float64 }
           FN getVal(c: Counter) RETURNS Float64 -> RETURN c.value; END
-          c = Counter{ value: 0 } @locked;
-          WITH c AS inner {
-            getVal(inner);
-          }
+          FN main() RETURNS Void ->
+            c = Counter{ value: 0 } @locked;
+            WITH c AS inner {
+              getVal(inner);
+            }
+          END
         FLUX
       }
 
@@ -376,10 +378,12 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Counter { value: Float64 }
-          c = Counter{ value: 0 } @locked;
-          WITH EXCLUSIVE c AS inner {
-            inner.value = 99;
-          }
+          FN main() RETURNS Void ->
+            c = Counter{ value: 0 } @locked;
+            WITH EXCLUSIVE c AS inner {
+              inner.value = 99;
+            }
+          END
         FLUX
       }
 
@@ -698,7 +702,7 @@ RSpec.describe SemanticAnnotator do
     let(:preamble) { "STRUCT Counter { value: Float64 }\n" }
 
     context "@shared:locked → Arc(Locked(T))" do
-      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @shared:locked;") }
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "FN main() RETURNS Void ->\n  c = Counter{ value: 0 } @shared:locked;\nEND") }
 
       it "emits lockedCreate for the inner sync layer" do
         expect(zig).to include("lockedCreate")
@@ -714,7 +718,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "@locked:shared → Arc(Locked(T)) (order-independent)" do
-      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @locked:shared;") }
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "FN main() RETURNS Void ->\n  c = Counter{ value: 0 } @locked:shared;\nEND") }
 
       it "emits lockedCreate and arcCreate" do
         expect(zig).to include("lockedCreate")
@@ -723,7 +727,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "@shared:writeLocked → Arc(RwLocked(T))" do
-      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @shared:writeLocked;") }
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "FN main() RETURNS Void ->\n  c = Counter{ value: 0 } @shared:writeLocked;\nEND") }
 
       it "emits rwLockedCreate for the inner sync layer" do
         expect(zig).to include("rwLockedCreate")
@@ -739,7 +743,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "@multiowned:locked → Rc(Locked(T))" do
-      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @multiowned:locked;") }
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "FN main() RETURNS Void ->\n  c = Counter{ value: 0 } @multiowned:locked;\nEND") }
 
       it "emits lockedCreate for the inner sync layer" do
         expect(zig).to include("lockedCreate")
@@ -755,7 +759,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "@multiowned:writeLocked → Rc(RwLocked(T))" do
-      let(:zig) { ZigTranspiler.new.transpile(preamble + "c = Counter{ value: 0 } @multiowned:writeLocked;") }
+      let(:zig) { ZigTranspiler.new.transpile(preamble + "FN main() RETURNS Void ->\n  c = Counter{ value: 0 } @multiowned:writeLocked;\nEND") }
 
       it "emits rwLockedCreate for the inner sync layer" do
         expect(zig).to include("rwLockedCreate")
@@ -782,8 +786,10 @@ RSpec.describe SemanticAnnotator do
     context "WITH EXCLUSIVE on @shared:locked dereferences through Arc (.data.*)" do
       let(:zig) {
         ZigTranspiler.new.transpile(preamble + <<~FLUX)
-          c = Counter{ value: 0 } @shared:locked;
-          WITH EXCLUSIVE c AS inner { getVal(inner); }
+          FN main() RETURNS Void ->
+            c = Counter{ value: 0 } @shared:locked;
+            WITH EXCLUSIVE c AS inner { getVal(inner); }
+          END
         FLUX
       }
 
@@ -799,8 +805,10 @@ RSpec.describe SemanticAnnotator do
     context "WITH EXCLUSIVE on @shared:writeLocked dereferences through Arc (.data.*)" do
       let(:zig) {
         ZigTranspiler.new.transpile(preamble + <<~FLUX)
-          c = Counter{ value: 0 } @shared:writeLocked;
-          WITH EXCLUSIVE c AS inner { getVal(inner); }
+          FN main() RETURNS Void ->
+            c = Counter{ value: 0 } @shared:writeLocked;
+            WITH EXCLUSIVE c AS inner { getVal(inner); }
+          END
         FLUX
       }
 
@@ -812,8 +820,10 @@ RSpec.describe SemanticAnnotator do
     context "WITH on @locked (no ownership) does NOT add .data.* dereference" do
       let(:zig) {
         ZigTranspiler.new.transpile(preamble + <<~FLUX)
-          c = Counter{ value: 0 } @locked;
-          WITH c AS inner { getVal(inner); }
+          FN main() RETURNS Void ->
+            c = Counter{ value: 0 } @locked;
+            WITH c AS inner { getVal(inner); }
+          END
         FLUX
       }
 
@@ -830,8 +840,10 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Counter { value: Float64 }
           FN getVal(c: Counter) RETURNS Float64 -> RETURN c.value; END
-          c = Counter{ value: 0 } @shared:locked;
-          WITH c AS inner { getVal(inner); }
+          FN main() RETURNS Void ->
+            c = Counter{ value: 0 } @shared:locked;
+            WITH c AS inner { getVal(inner); }
+          END
         FLUX
       }
 

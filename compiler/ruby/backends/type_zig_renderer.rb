@@ -11,6 +11,7 @@ class TypeZigRenderer
   extend T::Sig
 
   sig { params(type: Type, is_param: T::Boolean, is_field: T::Boolean).returns(String) }
+  # ruby-to-clear: effects reentrant
   def self.render_async_payload(type, is_param: false, is_field: false)
     unless type.error_union?
       return render(type, is_param: is_param, is_field: is_field, nested: true)
@@ -22,6 +23,7 @@ class TypeZigRenderer
   end
 
   sig { params(type: Type, is_param: T::Boolean, is_field: T::Boolean, nested: T::Boolean).returns(String) }
+  # ruby-to-clear: fallible
   def self.render(type, is_param: false, is_field: false, nested: false)
     # Zig needs an explicit error set before an optional payload. Its shorthand
     # accepts `!i64`, but not `!?i64`; the latter must be `anyerror!?i64`.

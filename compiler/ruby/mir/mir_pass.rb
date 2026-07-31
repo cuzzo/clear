@@ -251,17 +251,24 @@ class MIRPass
     # recurse into call arguments. Only BgBlock (outer consumer fiber) -- not
     # BgStreamBlock (generator fiber has special YIELD handling).
     case stmt
-    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment
-      val = stmt.value
-      if val.is_a?(AST::BgBlock) && val.body
-        val.body = transform_body(val.body, ctx.with(cleanup_facts: bg_inner_facts(val, ctx.cleanup_facts)))
-      end
+    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment, AST::ReturnNode
+      recurse_expr_body!(stmt.value, ctx)
     when AST::MethodCall, AST::FuncCall
-      stmt.args.each do |a|
-        if a.is_a?(AST::BgBlock) && a.body
-          a.body = transform_body(a.body, ctx.with(cleanup_facts: bg_inner_facts(a, ctx.cleanup_facts)))
-        end
-      end
+      stmt.args.each { |a| recurse_expr_body!(a, ctx) }
+    end
+  end
+
+  # A statement's value/argument may itself be a body-bearing expression whose
+  # inner statements the statement-level walk would otherwise miss: a BgBlock
+  # (consumer fiber) or a value BlockExpr (`{ stmts...; result }`, e.g. a
+  # desugared pipeline fold). Their reassignments/moves need the same
+  # cleanup-classification pass as any other statement.
+  sig { params(val: T.nilable(AST::Node), ctx: MIRPass::WalkCtx).void }
+  def recurse_expr_body!(val, ctx)
+    if val.is_a?(AST::BgBlock) && val.body
+      val.body = transform_body(val.body, ctx.with(cleanup_facts: bg_inner_facts(val, ctx.cleanup_facts)))
+    elsif val.is_a?(AST::BlockExpr)
+      val.body = transform_body(val.body, ctx)
     end
   end
 
@@ -454,6 +461,9 @@ class MIRPass
     return unless entry.needs_cleanup? || entry.heap?
 
     ti = stmt.full_type!
+    # Symbols are interned rodata: overwriting a String@symbol binding
+    # never frees the old value, whatever placement stamped on the entry.
+    return if Type.new(ti).symbol?
     zig_type = (Type.new(ti.resolved).zig_type rescue ti.resolved.to_s)
     stmt.reassign_cleanup = MIR::ReassignPlan.new(
       alloc: entry.alloc,
@@ -469,7 +479,7 @@ class MIRPass
     entry = MIR::LocalBindingAnalysis.binding_entry(decl)
     return entry if entry
 
-    return facts.entry_for_node(node.public_send(:name).to_s, node) if node.respond_to?(:name)
+    return facts.entry_for_node(T.unsafe(node).name.to_s, node) if node.respond_to?(:name)
 
     CleanupEntry::NONE
   end
@@ -524,10 +534,15 @@ class MIRPass
   def stamp_while_bind_cleanup!(stmt, facts)
     return unless stmt.is_a?(AST::WhileBindLoop)
     facts.with_live_entry_for(stmt.binding_name) do |entry|
+      cond_type = Type.from_node!(stmt.condition, context: "while-bind allocation marker")
+      # `WHILE NEXT s EXISTS AS item` binds the step payload for [~]T streams
+      # (NEXT returns StreamStep<T>) and the wrapped value for ?T conditions —
+      # the same unwrap the annotator applies in visit_WhileBindLoop.
+      item_type = cond_type.stream_step? ? cond_type.stream_step_item_type : cond_type.wrapped_type
       alloc_node = alloc_marker(
         stmt.binding_name.to_s,
         entry.alloc,
-        T.must(Type.from_node!(stmt.condition, context: "while-bind allocation marker").wrapped_type),
+        T.must(item_type),
       )
       drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s)
       drop.cleanup_entry = entry

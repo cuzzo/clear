@@ -335,7 +335,7 @@ RSpec.describe "automatic box transport — TDD contract" do
       CLEAR
 
       expect { transpile(source) }
-        .to raise_error(/Aliasing Error.*COPY.*CLONE/im)
+        .to raise_error(/Aliasing Error.*COPY.*KEEP/im)
     end
   end
 

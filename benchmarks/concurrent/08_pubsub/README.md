@@ -7,7 +7,7 @@ Total work: 10K x 64 x 2000 = 1.28 billion LCG iterations.
 ## Implementation
 
 - **CLEAR**: publisher writes once to a `SplitStream` ring buffer. Each
-  subscriber `CLONE`s an independent cursor — zero message copying. Publisher
+  subscriber `KEEP`s an independent cursor — zero message copying. Publisher
   blocks only when the slowest subscriber's cursor is a full buffer behind.
 - **Go**: publisher loops over 64 buffered channels (cap 64), sending one
   message per subscriber per iteration. Publisher blocks if any channel is

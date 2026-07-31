@@ -216,7 +216,7 @@ RSpec.describe Type, "zig_type gap coverage" do
     expect(type.zig_type).to eq("std.ArrayListUnmanaged(?Counter)")
   end
 
-  it "preserves ~?T[] as the open-stream spelling" do
+  it "preserves [~]T as the open-stream spelling" do
     type = Type.new(:"~?Counter[]")
 
     expect(type.open_stream?).to be true

@@ -190,6 +190,14 @@ module MIRLoweringLiterals
         inner = MIR::ContainerInit.new(transpile_type(inner_ti), :array_list_empty, list_alloc, nil)
         return wrap_list_literal_capability(inner, ti, list_alloc)
       end
+      # Empty SET literal (`Set[]` in rvalue position, e.g. stored into a
+      # set-valued map slot): makeList would build an ArrayList where the
+      # destination's Zig type is Set.
+      if ti.set_collection?
+        inner_ti = list_literal_capability_wrap_needed?(ti) ? ti.bare_data_type : ti
+        inner = MIR::ContainerInit.new(transpile_type(inner_ti), :set_empty, list_alloc, nil)
+        return wrap_list_literal_capability(inner, ti, list_alloc)
+      end
       # Dynamic empty list: use makeList with empty items
       return wrap_list_literal_capability(MIR::MakeList.new(elem_zig, [], list_alloc), ti, list_alloc)
     end

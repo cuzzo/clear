@@ -1,0 +1,32 @@
+STRUCT Budget { count: Int64 }
+STRUCT Holder { budget: Budget @multiowned }
+
+# Retained identity v4: every argument shape normalizes to an owned handle
+# at the edge - anonymous constructors and function results wrap a moved
+# payload, rc-typed field projections retain, and COPY forces an
+# independent identity (the per-site override).
+FN makeHolder(budget: Budget) RETURNS Holder ->
+    RETURN Holder{ budget: budget };
+END
+
+FN freshBudget(n: Int64) RETURNS Budget ->
+    RETURN Budget{ count: n };
+END
+
+FN main() RETURNS Void ->
+    anon = makeHolder(Budget{ count: 1 });
+    ASSERT anon.budget.count == 1, "anonymous constructor wraps";
+
+    result = makeHolder(freshBudget(2));
+    ASSERT result.budget.count == 2, "function result wraps";
+
+    MUTABLE shared = Budget{ count: 3 } @multiowned;
+    projected = makeHolder(anon.budget);
+    ASSERT projected.budget.count == 1, "rc field projection retains";
+
+    forked = makeHolder(COPY shared);
+    shared.count = 9;
+    ASSERT forked.budget.count == 3, "COPY forces an independent identity";
+    ASSERT shared.count == 9, "original identity unaffected";
+    RETURN;
+END

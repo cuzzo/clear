@@ -1,0 +1,24 @@
+STRUCT Budget { count: Int64 }
+STRUCT Holder { budget: Budget @multiowned }
+
+# Retained identity v4: keep-ness propagates through a pass-through helper.
+# The outer param is kept because it flows into the callee's kept position.
+FN makeHolder(budget: Budget) RETURNS Holder ->
+    RETURN Holder{ budget: budget };
+END
+
+FN viaHelper(b: Budget) RETURNS Holder ->
+    RETURN makeHolder(b);
+END
+
+FN main() RETURNS Void ->
+    MUTABLE shared = Budget{ count: 0 } @multiowned;
+    direct = makeHolder(shared);
+    routed = viaHelper(shared);
+
+    shared.count = 7;
+
+    ASSERT direct.budget.count == 7, "direct keeper shares";
+    ASSERT routed.budget.count == 7, "routed keeper shares the same identity";
+    RETURN;
+END

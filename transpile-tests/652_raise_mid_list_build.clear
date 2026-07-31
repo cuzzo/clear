@@ -1,0 +1,28 @@
+# F2 minimal: FOR builds heap list of owned strings, RAISE mid-iteration
+# with a pending element temp live.
+FN dup(s: String) RETURNS String ->
+    RETURN COPY s;
+END
+
+FN build(n: Int64) RETURNS !String[] ->
+    MUTABLE xs: []String = [];
+    FOR i IN (0_i64..<n) DO
+        tmp = dup("s") $+ i.toString();
+        IF i == 2_i64 THEN
+            RAISE "mid";
+        END
+        &xs.push(tmp);
+    END
+    RETURN xs;
+END
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST F2aLoopRaise DO
+    ok = build(2_i64) OR_ELSE [];
+    ASSERT ok.length() == 2;
+    ASSERT ok[0] == "s0";
+    ASSERT ok[1] == "s1";
+    bad = build(5_i64) OR_ELSE [];
+    ASSERT bad.length() == 0;
+END

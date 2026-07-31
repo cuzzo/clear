@@ -111,7 +111,7 @@ Reference docs: `mir-bugs.md` (known MIR violations), `alloc-bugs.md` (frame-the
 
 ## Language Semantics
 
-**Sigils:** `$` pipeline/interp, `!` mutation, `|>` SMOOTH (safe pipeline w/ error prop), `_` placeholder, `!!` explicit panic.
+**Sigils:** `$` pipeline/interp, `&` explicit mutable call-site path, `|>` SMOOTH (safe pipeline w/ error prop), `_` placeholder, `TRY` explicit propagation.
 
 **Ownership / capabilities — bindings, not types.** Two sigil groups:
 - **Group 1 (sync / ownership wrappers):** `@locked`, `@writeLocked`, `@shared` (Arc), `@multiowned` (Rc), `@local`. Stored on `SymbolEntry#sync` and `#storage`. Composed via `MIR::CapWrap`.

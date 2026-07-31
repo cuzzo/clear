@@ -3,13 +3,12 @@ require "sorbet-runtime"
 
 require "set"
 require_relative "./symbol_entry"
-require_relative "./schemas"
+require_relative "./type"
 
 class Scope
     extend T::Sig
 
   EMPTY_CAPABILITIES = T.let(Set.new.freeze, T::Set[Symbol])
-  RegInput = T.type_alias { T.nilable(T.any(AST::Node, String, Symbol)) }
   MutabilityInput = T.type_alias { T.nilable(T.any(T::Boolean, Lexer::Token)) }
   ScopeTypeSchema = T.type_alias do
     T.any(Schemas::EnumSchema, Schemas::ResourceSchema, Schemas::StructSchema, Schemas::UnionSchema)
@@ -100,12 +99,13 @@ class Scope
   sig { returns(T::Hash[String, String]) }
   attr_reader :dependencies
   attr_accessor :depth   # stack depth at scope creation; 0 for root
-  attr_reader   :types, :parent
+  attr_reader   :binding_entries, :types, :parent
 
   sig { void }
   def initialize
     @parent = T.let(nil, T.nilable(Scope))
     @bindings = T.let(ScopeBindings.new, ScopeBindings)
+    @binding_entries = T.let(@bindings.entries, T::Hash[String, SymbolEntry])
     @dependencies = T.let({}, T::Hash[String, String])
     @type_store = T.let(ScopeTypes.new, ScopeTypes)
     @types = T.let(@type_store.entries, T::Hash[Symbol, Scope::ScopeTypeEntry])
@@ -113,7 +113,8 @@ class Scope
     @depth = T.let(0, Integer)
   end
 
-  sig { params(name: String, reg: RegInput, type: SymbolEntry::TypeInput, is_mutable: MutabilityInput, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[Symbol], _borrowed_paths: T::Array[SymbolEntry], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_plan: T.nilable(Schemas::ResourceClosePlan)).returns(SymbolEntry) }
+  sig { params(name: String, reg: SymbolEntry::RegInput, type: SymbolEntry::TypeInput, is_mutable: MutabilityInput, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: T::Set[Symbol], _borrowed_paths: T::Array[SymbolEntry], sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_plan: T.nilable(Schemas::ResourceClosePlan)).returns(SymbolEntry) }
+  # ruby-to-clear: fallible
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_plan: nil)
     @owned_names.add(name)
     entry = SymbolEntry.new(
@@ -160,6 +161,7 @@ class Scope
 
     @parent = original
     @bindings = ScopeBindings.new
+    @binding_entries = @bindings.entries
     @dependencies = original.dependencies.dup
     @type_store = ScopeTypes.new
     @types = @type_store.entries
@@ -198,13 +200,32 @@ class Scope
 
   sig { params(name: Symbol).returns(T.nilable(ScopeTypeEntry)) }
   def resolve_type_entry(name)
-    @type_store[name] || @parent&.resolve_type_entry(name)
+    local = @type_store[name]
+    return local if local
+
+    cursor = T.let(@parent, T.nilable(Scope))
+    until cursor.nil?
+      ancestor = cursor
+      inherited = ancestor.types[name]
+      return inherited if inherited
+
+      cursor = ancestor.parent
+    end
+    nil
   end
 
   sig { returns(T::Hash[Symbol, ScopeTypeEntry]) }
   def visible_types
-    inherited = @parent ? @parent.visible_types : {}
-    inherited.merge(@types)
+    visible = @types.dup
+    cursor = T.let(@parent, T.nilable(Scope))
+    until cursor.nil?
+      ancestor = cursor
+      ancestor.types.each do |name, entry|
+        visible[name] = entry unless visible.key?(name)
+      end
+      cursor = ancestor.parent
+    end
+    visible
   end
 
   sig { params(name: String).returns(T.nilable(SymbolEntry)) }
@@ -219,7 +240,18 @@ class Scope
 
   sig { params(name: String).returns(T.nilable(SymbolEntry)) }
   def resolve_entry(name)
-    @bindings[name] || @parent&.resolve_entry(name)
+    local = @bindings[name]
+    return local if local
+
+    cursor = T.let(@parent, T.nilable(Scope))
+    until cursor.nil?
+      ancestor = cursor
+      inherited = ancestor.binding_entries[name]
+      return inherited if inherited
+
+      cursor = ancestor.parent
+    end
+    nil
   end
 
   sig { params(name: String).returns(SymbolEntry) }
@@ -234,7 +266,7 @@ class Scope
 
   sig { params(name: String).returns(T::Boolean) }
   def entry?(name)
-    local_entry?(name) || !!@parent&.entry?(name)
+    !resolve_entry(name).nil?
   end
 
   sig { params(name: String).returns(T.nilable(SymbolEntry)) }
@@ -242,7 +274,7 @@ class Scope
     entry = @bindings[name]
     return entry if entry
 
-    inherited = @parent&.resolve_entry(name)
+    inherited = resolve_entry(name)
     return nil unless inherited
 
     materialized = clone_entry_for_scope(inherited)
@@ -277,26 +309,41 @@ class Scope
   end
 
   sig { returns(Integer) }
+  # ruby-to-clear: fallible
   def visible_entry_count
     count_visible_entries!(Set.new)
   end
 
   sig { params(seen: T::Set[String]).returns(Integer) }
+  # ruby-to-clear: fallible
   def count_visible_entries!(seen)
-    count = @parent&.count_visible_entries!(seen) || 0
-    @bindings.keys.each do |name|
-      next if seen.include?(name)
+    count = T.let(0, Integer)
+    cursor = T.let(self, T.nilable(Scope))
+    until cursor.nil?
+      current = cursor
+      current.binding_entries.each_key do |name|
+        next if seen.include?(name)
 
-      seen << name
-      count += 1
+        seen << name
+        count += 1
+      end
+      cursor = current.parent
     end
     count
   end
 
   sig { returns(T::Hash[String, SymbolEntry]) }
   def visible_entries
-    inherited = @parent ? @parent.visible_entries : {}
-    inherited.merge(@bindings.entries)
+    visible = @binding_entries.dup
+    cursor = T.let(@parent, T.nilable(Scope))
+    until cursor.nil?
+      ancestor = cursor
+      ancestor.binding_entries.each do |name, entry|
+        visible[name] = entry unless visible.key?(name)
+      end
+      cursor = ancestor.parent
+    end
+    visible
   end
 
   sig { returns(T::Array[String]) }
@@ -309,8 +356,7 @@ class Scope
 
   sig { params(names: T::Array[String], seen: T::Set[String]).void }
   def append_visible_names!(names, seen)
-    @parent&.append_visible_names!(names, seen)
-    @bindings.keys.each do |name|
+    visible_entries.each_key do |name|
       next if seen.include?(name)
 
       seen << name
@@ -335,10 +381,11 @@ class Scope
 
     base_type = Type.new(entry.type)
 
-    value_sync = if entry.locked?
-      :locked
+    value_sync = T.let(nil, T.nilable(Symbol))
+    if entry.locked?
+      value_sync = :locked
     elsif entry.write_locked?
-      :write_locked
+      value_sync = :write_locked
     end
     base_type.apply_symbol_overlay!(
       storage: entry.storage,
@@ -390,8 +437,10 @@ class Scope
   # in the cap's old_scope (caller is responsible for emitting a diagnostic).
   sig { params(capability: AST::Capability).returns(T.nilable(SymbolEntry)) }
   def declare_with_new_capability(capability)
-    name = capability[:var_node].name
-    local = capability[:old_scope].resolve_entry(name)
+    var_node = T.cast(capability[:var_node], AST::Node)
+    old_scope = T.cast(capability[:old_scope], Scope)
+    name = T.must(AST.root_identifier(var_node)).name
+    local = old_scope.resolve_entry(name)
     return nil if local.nil?
     local = local.dup
     local.capabilities = local.capabilities.dup
@@ -404,18 +453,30 @@ class Scope
 
   sig { params(node: AST::Node).returns(T::Array[Symbol]) }
   def get_path_to_root(node)
-    path = []
-    curr = T.let(node, T.untyped)
-    while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
-      if curr.is_a?(AST::GetField)
-        path.unshift(curr.field.to_sym)
-      elsif curr.is_a?(AST::GetIndex)
-        path.unshift(:*)
+    path = T.let([], T::Array[Symbol])
+    curr = T.let(node, AST::Node)
+    while true
+      next_curr = T.let(nil, T.nilable(AST::Node))
+      case curr
+      when AST::GetField
+        path << curr.field.to_sym
+        next_curr = curr.target
+      when AST::GetIndex
+        path << :*
+        next_curr = curr.target
+      else
+        break
       end
-      curr = curr.target
+      curr = T.must(next_curr)
     end
-    path.unshift(curr.name.to_sym)
-    path
+    path << T.cast(curr, AST::Identifier).name.to_sym
+    reversed = T.let([], T::Array[Symbol])
+    i = path.length - 1
+    while i >= 0
+      reversed << T.must(path[i])
+      i -= 1
+    end
+    reversed
   end
 
   sig { params(name: String).void }

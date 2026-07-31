@@ -54,7 +54,20 @@ class FrontendResourceBudget
 
   sig { params(count: Integer).void }
   def check_tokens!(count)
-    raise Exceeded.new(:tokens, @max_tokens) if count > @max_tokens
+    violation = tokens_violation(count)
+    raise violation if violation
+  end
+
+  sig { params(count: Integer).returns(T.nilable(Exceeded)) }
+  def tokens_violation(count)
+    return Exceeded.new(:tokens, @max_tokens) if count > @max_tokens
+
+    nil
+  end
+
+  sig { returns(Integer) }
+  def nesting_limit
+    @max_nesting
   end
 
   sig { void }

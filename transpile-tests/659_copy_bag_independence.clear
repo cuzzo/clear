@@ -1,0 +1,22 @@
+STRUCT Bag { items: []String, tag: String }
+
+FN dup(s: String) RETURNS String -> RETURN COPY s; END
+
+FN main() RETURNS Void ->
+    MUTABLE xs: []String = List[];
+    &xs.append(dup("orig1"));
+    &xs.append(dup("orig2"));
+    MUTABLE bag = Bag{ items: xs, tag: dup("original") };
+
+    MUTABLE cpy = COPY bag;
+    &cpy.items.append(dup("extra"));
+    cpy.items[0_i64] = dup("CLOBBERED");
+    cpy.tag = dup("copy");
+
+    ASSERT bag.items.length() == 2, "original list still 2";
+    ASSERT (bag.items[0] OR_ELSE "") == "orig1", "original elem0 intact";
+    ASSERT bag.tag == "original", "original tag intact";
+    ASSERT cpy.items.length() == 3, "copy has 3";
+    ASSERT (cpy.items[0] OR_ELSE "") == "CLOBBERED", "copy elem0 mutated";
+    RETURN;
+END

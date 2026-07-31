@@ -12,6 +12,8 @@ module LexerHarnessSupport
     { 'name' => 'keywords_types_vars', 'source' => 'IF If if WITH SNAPSHOT x AS y' },
     { 'name' => 'whitespace_comments', 'source' => "IF # comment\n x\n  = 10" },
     { 'name' => 'simple_string', 'source' => ' "Hello" ' },
+    { 'name' => 'escaped_string', 'source' => '"line\\r\\n\\t\\\\end"' },
+    { 'name' => 'unicode_columns', 'source' => '"a—b" THEN "🚀" END' },
     { 'name' => 'triple_string', 'source' => "\"\"\"\n A\n\"\"\"\nIF" },
     { 'name' => 'interpolation', 'source' => '"Hello ${name}!"' },
     { 'name' => 'based_literals', 'source' => '0xFF 0b1010_0101 0o12_34 0xFF_FF_u32' },
@@ -60,6 +62,8 @@ module LexerHarnessSupport
   end
 
   def clear_string_expr(value)
+    return clear_string_literal(value) if value.empty?
+
     parts = value.split('$', -1)
     return clear_string_literal(value) if parts.length == 1
 

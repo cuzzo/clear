@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
   n_writes = 2_000_000;
   expected = (n_writes * (n_writes - 1)) / 2;
 
-  gen: ~?Int64[] = BG STREAM {
+  gen: [~]Int64 = BG STREAM {
     MUTABLE i = 0;
     WHILE i < n_writes DO
       YIELD i;

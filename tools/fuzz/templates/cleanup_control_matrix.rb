@@ -24,9 +24,9 @@ def ccm_spec(shape)
   when :string
     ["", "String", 'COPY "abc"', "x.length()", "3_i64"]
   when :list
-    ["", "Int64[]@list", "makeList() OR_ELSE RAISE", "x.length()", "2_i64"]
+    ["", "[List]Int64", "makeList() OR_ELSE RAISE", "x.length()", "2_i64"]
   when :hash
-    ["", "HashMap<String>", '{"a": COPY "aa", "b": COPY "bb"}', "x.count()", "2_i64"]
+    ["", "{String}String", '{"a": COPY "aa", "b": COPY "bb"}', "x.length()", "2_i64"]
   when :struct
     ["STRUCT Box { label: String }\n", "Box", 'Box{ label: COPY "abc" }', "x.label.length()", "3_i64"]
   when :union
@@ -34,11 +34,11 @@ def ccm_spec(shape)
   when :optional
     ["", "?String", 'COPY "abc"', "1_i64", "1_i64"]
   when :tuple
-    ["", "Tuple<String, Int64>", 'Tuple{COPY "abc", 2_i64}', "x._0.length()", "3_i64"]
+    ["", "Tuple<String, Int64>", "makeTuple()", "x._0.length()", "3_i64"]
   when :generic
     ["STRUCT Box<T> { value: T }\n", "Box<String>", 'Box<String>{ value: COPY "abc" }', "x.value.length()", "3_i64"]
   when :nested
-    ["STRUCT Inner { label: String }\nSTRUCT Box { items: Inner[]@list }\n", "Box", "makeBox() OR_ELSE RAISE", "(x.items[0_i64]?.label OR_ELSE \"\").length()", "3_i64"]
+    ["STRUCT Inner { label: String }\nSTRUCT Box { items: [List]Inner }\n", "Box", "makeBox() OR_ELSE RAISE", "(x.items[0_i64]?.label OR_ELSE \"\").length()", "3_i64"]
   when :nested_union
     [
       "UNION Choice { Empty, Text: String }\nSTRUCT Envelope { choice: ?Choice }\n",
@@ -54,8 +54,8 @@ def ccm_helpers(shape)
   helpers = +""
   if shape == :list
     helpers << <<~CHT
-      FN makeList() RETURNS !Int64[]@list ->
-          MUTABLE xs: Int64[]@list = [];
+      FN makeList() RETURNS ![List]Int64 ->
+          MUTABLE xs: [List]Int64 = [];
           &xs.append(1_i64);
           &xs.append(2_i64);
           RETURN xs;
@@ -64,9 +64,19 @@ def ccm_helpers(shape)
   elsif shape == :nested
     helpers << <<~CHT
       FN makeBox() RETURNS !Box ->
-          MUTABLE xs: Inner[]@list = [];
+          MUTABLE xs: [List]Inner = [];
           &xs.append(Inner{ label: COPY "abc" });
           RETURN Box{ items: xs };
+      END
+    CHT
+  elsif shape == :tuple
+    helpers << <<~CHT
+      FN makeOwnedString() RETURNS String ->
+          RETURN COPY "abc";
+      END
+
+      FN makeTuple() RETURNS Tuple<String, Int64> ->
+          RETURN Tuple{makeOwnedString(), 2_i64};
       END
     CHT
   end

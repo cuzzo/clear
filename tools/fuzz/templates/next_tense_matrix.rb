@@ -61,10 +61,10 @@ FuzzGenerator.register(:next_tense_matrix, cells: NEXT_TENSE_CELLS) do |p|
   when :open_stream_optional_item
     <<~CLEAR
       FN main() RETURNS Void ->
-        stream: ~?Int64[] = BG STREAM { YIELD 13_i64; };
+        stream: [~]Int64 = BG STREAM { YIELD 13_i64; };
         item:? = NEXT stream;
         IF item EXISTS AS value THEN
-          ASSERT value == 13_i64, "NEXT ~?T[] retains ?T explicitly";
+          ASSERT value == 13_i64, "NEXT [~]T retains ?T explicitly";
         ELSE
           ASSERT FALSE, "open stream yields its item";
         END

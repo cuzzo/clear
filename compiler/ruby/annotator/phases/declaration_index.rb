@@ -92,10 +92,20 @@ module Annotator
         registrations = T.let([], T::Array[ErrorTypeRegistration])
         AST.each_locatable(program, descend_functions: true) do |node|
           case node
-          when AST::Raise, AST::OrElseExit
+          when AST::Raise
             kind = node.kind
             type_name = node.error_name
-            next unless kind && type_name
+            next if kind.nil? || type_name.nil?
+
+            registrations << ErrorTypeRegistration.new(
+              kind: kind,
+              type_name: type_name,
+              token: node.token
+            )
+          when AST::OrElseExit
+            kind = node.kind
+            type_name = node.error_name
+            next if kind.nil? || type_name.nil?
 
             registrations << ErrorTypeRegistration.new(
               kind: kind,

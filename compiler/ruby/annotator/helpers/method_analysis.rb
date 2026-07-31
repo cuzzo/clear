@@ -111,7 +111,13 @@ module MethodAnalysis
     end
 
     # Set tag and return type
-    node.public_send(:"#{tag_field}=", node.name.to_sym)
+    case tag_field
+    when :pool_method then node.pool_method = node.name.to_sym
+    when :set_method then node.set_method = node.name.to_sym
+    when :map_method then node.map_method = node.name.to_sym
+    else
+      raise "resolve_typed_method: unknown collection tag field #{tag_field}"
+    end
     stamp_type!(node, defn.return_def.resolve(obj_type, []))
     node.container_borrow = defn.intrinsic_container_borrow?
 

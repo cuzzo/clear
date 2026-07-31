@@ -825,18 +825,12 @@ module MIRLoweringCapabilities
   sig { params(node: AstReturnSearchNode).returns(T::Boolean) }
   def ast_contains_return?(node)
     T.bind(self, MIRLowering) rescue nil
-    case node
-    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type, Lexer::Token, AST::FunctionDef
-      false
-    when Array, Set
-      node.any? { |item| ast_contains_return?(item) }
-    when Hash
-      node.values.any? { |item| ast_contains_return?(item) }
-    when AST::ReturnNode
-      true
-    else
-      node.respond_to?(:each_pair) && T.unsafe(node).each_pair.any? { |_, v| ast_contains_return?(v) }
+    root = node.is_a?(Set) ? node.to_a : node
+    found = T.let(false, T::Boolean)
+    AST.each_locatable(T.unsafe(root)) do |candidate|
+      found = true if candidate.is_a?(AST::ReturnNode)
     end
+    found
   end
 
   sig { params(node: AST::WithBlock).returns(T::Array[MIR::Emittable]) }
@@ -1183,12 +1177,17 @@ module MIRLoweringCapabilities
       lock_expr = MIR::CapabilityLockTarget.new(source_mir, is_arc, false)
       addr_expr = MIR::CapabilityLockAddress.new(source_mir, is_arc)
       var_sync   = cap.sync
-      panic_method, err_method = case cap.capability
-                                 when :EXCLUSIVE
-                                   var_sync == :write_locked ? %w[write writeOrErr] : %w[acquire acquireOrErr]
-                                 when :write_locked_read
-                                   %w[read readOrErr]
-                                 end
+      panic_method = T.let("read", String)
+      err_method = T.let("readOrErr", String)
+      if cap.capability == :EXCLUSIVE
+        if var_sync == :write_locked
+          panic_method = "write"
+          err_method = "writeOrErr"
+        else
+          panic_method = "acquire"
+          err_method = "acquireOrErr"
+        end
+      end
       MIR::SortedLockAcquireEntry.new(
         index: i,
         alias_name: alias_name.to_s,

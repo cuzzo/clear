@@ -11,6 +11,7 @@ class ClearParser
     when :parse_require then parse_require
     when :parse_extern_decl then parse_extern_decl
     when :parse_mutable_var_decl then parse_mutable_var_decl
+    when :parse_const_decl then parse_const_decl
     when :parse_function_def then parse_function_def
     when :parse_method_function_def then parse_function_def(:package, is_method: true)
     when :parse_pub_visibility then parse_visibility_decl(:pub)
@@ -27,6 +28,7 @@ class ClearParser
     when :parse_tight_stmt then parse_tight_stmt
     when :parse_return then parse_return
     when :parse_assert then parse_assert
+    when :parse_defer then parse_defer
     when :parse_assert_raises then parse_assert_raises
     when :parse_test_block then parse_test_block
     when :parse_stub then parse_stub
@@ -65,6 +67,53 @@ class ClearParser
     AST::Assert.new(token, condition, message)
   end
 
+  # DEFER <stmt>  |  DEFER { stmt* }
+  # The body runs at scope exit on BOTH the success and error paths (Zig
+  # defer semantics — compile-time control flow, zero runtime cost).
+  # RETURN/BREAK/CONTINUE/YIELD cannot appear inside a DEFER body: the
+  # deferred code runs during scope teardown, where redirecting control
+  # flow is meaningless (same restriction as Zig).
+  sig { returns(AST::DeferStmt) }
+  def parse_defer
+    token = consume(:KEYWORD, 'DEFER')
+    body = if match?(:CHAR, '{')
+      consume(:CHAR, '{')
+      stmts = T.let([], T::Array[AST::Node])
+      stmts << parse_statement until match?(:CHAR, '}')
+      consume(:CHAR, '}')
+      stmts
+    else
+      [parse_statement]
+    end
+    reject_defer_control_flow!(token, body)
+    AST::DeferStmt.new(token, body)
+  end
+
+  sig { params(token: Lexer::Token, body: T::Array[AST::Node]).void }
+  def reject_defer_control_flow!(token, body)
+    stack = T.let(body.dup, T::Array[AST::Node])
+    until stack.empty?
+      node = stack.pop
+      next unless node.is_a?(AST::Locatable)
+      if node.is_a?(AST::ReturnNode) || node.is_a?(AST::BreakNode) ||
+         node.is_a?(AST::ContinueNode) || node.is_a?(AST::YieldExpr)
+        kind = node.class.name.to_s.split("::").last
+        error!(token, :DEFER_NO_CONTROL_FLOW, kind: kind)
+      end
+      # FN/lambda bodies are their own control-flow scopes.
+      next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit)
+
+      node.class.members.each do |member|
+        value = T.unsafe(node)[member]
+        if value.is_a?(Array)
+          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
+        elsif value.is_a?(AST::Locatable)
+          stack << value
+        end
+      end
+    end
+  end
+
   sig { returns(AST::BreakNode) }
   def parse_break
     token = consume(:KEYWORD, 'BREAK')
@@ -91,8 +140,6 @@ class ClearParser
     match!(:CHAR, ';')  # optional semicolon — PASS may appear bare before a ','
     AST::PassStmt.new(tok)
   end
-
-  SYNTAX_TOKENS_AT_STATEMENT_END = %w[; THEN DO ->].freeze
 
   sig { returns(AST::Node) }
   def parse_statement
@@ -426,7 +473,7 @@ class ClearParser
   end
 
   VALUE_BLOCK_STATEMENT_KEYWORDS = T.let(Set[
-    'ASSERT', 'ASSERT_RAISES', 'BENCHMARK', 'BREAK', 'CONTINUE', 'DIE',
+    'ASSERT', 'ASSERT_RAISES', 'BENCHMARK', 'BREAK', 'CONTINUE', 'DEFER', 'DIE',
     'DO', 'ENUM', 'EXIT', 'EXTERN', 'FN', 'FOR', 'METHOD', 'MUTABLE',
     'IF', 'MATCH', 'PARTIAL', 'PASS', 'PRIVATE', 'PROFILE', 'PUB', 'RAISE', 'RETURN', 'SMASH',
     'STRUCT', 'STUB', 'SYNC', 'TEST', 'TIGHT', 'UNION', 'WHILE', 'WITH',

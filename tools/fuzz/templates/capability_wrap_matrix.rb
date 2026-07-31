@@ -248,7 +248,7 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
   when :materialized_distinct
     <<~CHT
       FN main() RETURNS Void ->
-          s: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 1_i64; YIELD 2_i64; };
+          s: [~]Int64 = BG STREAM { YIELD 1_i64; YIELD 1_i64; YIELD 2_i64; };
           vals: ~Int64[]@set:observable = s |> DISTINCT _;
           WITH MATERIALIZED VIEW vals AS snap { _ = snap.length(); }
           RETURN;
@@ -257,7 +257,7 @@ FuzzGenerator.register(:capability_wrap_matrix, cells: CWM_CELLS) do |p|
   when :observable_view
     <<~CHT
       FN main() RETURNS Void ->
-          stream: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 2_i64; };
+          stream: [~]Int64 = BG STREAM { YIELD 1_i64; YIELD 2_i64; };
           running: ~Int64@observable = stream |> SUM _;
           WITH VIEW running AS snapshot {
               ASSERT snapshot >= 0_i64, "observable view lower bound";

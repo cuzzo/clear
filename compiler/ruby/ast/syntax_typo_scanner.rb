@@ -107,7 +107,9 @@ module SyntaxTypoScanner
         next
       end
       RULES.each do |r|
-        pat = r.match
+        # Keep the matched text independently owned: emitting a finding below
+        # may mutably borrow the rule while `pat` remains live.
+        pat = r.match.dup
         next unless source[i, pat.length] == pat
         if pat[0] =~ /[A-Za-z_]/ && i > 0 && source[i - 1] =~ /[A-Za-z0-9_]/
           next
@@ -148,17 +150,17 @@ module SyntaxTypoScanner
         replacement: ''
       )]
     )
-    anchor = Struct.new(:line, :column).new(line, col)
+    anchor = AnchorToken.new(line, col)
     FixCollector.push(FixableFinding.new(
       level: :error,
-      message: T.must(DiagnosticRegistry.format(:LEGACY_MUTATION_NAME_SUFFIX)),
+      message: T.must(DiagnosticRegistry.format(:LEGACY_MUTATION_NAME_SUFFIX, [])),
       token: anchor,
       category: :mutability,
       fixes: [fix]
-    ))
+    ), true)
   end
 
-  sig { params(source: String, i: Integer, line: Integer, col: Integer).returns(T::Array[Integer]) }
+  sig { params(source: String, i: Integer, line: Integer, col: Integer).returns([Integer, Integer, Integer]) }
   def self.advance(source, i, line, col)
     if source[i] == "\n"
       [i + 1, line + 1, 1]
@@ -183,7 +185,7 @@ module SyntaxTypoScanner
       )]
     )
 
-    anchor = Struct.new(:line, :column).new(line, col)
+    anchor = AnchorToken.new(line, col)
     message = T.must(DiagnosticRegistry.format(
       :OPERATOR_TYPO_SUGGESTION,
       match: rule.match,
@@ -196,6 +198,6 @@ module SyntaxTypoScanner
       category: :type,
       fixes: [fix]
     )
-    FixCollector.push(finding)
+    FixCollector.push(finding, true)
   end
 end

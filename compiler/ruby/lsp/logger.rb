@@ -10,7 +10,7 @@ module LSP
     LEVELS = T.let({ debug: 0, info: 1, warn: 2, error: 3 }.freeze, T::Hash[Symbol, Integer])
 
     sig { params(level: Symbol, io: IO).void }
-    def initialize(level: :info, io: $stderr)
+    def initialize(level: :info, io: STDERR)
       @level = T.let(LEVELS.fetch(level), Integer)
       @io    = T.let(io, IO)
     end

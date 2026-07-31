@@ -256,33 +256,54 @@ module Annotator
           value_type
         end
 
-        node.type = if wants_future
+        selected_type = declared
+        if wants_future
           # `name:~` is a promise/stream-retention assertion, not a way to
           # re-label a synchronous pipeline result as asynchronous.
-          value_type.future? ? value_type : declared
+          if value_type.future?
+            selected_type = value_type
+          else
+            selected_type = declared
+          end
         elsif wants_error_optional
           if value_type.error_union? && value_type.success_type.optional?
-            value_type
-          elsif error_type&.error_union? && payload.optional?
-            error_type
+            selected_type = value_type
+          elsif !error_type.nil? && error_type.error_union? && payload.optional?
+            selected_type = error_type
           else
-            Type.error_union_of(Type.optional_of(payload))
+            selected_type = Type.error_union_of(Type.optional_of(payload))
           end
         elsif wants_error
-          value_type.error_union? ? value_type : (error_type&.error_union? ? error_type : Type.error_union_of(payload))
+          if value_type.error_union?
+            selected_type = value_type
+          elsif !error_type.nil? && error_type.error_union?
+            selected_type = error_type
+          else
+            selected_type = Type.error_union_of(payload)
+          end
         else
-          payload.optional? ? payload : Type.optional_of(payload)
+          if payload.optional?
+            selected_type = payload
+          else
+            selected_type = Type.optional_of(payload)
+          end
         end
+        node.type = selected_type
         if wants_error || wants_error_optional
-          node.value.retain_error_channel = true if node.value.respond_to?(:retain_error_channel=)
+          value_node = node.value
+          value_node.retain_error_channel = true if value_node.respond_to?(:retain_error_channel=)
         end
       end
 
-      sig { params(node: DeclarationNode).void }
-      def reject_implicit_wrapper_binding!(node)
+      sig { params(node: DeclarationNode, process_deferred_copy: T::Boolean).void }
+      def reject_implicit_wrapper_binding!(node, process_deferred_copy: false)
         return if node.type
 
         value = node.value
+        if value.is_a?(AST::CopyNode) && !process_deferred_copy
+          @traversal_state.deferred_copy_wrapper_bindings << node
+          return
+        end
         error_type = recoverable_result_type(value, context: "inferred wrapper binding")
         error_success_type = error_type&.error_union? ? error_type.success_type : nil
         value_type = Type.new(value.full_type!(context: "inferred wrapper binding"))
@@ -473,24 +494,25 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         declared = node.type
-        if node.value.is_a?(AST::BgBlock) && declared&.single_future?
+        value_node = node.value
+        if value_node.is_a?(AST::BgBlock) && declared&.single_future?
           payload = declared.tense_type
           if payload && !payload.dynamic? && !payload.auto? && !%i[Auto Any].include?(payload.resolved)
-            T.unsafe(node.value).declared_async_payload = payload
+            T.unsafe(value_node).declared_async_payload = payload
           end
         end
         # Fixed-array list literals must be storage-stamped before visiting so
         # downstream list analysis sees the intended stack placement.
-        if node.value.is_a?(AST::ListLit) && node.type&.fixed?
-          node.value.storage = :stack
+        if value_node.is_a?(AST::ListLit) && node.type&.fixed?
+          value_node.storage = :stack
         end
-        if node.value.is_a?(AST::ListLit) && node.type&.tuple?
-          node.value.coerced_type = node.type
+        if value_node.is_a?(AST::ListLit) && node.type&.tuple?
+          value_node.coerced_type = node.type
         end
-        if node.value.is_a?(AST::HashLit) && node.type&.map?
-          node.value.coerced_type = node.type
+        if value_node.is_a?(AST::HashLit) && node.type&.map?
+          value_node.coerced_type = node.type
         end
-        visit(node.value)
+        visit(value_node)
       end
 
       sig { params(node: DeclarationNode).void }
@@ -530,7 +552,7 @@ module Annotator
             "but mutation occurs on line #{mutation.token&.line || node.token.line} while `#{plan.destination}` " \
             "remains live through line #{last_line}. CLEAR will not infer snapshot-versus-shared mutation " \
             "semantics in EASY, DEFAULT, or STRICT. Write `#{plan.destination} = COPY #{plan.source}` for " \
-            "an independent value, or explicitly use @multiowned/@shared and `CLONE #{plan.source}`."
+            "an independent value, or explicitly use @multiowned/@shared and `KEEP #{plan.source}`."
           source_token = node.value.token
           fixes = T.let([
             Fix.new(
@@ -544,11 +566,11 @@ module Annotator
           ], T::Array[Fix])
           if source_type.any_rc? || source_type.split?
             fixes << Fix.new(
-              description: fix_description(:PREFIX_EXPLICIT_OWNERSHIP_COST, keyword: "CLONE"),
+              description: fix_description(:PREFIX_EXPLICIT_OWNERSHIP_COST, keyword: "KEEP"),
               confidence: :interactive,
               edits: [Edit.new(
                 span: Span.new(file: nil, line: source_token.line, col: source_token.column, length: 0),
-                replacement: "CLONE ",
+                replacement: "KEEP ",
               )],
             )
           end
@@ -564,10 +586,14 @@ module Annotator
 
         source = node.value
         source_type = source.full_type!(context: "implicit ownership materialization source")
-        keyword = source_type.any_rc? || source_type.split? ? "CLONE" : "COPY"
-        if language_mode == :strict
+        keyword = source_type.any_rc? || source_type.split? ? "KEEP" : "COPY"
+        # Retained-identity v5: KEEP (a refcount retain of a retained carrier)
+        # is optional in EVERY mode -- the declaration already chose the cost.
+        # A COPY (payload deep-copy of a plain value) stays explicit in STRICT
+        # so no hidden allocation occurs (design acceptance #5).
+        if language_mode == :strict && keyword == "COPY"
           detail = "STRICT ownership cost: `#{plan.destination} = #{plan.source}` requires an implicit " \
-            "#{keyword == 'CLONE' ? 'reference-count retain' : 'deep copy'}. Write " \
+            "#{keyword == 'KEEP' ? 'reference-count retain' : 'deep copy'}. Write " \
             "`#{plan.destination} = #{keyword} #{plan.source}` explicitly, or shorten the lifetime so this is a move/borrow."
           fixable!(node, code: :STRICT_IMPLICIT_OWNERSHIP_COST, detail: detail,
             category: :ownership, level: :error,
@@ -582,8 +608,8 @@ module Annotator
             raise_in_collector: true)
         end
 
-        wrapper = if keyword == "CLONE"
-          AST::CloneNode.new(source.token, source)
+        wrapper = if keyword == "KEEP"
+          AST::KeepNode.new(source.token, source)
         else
           AST::CopyNode.new(source.token, source)
         end
@@ -606,8 +632,8 @@ module Annotator
           if !node.value.equal?(previous_value)
             wrapper = node.value
             record_capture_site!(wrapper, copied: true)
-            if wrapper.is_a?(AST::CloneNode)
-              finish_previsited_clone!(wrapper)
+            if wrapper.is_a?(AST::KeepNode)
+              finish_previsited_keep!(wrapper)
             else
               finish_previsited_copy!(T.cast(wrapper, AST::CopyNode))
             end
@@ -630,13 +656,13 @@ module Annotator
           end
           source_type = source.full_type!(context: "finalized ownership transfer")
           wrapper = if source_type.any_rc? || source_type.split?
-            AST::CloneNode.new(source.token, source)
+            AST::KeepNode.new(source.token, source)
           else
             AST::CopyNode.new(source.token, source)
           end
           record_capture_site!(wrapper, copied: true)
-          if wrapper.is_a?(AST::CloneNode)
-            finish_previsited_clone!(wrapper)
+          if wrapper.is_a?(AST::KeepNode)
+            finish_previsited_keep!(wrapper)
           else
             finish_previsited_copy!(T.cast(wrapper, AST::CopyNode))
           end
@@ -690,6 +716,24 @@ module Annotator
         finalize_decl_node!(node, node.mutable)
         stamp_init_contents_heap!(node)
         stamp_bg_handle_lifetime!(node)
+        propagate_carrier_polymorphic!(node)
+      end
+
+      # Retained-identity v5 ("Why provenance is limited"): a local that
+      # DIRECTLY aliases a carrier-polymorphic binding inherits the unknown
+      # carrier, so COPY stays rejected on it. Only a bare identifier (or a
+      # MOVE of one) propagates; a projection or transformation does not.
+      sig { params(node: DeclarationNode).void }
+      def propagate_carrier_polymorphic!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        rhs = node.value
+        rhs = rhs.value if rhs.is_a?(AST::MoveNode)
+        return unless rhs.is_a?(AST::Identifier)
+        src = rhs.symbol
+        return unless src.is_a?(SymbolEntry) && src.carrier_polymorphic
+        dest = current_scope.resolve_entry(node.name.to_s)
+        dest.carrier_polymorphic = true if dest.is_a?(SymbolEntry)
       end
 
       sig { params(node: DeclarationNode).void }
@@ -715,6 +759,7 @@ module Annotator
         mark_borrowed_field_bind_alias!(node)
         stamp_init_contents_heap!(node)
         stamp_bg_handle_lifetime!(node)
+        propagate_carrier_polymorphic!(node)
       end
 
       sig { params(node: AST::BindExpr).void }
@@ -868,21 +913,22 @@ module Annotator
         return unless entry
         type_obj = entry.type
         return if type_obj.fn_type? # function signature, not a variable
-        entry.ownership_kind = if entry.resource
-          :resource
+        ownership_kind = T.let(:affine, Symbol)
+        if entry.resource
+          ownership_kind = :resource
         elsif type_obj.multiowned? || type_obj.shared? ||
               entry.rc_stored?
-          :rc
+          ownership_kind = :rc
         elsif entry.sync
-          :sync
+          ownership_kind = :sync
         elsif type_obj.collection?
-          :collection
+          ownership_kind = :collection
         elsif !entry.takes && type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
-          :value
-        else
-          # TAKES parameters own the data — always affine so cleanup is emitted.
-          :affine
+          ownership_kind = :value
         end
+        # TAKES parameters own the data — always affine so cleanup is emitted.
+        entry.ownership_kind = ownership_kind
+        ownership_kind
       end
 
       # Accumulate stack-local variable bytes for the current function context.
@@ -980,11 +1026,11 @@ module Annotator
 
       AccessPathNode = T.type_alias { T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier) }
 
-      sig { params(node: AccessPathNode).returns(T.nilable(String)) }
+      sig { params(node: AST::Node).returns(T.nilable(String)) }
       def chain_root_name(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        curr = T.let(node, T.any(AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Identifier))
+        curr = T.let(node, AST::Node)
         while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex) || curr.is_a?(AST::OptionalUnwrap)
           curr = curr.target
         end
@@ -1101,7 +1147,8 @@ module Annotator
         end
         validate_assignment_type(node, scope.resolve_type(var_name), node.value.resolved_type)
         stamp_type!(node, scope.resolve_type(var_name))
-        scope.resolve_entry(var_name)&.reassigned = true
+        entry = scope.resolve_entry(var_name)
+        entry.reassigned = true if entry
         mark_var_mutated(var_name)
         true
       end
@@ -1131,20 +1178,21 @@ module Annotator
 
         target_type = index_node.target.full_type!(context: "index assignment collection")
         protocol_map = map_requires_protocol_lowering?(target_type)
-        assign_type = if protocol_map
+        assign_type = Type.new(:Any)
+        if protocol_map
           require_generic_map_access_scope!(index_node.target, target_type)
           index_node.protocol_operation = :map_put
-          protocol_map_associated_type(target_type, :Value)
-        elsif target_type&.map?
+          assign_type = protocol_map_associated_type(target_type, :Value)
+        elsif !target_type.nil? && target_type.map?
           # Map reads return ?V because the key may be absent, but map writes
           # store the declared value type V. If V itself is optional, preserve it.
-          target_type.value_type
+          assign_type = target_type.value_type
         else
           index_type = index_node.full_type!(context: "index assignment target")
-          if index_type&.optional?
-            T.must(index_type.wrapped_type)
+          if index_type.optional?
+            assign_type = T.must(index_type.wrapped_type)
           else
-            index_type
+            assign_type = index_type
           end
         end
 
@@ -1155,9 +1203,9 @@ module Annotator
 
         validate_assignment_type(assignment_node, assign_type, assignment_node.value.resolved_type)
 
-        consume_generic_map_value!(assignment_node.value, T.must(assign_type)) if protocol_map
+        consume_generic_map_value!(assignment_node.value, assign_type) if protocol_map
 
-        stamp_type!(assignment_node, T.must(assign_type))
+        stamp_type!(assignment_node, assign_type)
 
         # HashMap put may allocate, so needs_rt must propagate.
         if target_type&.map? || protocol_map
@@ -1226,6 +1274,20 @@ module Annotator
             !assignment_node.value.full_type!(context: "pending field assignment").implicitly_copyable? { |name| lookup_type_schema(name) }
           T.unsafe(assignment_node.value).ownership_pending_transfer = true
         end
+        # Assignment after construction is a keep edge too (retained
+        # identity v4): a param flowing into an @multiowned field via
+        # `x.f = param [OR_ELSE default]` is kept exactly like a
+        # struct-literal store.
+        if assignment_field_type.multiowned?
+          owner = begin
+            field_node.target.full_type!(context: "assignment receiver").resolved
+          rescue StandardError
+            nil
+          end
+          keep_param_identity!(assignment_node.value, assignment_field_type,
+            "#{owner || 'field'}.#{field_node.field}")
+        end
+
         validate_assignment_type(
           assignment_node,
           assignment_field_type,
@@ -1247,12 +1309,13 @@ module Annotator
         return if target.any? || value.any? || value.untyped?
         return if target.resolved == :NIL # Allow narrowing from initial NIL
         union_schema = lookup_type_schema(target.value_payload_type.resolved)
+        value_node = node.value
         if UnionPayloadCompatibility.unique_variant(target, value, union_schema)
-          node.value.coerced_type = target
+          value_node.coerced_type = target
           return
         end
         if target.accepts?(value)
-          node.value.coerced_type = target if target != value ||
+          value_node.coerced_type = target if target != value ||
             (target.node_reference? && !value.node_reference?)
           return
         end

@@ -25,7 +25,7 @@ module LSP
     # path without sleeping for half a second; production runs at the
     # default 500.
     sig { params(stdin: T.any(IO, StringIO), stdout: T.any(IO, StringIO), log_level: Symbol, debounce_ms: Integer).void }
-    def initialize(stdin: $stdin, stdout: $stdout, log_level: :info, debounce_ms: 500)
+    def initialize(stdin: STDIN, stdout: STDOUT, log_level: :info, debounce_ms: 500)
       @stdin            = stdin
       @stdout           = stdout
       @stdout.sync      = true

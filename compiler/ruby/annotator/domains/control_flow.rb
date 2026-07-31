@@ -119,6 +119,7 @@ module Annotator
         with_new_scope(current_scope) do
           node.body.each { |stmt| visit(stmt) }
           visit(node.result)
+          promote_to_expr_if!(node, node.result) if node.result.is_a?(AST::IfStatement)
           stamp_type!(node, node.result.full_type!(context: "catch branch result"))
           node.storage   = node.result.storage
         end
@@ -516,30 +517,27 @@ module Annotator
               else
                 Type.new(b.expr.full_type!(context: "IF predicate binding expression"))
               end
-              unwrapped = if b.predicate == :is_ok
-                unless ti.error_union?
-                  error!(b.expr, :IS_OK_REQUIRES_FALLIBLE, got: b.expr.resolved_type)
-                end
-                T.must(ti.success_type)
-              else
-                if ti.stream_step?
-                  b[:predicate] = :stream_item
-                  T.must(ti.stream_step_item_type)
-                else
-                  unless ti.optional?
-                    error!(b.expr, :IF_AS_NEEDS_OPTIONAL, got: b.expr.resolved_type)
-                  end
-                  T.must(ti.wrapped_type)
-                end
-              end
+              unwrapped = if_bind_unwrapped_type!(b, ti)
               if b.expr.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
                 unwrapped.apply_reference_ownership!(ti.ownership, link_source: ti.link_source)
               end
               b.unwrapped_type = unwrapped
               sym = unwrapped.resolved
               root = AST.root_identifier(b.expr)
+              # Plain struct AND plain collection payloads bind mutable
+              # pointer aliases into the container slot (lowering uses
+              # getPtr/getAtPtrOpt), so mutation through the capture is
+              # legal and lands in the container. Rc/node-handle payloads
+              # are value captures and stay immutable borrows.
+              # A @node handle is itself a pointer into the NodeStore, so
+              # assigning through the capture lands in the stored node --
+              # excluding it here made `IF nodes[i] EXISTS AS n THEN n.f = ...`
+              # fail as an immutable-field assignment. Rc payloads stay
+              # immutable value captures.
+              mutable_slot_payload = (unwrapped.struct? || unwrapped.collection?) &&
+                !unwrapped.any_rc?
               mutable_list_alias = b.expr.is_a?(AST::GetIndex) && root &&
-                !current_scope.is_immutable?(root.name) && unwrapped.struct?
+                !current_scope.is_immutable?(root.name) && mutable_slot_payload
               current_scope.declare(b.name, nil, unwrapped, mutable_list_alias, false, nil, :stack)
               entry = current_scope.local_entry!(b.name)
               b.symbol = entry
@@ -549,14 +547,16 @@ module Annotator
               # of one). IF-AS on `p[i]` / `p.field` where `p` is the alias
               # makes the new binding a borrow into locked data; it must not
               # escape the enclosing WITH scope either.
-              container_source = find_container_source(b.expr)
               # Compact @node handles and ordinary Copy payloads are returned
               # by value. Binding them does not borrow the collection storage,
               # so a later handle assignment cannot invalidate the binding.
-              if unwrapped.node_reference? || unwrapped.implicitly_copyable?
-                container_source = nil
+              container_source = if_bind_container_source(unwrapped, b.expr)
+              src_sym = T.let(nil, T.nilable(SymbolEntry))
+              source_root = AST.root_identifier(b.expr)
+              if source_root
+                src_sym = source_root.symbol
               end
-              if (src_sym = AST.root_identifier(b.expr)&.symbol)
+              if src_sym
                 entry.mark_non_escaping! if src_sym.non_escaping
                 if container_source
                   entry.lifetime = SymbolEntry.tied_lifetime([src_sym])
@@ -566,7 +566,8 @@ module Annotator
               classify_ownership!(entry)
               og_declare(b.name.to_s, nil, unwrapped)
               if container_source
-                ownership_graph[b.name.to_s]&.kind = :borrowed
+                graph_node = ownership_graph[b.name.to_s]
+                graph_node.kind = :borrowed if graph_node
                 ownership_graph.borrow(b.name.to_s, container_source, mutable: mutable_list_alias == true)
               end
             end
@@ -581,6 +582,36 @@ module Annotator
 
         analyze_control_flow_branches(branch_logic)
         stamp_type!(node, :Void)
+      end
+
+      sig { params(binding: AST::Binding, type: Type).returns(Type) }
+      def if_bind_unwrapped_type!(binding, type)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        if binding.predicate == :is_ok
+          unless type.error_union?
+            error!(binding.expr, :IS_OK_REQUIRES_FALLIBLE, got: binding.expr.resolved_type)
+          end
+          return T.must(type.success_type)
+        end
+
+        if type.stream_step?
+          binding[:predicate] = :stream_item
+          return T.must(type.stream_step_item_type)
+        end
+
+        unless type.optional?
+          error!(binding.expr, :IF_AS_NEEDS_OPTIONAL, got: binding.expr.resolved_type)
+        end
+        T.must(type.wrapped_type)
+      end
+
+      sig { params(type: Type, expression: AST::Node).returns(T.nilable(String)) }
+      def if_bind_container_source(type, expression)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        return if type.node_reference? || type.implicitly_copyable?
+
+        find_container_source(expression)
       end
 
       # Type-checks a struct destructuring pattern against the match subject type.
@@ -739,10 +770,10 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         if node.type_args&.any?
-          Type.new(NamedTypeExpression.new(
+          Type.new(TypeExpression.of(NamedTypeExpression.new(
             name: node.name.to_sym,
             arguments: node.type_args.map { |argument| Type.new(argument).shape.expression },
-          ))
+          )))
         else
           Type.new(node.name.to_sym)
         end
@@ -808,26 +839,6 @@ module Annotator
 
         expr.was_moved = true
         og_set_moved(source_name, at_token: expr.token, action: :takes)
-      end
-
-      sig { params(node: AST::MatchStatement, plan: MatchSubjectPlan).returns(T::Array[T.proc.returns(BasicObject)]) }
-      def match_branch_logic(node, plan)
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
-        branches = T.let([], T::Array[T.proc.returns(BasicObject)])
-        node.cases.each do |match_case|
-          branches << Kernel.proc {
-            analyze_match_case!(node, match_case, plan)
-            with_conditional_context { visit_stmts(match_case.body) }
-            collect_scope_drops(node: node)
-          }
-        end
-        if node.default_case
-          branches << Kernel.proc {
-            with_conditional_context { visit_stmts(node.default_case) }
-            collect_scope_drops(node: node)
-          }
-        end
-        branches
       end
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }
@@ -1076,6 +1087,14 @@ module Annotator
         stamp_type!(node, :Void)
       end
 
+      sig { params(node: AST::DeferStmt).returns(T.nilable(Symbol)) }
+      def visit_DeferStmt(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        node.body.each { |stmt| visit(stmt) }
+        stamp_type!(node, :Void)
+      end
+
       sig { params(node: AST::MatchStatement).returns(T.nilable(Symbol)) }
       def visit_MatchStatement(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
@@ -1084,7 +1103,21 @@ module Annotator
         plan = match_subject_plan(node)
         consume_match_subject_if_takes!(node, plan)
 
-        all_drops = analyze_control_flow_branches(match_branch_logic(node, plan))
+        branches = T.let([], T::Array[T.proc.returns(BasicObject)])
+        node.cases.each do |match_case|
+          branches << Kernel.proc {
+            analyze_match_case!(node, match_case, plan)
+            with_conditional_context { visit_stmts(match_case.body) }
+            collect_scope_drops(node: node)
+          }
+        end
+        if node.default_case
+          branches << Kernel.proc {
+            with_conditional_context { visit_stmts(node.default_case) }
+            collect_scope_drops(node: node)
+          }
+        end
+        all_drops = analyze_control_flow_branches(branches)
 
         if node.default_case
           node.default_drops = T.must(all_drops).pop
@@ -1170,7 +1203,8 @@ module Annotator
             T.must(node.symbol).mark_borrowed_alias!
             classify_ownership!(T.must(node.symbol))
             og_declare(node.var_name.to_s, nil, elem_ti)
-            ownership_graph[node.var_name.to_s]&.kind = :borrowed
+            graph_node = ownership_graph[node.var_name.to_s]
+            graph_node.kind = :borrowed if graph_node
             visit_stmts(node.body)
             finalize_scope(node)
             node.deferred_drops
@@ -1379,7 +1413,8 @@ module Annotator
   private :consume_match_subject_if_takes!
   private :emit_unknown_destructure_field!
   private :loop_value_copyable?
-  private :match_branch_logic
+  private :if_bind_unwrapped_type!
+  private :if_bind_container_source
   private :match_enum_schema
   private :match_pattern_type_matches_subject?
   private :match_payload_binding_type

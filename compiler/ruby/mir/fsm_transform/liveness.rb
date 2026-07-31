@@ -29,6 +29,12 @@ require_relative "context"
 
 module FsmTransform
   module Liveness
+    # Structural walk domain of collect_defs/collect_tail_uses: AST and
+    # MIR nodes mixed on one stack. Named (not an inline T.any) so the
+    # CLEAR translation can dispatch the each_pair reflection walk over a
+    # closed union.
+    CollectValue = T.type_alias { T.any(AST::Node, MIR::Node) }
+
     class CrossSegmentVarFact < T::Struct
       extend T::Sig
 
@@ -196,13 +202,14 @@ module FsmTransform
       case tail
       when Segments::IoSuspend
         next_idx = seg.index + 1
-        bucket = (uses_by_seg[next_idx] ||= Set.new)
+        uses_by_seg[next_idx] ||= Set.new
+        bucket = uses_by_seg[next_idx]
         call_node = tail.call_node
         if call_node.is_a?(AST::MethodCall)
-          walk_idents(call_node.object) { |name| bucket << name }
+          walk_idents(call_node.object) { |name| T.must(bucket) << name }
         end
         call_node.args.each do |a|
-          walk_idents(a) { |name| bucket << name }
+          walk_idents(a) { |name| T.must(bucket) << name }
         end
       end
     end
@@ -269,7 +276,7 @@ module FsmTransform
     def self.walk_idents(node, &block)
       return if node.nil?
 
-      stack = T.let([], T::Array[T.any(AST::Node, MIR::Node)])
+      stack = T.let([], T::Array[CollectValue])
       case node
       when Array
         node.reverse_each do |child|

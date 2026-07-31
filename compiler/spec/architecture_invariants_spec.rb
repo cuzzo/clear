@@ -196,7 +196,7 @@ RSpec.describe "architecture invariants: semantic lifecycle authority" do
     expect(takes).to include("return nil if lifecycle && !lifecycle.needs_drop?")
   end
 
-  it "forbids semantic DROP, CLONE, replacement, and field cleanup without LifecyclePlan" do
+  it "forbids semantic DROP, KEEP, replacement, and field cleanup without LifecyclePlan" do
     drop_builder = method_body("compiler/ruby/mir/mir_lowering.rb", "build_drop_entry!")
     drop_lowering = method_body("compiler/ruby/mir/mir_lowering.rb", "lower_drop")
     clone_lowering = method_body("compiler/ruby/mir/lowering/expressions.rb", "lower_clone")
@@ -277,7 +277,7 @@ RSpec.describe "architecture invariants: ownership transport facts" do
     expect(annotator).to include("signature.params.each_with_index")
     expect(finalization_methods).not_to match(/visit\((?:node\.value|wrapper)\)/)
     expect(finalizer).to include("finish_previsited_copy!")
-    expect(finalizer).to include("finish_previsited_clone!")
+    expect(finalizer).to include("finish_previsited_keep!")
   end
 end
 

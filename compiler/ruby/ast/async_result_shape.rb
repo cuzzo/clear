@@ -37,6 +37,7 @@ class AsyncResultShape < T::Struct
   end
 
   sig { returns(String) }
+  # ruby-to-clear: fallible
   def payload_zig_type
     TypeZigRenderer.render_async_payload(payload_type)
   end

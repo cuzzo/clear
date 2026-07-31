@@ -1,0 +1,29 @@
+# Identity pass-through SELECT over OWNED items: ownership transfers into the
+# downstream push, and the consumer binding's cleanup frees each item exactly
+# once. Releasing in the select loop as well would double-free.
+
+FN main() RETURNS Void ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    out: [~]String = src |> SELECT _;
+    MUTABLE total = 0_i64;
+    WHILE NEXT out EXISTS AS item DO
+        total = total + item.length();
+    END
+    ASSERT total == 3_i64, "identity select transfers ownership without double-free";
+
+    # Identity as an intermediate fused stage (pure rename, no alias binding).
+    src2: [~]String = BG STREAM {
+        c: String = COPY "ccc";
+        d: String = COPY "dddd";
+        YIELD c;
+        YIELD d;
+    };
+    running: ~Int64@observable = src2 |> SELECT _ |> SUM _.length();
+    ASSERT (NEXT running) == 7_i64, "identity stage keeps the item for the fold terminal";
+    RETURN;
+END

@@ -185,7 +185,7 @@ RSpec.describe "annotator branch gap burndown" do
     expect(transition_for_sync("direct_locked", sync: :locked).exclusive_validation_action).to eq(:valid)
     expect(transition_for_sync("direct_atomic", sync: :atomic).exclusive_validation_action).to eq(:mismatch)
     expect(transition_for_sync("direct_atomic", sync: :atomic).admits_atomic?).to be(true)
-    expect(transition_for_sync("bad_family_shape", sync_families: :ATOMIC).admits_atomic?).to be(false)
+    expect(transition_for_sync("empty_family_set", sync_families: Set[]).admits_atomic?).to be(false)
     expect(transition_for_sync("atomic_family", sync_families: Set[:ATOMIC]).admits_atomic?).to be(true)
     expect(transition_for_sync("snapshotted_family", sync_families: Set[:SNAPSHOTTED]).admits_atomic?).to be(true)
     expect(transition_for_sync("locked_family", sync_families: Set[:LOCKED]).admits_atomic?).to be(false)
@@ -1222,7 +1222,7 @@ RSpec.describe "annotator branch gap burndown" do
       CHT
       <<~CHT,
         FN main() RETURNS Void ->
-          src: ~?Int64[] = BG STREAM {
+          src: [~]Int64 = BG STREAM {
             YIELD 1_i64;
             YIELD 2_i64;
           };
@@ -2246,7 +2246,7 @@ RSpec.describe "annotator branch gap burndown" do
 
     fix_ann = quiet_annotator
     moved_ident = AST::Identifier.new(token, "moved")
-    fix_ann.send(:emit_use_of_moved_error!, moved_ident, OwnershipGraph::Node.new(path: "moved", kind: :owned, state: :moved))
+    fix_ann.send(:emit_use_of_moved_error!, moved_ident, OwnershipGraph::OwnershipNode.new(path: "moved", kind: :owned, state: :moved))
     cap_ident = AST::Identifier.new(token, "cell")
     cap_field = AST::GetField.new(token(:DOT, "."), cap_ident, "value")
     fix_ann.send(:emit_cap_field_needs_with!, cap_field, :FIELD_NEEDS_WITH, name: "cell", field: "value", cap: "read", perm: "READ")
@@ -2578,7 +2578,7 @@ RSpec.describe "annotator branch gap burndown" do
     string_key = AST::Literal.new(token(:STRING, "k"), :STRING, "k", :rodata)
     string_key.full_type = Type.new(:String)
     shard_ann.send(:analyze_shard_op, AST::BinaryOp.new(token(:PIPE, "|>"), left, :SMOOTH, AST::ShardOp.new(token(:SHARD, "SHARD"), numeric_target, string_key)))
-    expect(direct_errors(shard_ann).map { |e| e[1] }).to include(:SHARD_NEEDS_RANGE_OR_COLLECTION, :SHARD_TARGET_BAD, :SHARD_KEY_NEEDS_STRING)
+    expect(direct_errors(shard_ann).map { |e| e[1] }).to include(:SHARD_NEEDS_RANGE_OR_COLLECTION, :SHARD_TARGET_BAD, :GENERIC_MAP_KEY_MISMATCH)
 
     fix_ann = quiet_annotator(source_code: "WITH SNAPSHOT cell AS MUTABLE guard {\n  guard.value;\n}\n")
     with_node = AST::WithBlock.new(token(:WITH, "WITH"), [], [], [])
@@ -3570,7 +3570,7 @@ RSpec.describe "annotator branch gap burndown" do
     codes = direct_errors(ann).map { |err| err[1] }
     expect(codes).to include(:PIPE_BAD_DESTINATION, :COLLECT_NEEDS_OBSERVABLE,
       :WINDOW_NEEDS_COLLECTION_INPUT, :EACH_NEEDS_COLLECTION, :TAP_NEEDS_COLLECTION,
-      :SHARD_KEY_NEEDS_NUMERIC, :WHERE_NEEDS_BOOL)
+      :GENERIC_MAP_KEY_MISMATCH, :WHERE_NEEDS_BOOL)
   end
 
   it "covers test annotation assert and strict IO traversal branches directly" do
@@ -4391,7 +4391,10 @@ RSpec.describe "annotator branch gap burndown" do
 
     expect(ann.send(:observable_capability_explanation, nil, :shared)).to include("heap-pointer lifetime")
     codes = direct_errors(ann).map { |e| e[1] }
-    expect(codes).to include(:MATCH_ENUM_CAPTURE, :MATCH_UNIT_CAPTURE, :GIVE_TO_BORROW_PARAM)
+    expect(codes).to include(:MATCH_ENUM_CAPTURE, :MATCH_UNIT_CAPTURE)
+    # GIVE-to-borrow defers until the keep fixpoint has run; the recorded
+    # validation replays as GIVE_TO_BORROW_PARAM unless the param is kept.
+    expect(ann.send(:deferred_give_validations).map(&:param_name)).to include("borrowed")
   end
 
   it "uses the function registry in execution-boundary, capability, and tight-loop helpers" do

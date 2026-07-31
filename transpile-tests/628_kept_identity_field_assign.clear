@@ -1,0 +1,24 @@
+STRUCT Budget { count: Int64 }
+STRUCT Holder { budget: Budget @multiowned }
+
+# Retained identity v4: assignment AFTER construction is a keep edge too -
+# the real generated-lexer shape assigns `provided OR_ELSE fresh` into an
+# @multiowned field of MUTABLE self.
+FN reseat(MUTABLE h: Holder, budget: ?Budget = NIL) RETURNS Void ->
+    h.budget = budget OR_ELSE Budget{ count: 77 };
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE shared = Budget{ count: 5 } @multiowned;
+    seed = Budget{ count: 1 } @multiowned;
+    MUTABLE h = Holder{ budget: seed };
+
+    reseat(&h, shared);
+    shared.count = 9;
+    ASSERT h.budget.count == 9, "reseated field shares the identity";
+
+    reseat(&h);
+    ASSERT h.budget.count == 77, "omitted arg constructs fresh";
+    RETURN;
+END

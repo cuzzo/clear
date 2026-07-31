@@ -1,0 +1,22 @@
+STRUCT Budget { count: Int64 }
+STRUCT Holder { budget: Budget @multiowned }
+
+# Retained identity v4, zero-config row: an omitted optional kept param
+# constructs a fresh identity; a provided one keeps the caller's. This is
+# the generated-lexer FrontendResourceBudget shape.
+FN makeHolder(budget: ?Budget = NIL) RETURNS !Holder ->
+    RETURN Holder{ budget: budget OR_ELSE Budget{ count: 9 } };
+END
+
+FN main() RETURNS !Void ->
+    MUTABLE shared = Budget{ count: 1 } @multiowned;
+
+    with_shared = TRY makeHolder(shared);
+    fresh = TRY makeHolder();
+
+    shared.count = 5;
+
+    ASSERT with_shared.budget.count == 5, "provided arg keeps the identity";
+    ASSERT fresh.budget.count == 9, "omitted arg constructs a fresh budget";
+    RETURN;
+END

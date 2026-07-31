@@ -47,19 +47,30 @@ class CHeaderImporter
     raise Error, "C header not found: #{header_path}" unless File.file?(header_path)
 
     zig = zig_executable
-    stdout, stderr, status = Open3.capture3(zig, "translate-c", "-I#{source_dir}", header_path)
-    unless status.success?
-      detail = stderr.lines.first(8).join.strip
-      raise Error, "Zig could not import C header #{header.inspect}: #{detail}"
-    end
+    stdout = compiler_zig_translate_c(zig, source_dir, header_path)
 
     header_source = File.read(header_path)
     Translator.new(stdout, header: header, library: library,
       allowed_names: declaration_names(header_source)).declarations
-  rescue Errno::ENOENT => e
-    raise Error, "Zig is required to import C headers: #{e.message}"
+  rescue Errno::ENOENT
+    raise Error, "Zig is required to import C headers"
   end
 
+  # Ruby shells out through Open3. The self-hosted compiler maps this adapter
+  # onto compilerZigTranslateC in the compiler native support module.
+  # ruby-to-clear: skip
+  sig { params(zig: String, source_dir: String, header_path: String).returns(String) }
+  def self.compiler_zig_translate_c(zig, source_dir, header_path)
+    stdout, stderr, status = Open3.capture3(zig, "translate-c", "-I#{source_dir}", header_path)
+    unless status.success?
+      detail = stderr.split("\n").take(8).join("\n").strip
+      raise Error, "Zig could not import C header #{header_path.inspect}: #{detail}"
+    end
+
+    stdout
+  end
+
+  # ruby-to-clear: skip
   sig { returns(String) }
   def self.zig_executable
     candidates = [
@@ -101,7 +112,7 @@ class CHeaderImporter
       structs = translate_structs
       functions = translate_functions
       declarations = structs + functions
-      if declarations.empty?
+      if declarations.length == 0
         raise Error, "C header #{@header.inspect} contains no ABI declarations CLEAR can import"
       end
       (declarations + [""]).join("\n")
@@ -111,8 +122,9 @@ class CHeaderImporter
 
     sig { void }
     def collect_aliases!
-      @zig_source.each_line do |line|
-        next unless (match = line.match(/^pub const ([A-Za-z_]\w*) = (.+);$/))
+      @zig_source.split("\n").each do |line|
+        match = T.let(line.match(/^pub const ([A-Za-z_]\w*) = (.+);$/), T.nilable(MatchData))
+        next unless match
         name = T.must(match[1])
         rhs = T.must(match[2]).strip
         @aliases[name] = rhs
@@ -126,50 +138,74 @@ class CHeaderImporter
         c_name = T.cast(name, String)
         next unless @allowed_names.include?(c_name)
         clear_name = clear_type_name(c_name)
-        fields = T.cast(body, String).lines.filter_map do |line|
+        fields = T.let([], T::Array[String])
+        T.cast(body, String).split("\n").each do |line|
           match = line.match(/^\s*([A-Za-z_]\w*):\s*(.+?)(?:\s*=\s*.+)?,$/)
           next unless match
           field_type = map_type(T.must(match[2]), position: :field)
           next unless field_type
-          "#{T.must(match[1])}: #{field_type}"
+          fields << "#{T.must(match[1])}: #{field_type}"
         end
         next if fields.empty? && !T.cast(body, String).strip.empty?
         output << %(EXTERN STRUCT #{clear_name} { #{fields.join(', ')} } AS "#{c_name}" FROM "#{@library}" ABI C HEADER "#{@header}";)
       end
 
-      @aliases.each do |name, rhs|
-        next unless @allowed_names.include?(name)
-        next unless rhs.start_with?("struct_")
-        next unless @zig_source.match?(/^pub const #{Regexp.escape(rhs)} = opaque \{/)
-        output << %(EXTERN STRUCT #{clear_type_name(name)} {} AS "#{name}" FROM "#{@library}" ABI C HEADER "#{@header}";)
+      alias_names = @aliases.keys
+      alias_index = T.let(0, Integer)
+      while alias_index < alias_names.length
+        name = alias_names.fetch(alias_index)
+        rhs = @aliases.fetch(name)
+        if @allowed_names.include?(name) &&
+           rhs.start_with?("struct_") &&
+           @zig_source.match?(/^pub const #{Regexp.escape(rhs)} = opaque \{/)
+          output << %(EXTERN STRUCT #{clear_type_name(name)} {} AS "#{name}" FROM "#{@library}" ABI C HEADER "#{@header}";)
+        end
+        alias_index += 1
       end
       output.uniq
     end
 
     sig { returns(T::Array[String]) }
     def translate_functions
-      @zig_source.each_line.filter_map do |line|
+      output = T.let([], T::Array[String])
+      @zig_source.split("\n").each do |line|
         parsed = parse_function_line(line)
         next unless parsed
         name, raw_params, raw_return = parsed
         next unless @allowed_names.include?(name)
         return_type = map_type(raw_return, position: :return)
         next unless return_type
-        params = split_top_level(raw_params).filter_map.with_index do |raw, index|
-          next if raw.strip == "..."
-          param_match = raw.match(/^([A-Za-z_]\w*):\s*(.+)$/)
-          param_name = param_match ? T.must(param_match[1]) : "arg#{index}"
-          raw_type = param_match ? T.must(param_match[2]) : raw
-          mapped = map_param(param_name, raw_type)
-          mapped
+        raw_param_parts = split_top_level(raw_params)
+        params = T.let([], T::Array[Param])
+        valid_params = T.let(true, T::Boolean)
+        raw_param_parts.each_with_index do |raw, index|
+          if raw.strip == "..."
+            valid_params = false
+            break
+          else
+            param_match = raw.match(/^([A-Za-z_]\w*):\s*(.+)$/)
+            param_name = T.let("arg#{index}", String)
+            raw_type = T.let(raw, String)
+            if param_match
+              param_name = T.must(param_match[1])
+              raw_type = T.must(param_match[2])
+            end
+            param = map_param(param_name, raw_type)
+            unless param
+              valid_params = false
+              break
+            end
+            params << param
+          end
         end
-        next unless params.length == split_top_level(raw_params).length
+        next unless valid_params
         rendered_params = params.map do |param|
           prefix = param.mutable ? "MUTABLE " : ""
           "#{prefix}#{param.name}: #{param.type}"
         end
-        %(EXTERN FN #{name}(#{rendered_params.join(', ')}) RETURNS #{return_type} AS "#{name}" FROM "#{@library}" ABI C HEADER "#{@header}";)
+        output << %(EXTERN FN #{name}(#{rendered_params.join(', ')}) RETURNS #{return_type} AS "#{name}" FROM "#{@library}" ABI C HEADER "#{@header}";)
       end
+      output
     end
 
     sig { params(line: String).returns(T.nilable([String, String, String])) }
@@ -264,11 +300,16 @@ class CHeaderImporter
     def map_callback(raw)
       match = raw.match(/^\?\*const fn \((.*)\) callconv\(\.c\) (.+)$/)
       return nil unless match
-      params = split_top_level(T.must(match[1])).filter_map do |item|
+      raw_params = split_top_level(T.must(match[1]))
+      # `filter_map` lowered this as `?String[]`, so `join` could not resolve
+      # an overload even after its length check established success.
+      params = T.let([], T::Array[String])
+      raw_params.each do |item|
         type = item.sub(/^[A-Za-z_]\w*:\s*/, "")
-        map_type(type, position: :param)
+        mapped = map_type(type, position: :param)
+        params << mapped if mapped
       end
-      return nil unless params.length == split_top_level(T.must(match[1])).length
+      return nil unless params.length == raw_params.length
       result = map_type(T.must(match[2]), position: :return)
       result ? "FN(#{params.join(', ')}) -> #{result} CALLCONV C" : nil
     end
@@ -304,7 +345,23 @@ class CHeaderImporter
 
     sig { params(c_name: String).returns(String) }
     def clear_type_name(c_name)
-      @type_names[c_name] ||= c_name.sub(/^struct_/, "").split("_").reject(&:empty?).map(&:capitalize).join
+      existing = T.let(@type_names[c_name], T.nilable(String))
+      return existing if existing
+
+      words = T.let([], T::Array[String])
+      c_name.sub(/^struct_/, "").split("_").each do |part|
+        next if part.empty?
+
+        # CLEAR has `upcase`/`downcase`, but no Ruby `capitalize` intrinsic.
+        # Normalize both halves explicitly to retain Ruby's capitalization
+        # semantics for mixed-case C spelling.
+        first = T.must(part[0, 1]).upcase
+        rest = T.must(part[1..]).downcase
+        words << (first + rest)
+      end
+      clear_name = words.join
+      @type_names[c_name] = clear_name
+      clear_name
     end
 
     sig { params(text: String).returns(T::Array[String]) }

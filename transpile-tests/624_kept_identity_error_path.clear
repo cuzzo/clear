@@ -1,0 +1,27 @@
+STRUCT Budget { count: Int64 }
+STRUCT Holder { budget: Budget @multiowned }
+
+# Retained identity v4: a fallible callee that fails after receiving the
+# retained handle must release it exactly once. The testing allocator
+# proves no leak and no double release on either path.
+FN mayFail(budget: Budget, bad: Bool) RETURNS !Holder ->
+    IF bad THEN
+        RAISE GuardFail;
+    END
+    RETURN Holder{ budget: budget };
+END
+
+FN main() RETURNS !Void ->
+    MUTABLE shared = Budget{ count: 6 } @multiowned;
+
+    ok = TRY mayFail(shared, FALSE);
+    ASSERT ok.budget.count == 6, "success path keeps";
+
+    failed = mayFail(shared, TRUE) OR_ELSE Holder{ budget: shared };
+    ASSERT failed.budget.count == 6, "error path fell back";
+
+    shared.count = 9;
+    ASSERT ok.budget.count == 9, "keeper still shares";
+    ASSERT failed.budget.count == 9, "fallback shares";
+    RETURN;
+END

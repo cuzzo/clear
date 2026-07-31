@@ -289,7 +289,7 @@ RSpec.describe "explicit generic protocol conformances" do
 
     shape = program.statements.grep(AST::StructDef).find { |node| node.name == "Shapes" }
     projections = T.must(shape).field_decls.values.flat_map do |field|
-      TypeExpressionTree.each_node(field.type.shape.expression).grep(TypeProjectionExpression)
+      TypeExpressionTree.each_node(field.type.shape.expression).map(&:kind).grep(TypeProjectionExpression)
     end
     expect(projections.map(&:protocol).uniq).to eq([:Identity])
     fn = program.statements.grep(AST::FunctionDef).find { |node| node.name == "callback" }
@@ -305,14 +305,6 @@ RSpec.describe "explicit generic protocol conformances" do
         METHOD name(self) RETURNS String -> RETURN "holder"; END
       }
     CLEAR
-  end
-
-  it "leaves future TypeExpression implementations intact during semantic transforms" do
-    custom = Class.new do
-      include TypeExpression
-      def capabilities = TypeCapabilities.new(ownership: :affine)
-    end.new
-    expect(TypeExpressionTree.transform(custom) { |node| node }).to equal(custom)
   end
 
   it "enforces the orphan rule for imported protocol and type facts" do

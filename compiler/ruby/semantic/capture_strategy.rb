@@ -320,6 +320,7 @@ module CaptureStrategy
   # Pointer-passed types render as *T in the field (same as historical
   # behavior for @pool / @map captures).
   sig { params(type: Type).returns(String) }
+  # ruby-to-clear: fallible
   def self.field_zig_type(type)
     base = type.zig_type(is_field: true)
     return base if type.respond_to?(:atomic_ptr?) && type.atomic_ptr?

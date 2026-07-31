@@ -23,8 +23,8 @@ RSpec.describe "pipeline type preservation" do
     result_type = declaration.value.full_type
 
     expect(result_type.collection).to eq(:set)
-    expect(result_type.shape.expression).to be_a(LinearTypeExpression)
-    expect(result_type.shape.expression.kind).to eq(:set)
+    expect(result_type.shape.expression.kind).to be_a(LinearTypeExpression)
+    expect(result_type.shape.expression.kind.kind).to eq(:set)
     expect(result_type.element_type.sync).to eq(:symbol)
   end
 end

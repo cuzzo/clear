@@ -3,9 +3,8 @@ require "sorbet-runtime"
 
 require_relative "./ast"
 require_relative "./param"
-require_relative "./schemas"
-require_relative "./struct_field"
 require_relative "./type"
+require_relative "./struct_field"
 require_relative "./lexer"
 require_relative "./parser_rules"
 require_relative "./error_registry"
@@ -21,7 +20,10 @@ require_relative "./parsed_type_syntax"
 class ClearParser
   extend T::Sig
 
+  # Reopened parser classes in required files use these constants.
+  # ruby-to-clear: data-api
   OPEN_DELIMITERS = T.let('([{'.freeze, String)
+  # ruby-to-clear: data-api
   CLOSE_DELIMITERS = T.let(')]}'.freeze, String)
 
   class CapabilityParseResult < T::Struct
@@ -250,8 +252,32 @@ class ClearParser
 
   sig { returns(AST::Program) }
   def parse
-    @budget.check_source!(@source_code)
-    @budget.check_tokens!(@tokens.length)
+    parse_with_budget
+  rescue SystemStackError
+    raise ParserError.new(current, "Frontend nesting resource limit exceeded", @source_code)
+  end
+
+  sig { returns(AST::Program) }
+  def parse_with_budget
+    source_violation = @budget.source_violation(@source_code)
+    if source_violation
+      raise ParserError.new(current, "Frontend #{source_violation.kind} resource limit exceeded (limit #{source_violation.limit})", @source_code)
+    end
+    token_violation = @budget.tokens_violation(@tokens.length)
+    if token_violation
+      raise ParserError.new(current, "Frontend #{token_violation.kind} resource limit exceeded (limit #{token_violation.limit})", @source_code)
+    end
+    parse_program
+  rescue FrontendResourceBudget::Exceeded
+    raise ParserError.new(
+      current,
+      "Frontend nesting resource limit exceeded (limit #{@budget.nesting_limit})",
+      @source_code,
+    )
+  end
+
+  sig { returns(AST::Program) }
+  def parse_program
     stmts = []
     stmts << parse_statement() while current.type != :EOF
     program = AST::Program.new(current, stmts)
@@ -259,10 +285,6 @@ class ClearParser
     stamp_source_range!(program, first, current)
     program.language_mode = @gradual ? :easy : self.class.ownership_mode
     program
-  rescue FrontendResourceBudget::Exceeded => e
-    raise ParserError.new(current, "Frontend #{e.kind} resource limit exceeded (limit #{e.limit})", @source_code)
-  rescue SystemStackError
-    raise ParserError.new(current, "Frontend nesting resource limit exceeded", @source_code)
   end
 
   private
@@ -271,6 +293,7 @@ class ClearParser
     rule(:KEYWORD, 'REQUIRE', action: :parse_require),
     rule(:KEYWORD, 'EXTERN', action: :parse_extern_decl),
     rule(:KEYWORD, 'MUTABLE', action: :parse_mutable_var_decl),
+    rule(:KEYWORD, 'CONST', action: :parse_const_decl),
     rule(:KEYWORD, 'FN', action: :parse_function_def),
     rule(:KEYWORD, 'METHOD', action: :parse_method_function_def),
     rule(:KEYWORD, 'PUB', action: :parse_pub_visibility),
@@ -287,6 +310,7 @@ class ClearParser
     rule(:KEYWORD, 'TIGHT', action: :parse_tight_stmt),
     rule(:KEYWORD, 'RETURN', action: :parse_return),
     rule(:KEYWORD, 'ASSERT', action: :parse_assert),
+    rule(:KEYWORD, 'DEFER', action: :parse_defer),
     rule(:KEYWORD, 'ASSERT_RAISES', action: :parse_assert_raises),
     rule(:KEYWORD, 'TEST', action: :parse_test_block),
     rule(:KEYWORD, 'STUB', action: :parse_stub),
@@ -337,7 +361,8 @@ class ClearParser
     rule(:KEYWORD, 'MOVE', action: :parse_move_node),
     rule(:KEYWORD, 'GIVE', action: :parse_move_node),
     rule(:KEYWORD, 'COPY', action: :parse_copy_node),
-    rule(:KEYWORD, 'CLONE', action: :parse_clone_node),
+    rule(:KEYWORD, 'OWN', action: :parse_own_node),
+    rule(:KEYWORD, 'KEEP', action: :parse_keep_node),
     rule(:KEYWORD, 'SHARE', action: :parse_share_node),
     rule(:KEYWORD, 'LINK', action: :parse_link_node),
     rule(:KEYWORD, 'RESOLVE', action: :parse_resolve_node),

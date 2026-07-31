@@ -7,6 +7,26 @@ RSpec.describe ClearParser do
     ClearParser.new(Lexer.new(source).tokenize, source)
   end
 
+  describe "retired bang-mutation syntax" do
+    it "surfaces the migration diagnostic for a bang-suffixed function name" do
+      source = "FN tokenize!(source: String) RETURNS Int64 ->\n  RETURN source.length();\nEND\n"
+      expect { parser_for(source).parse }
+        .to raise_error(ParserError, /no longer marks mutation/)
+    end
+
+    it "surfaces the migration diagnostic for a bang-suffixed call" do
+      source = "FN main() RETURNS Void ->\n  drain!(1);\n  RETURN;\nEND\n"
+      expect { parser_for(source).parse }
+        .to raise_error(ParserError, /no longer marks mutation/)
+    end
+
+    it "keeps the generic expectation for unrelated bang placement" do
+      source = "FN main() RETURNS Void ->\n  x = 1 ! 2;\n  RETURN;\nEND\n"
+      expect { parser_for(source).parse }
+        .to raise_error(ParserError, /Expected/)
+    end
+  end
+
   describe "#parse_extern_effects" do
     it "parses absence, allocation qualifiers, safety, and comma composition directly" do
       cases = {

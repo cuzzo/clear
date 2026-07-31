@@ -67,9 +67,20 @@ module OwnershipIdentity
     def parent
       return nil unless child?
 
-      PlaceId.from_path(path.rpartition(".").first)
+      parts = path.split(".")
+      parts.pop
+      parent_path = T.let("", String)
+      index = T.let(0, Integer)
+      while index < parts.length
+        parent_path = "#{parent_path}." unless parent_path.empty?
+        parent_path = "#{parent_path}#{T.must(parts[index])}"
+        index += 1
+      end
+      PlaceId.from_path(parent_path)
     end
 
+    # CLEAR value structs already use structural field equality.
+    # ruby-to-clear: skip
     sig { params(other: T.any(Object, OwnershipIdentity::PlaceId)).returns(T::Boolean) }
     def eql?(other)
       !!(other.is_a?(PlaceId) &&
@@ -78,6 +89,8 @@ module OwnershipIdentity
         binding_id == other.binding_id)
     end
 
+    # CLEAR derives the matching structural hash for value structs.
+    # ruby-to-clear: skip
     sig { returns(Integer) }
     def hash
       [path, binding_name, binding_id].hash

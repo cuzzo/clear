@@ -55,7 +55,7 @@ RSpec.describe "ClearParser typed rule routes" do
       "MOVE value" => AST::MoveNode,
       "GIVE value" => AST::MoveNode,
       "COPY value" => AST::CopyNode,
-      "CLONE value" => AST::CloneNode,
+      "KEEP value" => AST::KeepNode,
       "SHARE value" => AST::ShareNode,
       "LINK value" => AST::LinkNode,
       "RESOLVE value" => AST::ResolveNode,

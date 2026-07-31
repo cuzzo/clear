@@ -10,7 +10,7 @@
 #
 # Constraints (per spec):
 #   - @local | @shared can cross boundaries; @multiowned | @boxed cannot.
-#   - CLONE requires @shared or @split.
+#   - KEEP requires @shared or @split.
 #   - LEND poisons the boundary with the borrow's lifetime. Until the
 #     parser accepts that surface syntax, those cells are expected hard
 #     compile errors rather than skipped matrix slots.
@@ -59,17 +59,17 @@ end
 # Phase B — @shared with each of 4 sync strategies.
 #
 # Findings (from running the matrix on the current tree):
-#   - CLONE on a sync-wrapped value errors with "CLONE is only supported on
+#   - KEEP on a sync-wrapped value errors with "KEEP is only supported on
 #     @split streams, @shared promises, and owned shared handles, got
-#     'Int64'/'Counter'". Atomic primitives are bare (no Arc), and CLONE
+#     'Int64'/'Counter'". Atomic primitives are bare (no Arc), and KEEP
 #     on a `@locked` struct doesn't traverse through the capability to
 #     find the inner Arc. Marked :compile_error for now; revisit when
-#     CLONE learns to look through sync wrappers.
+#     KEEP learns to look through sync wrappers.
 CONSUMERS.each do |c|
   PHASE_B_VALUE_FOR_SYNC.each do |sync, value|
     SHARED_MOVES.each do |m|
       cell = { consumer: c, ownership: :shared, sync: sync, move: m, value: value }
-      cell[:expected] = :compile_error if m == :clone                # CLONE constraint
+      cell[:expected] = :compile_error if m == :clone                # KEEP constraint
       STREAM_BOUNDARY_CELLS << cell
     end
   end
@@ -185,7 +185,7 @@ FuzzGenerator.register(:stream_into_boundary, cells: STREAM_BOUNDARY_CELLS) do |
       case p[:move]
       when :borrow then ["", "val"]
       when :copy   then ["#{bv} = COPY val;",  bv]
-      when :clone  then ["#{bv} = CLONE val;", bv]
+      when :clone  then ["#{bv} = KEEP val;", bv]
       when :give   then ["", "GIVE val"]
       when :lend   then ["", "LEND val"]
       end
@@ -217,7 +217,7 @@ FuzzGenerator.register(:stream_into_boundary, cells: STREAM_BOUNDARY_CELLS) do |
       case p[:move]
       when :borrow then ["", "val"]
       when :copy   then ["c = COPY val;", "c"]
-      when :clone  then ["c = CLONE val;", "c"]
+      when :clone  then ["c = KEEP val;", "c"]
       when :give   then ["", "GIVE val"]
       when :lend   then ["", "LEND val"]
       end

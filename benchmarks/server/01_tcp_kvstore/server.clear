@@ -49,11 +49,11 @@ FN handleClient(client: TCPClient, MUTABLE store: {String}String, MUTABLE counte
               pos += len;
               pos += 2;
               IF ai == 0 THEN
-                arg0 = val;
+                arg0 = COPY val;
               ELSE_IF ai == 1 THEN
-                arg1 = val;
+                arg1 = COPY val;
               ELSE_IF ai == 2 THEN
-                arg2 = val;
+                arg2 = COPY val;
               END
             END
             ai += 1;

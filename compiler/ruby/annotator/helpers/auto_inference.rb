@@ -249,8 +249,6 @@ class AutoConstraintCollector
       # leaf
     when Array, Set
       node.each { |c| walk(c, current_fn: current_fn) }
-    when Set
-      node.each { |c| walk(c, current_fn: current_fn) }
     when Hash
       node.each_value { |v| walk(v, current_fn: current_fn) }
     else

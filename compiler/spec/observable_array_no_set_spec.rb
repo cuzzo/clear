@@ -16,7 +16,7 @@ RSpec.describe "C4: ~T[]@observable without :set is rejected" do
   it "rejects ~Int64[]@observable without :set" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-          gen: ~?Int64[] = BG STREAM {
+          gen: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
           };
@@ -31,7 +31,7 @@ RSpec.describe "C4: ~T[]@observable without :set is rejected" do
   it "accepts ~Int64[]@set:observable (the canonical DISTINCT shape)" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-          gen: ~?Int64[] = BG STREAM {
+          gen: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
           };

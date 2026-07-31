@@ -25,6 +25,8 @@ require_relative "lexer"
 # Synthetic token used for fixable spans whose AST node carries a
 # line/column but not a lexer token for the exact identifier.
 AnchorToken = Struct.new(:line, :column) do
+  # ruby-to-clear: field-type line=Int64
+  # ruby-to-clear: field-type column=Int64
   extend T::Sig
   sig { returns(Symbol) }
   def type; :ANCHOR; end
@@ -35,6 +37,7 @@ end
 TypoToken = T.type_alias { T.any(Lexer::Token, AnchorToken) }
 
 # ruby-to-clear: pub
+# ruby-to-clear: value
 class Span
     extend T::Sig
 
@@ -65,6 +68,7 @@ class Span
 end
 
 # ruby-to-clear: pub
+# ruby-to-clear: value
 class Edit
     extend T::Sig
 
@@ -78,6 +82,7 @@ class Edit
 end
 
 # ruby-to-clear: pub
+# ruby-to-clear: value
 class Fix
   extend T::Sig
 
@@ -98,6 +103,7 @@ class Fix
 end
 
 # ruby-to-clear: pub
+# ruby-to-clear: value
 class FixableFinding
     extend T::Sig
 
@@ -141,18 +147,27 @@ end
 module FixCollector
     extend T::Sig
 
-  @findings = T.let([], T::Array[FixableFinding])
+  # Initialize the owned buffer on first use. Keeping an allocated Array in a
+  # module binding gives native self-host builds no lifetime in which to free
+  # it; the nil sentinel is a comptime-safe module value.
+  @findings = T.let(nil, T.nilable(T::Array[FixableFinding]))
+  @fatal_count = T.let(0, Integer)
   @enabled = T.let(false, T::Boolean)
   @type_migrations_enabled = T.let(false, T::Boolean)
   @fallibility_propagation_enabled = T.let(false, T::Boolean)
 
   sig { returns(T::Array[FixableFinding]) }
   def self.enable!
-    @findings.clear
+    FixCollector.ensure_findings!
+    buffer = T.let(@findings, T.nilable(T::Array[FixableFinding]))
+    raise "BUG: fix collector storage was not initialized" if buffer.nil?
+    buffer.clear
+    @findings = buffer
+    @fatal_count = 0
     @enabled = true
     @type_migrations_enabled = false
     @fallibility_propagation_enabled = false
-    @findings
+    FixCollector.findings
   end
 
   sig { void }
@@ -177,7 +192,12 @@ module FixCollector
 
   sig { void }
   def self.disable!
-    @findings.clear
+    FixCollector.ensure_findings!
+    buffer = T.let(@findings, T.nilable(T::Array[FixableFinding]))
+    raise "BUG: fix collector storage was not initialized" if buffer.nil?
+    buffer.clear
+    @findings = buffer
+    @fatal_count = 0
     @enabled = false
     @type_migrations_enabled = false
     @fallibility_propagation_enabled = false
@@ -188,26 +208,59 @@ module FixCollector
     @enabled
   end
 
-  sig { params(finding: FixableFinding).returns(T::Array[FixableFinding]) }
-  def self.push(finding)
-    @findings << finding if @enabled
-    @findings
+  sig { params(finding: FixableFinding, fatal: T::Boolean).returns(T::Array[FixableFinding]) }
+  def self.push(finding, fatal = false)
+    FixCollector.ensure_findings!
+    buffer = T.let(@findings, T.nilable(T::Array[FixableFinding]))
+    raise "BUG: fix collector storage was not initialized" if buffer.nil?
+    if @enabled
+      buffer << finding
+      @fatal_count += 1 if fatal
+    end
+    @findings = buffer
+    FixCollector.findings
   end
 
   sig { returns(T::Array[FixableFinding]) }
   def self.drain
-    out = @findings.dup
-    @findings.clear if @enabled
+    FixCollector.ensure_findings!
+    buffer = T.let(@findings, T.nilable(T::Array[FixableFinding]))
+    raise "BUG: fix collector storage was not initialized" if buffer.nil?
+    out = buffer.dup
+    buffer.clear if @enabled
+    @findings = buffer
     out
   end
 
   sig { returns(T::Boolean) }
   def self.has_fatal?
-    @enabled && @findings.any?(&:fatal?)
+    FixCollector.ensure_findings!
+    buffer = T.let(@findings, T.nilable(T::Array[FixableFinding]))
+    raise "BUG: fix collector storage was not initialized" if buffer.nil?
+    @enabled && @fatal_count.positive?
   end
 
   sig { returns(Integer) }
   def self.fatal_count
-    @enabled ? @findings.count(&:fatal?) : 0
+    FixCollector.ensure_findings!
+    buffer = T.let(@findings, T.nilable(T::Array[FixableFinding]))
+    raise "BUG: fix collector storage was not initialized" if buffer.nil?
+    @enabled ? @fatal_count : 0
+  end
+
+  sig { void }
+  def self.ensure_findings!
+    return unless @findings.nil?
+
+    @findings = []
+  end
+
+  sig { returns(T::Array[FixableFinding]) }
+  def self.findings
+    FixCollector.ensure_findings!
+    buffer = T.let(@findings, T.nilable(T::Array[FixableFinding]))
+    raise "BUG: fix collector storage was not initialized" if buffer.nil?
+    out = buffer.dup
+    out
   end
 end

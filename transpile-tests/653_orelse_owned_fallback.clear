@@ -1,0 +1,29 @@
+# F1 nasty: OR_ELSE fallback is an owned heap string (allocator identity, INV-9),
+# then result is GIVEn onward.
+FN dup(s: String) RETURNS String ->
+    RETURN COPY s;
+END
+
+FN mk(fail: Bool) RETURNS !String ->
+    s = dup("x") $+ "y";
+    IF fail THEN
+        RAISE "boom";
+    END
+    RETURN s;
+END
+
+FN sink(TAKES s: String) RETURNS Int64 ->
+    RETURN s.length();
+END
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST F1bOwnedFallback DO
+    fb = dup("f") $+ "b";
+    v = mk(TRUE) OR_ELSE fb;
+    ASSERT v == "fb";
+    n = sink(GIVE v);
+    ASSERT n == 2;
+    w = mk(FALSE) OR_ELSE (dup("q") $+ "r");
+    ASSERT w == "xy";
+END

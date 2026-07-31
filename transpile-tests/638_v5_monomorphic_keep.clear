@@ -1,0 +1,27 @@
+# Retained-identity v5 (C-3c): KEEP inside a MONOMORPHIC variant resolves per
+# concrete carrier at Zig comptime -- retain another Rc/Arc handle, or copy a
+# plain value. The non-final fan-out (cache) uses KEEP; the final use (queue)
+# moves. For @multiowned/@shared the KEEP is a refcount retain (two consumers,
+# one identity), balanced against the move; for plain it is a value copy. The
+# testing allocator proves every carrier variant is leak-free and double-free
+# free.
+STRUCT User { id: Int64 }
+
+FN cache(TAKES u: MONOMORPHIC User) RETURNS Int64 -> RETURN u.id; END
+FN queue(TAKES u: MONOMORPHIC User) RETURNS Int64 -> RETURN u.id; END
+
+FN distribute(TAKES u: MONOMORPHIC User) RETURNS Int64 ->
+    a = cache(KEEP u);
+    b = queue(u);
+    RETURN a + b;
+END
+
+FN main() RETURNS Void ->
+    p = User{ id: 1 };
+    ASSERT distribute(p) == 2, "plain: KEEP copies, move consumes";
+    m = User{ id: 2 } @multiowned;
+    ASSERT distribute(m) == 4, "@multiowned: KEEP retains, move consumes";
+    s = User{ id: 3 } @shared;
+    ASSERT distribute(s) == 6, "@shared: KEEP atomic-retains, move consumes";
+    RETURN;
+END

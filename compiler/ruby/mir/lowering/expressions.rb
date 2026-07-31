@@ -117,6 +117,8 @@ module MIRLoweringExpressions
       case path
       when :ctrl_data
         MIR::FieldGet.new(MIR::FieldGet.new(root, "ctrl"), "data")
+      when :comptime_ctrl_data
+        MIR::ComptimeCarrierPayload.new(root)
       when :data
         MIR::FieldGet.new(root, "data")
       else
@@ -187,16 +189,6 @@ module MIRLoweringExpressions
 
   OPTIONAL_COMPARISON_OPS = T.let([:EQ, :NEQ, :LT, :LTE, :GT, :GTE].freeze, T::Array[Symbol])
 
-  BINARY_PLAN_EMITTERS = T.let({
-    pow: :emit_power_binary_plan,
-    builtin: :emit_builtin_binary_plan,
-    optional_comparison: :emit_optional_comparison_plan,
-    symbol_comparison: :emit_symbol_binary_plan,
-    string_comparison: :emit_string_binary_comparison,
-    unit_variant_comparison: :emit_unit_variant_comparison,
-    union_equality_error: :raise_union_equality_error,
-    standard: :emit_standard_binary_plan,
-  }.freeze, T::Hash[Symbol, Symbol])
 
   sig { params(node: AST::Literal).returns(MIR::Node) }
   def lower_literal(node)
@@ -213,6 +205,7 @@ module MIRLoweringExpressions
         when 0x0D then '\\r'
         when 0x09 then '\\t'
         when 0x00 then '\\x00'
+        when 0x01..0x1F, 0x7F then "\\x#{'%02x' % b}"
         when 0x80..0xFF then "\\x#{'%02x' % b}"
         else b.chr
         end
@@ -276,9 +269,14 @@ module MIRLoweringExpressions
     end
 
     # Use disambiguated Zig name if the declaration was renamed to avoid
-    # same-name collision in the MIR checker (see lower_var_decl).
+    # same-name collision in the MIR checker (see lower_var_decl). The
+    # name-keyed rename_map is the fallback when the use's symbol identity
+    # does not match the lowered decl node (a TEST THAT body mirroring a
+    # main-level binding): lowering order matches lexical order, so the
+    # latest same-name rename is the one in scope.
     decl_node = node.symbol&.reg
     zig_name = (decl_node && function_state.decl_zig_names[decl_node.object_id]) ||
+               function_state.rename_map[zig_safe_name(node.name)] ||
                zig_safe_name(node.name)
     ident = MIR::Ident.new(zig_name)
 
@@ -300,6 +298,17 @@ module MIRLoweringExpressions
     # Loop-carry string: identifier was marked for heap dupe at the use site
     # (frame string being assigned to a heap-carry outer variable).
     return MIR::DupeSlice.new(ident, :heap) if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
+
+    # Flow-refined optional: annotation narrowed this reference to the payload
+    # (e.g. the right side of `x != NIL AND ...`), but the binding's slot is
+    # still the optional. Emission must read the payload, or Zig sees the
+    # optional where the checker promised the payload.
+    binding_type = symbol&.type
+    if binding_type.is_a?(Type) && binding_type.optional?
+      stamped = node.full_type!(context: "identifier lowering")
+      return MIR::OptionalUnwrap.new(ident) unless stamped.optional?
+    end
+
     ident
   end
 
@@ -322,6 +331,12 @@ module MIRLoweringExpressions
   sig { params(ft: Type, field_node: AST::Node, field_alloc: T.nilable(Symbol), field_sink_alloc: Symbol).returns(T::Boolean) }
   def recursive_field_copy_required?(ft, field_node, field_alloc, field_sink_alloc)
     T.bind(self, MIRLowering) rescue nil
+    # A NIL literal owns nothing: promoting it to any allocator is a plain
+    # `null`, never a deep copy. Without this guard an optional heap-shaped
+    # field set to NIL emits a `try dupeValue(null)`, making the whole
+    # constructor fallible - and a heap-CAPABLE struct with all such fields NIL
+    # then cannot be a comptime CONST (Zig/Rust build that as a plain literal).
+    return false if field_node.is_a?(AST::Literal) && field_node.type == :NIL
     !!(ft.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) &&
       !ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc)
   end
@@ -611,10 +626,18 @@ module MIRLoweringExpressions
   sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
   def emit_binary_operation_plan(plan)
     T.bind(self, MIRLowering) rescue nil
-    emitter = BINARY_PLAN_EMITTERS[plan.kind]
-    raise "MIRLowering: unknown binary operation plan #{plan.kind}" unless emitter
-
-    T.cast(public_send(emitter, plan), MIR::Node)
+    case plan.kind
+    when :pow then emit_power_binary_plan(plan)
+    when :builtin then emit_builtin_binary_plan(plan)
+    when :optional_comparison then emit_optional_comparison_plan(plan)
+    when :symbol_comparison then emit_symbol_binary_plan(plan)
+    when :string_comparison then emit_string_binary_comparison(plan)
+    when :unit_variant_comparison then emit_unit_variant_comparison(plan)
+    when :union_equality_error then raise_union_equality_error(plan)
+    when :standard then emit_standard_binary_plan(plan)
+    else
+      raise "MIRLowering: unknown binary operation plan #{plan.kind}"
+    end
   end
 
   sig { params(plan: BinaryOperationPlan).returns(MIR::Call) }
@@ -834,15 +857,38 @@ module MIRLoweringExpressions
     source_type = node.left.is_a?(AST::RangeLit) ? :range : nil
     mir_result = pipeline_host.lower_pipeline(node)
     result_type = Type.from_node!(node, context: "pipeline result ownership")
-    sink_alloc = if result_type.observable?
-      :heap
-    elsif ownership_tracked_transfer_type?(result_type)
-      function_state.current_decl_alloc || placement_for_node(node)
-    end
+    # A pipeline whose terminal op yields a borrowed view (SKIP -> `items[n..]`)
+    # owns no fresh allocation, so it has no owned-transfer sink allocator.
+    # Tagging it :heap/:frame would emit a `defer cleanup` that frees the
+    # source's elements (a double free).
+    sink_alloc = complex_pipeline_sink_alloc(mir_result, result_type, node)
     return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, sink_alloc) if mir_result
 
     Kernel.raise "lower_smooth: unsupported pipeline op #{rhs.class}; legacy pipeline fallback has been removed"
   end
+
+  sig do
+    params(
+      mir_result: PipelineLoweringResult,
+      result_type: Type,
+      node: AST::BinaryOp,
+    ).returns(T.nilable(Symbol))
+  end
+  def complex_pipeline_sink_alloc(mir_result, result_type, node)
+    T.bind(self, MIRLowering) rescue nil
+    return if MIR::OwnershipEffect.borrowed_view_result?(mir_result)
+    return :heap if result_type.observable?
+    return unless ownership_tracked_transfer_type?(result_type)
+
+    # The pipeline domain owns the result-placement read (annotator storage
+    # stamp — heap for promise lists and rewind-forcing elements). When it
+    # says heap, the lowered block allocated its result there; otherwise the
+    # destination context decides.
+    return :heap if pipeline_host.pipeline_result_heap?(node)
+
+    function_state.current_decl_alloc || placement_for_node(node)
+  end
+  private :complex_pipeline_sink_alloc
 
   sig { params(node: AST::BinaryOp, rhs: AST::CollectOp).returns(MIR::Node) }
   def lower_collect_smooth(node, rhs)
@@ -1499,7 +1545,9 @@ module MIRLoweringExpressions
   private :tense_map_cleanup_entry
   sig { params(id: Integer, segment: String, count: Integer).returns(T::Array[String]) }
   def tense_map_bindings(id, segment, count)
-    Array.new(count) { |index| "__tense_#{segment}#{id}_#{index}" }
+    bindings = T.let([], T::Array[String])
+    count.times { |index| bindings << "__tense_#{segment}#{id}_#{index}" }
+    bindings
   end
 
   sig do
@@ -1564,6 +1612,15 @@ module MIRLoweringExpressions
     # selecting the representation access path.
     target_sync ||= target_node.full_type!(context: "field target capability").sync
     path = field_access_path(ti, target_sync, is_rc_unwrapped, is_locked_unwrapped)
+    # A MONOMORPHIC parameter is emitted anytype: its carrier is only known per
+    # Zig monomorphization, so project the payload out at comptime -- deref the
+    # Rc/Arc handle, or pass the plain value through -- so `u.field` resolves for
+    # every carrier at zero cost. (Unconstrained carrier-polymorphic params can
+    # never be a handle post-gate; they need no projection.)
+    if path == :direct && target_node.is_a?(AST::Identifier) &&
+        target_node.symbol&.carrier_contract == :monomorphic && !is_rc_unwrapped
+      path = :comptime_ctrl_data
+    end
 
     target_type_sym = ti.resolved.to_s.to_sym
     union_schema = union_schemas.dig(target_type_sym)
@@ -1607,16 +1664,17 @@ module MIRLoweringExpressions
     error_name = T.let(nil, T.nilable(String))
     name_id = T.let(nil, T.nilable(Integer))
     clear_type = T.let(false, T::Boolean)
+    explicit_error_name = ex.error_name
 
     if ex.kind
       kind = ex.kind.to_s
-      if (explicit_error_name = ex.error_name)
+      if explicit_error_name
         error_name = explicit_error_name
         name_id = AST.id_of_type(explicit_error_name.to_sym)
       else
         clear_type = true
       end
-    elsif (explicit_error_name = ex.error_name) && AST.error_type?(explicit_error_name.to_sym)
+    elsif explicit_error_name && AST.error_type?(explicit_error_name.to_sym)
       kind = AST.kind_of_type(explicit_error_name.to_sym).to_s
       error_name = explicit_error_name
       name_id = AST.id_of_type(explicit_error_name.to_sym)
@@ -1955,24 +2013,24 @@ module MIRLoweringExpressions
       end
       return projected if projected
 
-      return Type.new(TypeProjectionExpression.new(
+      return Type.new(TypeExpression.of(TypeProjectionExpression.new(
         owner: concrete.resolved,
         member: T.must(t.projection_member),
         protocol: t.projection_protocol,
-      ))
+      )))
     end
 
     if t.map?
-      expression = T.cast(t.shape.expression, MapTypeExpression)
+      wrapper = t.shape.expression
+      expression = T.cast(wrapper.kind, MapTypeExpression)
       new_key = T.cast(substitute_mir_type(t.key_type, subst), Type::TypeInput)
       new_value = T.cast(substitute_mir_type(t.value_type, subst), Type::TypeInput)
-      return Type.new(MapTypeExpression.new(
+      return Type.new(TypeExpression.new(kind: MapTypeExpression.new(
         key: Type.new(new_key).shape.expression,
         value: Type.new(new_value).shape.expression,
         key_implicit: expression.key_implicit,
         legacy_separator: expression.legacy_separator,
-        capabilities: expression.capabilities,
-      ))
+      ), capabilities: wrapper.capabilities))
     end
 
     if t.generic_instance?
@@ -2081,37 +2139,49 @@ module MIRLoweringExpressions
       ft = field_types[k.to_s]
       field_type_input = T.let(ft.is_a?(Schemas::InlineStructVariant) ? nil : ft, T.nilable(Type::TypeInput))
       borrowed_field = T.let(node.borrowed_field_names&.include?(k.to_s) == true, T::Boolean)
-      field_node = borrowed_field && v.is_a?(AST::CopyNode) ? v.value : v
+      field_node = struct_literal_field_node(borrowed_field, v)
       field_sink_alloc = aggregate_field_sink_alloc(field_type_input, field_node, struct_alloc)
       move_mark_field!(field_node)
       expected_ft = field_type_input ? (field_type_input.is_a?(Type) ? field_type_input : Type.new(field_type_input)) : nil
-      val = with_decl_alloc(field_sink_alloc) do
-        with_expected_type(expected_ft) do
-          with_sink_type(expected_ft) do
-            if borrowed_field
-          aggregate_dynamic_slice_field_value(lower(field_node), expected_ft, true, field_sink_alloc, field_node)
-        elsif rc_retain_needed?(field_node)
-          hoist_alloc(make_rc_retain(T.cast(field_node, AST::Identifier)), field_node, err_cleanup: true)
-        elsif field_node.is_a?(AST::CopyNode) && expected_ft&.collection? && !expected_ft.any_rc?
-          hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), expected_ft.zig_type, nil, :full_value, field_sink_alloc),
-            field_node, err_cleanup: true)
-        else
-          field_value = materialize_owned_sink_value(lower(field_node), field_node, field_sink_alloc, field_type_input)
-          if struct_field_wants_slice?(expected_ft, k, node)
-            field_value = aggregate_dynamic_slice_field_value(field_value, expected_ft, borrowed_field, field_sink_alloc, field_node)
-          end
-          field_alloc = mir_owned_alloc(field_value)
-          lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
-          if expected_ft && recursive_field_copy_required?(expected_ft, field_node, field_alloc, field_sink_alloc)
-            hoist_alloc(MIR::DeepCopy.new(lowered, expected_ft.zig_type, nil, :full_value, field_sink_alloc),
-              field_node, err_cleanup: true)
-          else
-            lowered
-          end
+      val, field_hoists = lower_head do
+        with_decl_alloc(field_sink_alloc) do
+          with_expected_type(expected_ft) do
+            with_sink_type(expected_ft) do
+              if borrowed_field
+                aggregate_dynamic_slice_field_value(lower(field_node), expected_ft, true, field_sink_alloc, field_node)
+              elsif rc_retain_needed?(field_node)
+                hoist_alloc(make_rc_retain(T.cast(field_node, AST::Identifier)), field_node, err_cleanup: true)
+              else
+                kept_orelse = kept_identity_orelse_field_value(field_node, expected_ft, field_sink_alloc)
+                if kept_orelse
+                  mir_allocates?(kept_orelse) ? hoist_alloc(kept_orelse, field_node, err_cleanup: true) : kept_orelse
+                elsif field_node.is_a?(AST::CopyNode) && expected_ft&.collection? && !expected_ft.any_rc?
+                  hoist_alloc(MIR::DeepCopy.new(lower(field_node.value), expected_ft.zig_type, nil, :full_value, field_sink_alloc),
+                    field_node, err_cleanup: true)
+                else
+                  field_value = materialize_owned_sink_value(lower(field_node), field_node, field_sink_alloc, field_type_input)
+                  if struct_field_wants_slice?(expected_ft, k, node)
+                    field_value = aggregate_dynamic_slice_field_value(field_value, expected_ft, borrowed_field, field_sink_alloc, field_node)
+                  end
+                  field_alloc = mir_owned_alloc(field_value)
+                  lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
+                  if expected_ft && recursive_field_copy_required?(expected_ft, field_node, field_alloc, field_sink_alloc)
+                    hoist_alloc(MIR::DeepCopy.new(lowered, expected_ft.zig_type, nil, :full_value, field_sink_alloc),
+                      field_node, err_cleanup: true)
+                  else
+                    lowered
+                  end
+                end
+              end
             end
           end
         end
       end
+      # Keep each field's materializations in the struct literal's enclosing
+      # lexical scope. Lowering a later lazy field (for example REDUCE or
+      # OR_ELSE) must not capture earlier fields' pending allocations into its
+      # nested block.
+      function_state.pending_stmts.concat(field_hoists)
       # @boxed field: hoist HeapCreate to a named temp so it is a Let-init,
       # not an anonymous sub-expression (INV-H).
       if v.needs_heap_create
@@ -2154,10 +2224,7 @@ module MIRLoweringExpressions
       next [] unless field_ast
       raw_field_type = field_types[field[:name].to_s]
       next [] if raw_field_type.is_a?(Schemas::InlineStructVariant)
-      actual_type = if field_ast.is_a?(AST::Identifier)
-        function_state.binding_types[field_ast.name.to_s] ||
-          (field_ast.symbol&.type if field_ast.symbol&.type.is_a?(Type))
-      end
+      actual_type = struct_literal_field_actual_type(field_ast)
       actual_type ||= Type.from_node!(field_ast, context: "struct field payload ownership")
       if node.borrowed_field_names&.include?(field[:name].to_s)
         next [MIR::OwnershipOperandFact.non_owning(actual_type, "MIR::StructInit borrowed field")]
@@ -2189,6 +2256,29 @@ module MIRLoweringExpressions
 
     wrap_indirect_field_hoists(hoisted, result)
   end
+
+  sig { params(borrowed_field: T::Boolean, value: AST::Node).returns(AST::Node) }
+  def struct_literal_field_node(borrowed_field, value)
+    return value.value if borrowed_field && value.is_a?(AST::CopyNode)
+
+    value
+  end
+  private :struct_literal_field_node
+
+  sig { params(field: AST::Node).returns(T.nilable(Type)) }
+  def struct_literal_field_actual_type(field)
+    T.bind(self, MIRLowering) rescue nil
+    return unless field.is_a?(AST::Identifier)
+
+    binding_type = function_state.binding_types[field.name.to_s]
+    return binding_type if binding_type
+
+    symbol = field.symbol
+    return unless symbol && symbol.type.is_a?(Type)
+
+    symbol.type
+  end
+  private :struct_literal_field_actual_type
 
   sig { params(node: AST::StructLit).returns(T::Hash[String, AST::Node]) }
   def struct_lit_fields_with_callsite_defaults(node)
@@ -2290,10 +2380,7 @@ module MIRLoweringExpressions
       # Result<Float64, Bool>.Ok payload must not manufacture a transfer for a
       # primitive parameter merely because unconcretized T is conservatively
       # droppable; a String instantiation still correctly transfers.
-      symbol_type = if field_ast.is_a?(AST::Identifier)
-        function_state.binding_types[field_ast.name.to_s] ||
-          (field_ast.symbol&.type if field_ast.symbol&.type.is_a?(Type))
-      end
+      symbol_type = struct_literal_field_actual_type(field_ast)
       field_type = symbol_type || Type.from_node!(field_ast, context: "union variant payload ownership")
       ownership_operands_for_sink_value(
         field[:value],
@@ -2402,7 +2489,7 @@ module MIRLoweringExpressions
     MIR::ConcatStr.new(parts, alloc, runtime_binding_name)
   end
 
-  sig { params(node: AST::BlockExpr).returns(MIR::BlockExpr) }
+  sig { params(node: AST::BlockExpr).returns(T.any(MIR::BlockExpr, MIR::ScopeBlock)) }
   def lower_block_expr(node)
     T.bind(self, MIRLowering) rescue nil
     label = "__blk_#{lowering_counters.next_block_expr_id}"
@@ -2417,6 +2504,11 @@ module MIRLoweringExpressions
       end
     end
     body = lower_body(node.body)
+    # A Void block (the rewriter's fused EACH wrapper: init statements + the
+    # loop, no value) has NO result — it is a statement sequence, not a value
+    # block. Lowering a nil result crashed even the error path (nil.token).
+    return MIR::ScopeBlock.new(body) if node.result.nil?
+
     result = lower(node.result)
     if transfer_name
       cleanup = body.find do |stmt|
@@ -2653,6 +2745,29 @@ module MIRLoweringExpressions
     # mir-lowering strict ivars
     function_state.current_sink_type = T.let(function_state.current_sink_type, T.nilable(Type))
     function_state.current_expected_type = T.let(function_state.current_expected_type, T.nilable(Type))
+    # OWN COPY of a MONOMORPHIC (carrier-polymorphic) parameter: project the
+    # payload out at comptime (deref an Rc/Arc handle, or pass the plain value)
+    # and deep-copy THAT into a fresh independent plain owner. dupeValue on the
+    # projected plain payload deep-copies (it would retain if handed the handle),
+    # so this detaches for every carrier.
+    if node.own && node.value.is_a?(AST::Identifier) && node.value.symbol&.carrier_contract == :monomorphic
+      payload_ti = Type.from_node!(node.value, context: "OWN COPY monomorphic payload")
+      projected = MIR::ComptimeCarrierPayload.new(lower(node.value))
+      return MIR::DeepCopy.new(projected, payload_ti.resolved.to_s, nil, :full_value, :heap)
+    end
+    # OWN COPY of a concrete @shared/@multiowned handle detaches the same
+    # way: project the payload out of the handle (comptime deref) and
+    # deep-copy it into an independent plain owner. Without this, the
+    # source's :retain lifecycle would clone the HANDLE and the bound
+    # result could never fill a plain slot.
+    if node.own
+      own_src_ti = Type.from_node!(node.value, context: "OWN COPY handle payload")
+      if own_src_ti.any_rc?
+        payload_ti = own_src_ti.bare_data_type
+        projected = MIR::ComptimeCarrierPayload.new(lower(node.value))
+        return MIR::DeepCopy.new(projected, payload_ti.zig_type, nil, :full_value, :heap)
+      end
+    end
     source = lower(node.value)
     # COPY of a freshly constructed rvalue has no independently observable
     # source owner. Transfer the constructor result directly; cloning it would
@@ -2675,6 +2790,15 @@ module MIRLoweringExpressions
     # bit-copy after it has lowered to an ArrayList aliases its allocation and
     # emits two cleanups for the same buffer.
     ti = node.coerced_type_info ? Type.new(T.must(node.coerced_type_info)) : source_ti
+    # Retain-vs-copy is a SOURCE-model decision: coercion into an
+    # @multiowned destination must not turn a plain payload into a handle
+    # retain - that edge deep-copies the payload and wraps it instead.
+    if ti.any_rc? && !source_ti.any_rc?
+      ti = source_ti
+      # Drop the stale handle coercion too: the payload copy must not be
+      # cast to the handle type it is about to be wrapped into.
+      node.coerced_type = nil if node.respond_to?(:coerced_type=)
+    end
     lifecycle = lifecycle_registry.fetch(ti)
     sink_type = function_state.current_sink_type || function_state.current_expected_type
     dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
@@ -2734,6 +2858,12 @@ module MIRLoweringExpressions
         # Borrowing is represented as an implementation pointer, not as part
         # of the copied value's logical type. COPY owns the pointee.
         bare_zig_type(dst_ti)
+      elsif dst_ti.any_rc? && !ti.any_rc?
+        # The destination capability is created by the enclosing declaration's
+        # CapWrap. COPY must duplicate the plain payload that will be placed in
+        # that control block; asking dupeValue to produce Rc(T)/Arc(T) here
+        # structurally copies a handle and then wraps it a second time.
+        transpile_type(ti)
       else
         # COPY preserves the logical value representation. A pointer emitted
         # for an ordinary borrowed aggregate is handled by emit_deep_copy's
@@ -2774,7 +2904,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::Node).returns(T::Boolean) }
   def fresh_copy_constructor?(node)
     value = T.let(node, AST::Node)
-    value = value.value while value.is_a?(AST::CopyNode) || value.is_a?(AST::CloneNode)
+    value = value.value while value.is_a?(AST::CopyNode) || value.is_a?(AST::KeepNode)
     value.is_a?(AST::TupleLit) || value.is_a?(AST::ListLit) ||
       value.is_a?(AST::HashLit) || value.is_a?(AST::StructLit) ||
       value.is_a?(AST::UnionVariantLit)
@@ -2789,13 +2919,37 @@ module MIRLoweringExpressions
     source_type.non_string_array? && dest_type.collection? ? source_type.zig_type : dest_type.zig_type
   end
 
-  sig { params(node: AST::CloneNode).returns(MIR::Node) }
+  sig { params(node: AST::KeepNode).returns(MIR::Node) }
   def lower_clone(node)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(node.value, context: "CLONE value")
+    # Retained-identity v5: MIR consumes the planner-stamped carrier_op rather
+    # than re-deriving. A carrier-polymorphic parameter source (carrier not
+    # statically known) needs compile-time carrier specialization (Phase 4b,
+    # see docs/agents/retained-identity-v5-tracker.md) -- fail closed with a
+    # clear boundary until that lands, never emit an unsound retain of a
+    # plain payload.
+    if node.carrier_op == :monomorphic_keep
+      # KEEP on a MONOMORPHIC param: dupeValue resolves the carrier at comptime --
+      # retain a handle, deep-copy a plain struct payload, or @compileError on a
+      # linear plain type. The heap arm allocates through the frame's heap alloc.
+      return MIR::MonomorphicKeep.new(lower(node.value), ti.resolved.to_s, :heap)
+    end
+    if node.carrier_op == :deferred_specialization
+      raise "KEEP on a carrier-polymorphic parameter requires carrier " \
+            "specialization (Phase 4b, not yet implemented): #{node.value.resolved_type}"
+    end
     lifecycle = lifecycle_registry.fetch(ti)
+    # KEEP preserves an additional usable value.  Direct values have no
+    # retain lifecycle, but they are freely duplicable and therefore satisfy
+    # that contract with the same pass-through copy used by COPY.  Rejecting
+    # them as if every KEEP were an Rc/Arc retain made compiler-generated
+    # boolean predicates fail during lowering.
+    if lifecycle.copy_strategy == :bit_copy
+      return MIR::DeepCopy.new(lower(node.value), nil, nil, :passthrough, nil)
+    end
     unless lifecycle.copy_strategy == :retain
-      raise "annotation admitted CLONE without retain lifecycle for #{lifecycle.type_key}"
+      raise "annotation admitted KEEP without retain lifecycle for #{lifecycle.type_key}"
     end
     if ti.optional? && ti.wrapped_type&.any_rc?
       wrapped = T.must(ti.wrapped_type)
@@ -2818,6 +2972,77 @@ module MIRLoweringExpressions
     end
     zig_base = ti.split_open_stream? ? ti.zig_type : rc_payload_zig_type(ti)
     MIR::RcRetain.new(lower(node.value), zig_base, func)
+  end
+
+  # Zero-config keep edge (retained identity v4): `param OR_ELSE default`
+  # into an @multiowned field moves the provided handle, or wraps the fresh
+  # default payload as a new Rc when the caller omitted the arg. The param's
+  # guarded cleanup is suppressed by the same transfer marks a plain
+  # identifier store uses; on the omitted branch the slot is null and the
+  # skipped cleanup is a no-op.
+  sig { params(field_node: AST::Node, expected_ft: T.nilable(Type), alloc: Symbol).returns(T.nilable(MIR::Node)) }
+  def kept_identity_orelse_field_value(field_node, expected_ft, alloc)
+    T.bind(self, MIRLowering) rescue nil
+    return nil unless expected_ft&.multiowned?
+    return nil unless field_node.is_a?(AST::BinaryOp) && field_node.op == :OR_ELSE
+    lhs = field_node.left
+    return nil unless lhs.is_a?(AST::Identifier)
+    entry = function_state.bindings[lhs.name.to_s]
+    return nil unless entry && entry.present? && entry[:source_kind] == :kept_param
+
+    bare = expected_ft.bare_data_type
+    # The fresh default must stay inside the orelse: a hoisted rcCreate
+    # would run (and leak) when the caller provided a handle. A default
+    # that already RETURNS an owned handle (an @multiowned factory) is
+    # used as-is; only payload defaults wrap.
+    default_ti = begin
+      Type.from_node!(field_node.right, context: "kept orelse default")
+    rescue StandardError
+      nil
+    end
+    default_rc = default_ti&.any_rc? == true
+    # Imported factory calls may erase the capability from the node stamp;
+    # the matched signature's return type is authoritative.
+    if !default_rc && field_node.right.respond_to?(:matched_signature)
+      sig = FunctionSignature.unwrap(T.unsafe(field_node.right).matched_signature)
+      rt = sig&.return_type
+      default_rc = rt ? (Type.new(rt).any_rc? rescue false) : false
+    end
+    wrapped = lower_scoped do
+      if default_rc
+        hoist_alloc(
+          with_expected_type(expected_ft) { lower(field_node.right) },
+          field_node.right,
+          err_cleanup: true,
+        )
+      else
+        default_mir = with_expected_type(bare) { lower(field_node.right) }
+        hoist_alloc(
+          compose_capability_wrap(default_mir, bare.zig_type, expected_ft, alloc),
+          field_node.right,
+          err_cleanup: true,
+        )
+      end
+    end
+    # A binding still used after this store keeps its own handle: the
+    # field takes a retained one. Only a genuine last use moves.
+    still_live = kept_store_liveness ? !T.must(kept_store_liveness).last_use?(lhs) : false
+    handle_type = Type.new(expected_ft.bare_data_type.resolved.to_s, ownership: :multiowned, location: :heap)
+    if still_live
+      # Retain only the PROVIDED branch (the fresh default is already an
+      # owned handle); an optional source unwraps through the capture.
+      payload = expected_ft.bare_data_type.zig_type
+      capture = "__keep_val_#{lowering_counters.next_tmp_id}"
+      provided = MIR::RcRetain.new(MIR::Ident.new(capture), payload, "rcRetain")
+      out = MIR::IfOptional.new(MIR::Ident.new(zig_safe_name(lhs.name.to_s)), capture, provided, wrapped)
+      out.result_type = handle_type
+      out
+    else
+      out = MIR::Orelse.new(MIR::Ident.new(zig_safe_name(lhs.name.to_s)), wrapped)
+      out.result_type = handle_type
+      move_mark_field!(lhs)
+      with_ownership_consumption(out, [zig_safe_name(lhs.name.to_s)], "kept optional field store", target_alloc: alloc)
+    end
   end
 
   # A struct/union literal field store is a consuming site: a moved

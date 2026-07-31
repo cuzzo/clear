@@ -200,24 +200,28 @@ module MIRLoweringConcurrency
         local_stream: String,
         is_inf: T::Boolean,
         close_label: T.nilable(String),
+        inherited_alloc_names: T.nilable(T::Set[String]),
         blk: T.proc.returns(T.type_parameter(:Result)),
       )
       .returns(T.type_parameter(:Result))
   end
-  def with_stream_body_context(local_stream, is_inf, close_label: nil, &blk)
+  def with_stream_body_context(local_stream, is_inf, close_label: nil, inherited_alloc_names: nil, &blk)
     T.bind(self, MIRLowering) rescue nil
     prev_stream_local = capture_state.current_stream_local
     prev_stream_is_inf = capture_state.current_stream_is_inf
     prev_close_label = capture_state.current_stream_close_label
+    prev_inherited_alloc_names = capture_state.current_fsm_inherited_alloc_names
     capture_state.current_stream_local = local_stream
     capture_state.current_stream_is_inf = is_inf
     capture_state.current_stream_close_label = close_label
+    capture_state.current_fsm_inherited_alloc_names = inherited_alloc_names if inherited_alloc_names
     blk.call
   ensure
     T.bind(self, MIRLowering) rescue nil
     capture_state.current_stream_local = prev_stream_local
     capture_state.current_stream_is_inf = prev_stream_is_inf
     capture_state.current_stream_close_label = prev_close_label
+    capture_state.current_fsm_inherited_alloc_names = T.must(prev_inherited_alloc_names)
   end
 
   sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String, close_plans: T::Hash[String, Schemas::ResourceClosePlan]).returns(T::Array[MIR::Stmt]) }
@@ -412,12 +416,13 @@ module MIRLoweringConcurrency
   def lower_do_block(node)
     T.bind(self, MIRLowering) rescue nil
     id = lowering_counters.next_do_block_id
-    n = node.branches.length
+    branches = node.branches
+    n = branches.length
     wg_var = "__do#{id}_wg"
 
     all_branch_bodies = []
     boundary_facts = T.let([], T::Array[MIR::ExecutionBoundaryFact])
-    branch_plans = node.branches.each_with_index.map { |branch, i|
+    branch_plans = branches.each_with_index.map { |branch, i|
       ctx_type = "__DoBranchCtx#{id}_#{i}"
       ctx_var = "__do#{id}_ctx#{i}"
       analysis = branch.capture_analysis
@@ -1060,7 +1065,7 @@ module MIRLoweringConcurrency
     expected_t = Type.from_node(function_state.current_expected_type)
     tense_t = bg_stream_expected_type?(expected_t) ? T.must(expected_t) : Type.new(node.full_type!)
     is_inf = tense_t.inf_stream?
-    stream_zig = if tense_t.dynamic_stream?
+    stream_zig = if tense_t.dynamic_stream? && !tense_t.split_open_stream?
       element_t = T.must(tense_t.tense_type.element_type)
       "CheatLib.Stream(#{element_t.nested_zig_type})"
     else
@@ -1143,30 +1148,24 @@ module MIRLoweringConcurrency
     stream_emit_body = T.let([], T::Array[MIR::Node])
     stream_capture_cleanups = capture_cleanup_stmts(caps.specs, "ctx")
     inherited_capture_names = caps.specs.filter_map { |spec| spec.needs_moved_guard? ? "ctx.#{spec.name}" : nil }.to_set
-    prev_stream_inherited_allocs = capture_state.current_fsm_inherited_alloc_names
-    with_stream_body_context(local_stream, is_inf) do
-      begin
-        capture_state.current_fsm_inherited_alloc_names = inherited_capture_names
-        with_fiber_capture_map(caps.capture_map,
-                               capture_symbols: caps.capture_symbols,
-                               rt_override: "__rt") do
-          body_mir = node.body.flat_map { |expr|
-            mir = lower(expr)
-            pending = flush_pending
-            mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
-            pending + mir_nodes
-          }
-          stream_run_body = finalized_boundary_body_for_emit(
-            capture_ownership_mirror_nodes(caps, analysis, "ctx") +
-              stream_capture_cleanups +
-              body_mir
-          )
-          stream_emit_body = stream_run_body.reject { |mir|
-            capture_ownership_mirror_node?(mir, "ctx") || stream_capture_cleanups.include?(mir)
-          }
-        end
-      ensure
-        capture_state.current_fsm_inherited_alloc_names = prev_stream_inherited_allocs
+    with_stream_body_context(local_stream, is_inf, inherited_alloc_names: inherited_capture_names) do
+      with_fiber_capture_map(caps.capture_map,
+                             capture_symbols: caps.capture_symbols,
+                             rt_override: "__rt") do
+        body_mir = node.body.flat_map { |expr|
+          mir = lower(expr)
+          pending = flush_pending
+          mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
+          pending + mir_nodes
+        }
+        stream_run_body = finalized_boundary_body_for_emit(
+          capture_ownership_mirror_nodes(caps, analysis, "ctx") +
+            stream_capture_cleanups +
+            body_mir
+        )
+        stream_emit_body = stream_run_body.reject { |mir|
+          capture_ownership_mirror_node?(mir, "ctx") || stream_capture_cleanups.include?(mir)
+        }
       end
     end
 

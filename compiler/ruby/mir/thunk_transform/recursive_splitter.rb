@@ -109,8 +109,10 @@ module ThunkTransform
         i += 1
       end
       final = T.must(stmts.last)
-      return nil unless final.is_a?(AST::ReturnNode) && final.value
-      combine = match_recursive_combine(final.value, fn_name)
+      return nil unless final.is_a?(AST::ReturnNode)
+      final_value = final.value
+      return nil unless final_value
+      combine = match_recursive_combine(final_value, fn_name)
       return nil if combine.nil?
 
       Plan.new(
@@ -170,8 +172,10 @@ module ThunkTransform
     sig { params(stmt: AST::Node, cycle_names: T::Set[String]).returns(T.nilable(BaseCase)) }
     def self.match_mutual_base_case(stmt, cycle_names)
       return nil unless stmt.is_a?(AST::IfStatement)
-      return nil if stmt.else_branch && !stmt.else_branch.empty?
-      then_b = stmt.then_branch || []
+      return nil if !stmt.else_branch.nil? && !T.must(stmt.else_branch).empty?
+      then_b = T.cast(stmt.then_branch, T.nilable(T::Array[AST::Node]))
+      return nil unless then_b
+      then_b = then_b
       return nil if then_b.length != 1
       ret = then_b.first
       return nil unless ret.is_a?(AST::ReturnNode) && ret.value
@@ -186,8 +190,9 @@ module ThunkTransform
     def self.match_tail_mutual_call(node, partner_names)
       return nil unless node.is_a?(AST::FuncCall)
       partners = partner_names.map(&:to_s).to_set
-      return nil unless partners.include?(node.name.to_s)
-      MutualTailCall.new(name: node.name.to_s, args: node.args)
+      name = T.cast(T.unsafe(node)[:name], String)
+      return nil unless partners.include?(name)
+      MutualTailCall.new(name: name, args: node.args)
     end
 
     # Like contains_self_call? but for a SET of fn names.
@@ -196,33 +201,19 @@ module ThunkTransform
       return false if node.nil?
 
       stack = T.let([], T::Array[AST::Node])
-      case node
-      when Array
-        node.reverse_each { |child| stack << child if child.is_a?(AST::Locatable) }
-      when AST::Locatable
+      if node.is_a?(Array)
+        node.reverse_each { |child| stack << child }
+      else
         stack << node
       end
       until stack.empty?
         current = T.must(stack.pop)
         next if current.is_a?(AST::FunctionDef) || current.is_a?(AST::LambdaLit)
         if current.is_a?(AST::FuncCall)
-          return true if names_set.include?(current.name.to_s)
+          name = T.cast(T.unsafe(current)[:name], String)
+          return true if names_set.include?(name)
         end
-        next unless current.respond_to?(:each_pair)
-
-        T.unsafe(current).each_pair do |_name, value|
-          case value
-          when Array
-            value.reverse_each { |child| stack << child if child.is_a?(AST::Locatable) }
-          when Hash
-            value.each do |key, child|
-              stack << key if key.is_a?(AST::Locatable)
-              stack << child if child.is_a?(AST::Locatable)
-            end
-          when AST::Locatable
-            stack << value
-          end
-        end
+        AST.each_child_node(current) { |child| stack << child }
       end
       false
     end
@@ -234,8 +225,10 @@ module ThunkTransform
     sig { params(stmt: AST::Node, fn_name: String).returns(T.nilable(BaseCase)) }
     def self.match_base_case(stmt, fn_name)
       return nil unless stmt.is_a?(AST::IfStatement)
-      return nil if stmt.else_branch && !stmt.else_branch.empty?
-      then_b = stmt.then_branch || []
+      return nil if !stmt.else_branch.nil? && !T.must(stmt.else_branch).empty?
+      then_b = T.cast(stmt.then_branch, T.nilable(T::Array[AST::Node]))
+      return nil unless then_b
+      then_b = then_b
       return nil if then_b.length != 1
       ret = then_b.first
       return nil unless ret.is_a?(AST::ReturnNode) && ret.value
@@ -274,7 +267,9 @@ module ThunkTransform
     # Returns nil otherwise (including for nested self-calls).
     sig { params(node: AST::Node, fn_name: String).returns(T.nilable(AST::FuncCall)) }
     def self.direct_self_call(node, fn_name)
-      return nil unless node.is_a?(AST::FuncCall) && node.name == fn_name
+      return nil unless node.is_a?(AST::FuncCall)
+      name = T.cast(T.unsafe(node)[:name], String)
+      return nil unless name == fn_name
       node
     end
 

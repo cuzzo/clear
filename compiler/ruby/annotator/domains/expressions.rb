@@ -117,11 +117,7 @@ module Annotator
           declared = recoverable_result_type(node.right, context: "TRY operand")
           raw_type = Type.new(node.right.full_type!(context: "TRY operand"))
           plan_input = declared || raw_type
-          begin
-            plan = TenseOperationPlanner.try_value(plan_input)
-          rescue ArgumentError
-            error!(node, :UNWRAP_NON_OPTIONAL, got: raw_type)
-          end
+          plan = try_value_plan_with_diagnostic(node, plan_input, raw_type)
           plan = T.must(plan)
           node.tense_plan = plan
           stamp_type!(node, plan.result_type)
@@ -134,6 +130,15 @@ module Annotator
         end
 
         node.full_type!(context: "unary expression")
+      end
+
+      sig { params(node: AST::UnaryOp, plan_input: Type, raw_type: Type).returns(T.nilable(TenseOperationPlan)) }
+      def try_value_plan_with_diagnostic(node, plan_input, raw_type)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        TenseOperationPlanner.try_value(plan_input)
+      rescue ArgumentError
+        error!(node, :UNWRAP_NON_OPTIONAL, got: raw_type)
+        nil
       end
 
       # ==========================================
@@ -577,19 +582,17 @@ module Annotator
 
         receiver_type = recoverable_result_type(navigation.target, context: "tense navigation receiver") ||
           navigation.target.full_type!(context: "tense navigation receiver")
-        plan = begin
-          TenseOperationPlanner.navigate(
-            receiver_type,
-            mapped_type,
-            markers: navigation.markers,
-            shared: receiver_type.shared?,
-          )
-        rescue ArgumentError => error
-          if error.message.include?("nested future")
-            error!(member, :TENSE_NAVIGATION_NESTED_FUTURE, type: Type.surface_name(mapped_type))
-          end
-          raise
+        receiver_envelope = TenseEnvelope.from_type(receiver_type)
+        mapped_envelope = TenseEnvelope.from_type(mapped_type)
+        if receiver_envelope.asynchronous? && mapped_envelope.asynchronous?
+          error!(member, :TENSE_NAVIGATION_NESTED_FUTURE, type: Type.surface_name(mapped_type))
         end
+        plan = TenseOperationPlanner.navigate(
+          receiver_type,
+          mapped_type,
+          markers: navigation.markers,
+          shared: receiver_type.shared?,
+        )
         member.tense_plan = plan
         if plan.consumes_handle?
           root = AST.root_identifier(navigation.target)

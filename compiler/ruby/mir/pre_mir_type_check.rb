@@ -45,12 +45,15 @@ module PreMirTypeCheck
       return
     end
 
+    # The survey is a Ruby-host debugging aid. A self-hosted compiler has no
+    # process-global Ruby ENV or stderr stream, so omit this branch there.
+    # ruby-to-clear: skip
     if ENV["PREMIR_SURVEY"] == "1"
       by_class = violations.group_by { |v| v[:cls] }
                            .transform_values(&:size)
                            .sort_by { |_, n| -n }
-      warn "[pre-mir-survey] #{violations.size} untyped node(s):"
-      by_class.each { |c, n| warn format("  %5d  %s", n, c) }
+      $stderr.puts "[pre-mir-survey] #{violations.size} untyped node(s):"
+      by_class.each { |c, n| $stderr.puts format("  %5d  %s", n, c) }
       return
     end
 

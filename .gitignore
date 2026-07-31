@@ -186,7 +186,6 @@ gems/**/target/**
 
 # Self-host bootstrap build outputs (sources use explicit extensions).
 compiler/src/ast/lexer
-compiler/src/ast/parser
 
 # Generated gem diagnostics and local analysis output.
 gems/**/*.log
@@ -213,3 +212,10 @@ gems/fact-mine/target/
 gems/hazard-contract/target/
 gems/nil-kill/target/
 kcov-bin/
+
+# Generated Sorbet-stripped mirror of compiler/ruby (tools/sorbet_strip.rb)
+compiler/.ruby-rbs/
+# Transient stash used by tools/sorbet_strip_test.rb while it swaps trees
+compiler/.ruby-original/
+# Local Spinel fork used for the AOT experiment
+tmp/spinel/

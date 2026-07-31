@@ -157,6 +157,8 @@ class MIREmitter
     when MIR::Comment          then "// #{node.text}"
     when MIR::Suppress         then "_ = &#{node.name};"
     when MIR::PubConst         then "pub const #{node.name} = #{node.value};"
+    when MIR::ModuleVar        then "#{node.visibility == :pub ? 'pub ' : ''}var #{node.name}: #{node.zig_type} = undefined;"
+    when MIR::ModuleConstFree  then "defer CheatLib.cleanup(@TypeOf(#{node.name}), #{@rt_name}.heapAlloc(), &#{node.name});"
     when MIR::ProtocolAdapterDef then emit_protocol_adapter_def(node)
 
     # --- Memory operations ---
@@ -173,6 +175,8 @@ class MIREmitter
     when MIR::CapWrap          then emit_cap_wrap(node)
     when MIR::SharePromote     then emit_share_promote(node)
     when MIR::RcRetain         then emit_rc_retain(node)
+    when MIR::ComptimeCarrierPayload then emit_comptime_carrier_payload(node)
+    when MIR::MonomorphicKeep  then emit_monomorphic_keep(node)
     when MIR::RcRelease        then emit_rc_release(node)
     when MIR::RcDowngrade      then emit_rc_downgrade(node)
     when MIR::WeakUpgrade      then emit_weak_upgrade(node)
@@ -605,7 +609,9 @@ class MIREmitter
     entry = node.stdlib_def
     raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry
     pattern = entry.required_intrinsic_template(IntrinsicTemplateKind::Zig)
-    node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
+    node.args.each_with_index do |a, i|
+      pattern = pattern.split("{#{i}}").join(T.must(emit(a)))
+    end
     node.suppress_try ? pattern.delete_prefix("try ") : pattern
   end
 
@@ -1219,16 +1225,16 @@ class MIREmitter
     inner_t = "@typeInfo(@TypeOf(#{source})).pointer.child"
     "(if (comptime #{is_ptr}) " \
       "(if (comptime @typeInfo(#{inner_t}) == .@\"struct\") " \
-        "(if (comptime @hasField(#{inner_t}, \"ctrl\")) #{source}.ctrl.data else #{source}) " \
+        "(if (comptime @hasDecl(#{inner_t}, \"__clear_ref_carrier\")) #{source}.ctrl.data else #{source}) " \
        "else " \
         "(if (comptime @typeInfo(#{inner_t}) == .pointer) " \
           "(if (comptime @typeInfo(@typeInfo(#{inner_t}).pointer.child) == .@\"struct\") " \
-            "(if (comptime @hasField(@typeInfo(#{inner_t}).pointer.child, \"ctrl\")) #{source}.*.ctrl.data else #{source}.*) " \
+            "(if (comptime @hasDecl(@typeInfo(#{inner_t}).pointer.child, \"__clear_ref_carrier\")) #{source}.*.ctrl.data else #{source}.*) " \
            "else #{source}.*) " \
          "else #{source})) " \
     "else " \
       "(if (comptime @typeInfo(@TypeOf(#{source})) == .@\"struct\") " \
-        "(if (comptime @hasField(@TypeOf(#{source}), \"ctrl\")) #{source}.ctrl.data else &#{source}) " \
+        "(if (comptime @hasDecl(@TypeOf(#{source}), \"__clear_ref_carrier\")) #{source}.ctrl.data else &#{source}) " \
        "else &#{source}))"
   end
 
@@ -1252,11 +1258,11 @@ class MIREmitter
     base_t = "@TypeOf(#{source})"
     "(if (comptime @typeInfo(#{base_t}) == .pointer) " \
       "(if (comptime @typeInfo(@typeInfo(#{base_t}).pointer.child) == .@\"struct\") " \
-        "(if (comptime @hasField(@typeInfo(#{base_t}).pointer.child, \"ctrl\")) #{source}.*.ctrl.data.* else #{source}.*) " \
+        "(if (comptime @hasDecl(@typeInfo(#{base_t}).pointer.child, \"__clear_ref_carrier\")) #{source}.*.ctrl.data.* else #{source}.*) " \
        "else #{source}.*) " \
      "else " \
       "(if (comptime @typeInfo(#{base_t}) == .@\"struct\") " \
-        "(if (comptime @hasField(#{base_t}, \"ctrl\")) #{source}.ctrl.data.* else #{source}) " \
+        "(if (comptime @hasDecl(#{base_t}, \"__clear_ref_carrier\")) #{source}.ctrl.data.* else #{source}) " \
        "else #{source}))"
   end
 
@@ -1462,6 +1468,17 @@ class MIREmitter
     @heap_allocator_cache_runtime_name = runtime_name
     blk.call
   ensure
+    restore_heap_allocator_cache(cache_name, previous_name, previous_runtime)
+  end
+
+  sig do
+    params(
+      cache_name: T.nilable(String),
+      previous_name: T.nilable(String),
+      previous_runtime: T.nilable(String),
+    ).void
+  end
+  def restore_heap_allocator_cache(cache_name, previous_name, previous_runtime)
     @heap_allocator_cache_names.pop if cache_name
     @heap_allocator_cache_name = previous_name
     @heap_allocator_cache_runtime_name = previous_runtime
@@ -1586,7 +1603,8 @@ class MIREmitter
   sig { params(node: MIR::WithMatchDispatch).returns(String) }
   def emit_with_match_dispatch(node)
     cell_zig = T.must(emit(node.cell))
-    arm_strs = node.arms.each_with_index.map { |arm, i|
+    arms = node.arms
+    arm_strs = arms.each_with_index.map { |arm, i|
       probe = emit_with_match_probe(arm.family, cell_zig, node.snapshot_mode)
       head = i.zero? ? "if (comptime #{probe})" : "else if (comptime #{probe})"
       body_zig = emit_body(arm.body || [])
@@ -1731,6 +1749,7 @@ class MIREmitter
       when 0x0D then '\\r'
       when 0x09 then '\\t'
       when 0x00 then '\\x00'
+      when 0x01..0x1F, 0x7F then "\\x#{'%02x' % b}"
       when 0x80..0xFF then "\\x#{'%02x' % b}"
       else b.chr
       end
@@ -1966,7 +1985,7 @@ class MIREmitter
 
   sig { params(node: MIR::Program).returns(String) }
   def emit_program(node)
-    parts = node.items.filter_map { |item| emit(item) }
+    parts = node.items.filter_map { |item| emit_container_item(item) }
     symbol_pool = symbol_pool_declarations
     parts.unshift(symbol_pool) unless symbol_pool.empty?
     out = []
@@ -2070,7 +2089,13 @@ class MIREmitter
 
   sig { params(node: MIR::TypeAlias).returns(String) }
   def emit_type_alias(node)
-    "const #{node.name} = #{node.target};"
+    # Aliases are declarative; a unit that keeps a declared-but-unused alias
+    # must still compile inside block scopes (gen.rb wraps library units in a
+    # `test { ... }` block, where Zig hard-errors on unused locals). The
+    # comptime reference placates that check at zero runtime cost. `pub`
+    # matches CLEAR's scope model, where imported types re-export: a module
+    # aliasing a foreign type must expose it to its own importers.
+    "pub const #{node.name} = #{node.target};\ncomptime { _ = @typeName(#{node.name}); }"
   end
 
   sig { params(node: MIR::CExternFnDecl).returns(String) }
@@ -2093,30 +2118,96 @@ class MIREmitter
 
   sig { params(node: MIR::ModuleNamespace).returns(String) }
   def emit_module_namespace(node)
-    body = emit_body(node.items || [])
+    body = (node.items || []).filter_map { |item| emit_container_item(item) }.join("\n")
     "const #{node.name} = struct {\n#{indent_block(body, 4)}\n};"
   end
 
+  # Zig container scope accepts declarations but not standalone discard
+  # statements. A lowering-time suppression belongs to a function body, so
+  # omit it when a MIR::Let is itself a program/module item.
+  sig { params(node: MIR::Emittable).returns(T.nilable(String)) }
+  def emit_container_item(node)
+    return emit_let(node, include_suppression: false) if node.is_a?(MIR::Let)
+
+    emit(node)
+  end
+  private :emit_container_item
+
   sig { params(node: MIR::TestDef).returns(String) }
   def emit_test_def(node)
+    return emit_scheduler_test_def(node) if node.needs_scheduler
+
     body = emit_body(node.body)
     "test \"#{node.name}\" {\n#{body}\n}"
   end
 
+  # Fiber-spawning test bodies (stamped by TestLowering): boot a scheduler
+  # and drive the body as a task, mirroring how clearMain runs — the bare
+  # test-runner thread has no scheduler (GPF in submitSpawn/getSched). The
+  # body's `rt` is the task fiber's runtime, so the plain preamble's rt
+  # binding is replaced by the entry-wrapper parameter.
+  sig { params(node: MIR::TestDef).returns(String) }
+  def emit_scheduler_test_def(node)
+    stmts = node.body.reject { |stmt| stmt.is_a?(MIR::TestPreamble) }
+    body = emit_body(stmts)
+    <<~ZIG.chomp
+      test "#{node.name}" {
+      var da = std.heap.DebugAllocator(.{}){};
+          defer _ = da.deinit();
+          const allocator = da.allocator();
+          var global_ctx = EbrContext{};
+          defer global_ctx.deinit(allocator);
+          const fp = @import("runtime/scheduler.zig");
+          var sched = try fp.Scheduler.init(allocator, &global_ctx, null);
+          defer {
+              fp.scheduler_running = false;
+              sched.deinit();
+              fp.global_registry.deinit(allocator);
+          }
+          fp.active_scheduler = &sched;
+          fp.scheduler_running = true;
+          const __TestBody = struct {
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  _ = raw_args;
+                  const rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &rt;
+      #{body}
+              }
+          };
+          try sched.submitSpawn(
+              @intFromPtr(&Runtime.entryWrapper),
+              @as(CheatHeader.TaskFn, @ptrCast(&__TestBody.run)),
+              null,
+              .{ .stack_size = .Large },
+          );
+          sched.run();
+      }
+    ZIG
+  end
+
   # --- Statement emitters ---
 
-  sig { params(node: MIR::Let).returns(String) }
-  def emit_let(node)
+  sig { params(node: MIR::Let, include_suppression: T::Boolean).returns(String) }
+  def emit_let(node, include_suppression: true)
     if node.init.is_a?(MIR::FreezeExpr)
       buf  = "#{node.name}__buf"
       kw   = node.mutable ? "var" : "const"
-      sup  = node.suppression ? " #{node.suppression}" : ""
+      sup  = include_suppression && node.suppression ? " #{node.suppression}" : ""
       return "const #{buf} = #{emit(node.init)};\n#{kw} #{node.name} = #{buf}._root;#{sup}"
     end
     kw = node.mutable ? "var" : "const"
     ann = node.annotation ? ": #{node.annotation.nested_zig_type}" : ""
+    if node.module_const
+      # A comptime CONST initializer runs at container scope with no runtime; any
+      # `rt` reference in the (pure) initializer binds to `undefined`. Zig folds
+      # the call at comptime, and a heap-touching initializer (which would deref
+      # `undefined`) is already rejected upstream as MODULE_SCOPE_OWNED_VALUE.
+      init = with_ident_overrides("rt" => "undefined") { emit(node.init) }
+      vis = node.const_visibility == :pub ? "pub " : ""
+      return "#{vis}const #{node.name}#{ann} = #{init};"
+    end
     init = emit(node.init)
-    sup = node.suppression ? " #{node.suppression}" : ""
+    sup = include_suppression && node.suppression ? " #{node.suppression}" : ""
     "#{kw} #{node.name}#{ann} = #{init};#{sup}"
   end
 
@@ -2317,7 +2408,8 @@ class MIREmitter
       return "return #{inner_call} catch {\n#{indent_block(emit_catch_default_body(node), 4)}\n};"
     end
 
-    branch_parts = node.clauses.each_with_index.map do |clause, index|
+    clauses = node.clauses
+    branch_parts = clauses.each_with_index.map do |clause, index|
       emit_catch_clause(clause, node.rt_name, node.snapshot_type, index.zero?)
     end
     branch_parts << emit_catch_default(node)
@@ -2485,9 +2577,10 @@ class MIREmitter
   def emit_sort(node)
     et = node.elem_type
     items = emit(node.items_expr)
+    cmp = node.string_keys ? "std.mem.order(u8, #{emit(node.key_a)}, #{emit(node.key_b)}) == .lt" : "#{emit(node.key_a)} < #{emit(node.key_b)}"
     "std.mem.sort(#{et}, #{items}, {}, struct {\n" \
       "    pub fn lessThan(_: void, a: #{et}, b: #{et}) bool {\n" \
-      "        return #{emit(node.key_a)} < #{emit(node.key_b)};\n" \
+      "        return #{cmp};\n" \
       "    }\n" \
       "}.lessThan);"
   end
@@ -2933,6 +3026,22 @@ class MIREmitter
   sig { params(node: MIR::RcRetain).returns(String) }
   def emit_rc_retain(node)
     "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"
+  end
+
+  sig { params(node: MIR::ComptimeCarrierPayload).returns(String) }
+  def emit_comptime_carrier_payload(node)
+    src = T.must(emit(node.source))
+    "(if (comptime @hasDecl(@TypeOf(#{src}), \"__clear_ref_carrier\")) #{src}.ctrl.data.* else #{src})"
+  end
+
+  sig { params(node: MIR::MonomorphicKeep).returns(String) }
+  def emit_monomorphic_keep(node)
+    src = T.must(emit(node.source))
+    alloc = alloc_from_sym(node.alloc || :heap)
+    # dupeValue is carrier-generic: retainOne for an Rc/Arc handle, a structural
+    # deep copy for a plain struct payload (heap fields included), and a
+    # @compileError for a linear plain type (drop glue without clone glue).
+    "try CheatLib.dupeValue(@TypeOf(#{src}), #{src}, #{alloc})"
   end
 
   sig { params(node: MIR::RcRelease).returns(String) }
@@ -3532,7 +3641,8 @@ class MIREmitter
   sig { params(action: Schemas::ResourceCloseAction, root_name: String).returns(String) }
   def render_resource_close_action(action, root_name)
     target = ([root_name] + action.field_path).join(".")
-    runtime_args = Array.new(action.runtime_heap_alloc_args) { alloc_zig(:heap) }
+    runtime_args = T.let([], T::Array[String])
+    action.runtime_heap_alloc_args.times { runtime_args << alloc_zig(:heap) }
     case action.call_kind
     when Schemas::ResourceCloseCallKind::Method
       "#{target}.#{action.name}(#{runtime_args.join(", ")})"

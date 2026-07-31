@@ -255,6 +255,10 @@ class PipelineBatchWindowCoverageHost
         @placeholder_visits << [node, placeholder]
         visit_mir(node)
       },
+      visit_expr_head: ->(node, placeholder) {
+        @placeholder_visits << [node, placeholder]
+        PipelineElementHead.new(value: visit_mir(node), pending: [], owned: false)
+      },
       pipeline_block: ->(list_node, blk) {
         @label_counter += 1
         label = "__bw_pblk#{@label_counter}"
@@ -325,7 +329,7 @@ class PipelineSetIndexCoverageHost
         block
       },
       range_chain: ->(node) { @range_chains[node.object_id] },
-      lazy_range_prefix: ->(source_node, _stages, on_skip) {
+      lazy_range_prefix: ->(source_node, _stages, on_skip, _track_owned_items) {
         @skip_hook = on_skip
         PipelineLazyRangePrefix.new(
           range_let: MIR::Let.new("__range_src", set_index_visit_mir(source_node), true, nil, nil),
@@ -394,6 +398,7 @@ class PipelineEachCoverageHost
 
   def services
     PipelineEachLowerer.new(
+        source_alloc_fact: ->(_value, _name, _type_info) { nil },
       bc_target: -> { @bc_target },
       visit_mir: ->(node) { each_visit_mir(node) },
       visit_body_with_placeholder: ->(_body_stmts, placeholder) {
@@ -658,10 +663,10 @@ RSpec.describe "pipeline backend coverage" do
       end
 
       expect(harness.state.current_label).to eq("__mat1")
-      expect(harness.state.alloc_fact_names.first.first).to eq("pipe_src_list")
+      expect(harness.state.alloc_fact_names.first.first).to eq("pipe_src_list_mat1")
       expect(block.body[0]).to be_a(MIR::AllocMark)
       expect(block.body[2]).to be_a(MIR::Cleanup)
-      expect(block.body.last.value.name).to eq("pipe_items")
+      expect(block.body.last.value.name).to match(/\Apipe_items_/)
     end
 
     it "builds concurrent source setup for range and collection sources" do
@@ -999,7 +1004,10 @@ RSpec.describe "pipeline backend coverage" do
         AST::Assignment.new(tok, id("_"), lit(1)),
       ])
       expect(concurrent_lowerer.send(:each_body_mutates_placeholder?, [nested_assignment])).to be true
-      expect(concurrent_lowerer.send(:assignment_targets_placeholder?, Object.new)).to be false
+      # A sig-valid non-assignment node reaches the false fallback. (Object.new
+      # violated the sig, so the result depended on the worker's sorbet
+      # runtime check level — a parallel-order flake.)
+      expect(concurrent_lowerer.send(:assignment_targets_placeholder?, lit(1))).to be false
     end
   end
 
@@ -1601,7 +1609,7 @@ RSpec.describe "pipeline backend coverage" do
       label_state = pipeline_host.instance_variable_get(:@label_state)
       expect(label_state.current_label).to eq("__pblk1")
       expect(block.body.first).to be_a(MIR::AllocMark)
-      expect(block.body.last.value.name).to eq("pipe_items")
+      expect(block.body.last.value.name).to match(/\Apipe_items_/)
 
       scoped = materializer.append_owned_value_stmt(
         "items",
@@ -1920,6 +1928,9 @@ RSpec.describe "pipeline backend coverage" do
           end
         },
         visit_expr: ->(_list_node, _expr_node, placeholder) { MIR::Ident.new(placeholder) },
+        visit_expr_head: ->(_expr_node, placeholder, _alloc) {
+          PipelineElementHead.new(value: MIR::Ident.new(placeholder), pending: [], owned: false)
+        },
         visit_reduce_expr: ->(_expr_node, item_placeholder, acc_placeholder) {
           MIR::BinOp.new("+", MIR::Ident.new(item_placeholder), MIR::Ident.new(acc_placeholder))
         },
@@ -1950,11 +1961,16 @@ RSpec.describe "pipeline backend coverage" do
           MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(receiver), "append", [value_expr], false,
             MIR::CallableContract.no_ownership(1)), nil)
         },
+        append_fresh_owned_value_stmt: ->(receiver, _alloc, value_expr, _owned_type) {
+          MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new(receiver), "append", [value_expr], false,
+            MIR::CallableContract.no_ownership(1)), nil)
+        },
         borrowed_pipeline_value: ->(value, _type_info, _alloc) { value },
         cleanup_bearing_type: ->(_type_info) { true },
         owning_pipeline_temp_stmts: ->(name, source, type_info, _zig_type, _alloc) {
           [MIR::Let.new(name, source, false, type_info, nil)]
         },
+        loop_mark_stmts: -> { [] },
       )
       items = id("items", type: Type.new(:"Int64[]"))
 
@@ -2003,14 +2019,15 @@ RSpec.describe "pipeline backend coverage" do
       expect(prefix.range_let).to be_a(MIR::Let)
       expect(prefix.source_name).to eq("__range_src")
       expect(prefix.initial_capture).to eq("__each_item")
-      expect(prefix.item_var).to eq("__each_item_1")
+      # Identity `SELECT _` is a pure rename: no aliasing Let, the item keeps
+      # its capture name and its ownership.
+      expect(prefix.item_var).to eq("__each_item")
       expect(prefix.item_used).to be true
       expect(prefix.elem_zig).to eq("i64")
       expect(prefix.next_method).to eq("next")
       expect(prefix.setup_stmts.first).to equal(prefix.range_let)
-      expect(prefix.outer_stmts.map(&:name)).to eq(["__limit_cnt_2", "__limit_max_2", "__skip_cnt_3", "__skip_max_3"])
+      expect(prefix.outer_stmts.map(&:name)).to eq(["__limit_cnt_1", "__limit_max_1", "__skip_cnt_2", "__skip_max_2"])
       expect(prefix.stage_stmts.map(&:class)).to eq([
-        MIR::Let,
         MIR::IfStmt,
         MIR::IfStmt,
         MIR::IfStmt,
@@ -2053,8 +2070,8 @@ RSpec.describe "pipeline backend coverage" do
       each_block = pipeline_host.send(:lower_each_range,
         stream, [], AST::EachOp.new(tok, [AST::FuncCall.new(tok, "touch", [id("_")])]))
 
-      cleanup = pipeline_host.send(:consumed_stream_item_cleanup,
-        "__owned_item", id("names", type: Type.new(:"~String[]")))
+      cleanup = pipeline_host.send(:owned_stream_item_stmts,
+        "__owned_item", Type.new(:String))
 
       count = AST::CountOp.new(tok, id("_"))
       count_smooth = typed(AST::BinaryOp.new(tok, stream, :SMOOTH, count), Type.new(:Int64))
@@ -2067,7 +2084,10 @@ RSpec.describe "pipeline backend coverage" do
       expect(distinct_block.body).to include(a_kind_of(MIR::DeferStmt), a_kind_of(MIR::WhileStmt))
       expect(index_block.body).to include(a_kind_of(MIR::DeferStmt), a_kind_of(MIR::WhileStmt))
       expect(each_block.body).to include(a_kind_of(MIR::DeferStmt), a_kind_of(MIR::WhileStmt))
-      expect(cleanup).to contain_exactly(a_kind_of(MIR::ExprStmt))
+      expect(cleanup).to contain_exactly(a_kind_of(MIR::AllocMark), a_kind_of(MIR::Cleanup))
+      cleanup_stmt = T.cast(cleanup.last, MIR::Cleanup)
+      expect(cleanup_stmt.cleanup_entry.alloc).to eq(:heap)
+      expect(cleanup_stmt.cleanup_entry.has_moved_guard?).to be true
       expect(fold_block.body).to include(a_kind_of(MIR::DeferStmt), a_kind_of(MIR::WhileStmt))
       expect(reduce_block.body).to include(a_kind_of(MIR::DeferStmt), a_kind_of(MIR::WhileStmt))
     end
@@ -2334,7 +2354,8 @@ RSpec.describe "pipeline backend coverage" do
         prefix, any_op, any_smooth, "__obs_any", source, terminal: :any)
 
       owned_source = id("names", type: Type.new(:"~String[]"))
-      owned_prefix = lazy_range_prefix(source_name: "names", item_var: "__name", elem_zig: "[]const u8")
+      owned_prefix = lazy_range_prefix(source_name: "names", item_var: "__name", elem_zig: "[]const u8",
+        item_type: Type.new(:String), item_owned: true)
       find = AST::FindOp.new(tok, id("_", type: Type.new(:Bool)))
       find_smooth = typed(AST::BinaryOp.new(tok, owned_source, :SMOOTH, find), Type.optional_of(:String))
       find_result = pipeline_host.send(:lower_range_fold_observable_default,
@@ -2343,9 +2364,12 @@ RSpec.describe "pipeline backend coverage" do
       find_loop = T.must(T.must(find_spawn).expr).body.first
       find_loop_nodes = []
       MIR.each_node(find_loop) { |node| find_loop_nodes << node }
-      find_item_alloc = find_loop_nodes.find { |node| node.is_a?(MIR::AllocMark) && node.name == "__name" }
-      expect(find_item_alloc).not_to be_nil
-      expect(T.must(find_item_alloc).type_info).to eq(Type.new(:String))
+      # FIND transfers the matched item into the publish: the success branch
+      # carries the transfer marks that suppress the prefix-owned defer.
+      find_item_transfer = find_loop_nodes.find { |node| node.is_a?(MIR::TransferMark) && node.name == "__name" }
+      expect(find_item_transfer).not_to be_nil
+      find_item_move = find_loop_nodes.find { |node| node.is_a?(MIR::MoveMark) && node.name == "__name" }
+      expect(find_item_move).not_to be_nil
       owned_distinct_smooth = typed(AST::BinaryOp.new(tok, owned_source, :SMOOTH, distinct),
         Type.new(:"~String[]", collection: :set, observable: true, observable_terminal: :distinct))
       owned_distinct_result = pipeline_host.send(:lower_range_fold_observable_distinct,
@@ -2489,6 +2513,43 @@ RSpec.describe "pipeline backend coverage" do
       expect(reduce_mir.body).to include(a_kind_of(MIR::ForStmt))
     ensure
       lowering.instance_variable_set(:@target, nil)
+    end
+  end
+
+  # A borrowed-view pipeline result (SKIP -> `items[n..]`) must be identified by
+  # the producer's EXPLICIT BlockExpr#borrowed_view marker, not by sniffing the
+  # break node's shape -- a cast/wrapper/conditional around the slice would
+  # defeat a node-shape check and let the materializer free the borrowed source
+  # (a double free). The marker is authoritative even when the break value is
+  # not a bare SliceExpr.
+  describe "OwnershipEffect.borrowed_view_result? (explicit marker)" do
+    def block_breaking_on(value, borrowed_view:)
+      blk = MIR::BlockExpr.new("__b", [MIR::BreakStmt.new("__b", value)])
+      blk.result_type = Type.array_of(Type.new(:String))
+      blk.borrowed_view = borrowed_view
+      blk
+    end
+
+    it "marker wins even when the break value is a wrapped (non-slice) view" do
+      wrapped = MIR::Cast.new(
+        MIR::SliceExpr.new(MIR::Ident.new("items"), MIR::Ident.new("n"), nil, nil),
+        "[]const u8", :bitCast
+      )
+      block = block_breaking_on(wrapped, borrowed_view: true)
+      expect(MIR::OwnershipEffect.borrowed_view_result?(block)).to be true
+      # ...and the cleanup-bearing-result-type fallback must NOT claim ownership.
+      expect(block.ownership_effect.produces_owned).to be false
+    end
+
+    it "an unmarked block breaking on an owned Ident is not a borrowed view" do
+      block = block_breaking_on(MIR::Ident.new("res_list"), borrowed_view: false)
+      expect(MIR::OwnershipEffect.borrowed_view_result?(block)).to be false
+    end
+
+    it "backstop still catches a direct unmarked slice break" do
+      slice = MIR::SliceExpr.new(MIR::Ident.new("items"), MIR::Ident.new("n"), nil, nil)
+      block = block_breaking_on(slice, borrowed_view: false)
+      expect(MIR::OwnershipEffect.borrowed_view_result?(block)).to be true
     end
   end
 end

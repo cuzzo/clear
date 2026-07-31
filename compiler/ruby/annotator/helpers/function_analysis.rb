@@ -10,7 +10,7 @@ module FunctionAnalysis
 
   RoutineNode = T.type_alias { T.any(AST::FunctionDef, AST::LambdaLit) }
   RoutineBody = T.type_alias { T.any(AST::RawBody, AST::Node) }
-  CallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
+  FunctionCallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
   CallArgList = T.type_alias { T::Array[AST::Locatable] }
   DeclaredReturn = T.type_alias { T.nilable(Type::TypeInput) }
   LifetimeSourceList = T.type_alias { T::Array[FunctionSignature::LifetimeSource] }
@@ -18,13 +18,14 @@ module FunctionAnalysis
   class CallSignatureSite < T::Struct
     extend T::Sig
 
-    const :node, CallNode
+    prop :node, FunctionCallNode
     const :name, String
     prop :args, T::Array[AST::Locatable]
 
     sig { params(signature: FunctionSignature).void }
     def assign_signature!(signature)
       T.unsafe(node).matched_signature = signature if node.respond_to?(:matched_signature=)
+      self.node = node
     end
 
     sig { params(arg: AST::Locatable).void }
@@ -40,21 +41,33 @@ module FunctionAnalysis
     sig { params(index: Integer).returns(T::Boolean) }
     def explicit_mutable_argument?(index)
       method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
-      if method_node && !args.empty? && args.first.equal?(method_node.object)
-        return method_node.explicit_mutable_receiver? if index == 0
-        return method_node.explicit_mutable_argument?(index - 1)
+      if method_node && args.length == method_node.args.length + 1
+        concrete_method = method_node
+        return concrete_method.explicit_mutable_receiver? if index == 0
+        return concrete_method.explicit_mutable_argument?(index - 1)
       end
-      node.explicit_mutable_argument?(index)
+      if node.is_a?(AST::FuncCall)
+        func_node = T.cast(node, AST::FuncCall)
+        return func_node.explicit_mutable_argument?(index)
+      end
+      method_call = T.cast(node, AST::MethodCall)
+      method_call.explicit_mutable_argument?(index)
     end
 
     sig { params(index: Integer).returns(T.nilable(Lexer::Token)) }
     def explicit_mutable_argument_token(index)
       method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
-      if method_node && !args.empty? && args.first.equal?(method_node.object)
-        return method_node.explicit_mutable_receiver_token if index == 0
-        return method_node.explicit_mutable_argument_token(index - 1)
+      if method_node && args.length == method_node.args.length + 1
+        concrete_method = method_node
+        return concrete_method.explicit_mutable_receiver_token_value if index == 0
+        return concrete_method.explicit_mutable_argument_token(index - 1)
       end
-      node.explicit_mutable_argument_token(index)
+      if node.is_a?(AST::FuncCall)
+        func_node = T.cast(node, AST::FuncCall)
+        return func_node.explicit_mutable_argument_token(index)
+      end
+      method_call = T.cast(node, AST::MethodCall)
+      method_call.explicit_mutable_argument_token(index)
     end
   end
 
@@ -81,10 +94,14 @@ module FunctionAnalysis
     def injectable_defaults
       return [] unless given_args < max_args
 
-      slice = params[given_args...max_args]
-      return [] unless slice
-
-      slice.reject(&:required)
+      defaults = T.let([], T::Array[AST::Param])
+      index = given_args
+      while index < max_args
+        param = params.fetch(index)
+        defaults << param unless param.required
+        index += 1
+      end
+      defaults
     end
   end
 
@@ -141,7 +158,10 @@ module FunctionAnalysis
           else
             visit(body)
           end
-          finalize_ownership_transport_facts!(transport_facts) unless language_mode == :strict
+          unless language_mode == :strict
+            finalize_ownership_transport_facts!(transport_facts)
+          end
+          nil
         ensure
           unless language_mode == :strict
             popped = phase_audit_inputs.ownership_transport_frames.pop
@@ -297,7 +317,8 @@ module FunctionAnalysis
         params: node.params.map { |p| AST::Param.new(
           name: p.name, type: p.type, required: p.default.nil?,
           default: p.default, mutable: p.mutable, takes: p.takes,
-          sync: p.type.any_sync? ? p.type.sync : nil
+          sync: p.type.any_sync? ? p.type.sync : nil,
+          carrier_contract: p.carrier_contract
         )},
         return_type: node.annotation_return_type, return_lifetime: lifetime_paths,
         visibility: node.visibility,
@@ -311,6 +332,7 @@ module FunctionAnalysis
       current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
       register_function_node!(node)
+      warn_monomorphic_variant_explosion!(node)
       body_identity = body_identity_for_function(node.name)
       node.semantic_with_blocks = []
 
@@ -419,7 +441,7 @@ module FunctionAnalysis
   # (intrinsic, user-defined, fn-type variable, generic), validate args,
   # and set the call node's full_type. Also tags cross-module, extern,
   # call result placement is decided later by escape analysis.
-  sig { params(node: CallNode, args: CallArgList).returns(T.nilable(Symbol)) }
+  sig { params(node: FunctionCallNode, args: CallArgList).returns(T.nilable(Symbol)) }
   def resolve_call(node, args)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     func_name = node.name
@@ -544,7 +566,7 @@ module FunctionAnalysis
   # retaining its declared !T for OR_ELSE and lowering. All resolved call
   # families use this boundary so generic and protocol dispatch cannot expose
   # a different expression type from ordinary calls.
-  sig { params(node: CallNode, return_type: Type, recoverable: T::Boolean).void }
+  sig { params(node: FunctionCallNode, return_type: Type, recoverable: T::Boolean).void }
   def stamp_resolved_call_result!(node, return_type, recoverable: false)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
     resolved = Type.new(return_type)
@@ -585,7 +607,7 @@ module FunctionAnalysis
   # values in this allocator (per "one collection = one allocator").
   # Returns nil when the call has no container context (plain function call,
   # or receiver storage not yet determined).
-  sig { params(node: CallNode).returns(T.nilable(Symbol)) }
+  sig { params(node: FunctionCallNode).returns(T.nilable(Symbol)) }
   def receiver_container_alloc(node)
     return nil unless node.is_a?(AST::MethodCall)
     obj = node.object
@@ -597,7 +619,7 @@ module FunctionAnalysis
     nil
   end
 
-  sig { params(node: CallNode, signature: FunctionSignature, args: T.nilable(CallArgList)).returns(NilClass) }
+  sig { params(node: FunctionCallNode, signature: FunctionSignature, args: T.nilable(CallArgList)).returns(NilClass) }
   def verify_function_signature!(node, signature, args = nil)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     args ||= node.args
@@ -621,13 +643,16 @@ module FunctionAnalysis
       verify_link_argument!(facts)
       verify_argument_type!(facts, signature, atomic_bare_value_args)
       verify_argument_aliases!(facts, encountered_args)
+      verify_copy_retained_boundary!(facts)
+      verify_unique_argument!(facts)
+      verify_retained_into_plain_slot!(facts)
     end
 
     warn_multi_atomic_bare_value_call!(site.node, atomic_bare_value_args)
     nil
   end
 
-  sig { params(node: CallNode, args: T.nilable(CallArgList)).returns(CallSignatureSite) }
+  sig { params(node: FunctionCallNode, args: T.nilable(CallArgList)).returns(CallSignatureSite) }
   def call_signature_site(node, args = nil)
     args ||= node.args
     source_name = if node.is_a?(AST::MethodCall) && node.source_method_name
@@ -719,6 +744,133 @@ module FunctionAnalysis
     )
   end
 
+  # Retained-identity v5: bare COPY is a memcpy and cannot copy a live handle.
+  # OWN COPY is the sole retained-carrier detach: it derefs the payload and
+  # deep-copies it (stamped shared_to_unique_copy). A plain COPY of a retained
+  # carrier is illegal at every boundary; the check is DEFERRED (keep-analysis
+  # has not run yet) so the v4 kept-edge exception can consult kept_identity
+  # after placement, before erroring COPY_RETAINED_NEEDS_UNIQUE.
+  sig { params(facts: CallArgumentFacts).void }
+  def verify_copy_retained_boundary!(facts)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    arg = facts.arg_node
+    return unless arg.is_a?(AST::CopyNode)
+    src_type = arg.value.full_type!(context: "COPY source carrier") rescue nil
+    return unless src_type.is_a?(Type)
+    carrier = if src_type.multiowned? then "@multiowned"
+    elsif src_type.shared? then "@shared"
+    end
+    return unless carrier
+
+    # OWN COPY is the explicit handle->owned-RawT downgrade: deref the retained
+    # payload and deep-copy it into a fresh uniquely-owned value. Legal for any
+    # retained source, at any parameter (a plain TAKES slot is already a unique
+    # owner). Bare COPY of a handle is a memcpy and stays illegal (below).
+    if arg.own
+      arg.carrier_op = :shared_to_unique_copy
+      return
+    end
+
+    # Bare COPY is a memcpy; it cannot copy a live @multiowned/@shared handle
+    # (that would duplicate the handle bits and skip the refcount). Illegal at
+    # every boundary, UNIQUE included -- the detach is always spelled OWN COPY.
+    name = arg.value.is_a?(AST::Identifier) ? T.cast(arg.value, AST::Identifier).name : "the value"
+    deferred_copy_retained_validations << Annotator::Phases::DeferredCopyRetainedValidation.new(
+      arg_node: arg, name: name, carrier: carrier,
+      callee_name: facts.site.node.name.to_s, param_index: facts.index,
+    )
+  end
+
+  # C-1 (carrier first pass): a UNIQUE parameter requires exactly one owner.
+  # A bare retained (@multiowned/@shared) argument is a live, potentially
+  # multi-owned handle -- reject it. COPY (which detaches an independent
+  # payload, handled by verify_copy_retained_boundary!) and plain owned values
+  # are the valid ways to satisfy UNIQUE.
+  # A retained @multiowned/@shared handle cannot silently fill a plain (RawT)
+  # TAKES slot -- crossing the carrier boundary must be explicit. The caller
+  # writes OWN COPY (detach an independent payload) or the parameter opts into
+  # keeping the handle via SHARED/MONOMORPHIC. A bare handle here used to
+  # silently deep-copy the payload out (identity-destroying, no diagnostic).
+  # Collections carry their own transport rules and are unaffected; UNIQUE is
+  # handled by verify_unique_argument!.
+  # C-3d: a MONOMORPHIC parameter is stenciled per concrete carrier
+  # (plain / @multiowned / @shared) by Zig. Each independent MONOMORPHIC param
+  # multiplies the variant count by up to 3, so N of them is up to 3^N compiled
+  # bodies -- a combinatoric-explosion hazard. Surface it once past a threshold
+  # so the cost is visible where it is chosen.
+  sig { params(node: AST::FunctionDef).void }
+  def warn_monomorphic_variant_explosion!(node)
+    count = node.params.count { |p| p.carrier_contract == :monomorphic }
+    return if count < 3
+
+    variants = 3**count
+    $stderr.puts "\e[36m[Note]\e[0m '#{node.name}' has #{count} MONOMORPHIC parameters, " \
+      "so Zig may stencil up to #{variants} (3^#{count}) carrier variants of it. " \
+      "This is a combinatoric-explosion hazard for code size and instruction cache; " \
+      "if the extra carriers are not needed, constrain some parameters to a concrete " \
+      "carrier (plain / SHARED)."
+  end
+
+  sig { params(facts: CallArgumentFacts).void }
+  def verify_retained_into_plain_slot!(facts)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    arg = facts.arg_node
+    return if arg.is_a?(AST::CopyNode)  # COPY / OWN COPY: their own checks
+    return if arg.is_a?(AST::KeepNode)  # KEEP: retains, carrier-preserving
+    return unless facts.param.takes
+    # Only user functions declare a plain RawT slot whose carrier contract is
+    # meaningful here. Container builtins (append/insert/...) carry their own
+    # element-handle transport and must not be gated by this rule.
+    callee_fn = function_node_for(facts.site.node.name.to_s)
+    return unless callee_fn
+    callee_param = callee_fn.params&.fetch(facts.index, nil)
+    contract = callee_param&.carrier_contract || facts.param.carrier_contract
+    # SHARED/MONOMORPHIC accept a handle; UNIQUE is checked separately.
+    return if contract == :shared || contract == :monomorphic || contract == :unique
+    param_type = facts.param.type
+    return if param_type.is_a?(Type) &&
+      (param_type.generic_type_parameter? || param_type.any_rc?)
+    # A bare MONOMORPHIC source may itself be a handle at some monomorphization,
+    # and a concrete plain slot cannot hold one. Forward it via OWN COPY (detach)
+    # or make the destination carrier-preserving. (An unconstrained
+    # carrier-polymorphic param is always plain post-gate, so forwarding it bare
+    # is a valid move.)
+    if arg.is_a?(AST::Identifier) && arg.symbol&.carrier_contract == :monomorphic
+      return error!(arg, :RETAINED_NEEDS_OWN_COPY, name: arg.name, carrier: "MONOMORPHIC", param: facts.param.name.to_s)
+    end
+    src_type = arg.full_type!(context: "retained plain-slot argument") rescue nil
+    return unless src_type.is_a?(Type)
+    return if src_type.collection?
+    carrier = if src_type.multiowned? then "@multiowned"
+    elsif src_type.shared? then "@shared"
+    end
+    return unless carrier
+
+    name = arg.is_a?(AST::Identifier) ? arg.name : "the value"
+    error!(arg, :RETAINED_NEEDS_OWN_COPY, name: name, carrier: carrier, param: facts.param.name.to_s)
+  end
+
+  sig { params(facts: CallArgumentFacts).void }
+  def verify_unique_argument!(facts)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    arg = facts.arg_node
+    # Any COPY is COPY's concern: verify_copy_retained_boundary! accepts OWN COPY
+    # (detach) and rejects a bare COPY of a handle (COPY_RETAINED_NEEDS_UNIQUE).
+    return if arg.is_a?(AST::CopyNode)
+    callee_param = function_node_for(facts.site.node.name.to_s)&.params&.fetch(facts.index, nil)
+    contract = callee_param&.carrier_contract || facts.param.carrier_contract
+    return unless contract == :unique
+    src_type = arg.full_type!(context: "UNIQUE argument carrier") rescue nil
+    return unless src_type.is_a?(Type)
+    carrier = if src_type.multiowned? then "@multiowned"
+    elsif src_type.shared? then "@shared"
+    end
+    return unless carrier
+
+    name = arg.is_a?(AST::Identifier) ? arg.name : "the value"
+    error!(arg, :UNIQUE_NEEDS_EXCLUSIVE, name: name, carrier: carrier, param: facts.param.name.to_s)
+  end
+
   sig { params(facts: CallArgumentFacts).void }
   def verify_mutable_argument!(facts)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
@@ -785,7 +937,10 @@ module FunctionAnalysis
   def verify_takes_argument!(facts)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
     if facts.is_give && !facts.param.takes
-      error!(facts.arg_node, :GIVE_TO_BORROW_PARAM, param: facts.param.name)
+      # Legal when keep-analysis proves the param kept (retained identity
+      # v4); keep-ness is whole-program, so the check replays after the
+      # keep fixpoint.
+      record_deferred_give_validation!(facts)
     end
     return unless facts.param.takes || facts.is_give
 
@@ -811,7 +966,7 @@ module FunctionAnalysis
 
     if language_mode != :strict && !facts.is_give && inner_identifier &&
         !inner_identifier.full_type!(context: "pending TAKES transport").implicitly_copyable? { |name| lookup_type_schema(name) } &&
-        !facts.arg_node.is_a?(AST::CopyNode) && !facts.arg_node.is_a?(AST::CloneNode)
+        !facts.arg_node.is_a?(AST::CopyNode) && !facts.arg_node.is_a?(AST::KeepNode)
       T.unsafe(inner_identifier).ownership_pending_transfer = true
       return
     end
@@ -1094,7 +1249,7 @@ module FunctionAnalysis
     type.atomic? && type.primitive?
   end
 
-  sig { params(node: CallNode, atomic_args: CallArgList).void }
+  sig { params(node: FunctionCallNode, atomic_args: CallArgList).void }
   def warn_multi_atomic_bare_value_call!(node, atomic_args)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     unique_args = atomic_args.compact
@@ -1304,6 +1459,26 @@ module FunctionAnalysis
       param.symbol = current_scope.local_entry!(param.name)
       param.symbol.is_param = true
       param.symbol.param_decl_token = param.name_token
+      # Retained-identity v5: propagate the parsed carrier contract onto the
+      # binding (single writer). Downstream consuming-use analysis and
+      # placement READ it; they never re-derive from syntax. An unconstrained
+      # TAKES parameter has a statically unknown carrier (the caller chose):
+      # mark it so COPY is rejected on it and on its direct aliases.
+      if param.carrier_contract
+        param.symbol.carrier_contract = param.carrier_contract
+        # Only a type that can actually carry a retained identity (@multiowned/
+        # @shared) is carrier-polymorphic. Collections, strings, and primitives
+        # have deterministic copy semantics -- COPY of them is unambiguous.
+        pt = param.type
+        retainable = pt.is_a?(Type) && !pt.collection? && !pt.string? && !pt.primitive?
+        # A MONOMORPHIC param is carrier-polymorphic too (its carrier varies per
+        # call), so the same fan-out rules apply: COPY is rejected on it and a
+        # non-final reuse requires KEEP. It differs only in that KEEP resolves
+        # per concrete carrier at monomorphization (stamp_keep_carrier_op!),
+        # rather than the deferred tag path.
+        param.symbol.carrier_polymorphic = true if param.takes && retainable &&
+          (param.carrier_contract == :polymorphic || param.carrier_contract == :monomorphic)
+      end
       # Preserve REQUIRES disjunctions for call-site effect resolution.
       if requires_map
         fams = requires_map[param.name.to_s]
@@ -1316,7 +1491,8 @@ module FunctionAnalysis
       # Non-TAKES parameters are implicit borrows. Mark in OG so the
       # annotator prevents storing borrowed data into owned containers.
       unless param.takes
-        ownership_graph[param.name]&.kind = :borrowed
+        graph_node = ownership_graph[param.name]
+        graph_node.kind = :borrowed if graph_node
       end
       param.type
     end
@@ -1573,7 +1749,17 @@ module FunctionAnalysis
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return true if spec.unconstrained_any?
     return true if spec.type == :"Any[]" && any_array_intrinsic_arg?(spec.type, arg)
-    return false unless spec.type == :Any || is_safe_autocast?(arg.resolved_type, spec.type)
+    # The legacy resolved-symbol spelling of a fixed-size array (String@symbol[3])
+    # does not round-trip through Type.new, which misreads it as a plain string
+    # family member. Bracketed spellings therefore match against their real
+    # parsed Type; anything else keeps the legacy spelling and never touches
+    # full_type!, so pre-resolution dispatcher recovery stays reachable.
+    cast_source = T.let(arg.resolved_type, T.untyped)
+    if cast_source.to_s.include?("[")
+      full = arg.full_type!(context: "intrinsic argument")
+      cast_source = full if full.array?
+    end
+    return false unless spec.type == :Any || is_safe_autocast?(cast_source, spec.type)
     return true unless spec.capability_constrained?
 
     arg_type = arg.full_type!(context: "intrinsic capability argument")

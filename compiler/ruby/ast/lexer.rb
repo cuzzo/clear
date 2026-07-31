@@ -60,6 +60,16 @@ class Lexer
       raise TokenPayloadError, payload_error("float", "Float")
     end
 
+    sig { returns(String) }
+    def display_value
+      payload = value
+      return payload if payload.is_a?(String)
+      return payload.to_s if payload.is_a?(Integer)
+      return payload.to_s if payload.is_a?(Float)
+
+      ""
+    end
+
     sig { returns(Integer) }
     def start_line = line
 
@@ -100,16 +110,16 @@ class Lexer
   # We use a hash for O(1) lookups
   KEYWORDS = T.let(%w[
       MUTABLE
-      FN METHOD RETURN RETURNS USE
+      FN METHOD RETURN RETURNS USE CONST
       IF THEN ELSE ELSE_IF END COMPTIME IS_A EXISTS IS_OK IS_READY
       WHILE DO FOR IN BG NEXT BREAK CONTINUE
       CAST AS TRY UNWRAP
       STRUCT ENUM UNION PROTOCOL IMPLEMENTATION TRUE FALSE NIL Auto
-      ASSERT RAISE CATCH EXIT DIE PASS PRUNE
+      ASSERT RAISE CATCH EXIT DIE PASS PRUNE DEFER
       MOD AND OR OR_ELSE XOR BIT_AND BIT_OR
       REQUIRE
       SELECT WHERE INDEX REDUCE ORDER_BY LIMIT SKIP UNNEST DISTINCT EACH TAP FIND ANY ALL COUNT SUM AVERAGE MIN MAX CONCURRENT SHARD TAKE_WHILE WINDOW JOIN RECOVER COLLECT
-      GIVE TAKES COPY MOVE CLONE SHARE LINK RESOLVE FREEZE
+      GIVE TAKES COPY KEEP MOVE SHARE LINK RESOLVE FREEZE UNIQUE MONOMORPHIC OWN
       WITH EXCLUSIVE RESTRICT BORROWED ON RETRY POSSIBLE_DEADLOCK POSSIBLE_LOCK_CYCLE VIEW MATERIALIZED UNSAFE LENGTH SNAPSHOT GUARD PRE DEBUG_POST
       POLYMORPHIC SHARED SYNC POLICY
       REQUIRES
@@ -223,25 +233,25 @@ class Lexer
       # `0xff_u32` is hex + suffix. The suffix-bearing regex runs before
       # the plain form so the suffix is captured when present.
       when @s.scan(/0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
-        hex_value = strip_digit_separators(@s.matched, @s[1]).to_i(16)
+        hex_value = strip_digit_separators(@s.matched, @s[1]).delete_prefix('0x').to_i(16)
         add_prefixed_int(hex_value, @s[1], start_col)
 
       when @s.scan(/0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*/)
-        add(:PREFIXED_INT, @s.matched.tr('_', '').to_i(16), start_col)
+        add(:PREFIXED_INT, check_based_literal(@s.matched.tr('_', '').delete_prefix('0x').to_i(16)), start_col)
 
       when @s.scan(/0o[0-7]+(?:_[0-7]+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
-        octal_value = strip_digit_separators(@s.matched, @s[1]).to_i(8)
+        octal_value = strip_digit_separators(@s.matched, @s[1]).delete_prefix('0o').to_i(8)
         add_prefixed_int(octal_value, @s[1], start_col)
 
       when @s.scan(/0o[0-7]+(?:_[0-7]+)*/)
-        add(:PREFIXED_INT, @s.matched.tr('_', '').to_i(8), start_col)
+        add(:PREFIXED_INT, check_based_literal(@s.matched.tr('_', '').delete_prefix('0o').to_i(8)), start_col)
 
       when @s.scan(/0b[0-1]+(?:_[0-1]+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
-        binary_value = strip_digit_separators(@s.matched, @s[1]).to_i(2)
+        binary_value = strip_digit_separators(@s.matched, @s[1]).delete_prefix('0b').to_i(2)
         add_prefixed_int(binary_value, @s[1], start_col)
 
       when @s.scan(/0b[0-1]+(?:_[0-1]+)*/)
-        add(:PREFIXED_INT, @s.matched.tr('_', '').to_i(2), start_col)
+        add(:PREFIXED_INT, check_based_literal(@s.matched.tr('_', '').delete_prefix('0b').to_i(2)), start_col)
 
       when @s.scan(/\d+(?:_\d+)*\.\d+(?:_\d+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
         float_value = strip_digit_separators(@s.matched, @s[1]).to_f
@@ -257,10 +267,14 @@ class Lexer
 
       when @s.scan(/\d+(?:_\d+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
         body = strip_digit_separators(@s.matched, @s[1])
-        add_prefixed_int(body.to_i, @s[1], start_col)
+        add_prefixed_int(body.to_i(10), @s[1], start_col)
 
       when @s.scan(/\d+(?:_\d+)*/)
-        add(:INT64, @s.matched.tr('_', '').to_i, start_col)
+        decimal_value = @s.matched.tr('_', '').to_i
+        if decimal_value > 9_223_372_036_854_775_807
+          raise Error, "Lexer Error: Literal #{@s.matched} overflows i64 (range #{integer_suffix_range_text('i64')})"
+        end
+        add(:INT64, decimal_value, start_col)
 
       when @s.scan(/"/)
         advance_pos(@s.matched) # Advance past the opening quote
@@ -519,6 +533,11 @@ class Lexer
 
   # Closed set of numeric type suffixes. Matches a word boundary so the
   # suffix can't absorb a following identifier.
+  # Lexer integer literals are never negative; their full domain is u64
+  # (self-hosted translation types TokenInt as UInt64 via the helper
+  # config; Ruby keeps its arbitrary-precision Integer).
+  TokenInt = T.type_alias { Integer }
+
   NUMERIC_SUFFIX_RE = T.let(/i8|i16|i32|i64|u8|u16|u32|u64|f32|f64/.freeze, Regexp)
 
   # Strip digit-group separators (underscores) from a numeric literal's
@@ -531,7 +550,7 @@ class Lexer
     body.tr('_', '')
   end
 
-  sig { params(val: Integer, suffix: String, start_col: Integer).returns(T.nilable(Integer)) }
+  sig { params(val: TokenInt, suffix: String, start_col: Integer).returns(T.nilable(Integer)) }
   def add_prefixed_int(val, suffix, start_col)
     unless numeric_suffix?(suffix)
       raise Error, "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}"
@@ -563,19 +582,36 @@ class Lexer
     %w[u8 i8 i16 u16 i32 u32 i64 u64].include?(suffix)
   end
 
-  sig { params(suffix: String, value: Integer).returns(T::Boolean) }
+  sig { params(suffix: String, value: TokenInt).returns(T::Boolean) }
   def integer_suffix_contains?(suffix, value)
+    # TokenInt is non-negative by construction (a literal carries no sign;
+    # minus is an operator), so only upper bounds apply. This keeps the
+    # checks valid in the self-hosted UInt64 domain.
     case suffix
-    when 'u8' then value >= 0 && value <= 255
-    when 'i8' then value >= -128 && value <= 127
-    when 'i16' then value >= -32_768 && value <= 32_767
-    when 'u16' then value >= 0 && value <= 65_535
-    when 'i32' then value >= -2_147_483_648 && value <= 2_147_483_647
-    when 'u32' then value >= 0 && value <= 4_294_967_295
-    when 'i64' then value >= -9_223_372_036_854_775_808 && value <= 9_223_372_036_854_775_807
-    when 'u64' then value >= 0 && value.bit_length <= 64
+    when 'u8' then value <= 255
+    when 'i8' then value <= 127
+    when 'i16' then value <= 32_767
+    when 'u16' then value <= 65_535
+    when 'i32' then value <= 2_147_483_647
+    when 'u32' then value <= 4_294_967_295
+    when 'i64' then value <= 9_223_372_036_854_775_807
+    # Sorbet cannot parse literals above i64 max, so "fits in u64" is
+    # spelled as a shift: (value >> 63) >> 1 is zero iff value < 2**64.
+    # The split shift keeps the u64 domain defined (a single >> 64 would
+    # be an over-wide shift there).
+    when 'u64' then ((value >> 63) >> 1) == 0
     else false
     end
+  end
+
+  # Bare based literals (0x/0o/0b, no suffix) live in the u64 token domain;
+  # the self-hosted parse rejects larger digits at the parseUInt boundary.
+  sig { params(value: TokenInt).returns(TokenInt) }
+  def check_based_literal(value)
+    if ((value >> 63) >> 1) != 0
+      raise Error, "Lexer Error: Literal #{@s.matched} overflows u64 (range #{integer_suffix_range_text('u64')})"
+    end
+    value
   end
 
   sig { params(suffix: String).returns(String) }

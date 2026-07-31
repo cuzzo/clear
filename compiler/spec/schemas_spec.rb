@@ -1,6 +1,6 @@
 require "rspec"
 
-require_relative "../ruby/ast/schemas"
+require_relative "../ruby/ast/ast"
 
 RSpec.describe Schemas do
   it "uses inline_struct? as a total schema-kind predicate" do

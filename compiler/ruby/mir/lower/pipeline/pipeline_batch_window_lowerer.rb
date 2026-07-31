@@ -6,6 +6,7 @@ require "sorbet-runtime"
 require_relative "../../../ast/ast"
 require_relative "../../../ast/type"
 require_relative "../../mir"
+require_relative "./pipeline_records"
 
 PipelineBatchWindowTypeInput = T.type_alias { T.any(Type, Symbol, String) }
 
@@ -26,7 +27,13 @@ class PipelineBatchWindowPlan < T::Struct
   const :element_zig, String
   const :result_zig, String
   const :size_mir, MIR::Node
-  const :expr_mir, MIR::Node
+  # Fresh per-use lowering of the per-window expression: its pending hoists
+  # (an owned call, a nested pipeline) must be emitted INSIDE each batch
+  # scope that declares the placeholder — a shared pre-lowered tree flushed
+  # them to the enclosing statement (undeclared __bw_batch Zig). Each call
+  # produces fresh temp ids so the linear ownership checker (name-keyed)
+  # sees distinct allocations at the push and flush sites.
+  const :make_expr, T.proc.returns(MIR::Node)
   const :alloc, Symbol
   const :placeholder_var, String
   const :timeout_ns, String
@@ -38,6 +45,7 @@ class PipelineBatchWindowLowerer < T::Struct
   const :bc_target, T.proc.returns(T::Boolean)
   const :visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :visit_mir_with_placeholder, T.proc.params(node: AST::Node, placeholder: String).returns(MIR::Node)
+  const :visit_expr_head, T.proc.params(expr_node: AST::Node, placeholder: String).returns(PipelineElementHead)
   const :pipeline_block, T.proc.params(list_node: AST::Node, blk: T.proc.params(items: String, label: String).returns(T::Array[MIR::Emittable])).returns(MIR::BlockExpr)
   const :next_label, T.proc.returns(String)
   const :set_current_label, T.proc.params(label: String).void
@@ -70,7 +78,7 @@ class PipelineBatchWindowLowerer < T::Struct
       element_zig: self.transpile_type.call(batch_element_type(lhs_type).to_s),
       result_zig: self.transpile_type.call(bw_node.expression.full_type!.to_s),
       size_mir: batch_size_mir(bw_node),
-      expr_mir: self.visit_mir_with_placeholder.call(bw_node.expression, placeholder_var),
+      make_expr: batch_expr_builder(bw_node, placeholder_var),
       alloc: self.pipeline_alloc.call(smooth_node),
       placeholder_var: placeholder_var,
       timeout_ns: batch_window_timeout_ns(bw_node),
@@ -130,6 +138,23 @@ class PipelineBatchWindowLowerer < T::Struct
     return Type.new(T.cast(lhs_type.stream_element_type, Type).resolved) if lhs_type.bounded_stream?
 
     lhs_type.runtime_stream_storage_element_type || T.must(lhs_type.element_type)
+  end
+
+  sig { params(bw_node: AST::BatchWindowOp, placeholder_var: String).returns(T.proc.returns(MIR::Node)) }
+  def batch_expr_builder(bw_node, placeholder_var)
+    lambda do
+      head = self.visit_expr_head.call(bw_node.expression, placeholder_var)
+      next head.value if head.pending.empty? && !head.owned
+
+      # The batch placeholder only exists inside the emitter's batch block —
+      # fence the expression as a lazy-boundary value block so the post-pass
+      # allocation normalizer materializes owned work INSIDE it instead of
+      # lifting a statement above the scope (undeclared __bw_batch Zig).
+      label = self.next_label.call
+      block = MIR::BlockExpr.new(label, [*head.pending, MIR::BreakStmt.new(label, head.value)])
+      block.lazy_boundary = true
+      block
+    end
   end
 
   sig { params(bw_node: AST::BatchWindowOp).returns(MIR::Node) }
@@ -314,7 +339,7 @@ class PipelineBatchWindowLowerer < T::Struct
         false,
         nil,
         nil),
-      MIR::Let.new("__bw_val", plan.expr_mir, false, nil, nil),
+      MIR::Let.new("__bw_val", plan.make_expr.call, false, nil, nil),
       bc_append_value_stmt(plan.alloc, append_uses_allocator: append_uses_allocator),
       MIR::Set.new(MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_end")),
     ]
@@ -374,7 +399,7 @@ class PipelineBatchWindowLowerer < T::Struct
       plan.placeholder_var,
       plan.element_zig,
       "res_list",
-      plan.expr_mir,
+      plan.make_expr.call,
       plan.alloc,
     )
   end
@@ -386,7 +411,7 @@ class PipelineBatchWindowLowerer < T::Struct
       plan.placeholder_var,
       plan.element_zig,
       "res_list",
-      plan.expr_mir,
+      plan.make_expr.call,
       plan.alloc,
     )
   end

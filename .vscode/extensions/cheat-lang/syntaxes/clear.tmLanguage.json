@@ -177,11 +177,6 @@
     "sigils": {
       "patterns": [
         {
-          "comment": "Explicit panic operator",
-          "name": "keyword.operator.panic.clear",
-          "match": "!!"
-        },
-        {
           "comment": "Mutation suffix on identifiers (foo!, increment!) — must follow a word",
           "name": "keyword.operator.mutation.clear",
           "match": "(?<=[a-zA-Z0-9_])!"

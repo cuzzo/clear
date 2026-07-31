@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require_relative "../../compiler/entrypoint"
+require_relative "../helpers/with_match_check"
 
 module Annotator
   module Domains
@@ -148,7 +149,6 @@ module Annotator
       def collapse_errors_for_call(sig, args)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        require_relative 'helpers/with_match_check' unless defined?(WithMatchCheck)
         collapsed = Set.new
         param_indices = sig.params.each_with_index.to_h { |param, index| [param.name.to_s, index] }
         sig.requires.each do |param_name, _families|
@@ -233,7 +233,7 @@ module Annotator
             type_sym = item.name.to_sym
             unless AST.error_type?(type_sym)
               emit_registry_mismatch!(
-                item.token, item.name, AST::ERROR_TYPES.keys,
+                item.token, item.name, AST.error_type_names,
                 "CATCH #{item.name}: error type '#{item.name}' is not registered. A type " \
                 "must be registered via RAISE/OR_ELSE EXIT before it can be CATCHed.",
                 "closest registered type"
@@ -565,18 +565,22 @@ module Annotator
         # heap-boxed into a `*T` cell at the RETURN site (escape analysis),
         # so the returned expression need not already carry :indirect.
         layout_ok = expected_t.layout == actual_t.layout || expected_t.indirect?
-        expected_t.ownership == actual_t.ownership &&
+        # nil element ownership IS the default: a declared `[]String@symbol`
+        # return leaves it nil while registry-built keys()/values() results
+        # stamp :affine explicitly — the same type, printed identically.
+        elem_own = ->(t) { t.elem_ownership == :affine ? nil : t.elem_ownership }
+        (expected_t.ownership == actual_t.ownership &&
           expected_t.sync == actual_t.sync &&
           layout_ok &&
-          expected_t.elem_ownership == actual_t.elem_ownership &&
-          expected_t.elem_sync == actual_t.elem_sync
+          elem_own.call(expected_t) == elem_own.call(actual_t) &&
+          expected_t.elem_sync == actual_t.elem_sync) == true
       end
 
       sig { params(type: Type).returns(String) }
       def type_display(type)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        parts = [type.resolved.to_s]
+        parts = [Type.surface_name_type(type)]
 
         ownership = type.ownership_surface_name
         sync = type.sync_surface_name
@@ -660,30 +664,42 @@ module Annotator
         end
 
         operation, recovery = or_else_operation(node.right)
-        begin
-          plan = TenseOperationPlanner.or_else(
-            t_left_type,
-            t_right_type,
-            operation: operation,
-            recovery: recovery,
-          )
-        rescue ArgumentError
-          expected = t_left_type.value_payload_type
-          error!(node, :TYPE_MISMATCH_IN_OR, expected: expected.resolved, got: t_right_type.resolved)
-          # Fix-collection mode records the diagnostic and continues. Publish
-          # the plan the corrected fallback would use so later phases never
-          # need a nullable compatibility path.
-          plan = TenseOperationPlanner.or_else(
-            t_left_type,
-            expected,
-            operation: operation,
-            recovery: recovery,
-          )
-        end
+        plan = plan_or_else_with_diagnostic(node, t_left_type, t_right_type, operation, recovery)
         plan = T.must(plan)
         node.tense_plan = plan
         coerce_empty_collection_fallback!(node.right, plan.result_type) if recovery == TenseRecovery::Fallback
         stamp_type!(node, plan.result_type)
+      end
+
+      sig do
+        params(
+          node: AST::BinaryOp,
+          left_type: Type,
+          right_type: Type,
+          operation: TenseOperationKind,
+          recovery: TenseRecovery,
+        ).returns(TenseOperationPlan)
+      end
+      def plan_or_else_with_diagnostic(node, left_type, right_type, operation, recovery)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        TenseOperationPlanner.or_else(
+          left_type,
+          right_type,
+          operation: operation,
+          recovery: recovery,
+        )
+      rescue ArgumentError
+        expected = left_type.value_payload_type
+        error!(node, :TYPE_MISMATCH_IN_OR, expected: expected.resolved, got: right_type.resolved)
+        # Fix-collection mode records the diagnostic and continues. Publish
+        # the plan the corrected fallback would use so later phases never
+        # need a nullable compatibility path.
+        TenseOperationPlanner.or_else(
+          left_type,
+          expected,
+          operation: operation,
+          recovery: recovery,
+        )
       end
 
       sig { params(node: AST::Node).returns([TenseOperationKind, TenseRecovery]) }

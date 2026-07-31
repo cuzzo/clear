@@ -256,10 +256,22 @@ class ProgramMIRFinalizer
         true
       when AST::Assignment
         indexed_assignment_lowers_through_runtime?(node)
-      when AST::CopyNode, AST::CloneNode
+      when AST::CopyNode, AST::KeepNode
         copy_node_lowers_through_runtime?(node, schema_lookup)
       when AST::BinaryOp
-        owned_or_else_lowers_through_runtime?(node, schema_lookup)
+        # A materializing pipeline allocates its result through the runtime
+        # (rt.frameAlloc / heapAlloc) in EVERY position — including ones no
+        # annotator branch records (an IF-condition, an each-materialized
+        # source). This body walk sees every node, so recognize it here:
+        # missing it dropped the rt parameter from signatures whose lowered
+        # bodies reference it (undeclared 'rt' Zig).
+        if node.smooth?
+          result_ti = Type.from_node!(node, context: "smooth pipeline needs-runtime")
+          next_needs = !result_ti.inf_stream?
+          next_needs || owned_or_else_lowers_through_runtime?(node, schema_lookup)
+        else
+          owned_or_else_lowers_through_runtime?(node, schema_lookup)
+        end
       when AST::WithBlock
         with_block_lowers_through_runtime?(node)
       else
@@ -285,7 +297,7 @@ class ProgramMIRFinalizer
       signature&.needs_rt == true || signature&.emits_allocating? == true
     end
 
-    sig { params(node: T.any(AST::CopyNode, AST::CloneNode), schema_lookup: Type::SchemaLookup).returns(T::Boolean) }
+    sig { params(node: T.any(AST::CopyNode, AST::KeepNode), schema_lookup: Type::SchemaLookup).returns(T::Boolean) }
     def copy_node_lowers_through_runtime?(node, schema_lookup)
       type = Type.from_node!(node, context: "COPY runtime requirement").success_type
       return false if type.primitive? || type.symbol? || type.id_handle?

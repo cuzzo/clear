@@ -114,12 +114,12 @@ RSpec.describe "RC ownership through optional collection bindings" do
     expect(zig).not_to match(/rcRetain\(Item, __copy_rc_\d+\);\n.*if \(source\)/m)
   end
 
-  it "retains an optional RC payload inside CLONE's capture scope" do
+  it "retains an optional RC payload inside KEEP's capture scope" do
     source = <<~CLEAR
       STRUCT Item { value: Int64 }
       FN main() RETURNS Void ->
         source: ?Item@shared = Item{ value: 1_i64 } @shared;
-        IF CLONE source EXISTS AS item THEN ASSERT item.value == 1_i64; END
+        IF KEEP source EXISTS AS item THEN ASSERT item.value == 1_i64; END
         IF source EXISTS AS item THEN ASSERT item.value == 1_i64; END
       END
     CLEAR

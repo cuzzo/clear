@@ -1,0 +1,19 @@
+# F7 minimal: {String}String insert/read/overwrite; old value must be freed
+FN dup(s: String) RETURNS String ->
+    RETURN COPY s;
+END
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST F7aMapOverwrite DO
+    MUTABLE m: {String}String = {};
+    m["k"] = dup("v1") $+ "a";
+    first = m["k"] OR_ELSE "";
+    ASSERT first == "v1a";
+    m["k"] = dup("v2") $+ "b";
+    got = m["k"] OR_ELSE "";
+    ASSERT got == "v2b";
+    ASSERT got.length() == 3;
+    missing = m["nope"] OR_ELSE "dflt";
+    ASSERT missing == "dflt";
+END

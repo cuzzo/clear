@@ -55,6 +55,10 @@ RSpec.describe "Allocation Strategy Invariants" do
     fn.cleanup_bindings&.[](name.to_s)
   end
 
+  def transpile(src)
+    ZigTranspiler.new(source_dir: Dir.pwd).transpile(src, source_dir: Dir.pwd, ownership_mode: :default)
+  end
+
   # ===========================================================================
   # Group A: INV-PRIM — primitives are always :stack
   # ===========================================================================
@@ -738,6 +742,58 @@ RSpec.describe "Allocation Strategy Invariants" do
       CLEAR
       d = find_decl_in(main_fn(ast), "s")
       expect(d.storage).to eq(:rodata)
+    end
+
+  end
+
+  # ===========================================================================
+  # Group I: INV-HOIST-ARG — a hoisted call-ARGUMENT temp is placed by whether
+  # it ESCAPES, not merely by whether its type needs cleanup.
+  #
+  # `Hoist.collect_stmt_hoists!` lifts allocating call arguments into temps so
+  # escape analysis sees a binding. Those temps must be placed like any other
+  # value: an argument that is MOVED out of the frame (consumed by a TAKES
+  # parameter, or stored into a collection/return) escapes -> :heap; an ordinary
+  # BORROWED argument (e.g. a concat passed to a non-consuming String parameter)
+  # is used within the current frame and stays frame-local -> frameAlloc.
+  #
+  # Regression guard: heap-promoting every cleanup-bearing hoisted arg moved
+  # dozens of short-lived borrowed temporaries off the frame allocator onto the
+  # general heap (measured on the MiniVM: frameAlloc 356 -> 264), hurting
+  # allocator locality for no ownership reason.
+  # ===========================================================================
+  describe "Group I: INV-HOIST-ARG — hoisted arg temps placed by escape" do
+
+    it "borrowed allocating call arg (concat into a borrow param) stays :frame" do
+      zig = transpile(<<~CLEAR)
+        FN show(label: String, s: String) RETURNS Int64 -> RETURN s.length() + label.length(); END
+        FN main() RETURNS Void ->
+          a = "hello";
+          b = "world";
+          n = show("tag", a $+ b);
+          ASSERT n == 13_i64, "borrowed";
+          RETURN;
+        END
+      CLEAR
+      concat = zig[/std\.mem\.concat\([^,]+,/]
+      expect(concat).to include("rt.frameAlloc()")
+      expect(zig).not_to match(/std\.mem\.concat\(__clear_heap_alloc/)
+    end
+
+    it "escaping allocating call arg (concat stored into a collection) is :heap" do
+      zig = transpile(<<~CLEAR)
+        FN main() RETURNS Void ->
+          a = "hello";
+          b = "world";
+          MUTABLE xs: []String = [];
+          &xs.append(a $+ b);
+          ASSERT xs.length() == 1_i64, "escapes";
+          RETURN;
+        END
+      CLEAR
+      concat = zig[/std\.mem\.concat\([^,]+,/]
+      expect(concat).to include("__clear_heap_alloc")
+      expect(zig).not_to match(/std\.mem\.concat\(rt\.frameAlloc/)
     end
 
   end

@@ -1,0 +1,16 @@
+# C-1: UNIQUE requires exactly one owner. COPY of a retained value detaches an
+# independent payload the UNIQUE callee owns exclusively; the shared original
+# advances independently. (The reject case -- a bare @multiowned into UNIQUE --
+# is covered by unique_exclusive_spec.)
+STRUCT Doc { version: Int64 }
+
+FN persist(TAKES d: UNIQUE Doc) RETURNS Int64 -> RETURN d.version; END
+
+FN main() RETURNS Void ->
+    MUTABLE shared = Doc{ version: 3 } @multiowned;
+    snap = persist(OWN COPY shared);
+    ASSERT snap == 3, "unique callee got an independent copy";
+    shared.version = 9;
+    WITH shared { ASSERT shared.version == 9, "shared advanced independently"; }
+    RETURN;
+END

@@ -164,7 +164,28 @@ module TestLowering
            before_mir +
            after_defers +
            body_mir
-    MIR::TestDef.new(full_name, body)
+    test_def = MIR::TestDef.new(full_name, body)
+    # A body that spawns fibers needs a scheduler; the bare test-runner
+    # thread has none (GPF in submitSpawn/getSched). The emitter reads this
+    # stamp and drives the body as a scheduler task (INV-7: decision here,
+    # template there).
+    test_def.needs_scheduler = test_body_spawns_fibers?(body)
+    test_def
+  end
+
+  # True when any node in the lowered test body reaches the fiber runtime:
+  # BG / BG STREAM blocks, stream spawns, sharded concurrent EACH, or any
+  # call that resolves the scheduler (getSched, concurrent list helpers).
+  sig { params(body: T::Array[MIR::Node]).returns(T::Boolean) }
+  def test_body_spawns_fibers?(body)
+    found = T.let(false, T::Boolean)
+    MIR.each_node(body) do |n|
+      found ||= n.is_a?(MIR::BgBlock) || n.is_a?(MIR::StreamSpawn) ||
+        n.is_a?(MIR::ShardConcurrentEach) ||
+        (n.is_a?(MIR::MethodCall) && n.method.to_s == "getSched") ||
+        (n.is_a?(MIR::RuntimeCall) && n.spec.callee.to_s.downcase.include?("concurrent"))
+    end
+    found
   end
 
   # Scope function_state.current_bindings to the cleanup-classifier's synthetic FN
@@ -307,15 +328,11 @@ module TestLowering
   sig { params(node: AstIdentifierSearchNode, name_set: LetAstMap, out: T::Set[String]).void }
   def collect_identifier_refs(node, name_set, out)
     T.bind(self, MIRLowering) rescue nil
-    return if node.nil? || AST.scalar_literal_value?(node) || node.is_a?(Lexer::Token)
-    if node.is_a?(Array)
-      node.each { |n| collect_identifier_refs(n, name_set, out) }
-      return
+    AST.each_locatable(T.unsafe(node), descend_functions: true) do |candidate|
+      if candidate.is_a?(AST::Identifier) && name_set.key?(candidate.name)
+        out << candidate.name
+      end
     end
-    if node.is_a?(AST::Identifier) && name_set.key?(node.name)
-      out << node.name
-    end
-    T.unsafe(node).each_pair { |_, v| collect_identifier_refs(v, name_set, out) } if node.respond_to?(:each_pair)
   end
 
   sig { params(node: AST::AssertRaises).returns(MIR::AssertRaisesCheck) }

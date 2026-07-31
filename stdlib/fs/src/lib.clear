@@ -32,3 +32,11 @@ PUB FN size(path: String) RETURNS !Int64 ->
     IF bytes < 0 -> RAISE "file size unavailable";
     RETURN bytes;
 END
+
+PUB FN exists?(path: String) RETURNS Bool ->
+    RETURN fileSize(path) >= 0;
+END
+
+PUB FN file?(path: String) RETURNS Bool ->
+    RETURN fileSize(path) >= 0;
+END

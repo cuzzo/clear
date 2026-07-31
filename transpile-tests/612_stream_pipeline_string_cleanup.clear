@@ -1,7 +1,7 @@
 FN size(s: String) RETURNS Int64 -> RETURN s.length(); END
 
 FN main() RETURNS Void ->
-  src: ~?String[] = BG STREAM {
+  src: [~]String = BG STREAM {
     a: String = COPY "a";
     b: String = COPY "bb";
     YIELD a;
@@ -11,7 +11,7 @@ FN main() RETURNS Void ->
   total = NEXT running;
   ASSERT total == 3_i64;
 
-  src2: ~?String[] = BG STREAM {
+  src2: [~]String = BG STREAM {
     c: String = COPY "ccc";
     d: String = COPY "dddd";
     YIELD c;

@@ -295,6 +295,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "frame-test.zig" },
         .{ .path = "ownership-test.zig" },
         .{ .path = "partitioned-map-test.zig", .tsan = true },
+        .{ .path = "rc-keep-edge-test.zig" },
         .{ .path = "resource-test.zig" },
         .{ .path = "runtime-header-test.zig" },
         .{ .path = "safety-test.zig" },

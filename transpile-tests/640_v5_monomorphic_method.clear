@@ -1,0 +1,17 @@
+# Retained-identity v5: a method called on a MONOMORPHIC parameter projects the
+# receiver payload out at comptime (deref an Rc/Arc handle, or pass the plain
+# value) before binding `self`, so `self.field` resolves for every carrier.
+STRUCT User { id: Int64 }
+IMPLEMENTATION User {
+  METHOD bump(self) RETURNS Int64 -> RETURN self.id + 1; END
+}
+FN consume(TAKES u: MONOMORPHIC User) RETURNS Int64 -> RETURN u.bump(); END
+FN main() RETURNS Void ->
+    m = User{ id: 2 } @multiowned;
+    ASSERT consume(m) == 3, "method on @multiowned handle";
+    s = User{ id: 4 } @shared;
+    ASSERT consume(s) == 5, "method on @shared handle";
+    p = User{ id: 9 };
+    ASSERT consume(p) == 10, "method on plain";
+    RETURN;
+END

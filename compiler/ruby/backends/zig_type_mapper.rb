@@ -34,9 +34,9 @@ module ZigTypeMapper
 
     # Special AST nodes you might map to operators
     #:OR_ELSE   => "orelse"
-  }, T::Hash[Symbol, String])
+  }.freeze, T::Hash[Symbol, String])
 
-  ZIG_PRIMITIVES = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "void", "[]const u8"]
+  ZIG_PRIMITIVES = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "void", "[]const u8"].freeze
 
   # Delegates to Type#zig_type for type-to-Zig conversion.
   # This keeps the transpiler interface stable while the logic lives in Type.

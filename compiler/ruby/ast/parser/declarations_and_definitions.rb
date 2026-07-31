@@ -26,6 +26,7 @@ class ClearParser
       p_name = name_tok.text! if name_tok
       p_type = T.let(nil, T.nilable(ArgumentType))
       default_val = nil
+      carrier_contract = T.let(:polymorphic, Symbol)
 
       if is_comptime
         consume(:CHAR, ':')
@@ -33,7 +34,14 @@ class ClearParser
         p_name = "comptime"
       else
         if match!(:CHAR, ':')
+          carrier_contract = parse_carrier_contract
           p_type = parse_type_annotation
+          # The existing `SHARED T` spelling produces a polymorphic-shared
+          # type; that IS the v5 :shared parameter contract (requires a
+          # retained-identity family). Derive it rather than intercepting
+          # the SHARED keyword, which belongs to the type annotation.
+          carrier_contract = :shared if carrier_contract == :polymorphic &&
+            p_type.is_a?(Type) && p_type.polymorphic_shared?
           default_val = parse_expression if match!(:CHAR, '=')
         elsif match!(:CHAR, '=')
           # Compatibility with the original spelling, `name=default: Type`.
@@ -49,9 +57,23 @@ class ClearParser
 
       AST::Capture.new(name: p_name, type: p_type, default: default_val,
                        mutable: is_mutable, takes: takes,
-                       comptime: is_comptime, name_token: name_tok)
+                       comptime: is_comptime, name_token: name_tok,
+                       carrier_contract: carrier_contract)
     end
      .last # always ignore the first token
+  end
+
+  # Retained-identity v5: an optional UNIQUE keyword between the `:` and the
+  # parameter type constrains the carrier to exclusively-owned. (The :shared
+  # contract is spelled `SHARED T`, which the type annotation already parses
+  # as a polymorphic-shared type; the caller derives :shared from that.)
+  # Absence is the carrier-polymorphic default.
+  sig { returns(Symbol) }
+  def parse_carrier_contract
+    return :unique if match!(:KEYWORD, 'UNIQUE')
+    return :monomorphic if match!(:KEYWORD, 'MONOMORPHIC')
+
+    :polymorphic
   end
 
   sig { returns(T::Array[AST::Param]) }
@@ -59,7 +81,8 @@ class ClearParser
     parse_argument_specs.map do |spec|
       AST::Param.new(name: spec.name, type: spec.type, default: spec.default,
                      mutable: spec.mutable, takes: spec.takes,
-                     comptime: spec.comptime, name_token: spec.name_token)
+                     comptime: spec.comptime, name_token: spec.name_token,
+                     carrier_contract: spec.carrier_contract)
     end
   end
 
@@ -100,6 +123,38 @@ class ClearParser
       return AST::VarDecl.new(start_token, name, type_annotation, value, true)
     end
     error!(start_token, :MUTABLE_BARE_NEEDS_TYPE)
+  end
+
+  # CONST NAME: Type = expr;
+  # A top-level immutable, comptime-initialized binding emitted at Zig container
+  # scope. Unlike a local, a CONST requires both an explicit type and an
+  # initializer: it has no enclosing frame to infer from or default into, and
+  # its value must be comptime-known (a heap-owning initializer is rejected
+  # downstream by MODULE_SCOPE_OWNED_VALUE).
+  sig { params(visibility: Symbol).returns(AST::VarDecl) }
+  def parse_const_decl(visibility = :package)
+    start_token = consume(:KEYWORD, 'CONST')
+    # A CONST name is SCREAMING_CASE, so it lexes as a TYPE_ID (leading capital).
+    # Enforce all-caps to keep constants visually distinct from types at every
+    # reference site (a bare all-caps identifier reads as "constant").
+    name_tok = match?(:TYPE_ID) ? consume(:TYPE_ID) : consume(:VAR_ID)
+    name = name_tok.text!
+    unless name.match?(/\A[A-Z][A-Z0-9_]*\z/)
+      error!(name_tok, :CONST_NEEDS_CAPS, name: name)
+    end
+    unless match!(:CHAR, ':')
+      error!(start_token, :CONST_NEEDS_TYPE, name: name)
+    end
+    type_annotation = parse_inferred_wrapper_annotation || parse_type_annotation
+    unless match!(:CHAR, '=')
+      error!(start_token, :CONST_NEEDS_VALUE, name: name)
+    end
+    value = parse_expression
+    consume(:CHAR, ';')
+    decl = AST::VarDecl.new(start_token, name, type_annotation, value, false)
+    decl.module_const = true
+    decl.const_visibility = visibility
+    decl
   end
 
   # Build a compact default-initialized AST value for a `T[N]` annotation.
@@ -164,6 +219,8 @@ class ClearParser
       parse_enum_def(visibility)
     elsif match?(:KEYWORD, 'UNION')
       parse_union_def(visibility)
+    elsif match?(:KEYWORD, 'CONST')
+      parse_const_decl(visibility)
     else
       error!(current, :VISIBILITY_BAD_KIND, got: current.value)
     end

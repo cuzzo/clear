@@ -1,0 +1,13 @@
+diff --git a/compiler/ruby/annotator/domains/lifetimes.rb b/compiler/ruby/annotator/domains/lifetimes.rb
+index 9b72c57d4..5108d7b3e 100644
+--- a/compiler/ruby/annotator/domains/lifetimes.rb
++++ b/compiler/ruby/annotator/domains/lifetimes.rb
+@@ -149,7 +149,7 @@ module Annotator
+         if copy_root.is_a?(AST::Identifier)
+           copy_entry = copy_root.symbol
+           if copy_entry.is_a?(SymbolEntry) && copy_entry.carrier_polymorphic
+-            error!(node, :COPY_ON_POLYMORPHIC_PARAM, name: copy_root.name)
++            error!(node, :COPY_ON_POLYMORPHIC_PARAM, name: copy_root.name) if copy_root != copy_root # MUTANT: carrier_copy_polymorphic
+           end
+         end
+ 

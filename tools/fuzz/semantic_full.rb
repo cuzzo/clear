@@ -176,7 +176,7 @@ module SemanticFull
         definition = "STRUCT SemanticWhole#{stem} { value: #{value.clear_type} }"
         [[definition], "box = SemanticWhole#{stem}{ value: #{fragment.source} };\n#{assertion.call('box.value')}"]
       when :list_element
-        [[], "values: #{value.clear_type}[] = [#{fragment.source}];\n#{assertion.call('values[0_i64]')}"]
+        [[], "values: []#{value.clear_type} = [#{fragment.source}];\n#{assertion.call('(UNWRAP values[0_i64])')}"]
       when :give_to_takes
         if managed?(fragment)
           helper = <<~CLEAR.strip

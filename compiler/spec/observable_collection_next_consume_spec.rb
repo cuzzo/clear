@@ -17,7 +17,7 @@ RSpec.describe "NEXT on collection observable: linear consume" do
   it "marks the binding moved on first NEXT (rejects double-NEXT)" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-          gen: ~?Int64[] = BG STREAM {
+          gen: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 3_i64 DO YIELD i; i = i + 1_i64; END
           };
@@ -33,7 +33,7 @@ RSpec.describe "NEXT on collection observable: linear consume" do
   it "accepts a single NEXT" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-          gen: ~?Int64[] = BG STREAM {
+          gen: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 3_i64 DO YIELD i; i = i + 1_i64; END
           };

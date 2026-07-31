@@ -5,7 +5,6 @@ require "sorbet-runtime"
 require_relative "param"
 require_relative "struct_field"
 require_relative "type"
-require_relative "schemas"
 require_relative "lexer"
 require_relative "function_signature_forward"
 
@@ -26,7 +25,20 @@ module AST
   end
 
   RawBody = T.type_alias { T::Array[AST::Node] }
-  HashLitPairs = T.type_alias { T::Hash[AST::Node, AST::Node] }
+  HashLitPairs = T.type_alias { T::Hash[AST::Locatable, AST::Locatable] }
+  AssignmentName = T.type_alias { T.any(String, AST::Identifier, AST::GetField, AST::GetIndex) }
+  PipelineRewriteNode = T.type_alias do
+    T.any(
+      AST::Identifier, AST::FuncCall, AST::MethodCall, AST::BinaryOp,
+      AST::GetField, AST::GetIndex, AST::BindExpr, AST::Assignment,
+      AST::UnaryOp, AST::CopyNode, AST::MoveNode, AST::KeepNode,
+      AST::ShareNode, AST::WithBlock, AST::StructLit, AST::HashLit,
+      AST::ListLit, AST::BlockExpr, AST::Assert, AST::IfStatement,
+      # A static call carries the same call metadata: annotation copies it onto
+      # the synthetic FuncCall it resolves through.
+      AST::StaticCall,
+    )
+  end
   BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
   BindingNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr, AST::DestructureTarget) }
   ScalarLiteralCandidate = T.type_alias do
@@ -97,48 +109,49 @@ module AST
 
   sig do
     params(
-      src: AST::Locatable,
-      dst: AST::Locatable,
+      dst: AST::PipelineRewriteNode,
+      src: AST::PipelineRewriteNode,
       include_call_metadata: T::Boolean,
-    ).returns(AST::Locatable)
+    ).returns(AST::PipelineRewriteNode)
   end
-  def self.copy_pipeline_rewrite_metadata!(src, dst, include_call_metadata: false)
-    src.full_type!(context: "pipeline rewrite type copy")
-    copy_pipeline_base_metadata!(src, dst)
-    copy_pipeline_call_metadata!(src, dst) if include_call_metadata
-    dst
-  end
-
-  sig { params(src: AST::Locatable, dst: AST::Locatable).void }
-  def self.copy_pipeline_base_metadata!(src, dst)
-    dst.full_type = src.full_type
-    dst.coerced_type = src.coerced_type_object if src.coerced_type_object
-    dst.storage = src.storage_override if src.storage_override
+  # ruby-to-clear: data-api
+  # ruby-to-clear: pub
+  def self.copy_pipeline_rewrite_metadata!(dst, src, include_call_metadata: false)
+    dst.type_object = src.type_object
+    dst.coerced_type_object = src.coerced_type_object
+    dst.storage_override = src.storage_override
     dst.var_used = src.var_used unless src.var_used.nil?
+    # INV-13: `arg.was_moved` is the single source of truth for "callee
+    # takes". A rewritten pipeline placeholder must keep the annotator's
+    # stamp or call lowering re-derives (and wrongly copies) the argument.
+    dst.was_moved = src.was_moved unless src.was_moved.nil?
     dst.slot_size = src.slot_size unless src.slot_size.nil?
     dst.container_borrow = src.container_borrow unless src.container_borrow.nil?
-    dst.tense_plan = T.must(src.tense_plan) if src.tense_plan
-    if src.respond_to?(:retain_error_channel) && dst.respond_to?(:retain_error_channel=)
-      retained = T.unsafe(src).retain_error_channel
-      T.unsafe(dst).retain_error_channel = retained unless retained.nil?
+    dst.tense_plan = src.tense_plan
+    case src
+    when AST::BinaryOp
+      dst.retain_error_channel = src.retain_error_channel if dst.is_a?(AST::BinaryOp)
+    when AST::FuncCall
+      dst.retain_error_channel = src.retain_error_channel if dst.is_a?(AST::FuncCall)
+    when AST::MethodCall
+      dst.retain_error_channel = src.retain_error_channel if dst.is_a?(AST::MethodCall)
     end
-  end
-  private_class_method :copy_pipeline_base_metadata!
 
-  sig { params(src: AST::Locatable, dst: AST::Locatable).void }
-  def self.copy_pipeline_call_metadata!(src, dst)
-    dst.zig_pattern = src.zig_pattern if src.zig_pattern
-    dst.matched_stdlib_def = src.matched_stdlib_def if src.matched_stdlib_def
-    dst.matched_signature = src.matched_signature if src.matched_signature
-    dst.stdlib_allocates = src.stdlib_allocates unless src.stdlib_allocates.nil?
-    dst.mutates_receiver = src.mutates_receiver unless src.mutates_receiver.nil?
-    dst.implicit_layout_cost = src.implicit_layout_cost unless src.implicit_layout_cost.nil?
-    dst.layout_transport = src.layout_transport unless src.layout_transport.nil?
-    dst.can_fail = src.can_fail unless src.can_fail.nil?
-    dst.error_kind = src.error_kind if src.error_kind
-    dst.error_type = src.error_type if src.error_type
+    if include_call_metadata
+      dst.zig_pattern = src.zig_pattern if src.zig_pattern
+      dst.matched_stdlib_def = src.matched_stdlib_def if src.matched_stdlib_def
+      dst.matched_signature = src.matched_signature if src.matched_signature
+      dst.stdlib_allocates = src.stdlib_allocates unless src.stdlib_allocates.nil?
+      dst.mutates_receiver = src.mutates_receiver unless src.mutates_receiver.nil?
+      dst.implicit_layout_cost = src.implicit_layout_cost unless src.implicit_layout_cost.nil?
+      dst.layout_transport = src.layout_transport unless src.layout_transport.nil?
+      dst.can_fail = src.can_fail unless src.can_fail.nil?
+      dst.error_kind = src.error_kind if src.error_kind
+      dst.error_type = src.error_type if src.error_type
+    end
+
+    dst
   end
-  private_class_method :copy_pipeline_call_metadata!
 
   # A node's value-type is, for these kinds, a pure function of its
   # structure — so it is DERIVED, never stamped. The full_type getter
@@ -164,7 +177,7 @@ module AST
   end
 
   Capture = Struct.new(:name, :type, :default, :mutable, :takes,
-                       :comptime, :name_token, :storage,
+                       :comptime, :name_token, :storage, :carrier_contract,
                        keyword_init: true) do
     extend T::Sig
 
@@ -176,6 +189,9 @@ module AST
       self[:mutable]  = !!self[:mutable]
       self[:takes]    = !!self[:takes]
       self[:comptime] = !!self[:comptime]
+      # Retained-identity v5 parameter carrier contract: :polymorphic
+      # (default), :unique, or :shared.
+      self[:carrier_contract] ||= :polymorphic
       t = self[:type]
       self[:type] = Type.new(t || :Any)
     end
@@ -231,9 +247,9 @@ module AST
                          :indirect_payload_as,
                          keyword_init: true) do
     extend T::Sig
-    # ruby-to-clear: field-type value=Node
-    # ruby-to-clear: field-type body=Node[]
-    # ruby-to-clear: field-type extra_values=Node[]
+    # ruby-to-clear: field-type value=Locatable
+    # ruby-to-clear: field-type body=[]Locatable
+    # ruby-to-clear: field-type extra_values=[]Locatable
 
     sig { params(kw: StructKwargs).void }
     def initialize(**kw)
@@ -254,6 +270,8 @@ module AST
     end
 
     sig { returns(T::Array[AST::Locatable]) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def body
       self[:body]
     end
@@ -294,7 +312,7 @@ module AST
                        keyword_init: true) do
     extend T::Sig
     attr_accessor :mir_binding_entry
-    # ruby-to-clear: field-type expr=Node
+    # ruby-to-clear: field-type expr=Locatable
 
     sig { params(kw: StructKwargs).void }
     def initialize(**kw)
@@ -365,6 +383,11 @@ module AST
     sig { returns(Type) }
     def resolved_type
       self[:resolved_type]
+    end
+
+    sig { returns(T.nilable(Symbol)) }
+    def capability
+      T.must(T.cast(self[:capability], T.nilable(Symbol)))
     end
 
     sig { params(val: Type).void }
@@ -486,11 +509,13 @@ module AST
   # resolution, capability source naming, and placeholder-root detection
   # each hand-rolled the same `case node; GetField/GetIndex -> .target`
   # recursion (decomplex Missing-Abstraction, scatter=7).
+  # ruby-to-clear: data-api
   sig { params(node: AST::Node).returns(T.nilable(AST::Identifier)) }
+  # ruby-to-clear: effects reentrant-tail-call
   def self.root_identifier(node)
     case node
-    when AST::MutableBorrow             then root_identifier(node.target)
-    when AST::GetField, AST::GetIndex then root_identifier(node.target)
+    when AST::MutableBorrow             then AST.root_identifier(node.target)
+    when AST::GetField, AST::GetIndex then AST.root_identifier(node.target)
     when AST::Identifier              then node
     end
   end
@@ -515,6 +540,9 @@ module AST
     node.is_a?(AST::FuncCall) || node.is_a?(AST::MethodCall)
   end
 
+  # This data-only unit emits only methods which form its cross-package API.
+  # ruby-to-clear: data-api
+  # ruby-to-clear: pub
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.container_borrow?(node)
     return false unless node
@@ -530,6 +558,8 @@ module AST
   # manufacture an owned value. Keeping the rule here prevents annotation,
   # cleanup classification, and lowering from independently guessing which
   # wrappers preserve borrow provenance.
+  # ruby-to-clear: data-api
+  # ruby-to-clear: pub
   sig { params(node: AST::Node).returns(T.nilable(AST::Node)) }
   def self.borrow_transparent_operand(node)
     return node.target if node.is_a?(AST::OptionalUnwrap) || node.is_a?(AST::TenseNavigation)
@@ -539,10 +569,12 @@ module AST
     nil
   end
 
+  # ruby-to-clear: data-api
+  # ruby-to-clear: pub
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.borrowed_ownership_view?(node)
     return false unless node
-    return false if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)
+    return false if node.is_a?(AST::CopyNode) || node.is_a?(AST::KeepNode)
     return true if node.is_a?(AST::Identifier) && node.symbol&.borrowed_alias
     return true if container_borrow?(node)
     return true if node.is_a?(AST::GetIndex)
@@ -572,7 +604,7 @@ module AST
     end
 
     call?(node) || node.is_a?(AST::NextExpr) || node.is_a?(AST::ResolveNode) ||
-      node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode) ||
+      node.is_a?(AST::CopyNode) || node.is_a?(AST::KeepNode) ||
       node.is_a?(AST::MoveNode) || node.is_a?(AST::ShareNode)
   end
 
@@ -660,7 +692,7 @@ module AST
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.ownership_wrapper?(node)
     node.is_a?(AST::MoveNode) || node.is_a?(AST::CopyNode) ||
-      node.is_a?(AST::CloneNode) || node.is_a?(AST::ShareNode) ||
+      node.is_a?(AST::KeepNode) || node.is_a?(AST::ShareNode) ||
       node.is_a?(AST::FreezeNode) || node.is_a?(AST::CapabilityWrap)
   end
 
@@ -706,25 +738,35 @@ module AST
     !!(target.name[0] =~ /[A-Z]/)
   end
 
+  # ruby-to-clear: data-api
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.soa_placeholder_field?(node)
     return false unless node.is_a?(AST::GetField)
-    target = node.target
+    target = T.cast(node.target, AST::Node)
     !!(target.is_a?(AST::Identifier) && target.name == "_")
   end
 
+  # ruby-to-clear: data-api
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.soa_placeholder_assignment?(node)
-    return false unless node.is_a?(AST::BindExpr) || node.is_a?(AST::Assignment)
+    if node.is_a?(AST::BindExpr)
+      bind = node
+      return soa_placeholder_field?(bind.name)
+    end
+    if node.is_a?(AST::Assignment)
+      assignment = node
+      return soa_placeholder_field?(assignment.name)
+    end
 
-    soa_placeholder_field?(node.name)
+    false
   end
 
   # Explicit ownership transfer marker stamped by annotation. This is a
   # predicate over the AST contract, not an ad hoc respond_to? check.
+  # ruby-to-clear: data-api
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.moved?(node)
-    !!(node && node.respond_to?(:was_moved) && node.was_moved == true)
+    !!(node && node.was_moved == true)
   end
 
   # Statement-position body traversal is an AST fact. MIR passes may attach
@@ -764,6 +806,8 @@ module AST
       node.branches.each do |branch|
         slots << BodySlot.new(branch.body, ->(body) { branch.body = body })
       end
+    when DeferStmt
+      slots << BodySlot.new(node.body, ->(body) { node.body = body }) if node.body
     end
     slots
   end
@@ -798,7 +842,7 @@ module AST
       (expr.fields&.values || []).compact
     when ListLit
       (expr.items || []).compact
-    when Cast, MoveNode, CopyNode, CloneNode, ShareNode, LinkNode, ResolveNode,
+    when Cast, MoveNode, CopyNode, KeepNode, ShareNode, LinkNode, ResolveNode,
          MutableBorrow,
          FreezeNode, CapabilityWrap
       child = expr.is_a?(MutableBorrow) ? expr.target : expr.value
@@ -815,7 +859,7 @@ module AST
     return [] unless node
 
     case node
-    when CopyNode, CloneNode, FreezeNode
+    when CopyNode, KeepNode, FreezeNode
       skip_copy ? [] : [node.value].compact
     when TenseNavigation
       [node.target].compact
@@ -1022,15 +1066,6 @@ module AST
     end
   end
 
-  module HasExpression
-    extend T::Sig
-
-    sig { returns(AST::Node) }
-    def expression
-      T.unsafe(self)[:expression]
-    end
-  end
-
   # ruby-to-clear: skip
   # ruby-to-clear: no-expand
   module Locatable
@@ -1045,7 +1080,7 @@ module AST
       @tense_plan
     end
 
-    sig { params(value: AST::TensePlanValue).returns(AST::TensePlanValue) }
+    sig { params(value: T.nilable(AST::TensePlanValue)).returns(T.nilable(AST::TensePlanValue)) }
     def tense_plan=(value)
       @tense_plan = value
       value
@@ -1086,9 +1121,19 @@ module AST
       @coerced_type_object = T.let(@coerced_type_object, T.nilable(Type))
     end
 
+    sig { params(value: T.nilable(Type)).void }
+    def coerced_type_object=(value)
+      @coerced_type_object = T.let(value, T.nilable(Type))
+    end
+
     sig { returns(T.nilable(Type)) }
     def type_object
       @type_object = T.let(@type_object, T.nilable(Type))
+    end
+
+    sig { params(value: T.nilable(Type)).void }
+    def type_object=(value)
+      @type_object = T.let(value, T.nilable(Type))
     end
 
     sig { returns(T.nilable(T.any(String, Symbol))) }
@@ -1140,6 +1185,26 @@ module AST
     sig { params(val: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     def mutates_receiver=(val)
       @mutates_receiver = T.let(val, T.nilable(T::Boolean))
+    end
+
+    sig { returns(T.nilable(T::Hash[Integer, CallEdgeOwnershipPlan])) }
+    def kept_edge_plans
+      @kept_edge_plans = T.let(@kept_edge_plans, T.nilable(T::Hash[Integer, CallEdgeOwnershipPlan]))
+    end
+
+    sig { params(val: T.nilable(T::Hash[Integer, CallEdgeOwnershipPlan])).returns(T.nilable(T::Hash[Integer, CallEdgeOwnershipPlan])) }
+    def kept_edge_plans=(val)
+      @kept_edge_plans = T.let(val, T.nilable(T::Hash[Integer, CallEdgeOwnershipPlan]))
+    end
+
+    sig { returns(T.nilable(CallEdgeOwnershipPlan)) }
+    def kept_edge_plan
+      @kept_edge_plan = T.let(@kept_edge_plan, T.nilable(CallEdgeOwnershipPlan))
+    end
+
+    sig { params(val: T.nilable(CallEdgeOwnershipPlan)).returns(T.nilable(CallEdgeOwnershipPlan)) }
+    def kept_edge_plan=(val)
+      @kept_edge_plan = T.let(val, T.nilable(CallEdgeOwnershipPlan))
     end
 
     sig { returns(T.nilable(T::Boolean)) }
@@ -1311,11 +1376,24 @@ module AST
     end
 
     # :Untyped sentinel (not nil) so no caller branches on nil; PreMirTypeCheck rejects it at the AST->MIR boundary.
+    # These three methods are the common typed-node interface consumed by
+    # semantic and MIR packages. The data-only AST package must export their
+    # concrete implementations for closed-union dispatch.
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     sig { returns(Type) }
     def full_type
       @type_object ||= Type.new(:Untyped)
     end
 
+    # Read annotation storage without manufacturing the Untyped sentinel.
+    sig { returns(T.nilable(Type)) }
+    def type_object
+      @type_object
+    end
+
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     sig { params(context: String).returns(Type) }
     def full_type!(context: "post-annotation AST")
       ft = full_type
@@ -1325,6 +1403,8 @@ module AST
 
     # True when the node carries a real (stamped) type, i.e. full_type
     # is not the :Untyped sentinel.
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     sig { returns(T::Boolean) }
     def typed?
       !full_type.untyped?
@@ -1492,6 +1572,11 @@ module AST
     sig { returns(T.nilable(Symbol)) }
     def storage_override
       @storage_override = T.let(@storage_override, T.nilable(Symbol))
+    end
+
+    sig { params(value: T.nilable(Symbol)).void }
+    def storage_override=(value)
+      @storage_override = T.let(value, T.nilable(Symbol))
     end
 
     # Canonical "is this expression's value heap-allocated?" — SIMP-13f.
@@ -1683,8 +1768,11 @@ module AST
 
   sig { params(node: Node, blk: T.proc.params(arg0: Node).void).void }
   def self.each_child_node(node, &blk)
-    node.class.members.each do |member|
-      value = node[member]
+    # Most AST nodes are Ruby Structs; ProtocolRequirement is a T::Struct,
+    # which enumerates fields via props instead of members.
+    members = node.is_a?(T::Struct) ? node.class.props.keys : node.class.members
+    members.each do |member|
+      value = node.is_a?(T::Struct) ? node.public_send(member) : node[member]
       if value.is_a?(Array)
         value.each { |child| yield child if child.is_a?(Locatable) }
       elsif value.is_a?(Hash)
@@ -1700,6 +1788,7 @@ module AST
   end
 
   Program      = Struct.new(:token, :statements) do
+    # ruby-to-clear: field-type statements=[]Locatable
     extend T::Sig
     include Locatable
 
@@ -1778,7 +1867,8 @@ module AST
                             :tight_reentrance, :requires_clauses, :return_type_token, :pre_clauses,
                             :post_clauses, :is_method) do
     # ruby-to-clear: field-type return_type=?Type
-    # ruby-to-clear: field-type type_params=String[]
+    # ruby-to-clear: field-type body=[]Locatable
+    # ruby-to-clear: field-type type_params=[]String
     # ruby-to-clear: field-type arrow_token=Token
     # ruby-to-clear: field-type name_token=?Token
     # ruby-to-clear: field-type return_type_token=?Token
@@ -1827,6 +1917,8 @@ module AST
     end
 
     sig { returns(Type) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def annotation_return_type
       self[:return_type] || Type.new(:Any)
     end
@@ -2110,6 +2202,10 @@ module AST
   end
 
   StructDef    = Struct.new(:token, :name, :field_decls, :visibility, :type_params) do
+    # Struct.new deliberately exposes these members as T.untyped to Sorbet.
+    # Supply the missing source contract instead of teaching the transpiler a
+    # name-based StructDef exception.
+    # ruby-to-clear: field-type name=String
     extend T::Sig
     include Locatable
 
@@ -2156,10 +2252,22 @@ module AST
     include Locatable
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
     attr_accessor :ownership_transport_plan
+    # set by parse_const_decl: a top-level CONST binding (immutable, comptime, container-scope)
+    sig { returns(T.nilable(T::Boolean)) }
+    def module_const = @module_const
+    sig { params(value: T::Boolean).void }
+    def module_const=(value); @module_const = value; end
+    # :pub / :private / :package - export visibility for a module CONST
+    sig { returns(T.nilable(Symbol)) }
+    def const_visibility = @const_visibility
+    sig { params(value: Symbol).void }
+    def const_visibility=(value); @const_visibility = value; end
 
     sig { params(args: InitArgs).void }
     def initialize(*args)
       super
+      @module_const = T.let(nil, T.nilable(T::Boolean))
+      @const_visibility = T.let(nil, T.nilable(Symbol))
       t = self[:type]
       self[:type] = Type.new(t) unless t.nil?
     end
@@ -2189,6 +2297,8 @@ module AST
     def hash = [var, sync].hash
   end
 	  Assignment   = Struct.new(:token, :name, :value, :compound_op) do
+      # ruby-to-clear: field-type name=AssignmentName
+      # ruby-to-clear: field-type value=Locatable
 	    include Locatable
 	    include StatementVoidType
 	    attr_accessor :auto_lock  # AutoLockPlan set by annotator for inline @locked/@writeLocked guards.
@@ -2281,16 +2391,21 @@ module AST
         end
     end
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
+    sig { returns(T::Boolean) }
+    def string_concat?
+      string_concat == true
+    end
     attr_accessor :or_fallback_dupe  # true when OR_ELSE fallback struct needs string-field heap dupe
     attr_accessor :error_union_type # recoverable result preserved through pipeline composition
     sig { returns(T.nilable(T::Boolean)) }
+    # ruby-to-clear: data-api
     def retain_error_channel
-      @retain_error_channel = T.let(nil, T.nilable(T::Boolean)) unless defined?(@retain_error_channel)
-      @retain_error_channel
+      T.let(@retain_error_channel, T.nilable(T::Boolean))
     end
     sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    # ruby-to-clear: data-api
     def retain_error_channel=(value)
-      @retain_error_channel = value
+      @retain_error_channel = T.let(value, T.nilable(T::Boolean))
     end
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
     # outer scope. The lowering's `descend` helper consults this and wraps
@@ -2362,6 +2477,7 @@ module AST
     end
   end
   ListLit      = Struct.new(:token, :items, :storage, :constructor_options) {
+    # ruby-to-clear: field-type items=[]Locatable
     extend T::Sig
     include Locatable 
 
@@ -2458,9 +2574,18 @@ module AST
       [target.resolved, nil]
     end
   end
-  HashLit      = Struct.new(:token, :pairs, :storage) { include Locatable }
+  HashLit      = Struct.new(:token, :pairs, :storage) do
+    # ruby-to-clear: field-type pairs=HashLitPairs
+    include Locatable
+  end
   DefaultLit   = Struct.new(:token) { include Locatable }
   StructLit    = Struct.new(:token, :name, :fields, :storage, :type_args) do
+    # Struct.new leaves these fields untyped even though the parser contract
+    # is concrete. Keep that information at the declaration boundary so every
+    # consumer (including generic zip) receives the same fact.
+    # ruby-to-clear: field-type name=String
+    # ruby-to-clear: field-type fields={String}Locatable
+    # ruby-to-clear: field-type type_args=?[]Type
     extend T::Sig
     include Locatable
 
@@ -2517,6 +2642,9 @@ module AST
     end
   end
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops, :comptime) do
+    # ruby-to-clear: field-type condition=Locatable
+    # ruby-to-clear: field-type then_branch=[]Locatable
+    # ruby-to-clear: field-type else_branch=?[]Locatable
     extend T::Sig
     include Locatable
     include StatementVoidType
@@ -2566,6 +2694,8 @@ module AST
     end
   end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops, :tight) do
+    # ruby-to-clear: field-type condition=Locatable
+    # ruby-to-clear: field-type do_branch=[]Locatable
     extend T::Sig
     include Locatable
     include StatementVoidType
@@ -2591,6 +2721,8 @@ module AST
     attr_accessor :mark_per_iter
   end
   WhileBindLoop = Struct.new(:token, :condition, :binding_name, :binding_token, :do_branch, :deferred_drops) do
+    # ruby-to-clear: field-type condition=Locatable
+    # ruby-to-clear: field-type do_branch=[]Locatable
     extend T::Sig
     include Locatable
     include StatementVoidType
@@ -2655,9 +2787,29 @@ module AST
   end
 
   FuncCall     = Struct.new(:token, :name, :args) do
+    # ruby-to-clear: field-type args=[]Locatable
     extend T::Sig
     include Locatable
     include ExplicitMutableArguments
+
+    sig { params(index: Integer).returns(T::Boolean) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    def explicit_mutable_argument?(index)
+      tokens = T.let(@explicit_mutable_argument_tokens, T.nilable(T::Hash[Integer, Lexer::Token]))
+      return false unless tokens
+      tokens.key?(index)
+    end
+
+    sig { params(index: Integer).returns(T.nilable(Lexer::Token)) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    def explicit_mutable_argument_token(index)
+      tokens = T.let(@explicit_mutable_argument_tokens, T.nilable(T::Hash[Integer, Lexer::Token]))
+      return nil unless tokens
+      tokens[index]
+    end
+
     # ruby-to-clear: field-type name=Any
     attr_accessor :module_alias
     attr_accessor :extern_call       # true when calling a native EXTERN FN (no rt, no try)
@@ -2682,7 +2834,16 @@ module AST
                                      # original `!T` is stashed here for OR_ELSE consumers
                                      # that need to know whether to emit `catch fallback`
                                      # (error union) or `orelse fallback` (optional).
-    attr_accessor :retain_error_channel # explicit `x:!` / `x:!?` binding keeps the call result wrapped
+    sig { returns(T.nilable(T::Boolean)) }
+    # ruby-to-clear: data-api
+    def retain_error_channel
+      T.let(@retain_error_channel, T.nilable(T::Boolean))
+    end
+    sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    # ruby-to-clear: data-api
+    def retain_error_channel=(value)
+      @retain_error_channel = T.let(value, T.nilable(T::Boolean))
+    end
     sig { returns(T.nilable(Symbol)) }
     def protocol_operation
       @protocol_operation = T.let(@protocol_operation, T.nilable(Symbol))
@@ -2714,9 +2875,30 @@ module AST
   end
 
   MethodCall   = Struct.new(:token, :object, :name, :args) do
+    # ruby-to-clear: field-type object=Locatable
+    # ruby-to-clear: field-type args=[]Locatable
     extend T::Sig
     include Locatable
     include ExplicitMutableArguments
+
+    sig { params(index: Integer).returns(T::Boolean) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    def explicit_mutable_argument?(index)
+      tokens = T.let(@explicit_mutable_argument_tokens, T.nilable(T::Hash[Integer, Lexer::Token]))
+      return false unless tokens
+      tokens.key?(index)
+    end
+
+    sig { params(index: Integer).returns(T.nilable(Lexer::Token)) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    def explicit_mutable_argument_token(index)
+      tokens = T.let(@explicit_mutable_argument_tokens, T.nilable(T::Hash[Integer, Lexer::Token]))
+      return nil unless tokens
+      tokens[index]
+    end
+
     attr_accessor :pool_method    # :insert, :get, :remove — set by annotator for Pool dispatch
     attr_accessor :set_method     # :insert, :contains, :remove, :count — set by annotator for Set dispatch
     attr_accessor :map_method     # :delete, :contains, :count, :keys, :values — set by annotator for HashMap dispatch
@@ -2727,18 +2909,35 @@ module AST
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :safe_nav_chain    # implicit continuation of an earlier ?. over non-optional members
     attr_accessor :error_union_type  # full !T requirement result before expression-level propagation unwraps it
-    attr_accessor :retain_error_channel
+    sig { returns(T.nilable(T::Boolean)) }
+    # ruby-to-clear: data-api
+    def retain_error_channel
+      T.let(@retain_error_channel, T.nilable(T::Boolean))
+    end
+    sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
+    # ruby-to-clear: data-api
+    def retain_error_channel=(value)
+      @retain_error_channel = T.let(value, T.nilable(T::Boolean))
+    end
     sig { params(token: Lexer::Token).void }
     def mark_explicit_mutable_receiver!(token)
       @explicit_mutable_receiver_token = T.let(token, T.nilable(Lexer::Token))
     end
     sig { returns(T::Boolean) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def explicit_mutable_receiver?
       !explicit_mutable_receiver_token.nil?
     end
     sig { returns(T.nilable(Lexer::Token)) }
     def explicit_mutable_receiver_token
       @explicit_mutable_receiver_token = T.let(@explicit_mutable_receiver_token, T.nilable(Lexer::Token))
+    end
+    sig { returns(T.nilable(Lexer::Token)) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    def explicit_mutable_receiver_token_value
+      explicit_mutable_receiver_token
     end
     sig { returns(T.nilable(Symbol)) }
     def protocol_operation
@@ -2771,6 +2970,7 @@ module AST
     def name; self[:name].to_s end
   end
   GetField     = Struct.new(:token, :target, :field) do
+    # ruby-to-clear: field-type target=Locatable
     extend T::Sig
     include Locatable
     # Set by visit_assignment_field before visiting this node so
@@ -2831,17 +3031,51 @@ module AST
     include Locatable
   end
   Require      = Struct.new(:token, :path) { include Locatable }
+  # DEFER <stmt> / DEFER { ... } — body runs at scope exit (success AND error
+  # paths), lowered directly to MIR::DeferStmt (Zig defer: zero runtime cost).
+  DeferStmt    = Struct.new(:token, :body) { include Locatable }
   class WithMatchArm < T::Struct
+    extend T::Sig
+
     const :family, Symbol
     prop :body, RawBody, factory: -> { [] }
     prop :lock_error_clauses, T::Array[ErrorClause], factory: -> { [] }
     const :token, T.nilable(Lexer::Token), default: nil
+
+    sig { returns(RawBody) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    def body_nodes
+      body
+    end
+
+    sig { returns(Symbol) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    def family_value
+      family
+    end
+
+    sig { returns(T::Array[ErrorClause]) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    def lock_error_clauses_value
+      lock_error_clauses
+    end
+
+    sig { returns(T.nilable(Lexer::Token)) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
+    def token_value
+      token
+    end
   end
 
   # lock_error_clause: optional ErrorClause describing ON TIMEOUT / RETRY
   # handling for EXCLUSIVE / write_locked_read captures.
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
   WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops, :capability_plan) do
+    # ruby-to-clear: field-type body=[]Locatable
     extend T::Sig
     include Locatable
     include HasBodies
@@ -2921,15 +3155,14 @@ module AST
   SelectOp = Struct.new(:token, :expression, :effect_mode, :stream_mode, :modifier_order, :capture_analysis) do
     extend T::Sig
     include Locatable
-    include HasExpression
   end
-  WhereOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
-  IndexOp      = Struct.new(:token, :expression) { include Locatable; include HasExpression }
-  ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable; include HasExpression }
-  OrderByOp    = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  WhereOp      = Struct.new(:token, :expression) { include Locatable }
+  IndexOp      = Struct.new(:token, :expression) { include Locatable }
+  ReduceOp     = Struct.new(:token, :initial_value, :expression) { include Locatable }
+  OrderByOp    = Struct.new(:token, :expression) { include Locatable }
   LimitOp      = Struct.new(:token, :count) { include Locatable }
-  UnnestOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression }
-  DistinctOp   = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  UnnestOp     = Struct.new(:token, :expression) { include Locatable }
+  DistinctOp   = Struct.new(:token, :expression) { include Locatable }
   # EachOp: side-effect iteration over a collection.
   # Uses `_` as the implicit item binding. Body is a list of statements.
   # Syntax: collection |> EACH { _.field = value; };
@@ -2946,28 +3179,28 @@ module AST
   # to `lhs.next()` (same shape as NEXT for ~T promises).
   CollectOp    = Struct.new(:token) { include Locatable }
   # TAKE_WHILE: take elements from the front while predicate is true.
-  TakeWhileOp = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  TakeWhileOp = Struct.new(:token, :expression) { include Locatable }
   # WINDOW(size): sliding window of `size` elements. _ is the sub-slice.
-  WindowOp = Struct.new(:token, :size, :expression) { include Locatable; include HasExpression }
+  WindowOp = Struct.new(:token, :size, :expression) { include Locatable }
   # WINDOW(size: N, time: 'Xms'): batch/tumbling window. _ is a T[] batch.
   # options = { "size" => size_node, "time" => time_node } (at least one required)
-  BatchWindowOp = Struct.new(:token, :options, :expression) { include Locatable; include HasExpression }
+  BatchWindowOp = Struct.new(:token, :options, :expression) { include Locatable }
   # JOIN(right_source) key_expr_or_lambda
   # Equi-join: shared key applied to both sides, or lambda(a, b) -> Bool.
   # Result: anonymous struct { left: L, right: ?R } for each left element.
   JoinOp = Struct.new(:token, :right_source, :key_expr) { include Locatable }
   # Phase 3 predicate query operators — return scalar values (not new lists).
   # All use `_` as the implicit item binding (like SELECT/WHERE).
-  FindOp   = Struct.new(:token, :expression) { include Locatable; include HasExpression } # ?ElemType
-  AnyOp    = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Bool
-  AllOp    = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Bool
-  CountOp  = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Int64
+  FindOp   = Struct.new(:token, :expression) { include Locatable } # ?ElemType
+  AnyOp    = Struct.new(:token, :expression) { include Locatable } # Bool
+  AllOp    = Struct.new(:token, :expression) { include Locatable } # Bool
+  CountOp  = Struct.new(:token, :expression) { include Locatable } # Int64
   # Phase 4 numeric aggregation operators — expression must be numeric.
   # SUM/AVERAGE return 0 for empty list; MIN/MAX panic on empty list.
-  SumOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number
-  AverageOp = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number
-  MinOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number (panics on empty)
-  MaxOp     = Struct.new(:token, :expression) { include Locatable; include HasExpression } # Number (panics on empty)
+  SumOp     = Struct.new(:token, :expression) { include Locatable } # Number
+  AverageOp = Struct.new(:token, :expression) { include Locatable } # Number
+  MinOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
+  MaxOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
   # ShardOp: route items to owning schedulers by key hash.
   # Syntax: collection |> SHARD(key_expr, target_map) |> CONCURRENT EACH { body }
   # key_expr uses `_` as the implicit item binding (consistent with SELECT/WHERE).
@@ -2984,7 +3217,7 @@ module AST
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
   OptionalUnwrap = Struct.new(:token, :target) do
-    # ruby-to-clear: field-type target=Node
+    # ruby-to-clear: field-type target=Locatable
     extend T::Sig
     include Locatable
     attr_accessor :error_union_type
@@ -3005,6 +3238,9 @@ module AST
   # the member against the payload while retaining the receiver envelope for
   # the authoritative tense planner and MIR handoff.
   TenseNavigation = Struct.new(:token, :target, :markers) do
+    # Struct.new leaves Sorbet field readers untyped; this is the source type
+    # contract consumed by the data-only CLEAR declaration.
+    # ruby-to-clear: field-type target=Locatable
     extend T::Sig
     include Locatable
 
@@ -3109,8 +3345,8 @@ module AST
   # CATCH block: error handler at function bottom. Multiple CATCH clauses + optional DEFAULT.
   # catch_clauses: [AST::CatchClause]; default_body: [ASTNode] or nil
   CatchBlock     = Struct.new(:token, :catch_clauses, :default_body) do
-    # ruby-to-clear: field-type catch_clauses=CatchClause[]
-    # ruby-to-clear: field-type default_body=?(Node[])
+    # ruby-to-clear: field-type catch_clauses=[]CatchClause
+    # ruby-to-clear: field-type default_body=?([]Locatable)
     include Locatable
   end
   # RECOVER(default): pipeline operator that replaces errors with a default value.
@@ -3184,13 +3420,18 @@ module AST
   # Transpiles to Zig labeled block: blk: { stmts; break :blk result; }
   # body: Array of statement AST nodes
   # result: AST node whose value is the block's result
-  BlockExpr      = Struct.new(:token, :body, :result) { include Locatable }
+  BlockExpr      = Struct.new(:token, :body, :result) do
+    # ruby-to-clear: field-type body=[]Locatable
+    # ruby-to-clear: field-type result=?Locatable
+    include Locatable
+  end
 
   # StringConcat: flattened string concatenation.
   # parts: Array of AST nodes (strings, identifiers, expressions)
   # Rewritten from chained BinaryOp(:ADD) on string types.
   # Any backend emits a single allocation covering all parts.
   StringConcat   = Struct.new(:token, :parts) do
+    # ruby-to-clear: field-type parts=[]Locatable
     include Locatable
   end
 
@@ -3233,7 +3474,10 @@ module AST
 	    sig { returns(T::Boolean) }
 	    def local_storage_wrap? = local? || (indirect? && !sync && !ownership)
 	  end
-  MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
+  MoveNode          = Struct.new(:token, :value) do
+    # ruby-to-clear: field-type value=Locatable
+    include Locatable
+  end # MOVE expr -> transfer Rc/Arc handle without retain
   # CopyNode -- explicit COPY expr (deep copy of value).
   #   deep_copy: true for unions with heap variants.
   #   alloc:     :heap (default) | :frame -- the allocator the duped buffer
@@ -3244,16 +3488,43 @@ module AST
   #              provenance" bug that forced cleanupAlloc. lower_copy reads
   #              this; hard-coded :heap pre-policy.
   CopyNode          = Struct.new(:token, :value) do
+    # ruby-to-clear: field-type value=Locatable
     extend T::Sig
     include Locatable
     attr_accessor :deep_copy
+    # Retained-identity v5: the physical op the OwnershipEdgePlanner selected
+    # for this COPY -- :payload_copy for a plain source, or
+    # :shared_to_unique_copy for a retained source detached via OWN COPY.
+    attr_accessor :carrier_op
+    # true when written `OWN COPY x`: the explicit handle->owned-RawT downgrade
+    # (deref the @multiowned/@shared payload, deep-copy it into a fresh
+    # uniquely-owned value). Bare `COPY x` is a memcpy and is illegal on a live
+    # handle; only OWN COPY may copy a retained payload out.
+    attr_accessor :own
     sig { params(val: Symbol).returns(Symbol) }
     def alloc=(val); T.must(@alloc = T.let(val, T.nilable(Symbol))); end
     sig { returns(Symbol) }
     def alloc; @alloc = T.let(@alloc, T.nilable(Symbol)); @alloc || :heap; end
   end
-  CloneNode         = Struct.new(:token, :value) { include Locatable }  # CLONE expr              -> explicit handle retain for non-affine replay/shared futures
-  ShareNode         = Struct.new(:token, :value) { include Locatable }  # SHARE expr              -> promote/retain as T@shared (semantic lowering follows)
+  # KeepNode -- KEEP expr (retained-identity v5): the unified carrier-
+  # preserving fan-out (formerly CLONE, which was the narrow Rc/Arc-retain
+  # case, and COPY_OR_CLONE). Preserves the caller's carrier -- @multiowned
+  # Rc retain, @shared Arc retain, or plain payload copy -- chosen at
+  # placement, never at runtime. Does NOT promise independent identity.
+  KeepNode          = Struct.new(:token, :value) do
+    # ruby-to-clear: field-type value=Locatable
+    include Locatable
+    # Retained-identity v5: the physical ownership operation the
+    # OwnershipEdgePlanner selected for this fan-out (one of the 7 ops), or
+    # :deferred_specialization when the source is a carrier-polymorphic
+    # parameter whose carrier is resolved per specialization (Phase 4). MIR
+    # lowering consumes this; it does NOT re-derive from the operand type.
+    attr_accessor :carrier_op
+  end
+  ShareNode         = Struct.new(:token, :value) do
+    # ruby-to-clear: field-type value=Locatable
+    include Locatable
+  end # SHARE expr -> promote/retain as T@shared (semantic lowering follows)
   LinkNode          = Struct.new(:token, :value) { include Locatable }  # LINK expr               -> downgrade Rc/Arc to WeakRc/WeakArc
   ResolveNode       = Struct.new(:token, :value) { include Locatable }  # RESOLVE expr            -> upgrade WeakRc/WeakArc to ?Rc/?Arc
   FreezeNode        = Struct.new(:token, :value) { include Locatable }  # FREEZE expr             -> compact @multiowned tree into contiguous buffer
@@ -3280,6 +3551,8 @@ module AST
   # RangeLit: a range expression (start..<end) or (start..<=end).
   # inclusive: false = exclusive end (..<), true = inclusive end (..<=)
   RangeLit          = Struct.new(:token, :start, :finish, :inclusive) { include Locatable }
+  ExternEffectValue = T.type_alias { T.any(Symbol, TrueClass) }
+  ExternEffects = T.type_alias { T::Hash[Symbol, ExternEffectValue] }
   # ExternFnDecl: EXTERN FN name<T>(params) RETURNS type [EFFECTS :alloc] FROM "module"
   # Or method:    EXTERN FN TypeName<T>.method(params) RETURNS type FROM "module"
   # Declares a native Zig/C function importable via @import("module").
@@ -3288,8 +3561,8 @@ module AST
                                 :return_lifetime) do
     # ruby-to-clear: field-type return_type=?Type
     # ruby-to-clear: field-type owner_type=?String
-    # ruby-to-clear: field-type owner_type_params=String[]@symbol
-    # ruby-to-clear: field-type fn_type_params=String[]@symbol
+    # ruby-to-clear: field-type owner_type_params=[]String@symbol
+    # ruby-to-clear: field-type fn_type_params=[]String@symbol
     # ruby-to-clear: field-type return_lifetime=Any
     extend T::Sig
     include Locatable
@@ -3303,6 +3576,11 @@ module AST
     sig { returns(T::Array[Symbol]) }
     def fn_type_params
       self[:fn_type_params]
+    end
+
+    sig { returns(T.nilable(ExternEffects)) }
+    def effects
+      self[:effects]
     end
 
     sig { params(args: InitArgs).void }
@@ -3340,6 +3618,8 @@ module AST
     end
 
     sig { returns(Type) }
+    # ruby-to-clear: data-api
+    # ruby-to-clear: pub
     def annotation_return_type
       self[:return_type] || Type.new(:Any)
     end
@@ -3350,7 +3630,7 @@ module AST
   ExternStructDecl = Struct.new(:token, :name, :field_decls, :from_module,
                                 :type_params, :close_method, :as_type, :extern_source) do
     # ruby-to-clear: field-type from_module=?String
-    # ruby-to-clear: field-type type_params=String[]@symbol
+    # ruby-to-clear: field-type type_params=[]String@symbol
     # ruby-to-clear: field-type close_method=?String
     # ruby-to-clear: field-type as_type=?String
     extend T::Sig
@@ -3413,8 +3693,12 @@ module AST
   # methods: Array of UnionMethodRequirement records; empty when absent.
   #   — compile-time constraints verified after function registration.
   UnionDef         = Struct.new(:token, :name, :variants, :visibility, :type_params, :methods) do
-    # ruby-to-clear: field-type type_params=String[]
-    # ruby-to-clear: field-type methods=UnionMethodRequirement[]
+    # Struct.new exposes untyped readers to Sorbet. Declare the storage
+    # contract once so ProgramIndex can type every consumer without inferring
+    # a Hash shape from whichever method happens to use this field first.
+    # ruby-to-clear: field-type variants={String}?SchemasUnionSchemaVariantInput
+    # ruby-to-clear: field-type type_params=[]String
+    # ruby-to-clear: field-type methods=[]UnionMethodRequirement
     extend T::Sig
     include Locatable
     # Array of type param name strings, e.g. ["T"]
@@ -3616,6 +3900,9 @@ module AST
   # case_drops: Array of drop-arrays (parallel to cases), filled by annotator
   # default_drops: drop-array for default branch (or nil), filled by annotator
   MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive, :takes) do
+    # ruby-to-clear: field-type expr=Locatable
+    # ruby-to-clear: field-type cases=[]MatchCase
+    # ruby-to-clear: field-type default_case=?([]Locatable)
     extend T::Sig
     include Locatable
     include HasBodies
@@ -3782,16 +4069,16 @@ module AST
   end
 
   # ASSERT_RAISES Kind, expr  OR  ASSERT_RAISES Kind, ErrorName, expr
-  AssertRaises = Struct.new(:token, :kind, :error_name, :expression) { include Locatable; include HasExpression }
+  AssertRaises = Struct.new(:token, :kind, :error_name, :expression) { include Locatable }
 
   # BENCHMARK expr x<N>
-  BenchmarkStmt = Struct.new(:token, :expression, :iterations) { include Locatable; include HasExpression }
+  BenchmarkStmt = Struct.new(:token, :expression, :iterations) { include Locatable }
 
   # SMASH expr
-  SmashStmt = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  SmashStmt = Struct.new(:token, :expression) { include Locatable }
 
   # PROFILE expr
-  ProfileStmt = Struct.new(:token, :expression) { include Locatable; include HasExpression }
+  ProfileStmt = Struct.new(:token, :expression) { include Locatable }
 
   class SelectOp
     extend T::Sig

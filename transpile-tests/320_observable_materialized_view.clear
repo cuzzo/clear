@@ -14,7 +14,7 @@
 
 FN main() RETURNS Void ->
     # Scalar
-    g_sum: ~?Int64[] = BG STREAM {
+    g_sum: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
     ASSERT (NEXT s_sum) == 45_i64, "SUM final";
 
     # Collection (DISTINCT)
-    g_dist: ~?Int64[] = BG STREAM {
+    g_dist: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 8_i64 DO YIELD i MOD 3_i64; i = i + 1_i64; END
     };

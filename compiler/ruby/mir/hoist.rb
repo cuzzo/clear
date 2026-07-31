@@ -136,7 +136,12 @@ module Hoist
       call.args.each_with_index do |arg, idx|
         next if arg.is_a?(AST::MoveNode) && arg.value.is_a?(AST::Identifier)
         next unless allocating?(arg, schema_lookup)
-        call.args[idx] = make_temp!(arg, hoists, counter.next_name, moved: moved_arg?(arg), schema_lookup: schema_lookup)
+        replacement = make_temp!(arg, hoists, counter.next_name, moved: moved_arg?(arg), schema_lookup: schema_lookup)
+        if call.is_a?(AST::FuncCall)
+          call.args[idx] = replacement
+        elsif call.is_a?(AST::MethodCall)
+          call.args[idx] = replacement
+        end
       end
     end
 
@@ -358,6 +363,19 @@ module Hoist
       :heap
     elsif ast_borrow_expr?(concat, moved) || (concat.respond_to?(:container_borrow) && concat.container_borrow)
       :borrow
+    elsif moved && ti.needs_explicit_cleanup?(:heap, T.unsafe(schema_lookup))
+      # An owned, heap-owning value (a collection/struct that needs cleanup)
+      # ESCAPES only when it is moved out of this frame: return / yield / element
+      # or field store, or a consuming (TAKES/GIVE) call argument. There a frame
+      # allocation would be rewound out from under the escaped value, so it must
+      # live on the heap. `moved` is the escape signal -- every escaping caller
+      # of make_temp! passes moved: true (the default). An ordinary BORROWED call
+      # argument (moved: false, e.g. a concat passed to a print/borrow parameter)
+      # is consumed within the current frame and stays frame-local; heap-
+      # promoting it needlessly moved dozens of temporaries off the frame
+      # allocator. A borrowed access-path source is handled above and keeps
+      # :borrow; this branch is only for freshly-allocated owned temps.
+      :heap
     else
       (concat.respond_to?(:storage) && concat.storage) || :frame
     end
@@ -461,7 +479,7 @@ module MIRHoistLowering
   ALLOC_MIR_CLASSES = [
     MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::CapWrap,
     MIR::SharePromote, MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade,
-    MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit,
+    MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit, MIR::MonomorphicKeep,
   ].freeze
 
   sig { returns(T::Array[MIR::Stmt]) }
@@ -528,7 +546,11 @@ module MIRHoistLowering
   def descend(parent, field)
     T.bind(self, MIRLowering) rescue nil
 
-    child = parent.public_send(field)
+    child = case field
+    when :left then parent.left
+    when :right then parent.right
+    else raise "unknown BinaryOp field #{field}"
+    end
     if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
       lower_scoped do
         lower(child)
@@ -767,6 +789,10 @@ module MIRHoistLowering
     when MIR::SharePromote, MIR::WeakUpgrade
       Type.new(mir.zig_base.to_s, ownership: :shared, location: :heap)
     when MIR::RcRetain, MIR::RcDowngrade, MIR::FreezeExpr
+      Type.new(mir.zig_base.to_s, ownership: :multiowned, location: :heap)
+    when MIR::MonomorphicKeep
+      # Carrier resolved per monomorphization; the retained arm is the owning
+      # shape the AllocMark tracks (the plain arm needs no drop).
       Type.new(mir.zig_base.to_s, ownership: :multiowned, location: :heap)
     when MIR::Cast, MIR::TryExpr, MIR::TryOptional, MIR::OptionalUnwrap
       mir_alloc_mark_type_info(mir.expr, nil, context: context)
@@ -1011,13 +1037,80 @@ module MIRHoistLowering
 
   sig { params(stmt: MIR::Node, attr: Symbol, transfer_on_success: T::Boolean).returns(T::Array[MIR::Node]) }
   def normalize_used_expr_attr!(stmt, attr, transfer_on_success: false)
-    value = stmt.public_send(attr)
+    value = normalized_expr_attr(stmt, attr)
     return [] unless value
 
     prefix, normalized = normalize_allocating_used_expr(value, transfer_on_success: transfer_on_success)
-    setter = :"#{attr}="
-    stmt.public_send(setter, normalized)
+    set_normalized_expr_attr!(stmt, attr, normalized)
     prefix
+  end
+
+  sig { params(stmt: MIR::Node, attr: Symbol).returns(T.nilable(MIR::Node)) }
+  def normalized_expr_attr(stmt, attr)
+    case attr
+    when :target
+      T.cast(stmt, MIR::Set).target
+    when :value
+      case stmt
+      when MIR::ReassignWithCleanup then stmt.value
+      when MIR::ReturnStmt then stmt.value
+      when MIR::BreakStmt then stmt.value
+      end
+    when :expr
+      T.cast(stmt, MIR::ExprStmt).expr
+    when :cond
+      stmt.is_a?(MIR::IfStmt) ? stmt.cond : T.cast(stmt, MIR::WhileStmt).cond
+    when :update
+      T.cast(stmt, MIR::WhileStmt).update
+    when :iter
+      T.cast(stmt, MIR::ForStmt).iter
+    when :subject
+      stmt.is_a?(MIR::SwitchStmt) ? stmt.subject : T.cast(stmt, MIR::UnionMatchStmt).subject
+    when :item_expr
+      T.cast(stmt, MIR::BatchWindowPush).item_expr
+    when :value_expr
+      stmt.is_a?(MIR::BatchWindowPush) ? stmt.value_expr : T.cast(stmt, MIR::BatchWindowFlush).value_expr
+    end
+  end
+
+  sig { params(stmt: MIR::Node, attr: Symbol, value: MIR::Node).void }
+  def set_normalized_expr_attr!(stmt, attr, value)
+    case attr
+    when :target
+      T.cast(stmt, MIR::Set).target = value
+    when :value
+      case stmt
+      when MIR::ReassignWithCleanup then stmt.value = value
+      when MIR::ReturnStmt then stmt.value = value
+      when MIR::BreakStmt then stmt.value = value
+      end
+    when :expr
+      T.cast(stmt, MIR::ExprStmt).expr = value
+    when :cond
+      if stmt.is_a?(MIR::IfStmt)
+        stmt.cond = value
+      else
+        T.cast(stmt, MIR::WhileStmt).cond = value
+      end
+    when :update
+      T.cast(stmt, MIR::WhileStmt).update = value
+    when :iter
+      T.cast(stmt, MIR::ForStmt).iter = value
+    when :subject
+      if stmt.is_a?(MIR::SwitchStmt)
+        stmt.subject = value
+      else
+        T.cast(stmt, MIR::UnionMatchStmt).subject = value
+      end
+    when :item_expr
+      T.cast(stmt, MIR::BatchWindowPush).item_expr = value
+    when :value_expr
+      if stmt.is_a?(MIR::BatchWindowPush)
+        stmt.value_expr = value
+      else
+        T.cast(stmt, MIR::BatchWindowFlush).value_expr = value
+      end
+    end
   end
 
   sig { params(stmt: MIR::IfBindStmt, name: String).returns(T::Boolean) }
@@ -1195,26 +1288,38 @@ module MIRHoistLowering
   def replace_mir_expr_in_value!(value, old_child, new_child)
     case value
     when Array
+      replaced = T.let(false, T::Boolean)
       value.each_with_index do |item, idx|
         if item.equal?(old_child)
           value[idx] = new_child
-          return true
+          replaced = true
+          break
         end
         if item.is_a?(Array) || item.is_a?(Hash)
-          return true if replace_mir_expr_in_value!(item, old_child, new_child)
+          if replace_mir_expr_in_value!(item, old_child, new_child)
+            replaced = true
+            break
+          end
         end
       end
+      return replaced
     when Hash
+      replaced = T.let(false, T::Boolean)
       value.each_key do |key|
         item = value[key]
         if item.equal?(old_child)
           value[key] = new_child
-          return true
+          replaced = true
+          break
         end
         if item.is_a?(Array) || item.is_a?(Hash)
-          return true if replace_mir_expr_in_value!(item, old_child, new_child)
+          if replace_mir_expr_in_value!(item, old_child, new_child)
+            replaced = true
+            break
+          end
         end
       end
+      return replaced
     end
     false
   end
@@ -1369,7 +1474,7 @@ module MIRHoistLowering
       end
     when MIR::SharePromote
       rc_cleanup_entry(ast_node, source: "MIR::SharePromote", mir: mir)
-    when MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade
+    when MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade, MIR::MonomorphicKeep
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) || CleanupEntry.build(:rc, alloc: alloc, has_moved_guard: false)
     when MIR::FreezeExpr
       CleanupEntry.build(:frozen, alloc: :heap, has_moved_guard: false, fixed_alloc: true)

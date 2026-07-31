@@ -2,7 +2,7 @@
 require "sorbet-runtime"
 
 require_relative "../../ast/ast"
-require_relative "../../ast/schemas"
+require_relative "../../ast/type"
 require_relative "../../compiler/entrypoint"
 
 module Annotator

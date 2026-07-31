@@ -72,6 +72,23 @@ RSpec.describe "String@symbol" do
       ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }.body
     end
 
+    it "parses a keyword-spelled symbol name as a plain symbol" do
+      ast = parse(<<~CLEAR)
+        FN main() RETURNS Void ->
+          x = :EXISTS;
+          y = :RETURN;
+          RETURN;
+        END
+      CLEAR
+      body = ast.statements.first.body
+      %w[EXISTS RETURN].each_with_index do |name, index|
+        decl = body[index]
+        expect(decl.value).to be_a(AST::Literal)
+        expect(decl.value.type).to eq(:SYMBOL)
+        expect(decl.value.value).to eq(name)
+      end
+    end
+
     it "parses a symbol literal as AST::Literal with type :SYMBOL" do
       ast = parse(<<~CLEAR)
         FN main() RETURNS Void ->

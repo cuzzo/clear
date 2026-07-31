@@ -10,9 +10,7 @@ OHD_OWNED_VALUE_SHAPES = %i[string concat struct_owned list_owned string_list_ow
 %i[orelse_success orelse_fallback try_success try_fallback].each do |or_kind|
   %i[return_value local_decl struct_field list_append fn_arg branch_expr].each do |sink|
     OHD_OWNED_VALUE_SHAPES.each do |shape|
-      expected = :pass
-      expected = :compile_error if sink == :list_append && %i[list_owned string_list_owned].include?(shape)
-      OR_HEAP_DESTINATION_CELLS << { or_kind: or_kind, sink: sink, shape: shape, expected: expected }
+      OR_HEAP_DESTINATION_CELLS << { or_kind: or_kind, sink: sink, shape: shape, expected: :pass }
     end
   end
 end
@@ -22,9 +20,9 @@ def ohd_prelude(shape)
   when :struct_owned
     "STRUCT Box { label: String }\n"
   when :union_owned
-    "UNION Val { Empty, Text: String, Items: String[]@list }\n"
+    "UNION Val { Empty, Text: String, Items: [List]String }\n"
   when :nested_owned
-    "STRUCT Nest { items: String[]@list }\n"
+    "STRUCT Nest { items: [List]String }\n"
   else
     ""
   end
@@ -34,8 +32,8 @@ def ohd_shape_helpers(shape)
   return "" unless %i[string_list_owned union_owned nested_owned].include?(shape)
 
   list_helper = <<~CHT
-    FN mkStringList() RETURNS String[]@list ->
-        MUTABLE xs: String[]@list = List[];
+    FN mkStringList() RETURNS [List]String ->
+        MUTABLE xs: [List]String = List[];
         &xs.append(COPY "a");
         &xs.append(COPY "b");
         RETURN xs;
@@ -57,8 +55,8 @@ def ohd_type(shape)
   case shape
   when :string, :concat then "String"
   when :struct_owned then "Box"
-  when :list_owned then "Int64[]@list"
-  when :string_list_owned then "String[]@list"
+  when :list_owned then "[List]Int64"
+  when :string_list_owned then "[List]String"
   when :union_owned then "Val"
   when :nested_owned then "Nest"
   end
@@ -73,9 +71,9 @@ def ohd_make_body(shape)
   when :struct_owned
     'out: ?Box = Box{ label: COPY "ok" }; RETURN out;'
   when :list_owned
-    "MUTABLE xs: Int64[]@list = [];\n    &xs.append(1_i64);\n    &xs.append(2_i64);\n    out: ?(Int64[]@list) = xs;\n    RETURN out;"
+    "MUTABLE xs: [List]Int64 = [];\n    &xs.append(1_i64);\n    &xs.append(2_i64);\n    out: ?[List]Int64 = xs;\n    RETURN out;"
   when :string_list_owned
-    "out: ?(String[]@list) = mkStringList(); RETURN out;"
+    "out: ?[List]String = mkStringList(); RETURN out;"
   when :union_owned
     "out: ?Val = Val{ Items: mkStringList() }; RETURN out;"
   when :nested_owned
@@ -140,12 +138,12 @@ end
 
 FuzzGenerator.register(:or_heap_destination_matrix, cells: OR_HEAP_DESTINATION_CELLS) do |p|
   ty = ohd_type(p[:shape])
-  optional_ty = ty.include?("[]") ? "?(#{ty})" : "?#{ty}"
+  optional_ty = "?#{ty}"
   expr = ohd_or_expr(p[:or_kind], p[:shape])
   prelude = "#{ohd_prelude(p[:shape])}#{ohd_shape_helpers(p[:shape])}"
   fallback_helper = p[:shape] == :list_owned ? <<~CHT : ""
-    FN fallbackList() RETURNS Int64[]@list ->
-        MUTABLE xs: Int64[]@list = [];
+    FN fallbackList() RETURNS [List]Int64 ->
+        MUTABLE xs: [List]Int64 = [];
         &xs.append(7_i64);
         &xs.append(8_i64);
         RETURN xs;
@@ -210,7 +208,7 @@ FuzzGenerator.register(:or_heap_destination_matrix, cells: OR_HEAP_DESTINATION_C
     <<~CHT
       #{helpers}
       FN main() RETURNS Void ->
-          MUTABLE out: #{ty}[]@list = [];
+          MUTABLE out: [List]#{ty} = [];
           &out.append(#{expr});
           ASSERT out.length() == 1_i64, "or heap list append";
           RETURN;

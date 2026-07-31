@@ -13,7 +13,7 @@
 # expected diagnostic output, not a failure.
 
 FN main() RETURNS Void ->
-    gen: ~?Int64[] = BG STREAM {
+    gen: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO
             IF i == 3_i64 THEN RAISE "producer failed at i=3"; END

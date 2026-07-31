@@ -19,13 +19,14 @@ class ClearParser
     when :parse_nil_literal then parse_nil_literal
     when :parse_default_literal then parse_default_literal
     when :parse_cast then parse_cast
-    when :parse_move_node then AST::MoveNode.new(consume(:KEYWORD), parse_expression)
-    when :parse_copy_node then AST::CopyNode.new(consume(:KEYWORD, 'COPY'), parse_expression)
-    when :parse_clone_node then AST::CloneNode.new(consume(:KEYWORD, 'CLONE'), parse_expression)
-    when :parse_share_node then AST::ShareNode.new(consume(:KEYWORD, 'SHARE'), parse_expression)
-    when :parse_link_node then AST::LinkNode.new(consume(:KEYWORD, 'LINK'), parse_expression)
-    when :parse_resolve_node then AST::ResolveNode.new(consume(:KEYWORD, 'RESOLVE'), parse_expression)
-    when :parse_freeze_node then AST::FreezeNode.new(consume(:KEYWORD, 'FREEZE'), parse_expression)
+    when :parse_move_node then AST::MoveNode.new(consume(:KEYWORD), parse_expression(wrapper_operand_precedence))
+    when :parse_copy_node then AST::CopyNode.new(consume(:KEYWORD, 'COPY'), parse_expression(wrapper_operand_precedence))
+    when :parse_own_node then parse_own_node
+    when :parse_keep_node then AST::KeepNode.new(consume(:KEYWORD, 'KEEP'), parse_expression(wrapper_operand_precedence))
+    when :parse_share_node then AST::ShareNode.new(consume(:KEYWORD, 'SHARE'), parse_expression(wrapper_operand_precedence))
+    when :parse_link_node then AST::LinkNode.new(consume(:KEYWORD, 'LINK'), parse_expression(wrapper_operand_precedence))
+    when :parse_resolve_node then AST::ResolveNode.new(consume(:KEYWORD, 'RESOLVE'), parse_expression(wrapper_operand_precedence))
+    when :parse_freeze_node then AST::FreezeNode.new(consume(:KEYWORD, 'FREEZE'), parse_expression(wrapper_operand_precedence))
     when :parse_bg_block then parse_bg_block
     when :parse_next_expr then parse_next_expr
     when :parse_sigil_construct then parse_sigil_construct
@@ -63,6 +64,21 @@ class ClearParser
       raise "Unknown primary parser action #{rule.action}"
     end
     T.must(result)
+  end
+
+  # OWN COPY x -- the sole handle->owned-RawT downgrade: deref the retained
+  # payload and deep-copy it into a fresh uniquely-owned value. Modeled as a
+  # CopyNode with `own` set, reusing the payload-detach lowering. Bare `OWN x`
+  # (extract/move the payload out of a handle) is deferred, so OWN currently
+  # requires a following COPY.
+  sig { returns(AST::CopyNode) }
+  def parse_own_node
+    token = consume(:KEYWORD, 'OWN')
+    error!(token, :OWN_ALONE_UNSUPPORTED) unless match?(:KEYWORD, 'COPY')
+    consume(:KEYWORD, 'COPY')
+    node = AST::CopyNode.new(token, parse_expression(wrapper_operand_precedence))
+    node.own = true
+    node
   end
 
   sig { returns(AST::SelectOp) }
@@ -145,8 +161,13 @@ class ClearParser
   sig { returns(AST::Literal) }
   def parse_symbol_literal
     colon_tok = consume(:CHAR, ':')
-    error!(colon_tok, :EXPECTED_SYMBOL_AFTER_COLON) unless match?(:VAR_ID) || match?(:TYPE_ID)
-    ident_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+    # After ':' the word is a symbol NAME, so a keyword spelling like :EXISTS
+    # or :RETURN is unambiguous - there is no expression position here for the
+    # keyword to mean anything else.
+    unless match?(:VAR_ID) || match?(:TYPE_ID) || match?(:KEYWORD)
+      error!(colon_tok, :EXPECTED_SYMBOL_AFTER_COLON)
+    end
+    ident_tok = consume(current.type)
     AST::Literal.new(colon_tok, :SYMBOL, ident_tok.text!, :stack)
   end
 
@@ -472,9 +493,22 @@ class ClearParser
   sig { params(precedence: Integer).returns(AST::Node) }
   def parse_expression(precedence = 0)
     @budget.enter!
+    # Value wrappers (COPY/MOVE/KEEP/...) parse their operand at the AMBIENT
+    # minimum precedence: inside a pipeline-stage element (parsed at 1) the
+    # operand stops before |>, while at statement level (parsed at 0)
+    # `COPY xs |> SELECT ...` keeps wrapping the whole pipeline.
+    prev_ambient = T.let(@wrapper_operand_precedence, T.nilable(Integer))
+    @wrapper_operand_precedence = T.let(precedence, T.nilable(Integer))
     expression = parse_expression_body(precedence)
     @budget.leave!
     expression
+  ensure
+    @wrapper_operand_precedence = prev_ambient
+  end
+
+  sig { returns(Integer) }
+  def wrapper_operand_precedence
+    @wrapper_operand_precedence || 0
   end
 
   sig { params(precedence: Integer).returns(AST::Node) }

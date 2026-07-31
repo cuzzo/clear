@@ -1,55 +1,59 @@
-# Split streams: ~?T[]@split — multiple handles can NEXT the same buffered sequence.
+# Split streams: [~]@split T — multiple handles can NEXT the same buffered sequence.
 # Each retained handle sees the same items in the same order.
+# NEXT returns a StreamStep unwrapped with EXISTS (absent = stream closed).
 
 FN main() RETURNS Void ->
     # -------------------------------------------------------
     # Test 1: clone before consumption replays full sequence.
     # -------------------------------------------------------
-    s: ~?Int64[] @split = BG STREAM {
+    s: [~]@split Int64 = BG STREAM {
         YIELD 1;
         YIELD 2;
         YIELD 3;
     };
-    s_clone: ~?Int64[] @split = CLONE s;
+    s_clone: [~]@split Int64 = KEEP s;
 
-    a1: ?Int64 = NEXT s;
-    a2: ?Int64 = NEXT s;
-    a3: ?Int64 = NEXT s;
-    a4: ?Int64 = NEXT s;
+    MUTABLE a_sum: Int64 = 0;
+    MUTABLE a_count: Int64 = 0;
+    WHILE NEXT s EXISTS AS a DO
+        a_count = a_count + 1;
+        a_sum = a_sum * 10 + a;
+    END
+    ASSERT a_count == 3, "split stream original handle reads all three items";
+    ASSERT a_sum == 123, "split stream original handle preserves order";
 
-    b1: ?Int64 = NEXT s_clone;
-    b2: ?Int64 = NEXT s_clone;
-    b3: ?Int64 = NEXT s_clone;
-    b4: ?Int64 = NEXT s_clone;
-
-    ASSERT a1 == 1, "split stream original handle reads first item";
-    ASSERT a2 == 2, "split stream original handle reads second item";
-    ASSERT a3 == 3, "split stream original handle reads third item";
-    ASSERT a4 == NIL, "split stream original handle exhausts to NIL";
-    ASSERT b1 == 1, "split stream clone replays first item";
-    ASSERT b2 == 2, "split stream clone replays second item";
-    ASSERT b3 == 3, "split stream clone replays third item";
-    ASSERT b4 == NIL, "split stream clone exhausts to NIL";
+    MUTABLE b_sum: Int64 = 0;
+    MUTABLE b_count: Int64 = 0;
+    WHILE NEXT s_clone EXISTS AS b DO
+        b_count = b_count + 1;
+        b_sum = b_sum * 10 + b;
+    END
+    ASSERT b_count == 3, "split stream clone replays all three items";
+    ASSERT b_sum == 123, "split stream clone replays in the same order";
 
     # -------------------------------------------------------
     # Test 2: late retain starts from the source handle's current point.
     # -------------------------------------------------------
-    s2: ~?Int64[] @split = BG STREAM {
+    s2: [~]@split Int64 = BG STREAM {
         YIELD 10;
         YIELD 20;
         YIELD 30;
     };
 
-    first: ?Int64 = NEXT s2;
-    late: ~?Int64[] @split = CLONE s2;
-    late1: ?Int64 = NEXT late;
-    late2: ?Int64 = NEXT late;
-    late3: ?Int64 = NEXT late;
-
-    ASSERT first == 10, "split stream original handle consumes first item before retain";
-    ASSERT late1 == 20, "late-retained split stream starts at current unread item";
-    ASSERT late2 == 30, "late-retained split stream preserves order";
-    ASSERT late3 == NIL, "late-retained split stream exhausts to NIL";
+    IF NEXT s2 EXISTS AS first THEN
+        ASSERT first == 10, "split stream original handle consumes first item before retain";
+    ELSE
+        ASSERT FALSE, "split stream original handle must produce the first item";
+    END
+    late: [~]@split Int64 = KEEP s2;
+    MUTABLE late_sum: Int64 = 0;
+    MUTABLE late_count: Int64 = 0;
+    WHILE NEXT late EXISTS AS l DO
+        late_count = late_count + 1;
+        late_sum = late_sum * 100 + l;
+    END
+    ASSERT late_count == 2, "late-retained split stream sees only the unread tail";
+    ASSERT late_sum == 2030, "late-retained split stream preserves order";
 
     RETURN;
 END

@@ -110,7 +110,20 @@ module MIR
 
     sig { returns(T::Array[String]) }
     def owned_operand_names
-      @operands.reject(&:borrowed).filter_map(&:name).map(&:to_s).reject(&:empty?).uniq.freeze
+      # Keep this imperative: the generated pipeline inferred `borrowed` as
+      # an inherent method (`_.borrowed()`), though it is a value-struct
+      # field. Named typed locals preserve field-read lowering.
+      names = T.let([], T::Array[String])
+      @operands.each do |operand|
+        next if operand.borrowed
+
+        name = operand.name
+        next unless name
+
+        string_name = name.to_s
+        names << string_name unless string_name.empty?
+      end
+      names.uniq.freeze
     end
 
     sig { returns(T::Boolean) }
@@ -561,8 +574,8 @@ module MIR
       ])
     end
 
-    sig { params(body: T::Array[Emittable], result_type: T.nilable(Type)).returns(OwnershipEffect) }
-    def self.from_block_body(body, result_type:)
+    sig { params(body: T::Array[Emittable], result_type: T.nilable(Type), borrowed_view: T::Boolean).returns(OwnershipEffect) }
+    def self.from_block_body(body, result_type:, borrowed_view: false)
       stmts = body
       break_stmt = stmts.reverse.grep(MIR::BreakStmt).first
       value = break_stmt&.value
@@ -570,8 +583,37 @@ module MIR
         [true, transferred_break_ident_effect(stmts, value)],
         [true, of(value)],
         [true, block_result_transfer_effect(stmts, value)],
-        [cleanup_result_type?(result_type), owned(alloc: nil, cleanup_kind: :uniform)],
+        [cleanup_result_type?(result_type) && !(borrowed_view || borrowed_break_value?(value)),
+         owned(alloc: nil, cleanup_kind: :uniform)],
       ])
+    end
+
+    # A block that breaks on a slice returns a BORROWED view of some other
+    # value's buffer -- a syntactic BACKSTOP for the explicit `borrowed_view`
+    # marker. The producer should set BlockExpr#borrowed_view (a cast/wrapper/
+    # conditional around the slice would defeat this node-shape check); this
+    # remains only to catch a direct unmarked slice break.
+    sig { params(value: T.nilable(Emittable)).returns(T::Boolean) }
+    private_class_method def self.borrowed_break_value?(value)
+      value.is_a?(MIR::SliceExpr)
+    end
+
+    # Whether a lowered pipeline body yields a borrowed view rather than a
+    # freshly-owned value (used to withhold the owned sink allocator so the
+    # materializer does not free the borrowed source). AUTHORITATIVE signal:
+    # the producer's explicit BlockExpr#borrowed_view marker (e.g. SKIP). Unlike
+    # ownership -- which cannot be proven here, since an owned SELECT block also
+    # reports produces_owned=false before its transfer marks are finalized --
+    # the borrowed case is declared, not inferred. The slice node-shape check is
+    # a defensive backstop for a direct unmarked slice break.
+    sig { params(node: OwnershipEffectInput).returns(T::Boolean) }
+    def self.borrowed_view_result?(node)
+      block = [node].grep(MIR::BlockExpr).first
+      return false unless block
+      return true if block.borrowed_view
+
+      value = block.body.reverse.grep(MIR::BreakStmt).first&.value
+      borrowed_break_value?(value)
     end
 
     ActiveEffectCandidate = T.type_alias { [T::Boolean, OwnershipEffect] }
@@ -1095,6 +1137,21 @@ module MIR
   TestDef = Struct.new(:name, :body) do
     extend T::Sig
     include Stmt
+    # Stamped by TestLowering when the body spawns fibers (BG / BG STREAM /
+    # CONCURRENT): the emitter then boots a scheduler and drives the body as
+    # a task — the bare test-runner thread has no scheduler and GPFs in
+    # submitSpawn/getSched otherwise.
+    sig { returns(T::Boolean) }
+    def needs_scheduler
+      @needs_scheduler = T.let(nil, T.nilable(T::Boolean)) unless defined?(@needs_scheduler)
+      @needs_scheduler == true
+    end
+
+    sig { params(value: T::Boolean).void }
+    def needs_scheduler=(value)
+      @needs_scheduler = T.let(value, T.nilable(T::Boolean))
+    end
+
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
 
@@ -1117,6 +1174,17 @@ module MIR
   Let = Struct.new(:name, :init, :mutable, :annotation, :suppression, :alias_safe) do
     extend T::Sig
     include Stmt
+    # Set for a top-level CONST: emit at Zig container scope with `rt` bound to
+    # `undefined` (a comptime const initializer has no runtime context), and
+    # honor `const_visibility` for `pub const` export.
+    sig { returns(T.nilable(T::Boolean)) }
+    def module_const = @module_const
+    sig { params(value: T::Boolean).void }
+    def module_const=(value); @module_const = value; end
+    sig { returns(T.nilable(Symbol)) }
+    def const_visibility = @const_visibility
+    sig { params(value: T.nilable(Symbol)).void }
+    def const_visibility=(value); @const_visibility = value; end
     sig do
       params(
         name: T.any(String, Symbol),
@@ -1129,6 +1197,8 @@ module MIR
     end
     def initialize(name, init, mutable, annotation = nil, suppression = nil, alias_safe = nil)
       super(name, init, mutable, annotation, suppression, alias_safe)
+      @module_const = T.let(nil, T.nilable(T::Boolean))
+      @const_visibility = T.let(nil, T.nilable(Symbol))
     end
 
     sig { returns(T::Array[Emittable]) }
@@ -1460,7 +1530,7 @@ module MIR
   # emitter wraps them in the appropriate Zig closure / VM comparator.
   # No allocation; ownership of items unchanged.
   # Zig: std.mem.sort(T, items, {}, struct { fn lessThan(_, a, b) {...} });
-  Sort = Struct.new(:elem_type, :items_expr, :key_a, :key_b) do
+  Sort = Struct.new(:elem_type, :items_expr, :key_a, :key_b, :string_keys) do
     extend T::Sig
     include Stmt
     sig { returns(T::Array[Emittable]) }
@@ -1517,6 +1587,11 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([item_expr, value_expr])
+    # The per-window value is appended into result_var by the emitter — an
+    # ownership-binding position (the batch placeholder only exists inside
+    # the emitted batch block, so the value cannot be hoisted above it).
+    sig { returns(T::Array[Emittable]) }
+    def owned_position_source_exprs = compact_child_exprs([value_expr])
   end
 
   BatchWindowFlush = Struct.new(:window, :batch_var, :elem_zig,
@@ -1525,6 +1600,8 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([value_expr])
+    sig { returns(T::Array[Emittable]) }
+    def owned_position_source_exprs = compact_child_exprs([value_expr])
   end
 
   # Defer statement.
@@ -2935,6 +3012,22 @@ module MIR
     include Stmt
   end
 
+  # A runtime-initialized module CONST's storage: `[pub] var NAME: TYPE = undefined;`
+  # at Zig container scope. It is assigned once, in dependency order, in
+  # clearMain's generated const-init prologue; container-scope reads borrow the
+  # initialized value. Program-lifetime (released with the runtime arena).
+  ModuleVar = Struct.new(:name, :zig_type, :visibility) do
+    include Stmt
+  end
+
+  # Releases a runtime-init CONST's program-lifetime storage at program exit.
+  # Emitted as a `defer CheatLib.cleanup(...)` at the top of clearMain so it runs
+  # once, after every use. The paired allocation lives in __clear_init_consts;
+  # the checker treats this as a program-lifetime free, not a scope cleanup.
+  ModuleConstFree = Struct.new(:name) do
+    include Stmt
+  end
+
   # ================================================================
   # Memory Operations (the point of the entire MIR system)
   # ================================================================
@@ -3219,6 +3312,34 @@ module MIR
     extend T::Sig
     include Expr
     # func: "arcRetain" or "rcRetain"
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([source])
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      OwnershipEffect.owned(alloc: :heap, cleanup_kind: :rc)
+    end
+  end
+
+  # Comptime carrier-payload projection for a MONOMORPHIC (carrier-polymorphic)
+  # value: derefs the payload out of an Rc/Arc handle, or passes a plain value
+  # through, chosen at Zig comptime with zero runtime cost.
+  # Zig: (if (comptime @hasDecl(@TypeOf(SRC), "__clear_ref_carrier")) SRC.ctrl.data.* else SRC)
+  ComptimeCarrierPayload = Struct.new(:source) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([source])
+  end
+
+  # KEEP on a MONOMORPHIC (carrier-polymorphic) value: carrier-preserving fan-out
+  # resolved at Zig comptime by CheatLib.dupeValue -- retain another Rc/Arc
+  # handle, deep-copy a plain struct payload (heap fields included), or
+  # @compileError for a linear plain type (no valid CopyPlan). Zig picks the arm
+  # per monomorphization.
+  # Zig: try CheatLib.dupeValue(@TypeOf(SRC), SRC, alloc)
+  MonomorphicKeep = Struct.new(:source, :zig_base, :alloc) do
+    extend T::Sig
+    include Expr
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([source])
     sig { returns(OwnershipEffect) }
@@ -3693,6 +3814,23 @@ module MIR
     end
   end
 
+  # Retained identity v4: kept-edge handles cross their transfer boundary
+  # BEFORE the call statement - the callee owns each handle from entry and
+  # releases it on its own failure paths, so the caller's guarded cleanup
+  # must disarm ahead of the invocation, after every sibling argument has
+  # been evaluated. This is the one marker builder for that boundary.
+  sig { params(names: T::Array[String]).returns(T::Array[MIR::Stmt]) }
+  def self.kept_edge_transfer_boundary(names)
+    names.uniq.flat_map do |name|
+      OwnershipTransferPlan.new(
+        name: name,
+        target: :owned_sink,
+        target_alloc: :heap,
+        move_guarded: true,
+      ).marks
+    end
+  end
+
   sig do
     params(
       name: String,
@@ -3790,6 +3928,9 @@ module MIR
       out = Call.new(callee, args, false, owned_return, callable_contract)
       out.never_success = never_success
       out.result_type = Type.new(T.unsafe(result_type)) if result_type
+      # Stripping the try flag does not change what the call consumed; the
+      # transfer-mark machinery reads this fact off the rebuilt node.
+      out.ownership_consumption = ownership_consumption if ownership_consumption
       out
     end
 
@@ -4254,6 +4395,19 @@ module MIR
     sig { params(value: T.nilable(Type)).void }
     def result_type=(value); @result_type = T.let(value, T.nilable(Type)); end
 
+    # Whether this block yields a BORROWED VIEW of some other value's buffer
+    # rather than a freshly-owned result (e.g. SKIP breaks on `items[n..]`). The
+    # PRODUCER sets this explicitly; ownership must not be re-derived from the
+    # break value's node shape, which a cast/wrapper/conditional would bypass.
+    sig { returns(T::Boolean) }
+    def borrowed_view
+      @borrowed_view = T.let(nil, T.nilable(T::Boolean)) unless defined?(@borrowed_view)
+      @borrowed_view == true
+    end
+
+    sig { params(value: T::Boolean).void }
+    def borrowed_view=(value); @borrowed_view = T.let(value, T.nilable(T::Boolean)); end
+
     sig { returns(T::Array[BodySlot]) }
     def body_slots = [body_slot(:body, body, ->(new_body) { self.body = new_body })]
 
@@ -4264,7 +4418,7 @@ module MIR
 
     sig { returns(OwnershipEffect) }
     def ownership_effect
-      OwnershipEffect.from_block_body(body, result_type: result_type)
+      OwnershipEffect.from_block_body(body, result_type: result_type, borrowed_view: borrowed_view)
     end
   end
 
@@ -5322,10 +5476,7 @@ module MIR
   end
 
   LEGACY_OWNERSHIP_NODE_TYPES = T.let(
-    [:ReassignCleanup, :FieldCleanup, :ReassignPlan].filter_map do |name|
-      value = const_defined?(name, false) ? const_get(name, false) : nil
-      value if value.is_a?(Class)
-    end.freeze,
+    [ReassignCleanup, FieldCleanup, ReassignPlan].freeze,
     T::Array[T::Class[T.anything]],
   )
   LEGACY_OWNERSHIP_NODE_NAMES = T.let(
@@ -5342,6 +5493,7 @@ module MIR
     Call, TailCall, MethodCall,
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
     DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain, RcRelease,
+    ComptimeCarrierPayload, MonomorphicKeep,
     RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, OwnedSlice,
     NextPromiseList,
     IndexInsert, BatchWindowPush, BatchWindowFlush,

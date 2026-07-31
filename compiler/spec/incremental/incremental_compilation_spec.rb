@@ -141,9 +141,16 @@ RSpec.describe "incremental CLEAR compilation" do
     expect(isolated.fast_path).to be(true)
     expect(isolated.changed_function).to eq("alpha")
 
+    # A comment or reflow is not a semantic change: the fingerprint is taken
+    # over tokens, so these stay on the fast path instead of dropping the whole
+    # file to a full rebuild (the common edit while developing).
+    commented = Incremental::ItemReconciler.reconcile(baseline, catalog("# changed\n#{source}"))
+    expect(commented.fast_path).to be(true)
+    expect(commented.changed_function).to be_nil
+
     cases = {
       "root function set changed" => source + "\nFN extra() RETURNS Int64 -> RETURN 1; END\n",
-      "non-function source changed" => "# changed\n#{source}",
+      "non-function source changed" => "STRUCT Added { x: Int64 }\n#{source}",
       "more than one function changed" => source(alpha: "3", beta: "4"),
       "main function changed" => source(main_body: 'print("no");'),
       "function interface changed" => source.sub("FN alpha() RETURNS Int64", "FN alpha(x: Int64) RETURNS Int64"),

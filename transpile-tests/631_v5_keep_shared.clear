@@ -1,0 +1,12 @@
+# Retained-identity v5: KEEP of a concrete @shared local is an atomic retain.
+STRUCT Cell { n: Int64 }
+
+FN read(c: Cell) RETURNS Int64 -> RETURN c.n; END
+
+FN main() RETURNS Void ->
+    MUTABLE original = Cell{ n: 11 } @shared;
+    kept = KEEP original;
+    WITH original { ASSERT read(original) == 11, "original observes 11"; }
+    WITH kept { ASSERT read(kept) == 11, "kept observes the same identity"; }
+    RETURN;
+END

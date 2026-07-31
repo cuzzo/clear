@@ -1,0 +1,32 @@
+# Test: a REDUCE whose step reads accumulator FIELDS (`acc.field`) inside a
+# struct-literal step expression substitutes `acc` for the desugared accumulator
+# variable.
+#
+# The pipeline rewriter's `replace_named_placeholder` (for `acc`) walked Array
+# and single-node members but skipped Hash members, so `acc.field` references
+# living inside a StructLit's `fields` Hash were left un-substituted and the
+# generated Zig referenced an undeclared `acc`. (`replace_placeholder`, for the
+# `_` element, already handled Hash -- this closes the same gap for `acc`.)
+
+STRUCT Acc { total: Int64, seen: Int64 }
+
+FN sumUp(nums: Int64[]) RETURNS Acc ->
+    RETURN nums |> REDUCE(Acc{ total: 0_i64, seen: 0_i64 }) Acc{ total: acc.total + _, seen: acc.seen + 1_i64 };
+END
+
+FN main() RETURNS Void ->
+    MUTABLE ns: Int64[] = List[];
+    &ns.push(10_i64);
+    &ns.push(20_i64);
+    &ns.push(30_i64);
+
+    r = sumUp(ns);
+    ASSERT r.total == 60_i64, "acc.total accumulated";
+    ASSERT r.seen == 3_i64, "acc.seen counted";
+
+    # Also exercise the in-place (var-assigned) path over a local list.
+    local = ns |> REDUCE(Acc{ total: 100_i64, seen: 0_i64 }) Acc{ total: acc.total + _, seen: acc.seen + 1_i64 };
+    ASSERT local.total == 160_i64, "local acc.total";
+    ASSERT local.seen == 3_i64, "local acc.seen";
+    RETURN;
+END

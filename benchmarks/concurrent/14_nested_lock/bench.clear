@@ -91,7 +91,7 @@ FN main() RETURNS Void ->
   MUTABLE acct_refs: []Account@shared:locked = [];
   WITH bank AS bk {
     FOR i IN (0 ..< numAccounts) DO
-      IF bk.accounts[i] EXISTS AS account THEN &acct_refs.append(CLONE account); END
+      IF bk.accounts[i] EXISTS AS account THEN &acct_refs.append(KEEP account); END
     END
   }
   MUTABLE total = 0;

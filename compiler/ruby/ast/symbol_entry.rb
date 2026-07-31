@@ -31,8 +31,8 @@ require "sorbet-runtime"
 # Load its implementation here so isolated tooling such as Mutant can evaluate
 # these signatures without relying on a broader compiler require order.
 require_relative "type"
+require_relative "param"
 require_relative "../annotator/helpers/function_signature"
-require_relative "schemas"
 require_relative "async_result_shape"
 
 # Scope and SymbolEntry are a mutual back-reference: scope.rb requires
@@ -50,6 +50,7 @@ class SymbolEntry
 
   @next_binding_id = T.let(0, Integer)
   TypeInput = T.type_alias { T.nilable(T.any(Type::TypeInput, FunctionSignature)) }
+  RegInput = T.type_alias { T.nilable(T.any(AST::Node, String, Symbol)) }
   LifetimeSourceInput = T.type_alias { T.any(SymbolEntry, Symbol) }
   LifetimeInput = T.type_alias { T.nilable(T.any(Symbol, T::Array[LifetimeSourceInput], T::Hash[Symbol, T::Array[LifetimeSourceInput]])) }
 
@@ -89,9 +90,26 @@ class SymbolEntry
     # value capture does not provide a writable source slot, so moving this
     # payload would leave the enclosing optional cleanup owning the same data.
     prop :owned_optional_capture, T::Boolean, default: false
+    # Keep-analysis (retained identity v4): this param's value flows into an
+    # identity destination, so its ABI is the family's handle and every call
+    # edge consumes a CallEdgeOwnershipPlan derived from the caller's
+    # declared model. nil = not kept.
+    prop :kept_identity, T.nilable(KeptIdentityContract), default: nil
+    # Retained-identity v5 parameter carrier contract: :polymorphic (default,
+    # carrier-preserving), :unique (exclusively owned, enables COPY), :shared
+    # (requires a retained-identity family). Written once at param binding.
+    prop :carrier_contract, Symbol, default: :polymorphic
+    # True when this binding's CARRIER is statically unknown -- an
+    # unconstrained TAKES parameter, or a local directly aliasing one. COPY
+    # (which needs independent identity) is rejected on such bindings; the
+    # default :polymorphic contract on an ordinary local does NOT set this.
+    prop :carrier_polymorphic, T::Boolean, default: false
   end
 
-  attr_accessor :reg, :mutable, :rebindable,
+  sig { returns(RegInput) }
+  attr_accessor :reg
+
+  attr_accessor :mutable, :rebindable,
                 :size, :capabilities,
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
                 :scope_depth,    # declaring scope depth (0 = root)
@@ -106,40 +124,128 @@ class SymbolEntry
   sig { returns(BindingLifecycleFacts) }
   attr_reader :lifecycle
 
-  class << self
-    extend T::Sig
+  sig { returns(T.nilable(AsyncResultShape)) }
+  def async_result_shape = lifecycle.async_result_shape
 
-    sig { params(name: Symbol).void }
-    def lifecycle_attr(name)
-      define_method(name) do
-        T.bind(self, SymbolEntry).lifecycle.public_send(name)
-      end
-      define_method(:"#{name}=") do |value|
-        T.bind(self, SymbolEntry).lifecycle.public_send(:"#{name}=", value)
-      end
-    end
-
-    sig { params(name: Symbol).void }
-    def flow_attr(name)
-      define_method(name) do
-        T.bind(self, SymbolEntry).flow_facts.public_send(name)
-      end
-    end
+  sig { params(value: T.nilable(AsyncResultShape)).void }
+  def async_result_shape=(value)
+    @lifecycle.async_result_shape = value
   end
 
-  lifecycle_attr :async_result_shape
-  lifecycle_attr :type
-  lifecycle_attr :storage
-  lifecycle_attr :sync
-  lifecycle_attr :layout
-  lifecycle_attr :resource
-  lifecycle_attr :close_plan
-  lifecycle_attr :ownership_kind
-  lifecycle_attr :takes
-  lifecycle_attr :is_param
-  lifecycle_attr :link_source
-  lifecycle_attr :foreign_out_owner
-  lifecycle_attr :owned_optional_capture
+  sig { returns(Type) }
+  def type = lifecycle.type
+
+  sig { returns(Symbol) }
+  def storage = lifecycle.storage
+
+  sig { params(value: Symbol).void }
+  def storage=(value)
+    @lifecycle.storage = value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def sync = lifecycle.sync
+
+  sig { params(value: T.nilable(Symbol)).void }
+  def sync=(value)
+    @lifecycle.sync = value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def layout = lifecycle.layout
+
+  sig { params(value: T.nilable(Symbol)).void }
+  def layout=(value)
+    @lifecycle.layout = value
+  end
+
+  sig { returns(T.nilable(T::Boolean)) }
+  def resource = lifecycle.resource
+
+  sig { params(value: T.nilable(T::Boolean)).void }
+  def resource=(value)
+    @lifecycle.resource = value
+  end
+
+  sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
+  def close_plan = lifecycle.close_plan
+
+  sig { params(value: T.nilable(Schemas::ResourceClosePlan)).void }
+  def close_plan=(value)
+    @lifecycle.close_plan = value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def ownership_kind = lifecycle.ownership_kind
+
+  sig { params(value: T.nilable(Symbol)).void }
+  def ownership_kind=(value)
+    @lifecycle.ownership_kind = value
+  end
+
+  sig { returns(T::Boolean) }
+  def takes = lifecycle.takes
+
+  sig { params(value: T::Boolean).void }
+  def takes=(value)
+    @lifecycle.takes = value
+  end
+
+  sig { returns(T::Boolean) }
+  def is_param = lifecycle.is_param
+
+  sig { params(value: T::Boolean).void }
+  def is_param=(value)
+    @lifecycle.is_param = value
+  end
+
+  sig { returns(T.nilable(KeptIdentityContract)) }
+  def kept_identity = lifecycle.kept_identity
+
+  sig { params(value: T.nilable(KeptIdentityContract)).void }
+  def kept_identity=(value)
+    @lifecycle.kept_identity = value
+  end
+
+  sig { returns(Symbol) }
+  def carrier_contract = lifecycle.carrier_contract
+
+  sig { params(value: Symbol).void }
+  def carrier_contract=(value)
+    @lifecycle.carrier_contract = value
+  end
+
+  sig { returns(T::Boolean) }
+  def carrier_polymorphic = lifecycle.carrier_polymorphic
+
+  sig { params(value: T::Boolean).void }
+  def carrier_polymorphic=(value)
+    @lifecycle.carrier_polymorphic = value
+  end
+
+  sig { returns(T.nilable(Symbol)) }
+  def link_source = lifecycle.link_source
+
+  sig { params(value: T.nilable(Symbol)).void }
+  def link_source=(value)
+    @lifecycle.link_source = value
+  end
+
+  sig { returns(T::Boolean) }
+  def foreign_out_owner = lifecycle.foreign_out_owner
+
+  sig { params(value: T::Boolean).void }
+  def foreign_out_owner=(value)
+    @lifecycle.foreign_out_owner = value
+  end
+
+  sig { returns(T::Boolean) }
+  def owned_optional_capture = lifecycle.owned_optional_capture
+
+  sig { params(value: T::Boolean).void }
+  def owned_optional_capture=(value)
+    @lifecycle.owned_optional_capture = value
+  end
 
   sig { returns(T.nilable(Integer)) }
   def semantic_place_id
@@ -148,23 +254,37 @@ class SymbolEntry
 
   sig { params(value: Integer).void }
   def adopt_semantic_place_id!(value)
-    @lifecycle.semantic_place_id ||= value
+    return unless @lifecycle.semantic_place_id.nil?
+
+    @lifecycle.semantic_place_id = value
   end
 
-  flow_attr :non_escaping
-  flow_attr :borrowed_alias
-  flow_attr :valid
-  flow_attr :invalid_reason
-  flow_attr :read
-  flow_attr :mutated
-  flow_attr :mutable_ref_target
-  flow_attr :poly_borrow_target
-  flow_attr :init_contents_heap
+  sig { returns(T::Boolean) }
+  def non_escaping = flow_facts.non_escaping
 
-  class << self
-    undef_method :lifecycle_attr
-    undef_method :flow_attr
-  end
+  sig { returns(T::Boolean) }
+  def borrowed_alias = flow_facts.borrowed_alias
+
+  sig { returns(T::Boolean) }
+  def valid = flow_facts.valid
+
+  sig { returns(T.nilable(String)) }
+  def invalid_reason = flow_facts.invalid_reason
+
+  sig { returns(T::Boolean) }
+  def read = flow_facts.read
+
+  sig { returns(T::Boolean) }
+  def mutated = flow_facts.mutated
+
+  sig { returns(T::Boolean) }
+  def mutable_ref_target = flow_facts.mutable_ref_target
+
+  sig { returns(T::Boolean) }
+  def poly_borrow_target = flow_facts.poly_borrow_target
+
+  sig { returns(T::Boolean) }
+  def init_contents_heap = flow_facts.init_contents_heap
 
   sig { returns(T::Array[SymbolEntry]) }
   attr_reader :lifetime
@@ -187,7 +307,17 @@ class SymbolEntry
   sig { params(value: LifetimeInput).void }
   def lifetime=(value)
     @lifetime = normalize_lifetime(value)
-    @flow.non_escaping = @lifetime.length == 1 && @lifetime.first.equal?(self)
+    @flow.non_escaping = lifetime_self_only?
+  end
+
+  sig { returns(T::Boolean) }
+  def lifetime_self_only?
+    return false unless @lifetime.length == 1
+
+    source = @lifetime.first
+    return false unless source
+
+    source.binding_id == @binding_id
   end
 
   # A function binding is a Type whose @raw is its FunctionSignature
@@ -199,7 +329,13 @@ class SymbolEntry
   # require ordering.
   sig { returns(T.nilable(FunctionSignature)) }
   def fn_signature
-    T.unsafe(type.function_signature)
+    function_type = type.function_type
+    return nil unless function_type
+
+    signature = function_type.source_signature
+    return nil unless signature
+
+    T.cast(signature, FunctionSignature)
   end
 
   # Backward-compat alias for `lifetime == :current_scope`.
@@ -537,23 +673,17 @@ class SymbolEntry
     sources.uniq
   end
 
-  sig { params(reg: T.untyped, type: TypeInput, mutable: T::Boolean, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.nilable(String), resource: T.nilable(T::Boolean), close_plan: T.nilable(Schemas::ResourceClosePlan)).void }
+  sig { params(reg: RegInput, type: TypeInput, mutable: T::Boolean, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.nilable(String), resource: T.nilable(T::Boolean), close_plan: T.nilable(Schemas::ResourceClosePlan)).void }
+  # ruby-to-clear: fallible
   def initialize(reg:, type:, mutable:, storage:, sync: nil, layout: nil, rebindable: false,
                  size: 0, capabilities: Set.new,
                  valid: true, invalid_reason: nil, resource: nil, close_plan: nil)
     @binding_id = T.let(self.class.next_binding_id, Integer)
     @ownership_binding_id = T.let(@binding_id, Integer)
     @reg = reg
-    normalized_type = if type.nil?
-      Type.new(:Untyped)
-    elsif type.is_a?(FunctionSignature)
-      Type.from_function_signature(type)
-    else
-      Type.new(type)
-    end
     @lifecycle = T.let(
       BindingLifecycleFacts.new(
-        type: normalized_type,
+        type: self.class.normalize_type_input(type),
         storage: storage,
         sync: sync,
         layout: layout,
@@ -581,17 +711,27 @@ class SymbolEntry
   # single Type. The runtime sig now enforces the accepted domain --
   # anything outside it is a compiler bug, surfaced here.
   sig { params(val: TypeInput).void }
+  # ruby-to-clear: fallible
   def type=(val)
-    @lifecycle.type = if val.nil?
-      Type.new(:Untyped)
-    elsif val.is_a?(FunctionSignature)
-      Type.from_function_signature(val)
-    else
-      Type.new(val)
-    end
+    @lifecycle.type = self.class.normalize_type_input(val)
   end
 
   private
+
+  sig { params(value: TypeInput).returns(Type) }
+  # ruby-to-clear: fallible
+  def self.normalize_type_input(value)
+    return Type.new(:Untyped) if value.nil?
+    return type_from_function_signature(value) if value.is_a?(FunctionSignature)
+
+    Type.new(value)
+  end
+
+  sig { params(signature: FunctionSignature).returns(Type) }
+  def self.type_from_function_signature(signature)
+    param_types = signature.params.map(&:type)
+    Type.function_type_from_parts(param_types, signature.return_type, signature.reentrant, signature)
+  end
 
   sig { returns(Integer) }
   def self.next_binding_id
@@ -602,19 +742,26 @@ class SymbolEntry
 
   sig { params(value: LifetimeInput).returns(T::Array[SymbolEntry]) }
   def normalize_lifetime(value)
-    return [self] if value == :current_scope
-
-    sources = if value.is_a?(Hash)
-      value[:sources]
-    else
-      value
+    if value.is_a?(Symbol)
+      return [self] if value == :current_scope
     end
 
-    Array(sources).map do |source|
+    sources = T.let([], T::Array[LifetimeSourceInput])
+    if value.is_a?(Hash)
+      sources = value[:sources] || []
+    elsif value.is_a?(Array)
+      sources = value
+    elsif value
+      sources = [value]
+    end
+
+    normalized = T.let([], T::Array[SymbolEntry])
+    sources.each do |source|
       unless source.is_a?(SymbolEntry)
         raise TypeError, "SymbolEntry#lifetime sources must be SymbolEntry instances"
       end
-      source
-    end.uniq
+      normalized << source
+    end
+    normalized.uniq
   end
 end

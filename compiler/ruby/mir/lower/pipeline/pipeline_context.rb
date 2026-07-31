@@ -89,8 +89,13 @@ class PipelineContextState < T::Struct
 
   sig { returns(T::Boolean) }
   def active?
-    !!(placeholder_name || acc_placeholder || join_param_map ||
-       soa_each_mode || soa_rewrite_active || !named_bindings.empty?)
+    return true unless placeholder_name.nil?
+    return true unless acc_placeholder.nil?
+    return true unless join_param_map.nil?
+    return true if soa_each_mode
+    return true if soa_rewrite_active
+
+    !named_bindings.empty?
   end
 
   sig { params(name: String).returns(T.nilable(String)) }
@@ -98,22 +103,42 @@ class PipelineContextState < T::Struct
     return placeholder_name if name == "_" && placeholder_name
     return acc_placeholder if name == "acc" && acc_placeholder
 
-    joined = join_param_map&.[](name)
-    return joined if joined
+    map = join_param_map
+    if map
+      joined = map[name]
+      return joined if joined
+    end
 
     named_bindings[name]
   end
 
   sig { params(node: AST::Node).returns(T::Boolean) }
   def soa_each_field_node?(node)
-    soa_each_mode && node.is_a?(AST::GetField) &&
-      node.target.is_a?(AST::Identifier) && node.target.name == "_"
+    return false unless soa_each_mode
+
+    case node
+    when AST::GetField
+      placeholder_identifier?(node.target)
+    else
+      false
+    end
   end
 
   sig { params(node: AST::GetField).returns(T::Boolean) }
   def soa_rewrite_field_node?(node)
-    soa_rewrite_active && node.target.is_a?(AST::Identifier) && node.target.name == "_"
+    soa_rewrite_active && placeholder_identifier?(node.target)
   end
+
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
+  def placeholder_identifier?(node)
+    case node
+    when AST::Identifier
+      node.name == "_"
+    else
+      false
+    end
+  end
+  private :placeholder_identifier?
 
   sig { params(field: T.any(Symbol, String)).void }
   def record_soa_field(field)
@@ -144,9 +169,12 @@ class PipelinePlaceholderRewriter
     when AST::BindExpr then substitute_bind_expr(node)
     when AST::Assignment then substitute_assignment(node)
     when AST::UnaryOp then substitute_unary_op(node)
+    when AST::CopyNode, AST::MoveNode, AST::KeepNode, AST::ShareNode
+      substitute_value_wrapper(node)
     when AST::WithBlock then substitute_with_block(node)
     when AST::StructLit then substitute_struct_lit(node)
     when AST::HashLit then substitute_hash_lit(node)
+    when AST::ListLit then substitute_list_lit(node)
     when AST::BlockExpr then substitute_block_expr(node)
     when AST::Assert then substitute_assert(node)
     when AST::IfStatement then substitute_if_statement(node)
@@ -210,7 +238,7 @@ class PipelinePlaceholderRewriter
 
     new_bin = AST::BinaryOp.new(node.token, new_left, node.op, new_right)
     copy_type_info(node, new_bin)
-    new_bin.string_concat = node.string_concat if node.respond_to?(:string_concat) && node.string_concat
+    new_bin.string_concat = true if node.string_concat == true
     new_bin
   end
 
@@ -219,9 +247,9 @@ class PipelinePlaceholderRewriter
     if @context.soa_rewrite_field_node?(node)
       @context.record_soa_field(node.field)
       soa_field = AST::Identifier.new(node.token, "__soa_#{node.field}")
-      AST.stamp_synthetic_type!(soa_field, soa_field_slice_type(node), context: "synthetic AST type")
+      soa_field.type_object = soa_field_slice_type(node)
       soa_idx = AST::Identifier.new(node.token, "__soa_i")
-      AST.stamp_synthetic_type!(soa_idx, :Int64, context: "synthetic AST type")
+      soa_idx.type_object = Type.new(:Int64)
       new_gi = AST::GetIndex.new(node.token, soa_field, soa_idx)
       copy_type_info(node, new_gi)
       return new_gi
@@ -276,9 +304,52 @@ class PipelinePlaceholderRewriter
     new_assign
   end
 
-  sig { params(node: T.any(AST::Node, String)).returns(T.any(AST::Node, String)) }
+  sig { params(node: AST::AssignmentName).returns(AST::AssignmentName) }
   def substitute_assignment_target(node)
-    node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex) ? substitute(node) : node
+    if node.is_a?(AST::GetField)
+      rewritten = substitute(node)
+      return T.cast(rewritten, AST::AssignmentName)
+    end
+    if node.is_a?(AST::GetIndex)
+      rewritten = substitute(node)
+      return T.cast(rewritten, AST::AssignmentName)
+    end
+
+    node
+  end
+
+  # COPY/GIVE/CLONE/SHARE wrappers: substitute inside the wrapped value.
+  sig { params(node: T.any(AST::CopyNode, AST::MoveNode, AST::KeepNode, AST::ShareNode)).returns(AST::Node) }
+  def substitute_value_wrapper(node)
+    value = T.let(nil, T.nilable(AST::Locatable))
+    case node
+    when AST::CopyNode
+      value = node.value
+    when AST::MoveNode
+      value = node.value
+    when AST::KeepNode
+      value = node.value
+    when AST::ShareNode
+      value = node.value
+    end
+    value = T.must(value)
+    new_value = substitute(value)
+    return node if new_value == value
+
+    new_node = T.let(nil, T.nilable(AST::PipelineRewriteNode))
+    case node
+    when AST::CopyNode
+      new_node = AST::CopyNode.new(node.token, new_value)
+    when AST::MoveNode
+      new_node = AST::MoveNode.new(node.token, new_value)
+    when AST::KeepNode
+      new_node = AST::KeepNode.new(node.token, new_value)
+    when AST::ShareNode
+      new_node = AST::ShareNode.new(node.token, new_value)
+    end
+    new_node = new_node
+    copy_type_info(node, new_node)
+    new_node
   end
 
   sig { params(node: AST::UnaryOp).returns(AST::Node) }
@@ -293,19 +364,31 @@ class PipelinePlaceholderRewriter
 
   sig { params(node: AST::WithBlock).returns(AST::Node) }
   def substitute_with_block(node)
-    new_body = node.body.map { |stmt| substitute(stmt) }
-    new_arms = node.arms&.map do |arm|
-      new_arm_body = arm.body.map { |stmt| substitute(stmt) }
-      if new_arm_body == arm.body
-        arm
-      else
-        AST::WithMatchArm.new(
-          family: arm.family,
-          body: new_arm_body,
-          lock_error_clauses: arm.lock_error_clauses,
-          token: arm.token,
-        )
+    new_body = substitute_body(node.body)
+    arms = node.arms
+    new_arms = T.let(nil, T.nilable(T::Array[AST::WithMatchArm]))
+    if arms
+      rewritten_arms = T.let([], T::Array[AST::WithMatchArm])
+      arm_index = 0
+      while arm_index < arms.length
+        arm = arms.fetch(arm_index)
+        arm_body = T.let(arm.body_nodes, T::Array[AST::Node])
+        new_arm_body = substitute_body(arm_body)
+        rewritten_arm =
+          if new_arm_body == arm_body
+            arm
+          else
+            AST::WithMatchArm.new(
+              family: arm.family_value,
+              body: new_arm_body,
+              lock_error_clauses: arm.lock_error_clauses_value,
+              token: arm.token_value,
+            )
+          end
+        rewritten_arms << rewritten_arm
+        arm_index += 1
       end
+      new_arms = rewritten_arms
     end
     return node if new_body == node.body && new_arms == node.arms
 
@@ -322,20 +405,57 @@ class PipelinePlaceholderRewriter
     new_with
   end
 
+  sig { params(body: T::Array[AST::Node]).returns(T::Array[AST::Node]) }
+  def substitute_body(body)
+    result = T.let([], T::Array[AST::Node])
+    index = 0
+    while index < body.length
+      result << substitute(body.fetch(index))
+      index += 1
+    end
+    result
+  end
+
   sig { params(node: AST::StructLit).returns(AST::Node) }
   def substitute_struct_lit(node)
-    new_fields = node.fields.transform_values { |value| substitute(value) }
-    return node if new_fields == node.fields
+    fields = T.let(node.fields, T::Hash[String, AST::Node])
+    new_fields = T.let({}, T::Hash[String, AST::Node])
+    keys = fields.keys
+    index = 0
+    while index < keys.length
+      key = keys.fetch(index)
+      new_fields[key] = substitute(fields.fetch(key))
+      index += 1
+    end
+    return node if new_fields == fields
 
     new_sl = AST::StructLit.new(node.token, node.name, new_fields, node.storage, node.type_args)
     copy_type_info(node, new_sl)
     new_sl
   end
 
+  sig { params(node: AST::ListLit).returns(AST::Node) }
+  def substitute_list_lit(node)
+    new_items = node.items.map { |item| substitute(item) }
+    return node if new_items == node.items
+
+    new_ll = AST::ListLit.new(node.token, new_items, node.storage, node.constructor_options)
+    copy_type_info(node, new_ll)
+    new_ll
+  end
+
   sig { params(node: AST::HashLit).returns(AST::Node) }
   def substitute_hash_lit(node)
-    new_pairs = node.pairs.transform_values { |value| substitute(value) }
-    return node if new_pairs == node.pairs
+    pairs = T.let(node.pairs, T::Hash[AST::Node, AST::Node])
+    new_pairs = T.let({}, T::Hash[AST::Node, AST::Node])
+    keys = pairs.keys
+    index = 0
+    while index < keys.length
+      key = keys.fetch(index)
+      new_pairs[key] = substitute(pairs.fetch(key))
+      index += 1
+    end
+    return node if new_pairs == pairs
 
     new_hl = AST::HashLit.new(node.token, new_pairs, node.storage)
     copy_type_info(node, new_hl)
@@ -344,7 +464,13 @@ class PipelinePlaceholderRewriter
 
   sig { params(node: AST::BlockExpr).returns(AST::Node) }
   def substitute_block_expr(node)
-    new_body = node.body.map { |stmt| substitute(stmt) }
+    body = T.let(node.body, T::Array[AST::Node])
+    new_body = T.let([], T::Array[AST::Node])
+    index = 0
+    while index < body.length
+      new_body << substitute(body.fetch(index))
+      index += 1
+    end
     result = T.let(node.result, T.nilable(AST::Node))
     new_result = result ? substitute(result) : nil
     return node if new_body == node.body && new_result == node.result
@@ -379,19 +505,22 @@ class PipelinePlaceholderRewriter
     new_if
   end
 
-  sig { params(src: AST::Locatable, dst: AST::Locatable).void }
+  sig { params(src: AST::PipelineRewriteNode, dst: AST::PipelineRewriteNode).void }
   def copy_type_info(src, dst)
-    AST.copy_pipeline_rewrite_metadata!(src, dst)
+    AST.copy_pipeline_rewrite_metadata!(dst, src)
   end
 
-  sig { params(src: AST::Locatable, dst: AST::Locatable).void }
+  sig { params(src: AST::PipelineRewriteNode, dst: AST::PipelineRewriteNode).void }
   def copy_call_metadata(src, dst)
-    AST.copy_pipeline_rewrite_metadata!(src, dst, include_call_metadata: true)
+    AST.copy_pipeline_rewrite_metadata!(dst, src, include_call_metadata: true)
   end
 
   sig { params(field_node: AST::GetField).returns(Type) }
   def soa_field_slice_type(field_node)
-    field_type = field_node.full_type!(context: "SOA field slice")
-    Type.new(:"#{field_type.resolved}[]")
+    field_type = field_node.type_object
+    raise "SOA field slice: missing annotated type" unless field_type
+    concrete_type = field_type
+    raise "SOA field slice: unresolved annotated type" if concrete_type.untyped?
+    Type.new(:"#{concrete_type.resolved}[]")
   end
 end

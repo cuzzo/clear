@@ -6,7 +6,7 @@
 # NEXT joins the producer and returns the final accumulator.
 
 FN main() RETURNS Void ->
-    gen: ~?Int64[] = BG STREAM {
+    gen: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 1_i64;
         WHILE i <= 5_i64 DO
             YIELD i;

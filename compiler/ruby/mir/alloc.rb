@@ -22,7 +22,8 @@ module AllocHelper
 
     node.full_type!.mark_stack_value!
     node.storage = :stack
-    node.value.storage = :stack
+    value_node = node.value
+    value_node.storage = :stack
     :stack
   end
 
@@ -72,7 +73,7 @@ module AllocHelper
       end
     when AST::Cast
       expression_allocates?(node.value)
-    when AST::MoveNode, AST::CopyNode, AST::CloneNode, AST::ShareNode, AST::LinkNode, AST::ResolveNode, AST::CapabilityWrap
+    when AST::MoveNode, AST::CopyNode, AST::KeepNode, AST::ShareNode, AST::LinkNode, AST::ResolveNode, AST::CapabilityWrap
       expression_allocates?(node.value)
     else
       true

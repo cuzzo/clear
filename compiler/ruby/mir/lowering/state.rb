@@ -64,6 +64,20 @@ class MIRLoweringRuntimeState < T::Struct
   end
 end
 
+# A runtime-initialized CONST: a value that is not comptime-foldable (it
+# allocates), emitted as a container-scope `var NAME: T = undefined` and
+# assigned once at the top of clearMain. Entries are collected in declaration
+# order, which is already a valid init order: the annotator rejects forward
+# references, so a const can only read earlier-declared consts. The value lives
+# in the program arena (freed at rt.deinit); every use borrows it.
+class ConstInitEntry < T::Struct
+  extend T::Sig
+  const :name, String
+  const :zig_type, String
+  const :init, MIR::Node
+  const :type_info, T.untyped, default: nil
+end
+
 class MIRLoweringProgramState < T::Struct
   extend T::Sig
 
@@ -80,12 +94,14 @@ class MIRLoweringProgramState < T::Struct
   prop :source_dir, T.nilable(String), default: nil
   prop :emitted_types, T::Set[String], factory: -> { Set.new }
   prop :emitted_require_modules, T::Set[String], factory: -> { Set.new }
+  prop :emitted_import_type_aliases, T::Set[String], factory: -> { Set.new }
   prop :debug_mode, T::Boolean, default: false
   prop :target, Symbol, default: :zig
   prop :used_sharded_map, T::Boolean, default: false
   prop :use_debug_allocator, T.nilable(T::Boolean), default: nil
   prop :fn_nodes, FnNodeMap, factory: -> { {} }
   prop :function_counter_snapshots, T::Hash[String, MIRLoweringCounterSnapshot], factory: -> { {} }
+  prop :runtime_init_consts, T::Array[ConstInitEntry], factory: -> { [] }
 end
 
 class MIRLoweringCaptureState < T::Struct

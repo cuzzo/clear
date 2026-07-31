@@ -45,10 +45,13 @@ def rcgc_set_setup(cap)
 end
 
 def rcgc_shared_set_key_setup
+  # Inserting a retained handle is a KEEP (refcount bump, identity
+  # preserved for the later contains?/remove identity checks); a bare
+  # COPY of a handle is rejected under the explicit-carrier design.
   <<~CLEAR.chomp
     MUTABLE items: RefItem@shared[]@set = [];
         item = RefItem{ value: 7_i64 } @shared;
-        &items.insert(COPY item);
+        &items.insert(KEEP item);
   CLEAR
 end
 

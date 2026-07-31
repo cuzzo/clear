@@ -404,3 +404,88 @@ test "MapType correctly selects StringMap or NumericMapType" {
     const NMap = CheatLib.MapType(i64, f64);
     try std.testing.expect(NMap == CheatLib.NumericMapType(i64, f64));
 }
+
+test "typed-key maps support structural keys and own their key data" {
+    const allocator = std.testing.allocator;
+    const Key = struct {
+        path: []const u8,
+        generation: ?i64,
+    };
+    var map: CheatLib.NumericMapType(Key, i64) = .{};
+    defer CheatLib.numericMapDeinit(Key, i64, allocator, &map);
+
+    const source_path = try allocator.dupe(u8, "alpha");
+    defer allocator.free(source_path);
+    const key = Key{ .path = source_path, .generation = 7 };
+
+    try CheatLib.numericMapPut(Key, i64, allocator, &map, key, 41);
+    try std.testing.expectEqual(@as(?i64, 41), CheatLib.numericMapGet(
+        Key,
+        i64,
+        map,
+        .{ .path = "alpha", .generation = 7 },
+    ));
+
+    // Equal structural keys update the existing slot rather than adding a
+    // pointer-distinct duplicate.
+    try CheatLib.numericMapPut(
+        Key,
+        i64,
+        allocator,
+        &map,
+        .{ .path = "alpha", .generation = 7 },
+        42,
+    );
+    try std.testing.expectEqual(@as(i64, 1), CheatLib.numericMapCount(Key, i64, map));
+    try std.testing.expectEqual(@as(?i64, 42), CheatLib.numericMapGet(Key, i64, map, key));
+
+    CheatLib.numericMapDelete(Key, i64, allocator, &map, key);
+    try std.testing.expectEqual(@as(i64, 0), CheatLib.numericMapCount(Key, i64, map));
+}
+
+test "InternedStringSet never frees interned elements (insert/dup/remove/deinit)" {
+    const allocator = std.testing.allocator;
+    var set: CheatLib.InternedStringSet() = .{};
+    defer set.deinit(allocator);
+
+    // Rodata literals stand in for intern-table symbols: any free would
+    // crash or corrupt, and std.testing.allocator would flag a non-owned
+    // pointer immediately.
+    try set.insert(allocator, "alpha");
+    try set.insert(allocator, "beta");
+    try set.insert(allocator, "alpha"); // duplicate: must NOT free
+    try std.testing.expectEqual(@as(i64, 2), set.length());
+    try std.testing.expect(set.contains("alpha"));
+
+    set.remove(allocator, "beta"); // must NOT free
+    try std.testing.expectEqual(@as(i64, 1), set.length());
+}
+
+test "InternedStringSet cleanup and dupeValue reuse element pointers" {
+    const allocator = std.testing.allocator;
+    var set: CheatLib.InternedStringSet() = .{};
+    try set.insert(allocator, "gamma");
+    try set.insert(allocator, "delta");
+
+    var copy = try CheatLib.dupeValue(CheatLib.InternedStringSet(), set, allocator);
+    try std.testing.expectEqual(@as(i64, 2), copy.length());
+    try std.testing.expect(copy.contains("gamma"));
+
+    // Generic cleanup path must only free the backing maps.
+    CheatLib.cleanup(CheatLib.InternedStringSet(), allocator, &copy);
+    CheatLib.cleanup(CheatLib.InternedStringSet(), allocator, &set);
+}
+
+test "owned-string Set still frees duplicates and elements at deinit" {
+    const allocator = std.testing.allocator;
+    var set: CheatLib.Set([]const u8) = .{};
+    defer set.deinit(allocator);
+
+    try set.insert(allocator, try allocator.dupe(u8, "one"));
+    try set.insert(allocator, try allocator.dupe(u8, "one")); // dup: freed
+    try set.insert(allocator, try allocator.dupe(u8, "two"));
+    try std.testing.expectEqual(@as(i64, 2), set.length());
+
+    set.remove(allocator, "one"); // freed
+    try std.testing.expectEqual(@as(i64, 1), set.length());
+}

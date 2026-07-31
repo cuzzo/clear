@@ -118,6 +118,7 @@ class MIRChecker
     MIR::OwnedCreate, MIR::OwnedDestroy, MIR::OwnedReturn,
     MIR::OwnedStore, MIR::OwnedTransfer, MIR::Panic, MIR::Pipeline,
     MIR::PolymorphicFlowSignal, MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow, MIR::PubConst,
+    MIR::ModuleVar, MIR::ModuleConstFree,
     MIR::ReassignMark, MIR::ReassignWithCleanup,
     MIR::ResourceClose,
     MIR::ReturnMark, MIR::ReturnStmt, MIR::ScopeBlock, MIR::Set,
@@ -131,7 +132,6 @@ class MIRChecker
 
   AUDITED_EMITTABLE_NODE_TYPES = T.let([
     MIR::AddressOf, MIR::AllocMark, MIR::AllocSlice, MIR::AllocatorRef, MIR::ArrayDefaultInit,
-    MIR::AsyncPayloadTake,
     MIR::ArrayInit, MIR::AssertRaisesCheck, MIR::AssertStmt, MIR::BatchWindowFlush,
     MIR::BatchWindowPush, MIR::BgBlock, MIR::BinOp, MIR::BlockExpr, MIR::BreakExpr,
     MIR::BreakStmt, MIR::Call, MIR::CapWrap, MIR::CapabilityLockAddress,
@@ -149,12 +149,12 @@ class MIRChecker
     MIR::IndexGet, MIR::IndexInsert, MIR::InlineBc, MIR::ItemsAccess, MIR::IterRange,
     MIR::LambdaExpr, MIR::Let, MIR::ListItems, MIR::ListLength, MIR::Lit,
     MIR::LockAcquire, MIR::MakeList, MIR::MethodCall, MIR::ModuleNamespace,
-    MIR::MoveMark, MIR::NextPromiseList, MIR::Noop, MIR::OptionalUnwrap,
+    MIR::MoveMark, MIR::Noop, MIR::OptionalUnwrap,
     MIR::OrElseExitBcRewrite, MIR::Orelse, MIR::OwnedBorrow, MIR::OwnedCreate,
     MIR::OwnedDestroy, MIR::OwnedReturn, MIR::OwnedSlice, MIR::OwnedStore,
     MIR::OwnedTransfer, MIR::Panic, MIR::Param, MIR::Pipeline, MIR::PointerCast,
     MIR::PolymorphicFlowSignal, MIR::PolymorphicMutate, MIR::PolymorphicMutateFlow,
-    MIR::PubConst, MIR::RangeLit, MIR::RcDowngrade, MIR::RcRelease, MIR::RcRetain,
+    MIR::PubConst, MIR::RangeLit, MIR::RcDowngrade, MIR::RcRelease, MIR::RcRetain, MIR::ComptimeCarrierPayload, MIR::MonomorphicKeep,
     MIR::ReassignMark, MIR::ReassignWithCleanup, MIR::ReturnMark, MIR::ReturnStmt,
     MIR::ResourceClose, MIR::RuntimeCall, MIR::ScopeBlock, MIR::Set, MIR::ShardedMapGet,
     MIR::ShardedMapPut, MIR::SharePromote, MIR::SliceExpr, MIR::SnapshotMultiTxn,
@@ -166,6 +166,9 @@ class MIRChecker
     MIR::TypeSentinel, MIR::UnaryOp, MIR::Undef, MIR::UnionMatchStmt,
     MIR::UnionPayloadGet, MIR::UnionTypeDef, MIR::UnionVariantGet, T.unsafe(MIR::VoidLiteral),
     MIR::WeakUpgrade, MIR::WhileStmt, MIR::WithMatchDispatch,
+    MIR::CExternFnDecl, MIR::CExternStructDef, MIR::FallibleOk, MIR::ForeignOwnedUnwrap,
+    MIR::ForeignSliceView, MIR::FutureReady, MIR::ModuleConstFree, MIR::ModuleVar,
+    MIR::ProtocolCall,
   ].freeze, T::Array[T::Class[T.anything]])
 
   LINEAR_FRAME_ESCAPING_TRANSFER_TARGETS = T.let(
@@ -1310,13 +1313,7 @@ class MIRChecker
   def ownership_registry_errors
     missing = T.let([], T::Array[String])
     unhandled_stmts = T.let([], T::Array[String])
-    MIR.constants.each do |const_name|
-      value = MIR.const_get(const_name)
-      next unless value.is_a?(Class)
-      next unless value < Struct
-      next unless value < MIR::Emittable
-
-      klass = value
+    ownership_registry_node_types.each do |klass|
       if klass < MIR::Stmt && !LINEAR_STATEMENT_NODE_TYPES.include?(klass)
         unhandled_stmts << T.must(klass.name)
       end
@@ -1339,6 +1336,11 @@ class MIRChecker
         "but is absent from MIR::OWNERSHIP_SIGNIFICANT_NODE_TYPES"
     end
     errors
+  end
+
+  sig { returns(T::Array[T::Class[T.anything]]) }
+  def ownership_registry_node_types
+    AUDITED_EMITTABLE_NODE_TYPES
   end
 
   sig { params(init: T.nilable(MIR::Node)).returns(T::Boolean) }
@@ -1566,22 +1568,36 @@ class MIRChecker
 
   sig { params(lets: T::Array[MIR::Let], allocs: AllocMarksByName).void }
   def verify_owned_result_alloc_marks!(lets, allocs)
-    lets.each do |let|
-      expected_alloc = expr_owned_result_alloc(let.init)
-      next unless expected_alloc
+    # Marks and lets are collected by name across the whole function, but the
+    # same name can label several DISTINCT allocations in disjoint scopes --
+    # pipeline sites emit `res_list`/`pipe_src_list` accumulators inside their
+    # own labeled blocks, so one name legitimately carries marks of different
+    # allocators. Match each owned-result let against a same-name mark of its
+    # expected allocator, consuming it, so every binding still requires a
+    # correctly-allocated mark without cross-site marks producing false
+    # mismatches.
+    lets.group_by(&:name).each do |name, name_lets|
+      marks = allocs[name]
+      available = marks ? marks.map(&:alloc) : []
+      name_lets.each do |let|
+        expected_alloc = expr_owned_result_alloc(let.init)
+        next unless expected_alloc
 
-      marks = allocs[let.name]
-      unless marks && !marks.empty?
-        @errors << error(:OWNED_RESULT_WITHOUT_ALLOC, let.name,
-          "owned-result initializer has no MIR::AllocMark; ownership is implicit")
-        next
+        if available.empty? && (marks.nil? || marks.empty?)
+          @errors << error(:OWNED_RESULT_WITHOUT_ALLOC, let.name,
+            "owned-result initializer has no MIR::AllocMark; ownership is implicit")
+          next
+        end
+
+        idx = available.index(expected_alloc)
+        if idx
+          available.delete_at(idx)
+        else
+          @errors << error(:OWNED_RESULT_ALLOC_MISMATCH, let.name,
+            "owned-result initializer produces :#{expected_alloc} storage but no MIR::AllocMark uses :#{expected_alloc} " \
+            "(marks: #{T.must(marks).map { |m| ":#{m.alloc}" }.join(', ')})")
+        end
       end
-
-      bad_mark = marks.find { |mark| mark.alloc != expected_alloc }
-      next unless bad_mark
-
-      @errors << error(:OWNED_RESULT_ALLOC_MISMATCH, let.name,
-        "owned-result initializer produces :#{expected_alloc} storage but MIR::AllocMark uses :#{bad_mark.alloc}")
     end
     nil
   end
@@ -3016,6 +3032,14 @@ class MIRChecker
       check_expr_for_unhoisted(node.update) if node.update
       node.body_slots.each { |slot| check_stmts_for_unhoisted(slot.body) }
       return
+    when MIR::BatchWindowPush
+      # The per-window value is appended into result_var by the emitter — an
+      # ownership-binding position. It cannot be hoisted to a Let: the batch
+      # placeholder only exists inside the emitted batch block.
+      check_expr_for_unhoisted(node.item_expr)
+      check_owned_expr_position_for_unhoisted(node.value_expr, "BatchWindow value")
+    when MIR::BatchWindowFlush
+      check_owned_expr_position_for_unhoisted(node.value_expr, "BatchWindow value")
     else
       node.child_exprs.each { |expr| check_expr_for_unhoisted(expr) }
     end

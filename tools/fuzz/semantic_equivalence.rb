@@ -200,7 +200,7 @@ module SemanticEquivalence
     ValueSpec.new(
       id: :list,
       goal: LIST_ONE,
-      clear_type: 'Int64[]',
+      clear_type: '[]Int64',
       attributes: MANAGED_ATTRIBUTES,
       setups: [],
       literal: -> { '[1_i64]' },
@@ -210,11 +210,11 @@ module SemanticEquivalence
     ValueSpec.new(
       id: :map,
       goal: MAP_ONE,
-      clear_type: 'HashMap<Int64>',
+      clear_type: '{String}Int64',
       attributes: MANAGED_ATTRIBUTES,
       setups: [],
       literal: -> { '{"one": 1_i64}' },
-      observe: ->(value) { "ASSERT #{value}.count() == 1_i64, \"semantic map count\"; ASSERT (#{value}[\"one\"] OR_ELSE 0_i64) == 1_i64, \"semantic map payload\";" },
+      observe: ->(value) { "ASSERT #{value}.length() == 1_i64, \"semantic map count\"; ASSERT (#{value}[\"one\"] OR_ELSE 0_i64) == 1_i64, \"semantic map payload\";" },
       capabilities: %i[multiowned shared]
     ),
     ValueSpec.new(
@@ -781,6 +781,68 @@ module SemanticEquivalence
           next [] unless goal.type == :bool && goal.value == true
           [Plan.new(children: [INT_ONE], setups: [], render: ->(children) { "(#{children.fetch(0)} == 1_i64)" })]
         end
+
+        # ── Stream pipelines ────────────────────────────────────────────
+        # A value routed through a BG STREAM producer, a fused SELECT stage,
+        # and a fold/consumer must be preserved. These exercise the stream
+        # SELECT ownership modalities semantically (values, not just
+        # leak-freedom): identity pass-through into a fused SUM, an
+        # observing selector over OWNED heap items, and identity re-stream
+        # of OWNED items drained by a WHILE-EXISTS consumer.
+        grammar.production(:stream_identity_sum, parser_ref: :parse_select_op, cost: 3) do |goal, _depth|
+          next [] unless goal.type == :int64 && goal.value.is_a?(Integer)
+          setup = <<~CLEAR.strip
+            FN semanticStreamIdentitySum(seed: Int64) RETURNS !Int64 ->
+                src: [~]Int64 = BG STREAM {
+                    YIELD seed;
+                };
+                running: ~Int64@observable = src |> SELECT _ |> SUM _;
+                RETURN NEXT running;
+            END
+          CLEAR
+          [Plan.new(children: [goal], setups: [setup],
+            render: ->(children) { "(semanticStreamIdentitySum(#{children.fetch(0)}) OR_ELSE -1_i64)" })]
+        end
+
+        grammar.production(:stream_owned_observe_sum, parser_ref: :parse_select_op, cost: 3) do |goal, _depth|
+          next [] unless goal.type == :bool && goal.value == true
+          setup = <<~CLEAR.strip
+            FN semanticStreamOwnedLenSum() RETURNS !Int64 ->
+                src: [~]String = BG STREAM {
+                    a: String = COPY "a";
+                    b: String = COPY "bb";
+                    YIELD a;
+                    YIELD b;
+                };
+                running: ~Int64@observable = src |> SELECT _.length() |> SUM _;
+                RETURN NEXT running;
+            END
+          CLEAR
+          [Plan.new(children: [], setups: [setup],
+            render: ->(_children) { "((semanticStreamOwnedLenSum() OR_ELSE -1_i64) == 3_i64)" })]
+        end
+
+        grammar.production(:stream_owned_identity_restream, parser_ref: :parse_select_op, cost: 3) do |goal, _depth|
+          next [] unless goal.type == :bool && goal.value == true
+          setup = <<~CLEAR.strip
+            FN semanticStreamOwnedIdentity() RETURNS !Int64 ->
+                src: [~]String = BG STREAM {
+                    a: String = COPY "a";
+                    b: String = COPY "bb";
+                    YIELD a;
+                    YIELD b;
+                };
+                out: [~]String = src |> SELECT _;
+                MUTABLE total = 0_i64;
+                WHILE NEXT out EXISTS AS item DO
+                    total = total + item.length();
+                END
+                RETURN total;
+            END
+          CLEAR
+          [Plan.new(children: [], setups: [setup],
+            render: ->(_children) { "((semanticStreamOwnedIdentity() OR_ELSE -1_i64) == 3_i64)" })]
+        end
       end
     end
 
@@ -904,8 +966,8 @@ module SemanticEquivalence
       <<~CLEAR
         #{definitions(fragment)}
         FN main() RETURNS Void ->
-          values: #{type_name(fragment)}[] = [#{fragment.source}];
-          #{assertion('values[0_i64]', fragment)}
+          values: []#{type_name(fragment)} = [#{fragment.source}];
+          #{assertion('(UNWRAP values[0_i64])', fragment)}
           RETURN;
         END
       CLEAR

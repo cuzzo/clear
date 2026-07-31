@@ -1,0 +1,15 @@
+FN main() RETURNS Void -> RETURN; END
+
+TEST Probe DO
+  WHEN "run" DO
+    TEST THAT "bg in test block" DO
+      xs: String[] = ["a", "", "ccc"];
+      h:~ = BG {
+          ys = xs |> WHERE !(_.empty?());
+          ys.length();
+      };
+      n = NEXT h;
+      ASSERT n == 2;
+    END
+  END
+END

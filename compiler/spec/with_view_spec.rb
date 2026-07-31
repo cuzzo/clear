@@ -111,7 +111,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
     it "keeps FIND view aliases optional" do
       src = <<~F
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 YIELD 6_i64;
             };
             found: ~?Int64@observable = gen |> FIND _ == 6_i64;

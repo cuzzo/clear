@@ -54,7 +54,7 @@ RSpec.describe "observable pipe destination (Commit 3)" do
   it "accepts `running: ~Int64@observable = gen |> SUM _;` (no type-mismatch)" do
     src = <<~F
       FN main() RETURNS Void ->
-          gen: ~?Int64[] = BG STREAM {
+          gen: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 100_i64 DO
                   YIELD i;
@@ -72,7 +72,7 @@ RSpec.describe "observable pipe destination (Commit 3)" do
   it "stamps `observable_dest` on the pipe BinaryOp" do
     src = <<~F
       FN main() RETURNS Void ->
-          gen: ~?Int64[] = BG STREAM {
+          gen: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 100_i64 DO
                   YIELD i;
@@ -96,7 +96,7 @@ RSpec.describe "observable pipe destination (Commit 3)" do
     # whether the LHS is annotated. The COLLECT pipe-terminal joins.
     src = <<~F
       FN main() RETURNS Void ->
-          gen: ~?Int64[] = BG STREAM {
+          gen: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 4_i64 DO
                   YIELD i;

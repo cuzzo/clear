@@ -152,6 +152,20 @@ class PipelineLoweringBridge
     @lowering.pipeline_owned_cleanup_entry(value, ast_node)
   end
 
+  sig { returns(T::Array[MIR::Emittable]) }
+  def pipeline_iteration_loop_marks
+    @lowering.pipeline_iteration_loop_marks
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(alloc: Symbol, blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_pipeline_decl_alloc(alloc, &blk)
+    @lowering.pipeline_with_decl_alloc(alloc, &blk)
+  end
+
   sig { params(insert: MIR::IndexInsert, value: MIR::Node, value_owns: T::Boolean, target_alloc: Symbol).returns(MIR::IndexInsert) }
   def pipeline_index_insert_with_ownership(insert, value, value_owns, target_alloc:)
     @lowering.pipeline_index_insert_with_ownership(insert, value, value_owns, target_alloc: target_alloc)

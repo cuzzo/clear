@@ -1,0 +1,24 @@
+# Retained-identity v5 regression: KEEP on a MONOMORPHIC parameter whose plain
+# instantiation carries a HEAP field (String) must deep-copy that payload, not
+# alias it. A shallow value copy would leave the KEEP'd copy and the original
+# sharing one String buffer -> double-free. The testing allocator proves the
+# plain carrier balances (as well as @multiowned, whose KEEP is a refcount
+# retain of the shared payload).
+STRUCT User { name: String }
+
+FN cache(TAKES u: MONOMORPHIC User) RETURNS Int64 -> RETURN u.name.length(); END
+FN queue(TAKES u: MONOMORPHIC User) RETURNS Int64 -> RETURN u.name.length(); END
+
+FN distribute(TAKES u: MONOMORPHIC User) RETURNS Int64 ->
+    a = cache(KEEP u);
+    b = queue(u);
+    RETURN a + b;
+END
+
+FN main() RETURNS Void ->
+    p = User{ name: COPY "hello" };
+    ASSERT distribute(p) == 10, "plain heap-field KEEP deep-copies";
+    m = User{ name: COPY "world" } @multiowned;
+    ASSERT distribute(m) == 10, "@multiowned heap-field KEEP retains";
+    RETURN;
+END

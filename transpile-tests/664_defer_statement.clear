@@ -1,0 +1,46 @@
+# DEFER <stmt> / DEFER { ... }: the body runs at scope exit on BOTH the
+# success and error paths (Zig defer semantics, zero runtime cost). Bodies
+# must be infallible and non-allocating, and cannot redirect control flow.
+STRUCT Ctx { depth: Int64, tag: Int64 }
+
+FN withDepth(MUTABLE c: Ctx, d: Int64) RETURNS Int64 ->
+    prev = c.depth;
+    c.depth = d;
+    DEFER c.depth = prev;
+    RETURN c.depth * 10;
+END
+
+FN failing(MUTABLE c: Ctx) RETURNS !Int64 ->
+    prev = c.depth;
+    c.depth = 9;
+    DEFER c.depth = prev;
+    RAISE Input, "boom";
+    RETURN 1;
+END
+
+FN swap2(MUTABLE c: Ctx, d: Int64, t: Int64) RETURNS Int64 ->
+    prev_d = c.depth;
+    prev_t = c.tag;
+    c.depth = d;
+    c.tag = t;
+    DEFER {
+        c.depth = prev_d;
+        c.tag = prev_t;
+    }
+    RETURN c.depth + c.tag;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE c = Ctx{ depth: 1, tag: 2 };
+    ASSERT withDepth(&c, 5) == 50, "inside";
+    ASSERT c.depth == 1, "restored";
+
+    r = failing(&c) OR_ELSE -1;
+    ASSERT r == -1, "error path taken";
+    ASSERT c.depth == 1, "restored on error path";
+
+    ASSERT swap2(&c, 10, 20) == 30, "block form inside";
+    ASSERT c.depth == 1, "block depth restored";
+    ASSERT c.tag == 2, "block tag restored";
+    RETURN;
+END

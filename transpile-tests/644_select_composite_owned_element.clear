@@ -1,0 +1,58 @@
+# Test: a SELECT element that constructs a composite literal holding an OWNED
+# (heap) field keeps the field-store-hoisted temp scoped to the per-element
+# loop body. The recursive REENTRANT tree transform below rebuilds each child
+# through a recursive call inside a struct literal that feeds a nested struct --
+# the shape of TypeExpression::transform. Before the fix the owned field temp
+# escaped the SELECT loop and the MIR ownership checker rejected the
+# memory-safe program; leak detection here confirms per-element cleanup.
+
+UNION TKind { Named: Named, Leaf: Leaf }
+STRUCT Param { expr: Tree }
+STRUCT Sig   { params: Param[] }
+STRUCT Named { sig: Sig }
+STRUCT Leaf  { v: Int64 }
+STRUCT Tree  { kind: TKind }
+
+FN bump(t: Tree) RETURNS Tree EFFECTS REENTRANT ->
+    MUTABLE kind = COPY t.kind;
+    IF kind IS_A Named AS n THEN
+        RETURN Tree{ kind: TKind{ Named: COPY Named{ sig: COPY Sig{ params: COPY n.sig.params |> SELECT Param{ expr: COPY bump(_.expr) } } } } };
+    ELSE_IF kind IS_A Leaf AS l THEN
+        RETURN Tree{ kind: TKind{ Leaf: COPY Leaf{ v: l.v + 1_i64 } } };
+    ELSE
+        RETURN COPY t;
+    END
+END
+
+FN leafOf(t: Tree) RETURNS Int64 ->
+    MUTABLE kind = COPY t.kind;
+    IF kind IS_A Leaf AS l THEN RETURN l.v; ELSE RETURN -1_i64; END
+END
+
+FN childCount(t: Tree) RETURNS Int64 ->
+    MUTABLE kind = COPY t.kind;
+    IF kind IS_A Named AS n THEN RETURN n.sig.params.length(); ELSE RETURN 0_i64; END
+END
+
+FN sumChildLeaves(t: Tree) RETURNS Int64 ->
+    MUTABLE kind = COPY t.kind;
+    IF kind IS_A Named AS n THEN
+        RETURN n.sig.params |> SELECT leafOf(_.expr) |> SUM _;
+    ELSE
+        RETURN -1_i64;
+    END
+END
+
+FN main() RETURNS Void ->
+    MUTABLE leaf = Tree{ kind: TKind{ Leaf: Leaf{ v: 1_i64 } } };
+    MUTABLE ps: Param[] = List[];
+    &ps.push(Param{ expr: COPY leaf });
+    &ps.push(Param{ expr: COPY leaf });
+    MUTABLE named = Tree{ kind: TKind{ Named: Named{ sig: Sig{ params: COPY ps } } } };
+
+    MUTABLE out = bump(named);
+    ASSERT out.kind IS_A Named, "transformed node stays Named";
+    ASSERT childCount(out) == 2_i64, "two children preserved";
+    ASSERT sumChildLeaves(out) == 4_i64, "each child leaf incremented once (1+1 -> 2+2)";
+    RETURN;
+END

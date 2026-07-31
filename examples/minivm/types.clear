@@ -33,7 +33,7 @@ UNION Value {
     Boxed: Id<Env>,
     # Split stream handle. bufId references an Env in the shared pool
     # whose vars["b"] holds the materialized buffer list (Value.List).
-    # cursor is the per-handle read position. CLONE creates a new
+    # cursor is the per-handle read position. KEEP creates a new
     # SplitStream with the same bufId and current cursor; NEXT reads
     # buf[cursor] and advances the handle's cursor (writeback to slot).
     SplitStream { splitBufId: Id<Env>, splitCursor: Int64 },

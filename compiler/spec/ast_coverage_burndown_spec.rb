@@ -113,7 +113,7 @@ RSpec.describe ClearParser do
         fixes: []
       )
 
-      FixCollector.push(finding)
+      FixCollector.push(finding, true)
 
       expect(FixCollector.has_fatal?).to be(true)
       expect(FixCollector.fatal_count).to eq(1)
@@ -682,7 +682,11 @@ RSpec.describe ClearParser do
   end
 
   describe "standard library validators" do
-    Arg = Struct.new(:resolved_type)
+    Arg = Struct.new(:resolved_type) do
+      def full_type!(context: nil)
+        Type.new(resolved_type)
+      end
+    end
 
     it "reports Set.insert and HashMap.put type mismatches" do
       errors = []
@@ -696,13 +700,13 @@ RSpec.describe ClearParser do
         token, [Arg.new(:Int64), Arg.new(:String)], Type.new(:"HashMap<String>"),
         ->(_node, message) { errors << message }
       )
-      expect(errors.last).to include("key must be a String")
+      expect(errors.last).to include("key must be String")
 
       MAP_METHODS.fetch("put").fetch(:validate).call(
         token, [Arg.new(:String), Arg.new(:Float64)], Type.new(:"HashMap<Int64,Float64>"),
         ->(_node, message) { errors << message }
       )
-      expect(errors.last).to include("key must be a numeric type")
+      expect(errors.last).to include("key must be Int64")
     end
   end
 

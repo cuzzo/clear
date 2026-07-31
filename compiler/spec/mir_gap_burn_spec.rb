@@ -1740,6 +1740,10 @@ RSpec.describe "MIR gap-burn characterization" do
     rc_type = Type.new(:Payload)
     rc_type.ownership = :shared
     shared.full_type = rc_type
+    # The retain decision reads the SOURCE's declared model: an identifier
+    # is retainable only when its binding is genuinely Rc/Arc-stored, not
+    # when a destination coercion stamped a handle type onto a plain read.
+    shared.symbol.storage = :shared if shared.symbol
     expect(low.send(:rc_retain_needed?, shared)).to eq(true)
 
     atomic = id("atomic", type: :String, storage: :heap)
@@ -2996,7 +3000,7 @@ RSpec.describe "MIR gap-burn characterization" do
     expect(fallible.resolved).to eq(:"!String")
 
     tense = low.send(:substitute_mir_type, Type.new(:"~T[]"), { T: :Int64 })
-    expect(tense.resolved).to eq(:"~Int64[]")
+    expect(Type.surface_name_type(tense)).to eq("~[]Int64")
     unchanged_tense = Type.new(:"~String")
     expect(low.send(:substitute_mir_type, unchanged_tense, { T: :Int64 })).to equal(unchanged_tense)
 
@@ -3243,8 +3247,8 @@ RSpec.describe "MIR gap-burn characterization" do
       MIR::RegistryCall.new(entry: sig, args: args.map { |arg| MIR::RegistryCallArg.new(expr: arg) }, reason: name.to_s)
     end
 
-    nul = AST::Literal.new(tok, :STRING, "a\0b", nil)
-    expect(low.send(:lower_literal, nul).value).to eq('"a\x00b"')
+    controls = AST::Literal.new(tok, :STRING, "a\0\x01\x1f\x7fb", nil)
+    expect(low.send(:lower_literal, controls).value).to eq('"a\x00\x01\x1f\x7fb"')
 
     bitwise = AST::UnaryOp.new(tok, :BITWISE_NOT, lit(1, type: :Int64))
     expect(low.send(:lower_unary_op, bitwise).op).to eq("~")
@@ -3628,8 +3632,8 @@ RSpec.describe "MIR gap-burn characterization" do
     fallback_source = lit(true, type: :Bool)
     expect(low.send(:copy_source_type_info, fallback_source).resolved).to eq(:Bool)
 
-    expect { low.send(:lower_clone, AST::CloneNode.new(tok, id("plain", type: :String))) }
-      .to raise_error(/CLONE without retain lifecycle/)
+    expect { low.send(:lower_clone, AST::KeepNode.new(tok, id("plain", type: :String))) }
+      .to raise_error(/KEEP without retain lifecycle/)
     moved_field = AST::MoveNode.new(tok, AST::GetField.new(tok, id("root", type: :Box), "value"))
     expect(low.send(:lower_move, moved_field)).to be_a(MIR::Ident)
 
@@ -3898,7 +3902,7 @@ RSpec.describe "MIR gap-burn characterization" do
     extern_call.module_alias = "c.lib"
     direct = extern_low.send(:lower_extern_direct_call, extern_call)
     expect(direct.args[1]).to be_a(MIR::MethodCall)
-    expect(direct.callee).to eq("c_lib.native")
+    expect(direct.callee).to eq("__clear_module_c_lib.native")
 
     trampoline_sig = FunctionSignature.new(params: [param("value", type: :Int64)], return_type: Type.new(:Int64))
     extern_low.send(:program_state).fn_sigs = { "native" => trampoline_sig }

@@ -51,12 +51,6 @@ class EffectSet
     @effects = T.let(eff.freeze, T::Set[Symbol])
   end
 
-  sig { returns(EffectSet) }
-  def self.empty
-    @empty = T.let(@empty, T.nilable(EffectSet))
-    @empty ||= new
-  end
-
   sig { params(effect: Symbol).returns(T::Boolean) }
   def include?(effect)
     @effects.include?(effect)
@@ -80,7 +74,21 @@ class EffectSet
 
   sig { returns(Integer) }
   def hash
-    @effects.hash
+    # Set#hash is not a CLEAR collection intrinsic. A bitset over this closed
+    # lattice preserves the only Hash contract that matters here: equal effect
+    # sets always produce equal hashes.
+    value = 0
+    value |= 1 if @effects.include?(:yield)
+    value |= 2 if @effects.include?(:alloc_heap)
+    value |= 4 if @effects.include?(:io)
+    value |= 8 if @effects.include?(:fail)
+    value |= 16 if @effects.include?(:contention)
+    value |= 32 if @effects.include?(:blocking)
+    value |= 64 if @effects.include?(:contends_maybe)
+    value |= 128 if @effects.include?(:blocks_maybe)
+    value |= 256 if @effects.include?(:contention?)
+    value |= 512 if @effects.include?(:blocking?)
+    value
   end
 
   # Human-readable summary used by the formatter. Effects are rendered in a
@@ -93,12 +101,18 @@ class EffectSet
 
   sig { returns(T::Array[Symbol]) }
   def to_a
-    EFFECT_ORDER.select { |e| @effects.include?(e) }
+    ordered = T.let([], T::Array[Symbol])
+    EFFECT_ORDER.each { |effect| ordered << effect if @effects.include?(effect) }
+    ordered
   end
 
   sig { returns(String) }
   def to_s
     "EffectSet(#{to_a.join(', ')})"
   end
-  alias inspect to_s
+
+  sig { returns(String) }
+  def inspect
+    to_s
+  end
 end

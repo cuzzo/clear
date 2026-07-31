@@ -71,15 +71,15 @@ module PredicateRewriter
     # Lint is best-effort; a malformed file just yields no findings.
   end
 
-  sig { params(node: T.untyped).returns(T.nilable(Array)) }
+  sig { params(node: WalkValue).returns(T.nilable(Array)).checked(:never) }
   def self.walk_lint(node)
     return if terminal?(node)
     if node.is_a?(Array)
-      node.each { |n| walk_lint(n) }
+      node.each { |n| walk_lint(T.unsafe(n)) }
       return
     end
     return unless node.respond_to?(:each_pair)
-    node.each_pair { |_, v| walk_lint(v) }
+    T.unsafe(node).each_pair { |_, v| walk_lint(v) }
     emit_length_lint(node) if node.is_a?(AST::BinaryOp)
   end
 
@@ -113,19 +113,30 @@ module PredicateRewriter
     FixCollector.push(finding)
   end
 
+  # Struct-member walk domain: AST nodes plus the raw member values a
+  # Struct field can hold. Typed (not T.untyped) so the CLEAR translation
+  # can dispatch the reflection walk over a closed union.
+  WalkValue = T.type_alias do
+    T.nilable(T.any(AST::Node, AST::Param, AST::Binding, AST::Capability, AST::Capture,
+      AST::CatchClause, AST::CatchFilter, AST::CatchItem, AST::MatchCase,
+      AST::PatternField, AST::StructField, Type, T::Array[BasicObject],
+      T::Hash[T.untyped, T.untyped], String, Symbol, Integer, Float,
+      T::Boolean, Lexer::Token))
+  end
+
   # ---- AST traversal ----
 
-  sig { params(node: T.untyped, source: String, edits: Array).returns(T.nilable(Array)) }
+  sig { params(node: WalkValue, source: String, edits: Array).returns(T.nilable(Array)).checked(:never) }
   def self.walk(node, source, edits)
     return if terminal?(node)
     if node.is_a?(Array)
-      node.each { |n| walk(n, source, edits) }
+      node.each { |n| walk(T.unsafe(n), source, edits) }
       return
     end
     return unless node.respond_to?(:each_pair)
     # Children first (post-order), so inner edits are computed before
     # the outer one. Apply right-to-left at the end keeps offsets sane.
-    node.each_pair { |_, v| walk(v, source, edits) }
+    T.unsafe(node).each_pair { |_, v| walk(v, source, edits) }
 
     edit = match_pattern(node, source)
     edits << edit if edit

@@ -133,8 +133,8 @@ module SemanticCapabilityExpansion
       # array contextual-literal path.
       if value.id == :list
         setup = [setup, <<~CLEAR.chomp].reject(&:empty?).join("\n\n")
-          FN semanticManagedList() RETURNS Int64[] ->
-            MUTABLE items: Int64[] = [];
+          FN semanticManagedList() RETURNS [List]Int64 ->
+            MUTABLE items: [List]Int64 = [];
             &items.append(1_i64);
             RETURN items;
           END
@@ -147,13 +147,17 @@ module SemanticCapabilityExpansion
           RETURN;
         END
       CLEAR
+      # Extraction out of a retained handle into a plain TAKES slot is an
+      # explicit carrier decision: OWN COPY detaches (deep-copies the payload
+      # into an independent plain owner). A bare COPY of a handle retains and
+      # is correctly rejected at the plain slot (RETAINED_NEEDS_OWN_COPY).
       transport = case carrier
                   when :direct
-                    "copied = COPY value;\n  capabilityConsume(GIVE copied);"
+                    "copied = OWN COPY value;\n  capabilityConsume(GIVE copied);"
                   when :nested_field
                     <<~CLEAR.chomp
                       holder = CapabilityTransportHolder{ value: COPY value };
-                      extracted = COPY holder.value;
+                      extracted = OWN COPY holder.value;
                       capabilityConsume(GIVE extracted);
                     CLEAR
                   else
@@ -162,7 +166,8 @@ module SemanticCapabilityExpansion
       # The field must retain the same managed-handle surface as `value`.
       # Declaring it as the raw payload type would ask Zig to place Rc/Arc in
       # a value-shaped field and masks the transport behavior we mean to test.
-      holder = carrier == :nested_field ? "STRUCT CapabilityTransportHolder { value: #{value.clear_type}#{capability.suffix} }\n" : ""
+      holder_type = capability_type(value.clear_type, capability.suffix)
+      holder = carrier == :nested_field ? "STRUCT CapabilityTransportHolder { value: #{holder_type} }\n" : ""
       source = <<~CLEAR
         #{setup}
         #{holder}#{consume}
@@ -182,6 +187,13 @@ module SemanticCapabilityExpansion
       raise 'duplicate capability transport ids' unless cases.map(&:id).uniq.length == cases.length
       raise 'transport suite must cover direct and nested carriers' unless report.fetch(:carriers) == %i[direct nested_field]
       raise 'transport suite lost a COPY/GIVE pair' unless report.fetch(:pairs).values.all? { |count| count == 2 }
+    end
+
+    def capability_type(type_name, suffix)
+      match = type_name.match(/\A(\[\]|\[List\]|\[Set\]|\{[^}]+\})(.+)\z/)
+      return "#{type_name}#{suffix}" unless match
+
+      "#{match[1]}#{suffix} #{match[2]}"
     end
   end
 end

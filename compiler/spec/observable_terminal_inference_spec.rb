@@ -36,7 +36,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
     it "stamps observable_terminal on SUM" do
       src = <<~F
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 1;
                 WHILE i <= 4 DO YIELD i; i = i + 1; END
             };
@@ -55,7 +55,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
       # fires.
       src = <<~F
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 1;
                 WHILE i <= 4 DO YIELD i; i = i + 1; END
             };
@@ -68,7 +68,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
     it "stamps observable_terminal on DISTINCT" do
       src = <<~F
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 1;
                 WHILE i <= 4 DO YIELD i; i = i + 1; END
             };
@@ -122,7 +122,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
       # COLLECT.
       src = <<~F
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 1;
                 WHILE i <= 4 DO YIELD i; i = i + 1; END
             };

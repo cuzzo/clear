@@ -57,9 +57,9 @@ FN main() RETURNS Void ->
 
     # -------------------------------------------------------
     # Test 5: open stream source, size-only
-    # gen: ~?Int64[] = 1..10, batch 4 -> [1-4],[5-8],[9-10]
+    # gen: [~]Int64 = 1..10, batch 4 -> [1-4],[5-8],[9-10]
     # -------------------------------------------------------
-    gen5: ~?Int64[] = BG STREAM {
+    gen5: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 1;
         WHILE i <= 10 DO
             YIELD i;

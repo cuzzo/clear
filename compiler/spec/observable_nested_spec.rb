@@ -23,11 +23,11 @@ RSpec.describe "A22: nested observable pipes" do
   it "rejects an inner fold-pipe inside an outer fold-pipe terminal expression (type error)" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-          g_outer: ~?Int64[] = BG STREAM {
+          g_outer: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 3_i64 DO YIELD i; i = i + 1_i64; END
           };
-          g_inner: ~?Int64[] = BG STREAM {
+          g_inner: [~]Int64 = BG STREAM {
               MUTABLE j: Int64 = 0_i64;
               WHILE j < 5_i64 DO YIELD j; j = j + 1_i64; END
           };
@@ -45,7 +45,7 @@ RSpec.describe "A22: nested observable pipes" do
   it "rejects WITH VIEW inside a fold-pipe expression (parser-level)" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-          g: ~?Int64[] = BG STREAM {
+          g: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 3_i64 DO YIELD i; i = i + 1_i64; END
           };
@@ -61,12 +61,12 @@ RSpec.describe "A22: nested observable pipes" do
   it "accepts sequential observables in the same scope (T14 — already pinned)" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-          g1: ~?Int64[] = BG STREAM {
+          g1: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
           };
           running_sum: ~Int64@observable = g1 |> SUM _;
-          g2: ~?Int64[] = BG STREAM {
+          g2: [~]Int64 = BG STREAM {
               MUTABLE j: Int64 = 0_i64;
               WHILE j < 4_i64 DO YIELD j; j = j + 1_i64; END
           };

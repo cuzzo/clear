@@ -1,0 +1,21 @@
+STRUCT Budget { count: Int64 }
+STRUCT Holder { budget: Budget @multiowned }
+
+# Retained identity v4: an immutable plain binding kept while still used
+# afterward is allocated AS an Rc at its declaration (born-as-Rc, reason
+# :kept_identity) - never payload-then-wrap. The mechanism is unobservable
+# for immutable data; the testing allocator proves balance.
+FN makeHolder(budget: Budget) RETURNS Holder ->
+    RETURN Holder{ budget: budget };
+END
+
+FN main() RETURNS Void ->
+    plain = Budget{ count: 4 };
+    a = makeHolder(plain);
+    b = makeHolder(plain);
+
+    ASSERT plain.count == 4, "caller still reads its binding";
+    ASSERT a.budget.count == 4, "first keeper reads";
+    ASSERT b.budget.count == 4, "second keeper reads";
+    RETURN;
+END

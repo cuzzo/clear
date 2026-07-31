@@ -1,0 +1,54 @@
+# Regression: Ruby's assignment is expression-valued (`x = y` evaluates to
+# `y`), so `#{@counter += 1}` inside a Ruby string interpolation is common -
+# but CLEAR's assignment has no expression form (there is no AssignExpr node
+# anywhere in the parser; matches the language's "immutable by default"
+# design), and a value block's ${...} interpolation slot is lexed as a real
+# parenthesized sub-expression (Lexer#read_interpolated_string desugars
+# "...${e}..." to "..." $+ (e) $+ "..." before the parser ever sees it), so
+# it cannot contain a bare assignment statement either. The translator now
+# hoists the assignment into a value block: emit it as a preceding
+# statement, then interpolate the value it just assigned. This fixture
+# covers the exact shape the translator emits for that lowering, and the
+# WITH POLYMORPHIC self-aliasing interaction that made it non-trivial: a
+# write through the borrowed `self` name is rejected ([ASSIGN_WHILE_
+# BORROWED]) inside such a block, so the hoisted assignment must reference
+# the block's own MUTABLE alias, not the outer borrowed name.
+
+STRUCT Counter {
+  n: Int64
+}
+
+FN counter__next_label(MUTABLE self: Counter) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN "item_${{ MUTABLE rtoc_value_block_marker = 0; rtoc_self_view.n = (rtoc_self_view.n + 1); rtoc_self_view.n.toString() }}";
+}
+END
+
+# A plain (non-compound) assignment used the same way, with a MUTABLE local
+# instead of an instance field - proves the fix isn't specific to instance
+# field writes or to compound (+=) assignment.
+FN describe(value: Int64) RETURNS String ->
+  RETURN "was_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE captured = value; captured.toString() }}_now";
+END
+
+# A non-assignment interpolation must still work unchanged (regression
+# check: the new assignment-detection branch must not misfire on ordinary
+# expressions).
+FN plain(value: Int64) RETURNS String ->
+  RETURN "value_${value.toString()}";
+END
+
+FN main() RETURNS Void ->
+  MUTABLE c = Counter{ n: 0 };
+  ASSERT counter__next_label(&c) == "item_1", "first call";
+  ASSERT counter__next_label(&c) == "item_2", "second call";
+  ASSERT counter__next_label(&c) == "item_3", "third call";
+  ASSERT c.n == 3_i64, "counter mutated";
+
+  ASSERT describe(7_i64) == "was_7_now", "plain assignment hoist";
+  ASSERT plain(9_i64) == "value_9", "non-assignment interpolation unaffected";
+
+  RETURN;
+END

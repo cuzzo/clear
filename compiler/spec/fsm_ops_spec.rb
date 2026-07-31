@@ -354,10 +354,10 @@ RSpec.describe FsmOps do
       expect(seen).to include(
         "FsmOps::AssignField",
         "FsmOps::CallExpr",
-        "FsmOps::FunctionPath",
         "FsmOps::StateField",
         "String",
       )
+      expect(seen).not_to include("FsmOps::FunctionPath")
     end
   end
 

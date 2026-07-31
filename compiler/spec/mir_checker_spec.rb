@@ -19,6 +19,20 @@ RSpec.describe MIRChecker do
     expect(described_class::AUDITED_EMITTABLE_NODE_TYPES).to include(MIR::OrElseExitBcRewrite)
   end
 
+  # The registry is written out explicitly because the self-hosted compiler has
+  # no dynamic constant lookup. Reflection belongs here, in the spec, so a newly
+  # defined emittable node still cannot be forgotten.
+  it "audits every emittable MIR node" do
+    reflected = MIR.constants.filter_map do |const_name|
+      value = MIR.const_get(const_name)
+      next unless value.is_a?(Class) && value < Struct && value < MIR::Emittable
+
+      value
+    end
+
+    expect(described_class::AUDITED_EMITTABLE_NODE_TYPES).to match_array(reflected)
+  end
+
   def fn_def(name, body)
     MIR::FnDef.new(name, [], "void", body, :pub, false, nil)
   end
@@ -1711,21 +1725,15 @@ RSpec.describe MIRChecker do
         "child" => [alloc_mark("child", :frame)],
       })
 
-      unregistered_stmt = Class.new(Struct.new(:expr)) do
-        include MIR::Stmt
-      end
-      unregistered_owned = Class.new(Struct.new(:alloc)) do
-        include MIR::Expr
-      end
-      stub_const("MIR::SpecCheckerUnregisteredStmt", unregistered_stmt)
-      stub_const("MIR::SpecCheckerOwnershipFieldExpr", unregistered_owned)
-      registry_errors = checker.send(:ownership_registry_errors)
+      # The registry is the explicit AUDITED_EMITTABLE_NODE_TYPES list, matching
+      # the self-hosted compiler, so a constant stubbed in at runtime is no
+      # longer discovered. "Nothing was forgotten" is asserted directly by
+      # "audits every emittable MIR node" above.
+      expect(checker.send(:ownership_registry_errors)).to eq([])
 
       errors = checker.errors.join("\n")
       expect(errors).to include("MOVEMARK_WITHOUT_GUARD")
       expect(errors).to include("AGGREGATE_CHILD_ALLOC_MISMATCH")
-      expect(registry_errors.join("\n")).to include("LINEAR_STMT_NOT_REGISTERED")
-      expect(registry_errors.join("\n")).to include("OWNERSHIP_NODE_NOT_REGISTERED")
     end
 
     it "covers owned return, FSM guard, and boundary-fact branches" do

@@ -2,7 +2,7 @@
 
 require "sorbet-runtime"
 
-require_relative "../../ast/schemas"
+require_relative "../../ast/type"
 
 class MIRLoweringSchemas
   extend T::Sig
@@ -53,7 +53,13 @@ class MIRLoweringSchemas
   sig { params(name: SchemaName).returns(SchemaLookupResult) }
   def lookup(name)
     key = schema_key(name)
-    @struct_schemas[key] || @union_schemas[key] || @enum_schemas[key]
+    struct_schema = @struct_schemas[key]
+    return struct_schema if struct_schema
+
+    union_schema = @union_schemas[key]
+    return union_schema if union_schema
+
+    @enum_schemas[key]
   end
 
   sig { params(lookup_proc: SchemaLookup).void }
@@ -63,17 +69,17 @@ class MIRLoweringSchemas
 
   sig { params(name: SchemaName, variants: EnumVariants).void }
   def register_enum(name, variants)
-    @enum_schemas[name.to_sym] = variants
+    @enum_schemas[schema_key(name)] = variants
   end
 
   sig { params(name: SchemaName, schema: Schemas::StructSchema).void }
   def register_struct(name, schema)
-    @struct_schemas[name.to_sym] = schema
+    @struct_schemas[schema_key(name)] = schema
   end
 
   sig { params(name: SchemaName, schema: Schemas::UnionSchema).void }
   def register_union(name, schema)
-    @union_schemas[name.to_sym] = schema
+    @union_schemas[schema_key(name)] = schema
   end
 
   sig do
@@ -84,15 +90,17 @@ class MIRLoweringSchemas
     ).void
   end
   def merge!(struct_schemas: {}, enum_schemas: {}, union_schemas: {})
-    @struct_schemas.merge!(struct_schemas)
-    @enum_schemas.merge!(enum_schemas)
-    @union_schemas.merge!(union_schemas)
+    struct_schemas.each { |name, schema| @struct_schemas[name] = schema }
+    enum_schemas.each { |name, variants| @enum_schemas[name] = variants }
+    union_schemas.each { |name, schema| @union_schemas[name] = schema }
   end
 
   private
 
   sig { params(name: SchemaName).returns(Symbol) }
   def schema_key(name)
-    name.is_a?(Symbol) ? name : name.to_sym
+    return name if name.is_a?(Symbol)
+
+    name.to_sym
   end
 end

@@ -69,7 +69,7 @@ HOT_CELLS = []
 end
 
 def hot_type(value)
-  value == :list ? "Int64[]@list" : "String"
+  value == :list ? "[List]Int64" : "String"
 end
 
 def hot_decl_type(value, decl)
@@ -82,7 +82,7 @@ end
 # faultable in every form (uniform: all OR_ELSE-bind forms valid).
 def hot_build(value, var)
   if value == :list
-    "    MUTABLE #{var}: Int64[]@list = [];\n    &#{var}.append(1_i64);\n    &#{var}.append(2_i64);\n"
+    "    MUTABLE #{var}: [List]Int64 = [];\n    &#{var}.append(1_i64);\n    &#{var}.append(2_i64);\n"
   else
     "    #{var}: String = \"a\" $+ \"b\";\n"
   end
@@ -97,7 +97,7 @@ def hot_fallback(value)
 end
 
 def hot_len_assert(value, rcv)
-  value == :list ? "ASSERT length(#{rcv}) == 2_i64, \"hot len\";" \
+  value == :list ? "ASSERT #{rcv}.length() == 2_i64, \"hot len\";" \
                   : "ASSERT #{rcv}.length() == 2_i64, \"hot len\";"
 end
 

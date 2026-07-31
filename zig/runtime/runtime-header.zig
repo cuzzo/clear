@@ -1614,6 +1614,7 @@ pub const CheatLib = struct {
     pub const ShardedPool = DataStructures.ShardedPool;
     pub const ShardedList = DataStructures.ShardedList;
     pub const Set = DataStructures.Set;
+    pub const InternedStringSet = DataStructures.InternedStringSet;
     pub const PartitionedStringMap = DataStructures.PartitionedStringMap;
     pub const PartitionedNumericMap = DataStructures.PartitionedNumericMap;
     pub const ShardedStringMap = DataStructures.ShardedStringMap;
@@ -3134,6 +3135,11 @@ pub const CheatLib = struct {
     pub fn Rc(comptime T: type) type {
         return struct {
             const Self = @This();
+            // Nominal carrier identity: the emitted comptime carrier-unwrap
+            // probes @hasDecl(_, "__clear_ref_carrier"), never a field name.
+            // A user payload may legitimately have a field named `ctrl`; only a
+            // real refcount carrier carries this reserved declaration.
+            pub const __clear_ref_carrier = true;
             ctrl: *RcControlBlock(T),
             // Convenience: access data through .data for compatibility
             pub fn getData(self: Self) *T {
@@ -3210,6 +3216,7 @@ pub const CheatLib = struct {
     pub fn Arc(comptime T: type) type {
         return struct {
             const Self = @This();
+            pub const __clear_ref_carrier = true;
             ctrl: *ArcControlBlock(T),
             pub fn getData(self: Self) *T {
                 return self.ctrl.data;
@@ -3238,7 +3245,7 @@ pub const CheatLib = struct {
 
     pub fn WithMatchInner(comptime ValT: type) type {
         const Underlying = StripPointers(ValT);
-        if (@typeInfo(Underlying) == .@"struct" and @hasField(Underlying, "ctrl")) {
+        if (@typeInfo(Underlying) == .@"struct" and @hasDecl(Underlying, "__clear_ref_carrier")) {
             const CtrlPtr = std.meta.fieldInfo(Underlying, .ctrl).type;
             const Ctrl = @typeInfo(CtrlPtr).pointer.child;
             const DataPtr = std.meta.fieldInfo(Ctrl, .data).type;
@@ -3338,6 +3345,7 @@ pub const CheatLib = struct {
     pub fn WeakRc(comptime T: type) type {
         return struct {
             const Self = @This();
+            pub const __clear_ref_carrier = true;
             ctrl: *RcControlBlock(T),
         };
     }
@@ -3366,6 +3374,7 @@ pub const CheatLib = struct {
     pub fn WeakArc(comptime T: type) type {
         return struct {
             const Self = @This();
+            pub const __clear_ref_carrier = true;
             ctrl: *ArcControlBlock(T),
         };
     }
@@ -3412,7 +3421,7 @@ pub const CheatLib = struct {
         if (info != .@"struct") return null;
         const fields = info.@"struct".fields;
         if (fields.len < 1) return null;
-        if (!std.mem.eql(u8, fields[0].name, "ctrl")) return null;
+        if (!@hasDecl(FT, "__clear_ref_carrier")) return null;
         const ctrl_ptr_info = @typeInfo(fields[0].type);
         if (ctrl_ptr_info != .pointer) return null;
         const ctrl_info = @typeInfo(ctrl_ptr_info.pointer.child);
@@ -3433,7 +3442,7 @@ pub const CheatLib = struct {
         if (info != .@"struct") return false;
         const fields = info.@"struct".fields;
         if (fields.len < 1) return false;
-        if (!comptime std.mem.eql(u8, fields[0].name, "ctrl")) return false;
+        if (!@hasDecl(FT, "__clear_ref_carrier")) return false;
         const ctrl_ptr_info = @typeInfo(fields[0].type);
         if (ctrl_ptr_info != .pointer) return false;
         const ctrl_info = @typeInfo(ctrl_ptr_info.pointer.child);
@@ -3529,8 +3538,8 @@ pub const CheatLib = struct {
         return @hasField(T, "inner") and @hasField(T, "alloc") and @hasDecl(T, "put");
     }
 
-    /// Returns true if T is a numeric map (AutoHashMapUnmanaged or similar).
-    /// Detected by: struct with metadata field and deinit, but not a StringMap.
+    /// Returns true if T is a typed-key map (HashMapUnmanaged or similar).
+    /// The historical helper name is retained for generated-code compatibility.
     fn isNumericMap(comptime T: type) bool {
         const info = @typeInfo(T);
         if (info != .@"struct") return false;
@@ -3637,19 +3646,19 @@ pub const CheatLib = struct {
         // probe.
         if (comptime @typeInfo(T) == .pointer) {
             const Child = @typeInfo(T).pointer.child;
-            if (comptime @typeInfo(Child) == .@"struct" and @hasField(Child, "ctrl")) {
+            if (comptime @typeInfo(Child) == .@"struct" and @hasDecl(Child, "__clear_ref_carrier")) {
                 return polymorphicMutateInner(cell_ptr_or_val.ctrl.data, rt, body, args);
             }
             if (comptime @typeInfo(Child) == .pointer) {
                 const GrandChild = @typeInfo(Child).pointer.child;
-                if (comptime @typeInfo(GrandChild) == .@"struct" and @hasField(GrandChild, "ctrl")) {
+                if (comptime @typeInfo(GrandChild) == .@"struct" and @hasDecl(GrandChild, "__clear_ref_carrier")) {
                     return polymorphicMutateInner(cell_ptr_or_val.*.ctrl.data, rt, body, args);
                 }
                 return polymorphicMutateInner(cell_ptr_or_val.*, rt, body, args);
             }
             return polymorphicMutateInner(cell_ptr_or_val, rt, body, args);
         }
-        if (comptime @typeInfo(T) == .@"struct" and @hasField(T, "ctrl")) {
+        if (comptime @typeInfo(T) == .@"struct" and @hasDecl(T, "__clear_ref_carrier")) {
             return polymorphicMutateInner(cell_ptr_or_val.ctrl.data, rt, body, args);
         }
         // Plain T by value: take address of the formal parameter copy.
@@ -3701,19 +3710,19 @@ pub const CheatLib = struct {
         const T = @TypeOf(cell_ptr_or_val);
         if (comptime @typeInfo(T) == .pointer) {
             const Child = @typeInfo(T).pointer.child;
-            if (comptime @typeInfo(Child) == .@"struct" and @hasField(Child, "ctrl")) {
+            if (comptime @typeInfo(Child) == .@"struct" and @hasDecl(Child, "__clear_ref_carrier")) {
                 return polymorphicMutateFlowInner(cell_ptr_or_val.ctrl.data, rt, body, args);
             }
             if (comptime @typeInfo(Child) == .pointer) {
                 const GrandChild = @typeInfo(Child).pointer.child;
-                if (comptime @typeInfo(GrandChild) == .@"struct" and @hasField(GrandChild, "ctrl")) {
+                if (comptime @typeInfo(GrandChild) == .@"struct" and @hasDecl(GrandChild, "__clear_ref_carrier")) {
                     return polymorphicMutateFlowInner(cell_ptr_or_val.*.ctrl.data, rt, body, args);
                 }
                 return polymorphicMutateFlowInner(cell_ptr_or_val.*, rt, body, args);
             }
             return polymorphicMutateFlowInner(cell_ptr_or_val, rt, body, args);
         }
-        if (comptime @typeInfo(T) == .@"struct" and @hasField(T, "ctrl")) {
+        if (comptime @typeInfo(T) == .@"struct" and @hasDecl(T, "__clear_ref_carrier")) {
             return polymorphicMutateFlowInner(cell_ptr_or_val.ctrl.data, rt, body, args);
         }
         return polymorphicMutateFlowInner(&cell_ptr_or_val, rt, body, args);
@@ -3941,8 +3950,13 @@ pub const CheatLib = struct {
             return;
         }
 
-        // 4. Numeric map (AutoHashMapUnmanaged or custom hash)
+        // 4. Typed-key map (HashMapUnmanaged with compiler-selected context).
         if (comptime isNumericMap(T)) {
+            const KeyT = comptime blk: {
+                const next_info = @typeInfo(@TypeOf(T.KeyIterator.next)).@"fn";
+                const key_ptr = @typeInfo(next_info.return_type.?).optional.child;
+                break :blk @typeInfo(key_ptr).pointer.child;
+            };
             // Extract V from the pub ValueIterator type: its `items` field is [*]V
             const ElemT = comptime blk: {
                 for (@typeInfo(T.ValueIterator).@"struct".fields) |f| {
@@ -3952,9 +3966,12 @@ pub const CheatLib = struct {
                 }
                 unreachable;
             };
-            if (comptime needsCleanup(ElemT)) {
-                var vit = ptr.valueIterator();
-                while (vit.next()) |val_ptr| cleanup(ElemT, alloc, val_ptr);
+            if (comptime needsCleanup(KeyT) or needsCleanup(ElemT)) {
+                var it = ptr.iterator();
+                while (it.next()) |entry| {
+                    if (comptime needsCleanup(KeyT)) cleanup(KeyT, alloc, entry.key_ptr);
+                    if (comptime needsCleanup(ElemT)) cleanup(ElemT, alloc, entry.value_ptr);
+                }
             }
             ptr.deinit(alloc);
             return;
@@ -3974,10 +3991,12 @@ pub const CheatLib = struct {
 
         // 6. Set(U)
         if (comptime isSetType(T)) {
-            // Release owned keys before freeing the backing map.
+            // Release owned keys before freeing the backing map. Interned
+            // sets never own their elements — backing map only.
+            const set_interned = comptime @hasDecl(T, "interned_elements") and T.interned_elements;
             const InnerMap = @TypeOf(ptr.inner);
             const inner_info = @typeInfo(InnerMap);
-            if (inner_info == .@"struct") {
+            if (!set_interned and inner_info == .@"struct") {
                 var it = ptr.inner.keyIterator();
                 while (it.next()) |key_ptr| {
                     const KeyT = @TypeOf(key_ptr.*);
@@ -4329,9 +4348,10 @@ pub const CheatLib = struct {
             errdefer result.deinit(alloc);
             var src_mut = value;
             var it = src_mut.keyIterator();
+            const set_interned = comptime @hasDecl(T, "interned_elements") and T.interned_elements;
             while (it.next()) |k| {
                 const ElemT = @TypeOf(k.*);
-                const copied = if (comptime needsCleanup(ElemT))
+                const copied = if (comptime !set_interned and needsCleanup(ElemT))
                     try dupeValue(ElemT, k.*, alloc)
                 else
                     k.*;

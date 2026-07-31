@@ -1,0 +1,26 @@
+STRUCT Budget { count: Int64 }
+STRUCT Pair { left: Budget @multiowned, right: Budget @multiowned }
+
+# Retained identity v4: two kept params in one call, mixed caller models
+# (declared @multiowned and born-as-Rc plain). Edge derivations are
+# per-param and additive; the testing allocator proves balance.
+FN makePair(l: Budget, r: Budget) RETURNS Pair ->
+    RETURN Pair{ left: l, right: r };
+END
+
+FN main() RETURNS Void ->
+    MUTABLE shared = Budget{ count: 1 } @multiowned;
+    plain = Budget{ count: 2 };
+
+    p = makePair(shared, plain);
+    q = makePair(shared, plain);
+
+    shared.count = 8;
+
+    ASSERT p.left.count == 8, "p shares the mutable identity";
+    ASSERT q.left.count == 8, "q shares the mutable identity";
+    ASSERT p.right.count == 2, "p reads the immutable identity";
+    ASSERT q.right.count == 2, "q reads the immutable identity";
+    ASSERT plain.count == 2, "caller still reads plain";
+    RETURN;
+END

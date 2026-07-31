@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
     # -------------------------------------------------------
     # Test 1: capacity smaller than auto-default (tight backlog)
     # -------------------------------------------------------
-    gen1: ~?Int64[] = BG STREAM {
+    gen1: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 1;
         WHILE i <= 10 DO
             YIELD i;
@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
     # -------------------------------------------------------
     # Test 2: capacity larger than auto-default (generous backlog)
     # -------------------------------------------------------
-    gen2: ~?Int64[] = BG STREAM {
+    gen2: [~]Int64 = BG STREAM {
         MUTABLE i2: Int64 = 1;
         WHILE i2 <= 6 DO
             YIELD i2;
@@ -43,7 +43,7 @@ FN main() RETURNS Void ->
     # Test 3: capacity=1 (extreme back pressure) with EACH
     # -------------------------------------------------------
     acc3 = Acc{ value: 0 } @shared:locked;
-    gen3: ~?Int64[] = BG STREAM {
+    gen3: [~]Int64 = BG STREAM {
         YIELD 10;
         YIELD 20;
         YIELD 30;

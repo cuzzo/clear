@@ -188,6 +188,26 @@ module DiagnosticRegistry
       template: "MUTABLE bare declaration requires an explicit type annotation.",
       summary:  "`MUTABLE x;` (no `=` initializer) needs an explicit `: T[N]` so the parser can synthesize the default-zero list.",
     },
+    CONST_NEEDS_TYPE: {
+      severity: :error, category: :syntax,
+      template: "CONST '%{name}' requires an explicit type annotation: `CONST %{name}: T = ...`.",
+      summary:  "A top-level CONST has no enclosing frame to infer from, so its type must be written explicitly.",
+    },
+    CONST_NEEDS_VALUE: {
+      severity: :error, category: :syntax,
+      template: "CONST '%{name}' requires an initializer: `CONST %{name}: T = expr`.",
+      summary:  "A CONST is an immutable comptime binding; it must be initialized at declaration.",
+    },
+    CONST_NEEDS_CAPS: {
+      severity: :error, category: :syntax,
+      template: "CONST name '%{name}' must be SCREAMING_CASE (all uppercase).",
+      summary:  "Constants are written in all-caps so a bare all-caps identifier reads as a constant reference; TitleCase names denote types.",
+    },
+    CONST_INIT_FALLIBLE: {
+      severity: :error, category: :ownership,
+      template: "CONST '%{name}' has a fallible initializer but a CONST has no error channel.",
+      summary:  "A runtime-initialized CONST is assigned once at program start; it cannot propagate a RAISE. Make the initializer infallible (allocation faults are still allowed) or compute the value inside a function.",
+    },
     MUTABLE_BARE_NEEDS_FIXED: {
       severity: :error, category: :syntax,
       template: "MUTABLE bare declaration requires a fixed-size array type T[N]; got %{type}.",
@@ -210,12 +230,12 @@ module DiagnosticRegistry
       cause: "A struct field assignment (`p.field = v`) requires the receiver binding `p` to be declared MUTABLE. CLEAR is immutable-by-default; without `MUTABLE p = ...`, no field of `p` can be reassigned.",
       fix_hint: "Add `MUTABLE` at the receiver's declaration. Capability-wrapped bindings (`@locked`, `@alwaysMutable`) also permit field writes through their unwrapping rules.",
     },
-    ILLEGAL_FIELD_LOOKUP: entry(
+    ILLEGAL_FIELD_LOOKUP: {
       severity: :error,
       category: :type,
       template: "Type Error: Cannot determine struct type for field access '%{field}'. Receiver is '%{type}'.",
       summary: "Field access on a non-struct (or unresolved-type) target.",
-    ),
+    },
     OPTIONAL_FIELD_REQUIRES_SAFE_NAV: {
       severity: :error, category: :type,
       template: "Type Error: Cannot access field '%{field}' on optional '%{type}' without safe navigation.",
@@ -784,6 +804,18 @@ module DiagnosticRegistry
       summary: "CLEAR no longer encodes mutation in function or method names.",
       fix_hint: "Remove the `!` suffix; the call-site checker will insert `&` on values passed to MUTABLE parameters.",
     },
+    INF_STREAM_SELECT_MOVES_ITEM: {
+      severity: :error, category: :type,
+      template: "SELECT over an infinite stream cannot MOVE the item (GIVE / TAKES): an [~INF]T rendezvous stream never drains, so moved payloads could be left in flight at teardown. Observe the item (borrow / COPY) or bound the stream with LIMIT into a finite pipeline first.",
+      summary: "Ownership-moving selectors are rejected on infinite stream sources.",
+      fix_hint: "Use a borrowing or COPY selector, or apply LIMIT before the moving SELECT.",
+    },
+    RETIRED_OPTIONAL_STREAM_SYNTAX: {
+      severity: :error, category: :type,
+      template: "Retired stream type syntax '%{got}'. Streams put the tense/cardinality layer first: use '%{replacement}'. ([~]T = unbound-finite, [~N]T = bound-finite, [~INF]T = infinite; NEXT on [~]T returns a StreamStep unwrapped with EXISTS.)",
+      summary: "The '~?T[]' open-stream alias is retired; the accepted spellings are [~]T, [~N]T, and [~INF]T.",
+      fix_hint: "Replace the annotation with the suggested cardinality-first spelling.",
+    },
     RETURN_MISMATCH: {
       severity: :error, category: :type,
       template: "Type Error: Function expected to return '%{expected}', but returned '%{got}'",
@@ -1160,6 +1192,12 @@ module DiagnosticRegistry
     },
 
     # ===================================================================
+    DEFER_NO_CONTROL_FLOW: {
+      severity: :error, category: :syntax,
+      template: "%{kind} is not allowed inside a DEFER body — deferred code runs during scope teardown, where redirecting control flow is meaningless.",
+      summary:  "DEFER bodies cannot contain RETURN/BREAK/CONTINUE/YIELD (same restriction as Zig defer).",
+      fix_hint: "Move the control-flow statement outside the DEFER body.",
+    },
     # PARSER — generic Expected/Unexpected token
     # ===================================================================
     PARSER_EXPECTED: {
@@ -2393,15 +2431,10 @@ module DiagnosticRegistry
       cause: "The value is, or transitively contains, a linear resource with a CLOSE contract. Duplicating the handle would make two owners close the same underlying resource.",
       fix_hint: "Use `CLONE` for shared / refcounted handles. For linear resources, transfer ownership via `GIVE` or pass through a borrow.",
     },
-    CLONE_WITH_SCOPED: {
+    KEEP_WITH_SCOPED: {
       severity: :error, category: :escape,
-      template: "Cannot CLONE WITH-scoped '%{name}'. WITH bindings are protected borrows; use COPY to return owned data.",
-      summary:  "CLONE on a WITH-scoped binding would create another reference that outlives the WITH.",
-    },
-    CLONE_BAD_TARGET: {
-      severity: :error, category: :ownership,
-      template: "CLONE is only supported on @split streams, @shared promises, and owned shared handles, got '%{got}'",
-      summary:  "CLONE has a narrow set of supported targets.",
+      template: "Cannot KEEP WITH-scoped '%{name}'. WITH bindings are protected borrows; use COPY to return owned data.",
+      summary:  "KEEP on a WITH-scoped binding would create another owner that outlives the WITH.",
     },
     SHARE_NEEDS_TYPED: {
       severity: :error, category: :ownership,
@@ -2835,6 +2868,83 @@ module DiagnosticRegistry
       cause: "Rc/Arc/Weak handles own a control-block count. Copying their pointer fields without a retain fabricates an uncounted owner and causes premature release, leaks, or use-after-free.",
       fix_hint: "Lowering bug — emit RcRetain/WeakUpgrade/RcDowngrade for direct handles. Aggregate copies must route RC fields through the runtime retain-aware dupeValue path.",
     },
+    GENERIC_IDENTITY_FIELD_UNSUPPORTED: {
+      severity: :error, category: :ownership,
+      template: "STRUCT '%{struct}' declares identity field '%{field}: %{param} @multiowned', but identity capabilities on generic type parameters are not yet supported",
+      summary:  "A generic type parameter cannot yet carry an identity capability.",
+      cause: "Substituting a concrete type into an identity-capable generic field either double-wraps an already-managed binding or fails to wrap a payload; generic keep-analysis has not been implemented.",
+      fix_hint: "Use a concrete identity type for the field, or drop the capability and wrap at the binding site.",
+    },
+    KEPT_FN_VALUE_ABI: {
+      severity: :error, category: :ownership,
+      template: "'%{name}' keeps parameter '%{param}' (%{sink}), so its compiled signature takes an owned handle and is incompatible with the plain function type '%{fn_type}'. Retention is not yet representable in function values",
+      summary:  "A retaining function cannot be used as a plain function value.",
+      cause: "Keep-analysis changes the kept parameter's ABI to the ownership family's handle. An ordinary FN type carries no retained-parameter contract, so assigning the function to it would produce an incompatible function pointer.",
+      fix_hint: "Call the function directly, or wrap it: a non-retaining adapter that constructs/receives the identity explicitly can be passed as a function value.",
+    },
+    KEEP_ON_KNOWN_CARRIER: {
+      severity: :error, category: :ownership,
+      template: "KEEP on '%{name}' is redundant: its carrier is statically known (%{carrier}), so use COPY for an independent copy",
+      summary:  "KEEP is only for carrier-polymorphic values.",
+      cause: "KEEP preserves a caller-chosen carrier. A plain local or a UNIQUE parameter has a statically known carrier, so the polymorphic form carries no information and hides whether an independent copy was intended.",
+      fix_hint: "Use COPY to create an independent copy.",
+    },
+    RETAINED_NEEDS_OWN_COPY: {
+      severity: :error, category: :ownership,
+      template: "'%{name}' is a retained %{carrier} handle and cannot fill the plain parameter '%{param}': a handle can't be moved into a plain slot without an explicit carrier decision. Passing it bare would silently deep-copy the payload out of the shared handle",
+      summary:  "A retained handle can't silently fill a plain parameter.",
+      cause: "The parameter is a plain (RawT) owned slot, but the argument is a @multiowned/@shared handle whose identity other owners may share. Crossing that carrier boundary must be explicit -- never a hidden allocation and deep copy.",
+      fix_hint: "Use OWN COPY %{name} to own an independent copy of the payload, or declare the parameter '%{param}: SHARED T' (or MONOMORPHIC T) to keep the handle.",
+    },
+    OWN_ALONE_UNSUPPORTED: {
+      severity: :error, category: :ownership,
+      template: "OWN must be followed by COPY. OWN COPY x owns an independent copy of the payload (dereferencing a @multiowned/@shared handle); bare OWN x (moving the payload out of a handle) is not yet supported",
+      summary:  "Bare OWN is not yet supported; write OWN COPY.",
+      cause: "OWN x alone would extract the payload out of a handle, which requires proving the handle is uniquely owned; that path is deferred. OWN COPY x always works because it copies the payload rather than moving it.",
+      fix_hint: "Write OWN COPY x to own an independent copy of the payload.",
+    },
+    UNIQUE_NEEDS_EXCLUSIVE: {
+      severity: :error, category: :ownership,
+      template: "'%{name}' is a retained %{carrier} value and is passed to the UNIQUE parameter '%{param}' without OWN COPY. A UNIQUE parameter requires exactly one owner; a live @multiowned/@shared handle is (or may be) multi-owned",
+      summary:  "A UNIQUE parameter cannot receive a live multi-owned handle.",
+      cause: "UNIQUE means the callee owns the value exclusively. A retained handle shares its identity with other owners, so handing it over bare would give the callee a non-exclusive value.",
+      fix_hint: "Use OWN COPY %{name} to detach an independent payload for the UNIQUE parameter, or pass a plain/uniquely-owned value.",
+    },
+    COPY_RETAINED_NEEDS_UNIQUE: {
+      severity: :error, category: :ownership,
+      template: "COPY of '%{name}' is not allowed: it is a retained %{carrier} handle, and COPY is a memcpy -- copying the handle bits would duplicate a shared owner without touching the reference count",
+      summary:  "COPY (a memcpy) cannot copy a live @multiowned/@shared handle.",
+      cause: "COPY performs a bitwise copy of the value. For a retained carrier the value IS a handle, so a memcpy would create a second owner that never incremented the reference count -- a double free. Retaining another handle or detaching an independent payload are different operations.",
+      fix_hint: "Use KEEP %{name} to retain another handle (carrier-preserving), or OWN COPY %{name} to own an independent copy of the payload.",
+    },
+    COPY_ON_POLYMORPHIC_PARAM: {
+      severity: :error, category: :ownership,
+      template: "COPY on '%{name}' is not allowed: it is a carrier-polymorphic parameter, so COPY cannot guarantee independent identity when the caller passed a retained (@multiowned/@shared) value",
+      summary:  "COPY needs a local or UNIQUE value, not a carrier-polymorphic parameter.",
+      cause: "A carrier-polymorphic parameter may be backed by a retained handle whose identity other owners share; COPY there would either retain (not independent) or require a hidden deep copy. The correctness choice must be explicit.",
+      fix_hint: "Use KEEP to preserve the caller's carrier, or declare the parameter UNIQUE if independent identity is required.",
+    },
+    CARRIER_POLYMORPHIC_FANOUT: {
+      severity: :error, category: :ownership,
+      template: "%{detail}",
+      summary:  "A carrier-polymorphic parameter is consumed then used again.",
+      cause: "A TAKES parameter with no UNIQUE/SHARED constraint preserves the caller's ownership carrier. Consuming it once and using it again creates a second owner, which requires an explicit correctness choice: KEEP preserves the carrier; UNIQUE + COPY forces independent identity.",
+      fix_hint: "Wrap the first consuming use as KEEP, or declare the parameter UNIQUE and use COPY if independent identity is required.",
+    },
+    KEPT_IDENTITY_FAMILY_MISMATCH: {
+      severity: :error, category: :ownership,
+      template: "'%{name}' is @%{source_family} but is kept by '%{keeper}' (%{sink}), which requires an @%{dest_family} identity. %{source_family} and %{dest_family} use incompatible reference-counting (Arc is atomic, Rc is not), so the handle cannot be retained across the call without breaking the other owners' accounting",
+      summary:  "A kept edge cannot convert between reference-counting families.",
+      cause: "Keep-analysis retains the caller's handle in the callee's identity field. @shared (Arc) and @multiowned (Rc) maintain their counts differently, so passing one where the other is retained would corrupt the surviving owners' counts.",
+      fix_hint: "Match the families (declare the source @%{dest_family}), or break identity with COPY %{name} so the keeper constructs an independent handle.",
+    },
+    KEPT_IDENTITY_NEEDS_MODEL: {
+      severity: :error, category: :ownership,
+      template: "'%{name}' is kept by '%{keeper}' (%{sink}) and is a plain MUTABLE binding. Unique ownership cannot satisfy a keep; declare the cost model at the declaration: '@multiowned' shares one identity (callers observe mutations), '@value' gives every keeper an independent copy, or pass 'GIVE %{name}' at the last use so the handle moves",
+      summary:  "A plain MUTABLE binding is kept, and no cost model is sound by default.",
+      cause: "A kept destination stores the value's identity beyond the call. For an immutable binding the mechanism is unobservable, but a MUTABLE binding used after the call makes sharing-vs-copying observable, so the declaration must choose.",
+      fix_hint: "Append @multiowned or @value to the declaration, or relinquish with GIVE at the call.",
+    },
     SHARDED_ELEMENT_REQUIRES_SHARED: {
       severity: :error, category: :ownership,
       template: "@sharded collections cannot store %{got}; cross-scheduler reference-counted elements must use @shared",
@@ -3154,7 +3264,7 @@ module DiagnosticRegistry
     },
     ATSPLIT_NEEDS_OPEN_STREAM: {
       severity: :error, category: :type,
-      template: "@split is currently only valid on open streams (~?T[]).",
+      template: "@split is currently only valid on open streams ([~]@split T).",
       summary:  "@split applies only to open streams.",
     },
     SOA_TO_EXTERN_FN: {
@@ -3605,7 +3715,7 @@ module DiagnosticRegistry
       cause: "Capabilities.validate! rejected the binding's capability stack — either an unsupported sigil combination (`@local:atomic`), a capability on an incompatible type (capability on a primitive), or a missing required capability.",
       fix_hint: "Read the message for the specific rejection. Common fixes: drop a contradictory sigil, wrap a primitive in a struct, add a missing wrapper (`@shared` for cross-fiber sharing).",
     },
-  }.freeze, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
+  }.freeze, T::Hash[Symbol, DiagnosticEntry])
 
   FIX_DESCRIPTIONS = T.let({
     INSERT_SELECT_EFFECT_COLON: "Change the legacy SELECT effect spelling to %{selector}.",
@@ -3679,8 +3789,8 @@ module DiagnosticRegistry
     WRAP_FOREIGN_INDEX_UNSAFE_VIEW: "Wrap this access in `WITH UNSAFE VIEW %{name} LENGTH %{length} AS %{alias_name} { ... }`; verify that the C allocation really contains that many elements.",
     CONVERT_FOREIGN_VIEW_TO_UNSAFE: "Change this to `WITH UNSAFE VIEW %{name} LENGTH 0 AS ...`; then replace 0 with the element count guaranteed by the C API.",
     WRAP_DIRECT_VIEW_ACCESS: "Wrap this access in `WITH %{permission} %{name} AS %{alias_name} { ... }` and use the scoped alias.",
-    WRAP_CONSUMER_WITH_CLONE: "Wrap the consuming reference with CLONE at line %{line} (bumps the refcount; both bindings stay live).",
     WRAP_CONSUMER_WITH_COPY: "Wrap the consuming reference with COPY at line %{line} (the original survives for the later use).",
+    WRAP_CONSUMER_WITH_KEEP: "Wrap the consuming reference with KEEP at line %{line} (preserves the caller's carrier: refcount retain for @multiowned/@shared/@split, payload copy for a plain value; both bindings stay live).",
     WRAP_RETURN_WITH_COPY: "Wrap the returned value with `COPY ` so it doesn't borrow from the parameter.",
     WRAP_VALUE_WITH_CAST: "Wrap value with `CAST(... AS %{type})` (narrowing -- verify it can't lose data).",
     REPLACE_AUTO_WITH_INFERRED: "Replace `Auto` with the inferred type `%{type}`.",
@@ -3708,8 +3818,15 @@ module DiagnosticRegistry
   # unimplemented compiler check.
   sig { params(code: Symbol).returns(T::Boolean) }
   def self.pending?(code)
-    entry = DIAGNOSTICS[code]
-    !entry.nil? && entry[:pending] == true
+    return true if code == :PRIMITIVE_PASSED_AS_MUTABLE || code == :GIVE_BAD_TARGET
+
+    # Ruby tests and extensions may replace DIAGNOSTICS at runtime. The
+    # self-hosted registry is closed, so it uses the exhaustive fast path
+    # above and omits this dynamic Hash lookup.
+    # ruby-to-clear: skip
+    return DIAGNOSTICS.dig(code, :pending) == true
+
+    false
   end
 
   # Format a registered code's template against `args`. Returns nil
@@ -3717,7 +3834,7 @@ module DiagnosticRegistry
   # nil — the legacy helper raises an internal-compiler-error there.
   sig { params(code: Symbol, args: DiagnosticArgs, kwargs: DiagnosticKwValue).returns(T.nilable(String)) }
   def self.format(code, args = [], **kwargs)
-    format_from_hash(code, args, kwargs)
+    DiagnosticRegistry.format_from_hash(code, args, kwargs)
   end
 
   sig { params(code: Symbol, args: DiagnosticArgs, kwargs: DiagnosticKwargs).returns(T.nilable(String)) }
@@ -3725,30 +3842,46 @@ module DiagnosticRegistry
     entry = DIAGNOSTICS[code]
     return nil unless entry
 
-    format_template(T.cast(entry[:template], String), args, kwargs)
+    DiagnosticRegistry.format_template(DiagnosticRegistry.template_from_entry(entry), args, kwargs)
+  end
+
+  # Entries preserve insertion order and always declare severity/category
+  # before template. Walking values avoids an optional nested Hash index that
+  # the self-host type annotator cannot stamp yet.
+  sig { params(entry: DiagnosticEntry).returns(String) }
+  def self.template_from_entry(entry)
+    entry.values.each do |value|
+      return value if value.is_a?(String)
+    end
+    Kernel.raise "Internal Compiler Error: diagnostic entry has no template"
   end
 
   sig { params(template: String, args: DiagnosticArgs, kwargs: DiagnosticKwargs).returns(String) }
   def self.format_template(template, args = [], kwargs = {})
     if !kwargs.empty? || template.include?("%{")
-      return template % kwargs if !template.include?("%{") || named_template_args_complete?(template, kwargs)
+      return template % kwargs if !template.include?("%{") || DiagnosticRegistry.named_template_args_complete?(template, kwargs)
 
       return "#{template} [Internal Args Error: #{kwargs.inspect}]"
     end
 
-    return template % args if positional_template_args_complete?(template, args)
+    return template % args if DiagnosticRegistry.positional_template_args_complete?(template, args)
 
     "#{template} [Internal Args Error: #{args.inspect}]"
   end
 
   sig { params(template: String, kwargs: DiagnosticKwargs).returns(T::Boolean) }
   def self.named_template_args_complete?(template, kwargs)
-    keys = named_template_keys(template)
-    i = T.let(0, Integer)
-    while i < keys.length
-      return false unless kwargs.key?(keys.fetch(i))
+    offset = T.let(0, Integer)
+    loop do
+      start_index = template.index("%{", offset)
+      break unless start_index
 
-      i += 1
+      end_index = template.index("}", start_index + 2)
+      break unless end_index
+
+      key = T.must(template[(start_index + 2)...end_index]).to_sym
+      return false unless kwargs.key?(key)
+      offset = end_index + 1
     end
     true
   end
@@ -3764,7 +3897,7 @@ module DiagnosticRegistry
       end_index = template.index("}", start_index + 2)
       break unless end_index
 
-      keys << T.unsafe(template[(start_index + 2)...end_index]).to_sym
+      keys << T.must(template[(start_index + 2)...end_index]).to_sym
       offset = end_index + 1
     end
     keys
@@ -3772,7 +3905,7 @@ module DiagnosticRegistry
 
   sig { params(template: String, args: DiagnosticArgs).returns(T::Boolean) }
   def self.positional_template_args_complete?(template, args)
-    positional_placeholder_count(template) <= args.length
+    DiagnosticRegistry.positional_placeholder_count(template) <= args.length
   end
 
   sig { params(template: String).returns(Integer) }
@@ -3800,29 +3933,33 @@ module DiagnosticRegistry
     template = FIX_DESCRIPTIONS[code]
     Kernel.raise "Internal Compiler Error: Unknown fix description code :#{code}" unless template
 
-    return template % kwargs if named_template_args_complete?(template, kwargs)
+    return template % kwargs if DiagnosticRegistry.named_template_args_complete?(template, kwargs)
 
-    missing = missing_named_template_key(template, kwargs)
+    missing = DiagnosticRegistry.missing_named_template_key(template, kwargs)
     detail = missing ? "key{#{missing}} not found kwargs=#{kwargs.inspect}" : "kwargs=#{kwargs.inspect}"
     "#{template} [Internal Args Error: #{detail}]"
   end
 
   sig { params(template: String, kwargs: DiagnosticKwargs).returns(T.nilable(Symbol)) }
   def self.missing_named_template_key(template, kwargs)
-    keys = named_template_keys(template)
-    i = T.let(0, Integer)
-    while i < keys.length
-      key = keys.fetch(i)
-      return T.unsafe(key) unless kwargs.key?(key)
+    offset = T.let(0, Integer)
+    loop do
+      start_index = template.index("%{", offset)
+      break unless start_index
 
-      i += 1
+      end_index = template.index("}", start_index + 2)
+      break unless end_index
+
+      key = T.must(template[(start_index + 2)...end_index]).to_sym
+      return T.unsafe(key) unless kwargs.key?(key)
+      offset = end_index + 1
     end
     nil
   end
 
   sig { params(code: Symbol, kwargs: DiagnosticKwValue).returns(String) }
   def self.fix_description(code, **kwargs)
-    fix_description_from_hash(code, kwargs)
+    DiagnosticRegistry.fix_description_from_hash(code, kwargs)
   end
 
   # Self-check: every entry is well-formed. Returns an array of

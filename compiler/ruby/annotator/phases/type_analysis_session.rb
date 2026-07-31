@@ -10,6 +10,9 @@ require_relative "../../ast/std_lib"
 require_relative "../../ast/async_result_shape"
 require_relative "../../semantic/ownership_graph"
 require_relative "../../semantic/ownership_transport"
+require_relative "../../semantic/keep_analysis"
+require_relative "../../semantic/escape_analysis"
+require_relative "../../semantic/ownership_edge_planner"
 require_relative "body_analysis"
 require_relative "builtin_environment"
 require_relative "declaration_index"
@@ -135,6 +138,7 @@ class Annotator::Phases::TypeAnalysisSession
     prop :value_type_refinements, T::Hash[Integer, Type], factory: -> { {} }
     prop :branch_terminated, T::Boolean, default: false
     prop :next_synthetic_body_ordinal, Integer, default: -1
+    prop :deferred_copy_wrapper_bindings, T::Array[T.any(AST::VarDecl, AST::BindExpr)], factory: -> { [] }
   end
 
   class Config < T::Struct
@@ -237,6 +241,16 @@ class Annotator::Phases::TypeAnalysisSession
   sig { returns(T::Array[Annotator::Phases::DeferredRecoveryValidation]) }
   def deferred_recovery_validations
     @audit_inputs.deferred_recovery_validations
+  end
+
+  sig { returns(T::Array[Annotator::Phases::DeferredGiveValidation]) }
+  def deferred_give_validations
+    @audit_inputs.deferred_give_validations
+  end
+
+  sig { returns(T::Array[Annotator::Phases::DeferredCopyRetainedValidation]) }
+  def deferred_copy_retained_validations
+    @audit_inputs.deferred_copy_retained_validations
   end
 
   sig { returns(T.nilable(FunctionContext)) }
@@ -369,19 +383,31 @@ class Annotator::Phases::TypeAnalysisSession
   end
   def with_conditional_context(&blk)
     fn_ctx = current_fn_ctx
+    enter_conditional_context!(fn_ctx)
+    blk.call
+  ensure
+    leave_conditional_context!(fn_ctx)
+  end
+
+  sig { params(fn_ctx: T.nilable(FunctionContext)).void }
+  def enter_conditional_context!(fn_ctx)
     if fn_ctx
       fn_ctx.enter_conditional!
     else
       @traversal_state.conditional_depth += 1
     end
-    blk.call
-  ensure
+  end
+  private :enter_conditional_context!
+
+  sig { params(fn_ctx: T.nilable(FunctionContext)).void }
+  def leave_conditional_context!(fn_ctx)
     if fn_ctx
       fn_ctx.exit_conditional!
     else
       @traversal_state.conditional_depth -= 1
     end
   end
+  private :leave_conditional_context!
 
   sig do
     type_parameters(:Result)
@@ -390,19 +416,32 @@ class Annotator::Phases::TypeAnalysisSession
   end
   def with_loop_context(&blk)
     fn_ctx = current_fn_ctx
+    enter_loop_context!(fn_ctx)
+    blk.call
+  ensure
+    leave_loop_context!(fn_ctx)
+  end
+
+  sig { params(fn_ctx: T.nilable(FunctionContext)).void }
+  def enter_loop_context!(fn_ctx)
     if fn_ctx
       fn_ctx.enter_loop!
     else
       @traversal_state.loop_depth += 1
     end
-    blk.call
-  ensure
+  end
+  private :enter_loop_context!
+
+  sig { params(fn_ctx: T.nilable(FunctionContext)).void }
+  def leave_loop_context!(fn_ctx)
     if fn_ctx
       fn_ctx.exit_loop!
     else
       @traversal_state.loop_depth -= 1
     end
   end
+  private :leave_loop_context!
+
   private :with_loop_context
 
   sig do
@@ -651,10 +690,20 @@ class Annotator::Phases::TypeAnalysisSession
     ownership = analyze_resolution!(resolution)
     inventory = Annotator::Phases::AnnotationTypeInventory.scan(resolution.program)
     inventory.verify_resolved!
+    # Keep-analysis and its placement run before the lifecycle inventory and
+    # its derived linear-resource closure are built and frozen: born-as-Rc
+    # bindings must be inventoried as Rc, not as their pre-keep payload.
+    apply_keep_analysis!(resolution)
+    schema_lookup = ->(name) { lookup_type_schema(name) }
+    lifecycle_inventory = Semantic::LifecycleRegistry.type_inventory(resolution.program, schema_lookup)
+    linear_resource_facts = Semantic::LinearResourceFacts.build_types(lifecycle_inventory.values, schema_lookup)
+    validate_copy_linear_resource_facts!(resolution.program, linear_resource_facts)
     lifecycle_registry = Semantic::LifecycleRegistry.build(
       resolution.program,
-      ->(name) { lookup_type_schema(name) },
+      schema_lookup,
       binding_nodes: resolution.function_registry.body_summaries.values.flat_map(&:binding_nodes),
+      linear_resource_facts: linear_resource_facts,
+      inventory: lifecycle_inventory,
     )
     typed_program = Annotator::Phases::TypedProgramFacts.new(
       resolution: resolution,
@@ -663,12 +712,115 @@ class Annotator::Phases::TypeAnalysisSession
       unresolved_node_count: inventory.unresolved_node_count,
       ownership_graph: ownership,
       lifecycle_registry: lifecycle_registry,
+      linear_resource_facts: linear_resource_facts,
     )
     Annotator::Phases::TypeAnalysisHandoff.new(
       typed_program: typed_program,
       audit_request: release_capability_audit_request!
     )
   end
+
+  sig { params(program: AST::Program, facts: Semantic::LinearResourceFacts).void }
+  def validate_copy_linear_resource_facts!(program, facts)
+    AST.each_locatable(program, descend_functions: true) do |node|
+      next unless node.is_a?(AST::CopyNode)
+
+      type_info = node.value.full_type!(context: "post-annotation COPY resource validation")
+      error!(node, :COPY_NON_COPYABLE, type: type_info.to_s) if facts.contains?(type_info)
+    end
+    @traversal_state.deferred_copy_wrapper_bindings.each do |binding|
+      reject_implicit_wrapper_binding!(binding, process_deferred_copy: true)
+    end
+  end
+  private :validate_copy_linear_resource_facts!
+
+  sig { params(resolution: Annotator::Phases::ResolutionFacts).void }
+  def apply_keep_analysis!(resolution)
+    fn_nodes = resolution.function_registry.nodes
+    body_summaries = resolution.function_registry.body_summaries
+    KeepAnalysis.propagate_kept_identity!(fn_nodes, body_summaries)
+    EscapeAnalysis.apply_kept_identity_placement!(
+      fn_nodes,
+      body_summaries,
+      on_mutable_violation: lambda { |entry, arg, callee_name|
+        sink = entry.kept_identity&.sink ||
+          fn_nodes[callee_name]&.params&.find { |p| p.symbol&.kept_identity }&.symbol&.kept_identity&.sink ||
+          "an @multiowned destination"
+        anchor = kept_identity_declaration_anchor(body_summaries, entry) || arg
+        error!(anchor, :KEPT_IDENTITY_NEEDS_MODEL,
+          name: arg.name, keeper: callee_name, sink: sink)
+      },
+      on_family_violation: lambda { |arg, source_family, dest_family, callee_name|
+        sink = fn_nodes[callee_name]&.params&.find { |p| p.symbol&.kept_identity }&.symbol&.kept_identity&.sink ||
+          "an @#{dest_family} destination"
+        name = arg.is_a?(AST::Identifier) ? arg.name : "the argument"
+        error!(arg, :KEPT_IDENTITY_FAMILY_MISMATCH,
+          name: name, keeper: callee_name, sink: sink,
+          source_family: source_family, dest_family: dest_family)
+      }
+    )
+    reject_kept_function_values!(resolution, fn_nodes)
+  end
+  private :apply_keep_analysis!
+
+  # A retaining function's compiled signature takes an owned handle, but an
+  # ordinary FN type carries no retained-parameter contract. Until retention
+  # is representable in function types, using a kept function as a VALUE
+  # must fail closed here - never as invalid Zig downstream. A call spells
+  # the name on the call node itself, so any Identifier carrying a kept
+  # function's name is a value use.
+  sig { params(resolution: Annotator::Phases::ResolutionFacts, fn_nodes: T::Hash[String, AST::FunctionDef]).void }
+  def reject_kept_function_values!(resolution, fn_nodes)
+    kept_fns = fn_nodes.each_with_object(T.let({}, T::Hash[String, AST::Param])) do |(name, fn), map|
+      kept_param = fn.params.find { |p| p.symbol&.kept_identity }
+      map[name] = kept_param if kept_param
+    end
+    return if kept_fns.empty?
+
+    fn_nodes.each_value { |fn| fn.body&.each { |stmt| scan_kept_fn_value_use!(stmt, kept_fns) } }
+    resolution.program.statements.each do |stmt|
+      next if stmt.is_a?(AST::FunctionDef)
+      scan_kept_fn_value_use!(stmt, kept_fns)
+    end
+  end
+  private :reject_kept_function_values!
+
+  sig { params(node: AST::Node, kept_fns: T::Hash[String, AST::Param]).void }
+  def scan_kept_fn_value_use!(node, kept_fns)
+    if node.is_a?(AST::Identifier) && kept_fns.key?(node.name)
+      sym = node.symbol
+      shadowed = sym.is_a?(SymbolEntry) && FunctionSignature.unwrap(sym.type).nil? && !sym.type.nil? &&
+        sym.type.resolved != :Any
+      unless shadowed
+        param = T.must(kept_fns[node.name])
+        contract = T.must(param.symbol&.kept_identity)
+        error!(node, :KEPT_FN_VALUE_ABI,
+          name: node.name,
+          param: param.name.to_s,
+          sink: contract.sink,
+          fn_type: "FN(...)")
+      end
+    end
+    # each_child_node yields body arrays as direct members; adding a
+    # child_bodies leg would revisit every nested body exponentially.
+    AST.each_child_node(node) { |child| scan_kept_fn_value_use!(child, kept_fns) }
+  end
+  private :scan_kept_fn_value_use!
+
+
+  # The keep diagnostic is declaration-sited: point at the binding that must
+  # declare a model, not at the call that exposed the conflict.
+  sig { params(body_summaries: T::Hash[String, T.untyped], entry: SymbolEntry).returns(T.nilable(AST::Node)) }
+  def kept_identity_declaration_anchor(body_summaries, entry)
+    body_summaries.each_value do |summary|
+      decl = summary.binding_nodes.find do |node|
+        node.respond_to?(:symbol) && T.unsafe(node).symbol.equal?(entry)
+      end
+      return decl if decl
+    end
+    nil
+  end
+  private :kept_identity_declaration_anchor
 
   sig { returns(Symbol) }
   def language_mode
@@ -854,6 +1006,7 @@ private
     when AST::BreakNode then visit_BreakNode(node)
     when AST::ContinueNode then visit_ContinueNode(node)
     when AST::PassStmt then visit_PassStmt(node)
+    when AST::DeferStmt then visit_DeferStmt(node)
     when AST::SyncPolicyDecl then visit_SyncPolicyDecl(node)
     when AST::Assert then visit_Assert(node)
     when AST::DieNode then visit_DieNode(node)
@@ -888,11 +1041,11 @@ private
     when AST::StaticCall then visit_StaticCall(node)
     when AST::MoveNode then visit_MoveNode(node)
     when AST::CopyNode then visit_CopyNode(node)
+    when AST::KeepNode then visit_KeepNode(node)
     when AST::Copy then visit_Copy(node)
     when AST::LinkNode then visit_LinkNode(node)
     when AST::ResolveNode then visit_ResolveNode(node)
     when AST::FreezeNode then visit_FreezeNode(node)
-    when AST::CloneNode then visit_CloneNode(node)
     when AST::ShareNode then visit_ShareNode(node)
     when AST::GetIndex then visit_GetIndex(node)
     when AST::GetField then visit_GetField(node)
@@ -1081,7 +1234,12 @@ private
   sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: OwnershipGraph::MoveConsumerParamType).returns(T.nilable(T::Set[String])) }
   def og_set_moved(name, at_token: nil, action: :move, consumer_param_type: nil) = ownership_graph.mark_moved(name, at_token: at_token, action: action, consumer_param_type: consumer_param_type)
   sig { params(name: String).returns(T.nilable(Symbol)) }
-  def og_set_live(name)  = (ownership_graph[name]&.state = :live)
+  def og_set_live(name)
+    graph_node = ownership_graph[name]
+    return nil unless graph_node
+
+    graph_node.state = :live
+  end
   sig { params(name: String).returns(T::Array[String]) }
   def og_drop(name)      = ownership_graph.drop(name)
   sig { returns(Integer) }
@@ -1105,6 +1263,7 @@ private
   private :current_stream_yield_frame
   private :deferred_with_validations
   private :deferred_recovery_validations
+  private :deferred_give_validations
   private :function_node_for
   private :function_node_map
   private :handle_prefixed_int_overflow!

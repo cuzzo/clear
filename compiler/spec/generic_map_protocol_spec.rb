@@ -174,7 +174,7 @@ RSpec.describe "the intrinsic generic Map protocol" do
           map["not-a-generic-key"];
         END
       CLEAR
-    }.to raise_error(CompilerError, /Map protocol indexing expects M::Key, but this key is Byte\[17\]/)
+      }.to raise_error(CompilerError, /Map protocol indexing expects M::Key, but this key is \[17\]Byte/)
 
     expect {
       annotate("FN bad<M: Map>(map: M) RETURNS Void -> map.keys(); END")
@@ -190,7 +190,7 @@ RSpec.describe "the intrinsic generic Map protocol" do
           &map.put(key, "not-a-generic-value");
         END
       CLEAR
-    }.to raise_error(CompilerError, /Map.put argument 2 expects M::Value, but got Byte\[19\]/)
+    }.to raise_error(CompilerError, /Map.put argument 2 expects M::Value, but got \[19\]Byte/)
   end
 
   it "keeps concrete map assignment and protocol runtime classification distinct" do

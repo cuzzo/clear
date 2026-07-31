@@ -22,7 +22,6 @@ module EffectInference
   sig { params(fn_nodes: FnNodes).void }
   def self.analyze!(fn_nodes)
     fn_nodes.each do |_name, fn|
-      next unless fn
       fn.effect_set = build(fn)
       fn.inferred_effects = fn.effect_set
     end
@@ -35,10 +34,12 @@ module EffectInference
     eff = Set.new
     raw = fn.respond_to?(:effects) ? fn.effects : nil
 
-    eff << :yield      if raw&.include?(EffectTracker::YIELD)
-    eff << :alloc_heap if raw&.include?(EffectTracker::HEAP)
-    eff << :io         if raw&.include?(EffectTracker::IO) ||
-                          raw&.include?(EffectTracker::EXTERN)
+    if raw
+      eff << :yield      if raw.include?(EffectTracker::YIELD)
+      eff << :alloc_heap if raw.include?(EffectTracker::HEAP)
+      eff << :io         if raw.include?(EffectTracker::IO) ||
+                            raw.include?(EffectTracker::EXTERN)
+    end
     eff << :fail       if fn.respond_to?(:can_fail) && fn.can_fail
 
     # Atomics M1.6.5 + True-Sync-Polymorphism (#327): project the
@@ -48,10 +49,12 @@ module EffectInference
     # across lock-free / lock-based families. The ?-form names are
     # spelled `<axis>_maybe` so they read like English rather than as
     # punctuated metasyntax.
-    eff << :contention      if raw&.include?(EffectTracker::CONTENTION)
-    eff << :blocking        if raw&.include?(EffectTracker::BLOCKING)
-    eff << :contends_maybe  if raw&.include?(EffectTracker::CONTENTION_MAYBE)
-    eff << :blocks_maybe    if raw&.include?(EffectTracker::BLOCKING_MAYBE)
+    if raw
+      eff << :contention      if raw.include?(EffectTracker::CONTENTION)
+      eff << :blocking        if raw.include?(EffectTracker::BLOCKING)
+      eff << :contends_maybe  if raw.include?(EffectTracker::CONTENTION_MAYBE)
+      eff << :blocks_maybe    if raw.include?(EffectTracker::BLOCKING_MAYBE)
+    end
 
     EffectSet.new(eff)
   end

@@ -19,7 +19,7 @@ module Annotator
           fn_type_params: node.type_params.map(&:to_sym),
           type_params: node.type_params.map(&:to_sym),
           generic_bounds: generic_bounds(node.generic_params),
-          reentrant: node.declared_plain_reentrant?,
+          reentrant: node.reentrance_kind == :reentrant || node.effects_decl == :reentrant,
           requires: node.requires
         )
       end
@@ -34,8 +34,9 @@ module Annotator
 
       sig { params(node: AST::ExternFnDecl).returns(FunctionSignature) }
       def self.extern_function_signature(node)
+        params = node.params.nil? ? [] : node.params
         FunctionSignature.new(
-          params: node.params.map { |param| extern_param(param) },
+          params: params.map { |param| extern_param(param) },
           return_type: node.annotation_return_type,
           return_lifetime: extern_lifetime_paths(node),
           visibility: :pub,
@@ -43,10 +44,10 @@ module Annotator
           module_alias: node.from_module,
           extern_effects: extern_effects(node),
           extern_source: node.extern_source,
-          fn_type_params: fn_type_params(node),
-          type_params: fn_type_params(node),
+          fn_type_params: node.fn_type_params.dup,
+          type_params: node.fn_type_params.dup,
           owner_type: node.owner_type,
-          owner_type_params: owner_type_params(node)
+          owner_type_params: node.owner_type_params.dup
         )
       end
 
@@ -56,9 +57,14 @@ module Annotator
         return [] if lifetime.nil?
         return [:wildcard] if lifetime == :wildcard
 
-        T.cast(lifetime, T::Array[AST::Node]).filter_map do |source|
-          source.respond_to?(:name) ? T.unsafe(source).name.to_s : nil
+        paths = T.let([], T::Array[FunctionSignature::LifetimeSource])
+        T.cast(lifetime, T::Array[AST::Node]).each do |source|
+          next unless source.is_a?(AST::Identifier)
+
+          identifier = source
+          paths << identifier.name.to_s
         end
+        paths
       end
       private_class_method :extern_lifetime_paths
 
@@ -94,17 +100,6 @@ module Annotator
       end
       private_class_method :extern_effects
 
-      sig { params(node: AST::ExternFnDecl).returns(T::Array[Symbol]) }
-      def self.fn_type_params(node)
-        node.fn_type_params
-      end
-      private_class_method :fn_type_params
-
-      sig { params(node: AST::ExternFnDecl).returns(T::Array[Symbol]) }
-      def self.owner_type_params(node)
-        node.owner_type_params
-      end
-      private_class_method :owner_type_params
     end
   end
 end

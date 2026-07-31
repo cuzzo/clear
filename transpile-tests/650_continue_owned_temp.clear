@@ -1,0 +1,19 @@
+# F3 minimal: CONTINUE on a branch before consuming an owned loop temp
+FN dup(s: String) RETURNS String ->
+    RETURN COPY s;
+END
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST F3aContinueOwned DO
+    MUTABLE acc = dup("");
+    FOR i IN (0_i64..<5_i64) DO
+        t = dup("x") $+ i.toString();
+        IF i == 1_i64 OR i == 3_i64 THEN
+            CONTINUE;
+        END
+        acc = acc $+ t;
+    END
+    ASSERT acc == "x0x2x4";
+    ASSERT acc.length() == 6;
+END

@@ -1236,9 +1236,7 @@ class PipelineConcurrentLowerer < T::Struct
 
   sig { params(map_type: Type).returns(Type) }
   def shard_key_type(map_type)
-    return map_type.key_type if map_type.numeric_map?
-
-    Type.new(:String)
+    map_type.key_type
   end
 
   sig { params(map_var_name: String, caps: FiberCtxBuilder::Result).returns(T::Hash[String, String]) }

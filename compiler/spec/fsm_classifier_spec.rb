@@ -633,12 +633,12 @@ RSpec.describe "FSM classifier (Phase A)" do
     end
 
     it "falls back to stackful for streams (~T[]) — they don't fit B2" do
-      # ~?T[] streams have a different Inner shape (no `.result` field);
+      # [~]T streams have a different Inner shape (no `.result` field);
       # the FSM-NEXT lowering refuses and the stackful path emits.
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          stream: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 2_i64; };
-          n: ?Int64 = NEXT stream;
+          stream: [~]Int64 = BG STREAM { YIELD 1_i64; YIELD 2_i64; };
+          n = NEXT stream;
           RETURN;
         END
       CLEAR

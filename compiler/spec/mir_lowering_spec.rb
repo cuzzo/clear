@@ -100,6 +100,47 @@ RSpec.describe MIRLowering do
     )
   end
 
+  it "does not give Rc/Arc list fields the bare ArrayList .empty default" do
+    low = lowering
+    plain = AST::StructField.new(type: Type.array_of(:Int64), default: nil, borrowed: false)
+    multiowned_type = Type.array_of(:Int64)
+    multiowned_type.ownership = :multiowned
+    multiowned = AST::StructField.new(type: multiowned_type, default: nil, borrowed: false)
+    shared_type = Type.array_of(:Int64)
+    shared_type.ownership = :shared
+    shared = AST::StructField.new(type: shared_type, default: nil, borrowed: false)
+
+    expect(low.send(:lower_struct_field_default, plain)).to be_a(MIR::ContainerInit)
+    expect(low.send(:lower_struct_field_default, multiowned)).to be_nil
+    expect(low.send(:lower_struct_field_default, shared)).to be_nil
+  end
+
+  it "projects an Rc list field payload before OWN COPY into a plain list" do
+    mir = lower_source_mir(<<~CLEAR)
+      FN makeList() RETURNS []Int64 ->
+        MUTABLE items: []Int64 = [];
+        &items.append(1_i64);
+        RETURN items;
+      END
+
+      STRUCT Holder { value: []@multiowned Int64 }
+
+      FN main() RETURNS Void ->
+        MUTABLE value = makeList() @multiowned;
+        holder = Holder{ value: COPY value };
+        extracted = OWN COPY holder.value;
+        ASSERT extracted.length() == 1_i64, "copied list payload";
+        RETURN;
+      END
+    CLEAR
+
+    zig = emit(mir)
+    expect(zig).to include(
+      '(if (comptime @hasDecl(@TypeOf(holder.value), "__clear_ref_carrier")) ' \
+      "holder.value.ctrl.data.* else holder.value)",
+    )
+  end
+
   def make_binop(left, op, right)
     node = AST::BinaryOp.new(tok, left, op, right)
     node.full_type = left.full_type
@@ -1502,13 +1543,13 @@ RSpec.describe MIRLowering do
       src = <<~CLEAR
         FN retainCount(TAKES map: {String}@shared:sharded(32) String) RETURNS !Int64 ->
           owned: {String}@shared:sharded(32) String = GIVE map;
-          retained: {String}@shared:sharded(32) String = CLONE owned;
+          retained: {String}@shared:sharded(32) String = KEEP owned;
           RETURN retained.count();
         END
 
         FN main() RETURNS !Int64 ->
           MUTABLE map: {String}@shared:sharded(32) String = {};
-          RETURN retainCount(CLONE map);
+          RETURN retainCount(KEEP map);
         END
       CLEAR
       importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
@@ -1944,10 +1985,10 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("handle")
     end
 
-    it "lowers CLONE of a shared handle to Arc retain" do
+    it "lowers KEEP of a shared handle to Arc retain" do
       source_type = Type.new(:Box, ownership: :shared)
       inner = make_id("box", full_type: source_type)
-      node = AST::CloneNode.new(tok, inner)
+      node = AST::KeepNode.new(tok, inner)
       node.full_type = source_type
 
       result = lowering.lower(node)
@@ -2010,16 +2051,27 @@ RSpec.describe MIRLowering do
       expect(entry).to include(kind: :rc, alloc: :heap, zig_type: "CheatLib.Arc(Box)")
     end
 
-    it "lowers CLONE of a multiowned handle to Rc retain" do
+    it "lowers KEEP of a multiowned handle to Rc retain" do
       source_type = Type.new(:Box, ownership: :multiowned)
       inner = make_id("box", full_type: source_type)
-      node = AST::CloneNode.new(tok, inner)
+      node = AST::KeepNode.new(tok, inner)
       node.full_type = source_type
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::RcRetain)
       expect(result.func).to eq("rcRetain")
       expect(result.zig_base).to eq("Box")
+    end
+
+    it "lowers KEEP of a direct value as a pass-through copy" do
+      inner = make_id("flag", full_type: :Bool)
+      node = AST::KeepNode.new(tok, inner)
+      node.full_type = :Bool
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::DeepCopy)
+      expect(result.strategy).to eq(:passthrough)
+      expect(emit(result)).to include("flag")
     end
 
     it "lowers COPY of union" do
@@ -3625,7 +3677,7 @@ RSpec.describe MIRLowering do
       yield_node = AST::YieldExpr.new(tok, yield_expr)
       yield_node.full_type = :Void
       node = AST::BgStreamBlock.new(tok, [yield_node], nil, nil)
-      node.full_type = :"~?Void[]"
+      node.full_type = :"[~]Void"
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::BgBlock)
@@ -3639,7 +3691,7 @@ RSpec.describe MIRLowering do
 
     it "refuses unsafe BG STREAM captures with ownership-specific guidance" do
       node = AST::BgStreamBlock.new(tok, [], nil, nil)
-      node.full_type = :"~?Int64[]"
+      node.full_type = :"[~]Int64"
       node.capture_analysis = capture_analysis(
         captures: { "items" => Type.new(:"Int64[]@list") },
         strategies: {
@@ -3659,7 +3711,7 @@ RSpec.describe MIRLowering do
       yield_node = AST::YieldExpr.new(tok, yield_expr)
       yield_node.full_type = :Void
       node = AST::BgStreamBlock.new(tok, [yield_node], nil, nil)
-      node.full_type = :"~?Int64[]"
+      node.full_type = :"[~]Int64"
 
       result = lowering(target: :bc).lower(node)
 
@@ -4092,10 +4144,18 @@ RSpec.describe MIRLowering do
       node = AST::RequireNode.new(tok, "math", "math", :package)
       node.full_type = :Void
 
-      result = lowering.lower(node)
-      expect(result).to be_a(MIR::Import)
-      zig = emit(result)
+      low = lowering
+      result = low.lower(node)
+      imports = Array(result).select { |item| item.is_a?(MIR::Import) }
+      expect(imports.length).to eq(1)
+      zig = emit(imports.fetch(0))
       expect(zig).to include('@import("math.zig")')
+
+      # The same package alias reaches one Zig unit once, even when a root
+      # and an inlined local module both require it.
+      duplicate = AST::RequireNode.new(tok, "math", "math", :package)
+      duplicate.full_type = :Void
+      expect(low.lower(duplicate)).to eq([])
     end
 
     it "raises on local require when no importer available" do
@@ -4139,12 +4199,12 @@ RSpec.describe MIRLowering do
 
       expect(result).to include(imported_type)
       namespace = result.find { |item| item.is_a?(MIR::ModuleNamespace) }
-      expect(namespace.name).to eq("helper")
+      expect(namespace.name).to eq("__clear_module_helper")
       expect(namespace.items).to include(an_object_having_attributes(name: "helper_value"))
       expect(namespace.items).not_to include(an_object_having_attributes(name: "main"))
       expect(low.send(:program_state).fn_sigs).to include("helper_value")
       expect(low.send(:program_state).fn_sigs).not_to include("main")
-      expect(emit(namespace)).to include("const helper = struct")
+      expect(emit(namespace)).to include("const __clear_module_helper = struct")
       expect(emit(namespace)).not_to include("clearMain")
     end
 
@@ -4266,11 +4326,17 @@ RSpec.describe MIRLowering do
         nil,
       )
 
-      items = lowering.send(:imported_module_items, imported_mod)
+      low = lowering
+      items = low.send(:imported_module_items, imported_mod)
 
       expect(items).not_to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
-      expect(items).to include(an_object_having_attributes(alias_name: "c", module_path: "c.zig"))
       expect(items).to include(an_object_having_attributes(name: "private_helper"))
+
+      # EXTERN declarations hoist to file scope so visible type defs emitted
+      # there can reference the foreign aliases.
+      expect(items).not_to include(an_object_having_attributes(alias_name: "c", module_path: "c.zig"))
+      extern_items = low.send(:imported_module_extern_items, imported_mod)
+      expect(extern_items).to include(an_object_having_attributes(alias_name: "__clear_module_c", module_path: "c.zig"))
     end
 
     it "filters already-lowered dependency namespaces from imported module bodies" do
@@ -4315,7 +4381,7 @@ RSpec.describe MIRLowering do
 
       items = lowering.send(:imported_module_dependency_items, imported_mod)
 
-      expect(items).to include(an_object_having_attributes(alias_name: "math", module_path: "math.zig"))
+      expect(items).to include(an_object_having_attributes(alias_name: "__clear_module_math", module_path: "math.zig"))
     end
 
     it "filters imported type items and BC helper items defensively" do
@@ -4489,7 +4555,7 @@ RSpec.describe MIRLowering do
       },
       "transpile-tests/349_polymorphic_transaction_acceptance.clear" => {
         description: "polymorphic lock and snapshot dispatch",
-        required_patterns: [/acquire\(\)/, /\.update\(rt, __clear_heap_alloc/, /@hasField/]
+        required_patterns: [/acquire\(\)/, /\.update\(rt, __clear_heap_alloc/, /@hasDecl/]
       }
     }
 
@@ -4511,7 +4577,10 @@ RSpec.describe MIRLowering do
 
       zig = emit(mir)
       expect(zig).to include("concurrentListSelect")
-      expect(zig).to match(/CheatLib\.cleanup\([^,]+,\s*rt\.frameAlloc\(\),\s*&pipe_src_list\)/)
+      # The concurrent pipeline's source binding is stamped :heap by the
+      # annotator (fibers borrow it across suspension); pipeline_alloc reads
+      # that stamp (INV-16), so its paired cleanup is heap-allocated too.
+      expect(zig).to match(/CheatLib\.cleanup\([^,]+,\s*__clear_heap_alloc,\s*&pipe_src_list_\w+\)/)
     end
 
   end
@@ -5053,6 +5122,68 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
 
     expect(facts.map { |fact| [fact.name, fact.target_alloc, fact.move_guarded] })
       .to eq([["owned_renamed", :heap, true]])
+  end
+
+  it "records guarded compiler temporaries embedded in aggregate FSM results" do
+    l = lowering
+    l.function_state.current_bindings = {}
+    l.function_state.fn_name_rename_map = {}
+    l.function_state.guarded_cleanup_names = { "__tmp_copy" => true }
+
+    string = AST::Literal.new(tok, :STRING, "Tuple", nil)
+    string.full_type = Type.new(:String)
+    integer = AST::Literal.new(tok, :INT64, 7, nil)
+    integer.full_type = Type.new(:Int64)
+    copied = AST::CopyNode.new(tok, string)
+    copied.full_type = Type.new(:String)
+    ast = AST::TupleLit.new(tok, [copied, integer], nil)
+    ast.full_type = Type.new("Tuple<String,Int64>")
+    mir = MIR::TupleLiteral.new([MIR::Ident.new("__tmp_copy"), MIR::Lit.new("7")])
+
+    facts = l.send(:fsm_result_transfer_facts, mir, ast, Type.new("Tuple<String,Int64>"))
+
+    expect(facts.map { |fact| [fact.name, fact.target_alloc, fact.move_guarded] })
+      .to eq([["__tmp_copy", :heap, true]])
+  end
+
+  it "allocates FSM tail values from the declared async payload type" do
+    l = lowering
+    literal = AST::TupleLit.new(tok, [], nil)
+    literal.full_type = Type.new("Tuple<[5]Byte,Int64>")
+    declared = Type.new("Tuple<String,Int64>")
+    observed = []
+
+    l.define_singleton_method(:escaping_value_alloc) do |type_info|
+      observed << [:alloc, type_info.to_s]
+      :heap
+    end
+    l.define_singleton_method(:with_decl_alloc) do |alloc, &blk|
+      observed << [:lower, alloc]
+      blk.call
+    end
+    l.define_singleton_method(:lower) { |_node| MIR::TupleLiteral.new([]) }
+    l.define_singleton_method(:place_value_for_destination) do |mir, _node, alloc, type_info|
+      observed << [:place, alloc, Type.new(type_info).to_s]
+      mir
+    end
+    l.define_singleton_method(:mir_allocates?) { |_mir| false }
+    l.define_singleton_method(:hoist_alloc) { |mir, *_args, **_kwargs| mir }
+    l.define_singleton_method(:flush_pending) { [] }
+    l.define_singleton_method(:ast_void_type?) { |_type| false }
+
+    l.send(
+      :lower_step_stmts,
+      [literal],
+      no_result: false,
+      ctx_id: 3,
+      async_result_shape: AsyncResultShape.promise(declared),
+    )
+
+    expect(observed).to include(
+      [:alloc, "Tuple<String,Int64>"],
+      [:lower, :heap],
+      [:place, :heap, "Tuple<String,Int64>"],
+    )
   end
 
 

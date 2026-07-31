@@ -30,41 +30,45 @@ module ErrorHelper
   # `%{name}` interpolation against the hash. Legacy positional args
   # against `%s`/`%d` still work for the (shrinking) set of templates
   # that haven't been migrated to named form yet.
-  sig { params(node_or_token: T.untyped, code_or_message: T.any(String, Symbol), args: String, kwargs: T.untyped).returns(T.noreturn) }
+  sig { params(node_or_token: T.untyped, code_or_message: T.any(String, Symbol), args: DiagnosticRegistry::DiagnosticKwValue, kwargs: T.untyped).returns(T.noreturn) }
   def error!(node_or_token, code_or_message, *args, **kwargs)
     T.bind(self, T.untyped) rescue nil
     token = diagnostic_token(node_or_token)
 
     # 2. Determine Message
+    message = T.let("", String)
     if code_or_message.is_a?(Symbol)
-      message = DiagnosticRegistry.format_from_hash(code_or_message, args, kwargs)
+      message = DiagnosticRegistry.format_from_hash(code_or_message, args, kwargs) || ""
       raise "Internal Compiler Error: Unknown error code :#{code_or_message}" unless message
     else
       # C. Legacy Support (Raw String)
       message = code_or_message
     end
 
-    # 3. Raise the specific error class
-    err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
     source_token = source_error_token(token)
-
-      raise err_class.new(
-        source_token,
-        T.unsafe(message),
-        diagnostic_source_code,
-        code: code_or_message.is_a?(Symbol) ? code_or_message : nil
-      )
+    diagnostic_code = T.let(nil, T.nilable(Symbol))
+    if code_or_message.is_a?(Symbol)
+      diagnostic_code = code_or_message.dup
+    end
+    raise_source_error!(
+      source_token,
+      T.unsafe(message),
+      # Keep the narrowed symbol in a typed optional local. This avoids
+      # materializing the original String-or-Symbol parameter as a union in
+      # an optional ternary slot at the ownership boundary.
+      code: diagnostic_code,
+    )
   end
 
   # Try the hash form first when applicable; fall back to positional;
   # surface any internal mismatch as an "Internal Args Error" suffix.
-  sig { params(template: String, args: T::Array[String], kwargs: T::Hash[Symbol, T::Array[Symbol]]).returns(String) }
+  sig { params(template: String, args: DiagnosticRegistry::DiagnosticArgs, kwargs: DiagnosticRegistry::DiagnosticKwargs).returns(String) }
   def format_diagnostic_template(template, args, kwargs)
     T.bind(self, T.untyped) rescue nil
     DiagnosticRegistry.format_template(template, args, kwargs)
   end
 
-  sig { params(code: Symbol, args: String, kwargs: T.untyped).returns(String) }
+  sig { params(code: Symbol, args: DiagnosticRegistry::DiagnosticKwValue, kwargs: T.untyped).returns(String) }
   def diagnostic_message(code, *args, **kwargs)
     message = DiagnosticRegistry.format_from_hash(code, args, kwargs)
     Kernel.raise "Internal Compiler Error: Unknown error code :#{code}" unless message
@@ -88,7 +92,7 @@ module ErrorHelper
   sig { params(node_or_token: AST::Node, message: String).returns(NilClass) }
   def note!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
-    token = diagnostic_token(node_or_token)
+    token = source_error_token(diagnostic_token(node_or_token))
     loc = token ? " (line #{token.line})" : ""
     diagnostic_output("\e[36m[Note]\e[0m #{message}#{loc}")
     nil
@@ -97,7 +101,7 @@ module ErrorHelper
   sig { params(node_or_token: AST::Node, message: String).returns(NilClass) }
   def warning!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
-    token = diagnostic_token(node_or_token)
+    token = source_error_token(diagnostic_token(node_or_token))
     loc = token ? " (line #{token.line})" : ""
     diagnostic_output("\e[33m[Warning]\e[0m #{message}#{loc}")
     nil
@@ -137,42 +141,51 @@ module ErrorHelper
     T.bind(self, T.untyped) rescue nil
     rendered_message = message || diagnostic_message(T.must(code), **kwargs)
     token = diagnostic_token(node_or_token)
+    source_token = source_error_token(token)
     finding = FixableFinding.new(
       level: level, message: rendered_message, token: token,
       category: category, fixes: fixes
     )
 
     if FixCollector.enabled?
-      FixCollector.push(finding)
+      FixCollector.push(finding, level == :error)
       return unless raise_in_collector
-      err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
-      source_token = source_error_token(token)
-      raise err_class.new(
-        source_token,
-        rendered_message,
-        diagnostic_source_code
-      )
+      raise_source_error!(source_token, rendered_message)
     end
 
     case level
     when :hint, :info, :warning
-      loc = token ? " (line #{token.line})" : ""
+      loc = source_token ? " (line #{source_token.line})" : ""
       tag = level == :warning ? "\e[33m[Warning]\e[0m" : "\e[36m[#{level.to_s.capitalize}]\e[0m"
       diagnostic_output("#{tag} #{rendered_message}#{loc}")
     when :error
-      err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
-      source_token = source_error_token(token)
-      raise err_class.new(
-        source_token,
-        rendered_message,
-        diagnostic_source_code
-      )
+      raise_source_error!(source_token, rendered_message)
     end
   end
 
   sig { returns(T.nilable(String)) }
   def diagnostic_source_code
     source_code
+  end
+
+  sig { returns(T::Boolean) }
+  def parser_error_host?
+    false
+  end
+
+  sig do
+    params(
+      token: T.nilable(Lexer::Token),
+      message: String,
+      code: T.nilable(Symbol),
+    ).returns(T.noreturn)
+  end
+  def raise_source_error!(token, message, code: nil)
+    if parser_error_host?
+      Kernel.raise ParserError.new(token, message, diagnostic_source_code, code: code)
+    end
+
+    Kernel.raise CompilerError.new(token, message, diagnostic_source_code, code: code)
   end
 
   sig { params(node_or_token: T.untyped).returns(DiagnosticToken) }
@@ -195,7 +208,8 @@ module ErrorHelper
     nil
   end
 
-  private :format_diagnostic_template, :diagnostic_source_code, :diagnostic_token, :source_error_token, :diagnostic_output
+  private :format_diagnostic_template, :diagnostic_source_code, :diagnostic_token,
+    :source_error_token, :diagnostic_output, :raise_source_error!
 
 end
 

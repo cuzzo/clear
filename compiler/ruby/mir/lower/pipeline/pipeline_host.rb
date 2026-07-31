@@ -93,6 +93,14 @@ class PipelineHost
       visit_expr: ->(_list_node, expr_node, placeholder) {
         with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }
       },
+      visit_expr_head: ->(expr_node, placeholder, alloc) {
+        # Owned field copies inside the element (COPY dup(_) in a composite)
+        # must land on the RESULT list's allocator: a frame copy moved into a
+        # heap-listed row dangles once the per-iteration rewind fires.
+        with_pipeline_context(placeholder: placeholder) do
+          @lowering_bridge.with_pipeline_decl_alloc(alloc) { visit_mir_head(expr_node) }
+        end
+      },
       visit_reduce_expr: ->(expr_node, item_placeholder, acc_placeholder) {
         with_pipeline_context(placeholder: item_placeholder, acc: acc_placeholder) { visit_mir(expr_node) }
       },
@@ -114,6 +122,9 @@ class PipelineHost
       append_owned_value_stmt: ->(receiver, alloc, value_expr) {
         append_owned_value_stmt(receiver, alloc, value_expr)
       },
+      append_fresh_owned_value_stmt: ->(receiver, alloc, value_expr, owned_type) {
+        append_owned_value_stmt(receiver, alloc, value_expr, known_owned: true, owned_type: owned_type)
+      },
       borrowed_pipeline_value: ->(value, type_info, alloc) {
         borrowed_pipeline_value(value, type_info, alloc)
       },
@@ -121,6 +132,7 @@ class PipelineHost
       owning_pipeline_temp_stmts: ->(name, source, type_info, zig_type, alloc) {
         owning_pipeline_temp_stmts(name, source, type_info, zig_type, alloc)
       },
+      loop_mark_stmts: -> { @lowering_bridge.pipeline_iteration_loop_marks },
     )
   end
 
@@ -179,6 +191,14 @@ class PipelineHost
       lower_each_range: ->(source_node, stages, each_op) { lower_each_range(source_node, stages, each_op) },
       lower_sharded_each: ->(list_node, each_op) { lower_sharded_each(list_node, each_op) },
       ast_stmts_use_placeholder: ->(body_stmts) { ast_stmts_use_placeholder?(body_stmts) },
+      source_alloc_fact: ->(value, name, type_info) {
+        fact = @lowering_bridge.pipeline_alloc_mark_fact(
+          value, name, fallback_alloc: :heap, type_info: type_info,
+          context: "each source materialization")
+        next nil unless fact
+        entry = CleanupEntry.build(:uniform, alloc: fact.alloc, has_moved_guard: false, zig_type: type_info.zig_type)
+        [fact.mark, entry]
+      },
       next_index_name: -> {
         @each_idx_counter += 1
         "__each_i_#{@each_idx_counter}"
@@ -204,8 +224,8 @@ class PipelineHost
         typed_block_expr(label, T.cast(body, T::Array[MIR::Node]), result_type)
       },
       range_chain: ->(node) { unwrap_range_chain(node) },
-      lazy_range_prefix: ->(source_node, stages, on_skip) {
-        build_lazy_range_prefix(source_node, stages, on_skip: on_skip)
+      lazy_range_prefix: ->(source_node, stages, on_skip, track_owned_items) {
+        build_lazy_range_prefix(source_node, stages, on_skip: on_skip, track_owned_items: track_owned_items)
       },
       range_fold_observable_distinct: ->(prefix, distinct_op, smooth_node, label, source_node) {
         lower_range_fold_observable_distinct(prefix, distinct_op, smooth_node, label, source_node)
@@ -241,6 +261,9 @@ class PipelineHost
       visit_mir_with_placeholder: ->(node, placeholder) {
         with_pipeline_context(placeholder: placeholder) { visit_mir(node) }
       },
+      visit_expr_head: ->(expr_node, placeholder) {
+        with_pipeline_context(placeholder: placeholder) { visit_mir_head(expr_node) }
+      },
       pipeline_block: ->(list_node, blk) {
         pipeline_block(list_node) { |items, label| blk.call(items, label) }
       },
@@ -261,6 +284,14 @@ class PipelineHost
       },
       visit_mir_with_context: ->(node, placeholder, acc) {
         with_pipeline_context(placeholder: placeholder, acc: acc) { visit_mir(node) }
+      },
+      lower_head_with_context: ->(node, placeholder) {
+        @lowering_bridge.lower_head do
+          with_pipeline_context(placeholder: placeholder) { visit_mir(node) }
+        end
+      },
+      with_fiber_rt: ->(rt_name, blk) {
+        with_fiber_capture_map({}, rt_override: rt_name) { blk.call }
       },
       visit_pipeline_body_mir: ->(body_stmts, placeholder) {
         visit_pipeline_body_mir(body_stmts, placeholder: placeholder)
@@ -595,6 +626,25 @@ class PipelineHost
     @lowering_bridge.lower_node(substituted)
   end
 
+  # Lower a per-element expression, capturing the hoisted temps it produces
+  # (owned struct fields, nested owned calls, ...) so the caller can emit them
+  # INSIDE the pipeline loop body. Without this the hoists flush to the
+  # enclosing statement -- outside the loop -- and a per-iteration allocation
+  # looks to the checker like a once-allocated binding consumed each iteration.
+  sig { params(node: AST::Node).returns(PipelineElementHead) }
+  def visit_mir_head(node)
+    substituted = substitute_placeholders(node)
+    head = @lowering_bridge.lower_head { @lowering_bridge.lower_node(substituted) }
+    # Capture ownership from MIR facts NOW, while both the value's effect and its
+    # captured hoists are visible. After hoisting, the value may be a plain Ident
+    # whose owned parts moved into `pending` (an owned struct field, a nested
+    # owned call), so the value's effect alone under-reports ownership. An owned
+    # allocation among the hoists means the element constructed something owned.
+    owned = MIR::OwnershipEffect.of(head.value).produces_owned ||
+      head.pending.any? { |stmt| stmt.is_a?(MIR::AllocMark) }
+    PipelineElementHead.new(value: head.value, pending: head.pending, owned: owned)
+  end
+
   # Lower an array of AST body statements to MIR nodes, with pipeline
   # placeholder substitution. Used by side-effect operators (Tap, Each, Join)
   # whose loop bodies contain multiple statements.
@@ -629,6 +679,13 @@ class PipelineHost
   end
 
   public
+
+  # Public placement read for lower_complex_smooth's sink decision: the
+  # pipeline domain owns the annotator's storage stamp (INV-16).
+  sig { params(smooth_node: AST::BinaryOp).returns(T::Boolean) }
+  def pipeline_result_heap?(smooth_node)
+    pipeline_alloc(smooth_node) == :heap
+  end
 
   # MIR entry point: returns MIR node tree for migrated pipeline operators.
   # Returns nil for non-migrated operators (caller falls back to string path).
@@ -770,12 +827,20 @@ class PipelineHost
       caps.specs.map { |spec| MIR::StructInitField.new(name: spec.name, value: spec.init_value_mir) }
 
     selector_prefix = T.let([], T::Array[MIR::Emittable])
-    selector = with_pipeline_context(placeholder: "__select_item") do
-      with_fiber_capture_map(caps.capture_map,
-        capture_symbols: caps.capture_symbols, rt_override: "__rt") do
-        visit_mir(op.expression)
+    # Lower the selector with its own pending-statement scope: allocating
+    # sub-expressions (COPY temps, TAKES dupes) must materialize inside the
+    # consumer loop, where the per-item capture is in scope, not at the
+    # enclosing statement.
+    selector_head = @lowering_bridge.lower_head do
+      with_pipeline_context(placeholder: "__select_item") do
+        with_fiber_capture_map(caps.capture_map,
+          capture_symbols: caps.capture_symbols, rt_override: "__rt") do
+          visit_mir(op.expression)
+        end
       end
     end
+    selector = T.let(selector_head.value, MIR::Node)
+    selector_prefix.concat(selector_head.pending)
     tense_plan = select_tense_plan(op)
     if tense_plan.asynchronous?
       promise_name = "__select_promise#{id}"
@@ -826,45 +891,106 @@ class PipelineHost
       end
     end
 
-    source_ref = MIR::FieldGet.new(MIR::Ident.new("ctx"), "source")
-    loop = if source_type.array?
-      # List sources are borrowed; elements stay owned by the list.
-      push = MIR::ExprStmt.new(MIR::MethodCall.new(
+    # `push` TRANSFERS the value into the channel: the consumer owns every
+    # dequeued item and frees it (the WHILE-NEXT path's guarded defer). The
+    # producer must therefore push an OWNED value and never free it itself —
+    # a `no_ownership` push contract here once let the hoisted owned selector
+    # temp keep its borrowed-arg (unguarded) cleanup, and both sides freed the
+    # same memory: an accepted program that segfaulted (invalid free).
+    #   - fresh-owned selector (a call like dup(_), concat, composite): move
+    #     it into the push under a moved-guard;
+    #   - identity selector: the dequeued item's ownership goes into the push
+    #     (existing behavior — the item guard below is skipped);
+    #   - borrowing projection of a heap-owning type: push a deep copy, so
+    #     the consumer never frees memory the producer still owns.
+    identity_selector = PipelinePlaceholderUsage.identity_placeholder?(op.expression)
+    # A fresh composite construction (Box{ name: GIVE _ } / tuple / array) is
+    # owned BY CONSTRUCTION even though nothing in it allocates: its fields
+    # took ownership of their values (a GIVE-moved item, a COPY dupe). Deep-
+    # copying it would strand the moved-in originals (leak); it must move.
+    fresh_composite = (selector.is_a?(MIR::StructInit) ||
+        selector.is_a?(MIR::TupleLiteral) || selector.is_a?(MIR::ArrayInit)) &&
+      item_type.recursive_cleanup_shape?(T.unsafe(pipeline_schema_lookup))
+    selector_owned = MIR::OwnershipEffect.of(selector).produces_owned ||
+      selector_prefix.any? { |stmt| stmt.is_a?(MIR::AllocMark) } ||
+      fresh_composite
+    if !selector_owned && !identity_selector &&
+        item_type.recursive_cleanup_shape?(T.unsafe(pipeline_schema_lookup))
+      selector = MIR::DeepCopy.new(selector, item_type.zig_type, nil, :full_value, :heap)
+      selector_owned = true
+    end
+
+    push_stmts = T.let([], T::Array[MIR::Emittable])
+    if selector_owned
+      push_contract = T.let(nil, T.nilable(MIR::CallableContract))
+      transfer_name = T.let(nil, T.nilable(String))
+      pushed = T.let(nil, T.nilable(MIR::Node))
+      if selector.is_a?(MIR::Ident)
+        # The owned value was hoisted into the prefix with its own cleanup;
+        # consume THAT binding: guard its cleanup and mark the move.
+        transfer_name = selector.name.to_s
+        selector_prefix.each do |stmt|
+          next unless (stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup)) &&
+                      stmt.name.to_s == transfer_name
+
+          stmt.cleanup_entry.mark_moved_guard!
+        end
+        pushed = selector
+      else
+        transfer_name = "__select_push#{id}"
+        entry = CleanupClassifier.owned_value_entry(item_type, T.unsafe(pipeline_schema_lookup)) ||
+          CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true, zig_type: item_type.zig_type)
+        entry = entry.with_alloc(:heap)
+        entry.mark_moved_guard!
+        push_stmts << MIR::AllocMark.new(transfer_name, :heap, item_type, :heap)
+        push_stmts << MIR::Let.new(transfer_name, selector, false, nil, nil)
+        push_stmts << MIR::ErrCleanup.new(transfer_name, entry)
+        pushed = MIR::Ident.new(transfer_name)
+      end
+      push_contract = MIR::CallableContract.new(
+        MIR::CallableContract.no_ownership(1).signature,
+        MIR::OwnershipContract.consume_operands([
+          MIR::OwnershipOperandFact.owned_binding(
+            transfer_name, item_type, "stream SELECT push transfers the item to the consumer", :heap),
+        ]),
+        1,
+      )
+      push_stmts << MIR::ExprStmt.new(MIR::MethodCall.new(
+        MIR::Ident.new(local_stream), "push", [pushed], true, push_contract), false)
+      push_stmts.concat(MIR::OwnershipTransferPlan.new(
+        name: transfer_name,
+        target: :owned_sink,
+        target_alloc: :heap,
+        move_guarded: true,
+      ).marks)
+    else
+      push_stmts << MIR::ExprStmt.new(MIR::MethodCall.new(
         MIR::Ident.new(local_stream), "push", [selector], true,
         MIR::CallableContract.no_ownership(1)), false)
-      MIR::ForStmt.new(MIR::ItemsAccess.new(source_ref, true), "__select_item", [*selector_prefix, push], nil)
+    end
+    item_body = T.let([*selector_prefix, *push_stmts], T::Array[MIR::Emittable])
+    # A stream source dequeues OWNED items (the producer's YIELD moved them
+    # into the channel; the same runtime :heap allocator frees them — the
+    # allocator identity the WHILE-NEXT consumer path already uses). Unless
+    # the selector passes the item through by identity (ownership goes into
+    # the push) the item gets a guarded per-iteration defer; a moving selector
+    # (GIVE / TAKES) suppresses it via the moved flag. A borrowing projection
+    # ALSO frees the item: the pushed value is an independent deep copy (see
+    # the push-transfer above), so the dequeued item would otherwise leak.
+    # Array sources iterate borrows of the source list — never released here.
+    source_item_type = T.let(source_type.runtime_stream_storage_element_type, T.nilable(Type))
+    if !source_type.array? && source_item_type &&
+        !PipelinePlaceholderUsage.identity_placeholder?(op.expression)
+      owned_stmts = @range_lowerer.owned_stream_item_stmts("__select_item", source_item_type)
+      item_body = owned_stmts + item_body unless owned_stmts.empty?
+    end
+    source_ref = MIR::FieldGet.new(MIR::Ident.new("ctx"), "source")
+    loop = if source_type.array?
+      MIR::ForStmt.new(MIR::ItemsAccess.new(source_ref, true), "__select_item", item_body, nil)
     else
-      # Stream sources hand each popped item over OWNED. The defer-based
-      # AllocMark/Cleanup pair (same contract as FOR-over-stream) frees it;
-      # an identity selector transfers the item into the result stream, so
-      # the push carries a consume-operands contract and the ownership-fact
-      # finalizer move-marks it.
-      source_elem_t = source_type.runtime_stream_storage_element_type ||
-        source_type.tense_type&.element_type
-      item_ownership = source_elem_t ?
-        @range_lowerer.stream_item_ownership_prelude(source_type, source_elem_t, "__select_item") : []
-      identity_transfer = !item_ownership.empty? &&
-        selector.is_a?(MIR::Ident) && selector.name == "__select_item"
-      push_contract = if identity_transfer
-        MIR::CallableContract.new(
-          FunctionSignature.new(params: [
-            AST::Param.new(name: "item", type: T.must(source_elem_t), takes: true),
-          ], return_type: Type.new(:Void)),
-          MIR::OwnershipContract.consume_operands([
-            MIR::OwnershipOperandFact.owned_binding(
-              "__select_item", T.must(source_elem_t), "stream SELECT identity transfer", :heap),
-          ]),
-          1,
-        )
-      else
-        MIR::CallableContract.no_ownership(1)
-      end
-      push = MIR::ExprStmt.new(MIR::MethodCall.new(
-        MIR::Ident.new(local_stream), "push", [selector], true, push_contract), false)
       next_method = source_type.inf_stream? || source_type.bounded_stream? ? "nextOrNull" : "next"
       MIR::WhileStmt.new(MIR::MethodCall.new(source_ref, next_method, [], true,
-        MIR::CallableContract.no_ownership(0)),
-        [*item_ownership, *selector_prefix, push], "__select_item", nil, nil, nil)
+        MIR::CallableContract.no_ownership(0)), item_body, "__select_item", nil, nil, nil)
     end
 
     stream_zig = if stream_type.inf_stream?
@@ -930,9 +1056,9 @@ class PipelineHost
     @materializer.schema_lookup
   end
 
-  sig { params(receiver: String, alloc: Symbol, value_expr: MIR::Node).returns(MIR::Emittable) }
-  def append_owned_value_stmt(receiver, alloc, value_expr)
-    @materializer.append_owned_value_stmt(receiver, alloc, value_expr)
+  sig { params(receiver: String, alloc: Symbol, value_expr: MIR::Node, known_owned: T::Boolean, owned_type: T.nilable(Type)).returns(MIR::Emittable) }
+  def append_owned_value_stmt(receiver, alloc, value_expr, known_owned: false, owned_type: nil)
+    @materializer.append_owned_value_stmt(receiver, alloc, value_expr, known_owned: known_owned, owned_type: owned_type)
   end
 
   sig { params(value: MIR::Node, type_info: Type, alloc: Symbol).returns(MIR::Node) }
@@ -1146,6 +1272,12 @@ class PipelineHost
 
   sig { params(smooth_node: AST::BinaryOp).returns(Symbol) }
   def pipeline_alloc(smooth_node)
+    # The storage stamp is the annotator/escape-analysis placement decision
+    # (INV-16: use sites READ, they do not re-classify). A :heap stamp
+    # (promise lists, rewind-forcing elements) overrides the declaration
+    # context; otherwise the destination's allocator decides.
+    return :heap if smooth_node.storage == :heap
+
     pipeline_result_alloc
   end
 
@@ -1287,14 +1419,16 @@ class PipelineHost
       stages: T::Array[AST::Node],
       on_skip: T.nilable(PipelineRangeSkipHook),
       source_alloc: T.nilable(Symbol),
+      track_owned_items: T::Boolean,
     ).returns(PipelineHost::LazyRangePrefix)
   end
-  def build_lazy_range_prefix(source_node, stages, on_skip: nil, source_alloc: nil)
+  def build_lazy_range_prefix(source_node, stages, on_skip: nil, source_alloc: nil, track_owned_items: false)
     @range_lowerer.build_lazy_range_prefix(
       source_node,
       stages,
       on_skip: on_skip,
       source_alloc: source_alloc,
+      track_owned_items: track_owned_items,
     )
   end
 
@@ -1360,9 +1494,9 @@ class PipelineHost
   # Single shared lowering for SUM/COUNT/MAX/MIN/AVG/ANY/ALL/FIND.
   # REDUCE and DISTINCT need seeded inits or inline CAS, so they keep
   # dedicated helpers below.
-  sig { params(p: PipelineHost::LazyRangePrefix, fold_op: DefaultObservableFoldOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, terminal: Symbol).returns(MIR::BlockExpr) }
-  def lower_range_fold_observable_default(p, fold_op, smooth_node, label, source_node, terminal:)
-    @range_lowerer.lower_range_fold_observable_default(p, fold_op, smooth_node, label, source_node, terminal: terminal)
+  sig { params(p: PipelineHost::LazyRangePrefix, fold_op: DefaultObservableFoldOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, terminal: Symbol, observable_id: T.nilable(Integer)).returns(MIR::BlockExpr) }
+  def lower_range_fold_observable_default(p, fold_op, smooth_node, label, source_node, terminal:, observable_id: nil)
+    @range_lowerer.lower_range_fold_observable_default(p, fold_op, smooth_node, label, source_node, terminal: terminal, observable_id: observable_id)
   end
 
   sig { params(type_info: Type).returns(T::Boolean) }
@@ -1370,9 +1504,9 @@ class PipelineHost
     @range_lowerer.pipeline_element_owns_heap?(type_info)
   end
 
-  sig { params(item_var: String, source_node: AST::Node).returns(T::Array[MIR::Emittable]) }
-  def consumed_stream_item_cleanup(item_var, source_node)
-    @range_lowerer.consumed_stream_item_cleanup(item_var, source_node)
+  sig { params(item_var: String, elem_t: T.nilable(Type)).returns(T::Array[MIR::Emittable]) }
+  def owned_stream_item_stmts(item_var, elem_t)
+    @range_lowerer.owned_stream_item_stmts(item_var, elem_t)
   end
 
   # REDUCE-scalar: per-item publish is a CAS loop that applies the

@@ -37,6 +37,10 @@ CLEANUP_CLASSIFIER_SHAPE_CELLS = %i[
   try_index_copy
   split_stream_handle
   observable_sum_handle
+  optional_symbol_field
+  optional_raw_field
+  fallible_symbol_return
+  optional_symbol_local
 ].map { |shape| { shape: shape } }
 
 FuzzGenerator.register(:cleanup_classifier_shapes,
@@ -310,11 +314,11 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
   when :split_stream_handle
     <<~CHT
       FN main() RETURNS Void ->
-          s: ~?Int64[] @split = BG STREAM {
+          s: [~]@split Int64 = BG STREAM {
               YIELD 1_i64;
               YIELD 2_i64;
           };
-          clone: ~?Int64[] @split = CLONE s;
+          clone: [~]@split Int64 = KEEP s;
           ASSERT (NEXT clone) == 1_i64, "split stream clone first";
           ASSERT (NEXT s) == 1_i64, "split stream source first";
           RETURN;
@@ -324,13 +328,69 @@ FuzzGenerator.register(:cleanup_classifier_shapes,
   when :observable_sum_handle
     <<~CHT
       FN main() RETURNS Void ->
-          s: ~?Int64[] = BG STREAM {
+          s: [~]Int64 = BG STREAM {
               YIELD 1_i64;
               YIELD 2_i64;
               YIELD 3_i64;
           };
           running: ~Int64@observable = s |> SUM _;
           ASSERT (NEXT running) == 6_i64, "observable sum cleanup";
+          RETURN;
+      END
+    CHT
+
+  # Non-owning strings under a wrapper. Symbols are interned and raw strings
+  # are borrowed, so neither owns its bytes -- wrapping one in an optional or
+  # an error union must not make the classifier ask for a cleanup the
+  # lifecycle plan refuses to provide.
+  when :optional_symbol_field
+    <<~CHT
+      STRUCT Caps { sync: ?String@symbol }
+
+      FN caps__new() RETURNS Caps ->
+          RETURN Caps{ sync: :locked };
+      END
+
+      FN main() RETURNS Void ->
+          c = caps__new();
+          ASSERT c.sync == :locked, "optional symbol field";
+          RETURN;
+      END
+    CHT
+
+  when :optional_raw_field
+    <<~CHT
+      STRUCT Caps { tag: ?String@raw }
+
+      FN caps__new() RETURNS Caps ->
+          RETURN Caps{ tag: NIL };
+      END
+
+      FN main() RETURNS Void ->
+          c = caps__new();
+          ASSERT c.tag == NIL, "optional raw field";
+          RETURN;
+      END
+    CHT
+
+  when :fallible_symbol_return
+    <<~CHT
+      FN tag() RETURNS !String@symbol ->
+          RETURN :shared;
+      END
+
+      FN main() RETURNS Void ->
+          t = TRY (tag());
+          ASSERT t == :shared, "fallible symbol return";
+          RETURN;
+      END
+    CHT
+
+  when :optional_symbol_local
+    <<~CHT
+      FN main() RETURNS Void ->
+          s: ?String@symbol = :locked;
+          ASSERT s == :locked, "optional symbol local";
           RETURN;
       END
     CHT

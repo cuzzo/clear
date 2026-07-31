@@ -3,6 +3,9 @@
 
 require 'bundler/setup' # so `bundle exec` not needed
 require "sorbet-runtime"
+# This configures the Ruby host only; Sorbet runtime checks do not exist in
+# the self-hosted CLEAR artifact.
+# ruby-to-clear: skip
 begin
   T::Configuration.default_checked_level = :never unless ENV["CLEAR_SORBET_RUNTIME"] == "1"
 rescue RuntimeError
@@ -331,25 +334,38 @@ end
 
 # --- RUN IT ---
 
+# ruby-to-clear: skip
 $logger = T.let(Logger.new(STDOUT), Logger)
+# ruby-to-clear: skip
 $logger.level = Logger::INFO
+# ruby-to-clear: skip
 $logger.formatter = proc do |severity, datetime, progname, msg|
   "[#{severity}] #{msg}\n"
 end
 
+# The self-hosted compiler has its own entrypoint; this is Ruby CLI glue.
+# ruby-to-clear: skip
 if __FILE__ == $0
   options = { mode: :standalone, pkg_paths: {} }
 
   OptionParser.new do |opts|
     opts.on('--log-level LEVEL', 'Set log level (DEBUG, INFO, WARN, ERROR)') do |level|
-      $logger.level = Logger.const_get(level.upcase)
+      levels = {
+        'DEBUG' => Logger::DEBUG,
+        'INFO' => Logger::INFO,
+        'WARN' => Logger::WARN,
+        'ERROR' => Logger::ERROR,
+      }
+      resolved = levels[level.upcase]
+      abort "Unknown log level: #{level} (expected DEBUG, INFO, WARN, or ERROR)" unless resolved
+      $logger.level = resolved
     end
     opts.on('--module', 'Emit as a Zig module (uses @import("cheat_runtime"), no runtime footer)') do
       options[:mode] = :module
     end
-    opts.on('--pkg SPEC', 'Register a package path as "name=/abs/path/to/lib.clear"') do |spec|
+    opts.on('--pkg SPEC', 'Register a package path as "name=/abs/path/to/lib.clear" (comma list = multi-file package)') do |spec|
       name, path = spec.split('=', 2)
-      options[:pkg_paths][name] = File.expand_path(path)
+      options[:pkg_paths][name] = path.split(',').map { |member| File.expand_path(member.strip) }.join(',')
     end
     opts.on('--use-c-allocator', 'Use the C allocator (jemalloc/mimalloc) instead of GPA') do
       options[:use_c_allocator] = true
@@ -386,6 +402,17 @@ if __FILE__ == $0
 
   script_file = ARGV.first
   if script_file
+    if script_file.start_with?('pkg:')
+      # A multi-file package as the root unit: materialize the merged source.
+      require 'tmpdir'
+      require_relative '../compiler/package_source'
+      pkg_name = script_file.delete_prefix('pkg:')
+      registered = options[:pkg_paths][pkg_name]
+      abort "pkg:#{pkg_name}: not registered (pass --pkg #{pkg_name}=a.clear,b.clear)" unless registered
+      merged = PackageSource.merge(registered.split(','), resolve_pkg: ->(name) { options[:pkg_paths][name] })
+      script_file = File.join(Dir.tmpdir, "clear_pkg_#{pkg_name}.clear")
+      File.write(script_file, merged.source)
+    end
     code       = File.read(script_file)
     source_dir = File.dirname(File.expand_path(script_file))
     ENV["AUDIT_CURRENT_FILE"] = script_file

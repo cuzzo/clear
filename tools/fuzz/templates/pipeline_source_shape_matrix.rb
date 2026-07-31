@@ -40,7 +40,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
     when :range_inline
       ["s: ~Int64[] = 1_i64 ..< 5_i64;", "s"]
     when :bg_stream_bound
-      ["s: ~?Int64[] = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };", "s"]
+      ["s: [~]Int64 = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };", "s"]
     when :list_bound
       ["s: Int64[] = [1_i64, 2_i64, 3_i64, 4_i64];", "s"]
     when :list_inline
@@ -71,7 +71,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
     if p[:source] == :string_stream
       <<~CHT
         FN main() RETURNS Void ->
-          s: ~?String[] = BG STREAM {
+          s: [~]String = BG STREAM {
             a: String = COPY "aa";
             b: String = COPY "bbb";
             c: String = COPY "c";
@@ -105,7 +105,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
           decl = "s: ~Int64[] = 1_i64 ..< 5_i64;"
           source_expr = "s"
         else
-          decl = "s: ~?Int64[] = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };"
+          decl = "s: [~]Int64 = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };"
           decl = "s: ~Int64[] = 1_i64 ..< 5_i64;" if p[:source] == :range_bound
         end
         <<~CHT
@@ -134,7 +134,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
     if p[:source] == :bg_stream_bound
       <<~CHT
         FN main() RETURNS Void ->
-          s: ~?Int64[] = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+          s: [~]Int64 = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
           total = s |> SELECT _ * 2_i64 |> SUM _ |> COLLECT;
           ASSERT total == 20_i64, "pipeline select sum";
           RETURN;
@@ -191,7 +191,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :find_int
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+        s: [~]Int64 = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
         running: ~?Int64@observable = s |> FIND _ > 2_i64;
         found:? = NEXT running;
         ASSERT found != NIL, "pipeline find present";
@@ -203,7 +203,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :distinct_int
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 2_i64; YIELD 1_i64; YIELD 2_i64; };
+        s: [~]Int64 = BG STREAM { YIELD 1_i64; YIELD 2_i64; YIELD 1_i64; YIELD 2_i64; };
         running: ~Int64[]@set:observable = s |> DISTINCT _;
         vals = NEXT running;
         ASSERT vals.length() == 2_i64, "pipeline distinct";
@@ -212,7 +212,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
     CHT
 
   when :index_struct
-    decl = p[:source] == :bounded_promises ? "s: ~Item[3] = [BG { makeItem(\"a\", 1_i64); }, BG { makeItem(\"b\", 2_i64); }, BG { makeItem(\"a\", 3_i64); }];" : "s: ~?Item[] = BG STREAM { YIELD makeItem(\"a\", 1_i64) OR_ELSE RAISE; YIELD makeItem(\"b\", 2_i64) OR_ELSE RAISE; YIELD makeItem(\"a\", 3_i64) OR_ELSE RAISE; };"
+    decl = p[:source] == :bounded_promises ? "s: ~Item[3] = [BG { makeItem(\"a\", 1_i64); }, BG { makeItem(\"b\", 2_i64); }, BG { makeItem(\"a\", 3_i64); }];" : "s: [~]Item = BG STREAM { YIELD makeItem(\"a\", 1_i64) OR_ELSE RAISE; YIELD makeItem(\"b\", 2_i64) OR_ELSE RAISE; YIELD makeItem(\"a\", 3_i64) OR_ELSE RAISE; };"
     <<~CHT
       STRUCT Item { category: String, score: Int64 }
 
@@ -232,7 +232,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :max_int
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { MUTABLE i = 0_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+        s: [~]Int64 = BG STREAM { MUTABLE i = 0_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
         running: ~Int64@observable = s |> MAX _;
         ASSERT (NEXT running) == 4_i64, "pipeline max";
         RETURN;
@@ -242,7 +242,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :min_int
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { MUTABLE i = 5_i64; WHILE i > 0_i64 DO YIELD i; i = i - 1_i64; END };
+        s: [~]Int64 = BG STREAM { MUTABLE i = 5_i64; WHILE i > 0_i64 DO YIELD i; i = i - 1_i64; END };
         running: ~Int64@observable = s |> MIN _;
         ASSERT (NEXT running) == 1_i64, "pipeline min";
         RETURN;
@@ -252,7 +252,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :average_int
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { MUTABLE i = 0_i64; WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END };
+        s: [~]Int64 = BG STREAM { MUTABLE i = 0_i64; WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END };
         running: ~Float64@observable = s |> AVERAGE _;
         ASSERT (NEXT running) == 4.5, "pipeline average";
         RETURN;
@@ -262,7 +262,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :any_int
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { MUTABLE i = 0_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+        s: [~]Int64 = BG STREAM { MUTABLE i = 0_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
         running: ~Bool@observable = s |> ANY _ == 3_i64;
         ASSERT (NEXT running) == TRUE, "pipeline any";
         RETURN;
@@ -272,7 +272,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :all_int
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { MUTABLE i = 0_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+        s: [~]Int64 = BG STREAM { MUTABLE i = 0_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
         running: ~Bool@observable = s |> ALL _ < 5_i64;
         ASSERT (NEXT running) == TRUE, "pipeline all";
         RETURN;
@@ -282,7 +282,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :collect_sum
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
+        s: [~]Int64 = BG STREAM { MUTABLE i = 1_i64; WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END };
         running: ~Int64@observable = s |> SUM _;
         total = running |> COLLECT;
         ASSERT total == 10_i64, "pipeline collect";
@@ -292,7 +292,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :collect_distinct
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 2_i64; YIELD 1_i64; };
+        s: [~]Int64 = BG STREAM { YIELD 1_i64; YIELD 2_i64; YIELD 1_i64; };
         vals = s |> DISTINCT _ |> COLLECT;
         ASSERT vals.length() == 2_i64, "collect distinct";
         RETURN;
@@ -318,7 +318,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :batch_window_open
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM { YIELD 1_i64; YIELD 2_i64; YIELD 3_i64; YIELD 4_i64; };
+        s: [~]Int64 = BG STREAM { YIELD 1_i64; YIELD 2_i64; YIELD 3_i64; YIELD 4_i64; };
         lens = s |> WINDOW(size: 2) _.length();
         ASSERT lens.length() == 2_i64, "batch window stream";
         RETURN;
@@ -371,7 +371,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :concurrent_stream_select
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM {
+        s: [~]Int64 = BG STREAM {
           MUTABLE i = 1_i64;
           WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END
         };
@@ -384,7 +384,7 @@ FuzzGenerator.register(:pipeline_source_shape_matrix, cells: PIPELINE_SOURCE_CEL
   when :concurrent_stream_where
     <<~CHT
       FN main() RETURNS Void ->
-        s: ~?Int64[] = BG STREAM {
+        s: [~]Int64 = BG STREAM {
           MUTABLE i = 1_i64;
           WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END
         };

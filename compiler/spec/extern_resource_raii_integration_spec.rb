@@ -120,7 +120,7 @@ RSpec.describe "EXTERN resource ownership", :integration do
 
       FN sharedOwner() RETURNS Void ->
         probe: Probe@multiowned = makeProbe(8) @multiowned;
-        other: Probe@multiowned = CLONE probe;
+        other: Probe@multiowned = KEEP probe;
         print(other.id);
       END
 

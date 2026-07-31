@@ -32,6 +32,27 @@ module Annotator
       const :value_type, Type
     end
 
+    # GIVE into a non-TAKES param is legal only when keep-analysis proves the
+    # param kept (retained identity v4). Keep-ness is a whole-program fact,
+    # so the check replays after the keep fixpoint.
+    class DeferredGiveValidation < T::Struct
+      const :arg_node, AST::Node
+      const :callee_name, String
+      const :param_index, Integer
+      const :param_name, String
+    end
+
+    # Retained-identity v5 (V5-3b): a COPY of a retained (@multiowned/@shared)
+    # value at a non-UNIQUE call edge. Replayed after keep-analysis so the
+    # temporary v4 kept-edge exception can consult kept_identity.
+    class DeferredCopyRetainedValidation < T::Struct
+      const :arg_node, AST::Node
+      const :name, String
+      const :carrier, String
+      const :callee_name, String
+      const :param_index, Integer
+    end
+
     # Facts gathered while typing but consumed only by capability auditing.
     # This immutable schema is owned by the phase boundary, not by either
     # executor on its two sides.
@@ -44,6 +65,12 @@ module Annotator
         factory: -> { [] }
       prop :deferred_recovery_validations,
         T::Array[DeferredRecoveryValidation],
+        factory: -> { [] }
+      prop :deferred_give_validations,
+        T::Array[DeferredGiveValidation],
+        factory: -> { [] }
+      prop :deferred_copy_retained_validations,
+        T::Array[DeferredCopyRetainedValidation],
         factory: -> { [] }
       prop :predicate_call_sites, T::Array[CapabilityHelper::PredicateCallSite], factory: -> { [] }
       prop :async_body_facts, T::Array[AsyncBodyFact], factory: -> { [] }

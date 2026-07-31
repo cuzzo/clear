@@ -1,0 +1,6 @@
+FN main() RETURNS Void ->
+    xs: String[] = ["a", "", "ccc"];
+    counter = %(ys: String[]) -> (ys |> WHERE !(_.empty?())).length();
+    ASSERT counter(xs) == 2, "count";
+    RETURN;
+END

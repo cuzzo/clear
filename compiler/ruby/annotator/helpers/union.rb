@@ -23,17 +23,24 @@ module UnionPayloadCompatibility
       actual_type
     end
 
-    matches = schema.variants.filter_map do |variant_name, payload|
-      next unless payload.is_a?(Type)
-      payload_matches?(payload, compared_actual) ? variant_name : nil
+    matches = T.let([], T::Array[T.any(String, Symbol)])
+    schema.variants.keys.each do |variant_name|
+      payload = schema.variants[variant_name]
+      next unless payload
+
+      concrete_payload = payload
+      case concrete_payload
+      when Type
+        matches << variant_name if payload_matches?(concrete_payload, compared_actual)
+      end
     end
     matches.one? ? matches.first : nil
   end
 
   sig { params(payload_type: Type, actual_type: Type).returns(T::Boolean) }
   def self.payload_matches?(payload_type, actual_type)
-    payload_surface = Type.coercion_surface_name(payload_type)
-    actual_surface = Type.coercion_surface_name(actual_type)
+    payload_surface = Type.coercion_surface_name_type(payload_type)
+    actual_surface = Type.coercion_surface_name_type(actual_type)
     return true if payload_surface == actual_surface
     return false if payload_type.string? || actual_type.string?
 

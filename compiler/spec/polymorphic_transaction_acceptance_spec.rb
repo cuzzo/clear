@@ -240,7 +240,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       tick_body = zig[/fn tick_Multi.*?\nfn /m] || zig[/fn tick_Multi.*/m]
       expect(tick_body).not_to match(/\.acquire\(\)/)
       expect(tick_body).not_to match(/\.update\(rt, __clear_heap_alloc/)
-      expect(tick_body).to include("comptime @hasField")
+      expect(tick_body).to include("comptime @hasDecl")
       expect(tick_body).not_to include("const x = c.*;")
     end
 
@@ -258,7 +258,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
       CLEAR
       zig = transpile(src)
       tick_body = zig[/fn tick_ReadMulti.*?\nfn /m] || zig[/fn tick_ReadMulti.*/m]
-      expect(tick_body).to include("comptime @hasField")
+      expect(tick_body).to include("comptime @hasDecl")
       expect(tick_body).not_to include("const x = c.*;")
     end
 

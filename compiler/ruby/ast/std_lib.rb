@@ -254,6 +254,9 @@ STD_LIB = T.let({
     { args: [:Int64],      return: :Float64, zig: "@as(f64, @floatFromInt({0}))", bc: true,
       is_method: true,
     },
+    { args: [:UInt64],     return: :Float64, zig: "@as(f64, @floatFromInt({0}))", bc: true,
+      is_method: true,
+    },
     { args: [:Float64],    return: :Float64, zig: "{0}", bc: true,
       is_method: true,
     }
@@ -1340,11 +1343,10 @@ MAP_METHODS = T.let({
     args: [:"String{}", :String, { type: :Any, takes: true }],
     numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})",
     validate: ->(node, args, obj_type, error_fn) {
-      key_type = Type.new(args[0].resolved_type)
-      if obj_type.numeric_map?
-        error_fn.call(node, "HashMap.put: key must be a numeric type, got #{args[0].resolved_type}") unless key_type.numeric?
-      else
-        error_fn.call(node, "HashMap.put: key must be a String, got #{args[0].resolved_type}") unless key_type.string?
+      actual_key = args[0].full_type!(context: "HashMap.put key")
+      expected_key = obj_type.key_type
+      unless obj_type.accepts_map_key?(actual_key)
+        error_fn.call(node, "HashMap.put: key must be #{Type.surface_name(expected_key)}, got #{Type.surface_name(actual_key)}")
       end
     },
     return_type: :Void,
@@ -1358,11 +1360,10 @@ MAP_METHODS = T.let({
     mutates_receiver: true,
     numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})",
     validate: ->(node, args, obj_type, error_fn) {
-      arg_type = Type.new(args[0].resolved_type)
-      if obj_type.numeric_map?
-        error_fn.call(node, "HashMap.delete: key must be a numeric type, got #{args[0].resolved_type}") unless arg_type.numeric?
-      else
-        error_fn.call(node, "HashMap.delete: key must be a String, got #{args[0].resolved_type}") unless arg_type.string?
+      actual_key = args[0].full_type!(context: "HashMap.delete key")
+      expected_key = obj_type.key_type
+      unless obj_type.accepts_map_key?(actual_key)
+        error_fn.call(node, "HashMap.delete: key must be #{Type.surface_name(expected_key)}, got #{Type.surface_name(actual_key)}")
       end
     },
     return_type: :Void,
@@ -1375,11 +1376,10 @@ MAP_METHODS = T.let({
     bc: true,
     numeric_zig: "CheatLib.numericMapContains({key_zig}, {val_zig}, {0}, {1})",
     validate: ->(node, args, obj_type, error_fn) {
-      arg_type = Type.new(args[0].resolved_type)
-      if obj_type.numeric_map?
-        error_fn.call(node, "HashMap.contains?: key must be a numeric type, got #{args[0].resolved_type}") unless arg_type.numeric?
-      else
-        error_fn.call(node, "HashMap.contains?: key must be a String, got #{args[0].resolved_type}") unless arg_type.string?
+      actual_key = args[0].full_type!(context: "HashMap.contains? key")
+      expected_key = obj_type.key_type
+      unless obj_type.accepts_map_key?(actual_key)
+        error_fn.call(node, "HashMap.contains?: key must be #{Type.surface_name(expected_key)}, got #{Type.surface_name(actual_key)}")
       end
     },
     return_type: :Bool,

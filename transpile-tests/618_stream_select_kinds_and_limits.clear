@@ -1,0 +1,61 @@
+# Stream SELECT ownership across stream kinds and stage shapes:
+# - bound-finite promise-list streams ([~N]T),
+# - infinite streams ([~INF]T) bounded by LIMIT (owned item held at the
+#   LIMIT break is released by the per-iteration defer),
+# - plain WHILE-NEXT consumption of owned items,
+# - two fused pipelines in one function (checker state per pipeline).
+
+FN size(s: String) RETURNS Int64 -> RETURN s.length(); END
+
+FN mkA() RETURNS !String -> RETURN COPY "a"; END
+FN mkB() RETURNS !String -> RETURN COPY "bb"; END
+
+FN boundedSelectSum() RETURNS !Int64 ->
+    src: [~2]String = [BG { mkA() OR_ELSE RAISE; }, BG { mkB() OR_ELSE RAISE; }];
+    running: ~Int64@observable = src |> SELECT size(_) |> SUM _;
+    RETURN NEXT running;
+END
+
+FN infLimitSelectSum() RETURNS !Int64 ->
+    counter: [~INF]String = BG STREAM {
+        WHILE TRUE DO
+            YIELD COPY "ab";
+        END
+    };
+    total: Int64 = counter |> LIMIT 3 |> SELECT _.length() |> SUM _;
+    RETURN total;
+END
+
+FN plainWhileNext() RETURNS !Int64 ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    MUTABLE total = 0_i64;
+    WHILE NEXT src EXISTS AS item DO
+        total = total + item.length();
+    END
+    RETURN total;
+END
+
+FN twoPipelinesOneFunction() RETURNS !Int64 ->
+    c1: [~INF]String = BG STREAM {
+        WHILE TRUE DO YIELD COPY "ab"; END
+    };
+    t1: Int64 = c1 |> LIMIT 3 |> SELECT _.length() |> SUM _;
+    c2: [~INF]String = BG STREAM {
+        WHILE TRUE DO YIELD COPY "xyz"; END
+    };
+    t2: Int64 = c2 |> LIMIT 2 |> SELECT _.length() |> SUM _;
+    RETURN t1 + t2;
+END
+
+FN main() RETURNS !Void ->
+    ASSERT (boundedSelectSum() OR_ELSE RAISE) == 3_i64, "bound-finite stream select+sum releases owned items";
+    ASSERT (infLimitSelectSum() OR_ELSE RAISE) == 6_i64, "INF stream with LIMIT releases the item held at break";
+    ASSERT (plainWhileNext() OR_ELSE RAISE) == 3_i64, "WHILE-NEXT consumer binding frees dequeued items";
+    ASSERT (twoPipelinesOneFunction() OR_ELSE RAISE) == 12_i64, "two fused pipelines in one function verify independently";
+    RETURN;
+END

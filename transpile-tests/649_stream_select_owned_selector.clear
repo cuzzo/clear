@@ -1,0 +1,58 @@
+# Stream SELECT with owned-producing and borrowing selectors: `push` TRANSFERS
+# the value into the channel (the consumer owns and frees every dequeued
+# item), so the producer must push an OWNED value and never free it itself.
+#
+# Regression coverage:
+#   - unfused owned selector (WHILE NEXT consumer): was ACCEPTED by the
+#     verifier and SEGFAULTED (double free -- producer's unguarded defer +
+#     consumer's cleanup on the same memory);
+#   - fused owned selector (|> EACH): was rejected fail-closed
+#     (OWNED_RETURN_WITHOUT_ALLOC -- the fused stage output had no lifecycle);
+#   - borrowing projection selector: the pushed value is an independent deep
+#     copy and the dequeued source item is freed (was leaking once copies
+#     were introduced).
+# All paths run under the testing allocator: leak/double-free clean.
+
+STRUCT User { name: String, id: Int64 }
+
+FN dup(s: String) RETURNS String -> RETURN COPY s; END
+
+TEST StreamSelectOwned DO
+    # Unfused: owned selector output consumed via WHILE NEXT (ex-segfault).
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    out: [~]String = src |> SELECT dup(_);
+    MUTABLE total = 0_i64;
+    WHILE NEXT out EXISTS AS item DO
+        total = total + item.length();
+    END
+    ASSERT total == 3_i64, "unfused owned selector";
+
+    # Fused: owned selector output observed by EACH (ex-checker-reject).
+    gen: [~]String = BG STREAM {
+        MUTABLE i: Int64 = 0;
+        WHILE i < 3 DO
+            YIELD i.toString();
+            i = i + 1;
+        END
+    };
+    MUTABLE n: Int64 = 0;
+    gen |> SELECT dup(_) |> EACH { n = n + _.length(); };
+    ASSERT n == 3, "fused owned selector";
+
+    # Projection: pushed value is an independent copy; source items freed.
+    users: [~]User = BG STREAM {
+        YIELD User{ name: COPY "alice", id: 1 };
+        YIELD User{ name: COPY "bo", id: 2 };
+    };
+    names: [~]String = users |> SELECT _.name;
+    MUTABLE lens = 0_i64;
+    WHILE NEXT names EXISTS AS nm DO
+        lens = lens + nm.length();
+    END
+    ASSERT lens == 7_i64, "projection selector";
+END
