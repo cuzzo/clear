@@ -225,17 +225,22 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
     let _ = INDEXED_LOCALS.set(rows);
 
     let mut signatures: BTreeMap<(String, usize, usize), String> = BTreeMap::new();
-    for path in index_paths {
-        let Ok(index) = read_index(path) else {
-            continue;
-        };
+    // A symbol is declared in one index and read in another: a dependency states
+    // its own declarations, and the project that calls it states only the
+    // reference. Collect declarations across every index before joining any
+    // occurrence to one.
+    let indexes = index_paths
+        .iter()
+        .filter_map(|path| read_index(path).ok())
+        .collect::<Vec<_>>();
+    for index in &indexes {
         // A symbol is declared in one file and read in every other, so exported
         // declarations are collected across the whole index. A local's name is
         // only unique within its own document, so those stay with it: merging
         // them would answer one file's question with another file's binding.
-        let exported = index
-            .documents
+        let exported = indexes
             .iter()
+            .flat_map(|index| index.documents.iter())
             .flat_map(|document| document.symbols.iter())
             .filter(|information| !information.symbol.starts_with("local "))
             .filter_map(|information| {

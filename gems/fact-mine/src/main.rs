@@ -80,6 +80,7 @@ fn run() -> Result<()> {
             output,
             language_override,
             scip_indexes,
+            scip_dependency_indexes,
             semantic_environments,
             complexity_summaries,
             bundled_complexity_summaries,
@@ -122,7 +123,14 @@ fn run() -> Result<()> {
             }
             // The compiler's answer for a binding has to be in hand before facts
             // are built from it, not imported afterwards with the call graph.
-            fact_mine_rust::scip::preload_local_binding_types(&scip_indexes);
+            // One pass over both: a dependency's declarations are read the same
+            // way as the project's, and the store is written once.
+            let declaration_indexes = scip_indexes
+                .iter()
+                .chain(scip_dependency_indexes.iter())
+                .cloned()
+                .collect::<Vec<_>>();
+            fact_mine_rust::scip::preload_local_binding_types(&declaration_indexes);
             let mut merged = build_requested_profile(
                 &files,
                 language_override,
@@ -525,6 +533,7 @@ enum Command {
         output: Option<PathBuf>,
         language_override: Option<String>,
         scip_indexes: Vec<PathBuf>,
+        scip_dependency_indexes: Vec<PathBuf>,
         semantic_environments: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
         bundled_complexity_summaries: bool,
@@ -632,6 +641,10 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut language_override = None;
             let mut files = Vec::new();
             let mut scip_indexes = Vec::new();
+            // A dependency is indexed on its own and names none of this
+            // project's files. It is attached for the declarations it carries,
+            // which is the only place a dependency's types are stated at all.
+            let mut scip_dependency_indexes: Vec<PathBuf> = Vec::new();
             let mut semantic_environments = Vec::new();
             let mut complexity_summaries = Vec::new();
             let mut bundled_complexity_summaries = true;
@@ -665,6 +678,17 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                     other if other.starts_with("--scip-index=") => {
                         scip_indexes
                             .push(PathBuf::from(other.strip_prefix("--scip-index=").unwrap()));
+                    }
+                    "--scip-dependency-index" => {
+                        scip_dependency_indexes.push(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--scip-dependency-index requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--scip-dependency-index=") => {
+                        scip_dependency_indexes.push(PathBuf::from(
+                            other.strip_prefix("--scip-dependency-index=").unwrap(),
+                        ));
                     }
                     "--semantic-environment" => {
                         semantic_environments.push(PathBuf::from(
@@ -727,6 +751,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 output,
                 language_override,
                 scip_indexes,
+                scip_dependency_indexes,
                 semantic_environments,
                 complexity_summaries,
                 bundled_complexity_summaries,
