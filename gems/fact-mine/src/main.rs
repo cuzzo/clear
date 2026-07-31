@@ -301,6 +301,22 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillSelectIncrement { input, output } => {
+            let raw = std::fs::read_to_string(&input)
+                .with_context(|| format!("unreadable {}", input.display()))?;
+            let request: serde_json::Value = serde_json::from_str(&raw)?;
+            let selection = fact_mine_rust::snapshot::select(
+                &fact_mine_rust::snapshot::Increment {
+                    manifest: &request["manifest"],
+                    current_hashes: &request["current_hashes"],
+                    current_environment: &request["environment"],
+                    functions: &request["functions"],
+                    workload: &request["workload"],
+                    trace_plan_digest: request["trace_plan_digest"].as_str().unwrap_or_default(),
+                },
+            );
+            fs::write(&output, serde_json::to_string(&selection)?)?;
+        }
         Command::NilKillShardBookkeeping { inventory, shards, output, root } => {
             let raw = std::fs::read_to_string(&inventory)
                 .with_context(|| format!("unreadable inventory {}", inventory.display()))?;
@@ -1137,6 +1153,11 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Which shards an incremental collect has to rerun.
+    NilKillSelectIncrement {
+        input: PathBuf,
+        output: PathBuf,
+    },
     /// Which functions each shard exercised, and which callsites it reached.
     NilKillShardBookkeeping {
         inventory: PathBuf,
@@ -1301,6 +1322,21 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-select-increment" => {
+            let mut input = None;
+            let mut output = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--input" => input = Some(PathBuf::from(iter.next().context("--input")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillSelectIncrement {
+                input: input.context("--input is required")?,
+                output: output.context("--output is required")?,
             })
         }
         "nil-kill-shard-bookkeeping" => {

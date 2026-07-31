@@ -1,6 +1,9 @@
 # typed: false
 # frozen_string_literal: true
 
+require "open3"
+require "tempfile"
+
 module NilKill
   module Runtime
     # Owns the canonical runtime-evidence snapshot and the dependency metadata
@@ -88,103 +91,37 @@ module NilKill
         )
       end
 
+      # Comparing two manifests to decide which shards must rerun. Set
+      # arithmetic over what the sources, functions, tests and workload were
+      # against what they are -- FactMine's, so there is one implementation of
+      # a rule whose failure mode is skipping a shard that needed rerunning.
       def select_increment(
         files:,
         function_inventory:,
         workload_plan:,
         trace_plan_digest:
       )
-        current_hashes = source_hashes(files)
-        previous_hashes = manifest.fetch("source_hashes", {})
-        changed_files = current_hashes.filter_map do |path, fingerprint|
-          path if previous_hashes[path] != fingerprint
-        end
-        deleted_files = previous_hashes.keys - current_hashes.keys
-        current_environment = runtime_environment(files)
-        previous_functions = manifest.fetch("functions", {})
-        current_functions = function_inventory
-        previous_workload = manifest.fetch("workload", {})
-        current_workload = workload_plan.to_h
-        previous_tests = previous_workload.fetch("tests", {})
-        current_tests = current_workload.fetch("tests", {})
-        previous_support = previous_workload.fetch("support_files", {})
-        current_support = current_workload.fetch("support_files", {})
-        changed_tests = current_tests.filter_map do |path, fingerprint|
-          path if previous_tests[path] != fingerprint
-        end
-        deleted_tests = previous_tests.keys - current_tests.keys
-        support_changed = previous_support != current_support
-        added_functions = current_functions.keys - previous_functions.keys
-        deleted_functions = previous_functions.keys - current_functions.keys
-        changed_functions = current_functions.filter_map do |key, function|
-          key if previous_functions[key] &&
-            previous_functions[key]["fingerprint"] != function["fingerprint"]
-        end
-        function_changed_paths = (
-          changed_functions.filter_map { |key| current_functions.dig(key, "path") } +
-          added_functions.filter_map { |key| current_functions.dig(key, "path") } +
-          deleted_functions.filter_map { |key| previous_functions.dig(key, "path") }
-        ).uniq
-        residual_source_changes = (changed_files + deleted_files).uniq - function_changed_paths
-        environment_changed = current_environment != manifest.fetch("environment", {})
-        command_changed = previous_workload["command_digest"] != current_workload["command_digest"]
-        mode_changed = previous_workload["mode"] != current_workload["mode"]
-        trace_plan_changed = manifest.fetch("trace_plan_digest", nil).to_s !=
-          trace_plan_digest.to_s
-        # Source edits necessarily change FactMine's document/anchor digests.
-        # Those changes are handled by function/test selection plus evidence
-        # rebasing, which marks any untouched changed anchor stale. A plan
-        # change with identical sources is different: it means the analyzer's
-        # evidence demand changed and no source dependency identifies the
-        # affected shards, so conservatively refresh all of them.
-        unexplained_trace_plan_changed = trace_plan_changed &&
-          changed_files.empty? && deleted_files.empty?
-        current_shards = workload_plan.shards.to_h { |shard| [shard.fetch("id"), shard] }
-        prior_shards = previous_workload.fetch("shards", {})
-        deleted_shards = prior_shards.keys - current_shards.keys
-        selected = changed_tests.filter_map do |path|
-          current_shards.values.find { |shard| shard["test_path"] == path }&.fetch("id")
-        end
-        dependencies = manifest.fetch("dependencies", {})
-        changed_functions.each do |function_key|
-          selected.concat(dependencies.filter_map do |shard_id, keys|
-            shard_id if Array(keys).include?(function_key)
-          end)
-        end
-        uncertain = environment_changed || command_changed || mode_changed ||
-          unexplained_trace_plan_changed ||
-          support_changed || added_functions.any? || deleted_functions.any? ||
-          residual_source_changes.any?
-        opaque_fallback = current_workload["mode"] == "opaque" &&
-          (changed_functions.any? || changed_tests.any? || deleted_tests.any?)
-        fallback_full = uncertain || opaque_fallback
-        selected = current_shards.keys if fallback_full
-        {
-          "selected_shards" => selected.uniq.sort,
-          "deleted_shards" => deleted_shards.sort,
-          "changed_tests" => changed_tests.sort,
-          "deleted_tests" => deleted_tests.sort,
-          "changed_functions" => changed_functions.sort,
-          "added_functions" => added_functions.sort,
-          "deleted_functions" => deleted_functions.sort,
-          "changed_files" => changed_files.sort,
-          "deleted_files" => deleted_files.sort,
-          "residual_source_changes" => residual_source_changes.sort,
-          "support_changed" => support_changed,
-          "environment_changed" => environment_changed,
-          "command_changed" => command_changed,
-          "trace_plan_changed" => trace_plan_changed,
-          "unexplained_trace_plan_changed" => unexplained_trace_plan_changed,
-          "uncertain_closure" => false,
-          "fallback_full" => fallback_full,
-          "rebuild" => selected.any? || deleted_shards.any? || changed_functions.any? ||
-            added_functions.any? || deleted_functions.any? || fallback_full,
-          "current_hashes" => current_hashes,
-          "environment" => current_environment,
-          "functions" => current_functions,
-          "workload" => current_workload,
+        request = {
+          "manifest" => manifest,
+          "current_hashes" => source_hashes(files),
+          "environment" => runtime_environment(files),
+          "functions" => function_inventory,
+          "workload" => workload_plan.to_h,
           "trace_plan_digest" => trace_plan_digest.to_s,
         }
+        Tempfile.create(["nil-kill-increment-in", ".json"]) do |input|
+          input.write(JSON.generate(request))
+          input.flush
+          Tempfile.create(["nil-kill-increment-out", ".json"]) do |out|
+            _stdout, err, status = Open3.capture3(
+              NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY,
+              "nil-kill-select-increment", "--input", input.path, "--output", out.path
+            )
+            raise "fact-mine nil-kill-select-increment failed: #{err}" unless status.success?
+
+            JSON.parse(File.read(out.path))
+          end
+        end
       end
 
       def write_incremental!(
