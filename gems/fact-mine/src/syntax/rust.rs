@@ -753,7 +753,10 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
             .collect::<Vec<_>>();
         if child_nodes.len() >= 2 {
             let name = child_nodes[0].text.trim();
-            if is_simple_name(name) {
+            // A field named after a keyword is escaped where it is declared and
+            // where it is read. Rejecting the escape drops the field entirely,
+            // so nothing that reads it can be typed.
+            if is_simple_name(name.trim_start_matches("r#")) {
                 let type_text = child_nodes[1].text.trim().to_string();
                 if !type_text.is_empty() && type_text != ":" && !type_text.starts_with('=') {
                     return Some(StateDeclaration {
