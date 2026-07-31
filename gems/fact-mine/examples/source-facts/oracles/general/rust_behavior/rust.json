@@ -1099,7 +1099,6 @@
           "place:RustSourceFactBehavior#update:local:String"
         ],
         "writes": [
-          "place:RustSourceFactBehavior#update:local:String",
           "place:RustSourceFactBehavior#update:local:result"
         ]
       },
@@ -1140,10 +1139,7 @@
           "place:RustSourceFactBehavior#update:local:fs",
           "place:RustSourceFactBehavior#update:local:std"
         ],
-        "writes": [
-          "place:RustSourceFactBehavior#update:local:fs",
-          "place:RustSourceFactBehavior#update:local:std"
-        ]
+        "writes": []
       },
       {
         "reads": [
@@ -1233,16 +1229,6 @@
         "name": "local"
       },
       {
-        "id": "place:RustSourceFactBehavior#update:local:fs",
-        "kind": "local",
-        "name": "fs"
-      },
-      {
-        "id": "place:RustSourceFactBehavior#update:local:std",
-        "kind": "local",
-        "name": "std"
-      },
-      {
         "id": "place:RustSourceFactBehavior#none_ready:local:&self",
         "kind": "local",
         "name": "&self"
@@ -1253,6 +1239,11 @@
         "name": "&mut self"
       },
       {
+        "id": "place:RustSourceFactBehavior#update:local:String",
+        "kind": "local",
+        "name": "String"
+      },
+      {
         "id": "place:RustSourceFactBehavior#update:local:Vec",
         "kind": "local",
         "name": "Vec"
@@ -1261,6 +1252,11 @@
         "id": "place:RustSourceFactBehavior#update:local:enabled",
         "kind": "local",
         "name": "enabled"
+      },
+      {
+        "id": "place:RustSourceFactBehavior#update:local:fs",
+        "kind": "local",
+        "name": "fs"
       },
       {
         "id": "place:RustSourceFactBehavior#update:local:input",
@@ -1278,9 +1274,9 @@
         "name": "println"
       },
       {
-        "id": "place:RustSourceFactBehavior#update:local:String",
+        "id": "place:RustSourceFactBehavior#update:local:std",
         "kind": "local",
-        "name": "String"
+        "name": "std"
       },
       {
         "id": "place:RustSourceFactBehavior#update:local:result",

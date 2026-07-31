@@ -2960,6 +2960,10 @@ pub(crate) fn type_after_local_colon(source: &str, name: &str) -> Option<String>
         (boundary(before) && boundary(after)).then_some(index)
     })?;
     let suffix = source[name_start + name.len()..].trim_start();
+    // `Vec::new()` names a function on a type, not a binding of type `:new()`.
+    if suffix.starts_with("::") {
+        return None;
+    }
     let type_name = suffix.strip_prefix(':')?.trim_start();
     let type_name = type_name
         .split(['=', ';'])
@@ -2972,6 +2976,27 @@ pub(crate) fn type_after_local_colon(source: &str, name: &str) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_separator_is_not_a_type_ascription() {
+        // `Vec::new()` names a function on a type. Reading the `:` as an
+        // ascription invents a local called `Vec` whose type is `:new()`, and
+        // that phantom then answers for anything mentioning `Vec`.
+        assert_eq!(type_after_local_colon("let mut dead = Vec::new();", "Vec"), None);
+        assert_eq!(
+            type_after_local_colon("let seen = HashMap::with_capacity(4);", "HashMap"),
+            None
+        );
+        // A real ascription still reads, including one whose type is a path.
+        assert_eq!(
+            type_after_local_colon("let dead: Vec<String> = Vec::new();", "dead"),
+            Some("Vec<String>".to_string())
+        );
+        assert_eq!(
+            type_after_local_colon("let b: local_flow::Boundary = x;", "b"),
+            Some("local_flow::Boundary".to_string())
+        );
+    }
 
     struct TestBehavior;
     impl NormalizedLanguageBehavior for TestBehavior {}

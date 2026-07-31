@@ -701,12 +701,18 @@ fn fact_for_method(
         );
     }
     // A compiler index states the type of every binding it resolved, which is
-    // the only source for one a language leaves to inference.
+    // the only source for one a language leaves to inference - and it outranks
+    // whatever the source text suggested, which for `let xs = Vec::new()` is a
+    // bare `Vec` that names no element and so matches no collection contract.
+    let mut indexed = BTreeMap::new();
     for (name, declared) in crate::scip::indexed_local_types(path, span[0], span[2]) {
-        augmented_parameter_types
-            .entry(name)
-            .or_insert_with(|| TypeExpr::parse(&declared, language));
+        indexed.entry(name).or_insert(declared);
     }
+    augmented_parameter_types.extend(
+        indexed
+            .into_iter()
+            .map(|(name, declared)| (name, TypeExpr::parse(&declared, language))),
+    );
     for (receiver_var, target) in behavior.receiver_aliases_for_function(node) {
         if target == "self" {
             augmented_parameter_types

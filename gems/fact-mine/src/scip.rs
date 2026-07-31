@@ -496,6 +496,12 @@ pub fn local_binding_types(index_path: &Path) -> Result<Vec<(String, usize, Stri
 /// name and is not part of either.
 fn binding_signature(text: &str) -> Option<(&str, &str)> {
     let (head, declared) = text.split_once(':')?;
+    // A callable states its parameters, not a binding: splitting on the first
+    // colon reads its first parameter as one and hands it the rest of the
+    // signature as a type. A path separator is not an ascription either.
+    if head.contains('(') || declared.starts_with(':') {
+        return None;
+    }
     let name = head.split_whitespace().last()?;
     let declared = declared.trim().trim_end_matches(['=', ';']).trim();
     (!name.is_empty()
@@ -4921,6 +4927,28 @@ mod local_binding_type_tests {
             .map(|signature| signature.text.trim())
             .and_then(binding_signature);
         assert_eq!(signature, Some(("kept", "Vec<String>")));
+    }
+
+    #[test]
+    fn a_callable_signature_states_no_binding() {
+        // Splitting on the first colon reads a function's first parameter as a
+        // binding and hands it the rest of the signature as its type.
+        assert_eq!(
+            binding_signature(
+                "fn reset_at(&self, boundary: &Boundary, ranges: &BTreeMap<String, RangeInfo>) -> Option<ResetPoint>"
+            ),
+            None
+        );
+        assert_eq!(binding_signature("fn new() -> Vec<String>"), None);
+        // A binding still reads, including one whose type is a path.
+        assert_eq!(
+            binding_signature("let mut dead: Vec<String>"),
+            Some(("dead", "Vec<String>"))
+        );
+        assert_eq!(
+            binding_signature("boundary: &local_flow::Boundary"),
+            Some(("boundary", "&local_flow::Boundary"))
+        );
     }
 
     #[test]

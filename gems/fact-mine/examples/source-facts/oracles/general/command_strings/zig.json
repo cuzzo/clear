@@ -207,8 +207,7 @@
           "place:(top-level)#method_four:local:std"
         ],
         "writes": [
-          "place:(top-level)#method_four:local:_",
-          "place:(top-level)#method_four:local:std"
+          "place:(top-level)#method_four:local:_"
         ]
       }
     ],
@@ -216,14 +215,14 @@
     "path_conditions": [],
     "places": [
       {
-        "id": "place:(top-level)#method_four:local:_",
-        "kind": "local",
-        "name": "_"
-      },
-      {
         "id": "place:(top-level)#method_four:local:std",
         "kind": "local",
         "name": "std"
+      },
+      {
+        "id": "place:(top-level)#method_four:local:_",
+        "kind": "local",
+        "name": "_"
       }
     ],
     "predicate_bodies": [],
