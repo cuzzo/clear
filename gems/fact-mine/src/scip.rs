@@ -284,7 +284,7 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
     }
     let _ = INDEXED_LOCALS.set(rows);
 
-    let mut signatures: BTreeMap<(String, usize, usize), String> = BTreeMap::new();
+    let mut signatures: BTreeMap<(usize, String), Vec<(usize, String)>> = BTreeMap::new();
     // A symbol is declared in one index and read in another: a dependency states
     // its own declarations, and the project that calls it states only the
     // reference. Collect declarations across every index before joining any
@@ -327,12 +327,18 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
                     .get(occurrence.symbol.as_str())
                     .or_else(|| exported.get(occurrence.symbol.as_str()))
                 {
-                    signatures
-                        .entry((document.relative_path.clone(), line, column))
-                        .or_insert_with(|| text.clone());
+                    let columns = signatures
+                        .entry((line, document.relative_path.clone()))
+                        .or_insert_with(Vec::new);
+                    if !columns.iter().any(|(existing, _)| *existing == column) {
+                        columns.push((column, text.clone()));
+                    }
                 }
             }
         }
+    }
+    for columns in signatures.values_mut() {
+        columns.sort_by_key(|(column, _)| *column);
     }
     let _ = INDEXED_SIGNATURES.set(signatures);
 
@@ -380,7 +386,8 @@ pub(crate) fn indexed_local_types(path: &str, first: usize, last: usize) -> Vec<
         .collect()
 }
 
-static INDEXED_SIGNATURES: OnceLock<BTreeMap<(String, usize, usize), String>> = OnceLock::new();
+static INDEXED_SIGNATURES: OnceLock<BTreeMap<(usize, String), Vec<(usize, String)>>> =
+    OnceLock::new();
 static INDEXED_FIELDS: OnceLock<BTreeMap<String, BTreeMap<String, String>>> = OnceLock::new();
 
 /// The shape of every record the index resolved, by owner. A record declared in
@@ -423,13 +430,33 @@ fn owner_and_member(symbol: &str) -> Option<(String, String)> {
 /// asking at the position the expression's head occupies is what tells them
 /// apart, where scanning a span only finds whatever sits furthest right.
 pub(crate) fn indexed_signature_at(path: &str, line: usize, column: usize) -> Option<&'static str> {
-    let indexed = INDEXED_SIGNATURES.get()?;
+    indexed_signatures_in(path, line, column, column + 1)
+        .first()
+        .map(|(_, text)| *text)
+}
+
+/// The declarations the index resolved inside one span, in source order. The
+/// index already states where every symbol it resolved occurs, so which symbol
+/// an expression's head is is a question for the index - not something to be
+/// recovered by counting characters in the expression's text.
+pub(crate) fn indexed_signatures_in(
+    path: &str,
+    line: usize,
+    first_column: usize,
+    last_column: usize,
+) -> Vec<(usize, &'static str)> {
+    let Some(indexed) = INDEXED_SIGNATURES.get() else {
+        return Vec::new();
+    };
+    // Keyed by line first, so one line's declarations are contiguous and a
+    // span query reads only them.
     indexed
-        .iter()
-        .find(|((indexed_path, indexed_line, indexed_column), _)| {
-            *indexed_line == line && *indexed_column == column && path.ends_with(indexed_path.as_str())
-        })
-        .map(|(_, text)| text.as_str())
+        .range((line, String::new())..(line + 1, String::new()))
+        .filter(|((_, indexed_path), _)| path.ends_with(indexed_path.as_str()))
+        .flat_map(|(_, columns)| columns.iter())
+        .filter(|(column, _)| *column >= first_column && *column < last_column)
+        .map(|(column, text)| (*column, text.as_str()))
+        .collect()
 }
 
 /// What a declaration states its result is: a callable hands back its return
