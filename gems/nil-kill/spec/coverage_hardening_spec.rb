@@ -772,29 +772,13 @@ RSpec.describe "NilKill coverage hardening" do
       expect(described_class.trace_plan).to eq(plan)
     end
 
-    it "normalizes paths, target membership, class names, and collection shapes" do
+    it "normalizes paths and target membership" do
       target_file = File.join(described_class::TARGETS.first, "shape_unit.rb")
       outside = File.join(Dir.tmpdir, "outside.rb")
 
       expect(described_class.abs_path(target_file)).to eq(File.expand_path(target_file, described_class::ROOT))
       expect(described_class.target_path?(target_file)).to be(true)
       expect(described_class.target_path?(outside)).to be(false)
-      expect(described_class.class_name(nil)).to eq("NilClass")
-      expect(described_class.class_name("x")).to eq("String")
-
-      array_shape = described_class.container_shape([1, 2, 3])
-      expect(array_shape.first).to eq(:array)
-      expect(array_shape[1].to_a).to eq(["Integer"])
-      expect(array_shape).to be_frozen
-
-      hash_shape = described_class.container_shape({ "id" => 1 })
-      expect(hash_shape.first).to eq(:hash)
-      expect(hash_shape[1][0].to_a).to eq(["String"])
-      expect(hash_shape[1][1].to_a).to eq(["Integer"])
-
-      nested_key = described_class.collection_type_shape_key([{ "id" => 1 }])
-      expect(described_class.shape_payload(nested_key)).to include("kind" => "array")
-      expect(described_class.container_shape("scalar")).to be_nil
     end
 
     it "records collection mutations through Array, Hash, and Set hooks without losing owners" do

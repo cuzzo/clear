@@ -250,69 +250,6 @@ module NilKillRuntimeTrace
     }
   end
 
-  # A runtime record is an observation about the value itself, rather than a
-  # source-flow conclusion. Keep it in the language-neutral value-shape
-  # vocabulary so FactMine can join it with its CFG/DFG without Ruby having to
-  # reason about any call sites. Binding Struct#members also makes collection
-  # safe when an application overrides `members` on a generated record.
-  def self.runtime_record_shape_key(value, depth = 2)
-    return unless value.is_a?(Struct)
-
-    fields = ORIG_STRUCT_MEMBERS.bind_call(value)
-    return unless fields.is_a?(Array)
-
-    members = fields.each_with_object({}) do |field, out|
-      name = field.to_s
-      next if name.empty?
-
-      # Ruby does not emit TracePoint call events for generated Struct reader
-      # methods. Preserve the observed member value as a language-neutral
-      # shape instead, so FactMine can type a downstream call through its
-      # generic record-accessor CFG/DFG join.  This observes the value only;
-      # it does not duplicate assignment or dispatch analysis in NilKill.
-      member = ORIG_STRUCT_FETCH.bind_call(value, field)
-      out[name] = runtime_record_member_shape(member, depth)
-    end
-    return if members.empty?
-
-    name = runtime_record_type_name(value, fields)
-    signature = members.map { |member, shape| "#{member}=#{JSON.generate(shape)}" }.join("\\0")
-    key = "record:#{name}:#{signature}".freeze
-    remember_shape(key, { kind: "record", name: name, members: members })
-  rescue StandardError
-    nil
-  end
-
-  def self.runtime_record_type_name(value, fields = nil)
-    return unless value.is_a?(Struct)
-
-    name = class_name(value)
-    return name unless name == "T.untyped"
-
-    # Anonymous Struct classes all lack a Ruby constant name. Treating every
-    # layout as the same `T.untyped` record makes FactMine intersect unrelated
-    # member sets and blocks generated-accessor proofs. The field schema is a
-    # stable structural runtime identity; it claims no source-level nominal
-    # type and is sufficient for the generic record contract.
-    fields ||= ORIG_STRUCT_MEMBERS.bind_call(value)
-    "AnonymousStruct(#{fields.map(&:to_s).join(",")})"
-  rescue StandardError
-    nil
-  end
-
-  def self.runtime_record_member_shape(value, depth)
-    return shape_payload(class_shape_key(value)) unless depth.positive?
-
-    record_key = runtime_record_shape_key(value, depth - 1)
-    return shape_payload(record_key) if record_key
-
-    if collection_value?(value)
-      return shape_payload(collection_type_shape_key(value, depth - 1))
-    end
-
-    shape_payload(class_shape_key(value))
-  end
-
   # After the first few executions of a callsite an observation adds no new
   # alternative, yet every merge rebuilt the field with a union, a re-sort, and a
   # JSON.generate per Hash member. Only rebuild when an alternative is genuinely
