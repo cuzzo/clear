@@ -1979,6 +1979,7 @@ fn visit_loops(
                                 behavior,
                             )
                         })
+                        .or_else(|| tag_comparison_complexity(message, node))
                 })
                 // A record's shape is known, so an operation over that shape is
                 // priced even where no library contract names the type.
@@ -2729,6 +2730,45 @@ fn declared_empty_collection_name(
             })
     });
     empty.then(|| name.to_string())
+}
+
+/// Comparing a value against a named variant is a tag check: either the tags
+/// differ and nothing else is read, or they match and what a unit variant
+/// carries is nothing. A variant built from constant-size parts costs those
+/// parts, which no input grows.
+fn tag_comparison_complexity(
+    message: &str,
+    node: &Node,
+) -> Option<crate::syntax::normalized_behavior::NormalizedCallComplexity> {
+    if !matches!(message, "==" | "!=") {
+        return None;
+    }
+    child_nodes(node)
+        .into_iter()
+        .any(|operand| named_variant(operand))
+        .then(|| NormalizedCollectionOperation::Constant.complexity())
+}
+
+/// Whether an expression names a variant of a nominal type, either as a bare
+/// path or built from parts that hold a fixed amount.
+fn named_variant(operand: &Node) -> bool {
+    let text = operand.text.trim();
+    let (path, built) = match text.split_once('(') {
+        Some((path, _)) => (path.trim(), true),
+        None => (text, false),
+    };
+    if path.contains([' ', '"', '[', ']', '.']) || path.is_empty() {
+        return false;
+    }
+    let segments = path.split("::").filter(|segment| !segment.is_empty()).collect::<Vec<_>>();
+    let named = segments.len() >= 2 && segments[0].starts_with(char::is_uppercase)
+        || segments.len() == 1 && segments[0].starts_with(char::is_uppercase);
+    if !named {
+        return false;
+    }
+    // What a variant is built from decides the comparison: parts that read no
+    // local and no state hold a fixed amount however large the input is.
+    !built || (local_names(operand).is_empty() && state_names(operand).is_empty())
 }
 
 /// Comparing two records of machine scalars is a fixed number of scalar
