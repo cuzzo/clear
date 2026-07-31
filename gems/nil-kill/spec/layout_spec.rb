@@ -50,13 +50,6 @@ RSpec.describe "nil-kill package layout" do
         "ruby", "runtime_value_evidence.rb"
       )
     )
-    shared_values = File.read(
-      File.join(
-        NilKill::ROOT,
-        "gems", "nil-kill", "lib", "nil_kill", "runtime",
-        "value_evidence_emitter.rb"
-      )
-    )
     fact_mine_overlay = File.read(
       File.join(
         NilKill::ROOT, "gems", "fact-mine", "src", "runtime_evidence.rs"
@@ -77,18 +70,14 @@ RSpec.describe "nil-kill package layout" do
       "control_flow",
       "data_flow"
     )
-    expect(shared_values).not_to include(
-      '"initialize"',
-      'split("::")',
-      'caller["class"]',
-      "Prism",
-      "Syntax.parse",
-      "TreeSitter",
-      "reaching_definitions",
-      "control_flow",
-      "data_flow",
-      "Languages::Providers::Ruby"
-    )
+    # There was a second implementation of the join here, in Ruby, and a spec
+    # asserting the two agreed. One join means there is nothing to disagree.
+    expect(
+      File.exist?(File.join(
+        NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime",
+        "value_evidence_emitter.rb"
+      ))
+    ).to be(false)
     expect(fact_mine_overlay).not_to match(/\b(?:if|match)\s+language\s*==\s*[\"']ruby/)
     expect(fact_mine_overlay).not_to include(
       'BTreeSet::from(["Array".to_string()])',

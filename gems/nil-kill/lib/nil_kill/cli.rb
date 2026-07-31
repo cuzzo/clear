@@ -367,7 +367,7 @@ module NilKill
         compress_runtime_evidence!(shard_dir)
         staged_traces[shard_id] = File.join(shard_dir, Runtime::TraceArtifact::DEFAULT_NAME)
         staged_evidence[shard_id] =
-          File.join(shard_dir, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+          File.join(shard_dir, Runtime::TraceArtifact::EVIDENCE_NAME)
       end }
       # A traced program writes what it saw and nothing else. Turning those
       # observations into the trace document needs no VM, so it happens here --
@@ -411,7 +411,7 @@ module NilKill
         selection.fetch("deleted_shards").map { |id| File.join(shard_store, "#{id}.json.gz") }
       ).uniq
       emitted = with_canonical_snapshot_transaction(extra_paths: transaction_paths) do
-        canonical_target = File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+        canonical_target = File.join(RUNTIME_DIR, Runtime::TraceArtifact::EVIDENCE_NAME)
         canonical_evidence = stage("evidence-merge") do
           if effective.sort == staged_evidence.values.sort && File.file?(merged_candidate)
             FileUtils.mkdir_p(File.dirname(canonical_target))
@@ -585,7 +585,7 @@ module NilKill
     # for diagnosis and a retry.
     def with_canonical_snapshot_transaction(extra_paths: [])
       paths = [
-        File.join(RUNTIME_DIR, Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT),
+        File.join(RUNTIME_DIR, Runtime::TraceArtifact::EVIDENCE_NAME),
         File.join(RUNTIME_DIR, Runtime::Snapshot::MANIFEST),
         File.join(RUNTIME_DIR, "runtime.scip.json"),
         File.join(RUNTIME_DIR, "runtime-attestation.json.gz"),

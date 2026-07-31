@@ -45,7 +45,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
       source = File.join(root, "app.rb")
       File.write(source, "def app = 1\n")
       runtime = File.join(root, "runtime")
-      canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+      canonical = File.join(runtime, NilKill::Runtime::TraceArtifact::EVIDENCE_NAME)
       FileUtils.mkdir_p(runtime)
       NilKill::Runtime::JsonIO.write(canonical, JSON.generate(evidence))
       workload = NilKill::Runtime::WorkloadPlan.build(
@@ -90,7 +90,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
       source = File.join(root, "app.rb")
       File.write(source, "def app = 1\n")
       runtime = File.join(root, "runtime")
-      canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+      canonical = File.join(runtime, NilKill::Runtime::TraceArtifact::EVIDENCE_NAME)
       FileUtils.mkdir_p(runtime)
       NilKill::Runtime::JsonIO.write(canonical, JSON.generate(evidence))
       workload = NilKill::Runtime::WorkloadPlan.build(
@@ -134,7 +134,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
       source = File.join(root, "app.rb")
       File.write(source, "def app = 1\n")
       runtime = File.join(root, "runtime")
-      canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+      canonical = File.join(runtime, NilKill::Runtime::TraceArtifact::EVIDENCE_NAME)
       FileUtils.mkdir_p(runtime)
       NilKill::Runtime::JsonIO.write(canonical, JSON.generate(evidence))
       workload = NilKill::Runtime::WorkloadPlan.from_h(
@@ -237,7 +237,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
     Dir.mktmpdir("nil-kill-snapshot-rollback", NilKill::ROOT) do |tmp|
       reset_nil_kill_tmp_paths!(tmp)
       paths = [
-        File.join(NilKill::RUNTIME_DIR, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT),
+        File.join(NilKill::RUNTIME_DIR, NilKill::Runtime::TraceArtifact::EVIDENCE_NAME),
         File.join(NilKill::RUNTIME_DIR, described_class::MANIFEST),
         File.join(NilKill::RUNTIME_DIR, "runtime.scip.json"),
         File.join(NilKill::RUNTIME_DIR, "runtime-attestation.json.gz"),
@@ -287,7 +287,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
         .to include("mode" => "full", "generation" => 0, "complete" => true)
       canonical_evidence = File.join(
         runtime,
-        NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT
+        NilKill::Runtime::TraceArtifact::EVIDENCE_NAME
       )
       trace_plan_path = File.join(root, ".nil-kill", "trace-plan.json")
       full_plan = JSON.parse(File.read(trace_plan_path)).fetch("runtime_evidence")
@@ -333,7 +333,7 @@ RSpec.describe NilKill::Runtime::Snapshot do
       expect(status).to be_success, "#{stdout}\n#{stderr}"
       final = NilKill::Runtime::JsonIO.parse(File.join(runtime, described_class::MANIFEST))
       evidence = NilKill::Runtime::JsonIO.parse(
-        File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+        File.join(runtime, NilKill::Runtime::TraceArtifact::EVIDENCE_NAME)
       )
       expect(final).to include("generation" => 3, "deleted_files" => ["lib/legacy.rb"])
       final_plan = JSON.parse(File.read(trace_plan_path)).fetch("runtime_evidence")

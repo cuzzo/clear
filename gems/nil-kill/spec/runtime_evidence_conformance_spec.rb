@@ -102,7 +102,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     runtime_dir = File.join(collect_dir, "runtime")
     evidence_path = File.join(
       runtime_dir,
-      NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT
+      NilKill::Runtime::TraceArtifact::EVIDENCE_NAME
     )
     plan = JSON.parse(File.read(trace_plan_path)).fetch("runtime_evidence")
     runtime_calls = Dir.glob(
@@ -119,6 +119,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       fixture_root: dir,
       source: File.join(production_dir, File.basename(source)),
       runtime_dir: runtime_dir,
+      trace_plan_path: trace_plan_path,
       support: catalog.dig("fixture", "support").map do |support|
         File.join(dir, support.sub(%r{\Aruby/}, ""))
       end,
@@ -746,19 +747,54 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     end
   end
 
+  # Evidence for a chosen set of events, produced the way a collect produces
+  # it: a shard directory holding those events, a trace document built from it,
+  # and FactMine's join over that. There is one join, so a merge oracle has to
+  # go through it rather than around it.
+  def evidence_for(run_id, events)
+    shard = File.join(NilKill::TMP_DIR, "merge-#{run_id}")
+    FileUtils.rm_rf(shard)
+    FileUtils.mkdir_p(shard)
+    source = @collector.fetch(:runtime_dir)
+    Dir.glob(File.join(source, "runs", "**", "*.jsonl{,.gz}")).each do |path|
+      next if File.basename(path).start_with?("runtime-calls-")
+
+      FileUtils.cp(path, File.join(shard, File.basename(path)))
+    end
+    File.write(
+      File.join(shard, "runtime-calls-0.jsonl"),
+      events.map { |event| JSON.generate(event.merge("run_id" => run_id)) }.join("\n") + "\n"
+    )
+    # The run a shard was traced under is the traced program's own claim, so a
+    # synthetic shard states it the same way a real one does.
+    NilKill::Runtime::JsonIO.write(
+      File.join(shard, "collector-raw-0.json.gz"),
+      JSON.generate("pid" => 0, "run_id" => run_id, "ruby_version" => RUBY_VERSION,
+                    "ruby_engine" => RUBY_ENGINE, "ruby_engine_version" => RUBY_ENGINE_VERSION)
+    )
+    NilKill::Runtime::DomainDeriver.trace_documents(
+      runtime_dirs: [shard], plan: @collector.fetch(:trace_plan_path),
+      root: NilKill::ROOT
+    )
+    join(shard, run_id)
+    File.join(shard, NilKill::Runtime::TraceArtifact::EVIDENCE_NAME)
+  end
+
+  def join(shard, run_id)
+    binary = NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY
+    trace = File.join(shard, NilKill::Runtime::TraceArtifact::DEFAULT_NAME)
+    _out, err, status = Open3.capture3(
+      binary, "runtime-trace", "--plan", @collector.fetch(:trace_plan_path),
+      "--root", NilKill::ROOT, "--runtime-trace", trace
+    )
+    raise "fact-mine runtime-trace failed for #{run_id}: #{err}" unless status.success?
+  end
+
   it "shared merge oracle: repeated shards add and a replaced shard owns no stale run" do
     exact = catalog.fetch("cases").find { |row| row.fetch("id") == "exact_ruby_call" }
     request = selected_request(@collector, exact.fetch("anchor"))
     paths = %w[run-a run-b].map do |run_id|
-      events = @collector.fetch(:runtime_calls).map { |event| event.merge("run_id" => run_id) }
-      NilKill::Runtime::ValueEvidenceEmitter.emit(
-        root: NilKill::ROOT,
-        runtime_dir: @collector.fetch(:runtime_dir),
-        output: File.join(NilKill::TMP_DIR, "#{run_id}.json.gz"),
-        events: events,
-        run_ids: [run_id],
-        plan: @collector.fetch(:plan)
-      ).fetch("path")
+      evidence_for(run_id, @collector.fetch(:runtime_calls))
     end
     merged = NilKill::Runtime::EvidenceMerger.merge(paths)
     repeated = catalog.fetch("merge_cases").find do |row|
@@ -789,14 +825,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       ["production-run", production],
       ["replacement-run", replacement],
     ].map do |run_id, shard_events|
-      NilKill::Runtime::ValueEvidenceEmitter.emit(
-        root: NilKill::ROOT,
-        runtime_dir: @collector.fetch(:runtime_dir),
-        output: File.join(NilKill::TMP_DIR, "#{run_id}.json.gz"),
-        events: shard_events.map { |event| event.merge("run_id" => run_id) },
-        run_ids: [run_id],
-        plan: @collector.fetch(:plan)
-      ).fetch("path")
+      evidence_for(run_id, shard_events)
     end
     split = NilKill::Runtime::EvidenceMerger.merge(split_paths)
     split_contract = catalog.fetch("merge_cases").find do |candidate|
@@ -830,14 +859,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       ["anonymous-production-run", anonymous_production],
       ["anonymous-replacement-run", anonymous_replacement],
     ].map do |run_id, shard_events|
-      NilKill::Runtime::ValueEvidenceEmitter.emit(
-        root: NilKill::ROOT,
-        runtime_dir: @collector.fetch(:runtime_dir),
-        output: File.join(NilKill::TMP_DIR, "#{run_id}.json.gz"),
-        events: shard_events.map { |event| event.merge("run_id" => run_id) },
-        run_ids: [run_id],
-        plan: @collector.fetch(:plan)
-      ).fetch("path")
+      evidence_for(run_id, shard_events)
     end
     anonymous_split = NilKill::Runtime::EvidenceMerger.merge(anonymous_paths)
     anonymous_contract = catalog.fetch("merge_cases").find do |candidate|
@@ -858,17 +880,7 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
       candidate.fetch("id") == "changed_shard_replaces_owned_evidence"
     end
     replacement_run = replacement.fetch("expected_runs").fetch(0)
-    replacement_events = @collector.fetch(:runtime_calls).map do |event|
-      event.merge("run_id" => replacement_run)
-    end
-    replacement_path = NilKill::Runtime::ValueEvidenceEmitter.emit(
-      root: NilKill::ROOT,
-      runtime_dir: @collector.fetch(:runtime_dir),
-      output: File.join(NilKill::TMP_DIR, "#{replacement_run}.json.gz"),
-      events: replacement_events,
-      run_ids: [replacement_run],
-      plan: @collector.fetch(:plan)
-    ).fetch("path")
+    replacement_path = evidence_for(replacement_run, @collector.fetch(:runtime_calls))
     replaced = NilKill::Runtime::EvidenceMerger.merge([replacement_path])
     expect(replaced.fetch("runs").map { |run| run.fetch("id") })
       .to eq(replacement.fetch("expected_runs"))

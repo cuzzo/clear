@@ -72,29 +72,21 @@ module NilKill
         events, invalid_events = load_events
         semantic_events = events
         excluded_events = 0
-        parsed_evidence = nil
-        value_evidence =
-          if @value_evidence_path
-            parsed_evidence = JsonIO.parse(@value_evidence_path)
-            anchors = parsed_evidence.fetch("anchors", [])
-            {
-              "path" => @value_evidence_path,
-              "observations" => anchors.count {
-                |row| row.fetch("executions", []).any? { |bucket| bucket["value"] }
-              },
-              "calls" => anchors.count {
-                |row| row.fetch("executions", []).any? { |bucket| bucket["target"] }
-              },
-            }
-          else
-            ValueEvidenceEmitter.emit(
-              root: @root,
-              runtime_dir: @runtime_dir,
-              events: semantic_events,
-              plan: runtime_plan
-            )
-          end
-        parsed_evidence ||= JsonIO.parse(value_evidence.fetch("path"))
+        # One join, whichever way we got here. A collect has already produced
+        # the canonical evidence and hands us its path; `collect-runtime` has
+        # not, so the same FactMine join that a collect uses runs here.
+        path = @value_evidence_path || join_runtime_dir
+        parsed_evidence = JsonIO.parse(path)
+        anchors = parsed_evidence.fetch("anchors", [])
+        value_evidence = {
+          "path" => path,
+          "observations" => anchors.count { |row|
+            row.fetch("executions", []).any? { |bucket| bucket["value"] }
+          },
+          "calls" => anchors.count { |row|
+            row.fetch("executions", []).any? { |bucket| bucket["target"] }
+          },
+        }
         evidence_runs = parsed_evidence.fetch("runs", []).map { |run| run.fetch("id") }
         evidence_environment = parsed_evidence.fetch("environment", []).to_h do |claim|
           [claim.fetch("key"), claim.fetch("value")]
@@ -140,22 +132,24 @@ module NilKill
         }
       end
 
-      def emit_value_evidence(output: nil, languages: nil, run_ids: nil)
-        events, invalid_events = load_events
-        result = ValueEvidenceEmitter.emit(
-          root: @root,
-          runtime_dir: @runtime_dir,
-          events: events,
-          output: output,
-          languages: languages,
-          run_ids: run_ids,
-          plan: runtime_plan
-        )
-        result.merge(
-          "events" => events.length,
-          "invalid_events" => invalid_events,
-          "excluded_events" => 0
-        )
+      # The evidence for a runtime directory that has none yet: build each
+      # shard's trace document, then let FactMine join it.
+      def join_runtime_dir
+        # The plan this emitter was given, which is not always the one on disk:
+        # `collect-runtime` builds one for the sources it was pointed at.
+        Tempfile.create(["nil-kill-runtime-plan", ".json"]) do |file|
+          file.write(JSON.generate(runtime_plan))
+          file.flush
+          DomainDeriver.trace_documents(
+            runtime_dirs: [@runtime_dir], plan: file.path, root: @root
+          )
+          TraceArtifact.join_all(
+            root: @root,
+            traces: { "runtime" => File.join(@runtime_dir, TraceArtifact::DEFAULT_NAME) },
+            plan: file.path
+          )
+        end
+        File.join(@runtime_dir, TraceArtifact::EVIDENCE_NAME)
       end
 
       private

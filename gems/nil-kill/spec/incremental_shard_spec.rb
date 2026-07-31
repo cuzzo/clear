@@ -102,7 +102,7 @@ RSpec.describe "NilKill incremental test shards" do
 
       double_test = File.join(root, "test", "double_test.rb")
       passing_double_test = File.read(double_test)
-      canonical = File.join(runtime, NilKill::Runtime::ValueEvidenceEmitter::DEFAULT_OUTPUT)
+      canonical = File.join(runtime, NilKill::Runtime::TraceArtifact::EVIDENCE_NAME)
       canonical_before_failure = Digest::SHA256.file(canonical).hexdigest
       File.write(double_test, passing_double_test.sub("assert_equal 8", "raise \"trace failure\""))
       File.write(File.join(root, "test", "test_helper.rb"), "SHARD_HELPER_VERSION = 2\n")

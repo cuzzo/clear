@@ -37,6 +37,9 @@ pub fn environment_claims(runtime: &Runtime, root: &Path) -> Vec<(String, String
             format!("sha256:{:x}", Sha256::digest(&bytes)),
         ));
     }
+    // A claim with no value is not a claim. A shard assembled by hand may
+    // carry no collector document to have asked.
+    claims.retain(|(_, value)| !value.is_empty());
     claims
 }
 
@@ -54,12 +57,30 @@ pub fn provenance(run_id: &str) -> Value {
 
 // ------------------------------------------------------------ value encoding
 
+/// A SCIP symbol word is never empty; `.` is the placeholder when a version is
+/// unknown, which is what a shard assembled without a collector document has.
+fn symbol_word(value: &str) -> &str {
+    if value.is_empty() {
+        "."
+    } else {
+        value
+    }
+}
+
 fn type_symbol(runtime: &Runtime, name: &str) -> String {
-    format!("nil-kill-runtime ruby ruby {} {}#", runtime.version, descriptor_owner(name))
+    format!(
+        "nil-kill-runtime ruby ruby {} {}#",
+        symbol_word(&runtime.version),
+        descriptor_owner(name)
+    )
 }
 
 fn singleton_symbol(runtime: &Runtime, name: &str) -> String {
-    format!("nil-kill-runtime ruby ruby {} {}.", runtime.version, descriptor_owner(name))
+    format!(
+        "nil-kill-runtime ruby ruby {} {}.",
+        symbol_word(&runtime.version),
+        descriptor_owner(name)
+    )
 }
 
 /// A SCIP descriptor for a type name: `A::B` becomes `A/B`, empty segments
@@ -886,7 +907,16 @@ pub fn build(
         })
         .collect::<Vec<_>>();
 
+    // A document's runs are exactly the runs its executions cite. Taking them
+    // from the traced program's own claim alone left a hand-assembled shard
+    // citing a run the document did not declare.
     let mut run_ids = run_ids.iter().filter(|id| !id.is_empty()).cloned().collect::<Vec<_>>();
+    for event in &rows.calls {
+        let cited = event["run_id"].as_str().unwrap_or_default();
+        if !cited.is_empty() && !run_ids.iter().any(|known| known == cited) {
+            run_ids.push(cited.to_string());
+        }
+    }
     run_ids.sort();
     run_ids.dedup();
 
