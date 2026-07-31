@@ -18,6 +18,7 @@
 --ignore=gems/slopcop/
 --ignore=gems/fix-cache/
 --ignore=gems/nil-kill/
+--ignore=gems/protocol/
 --ignore=gems/espalier/
 --ignore=gems/fact-mine/
 --ignore=gems/ruby-to-clear/
