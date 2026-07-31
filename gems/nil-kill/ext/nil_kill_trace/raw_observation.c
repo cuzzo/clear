@@ -20,9 +20,10 @@
 // consumer can apply its own cut-off rather than inherit one from here.
 #define NK_RAW_DEPTH 5
 
-static VALUE key_type, key_singleton, key_source, key_kind, key_elements, key_pairs, key_fields;
+static VALUE key_type, key_class_id, key_length, key_singleton, key_source, key_kind, key_elements, key_pairs, key_fields;
 static VALUE kind_scalar, kind_array, kind_hash, kind_set, kind_record;
 static VALUE set_class;
+static VALUE class_ids;
 static long element_sample = 20;
 
 static VALUE raw_observe(VALUE value, long depth);
@@ -106,9 +107,23 @@ static VALUE raw_fields(VALUE value, long depth) {
     return out;
 }
 
+// Two anonymous classes share the name `T.untyped`, and the shape memo buckets
+// on the class a collection carried, not on what that class is called. So the
+// class's identity travels beside its name -- a number that is stable for the
+// life of the process and means nothing outside it.
+static VALUE class_identity(VALUE klass) {
+    VALUE known = rb_hash_lookup2(class_ids, klass, Qundef);
+    if (known != Qundef) return known;
+
+    VALUE id = LONG2NUM(RHASH_SIZE(class_ids));
+    rb_hash_aset(class_ids, klass, id);
+    return id;
+}
+
 static VALUE raw_observe(VALUE value, long depth) {
     VALUE observation = rb_hash_new();
     rb_hash_aset(observation, key_type, nk_type_name(value));
+    rb_hash_aset(observation, key_class_id, class_identity(rb_obj_class(value)));
 
     // A module used as a strategy dispatches through its constant identity, so
     // that identity is reported next to the nominal type rather than instead.
@@ -131,6 +146,20 @@ static VALUE raw_observe(VALUE value, long depth) {
     }
     rb_hash_aset(observation, key_kind,
                  array ? kind_array : hash ? kind_hash : set ? kind_set : kind_record);
+
+    // How many members there really were, not how many were sampled: a
+    // fixed-length array is a tuple and a long one is not, and only the
+    // interpreter can tell them apart once the sample is taken.
+    if (array) {
+        rb_hash_aset(observation, key_length, LONG2NUM(RARRAY_LEN(value)));
+    } else if (hash) {
+        rb_hash_aset(observation, key_length, LONG2NUM(RHASH_SIZE(value)));
+    } else if (set) {
+        VALUE members = set_hash(value);
+        if (!NIL_P(members)) {
+            rb_hash_aset(observation, key_length, LONG2NUM(RHASH_SIZE(members)));
+        }
+    }
 
     // Below the emitted depth a consumer has the class name and nothing else,
     // which is exactly what every rule falls back to when it runs out of depth.
@@ -160,7 +189,12 @@ static VALUE nk_raw(VALUE self, VALUE value) {
 }
 
 void nk_raw_observation_init(VALUE mod) {
+    class_ids = rb_hash_new();
+    rb_gc_register_address(&class_ids);
+
     key_type = frozen("type");
+    key_class_id = frozen("class_id");
+    key_length = frozen("length");
     key_singleton = frozen("singleton");
     key_source = frozen("source");
     key_kind = frozen("kind");

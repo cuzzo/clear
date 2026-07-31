@@ -15,7 +15,7 @@
 //! first one's shape rather than describing itself. And shape ordering is by
 //! JSON text, because that text is also what identifies a record layout.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -37,6 +37,10 @@ pub struct RawObservation {
     #[serde(default)]
     pub source: Option<String>,
     pub kind: String,
+    /// How many members the container really had, as against how many were
+    /// sampled. A fixed-length array is a tuple; a long one is not.
+    #[serde(default)]
+    pub length: Option<usize>,
     #[serde(default)]
     pub elements: Vec<RawObservation>,
     #[serde(default)]
@@ -561,6 +565,38 @@ fn homogeneous_pair(raw: &RawObservation) -> Option<(Signature, Option<i64>)> {
         }
     }
     Some((keys.map_or(Signature::Empty, Signature::Class), values))
+}
+
+/// An array observed either in full or with its classes disagreeing. A declared
+/// type then has to spell out each position rather than name one element type,
+/// so this is a different claim from "an array of these element types".
+///
+/// The one array that does not qualify is the long uniform one: its tail went
+/// unobserved, and its head says nothing the element type does not already.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Tuple {
+    pub types: Vec<String>,
+    pub size: String,
+    pub complete: bool,
+    pub mixed: bool,
+}
+
+pub fn tuple_of(raw: &RawObservation, element_sample: usize) -> Option<Tuple> {
+    if raw.kind != "array" {
+        return None;
+    }
+    let length = raw.length?;
+    if length < 2 {
+        return None;
+    }
+    let types = raw.elements.iter().map(|element| element.type_name.clone()).collect::<Vec<_>>();
+    let mixed = types.iter().skip(1).any(|name| name != &types[0]);
+    let complete = types.len() == length;
+    if !complete && !mixed {
+        return None;
+    }
+    let size = if complete { length.to_string() } else { format!(">={element_sample}") };
+    Some(Tuple { types, size, complete, mixed })
 }
 
 fn push_unique(names: &mut Vec<String>, name: &str) {
