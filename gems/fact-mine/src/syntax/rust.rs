@@ -184,23 +184,20 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
             parametric_cost: None,
         };
     };
+    let scope = if rust_stdlib_crate(krate) {
+        "stdlib"
+    } else if crate::scip::project_package(krate) {
+        "project_declaration"
+    } else {
+        "dependency"
+    };
     super::ExternalSymbolMetadata {
-        scope: if rust_stdlib_crate(krate) {
-            "stdlib"
-        } else if crate::scip::project_package(krate) {
-            "project_declaration"
-        } else {
-            "dependency"
-        },
-        missing_cost_kind: configured_semantic_symbol_kind("rust", descriptor).unwrap_or_else(
-            || {
-                if rust_stdlib_crate(krate) {
-                    "stdlib_cost_model_missing".to_string()
-                } else {
-                    "dependency_cost_model_missing".to_string()
-                }
-            },
-        ),
+        scope,
+        // What is missing follows from whose declaration it is. Reporting a
+        // declaration of this project as a missing dependency cost model sends
+        // the reader looking for a dependency to model.
+        missing_cost_kind: configured_semantic_symbol_kind("rust", descriptor)
+            .unwrap_or_else(|| super::missing_cost_kind_for_scope(scope).to_string()),
         parametric_cost: rust_semantic_parametric_cost(descriptor).map(str::to_string),
     }
 }
@@ -1170,6 +1167,21 @@ mod tests {
         assert_eq!(
             external_symbol_call_complexity(tree_kind, "kind").map(|complexity| complexity.time),
             Some("O(1)")
+        );
+        // Running a subprocess is the subprocess's cost, not this program's.
+        for symbol in [
+            "rust-analyzer cargo std https://x/std process/impl#[Command]output().",
+            "rust-analyzer cargo std https://x/std process/impl#[Command]status().",
+        ] {
+            let message = symbol.rsplit_once(']').unwrap().1.trim_end_matches("().");
+            let complexity = external_symbol_call_complexity(symbol, message)
+                .unwrap_or_else(|| panic!("{symbol} left unpriced"));
+            assert_eq!(complexity.time, "O(1)");
+            assert!(complexity.assumption.is_some(), "{symbol} states no exclusion");
+        }
+        assert_eq!(
+            super::super::missing_cost_kind_for_scope("project_declaration"),
+            "project_declaration_body_or_generated_member_missing"
         );
         assert_eq!(external_symbol_metadata(vec_len).scope, "stdlib");
         assert_eq!(external_symbol_metadata(tree_kind).scope, "dependency");

@@ -621,7 +621,11 @@ ExternalLatency:
   BufRead.read_line: linear_materialize
   BufReader.read_exact: linear_materialize
   copy.copy: linear_materialize
+  # Running the subprocess. What it costs is the subprocess's, which is not
+  # this program's computational work; waiting for it is not either.
   Command.spawn: constant
+  Command.output: constant
+  Command.status: constant
   Child.kill: constant
   Child.wait: constant
   ChildStdin.flush: constant

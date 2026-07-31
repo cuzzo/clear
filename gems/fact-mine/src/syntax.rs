@@ -52,6 +52,18 @@ pub(crate) struct ExternalCallComplexity {
     pub assumption: Option<String>,
 }
 
+/// What is missing when a resolved symbol has no cost, which follows from whose
+/// declaration it is. A declaration of the analyzed project is not a dependency
+/// to be modelled; its body is there to be analysed, and saying otherwise sends
+/// the reader looking for a library that does not exist.
+pub(crate) fn missing_cost_kind_for_scope(scope: &str) -> &'static str {
+    match scope {
+        "stdlib" => "stdlib_cost_model_missing",
+        "project_declaration" => "project_declaration_body_or_generated_member_missing",
+        _ => "dependency_cost_model_missing",
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ExternalSymbolMetadata {
     pub scope: &'static str,
