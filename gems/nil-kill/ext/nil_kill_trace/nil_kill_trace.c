@@ -23,6 +23,7 @@
 #include "declarations.h"
 #include "identity.h"
 #include "records.h"
+#include "bootstrap.h"
 #include "value_domain.h"
 
 #define MAX_FRAMES 1024
@@ -137,15 +138,20 @@ int nk_analyzed_path(VALUE path) { return path_analyzed(path); }
 
 // The declaration hooks run whether or not runtime SCIP was asked for, so the
 // analyzed roots cannot wait for `configure` to supply them.
-static VALUE nk_configure_targets(VALUE self, VALUE roots) {
-    if (!RB_TYPE_P(roots, T_ARRAY)) return Qnil;
-    if (RARRAY_LEN(roots_ary) > 0) return Qnil;
+void nk_use_targets(VALUE roots) {
+    if (!RB_TYPE_P(roots, T_ARRAY)) return;
+    if (RARRAY_LEN(roots_ary) > 0) return;
 
     for (long i = 0; i < RARRAY_LEN(roots); i++) {
         VALUE root = RARRAY_AREF(roots, i);
         if (RB_TYPE_P(root, T_STRING)) rb_ary_push(roots_ary, rb_str_new_frozen(root));
     }
     st_clear(path_cache);
+    return;
+}
+
+static VALUE nk_configure_targets(VALUE self, VALUE roots) {
+    nk_use_targets(roots);
     return Qnil;
 }
 static unsigned long counts[8];
@@ -801,7 +807,7 @@ static void on_event(VALUE tpval, void *_unused) {
     }
 }
 
-static VALUE nk_configure(VALUE self, VALUE roots, VALUE anchor_map, VALUE state_map) {
+void nk_use_demands(VALUE roots, VALUE anchor_map, VALUE state_map) {
     rb_ary_clear(roots_ary);
     for (long i = 0; i < RARRAY_LEN(roots); i++) {
         rb_ary_push(roots_ary, rb_obj_freeze(rb_String(RARRAY_AREF(roots, i))));
@@ -832,10 +838,15 @@ static VALUE nk_configure(VALUE self, VALUE roots, VALUE anchor_map, VALUE state
         want->ivar = rb_intern_str(rb_hash_aref(state_map, key));
         st_insert(nested(state_demand, (st_data_t)path), (st_data_t)line, (st_data_t)want);
     }
+
+}
+
+static VALUE nk_configure(VALUE self, VALUE roots, VALUE anchor_map, VALUE state_map) {
+    nk_use_demands(roots, anchor_map, state_map);
     return Qtrue;
 }
 
-static VALUE nk_start(VALUE self) {
+void nk_start_observing(void) {
     if (NIL_P(tracepoint)) {
         tracepoint = rb_tracepoint_new(Qnil,
                                        RUBY_EVENT_LINE | RUBY_EVENT_CALL | RUBY_EVENT_RETURN |
@@ -844,11 +855,19 @@ static VALUE nk_start(VALUE self) {
                                        on_event, NULL);
     }
     rb_tracepoint_enable(tracepoint);
+}
+
+void nk_stop_observing(void) {
+    if (!NIL_P(tracepoint)) rb_tracepoint_disable(tracepoint);
+}
+
+static VALUE nk_start(VALUE self) {
+    nk_start_observing();
     return Qtrue;
 }
 
 static VALUE nk_stop(VALUE self) {
-    if (!NIL_P(tracepoint)) rb_tracepoint_disable(tracepoint);
+    nk_stop_observing();
     return Qtrue;
 }
 
@@ -1191,6 +1210,19 @@ static VALUE nk_reset(VALUE self) {
     return Qtrue;
 }
 
+// The collector's whole answer, gathered without dispatching a method the
+// traced program could have redefined.
+VALUE nk_core_tables(void) {
+    VALUE tables = rb_hash_new();
+    rb_hash_aset(tables, ID2SYM(rb_intern("records")), nk_records(Qnil));
+    rb_hash_aset(tables, ID2SYM(rb_intern("domains")), nk_domains(Qnil));
+    rb_hash_aset(tables, ID2SYM(rb_intern("executed_callsites")), nk_executed_callsites(Qnil));
+    rb_hash_aset(tables, ID2SYM(rb_intern("function_entries")), nk_function_entries(Qnil));
+    rb_hash_aset(tables, ID2SYM(rb_intern("state_values")), nk_state_values(Qnil));
+    rb_hash_aset(tables, ID2SYM(rb_intern("method_edges")), nk_method_edges(Qnil));
+    return tables;
+}
+
 void Init_nil_kill_trace(void) {
     VALUE mod = rb_define_module("NilKillTraceNative");
     rb_define_singleton_method(mod, "configure", nk_configure, 3);
@@ -1210,6 +1242,7 @@ void Init_nil_kill_trace(void) {
     nk_collections_init(mod);
     nk_records_init(mod);
     rb_define_singleton_method(mod, "configure_targets", nk_configure_targets, 1);
+    nk_bootstrap_init(mod);
 
     path_cache = st_init_numtable();
     demand = st_init_numtable();
@@ -1237,4 +1270,6 @@ void Init_nil_kill_trace(void) {
     id_return = rb_intern("return");
     id_local_variables = rb_intern("local_variables");
     id_local_variable_get = rb_intern("local_variable_get");
+
+    nk_bootstrap_autostart();
 }

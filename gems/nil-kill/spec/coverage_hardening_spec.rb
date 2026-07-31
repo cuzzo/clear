@@ -5,7 +5,6 @@ require_relative "../lib/nil_kill/native/command"
 require_relative "../lib/nil_kill/native/co_update"
 require_relative "../lib/nil_kill/native/flay_similarity"
 require_relative "../lib/nil_kill/native/predicate_aliases"
-require_relative "../lib/nil_kill/runtime_trace"
 
 RSpec.describe "NilKill coverage hardening" do
   def capture_io
@@ -635,154 +634,13 @@ RSpec.describe "NilKill coverage hardening" do
     end
   end
 
-  describe NilKillRuntimeTrace do
-    def reset_runtime_trace_state!
-      %i[
-        @runtime_scip_native_call_trace
-        @runtime_scip_native_result_trace
-      ].each do |trace_name|
-        trace = described_class.instance_variable_get(trace_name)
-        trace.disable if trace.respond_to?(:disable)
-      rescue RSpec::Mocks::MockExpectationError
-        # An example may have installed a verifying double whose lifecycle has
-        # already ended. The real TracePoint, when present, was disabled above.
-        nil
-      end
-      FileUtils.rm_f(described_class::TRACE_PLAN_PATH)
-      Thread.current[:__nil_kill_runtime_scip_identity_samples] = nil
-      {
-        methods: {},
-        tlets: {},
-        structs: {},
-        ivar_runtime: {},
-        tuples: {},
-        collections: {},
-        method_edges: {},
-        objects: {},
-        object_tokens: {},
-        frames: Hash.new { |h, k| h[k] = [] },
-        shape_lookup: {},
-        path_cache: {},
-        target_cache: {},
-        site_ctx: {},
-        cshape: {},
-        ctsk: {},
-        cls_name: {},
-        method_metadata: {},
-        planned_methods_by_class: nil,
-        sampled_tstruct_fields: {},
-        tlet_site_decisions: {},
-        targeted_tracepoints: [],
-        targeted_tracepoint_keys: Set.new,
-        trace_plan_loaded: false,
-        trace_plan: nil,
-        coverage_line_map: nil,
-        pending_mut: nil,
-        coalesce: true,
-        coverage_owned: false,
-        runtime_calls: {},
-        runtime_package_by_path: {},
-        runtime_native_receiver_source_locations: {},
-        runtime_scip_frames: Hash.new { |hash, thread_id| hash[thread_id] = [] },
-        runtime_scip_external_depth: Hash.new(0),
-        runtime_scip_native_calls: Hash.new { |hash, thread_id| hash[thread_id] = [] },
-        runtime_exact_anchor_executions: Hash.new(0),
-        runtime_anchor_execution_stack: Hash.new { |hash, thread_id| hash[thread_id] = [] },
-        runtime_scip_native_call_trace: nil,
-        runtime_scip_native_call_armed: false,
-        runtime_scip_native_selector_filter: nil,
-        runtime_scip_native_result_depth: 0,
-        runtime_scip_native_result_armed: false,
-        runtime_evidence_anchor_by_callsite: nil,
-        runtime_evidence_selectors_by_callsite: nil,
-        runtime_evidence_required_by_anchor: nil,
-        runtime_anchor_marker_depth: Hash.new(0),
-      }.each do |name, value|
-        described_class.instance_variable_set(:"@#{name}", value)
-      end
-    end
+  describe "the native collector" do
+    COLLECTOR_TARGETS = [File.expand_path("src", NilKill::ROOT)].freeze
 
-    FakeTracePoint = Struct.new(
-      :event,
-      :path,
-      :lineno,
-      :defined_class,
-      :method_id,
-      :self_value,
-      :parameters,
-      :return_value,
-      :raised_exception,
-      :trace_binding,
-      keyword_init: true
-    ) do
-      def binding
-        trace_binding
-      end
-
-      def self
-        self_value
-      end
-    end
-
-    def binding_for_forced_args(args)
-      binding
-    end
-
-    before do
-      reset_runtime_trace_state!
-    end
-
-    after do
-      reset_runtime_trace_state!
-    end
-
-    it "filters trace plans and respects sampling gates" do
-      target = described_class::TARGETS.first
-      file = File.join(target, "trace_plan_unit.rb")
-      plan = {
-        "target_dirs" => described_class::TARGETS,
-        "methods" => {
-          ["Worker", "skip", "instance", file, 10].join("\0") => { "sample" => false, "frame" => false },
-          ["Worker", "perform", "instance", file, 20].join("\0") => {
-            "sample" => true,
-            "frame" => true,
-            "return" => false,
-            "params" => { "payload" => true, "ignored" => false },
-          },
-        },
-        "tracepoint_methods" => {
-          ["Worker", "targeted", "class", file, 30].join("\0") => {
-            "sample" => true,
-            "frame" => false,
-            "return" => true,
-            "params" => { "arg" => true },
-          },
-        },
-        "tlets" => { [file, 40].join("\0") => true },
-        "struct_fields" => {
-          ["User", "name"].join("\0") => true,
-          ["User", "resolved"].join("\0") => false,
-          ["GenericParts", "generic_args_raw"].join("\0") => true,
-          ["TypeShape::GenericParts", "generic_args_raw"].join("\0") => false,
-        },
-      }
-      FileUtils.mkdir_p(File.dirname(described_class::TRACE_PLAN_PATH))
-      File.write(described_class::TRACE_PLAN_PATH, JSON.dump(plan))
-
-      expect(described_class.trace_plan).to eq(plan)
-    end
-
-    it "normalizes paths and target membership" do
-      target_file = File.join(described_class::TARGETS.first, "shape_unit.rb")
-      outside = File.join(Dir.tmpdir, "outside.rb")
-
-      expect(described_class.abs_path(target_file)).to eq(File.expand_path(target_file, described_class::ROOT))
-      expect(described_class.target_path?(target_file)).to be(true)
-      expect(described_class.target_path?(outside)).to be(false)
-    end
+    before { NilKillTraceNative.reset }
 
     it "records collection mutations through Array, Hash, and Set hooks without losing owners" do
-      target_file = File.join(described_class::TARGETS.first, "collection_hook_unit.rb")
+      target_file = File.join(COLLECTOR_TARGETS.first, "collection_hook_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "# trace target\n")
       NilKillTraceNative.install_collection_hook
@@ -802,7 +660,7 @@ RSpec.describe "NilKill coverage hardening" do
       frozen_array = [1, 2].freeze
       NilKillTraceNative.register_collection_owner(frozen_array, owner_kind: "method_return", name: "frozen_items", path: target_file, line: 16)
 
-      absolute = File.expand_path(target_file, described_class::ROOT)
+      absolute = File.expand_path(target_file, NilKill::ROOT)
       seen = NilKillTraceNative.collection_observations.to_h do |row|
         [[row.fetch(:name), row.fetch(:kind)], row]
       end
@@ -819,7 +677,7 @@ RSpec.describe "NilKill coverage hardening" do
     end
 
     it "samples Struct fields through the native reader when the app overrides #[]" do
-      target_file = File.join(described_class::TARGETS.first, "struct_reader_unit.rb")
+      target_file = File.join(COLLECTOR_TARGETS.first, "struct_reader_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "# trace target\n")
       dataset_class = Struct.new(:path, :files, keyword_init: true) do
@@ -840,17 +698,16 @@ RSpec.describe "NilKill coverage hardening" do
     end
 
     it "computes unresolved T::Struct fields once per class" do
-      target_file = File.join(described_class::TARGETS.first, "tstruct_plan_unit.rb")
+      target_file = File.join(COLLECTOR_TARGETS.first, "tstruct_plan_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "# trace target\n")
       plan = {
-        "target_dirs" => described_class::TARGETS,
+        "target_dirs" => COLLECTOR_TARGETS,
         "struct_fields" => {
           ["AnonymousTStruct", "known"].join("\0") => false,
           ["AnonymousTStruct", "raw"].join("\0") => true,
         },
       }
-      allow(described_class).to receive(:trace_plan).and_return(plan)
       NilKillTraceNative.configure_struct_fields(plan.fetch("struct_fields"))
 
       props_calls = 0
@@ -873,7 +730,7 @@ RSpec.describe "NilKill coverage hardening" do
       2.times { klass.new(known: "typed", raw: "observed") }
 
       observed = NilKillTraceNative.struct_observations
-        .select { |row| row.fetch(:path) == File.expand_path(target_file, described_class::ROOT) }
+        .select { |row| row.fetch(:path) == File.expand_path(target_file, NilKill::ROOT) }
       expect(props_calls).to eq(1)
       # `known` is resolved in the plan, so only `raw` is worth observing.
       expect(observed.map { |row| row.fetch(:field) }).to eq(["raw"])

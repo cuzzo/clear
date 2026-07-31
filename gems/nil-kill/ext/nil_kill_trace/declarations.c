@@ -88,9 +88,9 @@ static VALUE nk_tlet(int argc, VALUE *argv, VALUE self) {
 
 // The plan names its sites as "<absolute path>\0<line>", which is how the
 // collector is handed them and how it keeps them.
-static VALUE nk_configure_tlet_sites(VALUE self, VALUE sites) {
+void nk_use_tlet_sites(VALUE sites) {
     st_clear(tlet_sites);
-    if (!RB_TYPE_P(sites, T_HASH)) return Qnil;
+    if (!RB_TYPE_P(sites, T_HASH)) return;
 
     VALUE keys = rb_funcall(sites, rb_intern("keys"), 0);
     for (long i = 0; i < RARRAY_LEN(keys); i++) {
@@ -110,6 +110,11 @@ static VALUE nk_configure_tlet_sites(VALUE self, VALUE sites) {
         int line = atoi(text + split + 1);
         st_insert(nested_table(tlet_sites, (st_data_t)path), (st_data_t)(long)line, 1);
     }
+    return;
+}
+
+static VALUE nk_configure_tlet_sites(VALUE self, VALUE sites) {
+    nk_use_tlet_sites(sites);
     return Qnil;
 }
 
@@ -689,6 +694,8 @@ static VALUE nk_install_tlet(VALUE self) {
     nk_install_tlet_hook();
     return Qnil;
 }
+
+VALUE nk_tlet_table(void) { return nk_tlet_observations(Qnil); }
 
 void nk_declarations_init(VALUE mod) {
     id_orig_let = rb_intern("__nil_kill_orig_let");

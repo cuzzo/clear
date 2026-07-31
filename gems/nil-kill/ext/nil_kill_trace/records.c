@@ -165,9 +165,9 @@ static VALUE nk_record_field(VALUE self, VALUE klass, VALUE class_name, VALUE fi
 }
 
 // The plan names its entries "<class>\0<field>".
-static VALUE nk_configure_fields(VALUE self, VALUE fields) {
+void nk_use_struct_fields(VALUE fields) {
     rb_funcall(sampled_fields, rb_intern("clear"), 0);
-    if (!RB_TYPE_P(fields, T_HASH)) return Qnil;
+    if (!RB_TYPE_P(fields, T_HASH)) return;
 
     VALUE keys = rb_funcall(fields, rb_intern("keys"), 0);
     for (long i = 0; i < RARRAY_LEN(keys); i++) {
@@ -175,6 +175,11 @@ static VALUE nk_configure_fields(VALUE self, VALUE fields) {
         if (!RB_TYPE_P(key, T_STRING)) continue;
         rb_hash_aset(sampled_fields, rb_str_new_frozen(key), rb_hash_aref(fields, key));
     }
+    return;
+}
+
+static VALUE nk_configure_fields(VALUE self, VALUE fields) {
+    nk_use_struct_fields(fields);
     return Qnil;
 }
 
@@ -227,6 +232,11 @@ static VALUE nk_tuple_observations(VALUE self) {
     VALUE rows = rb_ary_new();
     rb_hash_foreach(tuples, export_tuple, rows);
     return rows;
+}
+
+void nk_record_tables(VALUE into) {
+    rb_hash_aset(into, ID2SYM(rb_intern("structs")), nk_struct_observations(Qnil));
+    rb_hash_aset(into, ID2SYM(rb_intern("tuples")), nk_tuple_observations(Qnil));
 }
 
 void nk_records_init(VALUE mod) {

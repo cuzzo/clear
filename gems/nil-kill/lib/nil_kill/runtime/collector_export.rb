@@ -21,7 +21,7 @@ module NilKill
         anchors = anchors_by_key(plan, root)
         JsonIO.matching(runtime_dir, RAW_GLOB).each do |path|
           raw = JSON.parse(JsonIO.read(path), symbolize_names: true)
-          new(raw, anchors).write(runtime_dir, raw.fetch(:pid))
+          new(raw, anchors, plan).write(runtime_dir, raw.fetch(:pid))
         end
       end
 
@@ -46,9 +46,10 @@ module NilKill
         end
       end
 
-      def initialize(raw, anchors)
+      def initialize(raw, anchors, plan = nil)
         @raw = raw
         @anchors = anchors
+        @plan = plan
       end
 
       # The same set of files the traced program used to write itself.
@@ -73,6 +74,53 @@ module NilKill
           path = File.join(runtime_dir, "#{name}-#{pid}.jsonl")
           File.open(path, "w") { |file| rows.each { |row| file.puts JSON.generate(row) } }
         end
+        write_coverage(runtime_dir, pid)
+      end
+
+      # Ruby's line coverage for the traced run, so the report can tell a tracer
+      # miss from a line the workload simply never reached. The collector wrote
+      # down what Coverage returned; turning it into covered line numbers needs
+      # no VM and so happens here.
+      def write_coverage(runtime_dir, pid)
+        coverage = @raw[:coverage]
+        return if coverage.nil?
+
+        covered_by_path = {}
+        File.open(File.join(runtime_dir, "coverage-#{pid}.jsonl"), "w") do |file|
+          coverage.each do |path, data|
+            source = path.to_s
+            # Native collection uses oneshot_lines. A shared SimpleCov session
+            # may already be running in counted-lines mode, so accept that shape
+            # rather than restarting or weakening the external session.
+            oneshot = data.is_a?(Hash) ? data[:oneshot_lines] : nil
+            lines = data.is_a?(Hash) ? data[:lines] : data
+            covered =
+              if oneshot
+                Array(oneshot).compact
+              else
+                Array(lines).each_with_index.filter_map do |hits, i|
+                  i + 1 if hits && hits.to_i.positive?
+                end
+              end
+            covered = covered.uniq.sort
+            next if covered.empty?
+
+            covered_by_path[source] = covered.to_set
+            file.puts JSON.generate(path: source, lines: covered)
+          end
+        end
+        File.open(File.join(runtime_dir, "loops-#{pid}.jsonl"), "w") do |file|
+          Hash(@plan && @plan["loop_sites"]).each_key do |key|
+            path, line = key.split("\0", 2)
+            line = line.to_i
+            next unless covered_by_path[path]&.include?(line)
+
+            # Espalier reads loop evidence as reached / not reached; it does not
+            # use iteration magnitude, and line coverage supplies that fact
+            # without charging every loop evaluation a hash update.
+            file.puts JSON.generate(path: path, line: line, count: 1)
+          end
+        end
       end
 
       private
@@ -86,7 +134,96 @@ module NilKill
       end
 
       def callee_facts(path, native)
-        @raw.fetch(:packages, {}).fetch(:"#{path}\x01#{native ? 1 : 0}", {})
+        @callee_facts ||= {}
+        @callee_facts[[path, native]] ||= {
+          source_role: (path && nonproduction_source?(path) ? "nonproduction" : nil),
+        }.merge(package(path, native: native))
+      end
+
+      def raw_root
+        @raw_root ||= @raw.fetch(:root, NilKill::ROOT).to_s
+      end
+
+      def raw_targets
+        @raw_targets ||= Array(@raw[:targets]).map(&:to_s)
+      end
+
+      def ruby_package
+        { package_manager: "ruby", package: "ruby", version: @raw.fetch(:ruby_version, RUBY_VERSION) }
+      end
+
+      def workspace_package
+        {
+          package_manager: "workspace",
+          package: ENV.fetch("NIL_KILL_PROJECT_NAME", File.basename(raw_root)),
+          version: ENV.fetch("NIL_KILL_PROJECT_VERSION", "workspace"),
+        }
+      end
+
+      def target_path?(absolute)
+        raw_targets.any? do |target|
+          absolute == target || absolute.start_with?("#{target}#{File::SEPARATOR}")
+        end
+      end
+
+      # Which gem owns a file is a fact only the traced VM held, and it wrote its
+      # gem table down. What that makes the file is decided here.
+      def gem_spec_for(absolute)
+        @default_names ||= Array(@raw[:default_gem_specs]).map { |name, _, _| name }.to_set
+        under = lambda do |row|
+          root = row.fetch(2).to_s
+          absolute == root || absolute.start_with?("#{root}#{File::SEPARATOR}")
+        end
+        Array(@raw[:gem_specs]).find(&under) || Array(@raw[:default_gem_specs]).find(&under)
+      end
+
+      def package(path, native:)
+        return ruby_package if native
+
+        # TracePoint uses pseudo-paths such as `<internal:warning>` for Ruby-core
+        # implementations written outside the workspace. Expanding those would
+        # incorrectly label `Kernel#warn` and peers as project code.
+        raw_path = path.to_s
+        return ruby_package if raw_path.empty? || raw_path.start_with?("<internal:")
+
+        absolute = File.expand_path(raw_path, raw_root)
+        @package_by_path ||= {}
+        @package_by_path[absolute] ||=
+          if target_path?(absolute)
+            workspace_package
+          elsif (spec = gem_spec_for(absolute))
+            name, version, _ = spec
+            {
+              # Ruby ships a growing portion of its standard library as default
+              # gems. Bundler may activate a newer vendored copy, but that does
+              # not turn StringIO, JSON, etc. into third-party APIs.
+              package_manager: @default_names.include?(name) ? "ruby" : "rubygems",
+              package: name,
+              version: version,
+            }
+          elsif absolute == raw_root || absolute.start_with?("#{raw_root}#{File::SEPARATOR}")
+            # Trace targets are intentionally narrower than the workspace: a
+            # project may call a sibling tool without instrumenting its source.
+            # It is still a workspace declaration, not a Ruby core method.
+            workspace_package
+          else
+            ruby_package
+          end
+      end
+
+      def nonproduction_source?(path)
+        @nonproduction ||= begin
+          roles = ENV["NIL_KILL_SOURCE_ROLES"].to_s
+          if !roles.empty? && File.file?(roles)
+            Array(JSON.parse(File.read(roles))["nonproduction"])
+              .map { |entry| File.expand_path(entry, raw_root) }.to_set
+          else
+            Set.new
+          end
+        rescue StandardError
+          Set.new
+        end
+        @nonproduction.include?(File.expand_path(path, raw_root))
       end
 
       def definition_path(path)
@@ -270,8 +407,6 @@ module NilKill
       row
     end
   end
-
-  COLLECTION_KINDS = { "Array" => "array", "Hash" => "hash", "Set" => "set" }.freeze
 
   # A collection observation is keyed by the slot it came from, at that slot's
   # definition line, which is what FactMine links to a COLLECTION_OPERATION

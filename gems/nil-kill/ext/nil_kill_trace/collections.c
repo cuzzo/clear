@@ -432,6 +432,8 @@ static VALUE nk_collection_observations(VALUE self) {
     return rows;
 }
 
+VALUE nk_collection_table(void) { return nk_collection_observations(Qnil); }
+
 void nk_collections_init(VALUE mod) {
     registered_hash(&owners_by_object);
     registered_hash(&observations);

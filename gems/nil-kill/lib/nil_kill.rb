@@ -34,6 +34,8 @@ module NilKill
   EVIDENCE_PATH = File.join(TMP_DIR, "evidence.json")
   REPORT_PATH = File.join(TMP_DIR, "report.md")
   TRACE_PLAN_PATH = File.join(TMP_DIR, "trace-plan.json")
+  COLLECTOR_PLAN_NAME = "collector-plan.tsv"
+  COLLECTOR_EXTENSION = File.expand_path("../ext/nil_kill_trace/nil_kill_trace.so", __dir__)
   SORBET_PAYLOAD_DIR = File.join(TMP_DIR, "sorbet-payload")
 end
 

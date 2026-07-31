@@ -972,11 +972,15 @@ static VALUE nk_reset_value_domain(VALUE self) {
 // Every path the collector reports is relative to this root, and every
 // source-role decision is a lookup keyed by one. The traced program is started
 // with it in its environment.
-static VALUE nk_set_root(VALUE self, VALUE path) {
+void nk_use_root(VALUE path) {
     root_path = vd_immortal(rb_file_expand_path(rb_obj_as_string(path), Qnil));
     rb_funcall(abs_path_memo, rb_intern("clear"), 0);
     rb_funcall(value_source_memo, rb_intern("clear"), 0);
     nonproduction_source = Qnil;
+}
+
+static VALUE nk_set_root(VALUE self, VALUE path) {
+    nk_use_root(path);
     return root_path;
 }
 

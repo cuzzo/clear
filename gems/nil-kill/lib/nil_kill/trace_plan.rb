@@ -60,9 +60,46 @@ module NilKill
         # file are private NilKill instrumentation controls.
         "runtime_evidence" => runtime_evidence_plan,
       }))
+      write_collector_plan(File.join(File.dirname(path), COLLECTOR_PLAN_NAME), runtime_evidence_plan)
     end
 
     private
+
+    # The collector reads this instead of the plan above. Everything it needs is
+    # already decided here, so the traced process is handed flat records rather
+    # than a JSON document plus the reshaping code to turn it into demands.
+    # Records are \x02-separated because demand keys themselves contain \x01.
+    def write_collector_plan(path, runtime_evidence_plan)
+      lines = []
+      NilKill.target_dirs.each { |dir| lines << ["t", File.expand_path(dir, ROOT)] }
+      demands = {}
+      states = {}
+      Array(runtime_evidence_plan && runtime_evidence_plan["requests"]).each do |request|
+        anchor = request["anchor"]
+        next unless anchor.is_a?(Hash)
+
+        abs = File.expand_path(anchor.fetch("relative_path"), ROOT)
+        name = anchor.fetch("display_name").to_s
+        range = request["execution_range"] || anchor["range"]
+        if range.is_a?(Hash)
+          symbol = anchor.fetch("symbol").to_s
+          (range.fetch("start_line").to_i..range.fetch("end_line").to_i).each do |line|
+            demands["#{abs}\x01#{line + 1}\x01#{name}"] ||= symbol
+          end
+        end
+        next unless anchor["kind"] == "STATE_WRITE" && !name.empty?
+
+        own_range = anchor["range"]
+        next unless own_range.is_a?(Hash)
+
+        states["#{abs}\x01#{own_range.fetch("start_line").to_i + 1}\x01#{name}"] = "@#{name}"
+      end
+      demands.each { |key, symbol| lines << ["d", key, symbol] }
+      states.each { |key, ivar| lines << ["s", key, ivar] }
+      @struct_fields.each { |key, sampled| lines << ["f", key, sampled ? "1" : "0"] }
+      @tlets.each_key { |key| lines << ["l", key] }
+      File.write(path, lines.map { |fields| fields.join("\x02") }.join("\n") + "\n")
+    end
 
     def add_method(method)
       abs = File.expand_path(method["path"], ROOT)

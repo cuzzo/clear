@@ -13,7 +13,7 @@
 require "tmpdir"
 
 module MiniCollect
-  TRACER = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+  TRACER = NilKill::COLLECTOR_EXTENSION
   SUBPROCESS_COVERAGE = File.join(__dir__, "subprocess_coverage.rb")
 
   def in_tmp(&blk)
@@ -58,6 +58,7 @@ module MiniCollect
       # keyword now only selects whether the SCIP artifacts are also read back.
       "NIL_KILL_RUNTIME_SCIP" => collector ? "1" : nil,
       "NIL_KILL_TMP_DIR" => NilKill::TMP_DIR,
+      "NIL_KILL_ROOT" => NilKill::ROOT,
       "NIL_KILL_TARGETS" => targets,
       "RUBYOPT" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "-r#{SUBPROCESS_COVERAGE} -r#{TRACER}" : "-r#{TRACER}",
       "NIL_KILL_SUBPROCESS_COVERAGE_CHILD" => ENV["NIL_KILL_SUBPROCESS_COVERAGE"] == "1" ? "1" : nil,

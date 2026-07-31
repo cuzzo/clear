@@ -251,7 +251,9 @@ module NilKill
         [[jobs.to_i, 1].max, [selected.size, 1].max].min.to_s
       ).to_i.clamp(1, [selected.size, 1].max)
       default_inner_jobs = [[jobs.to_i, 1].max / shard_jobs, 1].max.to_s
-      tracer = File.expand_path("runtime_trace.rb", __dir__)
+      # The collector is the extension itself. Requiring the object installs
+      # it, so the traced program loads no nil-kill Ruby at all.
+      tracer = NilKill::COLLECTOR_EXTENSION
       rubyopt = (ENV["RUBYOPT"].to_s.split + ["-r#{tracer}"]).join(" ")
       source_roles_path = File.join(working_runtime_dir, "source-roles.json")
       File.write(

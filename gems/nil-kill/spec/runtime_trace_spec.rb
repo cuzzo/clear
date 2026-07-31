@@ -6,50 +6,64 @@ RuntimeTraceSpecDouble = Struct.new(:lines) unless defined?(RuntimeTraceSpecDoub
 
 RSpec.describe "nil-kill runtime trace" do
   it "keeps workspace source outside the selected targets under workspace identity" do
-    require_relative "../lib/nil_kill/runtime_trace"
-    source = File.join(NilKill::ROOT, "tools", "vopr_coverage.rb")
-    cache = NilKillRuntimeTrace.instance_variable_get(:@runtime_package_by_path)
-    cache.clear
+    export = NilKill::Runtime::CollectorExport.new(
+      { root: NilKill::ROOT, targets: [File.join(NilKill::ROOT, "src")] }, {}
+    )
 
-    expect(NilKillRuntimeTrace.runtime_package(source, native: false)).to eq(
+    expect(export.send(:package, File.join(NilKill::ROOT, "tools", "vopr_coverage.rb"), native: false)).to eq(
       package_manager: "workspace",
       package: File.basename(NilKill::ROOT),
       version: "workspace"
     )
-    expect(NilKillRuntimeTrace.runtime_package("<internal:warning>", native: false)).to eq(
+    expect(export.send(:package, "<internal:warning>", native: false)).to eq(
       package_manager: "ruby",
       package: "ruby",
       version: RUBY_VERSION
     )
-  ensure
-    cache&.clear
   end
 
   it "retains Ruby default gems as versioned standard-library packages" do
-    require_relative "../lib/nil_kill/runtime_trace"
     Dir.mktmpdir("nil-kill-default-gem") do |directory|
       source = File.join(directory, "lib", "stringio.rb")
       FileUtils.mkdir_p(File.dirname(source))
       File.write(source, "# default gem fixture\n")
-      specification = Struct.new(:name, :version, :full_gem_path)
-        .new("stringio", Gem::Version.new("3.2.0"), directory)
-      stub = Struct.new(:name, :full_gem_path).new("stringio", directory)
-      allow(Gem).to receive(:loaded_specs).and_return("stringio" => specification)
-      allow(Gem::Specification).to receive(:default_stubs).and_return([stub])
+      export = NilKill::Runtime::CollectorExport.new({
+        root: NilKill::ROOT,
+        targets: [],
+        gem_specs: [["stringio", "3.2.0", directory]],
+        default_gem_specs: [["stringio", "3.2.0", directory]],
+      }, {})
 
-      expect(NilKillRuntimeTrace.runtime_package(source, native: false)).to eq(
+      expect(export.send(:package, source, native: false)).to eq(
         package_manager: "ruby",
         package: "stringio",
         version: "3.2.0"
       )
-    ensure
-      NilKillRuntimeTrace.instance_variable_get(:@runtime_package_by_path)
-        .delete(File.expand_path(source))
+    end
+  end
+
+  # The traced process no longer loads, filters or reshapes the plan: it reads
+  # flat records the orchestrator already decided. This is that contract.
+  it "hands the collector flat plan records rather than a document to interpret" do
+    Dir.mktmpdir("nil-kill-collector-plan", NilKill::ROOT) do |dir|
+      File.write(File.join(dir, "lib.rb"), "class Widget\n  def call = nil\nend\n")
+      isolated_env("NIL_KILL_TARGETS" => dir, "NIL_KILL_TMP_DIR" => dir) do
+        NilKill::TracePlan.write(File.join(dir, "trace-plan.json"))
+      end
+
+      records = File.read(File.join(dir, NilKill::COLLECTOR_PLAN_NAME))
+        .lines(chomp: true).map { |line| line.split("\x02") }
+      expect(records.select { |tag, _| tag == "t" }.map(&:last)).to eq([dir])
+      # Every demand is a coordinate and the one anchor it answers, so the
+      # collector never has to reshape a range into keys.
+      records.select { |tag, _| tag == "d" }.each do |_, key, symbol|
+        expect(key.split("\x01").length).to eq(3)
+        expect(symbol).not_to be_empty
+      end
     end
   end
 
   it "serializes Struct members as a runtime record shape without dispatching an override" do
-    require_relative "../lib/nil_kill/runtime_trace"
     record_class = Struct.new(:kind, :payload)
     record_class.class_eval do
       def members
@@ -67,7 +81,6 @@ RSpec.describe "nil-kill runtime trace" do
   end
 
   it "preserves an exact module identity separately from its nominal Module type" do
-    require_relative "../lib/nil_kill/runtime_trace"
     provider = Module.new
     stub_const("RuntimeTraceSemanticProvider", provider)
 
@@ -77,13 +90,10 @@ RSpec.describe "nil-kill runtime trace" do
   end
 
   it "removes explicitly nonproduction values from runtime SCIP domains, including containers" do
-    require_relative "../lib/nil_kill/runtime_trace"
     Dir.mktmpdir("nil-kill-source-role-domain") do |dir|
       roles = File.join(dir, "roles.json")
       File.write(roles, JSON.generate("nonproduction" => [File.expand_path(__FILE__)]))
       isolated_env("NIL_KILL_SOURCE_ROLES" => roles) do
-        NilKillRuntimeTrace.instance_variable_set(:@runtime_nonproduction_source_paths, nil)
-
         NilKillTraceNative.reset_value_domain
 
         # The observation is kept whatever declared it, with the verdict beside
@@ -103,15 +113,13 @@ RSpec.describe "nil-kill runtime trace" do
         )
       end
     end
-  ensure
-    NilKillRuntimeTrace.instance_variable_set(:@runtime_nonproduction_source_paths, nil)
   end
 
   it "permits an independent branch-coverage child when collect coverage is disabled" do
     Dir.mktmpdir("nil-kill-runtime-coverage-opt-out", NilKill::ROOT) do |dir|
       source = File.join(dir, "covered.rb")
       File.write(source, "result = ENV.fetch(\"NIL_KILL_BRANCH_FIXTURE\") == \"1\" ? :yes : :no\n")
-      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      tracer = NilKill::COLLECTOR_EXTENSION
       trace_tmp = File.join(dir, "trace-tmp")
       env = {
         "NIL_KILL_TRACE" => "1",
@@ -178,7 +186,7 @@ RSpec.describe "nil-kill runtime trace" do
 
       trace_tmp = File.join(dir, "trace-tmp")
       trace_dir = File.join(trace_tmp, "runtime")
-      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      tracer = NilKill::COLLECTOR_EXTENSION
       env = {
         "NIL_KILL_TRACE" => "1",
         "NIL_KILL_TRACE_METHODS" => "1",
@@ -226,7 +234,7 @@ RSpec.describe "nil-kill runtime trace" do
 
       trace_tmp = File.join(dir, "trace-tmp")
       trace_dir = File.join(trace_tmp, "runtime")
-      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      tracer = NilKill::COLLECTOR_EXTENSION
       env = {
         "NIL_KILL_TRACE" => "1",
         "NIL_KILL_TRACE_METHODS" => "1",
@@ -264,7 +272,7 @@ RSpec.describe "nil-kill runtime trace" do
       RUBY
 
       trace_tmp = File.join(dir, "trace-tmp")
-      tracer = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "runtime_trace.rb")
+      tracer = NilKill::COLLECTOR_EXTENSION
       env = {
         "NIL_KILL_TRACE" => "1",
         "NIL_KILL_TRACE_METHODS" => "1",

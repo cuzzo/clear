@@ -11,4 +11,6 @@ void nk_register_collection_owner(VALUE value, VALUE owner, VALUE shape);
 // The collector's own answer to whether a path is analyzed source.
 int nk_analyzed_path(VALUE path);
 
+VALUE nk_collection_table(void);
+
 #endif

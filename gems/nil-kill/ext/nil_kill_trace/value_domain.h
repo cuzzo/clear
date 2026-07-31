@@ -22,6 +22,10 @@ VALUE nk_type_name(VALUE value);
 // is not a container. `shapes` are shape keys; ask nk_shape_payload for the
 // document each one names.
 VALUE nk_container_shape(VALUE value);
+
+// Called directly by the bootstrap: going out to Ruby method dispatch and back
+// into our own C is what crashed the first four attempts at installing from C.
+void nk_use_root(VALUE path);
 VALUE nk_shape_payload(VALUE key);
 VALUE nk_nested_shape(VALUE value);
 

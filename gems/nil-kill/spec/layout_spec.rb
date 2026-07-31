@@ -23,21 +23,17 @@ RSpec.describe "nil-kill package layout" do
 
     expect(shared).not_to match(/\b(?:if|case)\s+language\b/)
     expect(shared).not_to match(/provider_for\(\s*["']/)
+    # Ruby's collector is the extension itself, so no provider owns a tracer
+    # that would be loaded into the traced program.
     expect(
       Dir.glob(
         File.join(
-          NilKill::ROOT,
-          "gems",
-          "nil-kill",
-          "lib",
-          "nil_kill",
-          "languages",
-          "providers",
-          "*",
-          "runtime_scip_trace.rb"
+          NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill", "languages",
+          "providers", "*", "runtime_scip_trace.rb"
         )
       )
-    ).not_to be_empty
+    ).to be_empty
+    expect(NilKill::COLLECTOR_EXTENSION).to end_with(".so")
   end
 
   it "keeps runtime inference in FactMine instead of NilKill" do
