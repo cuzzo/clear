@@ -1670,6 +1670,10 @@ impl NormalizedLanguageBehavior for CppNormalizedBehavior {
         Some("cpp")
     }
 
+    fn declares_machine_scalars(&self) -> bool {
+        true
+    }
+
     fn scalar_type_name(&self, name: &str) -> bool {
         cpp_scalar_primitive(name)
     }

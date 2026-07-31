@@ -1397,6 +1397,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         self.scalar_type_names().contains(&name.trim())
     }
 
+    /// Whether this adapter states what its machine scalars are. Only then does
+    /// "this operand is not a scalar" carry information; an adapter that names
+    /// none cannot tell a record from an integer. Languages that answer
+    /// `scalar_type_name` for themselves say so here.
+    fn declares_machine_scalars(&self) -> bool {
+        !self.scalar_type_names().is_empty()
+    }
+
     /// The operators that reduce to a machine instruction on a scalar. Every
     /// language that has an operator at all means the same thing by it; a
     /// language states its own list only where it spells one differently, or
@@ -1447,6 +1455,38 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         }
         matches!(operand_type, Some(TypeExpr::Primitive(name)) if name.eq_ignore_ascii_case("string"))
             .then_some(NormalizedCollectionOperation::LinearScan.complexity())
+    }
+
+    /// An operator the machine cannot answer in one instruction walks the value
+    /// it is given. A scalar is one instruction and is priced as one; anything
+    /// else - a record, an enum, a sequence, an option over any of them - is
+    /// compared, ordered or copied by reading what it holds, which is bounded
+    /// by that operand and nothing else.
+    ///
+    /// This is the upper bound for a proven operand type whose shape no
+    /// registry names. Leaving it unpriced does not make the function cheaper;
+    /// it makes the function's whole bound unknown.
+    fn walked_operand_complexity(
+        &self,
+        message: &str,
+        operand_type: Option<&TypeExpr>,
+    ) -> Option<NormalizedCallComplexity> {
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if !self.scalar_operator_names().contains(&operator) {
+            return None;
+        }
+        // "Not a scalar" is only evidence in a language that says what its
+        // scalars are. An adapter naming none cannot distinguish a record from
+        // an integer, and would price arithmetic as a walk.
+        if !self.declares_machine_scalars() {
+            return None;
+        }
+        let operand_type = operand_type?;
+        // A scalar, and a comparison against nil, are already one instruction.
+        if scalar_operand(operand_type, self) || matches!(operand_type, TypeExpr::NilClass) {
+            return None;
+        }
+        Some(NormalizedCollectionOperation::LinearScan.complexity())
     }
 
     /// Interpret a compiler symbol only at the owning language boundary. The

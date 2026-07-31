@@ -148,6 +148,10 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn declares_machine_scalars(&self) -> bool {
+        true
+    }
+
     fn scalar_type_name(&self, name: &str) -> bool {
         super::cpp::cpp_scalar_primitive(name)
     }

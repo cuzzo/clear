@@ -593,6 +593,10 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         }
     }
 
+    fn declares_machine_scalars(&self) -> bool {
+        true
+    }
+
     fn scalar_type_name(&self, name: &str) -> bool {
         rust_scalar_primitive(name)
     }

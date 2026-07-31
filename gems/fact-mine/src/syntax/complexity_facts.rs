@@ -2043,6 +2043,11 @@ fn visit_loops(
                         .or_else(|| fixed_side_comparison_complexity(message, node))
                         .or_else(|| input_independent_operator_complexity(node))
                         .or_else(|| negation_complexity(message))
+                        // Nothing above named this operand's shape, but its
+                        // type is proven: the operator reads what it holds.
+                        .or_else(|| {
+                            behavior.walked_operand_complexity(message, operand_type.as_ref())
+                        })
                 })
                 // A record's shape is known, so an operation over that shape is
                 // priced even where no library contract names the type.
@@ -2939,14 +2944,19 @@ fn record_operator_complexity(
     if fields.is_empty() {
         return None;
     }
-    fields
-        .values()
-        .all(|field| {
-            behavior
-                .scalar_operator_complexity("==", Some(field))
-                .is_some()
-        })
-        .then(|| NormalizedCollectionOperation::Constant.complexity())
+    // Walking a record of scalars is a fixed number of instructions. Walking
+    // one that holds a sequence is that sequence's length: the shape is known
+    // either way, so the operation is priced either way.
+    let every_field_is_a_scalar = fields.values().all(|field| {
+        behavior
+            .scalar_operator_complexity("==", Some(field))
+            .is_some()
+    });
+    Some(if every_field_is_a_scalar {
+        NormalizedCollectionOperation::Constant.complexity()
+    } else {
+        NormalizedCollectionOperation::LinearScan.complexity()
+    })
 }
 
 /// A local that cannot hold more elements as the input grows: it is declared
@@ -4023,9 +4033,9 @@ fn overloaded(left: Vec<i32>, right: Vec<i32>) -> bool {
             Some("O(1)")
         );
         assert_eq!(
-            context("overloaded", "==").known_time_complexity,
-            None,
-            "Vec equality dispatches through PartialEq and is not scalar"
+            context("overloaded", "==").known_time_complexity.as_deref(),
+            Some("O(N)"),
+            "Vec equality dispatches through PartialEq, which reads both vectors"
         );
     }
 
@@ -4333,6 +4343,105 @@ fn limit(values: &[usize]) -> usize {
                 priced.as_deref(),
                 Some("O(1)"),
                 "{language:?} left `n * m` on declared scalars unpriced"
+            );
+        }
+    }
+
+    /// Comparing a record walks the record. Where every field is a machine
+    /// scalar that walk is a fixed number of instructions; where a field holds
+    /// a sequence it is that sequence's length. Pricing only the all-scalar
+    /// case leaves the operator unpriced for every record that holds a string,
+    /// which is most of them - and an unpriced operator is an incomplete bound
+    /// for the whole function.
+    #[test]
+    fn comparing_a_record_walks_whatever_its_fields_hold() {
+        let all_scalar = language_facts(
+            r#"
+struct Point { row: usize, column: usize }
+
+fn same_point(left: Point, right: Point) -> bool {
+    left == right
+}
+"#,
+            Language::Rust,
+            ".rs",
+        );
+        let holds_a_sequence = language_facts(
+            r#"
+struct Entry { name: String, line: usize }
+
+fn same_entry(left: Entry, right: Entry) -> bool {
+    left == right
+}
+"#,
+            Language::Rust,
+            ".rs",
+        );
+        let priced = |rows: &[MethodComplexityFacts], function: &str| {
+            rows.iter()
+                .find(|row| row.function == function)
+                .unwrap_or_else(|| panic!("no facts for {function}"))
+                .call_contexts
+                .iter()
+                .find(|call| call.message == "==")
+                .unwrap_or_else(|| panic!("no `==` call context in {function}"))
+                .known_time_complexity
+                .clone()
+        };
+        assert_eq!(
+            priced(&all_scalar, "same_point").as_deref(),
+            Some("O(1)"),
+            "a record of scalars is compared in a fixed number of instructions"
+        );
+        assert_eq!(
+            priced(&holds_a_sequence, "same_entry").as_deref(),
+            Some("O(N)"),
+            "a record holding a sequence is compared by walking that sequence"
+        );
+    }
+
+    /// A language that dispatches its operators answers `==` with a function,
+    /// and that function reads the value. Where no registry names the operand's
+    /// shape - an enum, a type from another crate - the operand's own type is
+    /// still proven, and reading it is the bound. Leaving it unpriced does not
+    /// make the function cheaper; it makes the function's whole bound unknown,
+    /// which is why the languages that dispatch operators trailed the ones that
+    /// do not.
+    #[test]
+    fn an_operator_over_a_shape_no_registry_names_still_reads_its_operand() {
+        let cases: &[(Language, &str, &str)] = &[
+            (
+                Language::Rust,
+                ".rs",
+                "enum Shape { Leaf, Node }\n\nfn same(left: Shape, right: Shape) -> bool {\n    left == right\n}\n",
+            ),
+            (
+                Language::Kotlin,
+                ".kt",
+                "class C { fun same(left: Shape, right: Shape): Boolean { return left == right } }",
+            ),
+            (
+                Language::Python,
+                ".py",
+                "def same(left: Shape, right: Shape) -> bool:\n    return left == right\n",
+            ),
+        ];
+        for (language, extension, source) in cases {
+            let rows = language_facts(source, *language, extension);
+            let priced = rows
+                .iter()
+                .find(|row| row.function == "same")
+                .unwrap_or_else(|| panic!("{language:?} produced no facts for same"))
+                .call_contexts
+                .iter()
+                .find(|call| call.message == "==")
+                .unwrap_or_else(|| panic!("{language:?} produced no `==` call context"))
+                .known_time_complexity
+                .clone();
+            assert_eq!(
+                priced.as_deref(),
+                Some("O(N)"),
+                "{language:?} left a dispatched `==` on a proven operand unpriced"
             );
         }
     }
