@@ -11,12 +11,19 @@ Each corpus is production code only, its own SCIP index attached, measured with
 
 | Corpus | Language | Indexer | Functions | Was | Now |
 | --- | --- | --- | ---: | ---: | ---: |
-| `gems/decomplex` | Rust | rust-analyzer | 1144 | 75.2% | 77.3% |
-| `gems/decomplex` + dependency indexes | Rust | rust-analyzer | 1144 | 76.3% | 78.1% |
-| zod `src/v4/{core,classic}` | TypeScript | scip-typescript | 1305 | 48.2% | 72.6% |
-| rich `rich/` | Python | scip-python | 877 | 28.7% | 29.2% |
+| `gems/decomplex` | Rust | rust-analyzer | 1144 | 75.2% | 81.3% |
+| `gems/decomplex` + dependency index and summary | Rust | rust-analyzer | 1144 | 76.3% | 82.7% |
+| zod `src/v4/{core,classic}` | TypeScript | scip-typescript | 1305 | 48.2% | 73.0% |
+| rich `rich/` | Python | scip-python | 877 | 28.7% | 30.0% |
 | unslop | Go | scip-go | 145 | 93.1% | 93.1% |
 | gremlins | Go | scip-go | 200 | 60.5% | 60.5% |
+
+`complete` above means the bound closed, which the diagnostic reports as
+`big_o_complete` and which **folds the parametric tier in with the complete
+one**. Split three ways, decomplex with its dependency artifacts attached is
+59.7% complete, 23.1% parametric - a bound whose shape is closed but which
+still names an open callback `C` or reflective `R` - and 17.3% incomplete.
+Quote the three-way split when the question is how much is actually proven.
 
 Function-level completion understates the operator work, because a function
 usually carries several blockers and clearing one class rarely flips it. The
@@ -24,9 +31,9 @@ operator call facts themselves:
 
 | Corpus | Priced before | Priced now |
 | --- | ---: | ---: |
-| rich | 7/701 (1.0%) | 276/701 (39.4%) |
-| zod | 160/788 (20.3%) | 691/788 (87.7%) |
-| decomplex | 397/550 (72.2%) | 463/550 (84.2%) |
+| rich | 7/701 (1.0%) | 292/699 (41.8%) |
+| zod | 160/788 (20.3%) | 695/788 (88.2%) |
+| decomplex | 397/550 (72.2%) | 494/550 (89.8%) |
 | unslop | 661/661 (100%) | 661/661 (100%) |
 
 Reproduce:
@@ -107,29 +114,44 @@ Three defects fed it, each fixed:
 
 Ranked by the diagnostic's primary root-cause partition.
 
-### Rust - `gems/decomplex`, 77.3%
+### Rust - `gems/decomplex`, 81.3%
 
-- `dependency_cost_model_missing`, 111 functions. Dominated by sibling workspace
-  crates (`fact-mine-rust`, `hazard-contract`) plus serde_json and regex. The
-  declarations are recoverable - indexing fact-mine and attaching it as
-  `--scip-dependency-index` is worth +2.4 points on its own - but the *costs*
-  are not: attaching declarations moved this category by zero. A dependency
-  needs a complexity summary, the same artifact the bundled stdlib summaries
-  are.
-- `stdlib_cost_model_missing`, 82 functions. Concrete and small:
-  `PartialOrd::partial_cmp` / `Ord::cmp` on `f64`/`i64`/`isize` (17 functions),
-  `HashMap::values`, `HashMap::into_iter`, `Entry::and_modify`,
-  `Entry::or_insert_with`, `BTreeSet::union`, `Command::{arg,args,output}`,
-  `ExitStatus::success`, `thread::Scope::spawn`, `ScopedJoinHandle::join`.
-- Record shapes for dependency types are absent, so a comparison or copy of one
-  cannot be priced by its fields. Verified: `SimilarityFinding`,
-  `CloneCandidate`, `SemanticEffectSite` carry no symbol in decomplex's index
-  because they are declared in fact-mine.
+Of 198 incomplete, 100 are purely transitive - no blocker of their own, they
+resolve as their callees do. The leaf work is ~160 roots and it is a long tail:
+the top 5 unblock 46, the top 20 unblock 94, the top 40 unblock 126.
+
+- `dependency_cost_model_missing`, 123 functions - 62% of what is left.
+  Declarations are recoverable by indexing the dependency, but the *costs* are
+  not: attaching declarations alone moved this category by zero. A dependency
+  needs a complexity summary, the artifact the bundled stdlib summaries already
+  are, and generating one now works (see below). Its yield is bounded by the
+  dependency's own completion: fact-mine closes 1002 of 8588 methods, so the
+  calls decomplex leans on most are ones fact-mine has not closed either. This
+  improves as the dependency does.
+- `stdlib_cost_model_missing`, 18 functions, down from 82.
+- `allocation_bound_unproven`, 16 primary / 43 direct. 445 of 499 allocations
+  have unknown cardinality and 327 of those are `clone`. A scalar clone now
+  prices; the remainder are mostly `String` clones, honestly O(len) of an
+  element whose size is not any named domain. Closing them needs a per-element
+  size domain, which is a modelling extension rather than a defect.
+- `recursive_progress_unproven`, 11. `semantic_identity_missing`, 5.
 
 Attaching the whole Rust stdlib index is worth +1.1 points, not the dominant
 lever [`rust-completion.md`](rust-completion.md) took it for.
 
-### TypeScript - zod, 72.6%
+Producing a dependency summary:
+
+```
+rust-analyzer scip . --output dep.scip                 # in the dependency
+fact-mine-rust profile espalier --output dep.json --scip-index dep.scip FILE...
+ruby script/export_complexity_summary.rb --corpus <id> --source-revision <rev> \
+  --indexer rust-analyzer@1.96.0 --consumer-indexer rust-analyzer@1.96.0 \
+  dep.json dep-summary.json
+fact-mine-rust profile espalier ... --scip-dependency-index dep.scip \
+  --complexity-summary dep-summary.json
+```
+
+### TypeScript - zod, 73.0%
 
 - `semantic_identity_missing`, 158 functions: `project_lexical_binding_missing`
   36, `reflection_or_dynamic_dispatch` 21,
@@ -141,7 +163,7 @@ lever [`rust-completion.md`](rust-completion.md) took it for.
 - `typeof e` still resolves to the type of `e`, when what `typeof` yields is a
   string; 196 sites. Unions, nilable scalars and literal types now price.
 
-### Python - rich, 29.2%
+### Python - rich, 30.0%
 
 Python is not blocked on operators, and the operator ceiling is worth 1.3
 points. It is blocked before that:
