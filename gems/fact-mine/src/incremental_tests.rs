@@ -134,10 +134,17 @@ fn corrupt_shards_are_safe_misses() -> Result<()> {
         &cache_config,
         false,
     )?;
-    let shard = fs::read_dir(cache_config.directory.join("shards"))?
-        .next()
-        .expect("shard")?
-        .path();
+    // Target this file's own shard, not `read_dir().next()`: a build may also
+    // emit stdlib shards, and directory iteration order is unspecified.
+    let candidate = candidate(
+        &file,
+        None,
+        Profile::Espalier,
+        directory.path(),
+        &stdlib_registry_digest()?,
+        &configuration_digest()?,
+    )?;
+    let shard = ShardCache::new(cache_config.directory.clone()).shard_path(&candidate.cache_key);
     fs::write(&shard, b"corrupt")?;
     fs::remove_dir_all(cache_config.directory.join("projects"))?;
     let run = build_profile(&[file], None, Profile::Espalier, &cache_config, false)?;
@@ -365,11 +372,16 @@ fn compressed_shards_are_smaller_than_their_json_payload() -> Result<()> {
         "sample.rb",
         &format!("class A\n{}end\n", "  def run; 1; end\n".repeat(80)),
     );
-    build_profile(&[file], None, Profile::Espalier, &config, false)?;
-    let shard = fs::read_dir(config.directory.join("shards"))?
-        .next()
-        .expect("shard")?
-        .path();
+    build_profile(&[file.clone()], None, Profile::Espalier, &config, false)?;
+    let candidate = candidate(
+        &file,
+        None,
+        Profile::Espalier,
+        directory.path(),
+        &stdlib_registry_digest()?,
+        &configuration_digest()?,
+    )?;
+    let shard = ShardCache::new(config.directory.clone()).shard_path(&candidate.cache_key);
     let compressed = fs::metadata(shard)?.len();
     assert!(compressed > 0);
     Ok(())
