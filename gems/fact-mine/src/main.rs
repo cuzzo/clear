@@ -301,6 +301,9 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillCollectorPlan { plan, output, target_dirs, root } => {
+            fact_mine_rust::collector_plan::write(&plan, &output, &target_dirs, &root)?;
+        }
         Command::NilKillCollectorExport { runtime_dirs, plan, source_roles, root } => {
             let plan = plan
                 .as_deref()
@@ -965,6 +968,13 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Write the flat plan a traced program reads.
+    NilKillCollectorPlan {
+        plan: PathBuf,
+        output: PathBuf,
+        target_dirs: Vec<String>,
+        root: PathBuf,
+    },
     /// Shape the collector's documents into the rows the pipeline reads.
     NilKillCollectorExport {
         runtime_dirs: Vec<PathBuf>,
@@ -1085,6 +1095,27 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-collector-plan" => {
+            let mut plan = None;
+            let mut output = None;
+            let mut target_dirs = Vec::new();
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--target-dir" => target_dirs.push(iter.next().context("--target-dir")?),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillCollectorPlan {
+                plan: plan.context("--plan is required")?,
+                output: output.context("--output is required")?,
+                target_dirs,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "nil-kill-collector-export" => {
