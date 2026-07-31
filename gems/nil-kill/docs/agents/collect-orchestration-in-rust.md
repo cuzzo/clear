@@ -88,6 +88,7 @@ already did. Twice it was. The third, `evidence_merger.rb`, rebased stored
 shards onto the current plan -- which is what makes an incremental collect
 possible -- and deleting it would have broken `--fast` silently.
 `value_evidence_emitter.rb` looked dead from `nil-kill collect` and was live on
-`collect-runtime`.
+`collect-runtime` -- a command that has since been deleted, because tracing the
+whole chain showed no language could reach the emitter behind it.
 
 Grep the second entry point before believing a `git rm`.

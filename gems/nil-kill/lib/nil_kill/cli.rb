@@ -182,8 +182,6 @@ module NilKill
           bundle exec tools/nil-kill collect --append-runtime --commands more-runtime-commands.txt
           bundle exec tools/nil-kill infer [--no-sorbet]
           bundle exec tools/nil-kill static [--root DIR] [--language ruby|python|typescript|rust|zig] [--vcs git] [--source-role production|test|benchmark|example|generated|vendored|vcs_metadata|all] [--output static.json] [targets...]
-          bundle exec tools/nil-kill collect-runtime --language python [--target src] [--output traces/] -- <python test command...>
-          bundle exec tools/nil-kill collect-python [--root DIR] [--target src] [--output traces/] -- <python test command...>
           bundle exec tools/nil-kill normalize [--root DIR] --static static.json [--traces traces/] [--output evidence.json]
           bundle exec tools/nil-kill analyze [--evidence evidence.json] [--output evidence.json]
           bundle exec tools/nil-kill trace-spec
