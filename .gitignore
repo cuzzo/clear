@@ -202,3 +202,4 @@ gems/decomplex/target/
 gems/fact-mine/target/
 gems/hazard-contract/target/
 gems/nil-kill/target/
+kcov-bin/
