@@ -15,6 +15,11 @@
 !/GEMINI.md
 !/Gemfile
 !/Gemfile.lock
+/.cache/
+/.ci-local/
+/kcov-bin/
+/nil-kill-golden*/
+/nil-kill-missing-evidence*/
 !/gems/
 !/gems/**
 !/LICENSE
@@ -30,6 +35,11 @@
 !/compiler/**
 !/docs/
 !/examples/
+/.cache/
+/.ci-local/
+/kcov-bin/
+/nil-kill-golden*/
+/nil-kill-missing-evidence*/
 !/gems/
 !/manifesto/
 !/site/
