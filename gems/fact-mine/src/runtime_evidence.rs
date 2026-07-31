@@ -11,7 +11,7 @@ use flate2::read::GzDecoder;
 use protobuf::Enum;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 #[cfg(test)]
 use std::io::Read;
@@ -1292,15 +1292,18 @@ fn apply_to_profile(
 ) -> Result<RuntimeScipOverlay> {
     evidence.validate()?;
     let method_index = MethodIndex::new(&output.methods);
+    let call_index = CallIndex::new(&output.calls);
     let return_domains = observed_return_domains(evidence, &method_index);
-    let mut receiver_domains = observed_receiver_domains(output, evidence, &method_index);
+    let mut receiver_domains =
+        observed_receiver_domains(output, &call_index, evidence, &method_index);
     seed_fact_mine_receiver_domains(output, &method_index, &mut receiver_domains);
     let (exact_receiver_domains, exact_result_domains) =
-        matched_observed_value_domains(output, evidence, &method_index);
+        matched_observed_value_domains(&call_index, evidence, &method_index);
     for (call_id, domain) in exact_receiver_domains {
         merge_domain(receiver_domains.entry(call_id).or_default(), &domain);
     }
-    let observed = match_observed_calls(output, evidence, &method_index);
+    let observed = match_observed_calls(&call_index, evidence, &method_index);
+    let flow = flow_points(output, &method_index);
     seed_observed_call_receivers(&observed, &mut receiver_domains);
     let mut selected = observed.clone();
     let catalog = target_catalog(evidence);
@@ -1320,13 +1323,20 @@ fn apply_to_profile(
             output,
             evidence,
             &method_index,
+            &flow,
             &return_domains,
             &exact_result_domains,
             &selected,
             &mut receiver_domains,
         );
         let capability_narrowed =
-            runtime_capability_narrowed_domains(output, evidence, &method_index, &receiver_domains);
+            runtime_capability_narrowed_domains(
+                output,
+                &call_index,
+                evidence,
+                &method_index,
+                &receiver_domains,
+            );
         let narrowed_receiver_domains =
             runtime_truthiness_narrowed_domains(output, &method_index, &capability_narrowed);
         infer_runtime_receiver_targets(
@@ -1353,8 +1363,13 @@ fn apply_to_profile(
             break;
         }
     }
-    let capability_narrowed =
-        runtime_capability_narrowed_domains(output, evidence, &method_index, &receiver_domains);
+    let capability_narrowed = runtime_capability_narrowed_domains(
+        output,
+        &call_index,
+        evidence,
+        &method_index,
+        &receiver_domains,
+    );
     let narrowed_receiver_domains =
         runtime_truthiness_narrowed_domains(output, &method_index, &capability_narrowed);
     infer_runtime_record_accessors(output, &narrowed_receiver_domains, &mut selected);
@@ -1446,9 +1461,60 @@ fn runtime_record_type_exposes(domain: &ValueDomain, runtime_type: &str, member:
             .all(|shape| shape.members.contains_key(member))
 }
 
+/// What a flow node holds, keyed by (method, CFG node, place). The key borrows
+/// from the flow points rather than owning three copies of each string.
+type FlowNodeDomains<'p> = HashMap<(&'p str, &'p str, &'p str), ValueDomain>;
+
+/// Whether `qualified` names `suffix` nested inside some enclosing scope --
+/// what `qualified.ends_with(&format!("::{suffix}"))` said, without the
+/// allocation it charged for every method compared.
+fn nested_under(qualified: &str, suffix: &str) -> bool {
+    qualified.len() >= suffix.len() + 2
+        && qualified.ends_with(suffix)
+        && qualified.as_bytes()[qualified.len() - suffix.len() - 2..][..2] == *b"::"
+}
+
+/// The calls, grouped by the keys every join actually uses. Each join used to
+/// rescan the whole call list, so a corpus cost `calls * observations` where
+/// `calls + observations` is enough.
+struct CallIndex<'a> {
+    by_id: HashMap<&'a str, Vec<&'a CallRecord>>,
+    by_source: HashMap<&'a str, Vec<&'a CallRecord>>,
+    by_message: HashMap<&'a str, Vec<&'a CallRecord>>,
+}
+
+impl<'a> CallIndex<'a> {
+    fn new(calls: &'a [CallRecord]) -> Self {
+        let mut by_id: HashMap<&'a str, Vec<&'a CallRecord>> = HashMap::new();
+        let mut by_source: HashMap<&'a str, Vec<&'a CallRecord>> = HashMap::new();
+        let mut by_message: HashMap<&'a str, Vec<&'a CallRecord>> = HashMap::new();
+        for call in calls {
+            by_id.entry(call.id.as_str()).or_default().push(call);
+            by_source.entry(call.source.as_str()).or_default().push(call);
+            by_message.entry(call.message.as_str()).or_default().push(call);
+        }
+        Self { by_id, by_source, by_message }
+    }
+
+    fn with_id(&self, id: &str) -> &[&'a CallRecord] {
+        self.by_id.get(id).map_or(&[][..], Vec::as_slice)
+    }
+
+    fn from_source(&self, source: &str) -> &[&'a CallRecord] {
+        self.by_source.get(source).map_or(&[][..], Vec::as_slice)
+    }
+
+    fn with_message(&self, message: &str) -> &[&'a CallRecord] {
+        self.by_message.get(message).map_or(&[][..], Vec::as_slice)
+    }
+}
+
 struct MethodIndex<'a> {
     methods: &'a [MethodRecord],
     by_id: BTreeMap<&'a str, &'a MethodRecord>,
+    // Both spellings a locator may arrive under, so a lookup by name does not
+    // have to walk every method in the corpus.
+    by_name: HashMap<&'a str, Vec<&'a MethodRecord>>,
 }
 
 impl<'a> MethodIndex<'a> {
@@ -1459,13 +1525,34 @@ impl<'a> MethodIndex<'a> {
                 .iter()
                 .map(|method| (method.id.as_str(), method))
                 .collect(),
+            by_name: {
+                let mut by_name: HashMap<&'a str, Vec<&'a MethodRecord>> = HashMap::new();
+                for method in methods {
+                    by_name.entry(method.name.as_str()).or_default().push(method);
+                    if method.dispatch_name != method.name {
+                        by_name
+                            .entry(method.dispatch_name.as_str())
+                            .or_default()
+                            .push(method);
+                    }
+                }
+                by_name
+            },
         }
     }
 
+    /// Every method spelled `name`, in corpus order. Each method is filed
+    /// under its source spelling and, when they differ, its dispatch selector,
+    /// so no bucket repeats a method.
+    fn named(&self, name: &str) -> &[&'a MethodRecord] {
+        self.by_name.get(name).map_or(&[][..], Vec::as_slice)
+    }
+
     fn locate(&self, locator: &MethodLocator) -> Vec<&'a MethodRecord> {
-        let scoped = self
-            .methods
+        let named = self.named(&locator.name);
+        let scoped = named
             .iter()
+            .copied()
             .filter(|method| method.language == locator.language)
             // A method record preserves its source spelling for reporting
             // (`self.render` in Ruby, qualified declarations in other
@@ -1478,17 +1565,17 @@ impl<'a> MethodIndex<'a> {
             .filter(|method| {
                 locator.owner.is_empty()
                     || method.owner == locator.owner
-                    || method.owner.ends_with(&format!("::{}", locator.owner))
-                    || locator.owner.ends_with(&format!("::{}", method.owner))
+                    || nested_under(&method.owner, &locator.owner)
+                    || nested_under(&locator.owner, &method.owner)
             })
             .filter(|method| path_matches(&method.path, &locator.path))
             .collect::<Vec<_>>();
         if !scoped.is_empty() {
             return scoped;
         }
-        let unscoped = self
-            .methods
+        let unscoped = named
             .iter()
+            .copied()
             .filter(|method| method.language == locator.language)
             .filter(|method| method.name == locator.name || method.dispatch_name == locator.name)
             .filter(|method| locator.line == 0 || method.line == locator.line)
@@ -1503,20 +1590,20 @@ impl<'a> MethodIndex<'a> {
         if let Some(method_id) = scope.method_id.as_deref() {
             return self.by_id.get(method_id).copied().into_iter().collect();
         }
-        self.methods
-            .iter()
+        let candidates = if scope.function.is_empty() {
+            self.methods.iter().collect::<Vec<_>>()
+        } else {
+            self.named(&scope.function).to_vec()
+        };
+        candidates
+            .into_iter()
             .filter(|method| method.language == scope.language)
-            .filter(|method| {
-                scope.function.is_empty()
-                    || method.name == scope.function
-                    || method.dispatch_name == scope.function
-            })
             .filter(|method| scope.line == 0 || method.line == scope.line)
             .filter(|method| {
                 scope.owner.is_empty()
                     || method.owner == scope.owner
-                    || method.owner.ends_with(&format!("::{}", scope.owner))
-                    || scope.owner.ends_with(&format!("::{}", method.owner))
+                    || nested_under(&method.owner, &scope.owner)
+                    || nested_under(&scope.owner, &method.owner)
             })
             .filter(|method| scope.path.is_empty() || path_matches(&method.path, &scope.path))
             .collect()
@@ -1598,24 +1685,24 @@ fn propagate_cfg_dfg_domains(
     output: &ProfileOutput,
     evidence: &RuntimeValueEvidence,
     methods: &MethodIndex<'_>,
+    points: &[FlowPoint],
     return_domains: &BTreeMap<String, ValueDomain>,
     exact_result_domains: &BTreeMap<String, ValueDomain>,
     selected: &BTreeMap<String, Vec<SemanticTarget>>,
     receiver_domains: &mut BTreeMap<String, ValueDomain>,
 ) {
-    let points = flow_points(output, methods);
     if points.is_empty() {
         return;
     }
-    let mut node_domains = BTreeMap::<(String, String, String), ValueDomain>::new();
-    for point in &points {
+    let mut node_domains = FlowNodeDomains::new();
+    for point in points {
         if !point.static_domain.is_empty() {
             merge_domain(
                 node_domains
                     .entry((
-                        point.source.clone(),
-                        point.node_id.clone(),
-                        point.place_id.clone(),
+                        point.source.as_str(),
+                        point.node_id.as_str(),
+                        point.place_id.as_str(),
                     ))
                     .or_default(),
                 &point.static_domain,
@@ -1642,9 +1729,9 @@ fn propagate_cfg_dfg_domains(
                     merge_domain(
                         node_domains
                             .entry((
-                                point.source.clone(),
-                                definition.clone(),
-                                point.place_id.clone(),
+                                point.source.as_str(),
+                                definition.as_str(),
+                                point.place_id.as_str(),
                             ))
                             .or_default(),
                         &observation.domain,
@@ -1656,7 +1743,7 @@ fn propagate_cfg_dfg_domains(
 
     // Existing call domains are facts at their CFG use sites. This includes
     // runtime state observations and compiler/type-analyzer receiver facts.
-    seed_flow_nodes_from_calls(output, &points, receiver_domains, &mut node_domains);
+    seed_flow_nodes_from_calls(output, points, receiver_domains, &mut node_domains);
 
     // A normalized iteration relation binds collection value domains to block
     // locals. The source-language adapter decides whether a call is an
@@ -1664,14 +1751,14 @@ fn propagate_cfg_dfg_domains(
     seed_collection_callback_nodes(
         output,
         methods,
-        &points,
+        points,
         receiver_domains,
         &mut node_domains,
     );
     seed_call_result_definitions(
         output,
         methods,
-        &points,
+        points,
         return_domains,
         exact_result_domains,
         selected,
@@ -1680,50 +1767,55 @@ fn propagate_cfg_dfg_domains(
     );
 
     loop {
-        let before = node_domains.clone();
-        for point in &points {
+        let mut changed = false;
+        for point in points {
             let reaching = point
                 .reaching_definitions
                 .iter()
                 .filter_map(|definition| {
                     node_domains.get(&(
-                        point.source.clone(),
-                        definition.clone(),
-                        point.place_id.clone(),
+                        point.source.as_str(),
+                        definition.as_str(),
+                        point.place_id.as_str(),
                     ))
                 })
                 .collect::<Vec<_>>();
             if let Some(domain) = joined_domain(&reaching) {
-                merge_domain(
+                changed |= merge_domain(
                     node_domains
                         .entry((
-                            point.source.clone(),
-                            point.node_id.clone(),
-                            point.place_id.clone(),
+                            point.source.as_str(),
+                            point.node_id.as_str(),
+                            point.place_id.as_str(),
                         ))
                         .or_default(),
                     &domain,
                 );
             }
         }
-        if node_domains == before {
+        if !changed {
             break;
         }
     }
 
+    let mut points_by_slot: HashMap<(&str, &str), Vec<&FlowPoint>> = HashMap::new();
+    for point in points {
+        points_by_slot
+            .entry((point.source.as_str(), point.name.as_str()))
+            .or_default()
+            .push(point);
+    }
     for call in &output.calls {
-        let domains = points
+        let domains = points_by_slot
+            .get(&(call.source.as_str(), call.receiver.as_str()))
+            .map_or(&[][..], Vec::as_slice)
             .iter()
-            .filter(|point| {
-                point.source == call.source
-                    && point.name == call.receiver
-                    && span_contains_line(point.span, call.line)
-            })
+            .filter(|point| span_contains_line(point.span, call.line))
             .filter_map(|point| {
                 node_domains.get(&(
-                    point.source.clone(),
-                    point.node_id.clone(),
-                    point.place_id.clone(),
+                    point.source.as_str(),
+                    point.node_id.as_str(),
+                    point.place_id.as_str(),
                 ))
             })
             .collect::<Vec<_>>();
@@ -1831,11 +1923,11 @@ fn flow_points(output: &ProfileOutput, methods: &MethodIndex<'_>) -> Vec<FlowPoi
         .collect()
 }
 
-fn seed_flow_nodes_from_calls(
+fn seed_flow_nodes_from_calls<'p>(
     output: &ProfileOutput,
-    points: &[FlowPoint],
+    points: &'p [FlowPoint],
     receiver_domains: &BTreeMap<String, ValueDomain>,
-    node_domains: &mut BTreeMap<(String, String, String), ValueDomain>,
+    node_domains: &mut FlowNodeDomains<'p>,
 ) {
     for call in &output.calls {
         let Some(domain) = receiver_domains.get(&call.id) else {
@@ -1849,9 +1941,9 @@ fn seed_flow_nodes_from_calls(
             merge_domain(
                 node_domains
                     .entry((
-                        point.source.clone(),
-                        point.node_id.clone(),
-                        point.place_id.clone(),
+                        point.source.as_str(),
+                        point.node_id.as_str(),
+                        point.place_id.as_str(),
                     ))
                     .or_default(),
                 domain,
@@ -1860,12 +1952,12 @@ fn seed_flow_nodes_from_calls(
     }
 }
 
-fn seed_collection_callback_nodes(
+fn seed_collection_callback_nodes<'p>(
     output: &ProfileOutput,
     methods: &MethodIndex<'_>,
-    points: &[FlowPoint],
+    points: &'p [FlowPoint],
     receiver_domains: &BTreeMap<String, ValueDomain>,
-    node_domains: &mut BTreeMap<(String, String, String), ValueDomain>,
+    node_domains: &mut FlowNodeDomains<'p>,
 ) {
     for call in &output.calls {
         let Some(receiver_domain) = receiver_domains.get(&call.id) else {
@@ -1948,9 +2040,9 @@ fn seed_collection_callback_nodes(
             merge_domain(
                 node_domains
                     .entry((
-                        point.source.clone(),
-                        point.node_id.clone(),
-                        point.place_id.clone(),
+                        point.source.as_str(),
+                        point.node_id.as_str(),
+                        point.place_id.as_str(),
                     ))
                     .or_default(),
                 &callback_domain,
@@ -1975,9 +2067,9 @@ fn seed_collection_callback_nodes(
                 merge_domain(
                     node_domains
                         .entry((
-                            use_point.source.clone(),
-                            use_point.node_id.clone(),
-                            use_point.place_id.clone(),
+                            use_point.source.as_str(),
+                            use_point.node_id.as_str(),
+                            use_point.place_id.as_str(),
                         ))
                         .or_default(),
                     &callback_domain,
@@ -2032,15 +2124,15 @@ fn normalized_iteration_spans(output: &ProfileOutput, method: &MethodRecord) -> 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn seed_call_result_definitions(
+fn seed_call_result_definitions<'p>(
     output: &ProfileOutput,
     methods: &MethodIndex<'_>,
-    points: &[FlowPoint],
+    points: &'p [FlowPoint],
     return_domains: &BTreeMap<String, ValueDomain>,
     exact_result_domains: &BTreeMap<String, ValueDomain>,
     selected: &BTreeMap<String, Vec<SemanticTarget>>,
     receiver_domains: &BTreeMap<String, ValueDomain>,
-    node_domains: &mut BTreeMap<(String, String, String), ValueDomain>,
+    node_domains: &mut FlowNodeDomains<'p>,
 ) {
     let calls = output
         .calls
@@ -2084,9 +2176,9 @@ fn seed_call_result_definitions(
             merge_domain(
                 node_domains
                     .entry((
-                        point.source.clone(),
-                        definition.clone(),
-                        point.place_id.clone(),
+                        point.source.as_str(),
+                        definition.as_str(),
+                        point.place_id.as_str(),
                     ))
                     .or_default(),
                 &domain,
@@ -2384,6 +2476,7 @@ fn observed_return_domains(
 
 fn observed_receiver_domains(
     output: &ProfileOutput,
+    calls: &CallIndex<'_>,
     evidence: &RuntimeValueEvidence,
     methods: &MethodIndex<'_>,
 ) -> BTreeMap<String, ValueDomain> {
@@ -2393,7 +2486,7 @@ fn observed_receiver_domains(
             "parameter" => {
                 for method in methods.locate_scope(&observation.scope) {
                     seed_method_slot(
-                        output,
+                        calls,
                         method,
                         &observation.slot,
                         &observation.domain,
@@ -2405,7 +2498,7 @@ fn observed_receiver_domains(
                 let candidates = methods.locate_scope(&observation.scope);
                 for method in candidates {
                     seed_method_slot(
-                        output,
+                        calls,
                         method,
                         &observation.slot,
                         &observation.domain,
@@ -2426,7 +2519,7 @@ fn observed_receiver_domains(
                         })
                     {
                         seed_method_slot(
-                            output,
+                            calls,
                             method,
                             &observation.slot,
                             &observation.domain,
@@ -2442,9 +2535,7 @@ fn observed_receiver_domains(
                         && call.receiver.trim_start_matches('@') == slot
                         && (observation.scope.owner.is_empty()
                             || call.owner == observation.scope.owner
-                            || call
-                                .owner
-                                .ends_with(&format!("::{}", observation.scope.owner)))
+                            || nested_under(&call.owner, &observation.scope.owner))
                 }) {
                     merge_domain(
                         domains.entry(call.id.clone()).or_default(),
@@ -2459,23 +2550,23 @@ fn observed_receiver_domains(
 }
 
 fn seed_method_slot(
-    output: &ProfileOutput,
+    calls: &CallIndex<'_>,
     method: &MethodRecord,
     slot: &str,
     domain: &ValueDomain,
     domains: &mut BTreeMap<String, ValueDomain>,
 ) {
-    for call in output
-        .calls
+    for call in calls
+        .from_source(&method.id)
         .iter()
-        .filter(|call| call.source == method.id && call.receiver == slot)
+        .filter(|call| call.receiver == slot)
     {
         merge_domain(domains.entry(call.id.clone()).or_default(), domain);
     }
 }
 
 fn match_observed_calls(
-    output: &ProfileOutput,
+    calls: &CallIndex<'_>,
     evidence: &RuntimeValueEvidence,
     methods: &MethodIndex<'_>,
 ) -> BTreeMap<String, Vec<SemanticTarget>> {
@@ -2484,7 +2575,7 @@ fn match_observed_calls(
         if observed.targets.is_empty() {
             continue;
         }
-        for call in matched_profile_calls(output, methods, observed) {
+        for call in matched_profile_calls(calls, methods, observed) {
             let entry = selected.entry(call.id.clone()).or_default();
             entry.extend(observed.targets.clone());
             sort_dedup_targets(entry);
@@ -2494,14 +2585,14 @@ fn match_observed_calls(
 }
 
 fn matched_observed_value_domains(
-    output: &ProfileOutput,
+    calls: &CallIndex<'_>,
     evidence: &RuntimeValueEvidence,
     methods: &MethodIndex<'_>,
 ) -> (BTreeMap<String, ValueDomain>, BTreeMap<String, ValueDomain>) {
     let mut receivers = BTreeMap::<String, ValueDomain>::new();
     let mut results = BTreeMap::<String, ValueDomain>::new();
     for observed in &evidence.calls {
-        for call in matched_profile_calls(output, methods, observed) {
+        for call in matched_profile_calls(calls, methods, observed) {
             if let Some(domain) = &observed.receiver_domain {
                 merge_domain(receivers.entry(call.id.clone()).or_default(), domain);
             }
@@ -2519,6 +2610,7 @@ fn matched_observed_value_domains(
 /// that produced both results stays unclassified rather than being guessed.
 fn runtime_capability_narrowed_domains(
     output: &ProfileOutput,
+    calls: &CallIndex<'_>,
     evidence: &RuntimeValueEvidence,
     methods: &MethodIndex<'_>,
     receiver_domains: &BTreeMap<String, ValueDomain>,
@@ -2531,7 +2623,7 @@ fn runtime_capability_narrowed_domains(
             if observed.result_truths.len() != 1 {
                 continue;
             }
-            if !matched_profile_calls(output, methods, observed)
+            if !matched_profile_calls(calls, methods, observed)
                 .iter()
                 .any(|call| call.id == guard.condition_call_id)
             {
@@ -2667,26 +2759,17 @@ fn runtime_truthiness_narrowed_domains(
 }
 
 fn matched_profile_calls<'a>(
-    output: &'a ProfileOutput,
+    calls: &CallIndex<'a>,
     methods: &MethodIndex<'_>,
     observed: &ObservedCall,
 ) -> Vec<&'a CallRecord> {
     if let Some(call_id) = observed.call_id.as_deref() {
-        return output
-            .calls
-            .iter()
-            .filter(|call| call.id == call_id)
-            .collect();
+        return calls.with_id(call_id).to_vec();
     }
     let mut candidates = methods
         .locate(&observed.caller)
         .into_iter()
-        .flat_map(|caller| {
-            output
-                .calls
-                .iter()
-                .filter(move |call| call.source == caller.id)
-        })
+        .flat_map(|caller| calls.from_source(&caller.id).iter().copied())
         .filter(|call| call.message == observed.callsite.selector)
         .filter(|call| path_matches(&call.path, &observed.callsite.path))
         .collect::<Vec<_>>();
@@ -2713,10 +2796,10 @@ fn matched_profile_calls<'a>(
     // statically-known receiver when it conflicts with the observed runtime
     // domain. This is generic CFG/DFG joining, not a language-specific stack
     // heuristic.
-    let mut fallback = output
-        .calls
+    let mut fallback = calls
+        .with_message(&observed.callsite.selector)
         .iter()
-        .filter(|call| call.message == observed.callsite.selector)
+        .copied()
         .filter(|call| path_matches(&call.path, &observed.callsite.path))
         .collect::<Vec<_>>();
     if let Some(range) = observed.callsite.range {
@@ -3402,18 +3485,45 @@ fn normalized_document_path(path: &str) -> String {
         .unwrap_or(path)
 }
 
+/// Path comparison treats the two separators as one. Every join filter runs
+/// through here, so it reads the bytes in place rather than building four
+/// normalized copies per comparison.
+fn separator_normalized(byte: u8) -> u8 {
+    if byte == b'\\' {
+        b'/'
+    } else {
+        byte
+    }
+}
+
+fn path_bytes_eq(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| separator_normalized(*left) == separator_normalized(*right))
+}
+
+/// Whether `whole` ends with a separator followed by `tail`.
+fn path_ends_with_segment(whole: &[u8], tail: &[u8]) -> bool {
+    whole.len() > tail.len()
+        && separator_normalized(whole[whole.len() - tail.len() - 1]) == b'/'
+        && path_bytes_eq(&whole[whole.len() - tail.len()..], tail)
+}
+
 fn path_matches(left: &str, right: &str) -> bool {
-    let left = left.replace('\\', "/");
-    let right = right.replace('\\', "/");
-    left == right || left.ends_with(&format!("/{right}")) || right.ends_with(&format!("/{left}"))
+    let (left, right) = (left.as_bytes(), right.as_bytes());
+    path_bytes_eq(left, right)
+        || path_ends_with_segment(left, right)
+        || path_ends_with_segment(right, left)
 }
 
 fn runtime_owner_matches(observed: &str, expected: &str) -> bool {
     !observed.is_empty()
         && !expected.is_empty()
         && (observed == expected
-            || observed.ends_with(&format!("::{expected}"))
-            || expected.ends_with(&format!("::{observed}")))
+            || nested_under(observed, expected)
+            || nested_under(expected, observed))
 }
 
 fn domain_from_type_source(source: &str, language: &str) -> ValueDomain {
@@ -3493,7 +3603,17 @@ fn domain_from_type_expr(
     }
 }
 
-fn merge_domain(target: &mut ValueDomain, source: &ValueDomain) {
+/// Reports whether the target grew. A merge only ever adds alternatives, so
+/// counting them is an exact change test -- which lets a fixpoint stop on "no
+/// alternative was added" instead of cloning and comparing the whole map on
+/// every round.
+fn merge_domain(target: &mut ValueDomain, source: &ValueDomain) -> bool {
+    let before = target.types.len()
+        + target.singletons.len()
+        + target.elements.len()
+        + target.keys.len()
+        + target.values.len()
+        + target.shapes.len();
     target.types.extend(source.types.iter().cloned());
     target.singletons.extend(source.singletons.iter().cloned());
     target.elements.extend(source.elements.iter().cloned());
@@ -3504,6 +3624,13 @@ fn merge_domain(target: &mut ValueDomain, source: &ValueDomain) {
             target.shapes.push(shape.clone());
         }
     }
+    before
+        != target.types.len()
+            + target.singletons.len()
+            + target.elements.len()
+            + target.keys.len()
+            + target.values.len()
+            + target.shapes.len()
 }
 
 fn joined_domain(domains: &[&ValueDomain]) -> Option<ValueDomain> {
@@ -6008,7 +6135,8 @@ end
         .expect("evidence");
 
         let methods = MethodIndex::new(&output.methods);
-        let seeded = observed_receiver_domains(&output, &evidence, &methods);
+        let call_index = CallIndex::new(&output.calls);
+        let seeded = observed_receiver_domains(&output, &call_index, &evidence, &methods);
         let provider_call = output
             .calls
             .iter()
