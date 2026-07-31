@@ -770,7 +770,6 @@ RSpec.describe "NilKill coverage hardening" do
       File.write(described_class::TRACE_PLAN_PATH, JSON.dump(plan))
 
       expect(described_class.trace_plan).to eq(plan)
-      expect(described_class.sample_tlet?(file, 40)).to be(true)
       expect(described_class.sample_struct_field?("Models::User", "name")).to be(true)
       expect(described_class.sample_struct_field?("Models::User", "missing")).to be(true)
       expect(described_class.sample_struct_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)

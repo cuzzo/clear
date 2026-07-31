@@ -187,9 +187,11 @@ static int vd_is_collection(VALUE value) {
 }
 
 static VALUE vd_abs_path(VALUE path);
+static VALUE vd_class_name(VALUE value);
 
 VALUE nk_abs_path(VALUE path) { return vd_abs_path(path); }
 VALUE nk_root_path(void) { return root_path; }
+VALUE nk_type_name(VALUE value) { return vd_class_name(value); }
 VALUE nk_guard(VALUE (*fn)(VALUE), VALUE arg, VALUE fallback) { return vd_guard(fn, arg, fallback); }
 
 static VALUE vd_abs_path(VALUE path) {

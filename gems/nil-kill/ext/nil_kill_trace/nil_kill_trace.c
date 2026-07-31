@@ -19,6 +19,7 @@
 #include <ruby/debug.h>
 #include <ruby/st.h>
 
+#include "declarations.h"
 #include "identity.h"
 #include "value_domain.h"
 
@@ -1164,6 +1165,7 @@ void Init_nil_kill_trace(void) {
     rb_define_singleton_method(mod, "reset", nk_reset, 0);
     nk_value_domain_init(mod);
     nk_identity_init(mod);
+    nk_declarations_init(mod);
 
     path_cache = st_init_numtable();
     demand = st_init_numtable();

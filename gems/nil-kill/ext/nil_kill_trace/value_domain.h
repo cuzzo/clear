@@ -15,5 +15,6 @@ VALUE nk_value_domain(VALUE value);
 VALUE nk_abs_path(VALUE path);
 VALUE nk_root_path(void);
 VALUE nk_guard(VALUE (*fn)(VALUE), VALUE arg, VALUE fallback);
+VALUE nk_type_name(VALUE value);
 
 #endif

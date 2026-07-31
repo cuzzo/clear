@@ -31,7 +31,6 @@ module NilKillRuntimeTrace
   ELEMENT_SAMPLE = ENV.fetch("NIL_KILL_ELEMENT_SAMPLE", "20").to_i
   TRACE_PARAM_CLASSES = ENV.fetch("NIL_KILL_TRACE_PARAM_CLASSES", "String,Symbol").split(",").map(&:strip).reject(&:empty?).to_set
 
-  @tlets = {}
   @structs = {}
   @ivar_runtime = {}
   @runtime_state_values = {}
@@ -114,7 +113,6 @@ module NilKillRuntimeTrace
   @ctsk = {}
   @cls_name = {}
   @sampled_tstruct_fields = {}
-  @tlet_site_decisions = {}
   @trace_plan_loaded = false
   @trace_plan = nil
   @lock = Mutex.new
@@ -136,12 +134,6 @@ module NilKillRuntimeTrace
     @trace_plan
   rescue JSON::ParserError
     @trace_plan = nil
-  end
-
-  def self.sample_tlet?(path, line)
-    plan = trace_plan
-    return true unless plan
-    plan.dig("tlets", [abs_path(path), line].join("\0")) == true
   end
 
   def self.sample_struct_field?(klass_name, field)
@@ -726,58 +718,6 @@ module NilKillRuntimeTrace
     end
     return nil if frames.empty?
     "#{frames.join("|")}:#{cls}"
-  end
-
-  def self.install_tlet_hook
-    return unless defined?(T) && T.respond_to?(:let)
-    return if T.singleton_class.method_defined?(:__nil_kill_orig_let)
-    original_location = T.method(:let).source_location
-    T.singleton_class.alias_method(:__nil_kill_orig_let, :let)
-    T.singleton_class.define_method(:let) do |value, type, **kw|
-      loc = caller_locations(1, 1)&.first
-      if loc
-        raw = loc.absolute_path || loc.path
-        by_line = NilKillRuntimeTrace.tlet_site_decisions_for(raw)
-        decision = by_line[loc.lineno]
-        if decision.nil?
-          decision = false
-          if NilKillRuntimeTrace.target_path?(raw)
-            path = File.expand_path(raw, ROOT)
-            decision = [path, loc.lineno].freeze if
-              NilKillRuntimeTrace.sample_tlet?(path, loc.lineno)
-          end
-          NilKillRuntimeTrace.store_tlet_site_decision(by_line, loc.lineno, decision)
-        end
-        if decision
-          NilKillRuntimeTrace.with_collection_hooks_disabled do
-            NilKillRuntimeTrace.lock.synchronize do
-              rec = (NilKillRuntimeTrace.tlets[decision] ||= { calls: 0, classes: NKSet.new })
-              rec[:calls] += 1
-              rec[:classes] << NilKillRuntimeTrace.class_name(value)
-            end
-          end
-        end
-      end
-      T.send(:__nil_kill_orig_let, value, type, **kw)
-    end
-    register_runtime_scip_transparent_wrapper(
-      T.singleton_class,
-      :let,
-      owner: "T",
-      name: "let",
-      kind: "class",
-      native: false,
-      path: original_location&.first,
-      line: original_location&.last
-    )
-  end
-
-  def self.tlet_site_decisions_for(path)
-    @tlet_site_decisions[path] ||= {}
-  end
-
-  def self.store_tlet_site_decision(by_line, line, decision)
-    ORIG_HASH_STORE.bind_call(by_line, line, decision)
   end
 
   def self.install_struct_hook
@@ -1427,11 +1367,6 @@ module NilKillRuntimeTrace
     FileUtils.mkdir_p(OUT_DIR)
     pid = Process.pid
     dump_native_runtime_scip(pid) if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
-    File.open(File.join(OUT_DIR, "tlets-#{pid}.jsonl"), "w") do |file|
-      @tlets.each do |(path, line), rec|
-        file.puts JSON.generate(path: path, line: line, calls: rec[:calls], classes: rec[:classes].to_a.sort)
-      end
-    end
     File.open(File.join(OUT_DIR, "structs-#{pid}.jsonl"), "w") do |file|
       @structs.each do |(klass, field, path, line), rec|
         file.puts JSON.generate(
@@ -1480,6 +1415,14 @@ module NilKillRuntimeTrace
           key_shapes: rec[:key_shapes].to_a.sort.map { |shape| shape_payload(shape) },
           value_shapes: rec[:value_shapes].to_a.sort.map { |shape| shape_payload(shape) },
           mutation_sites: rec[:mutation_sites].sort_by { |site, count| [-count, site.to_s] }.to_h,
+        )
+      end
+    end
+    File.open(File.join(OUT_DIR, "tlets-#{pid}.jsonl"), "w") do |file|
+      NilKillTraceNative.tlet_observations.each do |row|
+        file.puts JSON.generate(
+          path: row.fetch(:path), line: row.fetch(:line),
+          calls: row.fetch(:calls), classes: row.fetch(:classes)
         )
       end
     end
@@ -1585,22 +1528,25 @@ require_relative "languages/providers/ruby/runtime_scip_native"
 
 if ENV["NIL_KILL_TRACE"] == "1"
   NilKillRuntimeTrace.start_coverage!
-  # Every per-event observation is the native collector's. What remains in Ruby
-  # are declaration-time hooks -- Struct.new, Data.define, T.let, container
-  # mutation -- which run once per definition or per mutation, not per VM event.
+  # The collector owns every per-event observation and the declaration hooks
+  # that are already native, so it is loaded whether or not runtime SCIP is on.
+  NilKillRuntimeTrace.require_native_scip!
   NilKillRuntimeTrace.install_native_runtime_scip_trace if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
   begin
     require "sorbet-runtime"
   rescue LoadError
     nil
   end
-  NilKillRuntimeTrace.install_tlet_hook
+  NilKillTraceNative.configure_tlet_sites(Hash(NilKillRuntimeTrace.trace_plan&.fetch("tlets", nil)))
+  NilKillTraceNative.install_tlet_hook
   NilKillRuntimeTrace.install_struct_hook
   NilKillRuntimeTrace.install_data_hook
   NilKillRuntimeTrace.install_open_struct_hook
   NilKillRuntimeTrace.install_tstruct_hook
   NilKillRuntimeTrace.install_collection_hook unless ENV["NIL_KILL_TRACE_COLLECTIONS"] == "0"
-  TracePoint.new(:end) { NilKillRuntimeTrace.install_tlet_hook }.enable
+  # Sorbet may be required after the collector starts, so `T` is looked for
+  # again whenever a class or module body finishes.
+  TracePoint.new(:end) { NilKillTraceNative.install_tlet_hook }.enable
   TracePoint.new(:end) do
     NilKillRuntimeTrace.install_data_hook
   end.enable
