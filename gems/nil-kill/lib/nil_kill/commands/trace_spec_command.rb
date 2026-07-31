@@ -3,7 +3,13 @@
 
 module NilKill
   module Commands
+    # The wire format a runtime tracer must produce. Nothing in this repository
+    # consumes it any more -- FactMine collects Ruby through the C extension --
+    # so this is a specification for an implementer, not a contract with a
+    # reader here.
     class TraceSpecCommand
+      AUTHORITY = "runtime-modeled-world"
+
       def initialize(_argv)
       end
 
@@ -24,12 +30,12 @@ module NilKill
           "optional_events" => %w[method_raise return_observed field_observed collection_observed hash_shape_observed call_edge runtime_call branch_observed type_assertion_observed nil_guard_observed],
           "runtime_scip" => {
             "event" => "runtime_call",
-            "authority" => Runtime::ScipEmitter::AUTHORITY,
+            "authority" => AUTHORITY,
             "required_fields" => %w[schema_version event language run_id caller callsite callee count],
             "caller_fields" => %w[class method kind path line],
             "callsite_fields" => %w[path line],
             "callee_fields" => %w[owner name kind path line native receiver_type package_manager package version],
-            "scip_tool_argument" => Runtime::ScipEmitter::AUTHORITY_ARGUMENT,
+            "scip_tool_argument" => "--fact-mine-index-authority=#{AUTHORITY}",
           },
           "runtime_type" => {
             "fields" => %w[name kind nullable language display confidence members],

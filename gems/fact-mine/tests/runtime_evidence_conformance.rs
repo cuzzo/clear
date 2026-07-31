@@ -141,7 +141,7 @@ struct BoundaryCase {
 }
 
 fn conformance_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../protocol/runtime-evidence/v1/conformance")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/runtime-evidence/v1/conformance")
 }
 
 fn load_catalog() -> Catalog {

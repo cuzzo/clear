@@ -31,8 +31,6 @@ RSpec.describe "NilKill coverage hardening" do
     it "dispatches supported subcommands to their command objects" do
       cases = [
         ["static", NilKill::Commands::StaticCommand],
-        ["collect-runtime", NilKill::Commands::CollectRuntimeCommand],
-        ["collect-python", NilKill::Commands::CollectPythonCommand],
         ["normalize", NilKill::Commands::NormalizeCommand],
         ["analyze", NilKill::Commands::AnalyzeCommand],
         ["trace-spec", NilKill::Commands::TraceSpecCommand],
@@ -177,54 +175,6 @@ RSpec.describe "NilKill coverage hardening" do
 
   end
 
-  describe NilKill::Commands::CollectRuntimeCommand do
-    it "parses options and delegates to the requested language provider" do
-      provider = instance_double(NilKill::Languages::Provider)
-      expect(NilKill::Languages).to receive(:provider_for).with("python").and_return(provider)
-      allow(provider).to receive(:runtime_capabilities).and_return({})
-      expect(provider).to receive(:collect_runtime).with(
-        argv: ["--", "pytest"],
-        root: File.expand_path("."),
-        output: File.expand_path("tmp/runtime", NilKill::ROOT),
-        targets: ["app", "lib"],
-        append: true
-      )
-
-      described_class.new([
-        "--language=python",
-        "--output", "tmp/runtime",
-        "--target", "app",
-        "--target=lib",
-        "--append-runtime",
-        "--", "pytest",
-      ]).run
-    end
-
-    it "emits SCIP only for providers that implement runtime call tracing" do
-      provider = instance_double(
-        NilKill::Languages::Provider,
-        runtime_capabilities: { "runtime_scip_calls" => true }
-      )
-      allow(NilKill::Languages).to receive(:provider_for).and_return(provider)
-      allow(provider).to receive(:collect_runtime)
-      emitted = { "index" => "/tmp/runtime.scip.json" }
-      expect(NilKill::Runtime::ScipEmitter).to receive(:emit).and_return(emitted)
-
-      out, = capture_io do
-        described_class.new(["--language", "ruby", "--", "ruby", "workload.rb"]).run
-      end
-
-      expect(out).to include("/tmp/runtime.scip.json")
-    end
-
-    it "turns unsupported runtime tracers into a user-facing abort" do
-      provider = instance_double(NilKill::Languages::Provider)
-      allow(NilKill::Languages).to receive(:provider_for).and_return(provider)
-      allow(provider).to receive(:collect_runtime).and_raise(NilKill::Languages::UnsupportedRuntimeTracer, "no tracer")
-
-      expect { capture_io { described_class.new(["--language", "go", "--", "go", "test"]).run } }.to raise_error(SystemExit)
-    end
-  end
 
   describe NilKill::Commands::AnalyzeCommand do
     it "requires normalized v2 evidence and writes analyzed actions" do
@@ -248,14 +198,6 @@ RSpec.describe "NilKill coverage hardening" do
     end
   end
 
-  describe NilKill::Commands::CollectPythonCommand do
-    it "is a python-specific wrapper around collect-runtime" do
-      runner = instance_double(NilKill::Commands::CollectRuntimeCommand, run: true)
-      expect(NilKill::Commands::CollectRuntimeCommand).to receive(:new).with(["--language", "python", "--", "pytest"]).and_return(runner)
-
-      described_class.new(["--", "pytest"]).run
-    end
-  end
 
   describe NilKill::Commands::TraceSpecCommand do
     it "publishes the runtime event schema and current language capabilities" do
@@ -266,44 +208,6 @@ RSpec.describe "NilKill coverage hardening" do
     end
   end
 
-  describe NilKill::Languages::Providers::Python do
-    it "builds a Python tracing environment and honors append mode" do
-      provider = described_class.new
-
-      Dir.mktmpdir do |dir|
-        output = File.join(dir, "trace")
-        FileUtils.mkdir_p(output)
-        stale = File.join(output, "old.jsonl")
-        File.write(stale, "old")
-
-        expect(provider).to receive(:system) do |env, *cmd, chdir:|
-          expect(env).to include(
-            "NIL_KILL_PY_TRACE" => "1",
-            "NIL_KILL_PY_TRACE_OUT" => output,
-            "NIL_KILL_TRACE_ROOT" => dir,
-          )
-          expect(env["NIL_KILL_TARGETS"].split(File::PATH_SEPARATOR)).to eq([File.join(dir, "src")])
-          expect(env["PYTHONPATH"]).to include("gems/nil-kill/lib")
-          expect(cmd).to eq(["python", "-m", "pytest"])
-          expect(chdir).to eq(dir)
-          true
-        end
-
-        out, = capture_io do
-          provider.collect_runtime(
-            argv: ["--", "python", "-m", "pytest"],
-            root: dir,
-            output: output,
-            targets: ["src"],
-            append: false
-          )
-        end
-
-        expect(File).not_to exist(stale)
-        expect(out).to include("wrote Python trace events")
-      end
-    end
-  end
 
   describe NilKill::HashShapeOps do
     it "deep-copies, merges, stringifies, and preserves poisoned shapes" do

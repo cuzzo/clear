@@ -3,7 +3,6 @@
 
 module NilKill
   module Languages
-    class UnsupportedRuntimeTracer < StandardError; end
 
     class Provider
       def language
@@ -98,69 +97,15 @@ module NilKill
         }
       end
 
-      def collect_runtime(argv:, root:, output:, targets:, append: false)
-        raise UnsupportedRuntimeTracer, "#{display_name} does not have a Nil-Kill runtime tracer provider"
-      end
 
-      # Opaque semantic-environment claims attached to runtime SCIP output.
-      # Language and package-manager discovery belongs in providers; the
-      # shared SCIP encoder only records and hashes supplied values.
-      def runtime_scip_environment(root:)
-        {}
-      end
 
-      # Mechanically decode one tracer-owned call event into the neutral
-      # runtime-evidence call shape. Package/symbol grammar and source-language
-      # naming conventions belong to the provider.
-      def runtime_scip_call_evidence(event:, root:)
-        raise UnsupportedRuntimeTracer,
-          "#{display_name} does not implement runtime call evidence decoding"
-      end
 
-      # Decoding a whole trace at once. A provider that can do it in one pass
-      # overrides this; the rest are asked one event at a time.
-      def runtime_scip_call_evidence_batch(events:, root:)
-        events.map { |event| runtime_scip_call_evidence(event: event, root: root) }
-      end
 
-      # Serialize tracer-owned value observations into the shared FactMine
-      # runtime evidence contract. Providers may decode their own trace storage
-      # here, but must not inspect source or infer flow relationships.
-      def runtime_value_observations(runtime_dir:, root:)
-        []
-      end
 
-      # Language-owned serialization of native runtime identities into
-      # canonical SCIP symbols. Shared protocol code treats these as opaque.
-      def runtime_evidence_type_symbol(type)
-        raise UnsupportedRuntimeTracer,
-          "#{display_name} does not implement runtime type SCIP identities"
-      end
 
-      def runtime_evidence_singleton_symbol(type)
-        raise UnsupportedRuntimeTracer,
-          "#{display_name} does not implement runtime singleton SCIP identities"
-      end
 
-      def runtime_evidence_provenance
-        {
-          "provider" => "#{language}-runtime",
-          "provider_version" => "1",
-        }
-      end
 
-      # Stable digest of source semantics that can affect runtime evidence.
-      # Providers may ignore representation-only edits, but must fall back to
-      # content hashing whenever they cannot prove such an edit irrelevant.
-      def runtime_incremental_fingerprint(path)
-        Digest::SHA256.file(path).hexdigest
-      end
 
-      # Optional language-owned test discovery/command sharding. Returning nil
-      # preserves the supplied commands as opaque, correctness-first shards.
-      def runtime_test_plan(root:, targets:, commands:)
-        nil
-      end
 
       def return_type_index(root:)
         nil

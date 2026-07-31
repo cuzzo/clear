@@ -17,8 +17,6 @@ module NilKill
       when "collect" then collect
       when "infer" then guard_fresh_runtime!; Infer.new(@argv).run
       when "static" then Commands::StaticCommand.new(@argv).run
-      when "collect-runtime" then Commands::CollectRuntimeCommand.new(@argv).run
-      when "collect-python" then Commands::CollectPythonCommand.new(@argv).run
       when "normalize" then Commands::NormalizeCommand.new(@argv).run
       when "analyze" then Commands::AnalyzeCommand.new(@argv).run
       when "trace-spec" then Commands::TraceSpecCommand.new(@argv).run

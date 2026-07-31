@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let protocol_dir = manifest_dir.join("../../protocol/runtime-evidence/v1");
+    let protocol_dir = manifest_dir.join("../protocol/runtime-evidence/v1");
     let protocol = protocol_dir.join("runtime_evidence.proto");
     println!("cargo:rerun-if-changed={}", protocol.display());
     protobuf_codegen::Codegen::new()

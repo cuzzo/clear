@@ -214,7 +214,7 @@ evidence contract, flow propagation, snapshot merge, and SCIP emission are
 language-neutral.
 
 Runtime Big-O evidence has one canonical v1 Protobuf contract at
-`protocol/runtime-evidence/v1/runtime_evidence.proto`. FactMine first emits an
+`gems/protocol/runtime-evidence/v1/runtime_evidence.proto`. FactMine first emits an
 exact trace plan. NilKill consumes that plan and records a capture status and
 correlated value/target bucket for every requested anchor. FactMine rebuilds
 the plan from the analyzed source, validates both digests and the complete

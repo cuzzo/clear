@@ -427,7 +427,7 @@ repository-level metric mystery.
 ## Implementation layout
 
 ```text
-protocol/runtime-evidence/v1/
+gems/protocol/runtime-evidence/v1/
   runtime_evidence.proto
   conformance/
 

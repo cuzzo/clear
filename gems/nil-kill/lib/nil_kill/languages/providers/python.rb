@@ -67,34 +67,9 @@ module NilKill
           ["annotation parsing is Tree-sitter static evidence; no Python type-checker backend is wired yet"]
         end
 
-        def collect_runtime(argv:, root:, output:, targets:, append: false)
-          split = argv.index("--")
-          abort "usage: nil-kill collect-runtime --language python [--root DIR] [--target PATH] [--output DIR] -- <python test command...>" unless split
-
-          command = argv[(split + 1)..]
-          abort "collect-runtime --language python requires a command after --" if command.empty?
-
-          FileUtils.rm_rf(output) unless append
-          FileUtils.mkdir_p(output)
-          ok = system(runtime_env(root: root, output: output, targets: targets), *command, chdir: root)
-          exit($?&.exitstatus || 1) unless ok
-          puts "wrote Python trace events to #{output}"
-        end
 
         private
 
-        def runtime_env(root:, output:, targets:)
-          lib_dir = File.expand_path("../../..", __dir__)
-          pythonpath = [lib_dir, ENV["PYTHONPATH"]].compact.reject(&:empty?).join(File::PATH_SEPARATOR)
-          abs_targets = targets.map { |target| File.expand_path(target, root) }.join(File::PATH_SEPARATOR)
-          ENV.to_h.merge(
-            "NIL_KILL_PY_TRACE" => "1",
-            "NIL_KILL_PY_TRACE_OUT" => output,
-            "NIL_KILL_TRACE_ROOT" => root,
-            "NIL_KILL_TARGETS" => abs_targets,
-            "PYTHONPATH" => pythonpath
-          )
-        end
       end
     end
   end

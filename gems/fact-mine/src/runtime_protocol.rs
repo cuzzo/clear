@@ -1247,7 +1247,7 @@ mod tests {
     fn conformance_fixture(name: &str) -> String {
         fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../protocol/runtime-evidence/v1/conformance")
+                .join("../protocol/runtime-evidence/v1/conformance")
                 .join(name),
         )
         .expect("shared runtime protocol conformance fixture")

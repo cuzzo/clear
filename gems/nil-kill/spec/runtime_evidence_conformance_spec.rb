@@ -6,6 +6,7 @@ require_relative "spec_helper"
 RSpec.describe "runtime evidence v1 shared executable conformance" do
   CONFORMANCE_ROOT = File.join(
     NilKill::ROOT,
+    "gems",
     "protocol",
     "runtime-evidence",
     "v1",
@@ -644,51 +645,6 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
     end
   end
 
-  it "wire oracle: every declared value shape and source role round-trips canonically" do
-    provider = NilKill::Languages.provider_for("ruby")
-    domains = {
-      "sequence" => {
-        "types" => ["Array"],
-        "shapes" => [{ "kind" => "array", "elements" => ["String"] }],
-      },
-      "mapping" => {
-        "types" => ["Hash"],
-        "shapes" => [{ "kind" => "hash", "keys" => ["Symbol"], "values" => ["String"] }],
-      },
-      "record" => {
-        "types" => ["Record"],
-        "shapes" => [{ "kind" => "record", "name" => "Record", "members" => { "id" => "Integer" } }],
-      },
-      "tuple" => {
-        "types" => ["Array"],
-        "shapes" => [{ "kind" => "tuple", "elements" => ["String", "Integer"] }],
-      },
-    }
-    wire_fields = {
-      "sequence" => "sequence",
-      "mapping" => "mapping",
-      "record" => "record",
-      "tuple" => "tuple",
-    }
-    catalog.dig("wire_matrix", "value_shapes").each do |shape|
-      value_set = NilKill::Runtime::EvidenceProtocol.value_set(
-        domains.fetch(shape),
-        count: 1,
-        provider: provider
-      )
-      expect(value_set.dig("alternatives", 0, "value"))
-        .to have_key(wire_fields.fetch(shape))
-    end
-    catalog.dig("wire_matrix", "source_roles").each do |source_role|
-      value_set = NilKill::Runtime::EvidenceProtocol.value_set(
-        { "types" => ["Object"] },
-        count: 1,
-        provider: provider,
-        source_role: source_role
-      )
-      expect(value_set.dig("alternatives", 0, "value", "source_role")).to eq(source_role)
-    end
-  end
 
   it "generic invariant: every requested kind is complete or has a precise fail-closed explanation" do
     requests = @collector.fetch(:plan).fetch("requests").to_h do |request|
@@ -916,15 +872,23 @@ RSpec.describe "runtime evidence v1 shared executable conformance" do
   it "end-to-end oracle: source, plan, real trace, validation, and FactMine join agree" do
     output = File.join(NilKill::TMP_DIR, "runtime-conformance.scip.json")
     FileUtils.mkdir_p(File.dirname(output))
-    result = NilKill::Runtime::ScipEmitter.emit(
-      root: NilKill::ROOT,
-      runtime_dir: @collector.fetch(:runtime_dir),
-      output: output,
-      files: [@collector.fetch(:source), *@collector.fetch(:support)],
-      value_evidence_path: @collector.fetch(:evidence_path),
-      plan: @collector.fetch(:plan)
+    plan_file = Tempfile.new(["conformance-plan", ".json"])
+    plan_file.write(JSON.generate(@collector.fetch(:plan)))
+    plan_file.close
+    attestation = File.join(NilKill::TMP_DIR, "runtime-conformance-attestation.json.gz")
+    _out, stderr, status = Open3.capture3(
+      Espalier::StaticEvidence::FACT_MINE_RUST_BINARY,
+      "nil-kill-scip-index",
+      "--root", NilKill::ROOT,
+      "--runtime-dir", @collector.fetch(:runtime_dir),
+      "--evidence", @collector.fetch(:evidence_path),
+      "--plan", plan_file.path,
+      "--output", output,
+      "--attestation", attestation
     )
-    index = JSON.parse(File.read(result.fetch("index")))
+    plan_file.unlink
+    expect(status).to be_success, stderr
+    index = JSON.parse(File.read(output))
     occurrences = index.fetch("documents").flat_map do |document|
       document.fetch("occurrences").map do |occurrence|
         [document.fetch("relativePath"), occurrence.fetch("range"), occurrence.fetch("symbol")]
