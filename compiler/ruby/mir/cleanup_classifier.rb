@@ -959,6 +959,14 @@ module CleanupClassifier
       entry = entry(:resource, resource_close_plan: schema.close_plan)
     end
 
+    # A tuple is a structural product with no schema, so unlike a named struct
+    # it has no generated __clear_drop and a :uniform entry hands it to
+    # CheatLib.cleanup's structural walk, which frees every []const u8 field.
+    # That walk is only sound while every slice element is owned. A symbol or
+    # borrowed element breaks it -- symbols are interned rodata and are never
+    # duped into owned storage -- so those tuples must clean per element, which
+    # is the one classifier that knows which elements own anything.
+    entry ||= classify_structural_product(ti, schema_lookup) if tuple_with_borrowed_element?(ti)
     entry ||= entry(:uniform, has_moved_guard: false) if ti.tense_observable? && !ti.promise_list?
     if !entry && ti.frozen?
       entry = entry(:frozen, has_moved_guard: false)
@@ -995,6 +1003,13 @@ module CleanupClassifier
     finalized = finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
     finalized&.set_lifecycle_plan!(lifecycle) if lifecycle
     finalized
+  end
+
+  sig { params(ti: Type).returns(T::Boolean) }
+  private_class_method def self.tuple_with_borrowed_element?(ti)
+    return false unless ti.tuple?
+
+    ti.generic_args.any? { |arg| arg.symbol? || arg.borrowed_reference? }
   end
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
