@@ -115,24 +115,33 @@ siblings are called from Ruby today and are fine, so what crashes is something
 only the C bootstrap does: resolving the layout, parsing the plan, or building
 the demand tables.
 
-Two candidates were considered. A truncated VALUE from an undeclared function
-would produce exactly this backtrace, but every API the bootstrap used --
-`rb_str_split`, `rb_set_end_proc`, `rb_postponed_job_register_one`, `rb_eql`,
-`rb_ary_sort`, `rb_str_plus` -- is declared in the 3.2 headers, so that is
-ruled out.
+Two theories were tested and both are wrong, which is worth knowing before a
+third attempt spends time on them:
 
-What remains, and what the next attempt should assume until it is ruled out
-too: the bootstrap kept its layout in `static VALUE`s and called
-`rb_gc_register_address` on them *after* assigning, with allocating calls in
-between. `targets` was the worst -- built by a loop of `File.expand_path` calls
-and only registered once the loop finished. An unregistered static is not a GC
-root; if a collection runs mid-loop the array survives only by luck of
-conservative stack scanning, and a freed VALUE used later is exactly a method
-lookup against a null method table. Register the address before the first
-assignment, or hold the value in a local until it is registered.
+- A truncated VALUE from an undeclared function produces exactly this
+  backtrace, but every API the bootstrap used -- `rb_str_split`,
+  `rb_set_end_proc`, `rb_postponed_job_register_one`, `rb_eql`, `rb_ary_sort`,
+  `rb_str_plus` -- is declared in the 3.2 headers.
+- Unregistered `static VALUE`s across allocating calls would do it too. The
+  bootstrap was rewritten to keep everything in one Hash registered before its
+  first write. It still crashes.
 
-Bisect `nk_bootstrap` by returning early after each step rather than rewriting
-the port; the crash is in the first few.
+Bisecting it (return early after each step, driven by an env var) puts the
+crash in a two-call window, and this is where the next attempt should start:
+
+```
+resolve_layout();                                             // survives
+rb_funcall(mod, rb_intern("value_domain_root="), 1, root);    // one of
+rb_funcall(mod, rb_intern("configure_targets"), 1, targets);  // these two
+```
+
+Both methods are called from Ruby today and are fine, and the arguments come
+out of a registered Hash, so the fault is in calling them *from C at that
+point* rather than in the methods or the values. `nk_set_root` calls
+`rb_gc_register_mark_object`, which is documented for init-time use and is
+being called here from a method invoked during `require`; `nk_configure_targets`
+calls `st_clear` on a table built in `Init`. Either is a plausible next
+suspect, and both are two-line changes to test.
 
 ## How to verify a port
 
