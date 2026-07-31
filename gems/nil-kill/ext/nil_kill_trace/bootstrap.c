@@ -269,8 +269,19 @@ static VALUE dump_body(VALUE unused) {
     rb_hash_aset(document, ID2SYM(rb_intern("run_id")), NIL_P(run_id) ? rb_utf8_str_new_cstr("") : run_id);
     rb_hash_aset(document, ID2SYM(rb_intern("root")), boot_root);
     rb_hash_aset(document, ID2SYM(rb_intern("targets")), boot_targets);
-    rb_hash_aset(document, ID2SYM(rb_intern("ruby_version")),
-                 rb_const_get(rb_cObject, rb_intern("RUBY_VERSION")));
+    // What the runtime was when it observed. The orchestrator has to repeat
+    // these claims from outside the traced program, and a trace whose claims
+    // disagree with them is rejected at merge -- so they come from the VM that
+    // did the observing rather than from whatever happens to be orchestrating.
+    const char *const runtime[] = {"ruby_version", "RUBY_VERSION",
+                                   "ruby_engine", "RUBY_ENGINE",
+                                   "ruby_engine_version", "RUBY_ENGINE_VERSION"};
+    for (size_t i = 0; i < sizeof(runtime) / sizeof(runtime[0]); i += 2) {
+        ID name = rb_intern(runtime[i + 1]);
+        if (!rb_const_defined(rb_cObject, name)) continue;
+
+        rb_hash_aset(document, ID2SYM(rb_intern(runtime[i])), rb_const_get(rb_cObject, name));
+    }
     rb_hash_aset(document, ID2SYM(rb_intern("gem_specs")), loaded_specs());
     rb_hash_aset(document, ID2SYM(rb_intern("default_gem_specs")), default_specs());
     rb_hash_aset(document, ID2SYM(rb_intern("coverage")), coverage_table());
