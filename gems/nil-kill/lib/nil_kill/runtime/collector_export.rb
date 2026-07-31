@@ -15,7 +15,6 @@ module NilKill
     # instead of live collector state.
     class CollectorExport
       RAW_GLOB = "collector-raw-*.json.gz"
-      COLLECTION_KINDS = { "Array" => "array", "Hash" => "hash", "Set" => "set" }.freeze
 
       def self.write(runtime_dir:, plan:, root: NilKill::ROOT)
         anchors = anchors_by_key(plan, root)
@@ -405,41 +404,6 @@ module NilKill
         row[:return_kv] = [domain.fetch(:keys), domain.fetch(:values)]
       end
       row
-    end
-  end
-
-  # A collection observation is keyed by the slot it came from, at that slot's
-  # definition line, which is what FactMine links to a COLLECTION_OPERATION
-  # anchor through its own flow facts. A reader whose result is a collection is
-  # exactly such a slot, and the callee definition site the collector records is
-  # its location.
-  def native_scip_collection_rows
-    table(:records).filter_map do |row|
-      callee = row.fetch(:callee)
-      path = definition_path(callee[:path])
-      owner = callee[:owner]
-      next unless path && owner && callee[:name]
-
-      domain = domain_for(
-        row.fetch(:result_types), row.fetch(:result_domain_indices)
-      )
-      kind = domain.fetch(:types).filter_map { |type| COLLECTION_KINDS[type] }.first
-      next unless kind
-
-      {
-        owner_kind: "struct_field",
-        name: "#{owner}.#{callee[:name]}",
-        path: path,
-        line: callee[:line].to_i,
-        kind: kind,
-        calls: row.fetch(:count),
-        classes: domain.fetch(:types),
-        elem_classes: domain.fetch(:elements),
-        key_classes: domain.fetch(:keys),
-        value_classes: domain.fetch(:values),
-        elem_shapes: [], key_shapes: [], value_shapes: [],
-        mutation_sites: {},
-      }
     end
   end
 

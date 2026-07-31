@@ -30,7 +30,6 @@ module NilKill
          end
   TMP_DIR = File.expand_path(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), ROOT)
   RUNTIME_DIR = File.join(TMP_DIR, "runtime")
-  INSTRUMENTED_DIR = File.join(TMP_DIR, "instrumented")
   EVIDENCE_PATH = File.join(TMP_DIR, "evidence.json")
   REPORT_PATH = File.join(TMP_DIR, "report.md")
   TRACE_PLAN_PATH = File.join(TMP_DIR, "trace-plan.json")

@@ -41,7 +41,7 @@ require_relative "../lib/nil_kill"
 
 module NilKillSpecHelpers
   NIL_KILL_PATH_CONSTANTS = %i[
-    TMP_DIR RUNTIME_DIR INSTRUMENTED_DIR EVIDENCE_PATH REPORT_PATH TRACE_PLAN_PATH SORBET_PAYLOAD_DIR
+    TMP_DIR RUNTIME_DIR EVIDENCE_PATH REPORT_PATH TRACE_PLAN_PATH SORBET_PAYLOAD_DIR
   ].freeze
 
   def reset_nil_kill_tmp_paths!(tmp_dir)
@@ -49,7 +49,6 @@ module NilKillSpecHelpers
     paths = {
       TMP_DIR: File.expand_path(tmp_dir, root),
       RUNTIME_DIR: File.join(File.expand_path(tmp_dir, root), "runtime"),
-      INSTRUMENTED_DIR: File.join(File.expand_path(tmp_dir, root), "instrumented"),
       EVIDENCE_PATH: File.join(File.expand_path(tmp_dir, root), "evidence.json"),
       REPORT_PATH: File.join(File.expand_path(tmp_dir, root), "report.md"),
       TRACE_PLAN_PATH: File.join(File.expand_path(tmp_dir, root), "trace-plan.json"),
