@@ -229,6 +229,20 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
         let Ok(index) = read_index(path) else {
             continue;
         };
+        // A symbol is declared in one file and read in every other, so exported
+        // declarations are collected across the whole index. A local's name is
+        // only unique within its own document, so those stay with it: merging
+        // them would answer one file's question with another file's binding.
+        let exported = index
+            .documents
+            .iter()
+            .flat_map(|document| document.symbols.iter())
+            .filter(|information| !information.symbol.starts_with("local "))
+            .filter_map(|information| {
+                let text = information.signature_documentation.as_ref()?.text.trim();
+                (!text.is_empty()).then(|| (information.symbol.as_str(), text.to_string()))
+            })
+            .collect::<BTreeMap<_, _>>();
         for document in &index.documents {
             let declarations = document
                 .symbols
@@ -244,7 +258,10 @@ pub fn preload_local_binding_types(index_paths: &[PathBuf]) {
                 else {
                     continue;
                 };
-                if let Some(text) = declarations.get(occurrence.symbol.as_str()) {
+                if let Some(text) = declarations
+                    .get(occurrence.symbol.as_str())
+                    .or_else(|| exported.get(occurrence.symbol.as_str()))
+                {
                     signatures
                         .entry((document.relative_path.clone(), line, column))
                         .or_insert_with(|| text.clone());
