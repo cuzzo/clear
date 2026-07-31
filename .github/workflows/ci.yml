@@ -808,6 +808,12 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+      # The corpus is traced by the collector, which is the C extension.
+      - name: Build the collector extension
+        run: |
+          cd gems/nil-kill/ext/nil_kill_trace
+          ruby extconf.rb
+          make
       - run: NIL_KILL_JOBS="$(nproc)" tools/clear-nil-kill-transpile-corpus.sh
         env:
           NO_COLOR: "1"

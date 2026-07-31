@@ -16,6 +16,13 @@ require "digest"
 RSpec.describe "the trace document a shard produces" do
   # A method, not a constant: a constant assigned inside a describe block lands
   # on Object, where another spec file's identically named one overwrites it.
+  # The root the shard was recorded under. The fixture is a real collect, so
+  # every path in it is absolute; shaping it means telling the tools which
+  # prefix to strip. Rewritten to a synthetic root when it was recorded, so no
+  # developer's home directory is committed and the fixture shapes the same
+  # way in every checkout.
+  GOLDEN_ROOT = "/golden/easy-vm"
+
   def fixture
     File.expand_path("fixtures/golden_shard", __dir__)
   end
@@ -65,7 +72,7 @@ RSpec.describe "the trace document a shard produces" do
       plan_path = File.join(dir, "plan.json")
       File.write(plan_path, JSON.generate(plan))
       NilKill::Runtime::DomainDeriver.export(
-        runtime_dirs: [dir], plan: plan_path, source_roles: nil, root: NilKill::ROOT
+        runtime_dirs: [dir], plan: plan_path, source_roles: nil, root: GOLDEN_ROOT
       )
 
       recorded = Dir.glob(File.join(fixture, "input", "*.jsonl.gz"))
@@ -97,11 +104,17 @@ RSpec.describe "the trace document a shard produces" do
       plan_path = File.join(dir, "plan.json")
       File.write(plan_path, JSON.generate(plan))
       NilKill::Runtime::DomainDeriver.trace_documents(
-        runtime_dirs: [dir], plan: plan_path, root: NilKill::ROOT
+        runtime_dirs: [dir], plan: plan_path, root: GOLDEN_ROOT
       )
       built = JSON.parse(Zlib::GzipReader.open(File.join(dir, "runtime-trace.json.gz"), &:read))
 
       expect(built.keys.sort).to eq(expected.keys.sort)
+      # The lockfile claim digests the checkout's own Gemfile.lock, so it says
+      # nothing about the shaping and everything about which machine ran it --
+      # pinning it would fail the golden shard on any dependency bump.
+      live = ->(claims) { claims.reject { |claim| claim["key"].to_s.include?("lockfile") } }
+      built["environment"] = live.call(built["environment"] || [])
+      expected["environment"] = live.call(expected["environment"] || [])
       differing = expected.keys.reject { |field| digest(built[field]) == digest(expected[field]) }
       expect(differing).to be_empty, lambda {
         differing.map { |field| "#{field}: #{first_difference(built[field], expected[field])}" }
