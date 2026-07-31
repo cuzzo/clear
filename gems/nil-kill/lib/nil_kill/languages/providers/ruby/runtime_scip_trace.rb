@@ -7,13 +7,19 @@
 module NilKillRuntimeTrace
   @runtime_package_by_path = {}
   @runtime_generated_wrapper_methods = Set.new
-  # Collector-installed wrappers may be the frame the VM reports even though the
-  # workload invoked the wrapped method. Preserve that raw target identity
-  # without doing any source/call-flow inference.
-  @runtime_transparent_wrapper_targets = {}
 
+  # The collector owns this mapping: it is consulted from inside the observation
+  # hook, once per class and selector, and asking Ruby for it there was the last
+  # thing the hook had to leave the interpreter to do.
+  # A declaration hook runs whether or not the collector was started; with no
+  # collector there is nobody to tell.
   def self.register_runtime_scip_transparent_wrapper(defined_class, method_id, target)
-    @runtime_transparent_wrapper_targets[[defined_class, method_id.to_sym]] = target.freeze
+    return unless defined?(::NilKillTraceNative)
+
+    ::NilKillTraceNative.register_wrapper(
+      defined_class, method_id.to_sym, target[:owner], target[:kind],
+      target[:native], target[:path], target[:line]
+    )
   end
 
   # Generated records outside the analyzed source corpus cannot join a parsed

@@ -186,6 +186,12 @@ static int vd_is_collection(VALUE value) {
     return RB_TYPE_P(value, T_ARRAY) || RB_TYPE_P(value, T_HASH) || vd_is_set(value);
 }
 
+static VALUE vd_abs_path(VALUE path);
+
+VALUE nk_abs_path(VALUE path) { return vd_abs_path(path); }
+VALUE nk_root_path(void) { return root_path; }
+VALUE nk_guard(VALUE (*fn)(VALUE), VALUE arg, VALUE fallback) { return vd_guard(fn, arg, fallback); }
+
 static VALUE vd_abs_path(VALUE path) {
     VALUE cached = rb_hash_lookup2(abs_path_memo, path, Qundef);
     if (cached != Qundef) return cached;

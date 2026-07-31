@@ -55,18 +55,6 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     File.readlines(FIXTURE).index { |line| line.include?(pattern) } + 1
   end
 
-  # Stands in for the one delegation left: the record-wrapper registry, which
-  # answers a callee's owner, kind, nativeness and declaration site. The value
-  # domain is the collector's own.
-  before do
-    NilKillTraceNative.value_domain_owner = Object.new.tap do |owner|
-      owner.define_singleton_method(:native_callee_identity) do |defined_class, method_id, native|
-        name = defined_class.respond_to?(:name) ? defined_class.name : nil
-        [name, "instance", nil, nil, nil]
-      end
-    end
-  end
-
   def trace(anchors, state_anchors = {})
     NilKillTraceNative.reset
     NilKillTraceNative.configure([FIXTURE_ROOT], anchors, state_anchors)
@@ -381,10 +369,10 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     expect(row.dig(:callsite, :line)).to eq(5)
   end
 
-  # A generated accessor is C-backed, so the VM offers no definition site for it.
-  # Its owning class still has one, and without it the accessor is exported as
-  # opaque CRuby rather than the project declaration FactMine can price.
-  it "reports the declaration site the identity delegation supplies for a native callee" do
+  # A generated accessor is reached through a wrapper the declaration hooks
+  # installed, so the class the VM reports is not the owner the evidence needs.
+  # The hook records what the wrapper stands for and the collector reports that.
+  it "reports the owner and declaration site a registered wrapper stands for" do
     path = File.join(FIXTURE_ROOT, "declared.rb")
     File.write(path, <<~RUBY)
       module NativeTraceDeclared
@@ -395,11 +383,9 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     RUBY
     load path
 
-    NilKillTraceNative.value_domain_owner = Object.new.tap do |owner|
-      owner.define_singleton_method(:native_callee_identity) do |_defined_class, _method_id, native|
-        native ? ["Record", "instance", true, "/declared/record.rb", 12] : [nil, nil, nil, nil, nil]
-      end
-    end
+    NilKillTraceNative.register_wrapper(
+      String, :length, "Record", "instance", true, "/declared/record.rb", 12
+    )
 
     NilKillTraceNative.reset
     NilKillTraceNative.configure([FIXTURE_ROOT], { "#{path}3length" => "anchor-declared" }, {})

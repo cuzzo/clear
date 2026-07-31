@@ -19,6 +19,7 @@
 #include <ruby/debug.h>
 #include <ruby/st.h>
 
+#include "identity.h"
 #include "value_domain.h"
 
 #define MAX_FRAMES 1024
@@ -116,9 +117,11 @@ static st_table *edges;
 static VALUE roots_ary;          // analyzed-source path prefixes
 static VALUE domains_ary;        // Ruby domain Hashes, referenced by index
 static VALUE tracepoint;
-static VALUE ruby_owner;         // NilKillRuntimeTrace, for delegation
 static ID id_call, id_instance, id_return;
-static ID id_local_variables, id_local_variable_get, id_callee_identity;
+// Binding#local_variables and #local_variable_get, the one pair of Ruby
+// methods the hook still calls -- on a Binding it made itself, whose class no
+// workload can redefine.
+static ID id_local_variables, id_local_variable_get;
 
 static ID class_name_id(VALUE klass);
 static unsigned long counts[8];
@@ -201,14 +204,10 @@ static identity_t *cached_identity(VALUE defined, ID selector, int native) {
     st_data_t found;
     if (st_lookup(by_selector, (st_data_t)selector, &found)) return (identity_t *)found;
 
-    if (NIL_P(ruby_owner)) {
-        ruby_owner = rb_const_get(rb_cObject, rb_intern("NilKillRuntimeTrace"));
-    }
     identity_t *identity = ALLOC(identity_t);
     memset(identity, 0, sizeof(*identity));
     identity->native = -1;
-    VALUE row = rb_funcall(ruby_owner, id_callee_identity, 3, defined, ID2SYM(selector),
-                           native ? Qtrue : Qfalse);
+    VALUE row = nk_callee_identity(defined, selector, native);
     if (RB_TYPE_P(row, T_ARRAY) && RARRAY_LEN(row) == 5) {
         VALUE o = RARRAY_AREF(row, 0), k = RARRAY_AREF(row, 1);
         VALUE nat = RARRAY_AREF(row, 2), pth = RARRAY_AREF(row, 3);
@@ -1093,11 +1092,6 @@ static int free_line_level(st_data_t _key, st_data_t value, st_data_t _arg) {
     return ST_CONTINUE;
 }
 
-static VALUE nk_set_owner(VALUE self, VALUE owner) {
-    ruby_owner = owner;
-    return owner;
-}
-
 static int free_state(st_data_t _key, st_data_t value, st_data_t _arg) {
     xfree((state_record_t *)value);
     return ST_CONTINUE;
@@ -1168,8 +1162,8 @@ void Init_nil_kill_trace(void) {
     rb_define_singleton_method(mod, "method_edges", nk_method_edges, 0);
     rb_define_singleton_method(mod, "stats", nk_stats, 0);
     rb_define_singleton_method(mod, "reset", nk_reset, 0);
-    rb_define_singleton_method(mod, "value_domain_owner=", nk_set_owner, 1);
     nk_value_domain_init(mod);
+    nk_identity_init(mod);
 
     path_cache = st_init_numtable();
     demand = st_init_numtable();
@@ -1197,7 +1191,4 @@ void Init_nil_kill_trace(void) {
     id_return = rb_intern("return");
     id_local_variables = rb_intern("local_variables");
     id_local_variable_get = rb_intern("local_variable_get");
-    id_callee_identity = rb_intern("native_callee_identity");
-    ruby_owner = Qnil;
-    rb_global_variable(&ruby_owner);
 }
