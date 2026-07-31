@@ -1193,9 +1193,39 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
+    /// Node kinds whose subtree is compile-time-only. An annotation on a
+    /// declaration says something *about* the declaration - which build selects
+    /// it, what tooling should know of it - and a type argument names a type;
+    /// neither is work the enclosing function does. Every grammar that has
+    /// these spells them from the same small vocabulary, so the default covers
+    /// them and an adapter adds only what its own grammar spells differently.
+    ///
+    /// A decorator is deliberately absent: Python and JavaScript evaluate one.
+    fn nonruntime_ancestor_kinds(&self) -> &'static [&'static str] {
+        &[
+            "attribute",
+            "attribute_item",
+            "attribute_list",
+            "inner_attribute_item",
+            "annotation",
+            "marker_annotation",
+            "annotation_argument_list",
+            "type_arguments",
+            "type_parameters",
+        ]
+    }
+
     /// Calls in compile-time-only syntax can look like ordinary call
     /// expressions to tree-sitter without contributing runtime work.
-    fn nonruntime_call_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+    fn nonruntime_call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        let kinds = self.nonruntime_ancestor_kinds();
+        let mut ancestor = node.parent();
+        while let Some(parent) = ancestor {
+            if kinds.contains(&parent.kind()) {
+                return true;
+            }
+            ancestor = parent.parent();
+        }
         false
     }
 

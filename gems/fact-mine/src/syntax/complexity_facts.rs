@@ -1346,6 +1346,11 @@ fn visit_loops(
     behavior: &dyn NormalizedLanguageBehavior,
     domain_registry: &mut DomainRegistry,
 ) {
+    // Syntax that is never evaluated costs nothing and contains nothing to
+    // cost: an annotation selecting a declaration, a `sizeof` asking a size.
+    if crate::syntax::normalized_extractor::is_unevaluated_context(node) {
+        return;
+    }
     let block_semantics = if node.r#type == "ITER" {
         iterator_message(node)
             .map(|message| {
@@ -3910,6 +3915,38 @@ fn overloaded(left: Vec<i32>, right: Vec<i32>) -> bool {
             context("overloaded", "==").known_time_complexity,
             None,
             "Vec equality dispatches through PartialEq and is not scalar"
+        );
+    }
+
+    #[test]
+    fn an_annotation_on_a_declaration_is_not_work_the_function_does() {
+        // `#[cfg(test)]` selects which declaration is compiled. It looks like a
+        // call to a grammar, and costing it leaves a function that does nothing
+        // but arithmetic waiting on a bound for `cfg`.
+        let rows = language_facts(
+            r#"
+fn limit(values: &[usize]) -> usize {
+    #[cfg(not(test))]
+    let cap = 10;
+    #[cfg(test)]
+    let cap = 2;
+    values.len() + cap
+}
+"#,
+            Language::Rust,
+            ".rs",
+        );
+        let messages = rows
+            .iter()
+            .find(|row| row.function == "limit")
+            .unwrap()
+            .call_contexts
+            .iter()
+            .map(|call| call.message.clone())
+            .collect::<Vec<_>>();
+        assert!(
+            !messages.iter().any(|message| message.contains("test")),
+            "a conditional-compilation attribute was costed as a call: {messages:?}"
         );
     }
 

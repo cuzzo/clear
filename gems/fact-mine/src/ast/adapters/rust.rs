@@ -5,18 +5,18 @@ use tree_sitter::Node as TreeSitterNode;
 pub(crate) struct RustAstAdapter;
 
 impl AstNormalizationAdapter for RustAstAdapter {
-    fn nonruntime_call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
-        let mut ancestor = node.parent();
-        while let Some(parent) = ancestor {
-            if matches!(
-                parent.kind(),
-                "type_arguments" | "type_parameters" | "const_item" | "macro_definition"
-            ) {
-                return true;
-            }
-            ancestor = parent.parent();
-        }
-        false
+    fn nonruntime_ancestor_kinds(&self) -> &'static [&'static str] {
+        // Beyond the shared vocabulary: a const initializer is evaluated at
+        // compile time, and a macro definition is a template, not a body.
+        &[
+            "attribute",
+            "attribute_item",
+            "inner_attribute_item",
+            "type_arguments",
+            "type_parameters",
+            "const_item",
+            "macro_definition",
+        ]
     }
 
     fn transparent_expression(

@@ -805,6 +805,12 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_call_node(&mut self, node: &Node, block: bool) {
+        // Nothing inside an unevaluated context is executed, so no call in one
+        // is work to be costed - though its operands are still read.
+        if self.unevaluated_context_depth > 0 {
+            self.scan_children(node);
+            return;
+        }
         let Some(parts) = self.call_parts(node) else {
             self.scan_children(node);
             return;
@@ -2637,10 +2643,26 @@ fn dispatch_member_name(call: &CallSite) -> String {
 /// C and C++ retain expression-shaped operands in a few type-only contexts.
 /// Those operands are parsed as ordinary pointer expressions but are never
 /// evaluated, so they cannot be nullable-operation obligations.
-fn is_unevaluated_context(node: &Node) -> bool {
+/// Syntax that reads as an expression and is never evaluated. `sizeof(f())`
+/// asks how large the result would be, and `#[cfg(test)]` says which build
+/// selects the declaration below it; neither runs what it names, so nothing
+/// inside one is work the enclosing function does.
+///
+/// A decorator is deliberately absent: some languages evaluate one, so whether
+/// it runs is the adapter's to state, not this pass's to assume.
+pub(crate) fn is_unevaluated_context(node: &Node) -> bool {
     matches!(
         node.r#type.as_str(),
-        "SIZEOF_EXPRESSION" | "ALIGNOF_EXPRESSION" | "DECLTYPE" | "NOEXCEPT"
+        "SIZEOF_EXPRESSION"
+            | "ALIGNOF_EXPRESSION"
+            | "DECLTYPE"
+            | "NOEXCEPT"
+            | "ATTRIBUTE"
+            | "ATTRIBUTE_ITEM"
+            | "INNER_ATTRIBUTE_ITEM"
+            | "ATTRIBUTE_LIST"
+            | "ANNOTATION"
+            | "MARKER_ANNOTATION"
     ) || (node.r#type == "FCALL" && node.text.trim_start().starts_with("noexcept("))
 }
 
