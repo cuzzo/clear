@@ -2971,76 +2971,77 @@ fn call_receiver(node: &Node) -> Option<&Node> {
     node.children.first().and_then(ast::node)
 }
 
-/// The type the index gives an expression, found by asking at the position its
-/// head occupies: for `row.name` the field, for `x.len()` the method, for
-/// `xs[i]` the collection being read. Scanning the whole expression instead
-/// finds whatever sits furthest right, which in a call is its last argument.
+/// The type the index gives an expression. The index states where every symbol
+/// it resolved occurs; the tree states which part of the expression is its
+/// head. Neither has to be recovered by counting characters in the text.
+///
+/// A call's head is what sits between its receiver and its arguments - `len` in
+/// `x.len()`, `name` in `row.name`, `f` in `f(row.name)` - and both of those
+/// are nodes with spans of their own. Asking the whole expression instead finds
+/// whatever sits furthest right, which in a call is its last argument.
 fn indexed_operand_type(path: &str, language: &str, operand: &Node) -> Option<TypeExpr> {
     let text = operand.text.trim_end();
     if text.contains('\n') {
         return None;
     }
-    let (offset, element_read) = operand_head(text)?;
-    let signature = crate::scip::indexed_signature_at(
+    // `xs[i]` reads an element out of what its receiver names, so the receiver
+    // is the head and the type wanted is the element's, not the collection's.
+    if direct_call_message(operand) == Some("[]") || text.ends_with(']') {
+        let collection = call_receiver(operand).unwrap_or(operand);
+        let declared = indexed_head_type(path, language, collection, head_span(collection))?;
+        return match declared.strip_nilable() {
+            TypeExpr::Array(element) | TypeExpr::Set(element) => Some(*element),
+            TypeExpr::Hash { value, .. } => Some(*value),
+            _ => None,
+        };
+    }
+    indexed_head_type(path, language, operand, head_span(operand))
+}
+
+/// Where an expression's head sits: after whatever it is called on, and before
+/// whatever it is called with. An expression that is neither is its own head.
+fn head_span(operand: &Node) -> (usize, usize) {
+    let start = call_receiver(operand)
+        .filter(|receiver| receiver.last_lineno == operand.first_lineno)
+        .map(|receiver| receiver.last_column)
+        .unwrap_or(operand.first_column);
+    let end = call_argument_nodes(operand)
+        .into_iter()
+        .filter(|argument| argument.first_lineno == operand.first_lineno)
+        .map(|argument| argument.first_column)
+        .min()
+        .unwrap_or_else(|| operand_end_column(operand));
+    (start.min(end), end)
+}
+
+fn operand_end_column(operand: &Node) -> usize {
+    if operand.last_lineno == operand.first_lineno {
+        operand.last_column
+    } else {
+        operand.first_column + operand.text.trim_end().len()
+    }
+}
+
+/// The declaration the index resolved for the head, taken from the head's own
+/// span. The last one there is the head: a receiver spelled `a::b::c` resolves
+/// each segment, and what the expression stands on is the one it ends at.
+fn indexed_head_type(
+    path: &str,
+    language: &str,
+    operand: &Node,
+    (first_column, last_column): (usize, usize),
+) -> Option<TypeExpr> {
+    let declarations = crate::scip::indexed_signatures_in(
         path,
         operand.first_lineno,
-        operand.first_column + offset,
-    )?;
-    let declared = TypeExpr::parse(&crate::scip::declared_result_type(language, signature)?, language);
-    if !element_read {
-        return Some(declared);
-    }
-    match declared.strip_nilable() {
-        TypeExpr::Array(element) | TypeExpr::Set(element) => Some(*element),
-        TypeExpr::Hash { value, .. } => Some(*value),
-        _ => None,
-    }
-}
-
-/// Where an expression's head sits within it, and whether the expression reads
-/// an element out of what that head names.
-fn operand_head(text: &str) -> Option<(usize, bool)> {
-    let text = text.trim_end();
-    if let Some(open) = closing_pair(text, b'[', b']') {
-        return operand_head(&text[..open]).map(|(offset, _)| (offset, true));
-    }
-    if let Some(open) = closing_pair(text, b'(', b')') {
-        return last_identifier_offset(&text[..open]).map(|offset| (offset, false));
-    }
-    last_identifier_offset(text).map(|offset| (offset, false))
-}
-
-/// The opening byte matching a trailing close, if the text ends with one.
-fn closing_pair(text: &str, open: u8, close: u8) -> Option<usize> {
-    let bytes = text.as_bytes();
-    if bytes.last() != Some(&close) {
-        return None;
-    }
-    let mut depth = 0usize;
-    for (index, byte) in bytes.iter().enumerate().rev() {
-        if *byte == close {
-            depth += 1;
-        } else if *byte == open {
-            depth -= 1;
-            if depth == 0 {
-                return Some(index);
-            }
-        }
-    }
-    None
-}
-
-fn last_identifier_offset(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let end = bytes
-        .iter()
-        .rposition(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')?;
-    let start = bytes[..=end]
-        .iter()
-        .rposition(|byte| !(byte.is_ascii_alphanumeric() || *byte == b'_'))
-        .map(|index| index + 1)
-        .unwrap_or(0);
-    Some(start)
+        first_column,
+        last_column.max(first_column + 1),
+    );
+    let (_, signature) = declarations.last()?;
+    Some(TypeExpr::parse(
+        &crate::scip::declared_result_type(language, signature)?,
+        language,
+    ))
 }
 
 fn operator_operand_type(
@@ -3972,6 +3973,62 @@ fn overloaded(left: Vec<i32>, right: Vec<i32>) -> bool {
             None,
             "Vec equality dispatches through PartialEq and is not scalar"
         );
+    }
+
+    #[test]
+    fn a_calls_head_is_what_sits_between_its_receiver_and_its_arguments() {
+        // Taking whatever sits furthest right inside the expression makes
+        // `f(row.name)` the type of `name`. The head is bounded by the nodes
+        // either side of it, both of which carry their own span.
+        let leaf = |kind: &str, text: &str, first: usize, last: usize| Node {
+            r#type: kind.to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: first,
+            last_lineno: 1,
+            last_column: last,
+            text: text.to_string(),
+        };
+        // `f(row.name)` - the head is `f`, before the argument list.
+        let call = Node {
+            r#type: "FCALL".to_string(),
+            children: vec![
+                Child::Symbol("f".to_string()),
+                Child::Node(Box::new(Node {
+                    r#type: "LIST".to_string(),
+                    children: vec![Child::Node(Box::new(leaf("CALL", "row.name", 2, 10)))],
+                    first_lineno: 1,
+                    first_column: 2,
+                    last_lineno: 1,
+                    last_column: 10,
+                    text: "row.name".to_string(),
+                })),
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 11,
+            text: "f(row.name)".to_string(),
+        };
+        assert_eq!(head_span(&call), (0, 2));
+
+        // `x.len()` - the head is `len`, after the receiver and before the end.
+        let method = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                Child::Node(Box::new(leaf("LVAR", "x", 0, 1))),
+                Child::Symbol("len".to_string()),
+            ],
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 7,
+            text: "x.len()".to_string(),
+        };
+        assert_eq!(head_span(&method), (1, 7));
+
+        // A bare name is its own head.
+        assert_eq!(head_span(&leaf("LVAR", "total", 4, 9)), (4, 9));
     }
 
     #[test]

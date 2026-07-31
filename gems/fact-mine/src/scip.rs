@@ -429,12 +429,6 @@ fn owner_and_member(symbol: &str) -> Option<(String, String)> {
 /// method, a parameter and a binding are each a symbol the compiler resolved;
 /// asking at the position the expression's head occupies is what tells them
 /// apart, where scanning a span only finds whatever sits furthest right.
-pub(crate) fn indexed_signature_at(path: &str, line: usize, column: usize) -> Option<&'static str> {
-    indexed_signatures_in(path, line, column, column + 1)
-        .first()
-        .map(|(_, text)| *text)
-}
-
 /// The declarations the index resolved inside one span, in source order. The
 /// index already states where every symbol it resolved occurs, so which symbol
 /// an expression's head is is a question for the index - not something to be
