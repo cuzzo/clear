@@ -416,7 +416,7 @@ pub(crate) fn indexed_field_types() -> Option<&'static BTreeMap<String, BTreeMap
 /// The owner and member a symbol names, if it names a member of one. Every
 /// indexer spells this the same way: the descriptor path, then `#`, then the
 /// member.
-fn owner_and_member(symbol: &str) -> Option<(String, String)> {
+pub(crate) fn owner_and_member(symbol: &str) -> Option<(String, String)> {
     let descriptor = symbol.split_whitespace().last()?;
     let (owner, member) = descriptor.split_once('#')?;
     let owner = owner.rsplit(['/', '.', ':']).next()?.trim();
@@ -1032,6 +1032,10 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
     // `auto value = factory(); value.method()` chain can consume the declared
     // return contract without guessing the local's type.
     crate::profile::reapply_direct_call_result_costs(output);
+    // The index names which interface a dynamically dispatched call goes
+    // through; conformance says which types provide it. Neither alone is a
+    // target set, so the join waits until both are in hand.
+    crate::profile::reapply_interface_dispatch_candidates(output);
     apply_resolved_call_costs_to_contexts(output);
     Ok(stats)
 }
@@ -2840,6 +2844,65 @@ mod tests {
         assert_eq!(
             output.calls[0].complexity_provenance.as_deref(),
             Some("compiler_proven_abstract_project_contract")
+        );
+    }
+
+    #[test]
+    fn a_call_into_an_interface_lands_on_every_type_that_provides_it() {
+        // Which implementation runs is not knowable statically, so each is a
+        // candidate and the bound is the worst of them. Conformance is whatever
+        // the adapter recorded as a supertype; the interface is named by the
+        // symbol the index resolved the call to.
+        let path = "src/dialect.rs".to_string();
+        let mut ruby_clean = method("m:ruby", &path, "clean", [2, 4, 2, 20]);
+        ruby_clean.owner = "RubyDialect".into();
+        ruby_clean.owner_id = "owner:RubyDialect".into();
+        ruby_clean.dispatch_name = "clean".into();
+        let mut python_clean = method("m:python", &path, "clean", [5, 4, 5, 20]);
+        python_clean.owner = "PythonDialect".into();
+        python_clean.owner_id = "owner:PythonDialect".into();
+        python_clean.dispatch_name = "clean".into();
+        let mut caller = method("m:caller", &path, "run", [8, 0, 8, 20]);
+        caller.owner = "Report".into();
+        caller.owner_id = "owner:Report".into();
+
+        let mut dispatched = call("m:caller", &path, "clean", [9, 4, 9, 24]);
+        dispatched.receiver = "dialect".into();
+        dispatched.semantic_symbol =
+            Some("scip-java maven demo 0.1.0 dialect/Dialect#clean().".into());
+
+        let owner = |name: &str, kind: &str, supertypes: Vec<String>| OwnerRecord {
+            id: format!("owner:{name}"),
+            name: name.into(),
+            kind: kind.into(),
+            language: "java".into(),
+            path: path.clone(),
+            line: 1,
+            span: [1, 0, 1, 10],
+            confidence: "high".into(),
+            symbol: Some(name.into()),
+            supertypes,
+            requirements: Vec::new(),
+        };
+        let mut output = ProfileOutput::default();
+        output.owners = vec![
+            owner("Dialect", "interface", Vec::new()),
+            owner("RubyDialect", "impl", vec!["Dialect".into()]),
+            owner("PythonDialect", "impl", vec!["Dialect".into()]),
+            owner("Report", "struct", Vec::new()),
+        ];
+        output.methods = vec![ruby_clean, python_clean, caller];
+        output.calls = vec![dispatched];
+
+        crate::profile::reapply_interface_dispatch_candidates(&mut output);
+
+        assert_eq!(
+            output.calls[0].candidate_reason.as_deref(),
+            Some("interface_dispatch")
+        );
+        assert_eq!(
+            output.calls[0].candidate_targets,
+            vec!["m:python".to_string(), "m:ruby".to_string()]
         );
     }
 

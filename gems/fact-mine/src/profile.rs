@@ -3271,6 +3271,34 @@ fn resolve_same_namespace_declared_receiver_calls(
     }
 }
 
+/// A call into an interface can only be joined to its implementations once the
+/// index has said which interface it is. That identity arrives with SCIP, after
+/// project resolution has already run, so this re-runs the one step that needs
+/// it.
+pub fn reapply_interface_dispatch_candidates(output: &mut ProfileOutput) {
+    let sources = output
+        .methods
+        .iter()
+        .map(|method| (method.id.clone(), method.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let owners = output.owners.clone();
+    let methods = output.methods.clone();
+    for call in output
+        .calls
+        .iter_mut()
+        .filter(|call| call.target.is_none() && call.candidate_targets.is_empty())
+    {
+        let Some(source) = sources.get(call.source.as_str()) else {
+            continue;
+        };
+        let candidates = interface_dispatch_target_ids(&owners, &methods, call, source);
+        if candidates.len() > 1 {
+            call.candidate_targets = candidates.into_iter().collect();
+            call.candidate_reason = Some("interface_dispatch".to_string());
+        }
+    }
+}
+
 fn annotate_project_candidate_sets(
     owners: &[OwnerRecord],
     methods: &[MethodRecord],
@@ -3436,6 +3464,52 @@ fn resolve_inherited_calls(
         call.confidence = "high".to_string();
         call.unresolved_reason = None;
     }
+}
+
+/// A call into an interface runs one of the implementations of it. Which one is
+/// not knowable statically, so each is a candidate and the bound is the worst of
+/// them - the same closed-candidate maximum an overload set already takes.
+///
+/// This is language-neutral by construction: conformance is whatever each
+/// adapter recorded as a supertype, and the interface is named by the symbol the
+/// compiler already resolved the call to.
+fn interface_dispatch_target_ids(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    call: &CallRecord,
+    source: &MethodRecord,
+) -> BTreeSet<String> {
+    let Some(symbol) = call.semantic_symbol.as_deref() else {
+        return BTreeSet::new();
+    };
+    let Some((interface, member)) = crate::scip::owner_and_member(symbol) else {
+        return BTreeSet::new();
+    };
+    if member != call.message {
+        return BTreeSet::new();
+    }
+    let implementors = owners
+        .iter()
+        .filter(|owner| owner.language == source.language)
+        .filter(|owner| {
+            owner.supertypes.iter().any(|supertype| {
+                supertype == &interface
+                    || supertype.rsplit(['.', ':']).next() == Some(interface.as_str())
+            })
+        })
+        .map(|owner| owner.name.as_str())
+        .collect::<BTreeSet<_>>();
+    if implementors.is_empty() {
+        return BTreeSet::new();
+    }
+    methods
+        .iter()
+        .filter(|method| method.language == source.language)
+        .filter(|method| implementors.contains(method.owner.as_str()))
+        .filter(|method| method.dispatch_name == call.message)
+        .filter(|method| method.id != call.source)
+        .map(|method| method.id.clone())
+        .collect()
 }
 
 fn conservative_inherited_target_ids(
