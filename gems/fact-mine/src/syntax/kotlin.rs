@@ -190,6 +190,30 @@ const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct KotlinNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
+    /// Kotlin states conformance in the class header, after the primary
+    /// constructor: `class RealSink(private val n: Int) : Sink, Closeable`. A
+    /// parameter's own type is written `n: Int` with no space before the colon,
+    /// so the clause separator is unambiguous. A supertype invoked as a
+    /// constructor - `: Buffer()` - names the same type.
+    fn owner_supertypes(&self, node: &Node) -> Vec<String> {
+        let header = node.text.split('{').next().unwrap_or(&node.text);
+        let before_constraints = header.split(" where ").next().unwrap_or(header);
+        before_constraints
+            .split_once(" : ")
+            .map(|(_, clause)| {
+                super::normalized_behavior::split_declared_supertypes(clause)
+                    .into_iter()
+                    .filter_map(|supertype| {
+                        let bare = supertype.split('(').next().unwrap_or(&supertype).trim();
+                        let bare = bare.split('<').next().unwrap_or(bare).trim();
+                        let bare = bare.rsplit('.').next().unwrap_or(bare).trim();
+                        (!bare.is_empty()).then(|| bare.to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn scalar_type_names(&self) -> &'static [&'static str] {
         // Kotlin overloads operators on declared types, never on these: each
         // compiles to the JVM instruction for the primitive behind it.
@@ -498,6 +522,42 @@ fn is_keyword(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_class_header_states_what_it_conforms_to() {
+        let behavior = KotlinNormalizedBehavior;
+        let owner = |text: &str| Node {
+            r#type: "CLASS".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: text.len(),
+            text: text.to_string(),
+        };
+        // A primary constructor's own parameter types are written `n: Int`,
+        // with no space before the colon, so they are not the clause.
+        assert_eq!(
+            behavior.owner_supertypes(&owner(
+                "class RealSink(private val n: Int, val s: String) : Sink, Closeable {"
+            )),
+            vec!["Sink".to_string(), "Closeable".to_string()]
+        );
+        // A supertype invoked as a constructor names the same type.
+        assert_eq!(
+            behavior.owner_supertypes(&owner("class Peek : Buffer(), Source {")),
+            vec!["Buffer".to_string(), "Source".to_string()]
+        );
+        assert_eq!(
+            behavior.owner_supertypes(&owner("class Options : AbstractList<ByteString>() {")),
+            vec!["AbstractList".to_string()]
+        );
+        // A class conforming to nothing states nothing.
+        assert_eq!(
+            behavior.owner_supertypes(&owner("class Segment(val data: ByteArray) {")),
+            Vec::<String>::new()
+        );
+    }
+
     use super::*;
 
     #[test]
