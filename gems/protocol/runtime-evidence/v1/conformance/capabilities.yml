@@ -46,7 +46,7 @@ wire_matrix:
   value_shapes: [sequence, mapping, record, tuple]
   negative_controls:
     - unknown-field
-    - missing-anchor
+    - unknown-anchor
     - duplicate-anchor
     - stale-plan-digest
     - stale-anchor-digest

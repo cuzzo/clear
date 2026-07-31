@@ -30,8 +30,12 @@ The core invariant is:
 > non-complete with a precise reason. `NOT_EXECUTED` is complete negative
 > evidence only when the anchor did not execute in that run.
 
-The suite includes negative controls, so an empty trace or a collector that
-silently omits an executed anchor cannot pass.
+The suite includes negative controls, so an empty trace cannot pass. An anchor
+with no entry is a claim that it did not execute -- evidence is sparse, and
+restating "nothing happened here" for every planned anchor made a document
+proportional to the plan rather than to what ran. What a collector cannot do is
+report an anchor the plan never requested, report one twice, or mark a capture
+complete while dropping executions from it.
 
 ## Ownership contract
 

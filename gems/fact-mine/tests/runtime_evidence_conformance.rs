@@ -964,9 +964,10 @@ fn assert_validation_error(
     evidence: &RuntimeEvidence,
     expected: &str,
 ) {
-    let error = runtime_protocol::validate_runtime_evidence(plan, evidence)
-        .expect_err("negative conformance control must fail")
-        .to_string();
+    let error = match runtime_protocol::validate_runtime_evidence(plan, evidence) {
+        Err(error) => error.to_string(),
+        Ok(()) => panic!("negative control accepted; expected an error containing {expected:?}"),
+    };
     assert!(
         error.contains(expected),
         "expected error containing {expected:?}, got {error:?}"
@@ -1506,10 +1507,13 @@ fn shared_negative_controls_fail_closed_at_the_protocol_boundary() {
     assert!(runtime_protocol::parse_runtime_evidence_json(&unknown).is_err());
     exercised.insert("unknown-field");
 
+    // Evidence went sparse: an anchor with no entry did not execute, so
+    // omitting one is a valid document. Evidence for an anchor the plan never
+    // requested is not -- it claims an observation nothing asked for.
     let mut evidence = canonical.clone();
-    evidence.anchors.pop();
-    assert_validation_error(&built.plan, &evidence, "omits requested anchors");
-    exercised.insert("missing-anchor");
+    evidence.anchors[0].anchor_symbol = "nil-kill-runtime ruby ruby 0 Absent#gone().".to_string();
+    assert_validation_error(&built.plan, &evidence, "unknown plan anchor");
+    exercised.insert("unknown-anchor");
 
     let mut evidence = canonical.clone();
     evidence.anchors.push(evidence.anchors[0].clone());
