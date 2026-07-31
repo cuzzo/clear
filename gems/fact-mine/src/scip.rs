@@ -743,6 +743,28 @@ fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportSta
                 call.empty_domain_cause = None;
                 call.complexity_missing_kind = None;
                 stats.modeled_external_symbols += 1;
+            } else if let Some(complexity) = call
+                .receiver_type
+                .as_deref()
+                .filter(|_| parametric_cost.is_some())
+                .and_then(|declared| {
+                    // A blanket symbol proves which trait method runs, not what
+                    // it costs. A proven receiver does: cloning a String copies
+                    // a String whichever impl the compiler selected.
+                    let behavior =
+                        crate::syntax::normalized_behavior::behavior_for_name(language)?;
+                    let receiver = TypeExpr::parse(declared, language);
+                    behavior.call_complexity(&receiver, &call.message)
+                })
+            {
+                call.known_time_complexity = Some(complexity.time.to_string());
+                call.known_space_complexity = Some(complexity.space.to_string());
+                call.complexity_provenance = Some("language_stdlib_registry".to_string());
+                call.complexity_bound_quality =
+                    Some("upper_bound_declared_receiver".to_string());
+                call.unresolved_reason = None;
+                call.complexity_missing_kind = None;
+                stats.modeled_external_symbols += 1;
             } else if let Some(parametric_cost) = parametric_cost {
                 let (time, space) = syntax::parametric_call_complexity(&parametric_cost)
                     .ok_or_else(|| {
