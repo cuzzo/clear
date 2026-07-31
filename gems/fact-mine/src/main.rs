@@ -272,6 +272,7 @@ fn run() -> Result<()> {
         }
         Command::NilKillTracePlan {
             static_facts,
+            raw,
             runtime_plan,
             output,
             root,
@@ -286,6 +287,11 @@ fn run() -> Result<()> {
                 Some(path) => serde_json::from_str(&std::fs::read_to_string(&path)?)
                     .with_context(|| format!("failed to parse {}", path.display()))?,
                 None => serde_json::Value::Null,
+            };
+            let facts = if raw {
+                fact_mine_rust::trace_plan::reshape_static_facts(&facts, &root)
+            } else {
+                facts
             };
             let plan = fact_mine_rust::trace_plan::TracePlan::build(&facts, &root);
             let document =
@@ -769,6 +775,8 @@ enum Command {
     /// Assemble the collector's instrumentation plan from static facts.
     NilKillTracePlan {
         static_facts: PathBuf,
+        /// True when the file is unreshaped `profile trace-plan` output.
+        raw: bool,
         runtime_plan: Option<PathBuf>,
         output: PathBuf,
         root: PathBuf,
@@ -844,6 +852,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
     match command.as_str() {
         "nil-kill-trace-plan" => {
             let mut static_facts = None;
+            let mut raw = false;
             let mut runtime_plan = None;
             let mut output = None;
             let mut root = None;
@@ -856,6 +865,10 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 };
                 match arg.as_str() {
                     "--static-facts" => static_facts = Some(PathBuf::from(take("--static-facts")?)),
+                    "--raw-facts" => {
+                        static_facts = Some(PathBuf::from(take("--raw-facts")?));
+                        raw = true;
+                    }
                     "--runtime-plan" => runtime_plan = Some(PathBuf::from(take("--runtime-plan")?)),
                     "--output" => output = Some(PathBuf::from(take("--output")?)),
                     "--root" => root = Some(PathBuf::from(take("--root")?)),
@@ -867,6 +880,7 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             }
             Ok(Command::NilKillTracePlan {
                 static_facts: static_facts.context("--static-facts is required")?,
+                raw,
                 runtime_plan,
                 output: output.context("--output is required")?,
                 root: root.unwrap_or_else(|| PathBuf::from(".")),

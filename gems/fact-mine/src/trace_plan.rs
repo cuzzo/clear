@@ -61,6 +61,128 @@ fn void_signature(signature: &str) -> bool {
         })
 }
 
+/// The narrow slice of static facts the collector is allowed to see. It
+/// deliberately excludes CFG/DFG, protocol, shape, alias, call-graph and
+/// pressure facts: the collector receives opaque source anchors that FactMine
+/// selected, never the reasoning behind them.
+const FACT_KEYS: [&str; 7] = [
+    "tlet_sites",
+    "struct_declarations",
+    "state_type_records",
+    "type_definitions",
+    "runtime_call_sites",
+    "runtime_result_call_sites",
+    "runtime_collection_receiver_sites",
+];
+
+/// Reshape raw `profile trace-plan` output into what [`TracePlan::build`] reads.
+///
+/// A struct declaration may name its class unqualified (`Point` for
+/// `Geometry::Point`), while the runtime looks the class up by its qualified
+/// name. Both spellings are kept: the unqualified one stays sampled, and the
+/// qualified one carries the enforceable field types, so a lookup tries the
+/// qualified class first and falls back to suffixes.
+pub fn reshape_static_facts(raw: &Value, root: &Path) -> Value {
+    let mut facts = Map::new();
+    for key in FACT_KEYS {
+        facts.insert(key.to_string(), raw.get(key).cloned().unwrap_or(Value::Null));
+    }
+    let declarations = array(raw.get("struct_declarations")).to_vec();
+    let mut resolved = declarations.clone();
+    resolve_struct_declaration_classes(
+        &mut resolved,
+        array(raw.get("type_definitions")),
+        array(raw.get("methods")),
+        root,
+    );
+    // The unqualified entry keeps no field types, so it stays conservative.
+    let mut both: Vec<Value> = declarations
+        .into_iter()
+        .map(|mut decl| {
+            if let Some(object) = decl.as_object_mut() {
+                object.insert("field_types".to_string(), json!({}));
+            }
+            decl
+        })
+        .collect();
+    both.extend(resolved);
+    facts.insert("struct_declarations".to_string(), Value::Array(both));
+
+    json!({
+        "methods": raw.get("methods").cloned().unwrap_or_else(|| json!([])),
+        "fields": raw.get("fields").cloned().unwrap_or_else(|| json!([])),
+        "facts": Value::Object(facts),
+    })
+}
+
+/// Rewrite each unqualified declaration class to its fully-qualified name when
+/// the file says unambiguously what that is.
+fn resolve_struct_declaration_classes(
+    declarations: &mut [Value],
+    type_definitions: &[Value],
+    methods: &[Value],
+    root: &Path,
+) {
+    let normalize = |path: &str| -> String {
+        if path.is_empty() {
+            String::new()
+        } else {
+            absolute(path, root)
+        }
+    };
+
+    let mut qualified: BTreeMap<(String, String), String> = BTreeMap::new();
+    let mut by_path: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for definition in type_definitions {
+        let owner = text(definition.get("owner"));
+        if owner.is_empty() {
+            continue;
+        }
+        let path = normalize(&text(definition.get("path")));
+        let kind = text(definition.get("kind"));
+        if kind == "state_field" || kind == "method_signature" {
+            let unqualified = owner.rsplit("::").next().unwrap_or(&owner).to_string();
+            qualified.insert((path.clone(), unqualified), owner.clone());
+        }
+        by_path.entry(path).or_default().insert(owner);
+    }
+    for method in methods {
+        let owner = text(method.get("owner"));
+        if owner.is_empty() {
+            continue;
+        }
+        by_path
+            .entry(normalize(&text(method.get("path"))))
+            .or_default()
+            .insert(owner);
+    }
+
+    for declaration in declarations {
+        let name = text(declaration.get("class"));
+        if name.contains("::") {
+            continue;
+        }
+        let path = normalize(&text(declaration.get("path")));
+        let resolved = qualified.get(&(path.clone(), name.clone())).cloned().or_else(|| {
+            // Nothing declared it here by name, so accept a suffix match only
+            // when exactly one owner in this file could be meant.
+            let suffix = format!("::{name}");
+            let mut candidates = by_path
+                .get(&path)
+                .into_iter()
+                .flatten()
+                .filter(|owner| owner.ends_with(&suffix));
+            let first = candidates.next()?;
+            candidates.next().is_none().then(|| first.clone())
+        });
+        if let Some(resolved) = resolved {
+            if let Some(object) = declaration.as_object_mut() {
+                object.insert("class".to_string(), Value::String(resolved));
+            }
+        }
+    }
+}
+
 /// What the runtime must watch, accumulated as facts arrive.
 #[derive(Default)]
 pub struct TracePlan {
@@ -741,6 +863,115 @@ mod tests {
         assert_eq!(plan["target_dirs"], json!(["/a", "/b"]));
         assert_eq!(plan["target_exclude_dirs"], json!(["/z"]));
         assert_eq!(plan["runtime_evidence"]["plan_digest"], json!("abc"));
+    }
+
+
+    // --- reshaping raw facts --------------------------------------------------
+
+    #[test]
+    fn an_unqualified_declaration_gains_the_name_its_file_declares() {
+        let raw = json!({
+            "struct_declarations": [
+                { "class": "Point", "path": "lib/geo.rb", "fields": ["x"],
+                  "field_types": { "x": "Integer" } }
+            ],
+            "type_definitions": [
+                { "kind": "state_field", "owner": "Geometry::Point", "path": "lib/geo.rb",
+                  "name": "@x", "declared_type": "Integer" }
+            ]
+        });
+        let reshaped = reshape_static_facts(&raw, root());
+        let declarations = array(reshaped["facts"].get("struct_declarations"));
+        assert_eq!(declarations.len(), 2, "both spellings are kept");
+        assert_eq!(declarations[0]["class"], json!("Point"));
+        assert_eq!(
+            declarations[0]["field_types"],
+            json!({}),
+            "the unqualified entry stays conservative"
+        );
+        assert_eq!(declarations[1]["class"], json!("Geometry::Point"));
+        assert_eq!(declarations[1]["field_types"]["x"], json!("Integer"));
+
+        // And the conservative entry must not undo the qualified one.
+        let plan = TracePlan::build(&reshaped, root()).document("t", &[], &[], Value::Null);
+        assert_eq!(plan["struct_fields"]["Point\u{0}x"], json!(true));
+        assert_eq!(plan["struct_fields"]["Geometry::Point\u{0}x"], json!(false));
+    }
+
+    #[test]
+    fn an_ambiguous_suffix_is_left_unqualified() {
+        let raw = json!({
+            "struct_declarations": [{ "class": "Point", "path": "lib/geo.rb", "fields": [] }],
+            "type_definitions": [
+                { "kind": "method", "owner": "A::Point", "path": "lib/geo.rb" },
+                { "kind": "method", "owner": "B::Point", "path": "lib/geo.rb" }
+            ]
+        });
+        let reshaped = reshape_static_facts(&raw, root());
+        let declarations = array(reshaped["facts"].get("struct_declarations"));
+        assert_eq!(declarations[1]["class"], json!("Point"), "two candidates, so neither");
+    }
+
+    #[test]
+    fn a_lone_suffix_match_resolves_even_without_a_declaring_kind() {
+        let raw = json!({
+            "struct_declarations": [{ "class": "Point", "path": "lib/geo.rb", "fields": [] }],
+            "methods": [{ "owner": "Geometry::Point", "path": "lib/geo.rb" }]
+        });
+        let reshaped = reshape_static_facts(&raw, root());
+        assert_eq!(
+            array(reshaped["facts"].get("struct_declarations"))[1]["class"],
+            json!("Geometry::Point")
+        );
+    }
+
+    #[test]
+    fn an_already_qualified_declaration_is_left_alone() {
+        let raw = json!({
+            "struct_declarations": [{ "class": "Other::Point", "path": "lib/geo.rb", "fields": [] }],
+            "type_definitions": [
+                { "kind": "state_field", "owner": "Geometry::Point", "path": "lib/geo.rb" }
+            ]
+        });
+        let reshaped = reshape_static_facts(&raw, root());
+        assert_eq!(
+            array(reshaped["facts"].get("struct_declarations"))[1]["class"],
+            json!("Other::Point")
+        );
+    }
+
+    #[test]
+    fn a_declaration_in_another_file_does_not_qualify_this_one() {
+        let raw = json!({
+            "struct_declarations": [{ "class": "Point", "path": "lib/a.rb", "fields": [] }],
+            "type_definitions": [
+                { "kind": "state_field", "owner": "Geometry::Point", "path": "lib/b.rb" }
+            ]
+        });
+        let reshaped = reshape_static_facts(&raw, root());
+        assert_eq!(
+            array(reshaped["facts"].get("struct_declarations"))[1]["class"],
+            json!("Point")
+        );
+    }
+
+    #[test]
+    fn reshaping_forwards_only_the_facts_the_collector_may_see() {
+        let raw = json!({
+            "methods": [{ "owner": "A" }],
+            "fields": [{ "owner": "A" }],
+            "tlet_sites": [{ "path": "a.rb" }],
+            "call_graph": [{ "secret": true }],
+            "pressure_facts": [{ "secret": true }]
+        });
+        let reshaped = reshape_static_facts(&raw, root());
+        let facts = reshaped["facts"].as_object().expect("facts");
+        assert!(facts.contains_key("tlet_sites"));
+        assert!(!facts.contains_key("call_graph"), "CFG/DFG facts stay out");
+        assert!(!facts.contains_key("pressure_facts"));
+        assert_eq!(facts.len(), FACT_KEYS.len());
+        assert_eq!(reshaped["methods"], raw["methods"]);
+        assert_eq!(reshaped["fields"], raw["fields"]);
     }
 
     #[test]
