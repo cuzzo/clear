@@ -31,6 +31,18 @@ module NilKill
         end
       end
 
+      # The document a shard adds up to. Minting a protocol value from an
+      # observed one needs the traced language's own type-symbol rules, and the
+      # shard's own document reports which runtime observed it.
+      def self.trace_documents(runtime_dirs:, plan:, root:)
+        return if runtime_dirs.empty?
+
+        call("nil-kill-trace-document", root: root, source_roles: nil) do |args|
+          args.concat(["--plan", plan.to_s])
+          runtime_dirs.each { |dir| args.concat(["--runtime-dir", dir.to_s]) }
+        end
+      end
+
       def self.call(subcommand, root:, source_roles:)
         args = [NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY, subcommand,
                 "--root", root.to_s]

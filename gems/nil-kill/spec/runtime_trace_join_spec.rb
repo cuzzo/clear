@@ -65,13 +65,17 @@ RSpec.describe "runtime trace join" do
       plan = NilKill::Runtime::EvidenceProtocol.plan
       expect(plan.fetch("requests")).not_to be_empty
 
-      trace_path = NilKill::Runtime::TraceArtifact.write(
-        root: NilKill::ROOT, runtime_dir: runtime_dir, plan: plan,
-        languages: ["ruby"], run_ids: ["join-spec"]
+      NilKill::Runtime::DomainDeriver.trace_documents(
+        runtime_dirs: [runtime_dir], plan: NilKill::TRACE_PLAN_PATH, root: NilKill::ROOT
       )
+      trace_path = File.join(runtime_dir, NilKill::Runtime::TraceArtifact::DEFAULT_NAME)
+      # The run a shard was traced under is recorded by the traced program
+      # itself, so both joins read it from there rather than being handed a
+      # synthetic one that only the Ruby side would have seen.
+      run_ids = NilKill::Runtime::JsonIO.parse(trace_path).fetch("run_ids")
       evidence = NilKill::Runtime::ScipEmitter.emit_value_evidence(
         root: NilKill::ROOT, runtime_dir: runtime_dir,
-        languages: ["ruby"], run_ids: ["join-spec"]
+        languages: ["ruby"], run_ids: run_ids
       )
 
       ruby_doc = NilKill::Runtime::JsonIO.parse(evidence.fetch("path"))

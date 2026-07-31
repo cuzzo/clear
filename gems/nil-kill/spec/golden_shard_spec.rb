@@ -91,11 +91,15 @@ RSpec.describe "the trace document a shard produces" do
     )
 
     Dir.mktmpdir("nil-kill-golden", NilKill::ROOT) do |dir|
+      # Gzipped, as the collect leaves them. Reading only the plain form is a
+      # bug that produces an empty document rather than a wrong one.
       FileUtils.cp_r(Dir.glob(File.join(fixture, "input", "*")), dir)
-      built = NilKill::Runtime::TraceArtifact.build(
-        root: NilKill::ROOT, runtime_dir: dir, plan: { "plan_digest" => plan.fetch("plan_digest") },
-        languages: expected.fetch("languages"), run_ids: expected.fetch("run_ids")
+      plan_path = File.join(dir, "plan.json")
+      File.write(plan_path, JSON.generate(plan))
+      NilKill::Runtime::DomainDeriver.trace_documents(
+        runtime_dirs: [dir], plan: plan_path, root: NilKill::ROOT
       )
+      built = JSON.parse(Zlib::GzipReader.open(File.join(dir, "runtime-trace.json.gz"), &:read))
 
       expect(built.keys.sort).to eq(expected.keys.sort)
       differing = expected.keys.reject { |field| digest(built[field]) == digest(expected[field]) }

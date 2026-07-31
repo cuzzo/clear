@@ -301,6 +301,27 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillTraceDocument { runtime_dirs, plan, root } => {
+            let raw = fact_mine_rust::runtime_protocol::read_json(&plan)
+                .with_context(|| format!("unreadable plan {}", plan.display()))?;
+            let plan: serde_json::Value = serde_json::from_str(&raw)?;
+            let digest = plan["runtime_evidence"]["plan_digest"]
+                .as_str()
+                .or_else(|| plan["plan_digest"].as_str())
+                .unwrap_or_default()
+                .to_string();
+            let built = fact_mine_rust::parallel::map_ordered(&runtime_dirs, |directory| {
+                // The runtime that observed, and the run it observed under,
+                // both come from the shard's own document.
+                let (runtime, run_id) = fact_mine_rust::trace_document::runtime_of(directory)?;
+                let run_ids = if run_id.is_empty() { vec![] } else { vec![run_id] };
+                fact_mine_rust::trace_document::write(
+                    &root, directory, &digest, &runtime, &run_ids,
+                )?;
+                Ok(1usize)
+            })?;
+            eprintln!("Built {} trace documents", built.iter().sum::<usize>());
+        }
         Command::NilKillCollectorPlan { plan, output, target_dirs, root } => {
             fact_mine_rust::collector_plan::write(&plan, &output, &target_dirs, &root)?;
         }
@@ -968,6 +989,12 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Build each shard's trace document from the rows it holds.
+    NilKillTraceDocument {
+        runtime_dirs: Vec<PathBuf>,
+        plan: PathBuf,
+        root: PathBuf,
+    },
     /// Write the flat plan a traced program reads.
     NilKillCollectorPlan {
         plan: PathBuf,
@@ -1095,6 +1122,26 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-trace-document" => {
+            let mut runtime_dirs = Vec::new();
+            let mut plan = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--runtime-dir" => {
+                        runtime_dirs.push(PathBuf::from(iter.next().context("--runtime-dir")?));
+                    }
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillTraceDocument {
+                runtime_dirs,
+                plan: plan.context("--plan is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "nil-kill-collector-plan" => {
