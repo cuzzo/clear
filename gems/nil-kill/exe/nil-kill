@@ -28,4 +28,7 @@ if [ "${1-}" = "collect" ] && [ -z "$incremental" ]; then
   exit 1
 fi
 
-exec ruby "$here/nil-kill.rb" "$@"
+# The Ruby side needs its gems, and nothing guarantees this was invoked from
+# inside a bundle -- `nil-kill collect --fast` reaches here from a shell.
+export BUNDLE_GEMFILE="${BUNDLE_GEMFILE:-$root/Gemfile}"
+exec bundle exec ruby "$here/nil-kill.rb" "$@"
