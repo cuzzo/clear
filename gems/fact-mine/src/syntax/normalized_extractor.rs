@@ -417,7 +417,10 @@ impl<'a> Extractor<'a> {
         let owner = self.current_owner();
         let lambda_span = span(node);
         let name = crate::syntax::lambda_function_name(lambda_span[0], lambda_span[1]);
-        let params = function_params(node, self.behavior);
+        let mut params = function_params(node, self.behavior);
+        if params.is_empty() {
+            params = self.behavior.closure_parameter_names(node);
+        }
         self.facts.function_defs.push(FunctionDef {
             file: self.file.clone(),
             name: name.clone(),

@@ -4073,14 +4073,23 @@ fn field_in_closure(docs: &[Doc]) -> Vec<String> {
             Some("same"),
             "a copy of a loop binding is bounded by the collection the loop walks"
         );
-        // A closure's copy is still unbounded: binding it needs the closure to
-        // name its own parameter, and espalier still composes that parameter as
-        // a second dimension rather than a piece of the first.
+        // A closure is analysed as its own function, and the name in its
+        // header is that function's parameter, so a copy of it is bounded by
+        // what the closure was handed.
         let closure = rows
             .iter()
             .find(|row| row.function.starts_with("<lambda@"))
             .expect("the closure is analysed as its own function");
-        assert!(closure.parameters.is_empty());
+        assert_eq!(closure.parameters, vec!["d".to_string()]);
+        assert_eq!(
+            closure
+                .allocations
+                .iter()
+                .find(|allocation| allocation.kind == "clone")
+                .map(|allocation| allocation.cardinality_relation.as_str()),
+            Some("same"),
+            "a copy of a closure's own parameter is bounded by what it is handed"
+        );
     }
 
     #[test]

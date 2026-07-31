@@ -255,13 +255,21 @@ module Espalier
     # A callable whose own cost is neither symbolically known nor proven
     # constant leaves C open. Dropping it there would silently price a
     # non-constant callback as free.
-    def substitute_callback_cost(expression, callable, callable_constant: false)
+    # Replace a callback's cost with the cost of the callable passed for it.
+    #
+    # `per_piece` states that the callable runs on one piece of what the site
+    # walks, which the site's multiplicity already counts. Work at most linear
+    # in a piece sums over the pieces to the whole, so `O(N*C)` is `O(N)` and
+    # not `O(N*M)`. Anything steeper than linear in the piece does not sum that
+    # way and still multiplies.
+    def substitute_callback_cost(expression, callable, callable_constant: false, per_piece: false)
       ids = callback_domain_ids(expression)
       return expression if ids.empty?
       return expression unless callable || callable_constant
 
       reduced = without_domains(expression, ids)
       return reduced unless callable && degree(callable).positive?
+      return reduced if per_piece && degree(callable) <= 1
 
       multiply(reduced, callable)
     end

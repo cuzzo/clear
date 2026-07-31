@@ -823,7 +823,9 @@ module Espalier
         next node unless callable
 
         substituted = Espalier::SymbolicComplexity.substitute_callback_cost(
-          expression, callable.fetch(:expression), callable_constant: callable.fetch(:constant)
+          expression, callable.fetch(:expression),
+          callable_constant: callable.fetch(:constant),
+          per_piece: node[:per_piece] == true
         )
         next node if substituted.equal?(expression)
 
@@ -1189,6 +1191,11 @@ module Espalier
                         end,
           symbolic_time: per_invocation_cost(callback_cost || parametric_call_symbolic(delegation, context), context) ||
             (context && symbolic_call_complexity(context)),
+          # Whether a callback substituted here runs on one piece of what the
+          # site walks. The product `N*C` is formed before the callback is
+          # resolved, so only the substitution can tell a per-piece cost from a
+          # second dimension.
+          per_piece: context && context["argument_cardinality_relation"] == "partition_of",
           collection_arguments: context && context["power"].to_i.positive? &&
             (Array(context["parameter_arguments"]) & Array(context["collection_parameters"])),
           internal_call: (delegation[:receiver].to_s == "self" &&
