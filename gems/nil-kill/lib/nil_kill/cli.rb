@@ -303,31 +303,16 @@ module NilKill
           cmd = shard.fetch("command")
           [i, shard.fetch("id"), env, cmd]
         end
-        queue = Queue.new
-        runs.each { |run| queue << run }
-        result_lock = Mutex.new
-        stop = false
-        Array.new(shard_jobs) do
-          Thread.new do
-            loop do
-              break if result_lock.synchronize { stop }
-              run = queue.pop(true)
-              i, shard_id, env, cmd = run
-              result_lock.synchronize do
-                puts "[#{i + 1}/#{selected.size}] NIL_KILL_TRACE=1 " \
-                  "RUBYOPT=#{rubyopt.shellescape} #{cmd.shelljoin}"
-              end
-              next if system(env, *cmd)
-
-              result_lock.synchronize do
-                failed_shards << shard_id
-                stop = true unless continue
-              end
-            rescue ThreadError
-              break
-            end
-          end
-        end.each(&:join)
+        failed_shards.concat(
+          Runtime::DomainDeriver.run_shards(
+            shards: runs.map do |_index, shard_id, env, cmd|
+              { "id" => shard_id, "command" => cmd, "env" => env }
+            end,
+            jobs: shard_jobs,
+            continue_on_error: !continue.nil?,
+            banner: "NIL_KILL_TRACE=1 RUBYOPT=#{rubyopt.shellescape} "
+          )
+        )
       end
       if failed_shards.any?
         snapshot&.mark_stale!(

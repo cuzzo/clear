@@ -301,6 +301,14 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillRunShards { plan, output } => {
+            // To a file, not stdout: the traced programs are writing there,
+            // and their output belongs to the person watching it. The caller
+            // needs the failures by name to mark the snapshot stale, which an
+            // exit code cannot carry.
+            let failed = fact_mine_rust::shard_runner::run_file(&plan)?;
+            fs::write(&output, serde_json::to_string(&serde_json::json!({"failed": failed}))?)?;
+        }
         Command::NilKillSelectIncrement { input, output } => {
             let raw = std::fs::read_to_string(&input)
                 .with_context(|| format!("unreadable {}", input.display()))?;
@@ -1153,6 +1161,11 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Run one traced program per shard, several at a time.
+    NilKillRunShards {
+        plan: PathBuf,
+        output: PathBuf,
+    },
     /// Which shards an incremental collect has to rerun.
     NilKillSelectIncrement {
         input: PathBuf,
@@ -1322,6 +1335,21 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-run-shards" => {
+            let mut plan = None;
+            let mut output = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillRunShards {
+                plan: plan.context("--plan is required")?,
+                output: output.context("--output is required")?,
             })
         }
         "nil-kill-select-increment" => {

@@ -78,6 +78,29 @@ module NilKill
         end
       end
 
+      # One traced program per shard, several at a time. Their output is the
+      # workload's own, so it goes straight to the terminal; only the names of
+      # the shards that failed come back.
+      def self.run_shards(shards:, jobs:, continue_on_error:, banner:)
+        return [] if shards.empty?
+
+        Tempfile.create(["nil-kill-shards", ".json"]) do |plan|
+          plan.write(JSON.generate(
+            "shards" => shards, "jobs" => jobs,
+            "continue_on_error" => continue_on_error, "banner" => banner
+          ))
+          plan.flush
+          Tempfile.create(["nil-kill-shard-failures", ".json"]) do |out|
+            system(
+              NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY, "nil-kill-run-shards",
+              "--plan", plan.path, "--output", out.path
+            )
+            contents = File.read(out.path)
+            contents.empty? ? [] : JSON.parse(contents).fetch("failed", [])
+          end
+        end
+      end
+
       def self.call(subcommand, root:, source_roles:)
         args = [NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY, subcommand,
                 "--root", root.to_s]
