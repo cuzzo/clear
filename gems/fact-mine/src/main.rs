@@ -473,14 +473,24 @@ fn run() -> Result<()> {
             let root = root
                 .unwrap_or(std::env::current_dir().context("failed to determine project root")?);
             let files = canonical_runtime_sources(&files, &root)?;
-            let mut profile = build_profile(&files, language_override, Profile::Espalier)?;
             let supplied_plan = fact_mine_rust::runtime_protocol::read_trace_plan(&plan)?;
+            let plan_files = supplied_plan
+                .documents
+                .iter()
+                .map(|document| root.join(&document.relative_path))
+                .collect::<Vec<_>>();
+            let (mut profile, plan_profile) =
+                build_profile_pair(&files, &plan_files, language_override)?;
             // Runtime discovery may add workspace callees to the analysis
             // corpus after collection. Those files are useful declaration
             // context, but were never evidence anchors and therefore must not
             // alter the trace-plan digest. Rebuild anchor bindings from the
             // exact document set named by the validated plan.
-            let rebuilt = rebuild_supplied_runtime_plan(&supplied_plan, &root, language_override)?;
+            let rebuilt = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+                &plan_profile,
+                &plan_files,
+                &root,
+            )?;
             if supplied_plan.plan_digest != rebuilt.plan.plan_digest {
                 bail!("supplied runtime trace plan does not describe the current source snapshot");
             }
@@ -632,6 +642,84 @@ fn build_profile(
     Ok(output)
 }
 
+/// The analysis profile and the trace-plan profile are extracted from the same
+/// sources, so parse each file once and run both extractions over it. Building
+/// them separately parsed the whole snapshot twice.
+fn build_profile_pair(
+    analysis_files: &[PathBuf],
+    plan_files: &[PathBuf],
+    language_override: Option<Language>,
+) -> Result<(profile::ProfileOutput, profile::ProfileOutput)> {
+    let mut union = Vec::new();
+    for file in analysis_files.iter().chain(plan_files) {
+        if !union.contains(file) {
+            union.push(file.clone());
+        }
+    }
+    let wanted = |files: &[PathBuf], file: &PathBuf| files.contains(file);
+    let parsed = parallel::map_ordered(&union, |file| {
+        let language = if let Some(language) = language_override {
+            language
+        } else {
+            Language::for_path(file)
+                .with_context(|| format!("cannot detect language for {}", file.display()))?
+        };
+        let document = syntax::parse_file(file.clone(), language)?;
+        let analysis = wanted(analysis_files, file)
+            .then(|| profile::extract_local(&document, Profile::Espalier));
+        let plan =
+            wanted(plan_files, file).then(|| profile::extract_local(&document, Profile::TracePlan));
+        Ok((
+            analysis,
+            plan,
+            document.parse_recovered.then(|| profile::ParseRecovery {
+                path: file.to_string_lossy().to_string(),
+                spans: document.parse_recovery_spans,
+            }),
+        ))
+    })?;
+
+    // Each profile is finalized over its own files, in its own order, so the
+    // result is exactly what building it alone would have produced.
+    let position = |file: &PathBuf| union.iter().position(|entry| entry == file);
+    let mut analysis_shards = Vec::with_capacity(analysis_files.len());
+    let mut plan_shards = Vec::with_capacity(plan_files.len());
+    for file in analysis_files {
+        if let Some(shard) = position(file).and_then(|at| parsed[at].0.clone()) {
+            analysis_shards.push(shard);
+        }
+    }
+    for file in plan_files {
+        if let Some(shard) = position(file).and_then(|at| parsed[at].1.clone()) {
+            plan_shards.push(shard);
+        }
+    }
+    let recoveries = |files: &[PathBuf]| {
+        files
+            .iter()
+            .filter_map(|file| position(file).and_then(|at| parsed[at].2.clone()))
+            .collect::<Vec<_>>()
+    };
+    let finalize = |selected: Profile, files: &[PathBuf], shards: Vec<profile::LocalFactShard>| {
+        let recovered = recoveries(files);
+        let mut output = profile::ProjectFactFinalizer::new(selected).finalize(shards);
+        output.input_coverage = profile::InputCoverage {
+            selected_files: files.len(),
+            parsed_files: files.len(),
+            parse_recovery_files: recovered
+                .iter()
+                .map(|recovery| recovery.path.clone())
+                .collect(),
+            parse_recoveries: recovered,
+        };
+        output
+    };
+    Ok((
+        finalize(Profile::Espalier, analysis_files, analysis_shards),
+        finalize(Profile::TracePlan, plan_files, plan_shards),
+    ))
+}
+
 fn canonical_runtime_sources(files: &[PathBuf], root: &std::path::Path) -> Result<Vec<PathBuf>> {
     files
         .iter()
@@ -648,23 +736,6 @@ fn canonical_runtime_sources(files: &[PathBuf], root: &std::path::Path) -> Resul
         .collect()
 }
 
-fn rebuild_supplied_runtime_plan(
-    supplied: &fact_mine_rust::runtime_protocol::TracePlan,
-    root: &std::path::Path,
-    language_override: Option<Language>,
-) -> Result<fact_mine_rust::runtime_protocol::BuiltTracePlan> {
-    let plan_files = supplied
-        .documents
-        .iter()
-        .map(|document| root.join(&document.relative_path))
-        .collect::<Vec<_>>();
-    let plan_profile = build_profile(&plan_files, language_override, Profile::TracePlan)?;
-    fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
-        &plan_profile,
-        &plan_files,
-        root,
-    )
-}
 
 fn build_requested_profile(
     files: &[PathBuf],
@@ -1581,10 +1652,30 @@ mod tests {
         )
         .expect("supplied plan");
 
-        // `discovered` exists and may participate in the full analysis
-        // corpus, but only `planned` owns evidence anchors.
-        let rebuilt =
-            rebuild_supplied_runtime_plan(&supplied.plan, directory.path(), None).expect("rebuild");
+        // `discovered` exists and participates in the full analysis corpus, but
+        // only `planned` owns evidence anchors. Both profiles come out of one
+        // parse of the union, so this also proves the shared parse does not let
+        // the wider corpus reach the plan.
+        let plan_files = supplied
+            .plan
+            .documents
+            .iter()
+            .map(|document| directory.path().join(&document.relative_path))
+            .collect::<Vec<_>>();
+        let (analysis, plan_profile) = build_profile_pair(
+            &[planned.clone(), discovered.clone()],
+            &plan_files,
+            None,
+        )
+        .expect("profiles");
+        assert_eq!(analysis.input_coverage.selected_files, 2);
+        assert_eq!(plan_profile.input_coverage.selected_files, 1);
+        let rebuilt = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+            &plan_profile,
+            &plan_files,
+            directory.path(),
+        )
+        .expect("rebuild");
 
         assert_eq!(rebuilt.plan.plan_digest, supplied.plan.plan_digest);
         assert_eq!(rebuilt.plan.documents.len(), 1);

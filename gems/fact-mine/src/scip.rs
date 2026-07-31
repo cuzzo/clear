@@ -277,6 +277,14 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
     apply_index(output, index)
 }
 
+/// Import an index the caller already holds. The runtime overlay builds its
+/// index as a `Value` and then imports it; printing that to a string only to
+/// lex it straight back is work neither side needs.
+pub fn apply_value(output: &mut ProfileOutput, value: &serde_json::Value) -> Result<ImportStats> {
+    let index: Index = serde_json::from_value(value.clone())?;
+    apply_index(output, index)
+}
+
 fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportStats> {
     let authority = index_authority(&index)?;
     let runtime_observed_callsite_anchors = (authority == IndexAuthority::RuntimeModeled)

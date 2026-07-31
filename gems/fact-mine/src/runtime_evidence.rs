@@ -1303,7 +1303,8 @@ fn apply_to_profile(
         merge_domain(receiver_domains.entry(call_id).or_default(), &domain);
     }
     let observed = match_observed_calls(&call_index, evidence, &method_index);
-    let flow = flow_points(output, &method_index);
+    let flow_points = flow_points(output, &method_index);
+    let flow = FlowIndex::new(&flow_points);
     seed_observed_call_receivers(&observed, &mut receiver_domains);
     let mut selected = observed.clone();
     let catalog = target_catalog(evidence);
@@ -1402,7 +1403,7 @@ fn apply_to_profile(
         &mut stats,
     )?;
     if !selected.is_empty() {
-        crate::scip::apply_json(output, &serde_json::to_string(&index)?)?;
+        crate::scip::apply_value(output, &index)?;
     }
     Ok(RuntimeScipOverlay { index, stats })
 }
@@ -1459,6 +1460,36 @@ fn runtime_record_type_exposes(domain: &ValueDomain, runtime_type: &str, member:
         && shapes
             .iter()
             .all(|shape| shape.members.contains_key(member))
+}
+
+/// The flow points, plus the grouping by (method, local) that the seeding and
+/// the final receiver join both key on. Each of those used to rescan every
+/// point for every call.
+struct FlowIndex<'p> {
+    points: &'p [FlowPoint],
+    by_slot: HashMap<&'p str, HashMap<&'p str, Vec<&'p FlowPoint>>>,
+}
+
+impl<'p> FlowIndex<'p> {
+    fn new(points: &'p [FlowPoint]) -> Self {
+        let mut by_slot: HashMap<&'p str, HashMap<&'p str, Vec<&'p FlowPoint>>> = HashMap::new();
+        for point in points {
+            by_slot
+                .entry(point.source.as_str())
+                .or_default()
+                .entry(point.name.as_str())
+                .or_default()
+                .push(point);
+        }
+        Self { points, by_slot }
+    }
+
+    fn in_slot(&self, source: &str, name: &str) -> &[&'p FlowPoint] {
+        self.by_slot
+            .get(source)
+            .and_then(|slots| slots.get(name))
+            .map_or(&[][..], Vec::as_slice)
+    }
 }
 
 /// What a flow node holds, keyed by (method, CFG node, place). The key borrows
@@ -1685,12 +1716,13 @@ fn propagate_cfg_dfg_domains(
     output: &ProfileOutput,
     evidence: &RuntimeValueEvidence,
     methods: &MethodIndex<'_>,
-    points: &[FlowPoint],
+    flow: &FlowIndex<'_>,
     return_domains: &BTreeMap<String, ValueDomain>,
     exact_result_domains: &BTreeMap<String, ValueDomain>,
     selected: &BTreeMap<String, Vec<SemanticTarget>>,
     receiver_domains: &mut BTreeMap<String, ValueDomain>,
 ) {
+    let points = flow.points;
     if points.is_empty() {
         return;
     }
@@ -1717,10 +1749,7 @@ fn propagate_cfg_dfg_domains(
         row.kind == "parameter" || (row.kind == "collection" && row.slot_kind == "method_param")
     }) {
         for method in methods.locate_scope(&observation.scope) {
-            for point in points
-                .iter()
-                .filter(|point| point.source == method.id && point.name == observation.slot)
-            {
+            for point in flow.in_slot(&method.id, &observation.slot) {
                 for definition in point
                     .reaching_definitions
                     .iter()
@@ -1743,7 +1772,7 @@ fn propagate_cfg_dfg_domains(
 
     // Existing call domains are facts at their CFG use sites. This includes
     // runtime state observations and compiler/type-analyzer receiver facts.
-    seed_flow_nodes_from_calls(output, points, receiver_domains, &mut node_domains);
+    seed_flow_nodes_from_calls(output, flow, receiver_domains, &mut node_domains);
 
     // A normalized iteration relation binds collection value domains to block
     // locals. The source-language adapter decides whether a call is an
@@ -1751,7 +1780,7 @@ fn propagate_cfg_dfg_domains(
     seed_collection_callback_nodes(
         output,
         methods,
-        points,
+        flow,
         receiver_domains,
         &mut node_domains,
     );
@@ -1798,17 +1827,9 @@ fn propagate_cfg_dfg_domains(
         }
     }
 
-    let mut points_by_slot: HashMap<(&str, &str), Vec<&FlowPoint>> = HashMap::new();
-    for point in points {
-        points_by_slot
-            .entry((point.source.as_str(), point.name.as_str()))
-            .or_default()
-            .push(point);
-    }
     for call in &output.calls {
-        let domains = points_by_slot
-            .get(&(call.source.as_str(), call.receiver.as_str()))
-            .map_or(&[][..], Vec::as_slice)
+        let domains = flow
+            .in_slot(&call.source, &call.receiver)
             .iter()
             .filter(|point| span_contains_line(point.span, call.line))
             .filter_map(|point| {
@@ -1925,7 +1946,7 @@ fn flow_points(output: &ProfileOutput, methods: &MethodIndex<'_>) -> Vec<FlowPoi
 
 fn seed_flow_nodes_from_calls<'p>(
     output: &ProfileOutput,
-    points: &'p [FlowPoint],
+    points: &FlowIndex<'p>,
     receiver_domains: &BTreeMap<String, ValueDomain>,
     node_domains: &mut FlowNodeDomains<'p>,
 ) {
@@ -1933,11 +1954,11 @@ fn seed_flow_nodes_from_calls<'p>(
         let Some(domain) = receiver_domains.get(&call.id) else {
             continue;
         };
-        for point in points.iter().filter(|point| {
-            point.source == call.source
-                && point.name == call.receiver
-                && span_contains_line(point.span, call.line)
-        }) {
+        for point in points
+            .in_slot(&call.source, &call.receiver)
+            .iter()
+            .filter(|point| span_contains_line(point.span, call.line))
+        {
             merge_domain(
                 node_domains
                     .entry((
@@ -1955,10 +1976,11 @@ fn seed_flow_nodes_from_calls<'p>(
 fn seed_collection_callback_nodes<'p>(
     output: &ProfileOutput,
     methods: &MethodIndex<'_>,
-    points: &'p [FlowPoint],
+    flow: &FlowIndex<'p>,
     receiver_domains: &BTreeMap<String, ValueDomain>,
     node_domains: &mut FlowNodeDomains<'p>,
 ) {
+    let points = flow.points;
     for call in &output.calls {
         let Some(receiver_domain) = receiver_domains.get(&call.id) else {
             continue;
@@ -2051,14 +2073,11 @@ fn seed_collection_callback_nodes<'p>(
             // callback region. Compound CFG nodes can contain multiple
             // chained callbacks, so seed same-named uses in this exact region
             // instead of conflating sibling bindings through one place.
-            for use_point in points.iter().filter(|use_point| {
-                use_point.source == point.source
-                    && use_point.name == point.name
-                    && span_contains(point.span, use_point.span)
-                    && !points.iter().any(|shadow| {
-                        shadow.source == point.source
-                            && shadow.name == point.name
-                            && shadow.callback_binding_position.is_some()
+            let slot = flow.in_slot(&point.source, &point.name);
+            for use_point in slot.iter().filter(|use_point| {
+                span_contains(point.span, use_point.span)
+                    && !slot.iter().any(|shadow| {
+                        shadow.callback_binding_position.is_some()
                             && shadow.span != point.span
                             && span_contains(point.span, shadow.span)
                             && span_contains(shadow.span, use_point.span)
@@ -2970,7 +2989,6 @@ fn infer_targets(
                     || target.target.kind == "class"
                     || target.target.kind == "static"
             })
-            .cloned()
             .collect::<Vec<_>>();
         let Some(domain) = receiver_domains.get(&call.id) else {
             let owners = catalog_candidates
@@ -2989,7 +3007,7 @@ fn infer_targets(
                     call.id.clone(),
                     catalog_candidates
                         .into_iter()
-                        .map(|candidate| candidate.target)
+                        .map(|candidate| candidate.target.clone())
                         .collect(),
                 );
             }

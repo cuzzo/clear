@@ -1213,15 +1213,28 @@ fn validate_local_symbol(symbol: &str, context: &str) -> Result<()> {
     }
 }
 
+thread_local! {
+    /// Symbols already proven canonical. Whether a symbol is in canonical form
+    /// is a property of the symbol alone -- `context` only names the field for
+    /// the error -- and a corpus repeats the same few thousand symbols across
+    /// every anchor that mentions them.
+    static CANONICAL_SYMBOLS: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
 fn validate_global_symbol(symbol: &str, context: &str) -> Result<()> {
     if symbol.is_empty() || scip::symbol::is_local_symbol(symbol) {
         bail!("{context} must be a canonical global SCIP symbol");
+    }
+    if CANONICAL_SYMBOLS.with(|known| known.borrow().contains(symbol)) {
+        return Ok(());
     }
     let parsed = scip::symbol::parse_symbol(symbol)
         .map_err(|error| anyhow::anyhow!("{context}: {error:?}"))?;
     if scip::symbol::format_symbol(parsed) != symbol {
         bail!("{context} is not in canonical SCIP symbol form");
     }
+    CANONICAL_SYMBOLS.with(|known| known.borrow_mut().insert(symbol.to_string()));
     Ok(())
 }
 
