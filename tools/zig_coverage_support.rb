@@ -4,6 +4,7 @@ require "fileutils"
 require "find"
 require "json"
 require "open3"
+require "rbconfig"
 require_relative "zig_coverage_sanitize"
 
 # Shared kcov wrapper for generated Zig test runners.
@@ -53,8 +54,27 @@ module ZigCoverageSupport
     raise Error, "ZIG_COVERAGE=1 requires kcov on PATH"
   end
 
+  # kcov runs the compiled binary itself, so it takes the cwd via chdir. The
+  # uninstrumented path hands the binary to `zig test`, which needs the same
+  # cwd expressed as a test-cmd wrapper.
+  def self.test_cmd_chdir_args(run_dir)
+    [
+      "--test-cmd", RbConfig.ruby,
+      "--test-cmd", "-e",
+      "--test-cmd", "cwd = ARGV.shift; binary = File.expand_path(ARGV.shift); Dir.chdir(cwd) { exec(binary, *ARGV) }",
+      "--test-cmd", run_dir,
+      "--test-cmd-bin",
+    ]
+  end
+
   def self.run_zig_test(zig:, build_dir:, args:, suite:, name:, env: {}, run_dir: nil)
-    return Open3.capture2e(env, zig, "test", *args, chdir: build_dir) unless enabled?
+    # `zig test` runs the binary from its own compilation directory, so a
+    # caller that needs the test to see a particular cwd passes run_dir and
+    # must get it whether or not coverage instrumentation is on.
+    unless enabled?
+      args = args + test_cmd_chdir_args(run_dir) if run_dir
+      return Open3.capture2e(env, zig, "test", *args, chdir: build_dir)
+    end
 
     require_kcov!
 

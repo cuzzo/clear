@@ -1,7 +1,7 @@
 REQUIRE "brnfk.clear";
 
 FN testPath(name: String) RETURNS !String ->
-  RETURN "../../examples/brnfk/tests/" $+ name;
+  RETURN "examples/brnfk/tests/" $+ name;
 END
 
 FN expectedSquares() RETURNS !String ->
