@@ -499,6 +499,15 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
         operand_type: Option<&TypeExpr>,
     ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
         let operator = message.strip_suffix('@').unwrap_or(message);
+        // Negation reads a machine value and writes one. Whatever produced that
+        // value is a call of its own and is priced where it happens, so the
+        // negation adds a step rather than repeating that work.
+        if operator == "!" {
+            return Some(super::normalized_behavior::NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            });
+        }
         if !RUST_PRIMITIVE_OPERATORS.contains(&operator) {
             return None;
         }
