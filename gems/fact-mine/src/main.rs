@@ -301,6 +301,14 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillWorkloadPlan { targets, command, output, root } => {
+            // Null when no runner is recognizable: the caller then keeps one
+            // opaque shard per command, which is correct rather than a
+            // fallback -- nothing about such a command says which part of it a
+            // source change affects.
+            let plan = fact_mine_rust::workload_plan::build(&targets, &command, &root);
+            fs::write(&output, serde_json::to_string(&plan)?)?;
+        }
         Command::NilKillRunShards { plan, output } => {
             // To a file, not stdout: the traced programs are writing there,
             // and their output belongs to the person watching it. The caller
@@ -1161,6 +1169,13 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Split a workload into one shard per test file.
+    NilKillWorkloadPlan {
+        targets: Vec<PathBuf>,
+        command: Vec<String>,
+        output: PathBuf,
+        root: PathBuf,
+    },
     /// Run one traced program per shard, several at a time.
     NilKillRunShards {
         plan: PathBuf,
@@ -1335,6 +1350,27 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-workload-plan" => {
+            let mut targets = Vec::new();
+            let mut command = Vec::new();
+            let mut output = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--target" => targets.push(PathBuf::from(iter.next().context("--target")?)),
+                    "--arg" => command.push(iter.next().context("--arg")?),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillWorkloadPlan {
+                targets,
+                command,
+                output: output.context("--output is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "nil-kill-run-shards" => {

@@ -20,6 +20,7 @@ pub mod shard_runner;
 pub mod snapshot;
 pub mod sorbet_sig;
 pub mod trace_document;
+pub mod workload_plan;
 pub mod trace_plan;
 pub mod collector_export;
 pub mod collector_plan;
