@@ -35,19 +35,6 @@ module NilKillRuntimeTrace
   @ivar_runtime = {}
   @runtime_state_values = {}
   @tuples = {}
-  @collections = {}
-  @objects = {}
-  @object_tokens = {}
-  # Mutation coalescing: a tight loop mutating ONE object at ONE site
-  # with ONE element-class fires record_collection_mutation N times,
-  # all producing the SAME observation. Defer them into a single
-  # pending batch + count; flush (one core call/owner, count: N) on
-  # any discriminator change or at dump. Byte-identical: every effect
-  # is an additive count or an idempotent merge, so N x count:1 ==
-  # 1 x count:N. NIL_KILL_COALESCE=0 restores the exact per-mutation
-  # path (the differential-proof baseline).
-  @coalesce = ENV["NIL_KILL_COALESCE"] != "0"
-  @pending_mut = nil
   @shape_lookup = {}
 
   # ---- non-hooked recorder-internal accumulators (Fix 2) ----
@@ -428,242 +415,6 @@ module NilKillRuntimeTrace
     end
   end
 
-  # The finalizer MUST be built in a separate method so its closure
-  # captures ONLY scalars/tokens and the module -- never `value`
-  # (capturing value would pin it alive forever, the finalizer would
-  # never run, and the leak would be reinstated). Ruby can reuse an
-  # object_id before a stale finalizer runs, so deletion is generation
-  # checked instead of keyed by object_id alone.
-  def self.objects_finalizer(oid, token)
-    proc do
-      next unless @object_tokens[oid].equal?(token)
-      @object_tokens.delete(oid)
-      @objects.delete(oid)
-    end
-  end
-
-  def self.register_collection_owner(value, owner = nil, shape: nil, **owner_keywords)
-    return unless value.is_a?(Array) || value.is_a?(Hash) || (defined?(Set) && value.is_a?(Set))
-    owner ||= owner_keywords
-
-    if value.frozen?
-      record_collection_snapshot(value, owner, shape: shape)
-      return
-    end
-
-    oid = value.object_id
-    owners = @objects[oid]
-    unless owners
-      # @objects is keyed by object_id and was NEVER evicted -> every
-      # transient collection leaked an entry forever, and GC then
-      # marked a monotonically growing live graph each cycle (the
-      # collect end-to-end ceiling, and a real unbounded-memory bug).
-      # ObjectSpace::WeakMap is unusable here: Ruby 3.2 holds WeakMap
-      # VALUES weakly, so the owners hash would vanish for LIVE
-      # collections -> lost mutation attribution. Instead evict via a
-      # finalizer when the collection is GC'd: a GC'd collection can
-      # never be mutated again, so no recorded mutation is ever lost
-      # and downstream output is byte-identical. The 13 mutation-hook
-      # read sites + record_collection_mutation keep object_id keys
-      # unchanged.
-      owners = {}
-      token = Object.new
-      @object_tokens[oid] = token
-      @objects[oid] = owners
-      ObjectSpace.define_finalizer(value, objects_finalizer(oid, token))
-      # Mutation-gate marker. The collection-mutation hooks fire on
-      # EVERY Array/Hash/Set mutation in the WHOLE process; the old
-      # gate paid Kernel#object_id + an @objects hash lookup on each
-      # one just to discover "not registered, ignore." Relevance is
-      # known HERE (registration). Stamp the object so the hook
-      # fast-path is one ivar read. Marker present <=> @objects entry
-      # present for every live non-frozen registered object (both set
-      # here, both die with the object; the finalizer only deletes
-      # @objects when the object -- and its ivar -- are already gone).
-      value.instance_variable_set(:@__nil_kill_traced, true)
-    end
-    owners[owner_identity_key(owner)] ||= owner
-    record_collection_snapshot(value, owner, shape: shape)
-  end
-
-  def self.owner_identity_key(owner)
-    [owner[:owner_kind].to_s, owner[:name].to_s, abs_path(owner[:path]), owner[:line]]
-  end
-
-  def self.collection_kind(value)
-    if value.is_a?(Hash)
-      "hash"
-    elsif defined?(Set) && value.is_a?(Set)
-      "set"
-    else
-      "array"
-    end
-  end
-
-  def self.collection_key(value, owner)
-    collection_key_for(collection_kind(value), owner)
-  end
-
-  def self.collection_key_for(kind, owner)
-    [owner[:owner_kind].to_s, owner[:name].to_s, abs_path(owner[:path]), owner[:line], kind]
-  end
-
-  def self.record_collection_snapshot(value, owner, shape: nil)
-    shape ||= container_shape(value)
-    return unless shape
-    if shape[0] == :array
-      record_collection_observation(value, owner, elem_classes: shape[1], elem_shapes: shape[2])
-    else
-      record_collection_observation(value, owner, key_classes: shape[1][0], value_classes: shape[1][1], key_shapes: shape[2][0], value_shapes: shape[2][1])
-    end
-  end
-
-  def self.record_collection_observation(value, owner, elem_classes: [], key_classes: [], value_classes: [], elem_shapes: [], key_shapes: [], value_shapes: [], mutation_site: nil)
-    record_collection_observation_core(class_name(value), collection_kind(value), owner,
-      elem_classes: elem_classes, key_classes: key_classes, value_classes: value_classes,
-      elem_shapes: elem_shapes, key_shapes: key_shapes, value_shapes: value_shapes, mutation_site: mutation_site)
-  end
-
-  # cname/kind are the derived CLASS strings -- never the object. The
-  # coalescer stores THESE (never `value`/`elem`), so a pending batch
-  # cannot pin a workload object alive (no GC-leak hazard). `count`
-  # multiplies the additive effects (calls, mutation_sites); the set
-  # merges are idempotent so they run once regardless -> coalescing N
-  # identical mutations into one core call with count: N is exactly
-  # byte-identical to N separate count: 1 calls.
-  def self.record_collection_observation_core(cname, kind, owner, count: 1, elem_classes: [], key_classes: [], value_classes: [], elem_shapes: [], key_shapes: [], value_shapes: [], mutation_site: nil)
-    with_collection_hooks_disabled do
-      path = owner[:path]
-      line = owner[:line]
-      return unless path && line
-      key = collection_key_for(kind, owner)
-      rec = (@collections[key] ||= { calls: 0, classes: NKSet.new, elem_classes: NKSet.new, key_classes: NKSet.new, value_classes: NKSet.new,
-                                      elem_shapes: NKSet.new, key_shapes: NKSet.new, value_shapes: NKSet.new, mutation_sites: NKTally.new })
-      rec[:calls] += count
-      rec[:classes] << cname
-      rec[:elem_classes].merge(elem_classes)
-      rec[:key_classes].merge(key_classes)
-      rec[:value_classes].merge(value_classes)
-      rec[:elem_shapes].merge(elem_shapes)
-      rec[:key_shapes].merge(key_shapes)
-      rec[:value_shapes].merge(value_shapes)
-      rec[:mutation_sites][mutation_site] += count if mutation_site
-    end
-  end
-
-  def self.record_collection_mutation(value, elem: :__nil_kill_missing, key: :__nil_kill_missing, val: :__nil_kill_missing)
-    owners_by_key = @objects[value.object_id]
-    owners = owners_by_key&.values
-    return if owners.nil? || owners.empty?
-    elem_classes = []
-    key_classes = []
-    value_classes = []
-    elem_shapes = []
-    key_shapes = []
-    value_shapes = []
-    elem_classes << class_name(elem) unless elem == :__nil_kill_missing
-    key_classes << class_name(key) unless key == :__nil_kill_missing
-    value_classes << class_name(val) unless val == :__nil_kill_missing
-    elem_shape = nested_collection_shape(elem) unless elem == :__nil_kill_missing
-    key_shape = nested_collection_shape(key) unless key == :__nil_kill_missing
-    value_shape = nested_collection_shape(val) unless val == :__nil_kill_missing
-    elem_shapes << elem_shape if elem_shape
-    key_shapes << key_shape if key_shape
-    value_shapes << value_shape if value_shape
-    mutation_site = collection_mutation_site
-    unless @coalesce
-      @lock.synchronize do
-        owners.each do |owner|
-          record_collection_observation(value, owner, elem_classes: elem_classes, key_classes: key_classes, value_classes: value_classes,
-            elem_shapes: elem_shapes, key_shapes: key_shapes, value_shapes: value_shapes, mutation_site: mutation_site)
-        end
-      end
-      return
-    end
-
-    # Derived CLASS strings only -- never `value`/`elem` (no GC pin).
-    cname = class_name(value)
-    kind = collection_kind(value)
-    @lock.synchronize do
-      p = @pending_mut
-      if p && p[:obk].equal?(owners_by_key) && p[:olen] == owners_by_key.size &&
-         p[:site] == mutation_site && p[:ec] == elem_classes && p[:kc] == key_classes &&
-         p[:vc] == value_classes && p[:es] == elem_shapes && p[:ks] == key_shapes && p[:vs] == value_shapes
-        # Same object-registration, owner-set, site and element-class
-        # signature as the pending batch -> identical observation; just
-        # bump the count.
-        p[:count] += 1
-      else
-        # Discriminator changed (incl. a different object -- the common
-        # interleave -- or owner-set growth): the old batch is complete.
-        flush_pending_locked!(p) if p
-        @pending_mut = { obk: owners_by_key, olen: owners_by_key.size, owners: owners,
-                         cname: cname, kind: kind, site: mutation_site,
-                         ec: elem_classes, kc: key_classes, vc: value_classes,
-                         es: elem_shapes, ks: key_shapes, vs: value_shapes, count: 1 }
-      end
-    end
-  end
-
-  # Flush ONE coalesced batch. @lock MUST already be held. Replays it
-  # as a single core call per owner with count == the coalesced total;
-  # byte-identical to `count` separate observations (additive counts,
-  # idempotent merges). Iterates the owner SNAPSHOT taken at batch
-  # start -- valid because owner-set growth ends the batch.
-  def self.flush_pending_locked!(pending)
-    pending[:owners].each do |owner|
-      record_collection_observation_core(pending[:cname], pending[:kind], owner, count: pending[:count],
-        elem_classes: pending[:ec], key_classes: pending[:kc], value_classes: pending[:vc],
-        elem_shapes: pending[:es], key_shapes: pending[:ks], value_shapes: pending[:vs], mutation_site: pending[:site])
-    end
-  end
-
-  # Flush the outstanding batch. MUST run before dump reads
-  # @collections (the counts/sites are otherwise still pending). Timing
-  # is otherwise irrelevant -- every effect is additive or idempotent.
-  def self.flush_pending_mutations!
-    @lock.synchronize do
-      pending = @pending_mut
-      @pending_mut = nil
-      flush_pending_locked!(pending) if pending
-    end
-  end
-
-  # Was caller_locations(2, 20) -- a 20-frame backtrace ALLOCATION on
-  # every collection mutation of a registered collection (microseconds
-  # x per-mutation = the hot-loop killer). Thread.each_caller_location
-  # is lazy + early-exits at the first match and allocates nothing.
-  # Byte-identical: same predicate, same skip-1 offset (the +1 frame is
-  # this gem's own, excluded by SELF_ABS anyway) and same 20-frame
-  # window cap (indices 2..21), so a match deeper than the original
-  # window still yields nil exactly as before.
-  def self.collection_mutation_site
-    seen = 0
-    Thread.each_caller_location do |c|
-      seen += 1
-      next if seen == 1
-      return nil if seen > 21
-
-      raw = c.absolute_path || c.path
-      next unless raw && target_path?(raw)
-
-      a = abs_path(raw)
-      next if a == SELF_ABS
-
-      return "#{a}:#{c.lineno}"
-    end
-    nil
-  end
-
-  def self.with_collection_hook_guard
-    previous = Thread.current[:__nil_kill_collection_hook]
-    return if previous
-    Thread.current[:__nil_kill_collection_hook] = true
-    yield
-  ensure
-    Thread.current[:__nil_kill_collection_hook] = previous
-  end
-
   def self.with_collection_hooks_disabled
     # Already disabled (re-entrant -- the wrapped recorder paths nest):
     # set-true + restore is a no-op, so skip both TLS writes and the
@@ -925,199 +676,12 @@ module NilKillRuntimeTrace
     fields
   end
 
-  def self.install_collection_hook
-    install_array_hook
-    install_hash_hook
-    install_set_hook
-  end
-
   # NOTE: the parallel instrumented tree and its require/require_relative
   # redirect (instrumented_copy_for / resolve_required_source /
   # install_instrumented_require_hook) were DELETED. In-place
   # instrumentation puts the single wrapped copy at the real src path,
   # so every load mechanism loads instrumented code with no redirect --
   # which is exactly what made collect_ran_untraced non-convergent.
-
-  def self.install_array_hook
-    return if Array.instance_variable_get(:@__nil_kill_attached)
-    Array.instance_variable_set(:@__nil_kill_attached, true)
-    wrapper = Module.new do
-      define_method(:<<) do |value|
-        result = super(value)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
-        end
-        result
-      end
-
-      define_method(:push) do |*values|
-        result = super(*values)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { values.each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
-        end
-        result
-      end
-
-      define_method(:append) do |*values|
-        result = super(*values)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { values.each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
-        end
-        result
-      end
-
-      define_method(:unshift) do |*values|
-        result = super(*values)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { values.each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } }
-        end
-        result
-      end
-
-      define_method(:[]=) do |*args|
-        value = args.last
-        result = super(*args)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
-        end
-        result
-      end
-
-      define_method(:concat) do |*others|
-        result = super(*others)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard do
-            others.each do |other|
-              Array(other).first(NilKillRuntimeTrace::ELEMENT_SAMPLE).each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
-            end
-          end
-        end
-        result
-      end
-    end
-    Array.prepend(wrapper)
-    register_collection_wrapper_targets(Array, wrapper)
-    register_collection_wrapper_targets(Array, wrapper)
-    %i[<< push append unshift []= concat].each do |method_id|
-      register_runtime_scip_transparent_wrapper(
-        wrapper,
-        method_id,
-        owner: "Array",
-        name: method_id.to_s,
-        kind: "instance",
-        native: true
-      )
-    end
-  end
-
-  def self.install_hash_hook
-    return if Hash.instance_variable_get(:@__nil_kill_attached)
-    Hash.instance_variable_set(:@__nil_kill_attached, true)
-    wrapper = Module.new do
-      define_method(:[]=) do |key, value|
-        result = super(key, value)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
-        end
-        result
-      end
-
-      define_method(:store) do |key, value|
-        result = super(key, value)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
-        end
-        result
-      end
-
-      define_method(:merge!) do |*others, **kw, &blk|
-        result = super(*others, **kw, &blk)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard do
-            others.each { |other| other.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) } if other.respond_to?(:each) }
-            kw.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
-          end
-        end
-        result
-      end
-
-      define_method(:update) do |*others, **kw, &blk|
-        result = super(*others, **kw, &blk)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard do
-            others.each { |other| other.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) } if other.respond_to?(:each) }
-            kw.each { |key, value| NilKillRuntimeTrace.record_collection_mutation(self, key: key, val: value) }
-          end
-        end
-        result
-      end
-    end
-    Hash.prepend(wrapper)
-    register_collection_wrapper_targets(Hash, wrapper)
-    register_collection_wrapper_targets(Hash, wrapper)
-    %i[[]= store merge! update].each do |method_id|
-      register_runtime_scip_transparent_wrapper(
-        wrapper,
-        method_id,
-        owner: "Hash",
-        name: method_id.to_s,
-        kind: "instance",
-        native: true
-      )
-    end
-  end
-
-  def self.install_set_hook
-    require "set"
-    return if Set.instance_variable_get(:@__nil_kill_attached)
-    Set.instance_variable_set(:@__nil_kill_attached, true)
-    original_locations = %i[add << merge].to_h do |method_id|
-      [method_id, Set.instance_method(method_id).source_location]
-    end
-    wrapper = Module.new do
-      define_method(:add) do |value|
-        result = super(value)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
-        end
-        result
-      end
-
-      define_method(:<<) do |value|
-        result = super(value)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { NilKillRuntimeTrace.record_collection_mutation(self, elem: value) }
-        end
-        result
-      end
-
-      define_method(:merge) do |enum|
-        result = super(enum)
-        if @__nil_kill_traced
-          NilKillRuntimeTrace.with_collection_hook_guard { enum.first(NilKillRuntimeTrace::ELEMENT_SAMPLE).each { |value| NilKillRuntimeTrace.record_collection_mutation(self, elem: value) } if enum.respond_to?(:first) }
-        end
-        result
-      end
-    end
-    Set.prepend(wrapper)
-    register_collection_wrapper_targets(Set, wrapper)
-    register_collection_wrapper_targets(Set, wrapper)
-    %i[add << merge].each do |method_id|
-      path, line = original_locations.fetch(method_id)
-      register_runtime_scip_transparent_wrapper(
-        wrapper,
-        method_id,
-        owner: "Set",
-        name: method_id.to_s,
-        kind: "instance",
-        native: false,
-        path: path,
-        line: line
-      )
-    end
-  rescue LoadError
-    nil
-  end
 
   def self.attach_struct(klass)
     return unless klass.is_a?(Class) && klass < Struct
@@ -1305,12 +869,12 @@ module NilKillRuntimeTrace
           rec[:array_calls] += 1
           rec[:elem_classes].merge(shape[1])
           record_tuple("struct_field", path, line, "#{klass_name}.#{field}", value)
-          register_collection_owner(value, { owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line }, shape: shape)
+          NilKillTraceNative.register_collection_owner(value, { owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line })
         elsif shape&.first == :hash
           rec[:hash_calls] += 1
           rec[:key_classes].merge(shape[1][0])
           rec[:value_classes].merge(shape[1][1])
-          register_collection_owner(value, { owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line }, shape: shape)
+          NilKillTraceNative.register_collection_owner(value, { owner_kind: "struct_field", name: "#{klass_name}.#{field}", path: path, line: line })
         end
       end
     end
@@ -1330,40 +894,7 @@ module NilKillRuntimeTrace
     rec[:mixed] ||= mixed
   end
 
-  # A mutation wrapper is prepended to the real container class, so the VM
-  # reports the wrapper module -- which is NilKill's own code -- as the callee.
-  # Record the method it stands in for, exactly as generated record accessors
-  # do, so the observation keeps the container's identity.
-  def self.register_collection_wrapper_targets(klass, wrapper)
-    wrapper.instance_methods(false).each do |method_id|
-      register_runtime_scip_transparent_wrapper(
-        wrapper, method_id,
-        owner: klass.name, name: method_id.to_s, kind: "instance",
-        native: true, path: nil
-      )
-    end
-  rescue StandardError
-    nil
-  end
-
-  # A mutation wrapper is prepended to the real container class, so the VM
-  # reports the wrapper module -- which is NilKill's own code -- as the callee.
-  # Record the method it stands in for, exactly as generated record accessors
-  # do, so the observation keeps the container's identity.
-  def self.register_collection_wrapper_targets(klass, wrapper)
-    wrapper.instance_methods(false).each do |method_id|
-      register_runtime_scip_transparent_wrapper(
-        wrapper, method_id,
-        owner: klass.name, name: method_id.to_s, kind: "instance",
-        native: true, path: nil
-      )
-    end
-  rescue StandardError
-    nil
-  end
-
   def self.dump
-    flush_pending_mutations!
     FileUtils.mkdir_p(OUT_DIR)
     pid = Process.pid
     dump_native_runtime_scip(pid) if ENV["NIL_KILL_RUNTIME_SCIP"] == "1"
@@ -1404,18 +935,11 @@ module NilKillRuntimeTrace
       end
     end
     File.open(File.join(OUT_DIR, "collections-#{pid}.jsonl"), "w") do |file|
-      @collections.each do |(owner_kind, name, path, line, kind), rec|
-        file.puts JSON.generate(
-          owner_kind: owner_kind, name: name, path: path, line: line, kind: kind, calls: rec[:calls],
-          classes: rec[:classes].to_a.sort,
-          elem_classes: rec[:elem_classes].to_a.sort,
-          key_classes: rec[:key_classes].to_a.sort,
-          value_classes: rec[:value_classes].to_a.sort,
-          elem_shapes: rec[:elem_shapes].to_a.sort.map { |shape| shape_payload(shape) },
-          key_shapes: rec[:key_shapes].to_a.sort.map { |shape| shape_payload(shape) },
-          value_shapes: rec[:value_shapes].to_a.sort.map { |shape| shape_payload(shape) },
-          mutation_sites: rec[:mutation_sites].sort_by { |site, count| [-count, site.to_s] }.to_h,
-        )
+      NilKillTraceNative.collection_observations.each do |row|
+        file.puts JSON.generate(row.merge(
+          mutation_sites: row.fetch(:mutation_sites)
+            .sort_by { |site, count| [-count, site.to_s] }.to_h
+        ))
       end
     end
     File.open(File.join(OUT_DIR, "tlets-#{pid}.jsonl"), "w") do |file|
@@ -1543,7 +1067,7 @@ if ENV["NIL_KILL_TRACE"] == "1"
   NilKillRuntimeTrace.install_data_hook
   NilKillRuntimeTrace.install_open_struct_hook
   NilKillRuntimeTrace.install_tstruct_hook
-  NilKillRuntimeTrace.install_collection_hook unless ENV["NIL_KILL_TRACE_COLLECTIONS"] == "0"
+  NilKillTraceNative.install_collection_hook unless ENV["NIL_KILL_TRACE_COLLECTIONS"] == "0"
   # Sorbet may be required after the collector starts, so `T` is looked for
   # again whenever a class or module body finishes.
   TracePoint.new(:end) { NilKillTraceNative.install_tlet_hook }.enable

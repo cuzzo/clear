@@ -188,9 +188,65 @@ static int vd_is_collection(VALUE value) {
 
 static VALUE vd_abs_path(VALUE path);
 static VALUE vd_class_name(VALUE value);
+static VALUE vd_shape_payload(VALUE key);
+static VALUE vd_record_shape_key(VALUE value, long depth);
+static VALUE vd_shape_key_for_collection(VALUE value, long depth);
+static int vd_is_collection(VALUE value);
+static int vd_is_set(VALUE value);
+static VALUE vd_sample_members(VALUE value);
+static VALUE vd_sample_pairs(VALUE value);
+static VALUE vd_class_name(VALUE value);
 
 VALUE nk_abs_path(VALUE path) { return vd_abs_path(path); }
 VALUE nk_root_path(void) { return root_path; }
+VALUE nk_shape_payload(VALUE key) { return vd_shape_payload(key); }
+
+// A member that is itself a record or a collection contributes its shape to the
+// container's; anything else contributes nothing.
+VALUE nk_nested_shape(VALUE value) {
+    VALUE record = vd_record_shape_key(value, VD_RECORD_DEPTH);
+    if (!NIL_P(record)) return record;
+    if (vd_is_collection(value)) return vd_shape_key_for_collection(value, VD_COLLECTION_DEPTH);
+    return Qnil;
+}
+
+static void vd_push_unique(VALUE list, VALUE item) {
+    if (NIL_P(item)) return;
+    for (long i = 0; i < RARRAY_LEN(list); i++) {
+        if (rb_str_cmp(RARRAY_AREF(list, i), item) == 0) return;
+    }
+    rb_ary_push(list, item);
+}
+
+VALUE nk_container_shape(VALUE value) {
+    if (RB_TYPE_P(value, T_ARRAY) || vd_is_set(value)) {
+        VALUE members = vd_sample_members(value);
+        VALUE classes = rb_ary_new();
+        VALUE shapes = rb_ary_new();
+        for (long i = 0; i < RARRAY_LEN(members); i++) {
+            VALUE item = RARRAY_AREF(members, i);
+            vd_push_unique(classes, vd_class_name(item));
+            vd_push_unique(shapes, nk_nested_shape(item));
+        }
+        return rb_ary_new_from_args(3, ID2SYM(rb_intern("array")), classes, shapes);
+    }
+    if (RB_TYPE_P(value, T_HASH)) {
+        VALUE pairs = vd_sample_pairs(value);
+        VALUE keys = rb_ary_new(), values = rb_ary_new();
+        VALUE key_shapes = rb_ary_new(), value_shapes = rb_ary_new();
+        for (long i = 0; i < RARRAY_LEN(pairs); i++) {
+            VALUE pair = RARRAY_AREF(pairs, i);
+            vd_push_unique(keys, vd_class_name(RARRAY_AREF(pair, 0)));
+            vd_push_unique(values, vd_class_name(RARRAY_AREF(pair, 1)));
+            vd_push_unique(key_shapes, nk_nested_shape(RARRAY_AREF(pair, 0)));
+            vd_push_unique(value_shapes, nk_nested_shape(RARRAY_AREF(pair, 1)));
+        }
+        return rb_ary_new_from_args(3, ID2SYM(rb_intern("hash")),
+                                    rb_ary_new_from_args(2, keys, values),
+                                    rb_ary_new_from_args(2, key_shapes, value_shapes));
+    }
+    return Qnil;
+}
 VALUE nk_type_name(VALUE value) { return vd_class_name(value); }
 VALUE nk_guard(VALUE (*fn)(VALUE), VALUE arg, VALUE fallback) { return vd_guard(fn, arg, fallback); }
 

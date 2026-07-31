@@ -804,37 +804,35 @@ RSpec.describe "NilKill coverage hardening" do
       target_file = File.join(described_class::TARGETS.first, "collection_hook_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "# trace target\n")
-      described_class.install_collection_hook
+      NilKillTraceNative.install_collection_hook
 
       array = []
-      described_class.register_collection_owner(array, owner_kind: "method_param", name: "items", path: target_file, line: 10)
+      NilKillTraceNative.register_collection_owner(array, owner_kind: "method_param", name: "items", path: target_file, line: 10)
       eval("array.push('a'); array.append('b'); array.unshift(:sym); array[1] = 7; array.concat(['c'], ['d'])", binding, target_file, 20)
 
       hash = {}
-      described_class.register_collection_owner(hash, owner_kind: "method_param", name: "meta", path: target_file, line: 12)
+      NilKillTraceNative.register_collection_owner(hash, owner_kind: "method_param", name: "meta", path: target_file, line: 12)
       eval("hash['id'] = 1; hash.store(:name, 'Ada'); hash.merge!({'age' => 42}, active: true); hash.update({'score' => 10})", binding, target_file, 30)
 
       set = Set.new
-      described_class.register_collection_owner(set, owner_kind: "method_param", name: "tags", path: target_file, line: 14)
+      NilKillTraceNative.register_collection_owner(set, owner_kind: "method_param", name: "tags", path: target_file, line: 14)
       eval("set.add('one'); set << 'two'; set.merge(['three'])", binding, target_file, 40)
 
-      described_class.flush_pending_mutations!
-
-      array_key = ["method_param", "items", File.expand_path(target_file, described_class::ROOT), 10, "array"]
-      hash_key = ["method_param", "meta", File.expand_path(target_file, described_class::ROOT), 12, "hash"]
-      set_key = ["method_param", "tags", File.expand_path(target_file, described_class::ROOT), 14, "set"]
-      expect(described_class.collections.fetch(array_key)[:elem_classes].to_a).to include("String", "Integer", "Symbol")
-      expect(described_class.collections.fetch(hash_key)[:key_classes].to_a).to include("String", "Symbol")
-      expect(described_class.collections.fetch(set_key)[:elem_classes].to_a).to include("String")
-
-      described_class.instance_variable_set(:@coalesce, false)
-      described_class.record_collection_mutation(array, elem: "direct")
-      expect(described_class.collections.fetch(array_key)[:elem_classes].to_a).to include("String")
-
       frozen_array = [1, 2].freeze
-      described_class.register_collection_owner(frozen_array, owner_kind: "method_return", name: "frozen_items", path: target_file, line: 16)
-      frozen_key = ["method_return", "frozen_items", File.expand_path(target_file, described_class::ROOT), 16, "array"]
-      expect(described_class.collections.fetch(frozen_key)[:elem_classes].to_a).to eq(["Integer"])
+      NilKillTraceNative.register_collection_owner(frozen_array, owner_kind: "method_return", name: "frozen_items", path: target_file, line: 16)
+
+      absolute = File.expand_path(target_file, described_class::ROOT)
+      seen = NilKillTraceNative.collection_observations.to_h do |row|
+        [[row.fetch(:name), row.fetch(:kind)], row]
+      end
+      expect(seen.fetch(["items", "array"]).fetch(:elem_classes)).to include("String", "Integer", "Symbol")
+      expect(seen.fetch(["meta", "hash"]).fetch(:key_classes)).to include("String", "Symbol")
+      expect(seen.fetch(["tags", "set"]).fetch(:elem_classes)).to include("String")
+      expect(seen.fetch(["items", "array"]).fetch(:path)).to eq(absolute)
+      # A frozen collection cannot be mutated again, so it is recorded once at
+      # the moment it is owned and never tracked.
+      expect(seen.fetch(["frozen_items", "array"]).fetch(:elem_classes)).to eq(["Integer"])
+      expect(NilKillTraceNative.tracks_collection?(frozen_array)).to be(false)
     ensure
       FileUtils.rm_f(target_file)
     end

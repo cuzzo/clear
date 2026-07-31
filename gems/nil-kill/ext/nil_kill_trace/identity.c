@@ -55,6 +55,11 @@ void nk_register_wrapper(VALUE defined_class, ID selector, ID owner, ID kind,
     st_insert(by_selector, (st_data_t)selector, (st_data_t)wrapper);
 }
 
+// The collector needs to know a wrapper frame when it sees one: a wrapper
+// implemented in C pushes no Ruby frame, so its `super` still reports the
+// original callsite and would be counted a second time.
+int nk_is_wrapper(VALUE defined_class, ID selector);
+
 static wrapper_t *wrapper_for(VALUE defined_class, ID selector) {
     st_data_t found;
     if (!st_lookup(wrappers, (st_data_t)defined_class, &found)) return NULL;
@@ -77,6 +82,10 @@ static VALUE nk_register(int argc, VALUE *argv, VALUE self) {
         RB_TYPE_P(path, T_STRING) ? rb_intern_str(path) : 0,
         NIL_P(line) ? 0 : NUM2INT(line));
     return Qnil;
+}
+
+int nk_is_wrapper(VALUE defined_class, ID selector) {
+    return wrapper_for(defined_class, selector) != NULL;
 }
 
 // ------------------------------------------------------------ declaration site

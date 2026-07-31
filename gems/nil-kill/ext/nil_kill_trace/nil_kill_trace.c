@@ -19,6 +19,7 @@
 #include <ruby/debug.h>
 #include <ruby/st.h>
 
+#include "collections.h"
 #include "declarations.h"
 #include "identity.h"
 #include "value_domain.h"
@@ -63,6 +64,10 @@ typedef struct {
     ID method;
     ID owner;
     int raised;
+    // A wrapper the collector installed. Its `super` reaches the real method
+    // and, because a C wrapper pushes no Ruby frame, reports the same callsite;
+    // counting both would double every call that goes through one.
+    int wrapper;
 } native_frame_t;
 
 typedef struct {
@@ -125,6 +130,9 @@ static ID id_call, id_instance, id_return;
 static ID id_local_variables, id_local_variable_get;
 
 static ID class_name_id(VALUE klass);
+static int path_analyzed(VALUE path);
+
+int nk_analyzed_path(VALUE path) { return path_analyzed(path); }
 static unsigned long counts[8];
 
 static thread_state_t *current_state(void) {
@@ -532,7 +540,14 @@ static void observe_native_call(rb_trace_arg_t *arg) {
     ID selector = NIL_P(method) ? 0 : SYM2ID(method);
     call_record_t *record = NULL;
 
-    if (state->depth > 0) {
+    int wrapper = selector && nk_is_wrapper(rb_tracearg_defined_class(arg), selector);
+    int super_leg = 0;
+    if (!wrapper && selector && state->native_depth > 0) {
+        native_frame_t *top = &state->natives[state->native_depth - 1];
+        super_leg = top->wrapper && top->method == selector;
+    }
+
+    if (!super_leg && state->depth > 0) {
         frame_t *frame = &state->frames[state->depth - 1];
         if (frame->analyzed && frame->path) {
             // A native event carries its own caller coordinate. The frame's last
@@ -555,6 +570,7 @@ static void observe_native_call(rb_trace_arg_t *arg) {
         pending->method = selector;
         pending->owner = record ? record->callee_owner : 0;
         pending->raised = 0;
+        pending->wrapper = wrapper;
     }
 }
 
@@ -653,6 +669,16 @@ static void on_event(VALUE tpval, void *_unused) {
         // observed exactly like a dependency one.
         call_record_t *observed = NULL;
         frame_t *caller = state->depth > 0 ? &state->frames[state->depth - 1] : NULL;
+        // The `super` beneath a wrapper the collector installed. A wrapper
+        // implemented in C pushes no Ruby frame, so this reports the original
+        // callsite; counting it as well would double the call. The method
+        // underneath may be written in Ruby -- Set#merge is -- which is why the
+        // check belongs here as well as on the native path.
+        VALUE called = rb_tracearg_method_id(arg);
+        if (caller && state->native_depth > 0 && !NIL_P(called)) {
+            native_frame_t *top = &state->natives[state->native_depth - 1];
+            if (top->wrapper && top->method == SYM2ID(called)) caller = NULL;
+        }
         if (caller) {
             observed = observed_record(caller, arg, 0, 1);
             if (observed) record_receiver(observed, rb_tracearg_self(arg));
@@ -1166,6 +1192,7 @@ void Init_nil_kill_trace(void) {
     nk_value_domain_init(mod);
     nk_identity_init(mod);
     nk_declarations_init(mod);
+    nk_collections_init(mod);
 
     path_cache = st_init_numtable();
     demand = st_init_numtable();
