@@ -304,6 +304,15 @@ fn require_compatible(output: &ProfileOutput, summary: &SummaryFile) -> Result<(
     Ok(())
 }
 
+/// Whether a rendered bound still names an unclosed parameter.
+fn parametric_bound(text: &str) -> bool {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|token| {
+            matches!(token.as_bytes().first(), Some(b'C') | Some(b'R') | Some(b'S'))
+                && token[1..].chars().all(|c| c.is_ascii_digit())
+        })
+}
+
 fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<usize> {
     // A complete result is authoritative regardless of where it came from. Audit
     // every overlap before mutating the profile so a generated/manual
@@ -326,6 +335,13 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
         ) else {
             continue;
         };
+        // A bound naming a callback or a reflective target states a cost it
+        // never closed, so it is not a complete result and cannot contradict
+        // one. Analysing a source that implements a library trait produces
+        // exactly that, and it must not be read as the library's own contract.
+        if parametric_bound(&cost.time) || parametric_bound(&cost.space) {
+            continue;
+        }
         if existing_time != cost.time || existing_space != cost.space {
             bail!(
                 "complete complexity conflict for {symbol}: existing {} has {existing_time}/{existing_space}, generated {} has {}/{}; fix the source analysis or fallback model instead of overriding either complete result",
