@@ -1228,12 +1228,19 @@ mod tests {
             Some("rust_dependency_registry")
         );
 
+        // An inherent function generic over its argument is not blanket trait
+        // dispatch: whichever type is passed, `Path::new` casts a pointer.
+        assert_eq!(
+            external_symbol_call_complexity(&format!("{std}path/impl#[Path]new()."), "new")
+                .map(|complexity| complexity.time),
+            Some("O(1)")
+        );
+
         // Blanket trait dispatch and closure-running APIs must stay parametric:
         // the symbol proves identity but never names the selected impl.
         for (symbol, cost) in [
             (format!("{core}convert/impl#[T][`Into<U>`]into()."), "reflective_once"),
             (format!("{core}clone/Clone#clone()."), "reflective_once"),
-            (format!("{std}path/impl#[Path]new()."), "reflective_once"),
             (format!("{std}sync/once_lock/impl#[`OnceLock<T>`]get_or_init()."), "callback_once"),
             (format!("{core}iter/traits/iterator/Iterator#fold()."), "callback_linear"),
             (format!("{core}iter/traits/iterator/Iterator#partition()."), "callback_linear"),
