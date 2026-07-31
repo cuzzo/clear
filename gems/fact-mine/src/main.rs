@@ -270,6 +270,31 @@ fn run() -> Result<()> {
                 println!("{}", rendered);
             }
         }
+        Command::NilKillTracePlan {
+            static_facts,
+            runtime_plan,
+            output,
+            root,
+            generated_at,
+            target_dirs,
+            exclude_dirs,
+        } => {
+            let facts: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&static_facts)?)
+                    .with_context(|| format!("failed to parse {}", static_facts.display()))?;
+            let evidence = match runtime_plan {
+                Some(path) => serde_json::from_str(&std::fs::read_to_string(&path)?)
+                    .with_context(|| format!("failed to parse {}", path.display()))?,
+                None => serde_json::Value::Null,
+            };
+            let plan = fact_mine_rust::trace_plan::TracePlan::build(&facts, &root);
+            let document =
+                plan.document(&generated_at, &target_dirs, &exclude_dirs, evidence);
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
+        }
         Command::RuntimePlan {
             files,
             output,
@@ -741,6 +766,16 @@ fn percent(numerator: usize, denominator: usize) -> f64 {
 }
 
 enum Command {
+    /// Assemble the collector's instrumentation plan from static facts.
+    NilKillTracePlan {
+        static_facts: PathBuf,
+        runtime_plan: Option<PathBuf>,
+        output: PathBuf,
+        root: PathBuf,
+        generated_at: String,
+        target_dirs: Vec<String>,
+        exclude_dirs: Vec<String>,
+    },
     SyntaxFacts {
         language: Option<String>,
         files: Vec<PathBuf>,
@@ -807,6 +842,39 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
     let command = iter.next().unwrap_or_default();
 
     match command.as_str() {
+        "nil-kill-trace-plan" => {
+            let mut static_facts = None;
+            let mut runtime_plan = None;
+            let mut output = None;
+            let mut root = None;
+            let mut generated_at = None;
+            let mut target_dirs = Vec::new();
+            let mut exclude_dirs = Vec::new();
+            while let Some(arg) = iter.next() {
+                let mut take = |name: &str| -> Result<String> {
+                    iter.next().with_context(|| format!("{name} requires a value"))
+                };
+                match arg.as_str() {
+                    "--static-facts" => static_facts = Some(PathBuf::from(take("--static-facts")?)),
+                    "--runtime-plan" => runtime_plan = Some(PathBuf::from(take("--runtime-plan")?)),
+                    "--output" => output = Some(PathBuf::from(take("--output")?)),
+                    "--root" => root = Some(PathBuf::from(take("--root")?)),
+                    "--generated-at" => generated_at = Some(take("--generated-at")?),
+                    "--target-dir" => target_dirs.push(take("--target-dir")?),
+                    "--exclude-dir" => exclude_dirs.push(take("--exclude-dir")?),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillTracePlan {
+                static_facts: static_facts.context("--static-facts is required")?,
+                runtime_plan,
+                output: output.context("--output is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+                generated_at: generated_at.unwrap_or_default(),
+                target_dirs,
+                exclude_dirs,
+            })
+        }
         "runtime-plan" => {
             let mut output = None;
             let mut root = None;

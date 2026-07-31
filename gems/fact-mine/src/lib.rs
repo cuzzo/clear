@@ -14,6 +14,7 @@ pub mod runtime_protocol;
 pub mod runtime_trace;
 pub mod scip;
 pub mod sorbet_sig;
+pub mod trace_plan;
 pub mod syntax;
 pub mod syntax_oracle;
 pub mod type_inference;
