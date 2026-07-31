@@ -259,8 +259,13 @@ module MIRLoweringControlFlow
   # getPtr(); ordinary indexed lowering uses get(), which returns a value
   # and contradicts the pointer-alias fact.
   #
-  # Shared/sharded maps must keep their lock-scoped get path: a pointer into
-  # those maps cannot safely escape the operation that holds the lock.
+  # This predicate only sees the *declared* receiver type. Map shape is erased
+  # whenever the receiver is a `{K}V` parameter -- a `{K}@sharded(N):writeLocked V`
+  # argument arrives here looking plain -- so the shape guards below are an
+  # opt-out for directly-typed shared-nothing maps, not the safety decision.
+  # Every shape a plain-map parameter can bind to answers `getPtr` (see the
+  # getPtr contract note in zig/lib/data-structures.zig); shared-nothing
+  # partitioned maps answer with a @compileError naming the fix.
   sig { params(expr: AST::Node).returns(T::Boolean) }
   def plain_map_pointer_bind?(expr)
     T.bind(self, MIRLowering) rescue nil

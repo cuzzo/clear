@@ -419,3 +419,65 @@ test "Hammer: BoundedChannel push parks on full ring and consumer drains every i
     try std.testing.expectEqual(@as(usize, 3), ctx.count);
     try std.testing.expectEqual(@as(i64, 3), ctx.sum);
 }
+
+// Sharded maps answer getPtr so that CLEAR's `IF map[k] EXISTS AS slot` slot
+// borrow survives map-shape erasure at a plain `{K}V` parameter. The borrow is
+// documented as valid only while no other fiber writes the shard, so this
+// hammers the supported window: disjoint keys, concurrent borrow + mutate,
+// no concurrent puts. Under TSan it proves getPtr resolves and locks the
+// correct shard when several threads collide inside one shard.
+const ShardedGetPtrCtx = struct {
+    const shards = 4;
+    const threads = 8;
+    const keys_per_thread = 16;
+    const rounds = 512;
+
+    map: CheatLib.ShardedStringMap(i64, shards) = .{ .alloc = allocator },
+    keys: [threads][keys_per_thread][]u8 = undefined,
+
+    fn key(self: *@This(), t: usize, k: usize) []const u8 {
+        return self.keys[t][k];
+    }
+
+    fn worker(self: *@This(), t: usize) void {
+        var round: usize = 0;
+        while (round < rounds) : (round += 1) {
+            for (0..keys_per_thread) |k| {
+                const slot = self.map.getPtr(self.key(t, k)) orelse unreachable;
+                slot.* += 1;
+            }
+        }
+    }
+};
+
+test "Hammer: ShardedStringMap.getPtr borrows disjoint slots across colliding shards" {
+    var ctx = try allocator.create(ShardedGetPtrCtx);
+    defer allocator.destroy(ctx);
+    ctx.* = .{};
+    defer ctx.map.deinit(allocator, allocator);
+
+    for (0..ShardedGetPtrCtx.threads) |t| {
+        for (0..ShardedGetPtrCtx.keys_per_thread) |k| {
+            ctx.keys[t][k] = try std.fmt.allocPrint(allocator, "t{d}-k{d}", .{ t, k });
+            try ctx.map.put(allocator, allocator, ctx.keys[t][k], 0);
+        }
+    }
+    defer for (0..ShardedGetPtrCtx.threads) |t| {
+        for (0..ShardedGetPtrCtx.keys_per_thread) |k| allocator.free(ctx.keys[t][k]);
+    };
+
+    var handles: [ShardedGetPtrCtx.threads]std.Thread = undefined;
+    for (0..ShardedGetPtrCtx.threads) |t| {
+        handles[t] = try std.Thread.spawn(.{}, ShardedGetPtrCtx.worker, .{ ctx, t });
+    }
+    for (&handles) |h| h.join();
+
+    for (0..ShardedGetPtrCtx.threads) |t| {
+        for (0..ShardedGetPtrCtx.keys_per_thread) |k| {
+            try std.testing.expectEqual(
+                @as(i64, ShardedGetPtrCtx.rounds),
+                ctx.map.get(ctx.key(t, k)).?,
+            );
+        }
+    }
+}

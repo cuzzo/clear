@@ -2818,6 +2818,14 @@ pub fn bind(comptime deps: type) type {
                 if (comptime is_slice_value) caller_alloc.free(value);
             }
 
+            pub fn getPtr(self: *Self, key: []const u8) ?*V {
+                _ = self;
+                _ = key;
+                @compileError("@sharded(N) string maps are shared-nothing: each shard is owned by " ++
+                    "a scheduler, so a slot cannot be borrowed in place. Bind the value instead " ++
+                    "(`v = map[k] OR_ELSE ...`), or declare the map @sharded(N):writeLocked.");
+            }
+
             pub fn get(self: *Self, key: []const u8) ?V {
                 self.ensureOwnership();
                 const s = shardIndex(key);
@@ -3248,6 +3256,14 @@ pub fn bind(comptime deps: type) type {
                 if (had_err) return error.OutOfMemory;
             }
 
+            pub fn getPtr(self: *Self, key: K) ?*V {
+                _ = self;
+                _ = key;
+                @compileError("@sharded(N) numeric maps are shared-nothing: each shard is owned by " ++
+                    "a scheduler, so a slot cannot be borrowed in place. Bind the value instead " ++
+                    "(`v = map[k] OR_ELSE ...`), or declare the map @sharded(N):writeLocked.");
+            }
+
             pub fn get(self: *Self, key: K) ?V {
                 self.ensureOwnership();
                 const s = shardIndex(key);
@@ -3362,6 +3378,16 @@ pub fn bind(comptime deps: type) type {
     // N independent shards, each protected by a RwLock. Readers are concurrent
     // within a shard; writers are exclusive per-shard. Thread-safe for @parallel.
     // Emitted for @sharded(N):locked and @sharded(N):writeLocked.
+    //
+    // getPtr contract (shared by every lock-based map shape below): CLEAR's
+    // `IF map[k] EXISTS AS slot` borrows the slot rather than copying an
+    // ownership-bearing payload, so every map shape a plain `{K}V` parameter
+    // can be instantiated with must expose `getPtr`. The returned pointer
+    // aliases shard storage after the shard lock is released, so it stays
+    // valid only while no other fiber writes that shard -- the same window
+    // `get` already hands out for aggregate values, widened to include
+    // rehash. Shared-nothing shapes cannot honour it at all and say so with
+    // @compileError.
     pub fn ShardedStringMap(comptime V: type, comptime N: usize) type {
         comptime std.debug.assert(N >= 2);
         return struct {
@@ -3401,6 +3427,16 @@ pub fn bind(comptime deps: type) type {
                 self.shards[s].lock.lockShared();
                 defer self.shards[s].lock.unlockShared();
                 return self.shards[s].map.get(key);
+            }
+
+            /// Borrow a slot in place. See the `getPtr` contract note above
+            /// ShardedStringMap: the borrow is only valid while no other
+            /// fiber writes this shard.
+            pub fn getPtr(self: *Self, key: []const u8) ?*V {
+                const s = shardIndex(key);
+                self.shards[s].lock.lockShared();
+                defer self.shards[s].lock.unlockShared();
+                return self.shards[s].map.getPtr(key);
             }
 
             pub fn contains(self: *Self, key: []const u8) bool {
@@ -3590,6 +3626,13 @@ pub fn bind(comptime deps: type) type {
                 return self.shards[s].map.get(key);
             }
 
+            pub fn getPtr(self: *Self, key: []const u8) ?*V {
+                const s = shardIndex(key);
+                instrumentedLock(&self.shards[s]);
+                defer self.shards[s].lock.unlock();
+                return self.shards[s].map.getPtr(key);
+            }
+
             pub fn contains(self: *Self, key: []const u8) bool {
                 const s = shardIndex(key);
                 self.shards[s].lock.lock();
@@ -3735,6 +3778,14 @@ pub fn bind(comptime deps: type) type {
                 return self.shards[s].map.get(key);
             }
 
+            pub fn getPtr(self: *Self, key: K) ?*V {
+                const s = shardIndex(key);
+                const elided = self.locks_elided.load(.monotonic);
+                acquire(&self.shards[s], elided);
+                defer release(&self.shards[s], elided);
+                return self.shards[s].map.getPtr(key);
+            }
+
             pub fn contains(self: *Self, key: K) bool {
                 const s = shardIndex(key);
                 const elided = self.locks_elided.load(.monotonic);
@@ -3803,6 +3854,9 @@ pub fn bind(comptime deps: type) type {
                 }
                 pub fn get(self: *Self, k: K) ?V {
                     return self.inner.get(k);
+                }
+                pub fn getPtr(self: *Self, k: K) ?*V {
+                    return self.inner.getPtr(k);
                 }
                 pub fn contains(self: *Self, k: K) bool {
                     return self.inner.contains(k);

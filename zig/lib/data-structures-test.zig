@@ -489,3 +489,53 @@ test "owned-string Set still frees duplicates and elements at deinit" {
     set.remove(allocator, "one"); // freed
     try std.testing.expectEqual(@as(i64, 1), set.length());
 }
+
+// CLEAR lowers `IF map[k] EXISTS AS slot` to a slot borrow, and map shape is
+// erased whenever the receiver is a plain `{K}V` parameter. Every shape such a
+// parameter can bind to must therefore answer getPtr with a live alias.
+
+test "ShardedStringMap.getPtr aliases the shard slot" {
+    const allocator = std.testing.allocator;
+    var map = CheatLib.ShardedStringMap(i64, 4){ .alloc = allocator };
+    defer map.deinit(allocator, allocator);
+
+    try map.put(allocator, allocator, "alpha", 1);
+    try map.put(allocator, allocator, "beta", 2);
+
+    const slot = map.getPtr("alpha") orelse return error.MissingSlot;
+    slot.* = 41;
+    slot.* += 1;
+
+    try std.testing.expectEqual(@as(i64, 42), map.get("alpha").?);
+    try std.testing.expectEqual(@as(i64, 2), map.get("beta").?);
+    try std.testing.expect(map.getPtr("gamma") == null);
+}
+
+test "MutexShardedStringMap.getPtr aliases the shard slot" {
+    const allocator = std.testing.allocator;
+    var map = CheatLib.MutexShardedStringMap(i64, 4){ .alloc = allocator };
+    defer map.deinit(allocator, allocator);
+
+    try map.put(allocator, allocator, "alpha", 7);
+
+    const slot = map.getPtr("alpha") orelse return error.MissingSlot;
+    slot.* = 8;
+
+    try std.testing.expectEqual(@as(i64, 8), map.get("alpha").?);
+    try std.testing.expect(map.getPtr("absent") == null);
+}
+
+test "sharded getPtr reaches an aggregate payload without copying it" {
+    const allocator = std.testing.allocator;
+    const Node = struct { edges: std.ArrayListUnmanaged(i64) = .empty };
+    var map = CheatLib.ShardedStringMap(Node, 4){ .alloc = allocator };
+    defer map.deinit(allocator, allocator);
+
+    try map.put(allocator, allocator, "n", .{});
+    const slot = map.getPtr("n") orelse return error.MissingSlot;
+    try slot.edges.append(allocator, 5);
+
+    const observed = map.getPtr("n") orelse return error.MissingSlot;
+    try std.testing.expectEqual(@as(usize, 1), observed.edges.items.len);
+    try std.testing.expectEqual(@as(i64, 5), observed.edges.items[0]);
+}
