@@ -30,6 +30,41 @@ Also measure blockers *per function*: of 2907 incomplete, 1390 have no unpriced
 call of their own (purely transitive - they resolve as their callees resolve)
 and ~1000 have exactly one.
 
+## The dominant cause: dependency declarations are absent
+
+An index carries `SymbolInformation` only for the crate it indexes. Dependencies
+appear as bare symbol names on references, with no declaration attached, so the
+type of anything they return or hold is unavailable:
+
+    node.kind() == "block"        // kind() -> &str, unknown: O(N) unpriced
+    start.row + 1                 // Point#row -> usize, unknown: O(1) unpriced
+
+Verified: fact-mine's index holds 2717 tree-sitter symbols and zero signatures
+for them (`grep 'fn kind'` finds nothing). Project code has no such problem - a
+probe comparing two project call results resolves complete today - so this is a
+missing input, not a resolution defect.
+
+This is why Rust trails Go here rather than anything about inference: the Go
+corpora call their own code plus a stdlib the registry models, while fact-mine
+is tree-sitter and serde heavy.
+
+Indexing the dependency itself supplies exactly what is missing:
+
+    cd ~/.cargo/registry/src/*/tree-sitter-0.25.8 && rust-analyzer scip .
+    # pub fn kind(&self) -> &'static str
+    # pub row: usize
+
+Attaching that index measured fact-mine incomplete 2548 -> 2523. That is one
+dependency; `core` and `alloc` carry ~67000 symbols by comparison.
+
+`apply_json` refuses it: an index joining to none of the analyzed methods is
+rejected, which is right for a mis-scoped `scip-go .` and wrong for a dependency
+that is foreign by construction. The guard cannot tell the two apart, and a test
+pins the current behaviour deliberately. Intent has to come from the caller - a
+`--scip-dependency-index` flag that skips the coverage check and contributes
+declarations only. Note the flag is parsed in one subcommand block while the
+preload runs in another; the two scopes need joining.
+
 ## Open work
 
 ### 1. Cross-file record shapes are order-dependent
