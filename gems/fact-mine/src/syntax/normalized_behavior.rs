@@ -995,6 +995,54 @@ pub(crate) fn native_pointer_nullability_contract(type_name: &str) -> Option<&'s
 /// What an operator means where it reduces to a machine instruction. Every
 /// language that has these spells them the same way; the two exceptions state
 /// their own list.
+/// What a declaration states about itself, without the body it introduces. A
+/// declaration's own text runs on into its body, and everything a signature
+/// says - parameters, result, the bounds its type parameters carry - is stated
+/// before the body opens.
+fn declaration_head(source: &str) -> &str {
+    let Some(brace) = source.find('{') else {
+        return source;
+    };
+    if source[..brace].contains(')') {
+        &source[..brace]
+    } else {
+        source
+    }
+}
+
+/// The bound a declaration puts on one of its own type parameters, wherever it
+/// states it. A parameter typed by a name the declaration itself introduces is
+/// only as callable as that name's bound.
+fn type_parameter_bound(head: &str, name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() || !name.chars().all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let mut rest = head;
+    while let Some(index) = rest.find(name) {
+        let (before, after) = rest.split_at(index);
+        let tail = &after[name.len()..];
+        let standalone = before
+            .chars()
+            .last()
+            .is_none_or(|ch| !(ch == '_' || ch.is_ascii_alphanumeric()));
+        if standalone {
+            let bound = tail.trim_start();
+            if let Some(bound) = bound.strip_prefix(':') {
+                let end = bound
+                    .find(|ch| matches!(ch, ',' | '>' | '{'))
+                    .unwrap_or(bound.len());
+                let bound = bound[..end].trim();
+                if !bound.is_empty() {
+                    return Some(bound.to_string());
+                }
+            }
+        }
+        rest = &rest[index + name.len()..];
+    }
+    None
+}
+
 const SCALAR_OPERATORS: &[&str] = &[
     "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&", "|", "^", "<<", ">>", "&&",
     "||", "~",
@@ -2302,6 +2350,40 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         text.split(|ch: char| !(ch == '_' || ch == '?' || ch.is_ascii_alphanumeric()))
             .rfind(|part| !part.is_empty())
             .map(|part| part.trim_end_matches('?').to_string())
+    }
+
+    /// Whether a declared type is something the program calls rather than
+    /// reads. This is the whole of what an adapter contributes to finding a
+    /// callback parameter; the rule built on it is shared, because "a parameter
+    /// the body calls" means the same thing in every language.
+    fn callable_type_spelling(&self, _declared: &str) -> bool {
+        false
+    }
+
+    /// The parameters this declaration receives as callables. What such a
+    /// parameter costs is the caller's to supply, so a bound over it is
+    /// parametric rather than unknown - and naming it is what lets a caller
+    /// discharge that parameter.
+    ///
+    /// A language may state the bound beside the parameter (`f: impl Fn()`) or
+    /// away from it, among the declaration's own type parameters (`f: F` with
+    /// `F: Fn()`). Both are the same fact, so both resolve here.
+    fn callback_parameter_names_from_signature(&self, signature: &str) -> Vec<String> {
+        let head = declaration_head(signature);
+        let params_source = self.parameter_list_source(head);
+        if params_source.is_empty() {
+            return Vec::new();
+        }
+        crate::syntax::normalized_extractor::split_parameters(&params_source)
+            .into_iter()
+            .filter_map(|param| {
+                let (name, declared) = self.parse_variable_binding(&param)?;
+                let callable = self.callable_type_spelling(&declared)
+                    || type_parameter_bound(head, &declared)
+                        .is_some_and(|bound| self.callable_type_spelling(&bound));
+                callable.then_some(name)
+            })
+            .collect()
     }
 
     fn property_read_call(&self, _node: &Node, _parts: &NormalizedCallParts) -> bool {

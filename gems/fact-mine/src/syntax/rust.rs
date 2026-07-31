@@ -6,7 +6,8 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
     configured_external_latency_bound, configured_semantic_symbol_call_complexity,
     configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    eliminable_guard_from_call, nil_guard_from_predicates, type_after_parameter_colon,
+    eliminable_guard_from_call, matching_paren_index, nil_guard_from_predicates,
+    type_after_parameter_colon,
     NormalizedCallParts, NormalizedCallProjection, NormalizedLanguageBehavior,
     NormalizedNilGuardFact, NormalizedOwner, NormalizedSemanticEffect,
 };
@@ -368,6 +369,65 @@ pub(crate) struct RustNormalizedBehavior;
 impl NormalizedLanguageBehavior for RustNormalizedBehavior {
     fn function_has_executable_body(&self, node: &Node) -> bool {
         node.text.trim_end().ends_with('}')
+    }
+
+    /// A declaration states its parameters after the name it declares. Rust
+    /// writes a visibility restriction in parentheses too - `pub(crate)`,
+    /// `pub(in crate::ast)` - and writes it first, so the parameter list is the
+    /// pair that follows `fn`, not the first pair in the text.
+    fn parameter_list_source(&self, source: &str) -> String {
+        let mut rest = source;
+        let mut offset = 0usize;
+        let start = loop {
+            let Some(index) = rest.find("fn ") else {
+                return String::new();
+            };
+            let before_is_boundary = rest[..index]
+                .chars()
+                .last()
+                .is_none_or(|ch| !(ch == '_' || ch.is_ascii_alphanumeric()));
+            offset += index + 3;
+            rest = &rest[index + 3..];
+            if before_is_boundary {
+                break offset;
+            }
+        };
+        // A generic list sits between the name and the parameters, and may
+        // itself contain parentheses (`F: Fn(&T)`), so the parameter list opens
+        // at the first parenthesis outside it.
+        let mut depth = 0usize;
+        for (index, ch) in source[start..].char_indices() {
+            match ch {
+                '<' => depth += 1,
+                '>' => depth = depth.saturating_sub(1),
+                '(' if depth == 0 => {
+                    let open = start + index;
+                    let Some(close) = matching_paren_index(source, open) else {
+                        return String::new();
+                    };
+                    return source[(open + 1)..close].to_string();
+                }
+                '{' | ';' => return String::new(),
+                _ => {}
+            }
+        }
+        String::new()
+    }
+
+    /// Rust spells a callable as a bound: `Fn`, `FnMut` or `FnOnce`, reached
+    /// through `impl`, through `dyn`, or through a type parameter. A bare
+    /// function pointer is callable too.
+    fn callable_type_spelling(&self, declared: &str) -> bool {
+        let declared = declared.trim();
+        declared
+            .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+            .any(|word| matches!(word, "Fn" | "FnMut" | "FnOnce"))
+            || declared.starts_with("fn(")
+            || declared.starts_with("fn ")
+    }
+
+    fn callback_parameter_names(&self, function: &Node) -> Vec<String> {
+        self.callback_parameter_names_from_signature(&function.text)
     }
 
     fn uses_source_declaration_header(&self) -> bool {
@@ -962,6 +1022,80 @@ fn is_simple_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    /// A declaration states its parameters between the parentheses that follow
+    /// the name it declares. Rust spells a visibility restriction with
+    /// parentheses too, and it comes first, so reading the first pair reads
+    /// `pub(crate)` as the parameter list and the declaration loses every
+    /// parameter it has.
+    #[test]
+    fn a_visibility_restriction_is_not_a_parameter_list() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/lsp_scip.rs");
+        let document = crate::syntax::parse_file(path, crate::syntax::Language::Rust).unwrap();
+        let definition = document
+            .function_defs
+            .iter()
+            .find(|row| row.name == "scip_atom")
+            .expect("scip_atom");
+        assert_eq!(
+            definition.params,
+            vec!["value".to_string()],
+            "`pub(crate) fn scip_atom(value: &str)` declares one parameter"
+        );
+    }
+
+    /// A parameter whose declared type is callable is a callback: what it costs
+    /// is the caller's to supply, not something this declaration can state. The
+    /// bound is parametric in it, and naming it is what lets a caller discharge
+    /// that parameter.
+    #[test]
+    fn a_parameter_declared_callable_is_a_callback() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/ast/normalizer.rs");
+        let document = crate::syntax::parse_file(path, crate::syntax::Language::Rust).unwrap();
+        let definition = document
+            .function_defs
+            .iter()
+            .find(|row| row.name == "with_dynamic_scope")
+            .expect("with_dynamic_scope");
+        assert_eq!(
+            definition.callback_params,
+            vec!["f".to_string()],
+            "`f: impl FnOnce(&mut Self) -> T` is a callback parameter"
+        );
+    }
+
+    /// The three spellings a callable parameter takes: an `impl` bound, a `dyn`
+    /// object behind a reference, and a generic whose bound sits in the
+    /// declaration's own type parameters rather than beside the parameter.
+    #[test]
+    fn every_spelling_of_a_callable_parameter_is_one() {
+        let behavior = super::RustNormalizedBehavior;
+        use crate::syntax::normalized_behavior::NormalizedLanguageBehavior;
+        for (signature, expected) in [
+            (
+                "fn with_control(&mut self, control: &str, block: impl FnOnce(&mut Self))",
+                vec!["block"],
+            ),
+            (
+                "fn walk_local(&self, node: &Node, blk: &mut dyn FnMut(&Node))",
+                vec!["blk"],
+            ),
+            (
+                "pub(crate) fn map_ordered<T, U, F>(items: &[T], f: F) -> Vec<U> where F: Fn(&T) -> Result<U> + Sync",
+                vec!["f"],
+            ),
+            (
+                "pub(crate) fn scip_atom(value: &str) -> String",
+                Vec::new(),
+            ),
+        ] {
+            assert_eq!(
+                behavior.callback_parameter_names_from_signature(signature),
+                expected.iter().map(|name| name.to_string()).collect::<Vec<_>>(),
+                "signature={signature}"
+            );
+        }
+    }
 
     #[test]
     fn rust_local_types_cover_this_crates_own_digest_helper() {

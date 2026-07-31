@@ -2274,7 +2274,7 @@ fn function_params_from_signature(
         .collect()
 }
 
-fn split_parameters(source: &str) -> Vec<String> {
+pub(crate) fn split_parameters(source: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
     let mut depth = 0usize;
