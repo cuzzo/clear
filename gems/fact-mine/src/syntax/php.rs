@@ -167,6 +167,26 @@ const PHP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PhpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
+    /// PHP names a base class after `extends` and interfaces after
+    /// `implements`; a class may state both.
+    fn owner_supertypes(&self, node: &Node) -> Vec<String> {
+        let header = node.text.split('{').next().unwrap_or(&node.text);
+        let mut rows = Vec::new();
+        if let Some((_, clause)) = header.split_once(" implements ") {
+            rows.extend(super::normalized_behavior::split_declared_supertypes(clause));
+        }
+        if let Some((_, clause)) = header.split_once(" extends ") {
+            let clause = clause.split(" implements ").next().unwrap_or(clause);
+            rows.extend(super::normalized_behavior::split_declared_supertypes(clause));
+        }
+        rows.into_iter()
+            .filter_map(|supertype| {
+                let bare = supertype.rsplit('\\').next().unwrap_or(&supertype).trim();
+                (!bare.is_empty()).then(|| bare.to_string())
+            })
+            .collect()
+    }
+
     fn scalar_type_names(&self) -> &'static [&'static str] {
         &["int", "float", "bool"]
     }
@@ -581,6 +601,32 @@ fn is_simple_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_php_class_states_what_it_extends_and_implements() {
+        let behavior = PhpNormalizedBehavior;
+        let owner = |text: &str| Node {
+            r#type: "CLASS".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: text.len(),
+            text: text.to_string(),
+        };
+        assert_eq!(
+            behavior.owner_supertypes(&owner("class Sink extends Base implements Writer, Closer {")),
+            vec!["Writer".to_string(), "Closer".to_string(), "Base".to_string()]
+        );
+        assert_eq!(
+            behavior.owner_supertypes(&owner("class Buffer implements \\Psr\\Log\\LoggerInterface {")),
+            vec!["LoggerInterface".to_string()]
+        );
+        assert_eq!(
+            behavior.owner_supertypes(&owner("class Segment {")),
+            Vec::<String>::new()
+        );
+    }
+
     use super::*;
 
     #[test]

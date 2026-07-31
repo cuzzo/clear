@@ -181,6 +181,25 @@ const SWIFT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct SwiftNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
+    /// Swift states conformance in the declaration header, after the type's
+    /// name: `class Buffer: Sink, Closeable`. Unlike C# and Kotlin it writes no
+    /// space before the colon, and a generic constraint follows `where`.
+    fn owner_supertypes(&self, node: &Node) -> Vec<String> {
+        let header = node.text.split('{').next().unwrap_or(&node.text);
+        let before_constraints = header.split(" where ").next().unwrap_or(header);
+        let Some((_declaration, clause)) = before_constraints.split_once(':') else {
+            return Vec::new();
+        };
+        super::normalized_behavior::split_declared_supertypes(clause)
+            .into_iter()
+            .filter_map(|supertype| {
+                let bare = supertype.split('<').next().unwrap_or(&supertype).trim();
+                let bare = bare.rsplit('.').next().unwrap_or(bare).trim();
+                (!bare.is_empty()).then(|| bare.to_string())
+            })
+            .collect()
+    }
+
     fn scalar_type_names(&self) -> &'static [&'static str] {
         &[
             "Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16", "UInt32",
@@ -550,6 +569,37 @@ fn is_keyword(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_swift_declaration_states_what_it_conforms_to() {
+        let behavior = SwiftNormalizedBehavior;
+        let owner = |text: &str| Node {
+            r#type: "CLASS".to_string(),
+            children: Vec::new(),
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: text.len(),
+            text: text.to_string(),
+        };
+        assert_eq!(
+            behavior.owner_supertypes(&owner("struct Flag: Decodable, ParsedWrapper {")),
+            vec!["Decodable".to_string(), "ParsedWrapper".to_string()]
+        );
+        assert_eq!(
+            behavior.owner_supertypes(&owner("extension Int32: ExpressibleByArgument {")),
+            vec!["ExpressibleByArgument".to_string()]
+        );
+        // A generic constraint is not conformance of the declaration.
+        assert_eq!(
+            behavior.owner_supertypes(&owner("struct Box<T>: Wrapper where T: Equatable {")),
+            vec!["Wrapper".to_string()]
+        );
+        assert_eq!(
+            behavior.owner_supertypes(&owner("struct Segment {")),
+            Vec::<String>::new()
+        );
+    }
+
     use super::*;
 
     #[test]
