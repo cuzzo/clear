@@ -4,11 +4,15 @@ require "json"
 require "fileutils"
 require "minitest/autorun"
 require "open3"
+require_relative "../lib/espalier/static_evidence"
 require "tmpdir"
 
 class DiagnoseBigOGapsTest < Minitest::Test
   ROOT = File.expand_path("../../..", __dir__)
-  FACT_MINE = File.join(ROOT, "gems/fact-mine/target/debug/fact-mine-rust")
+  # Whichever profile is built, the way every other caller resolves it. CI
+  # builds --release, so naming the debug path made these tests error rather
+  # than run.
+  FACT_MINE = Espalier::StaticEvidence::FACT_MINE_RUST_BINARY
   SCRIPT = File.join(ROOT, "gems/espalier/script/diagnose_big_o_gaps.rb")
 
   def test_accepts_fact_mine_profiles_with_paths_relative_to_source_root
