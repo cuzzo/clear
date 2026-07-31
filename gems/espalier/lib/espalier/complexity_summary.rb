@@ -29,11 +29,22 @@ module Espalier
       return false unless method["source_export_eligible"] == true
       return false unless source_proven?(quality, complexity_facts)
 
-      qualities = Array(quality[:big_o_bound_qualities]).map(&:to_s)
-      return false if qualities.any? { |bound| bound.include?("parametric_callback") } &&
-        Array(method["callback_params"]).empty?
+      return false if undischarged_cost?(quality) && Array(method["callback_params"]).empty?
 
       true
+    end
+
+    # Whether the bound this method publishes still names a cost its caller did
+    # not supply. A call priced parametrically before its callback was
+    # substituted leaves that quality behind on the method, but a closure
+    # written at the call site is analyzed where it stands and its cost is
+    # already inside the expression. What a consumer can use is decided by the
+    # bound, so the bound's own domains decide it - not the history of the
+    # calls that built it.
+    def undischarged_cost?(quality)
+      Array(quality[:big_o_variables]).any? do |domain|
+        (domain["source_kind"] || domain[:source_kind]).to_s.end_with?("_cost")
+      end
     end
 
     def consumer_closed_candidate_set?(call)
@@ -43,7 +54,6 @@ module Espalier
     def source_proven?(quality, _complexity_facts)
       return false unless quality
       return false unless quality[:big_o_complete] == true
-      return false unless quality[:big_o_space_complete] == true
 
       qualities = Array(quality[:big_o_bound_qualities]).map(&:to_s)
       return false if qualities.any? do |bound_quality|

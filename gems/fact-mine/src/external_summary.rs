@@ -68,7 +68,11 @@ struct SummarySource {
 #[derive(Clone, Debug, Deserialize)]
 struct ComplexitySummary {
     time: String,
-    space: String,
+    /// Stated only when the producer proved it. Time and space are proven
+    /// separately, so a producer publishes each axis it proved rather than
+    /// withholding both until the pair is complete.
+    #[serde(default)]
+    space: Option<String>,
     #[serde(default = "default_provenance")]
     provenance: String,
     #[serde(default = "default_bound_quality")]
@@ -96,7 +100,7 @@ pub fn apply_file(output: &mut ProfileOutput, path: &Path) -> Result<usize> {
 
 pub fn apply_files(output: &mut ProfileOutput, paths: &[impl AsRef<Path>]) -> Result<usize> {
     let mut summaries = Vec::with_capacity(paths.len());
-    let mut costs_by_symbol: BTreeMap<String, (String, String, String)> = BTreeMap::new();
+    let mut costs_by_symbol: BTreeMap<String, (String, Option<String>, String)> = BTreeMap::new();
     for path in paths {
         let path = path.as_ref();
         let summary = read_file(path)?;
@@ -106,11 +110,12 @@ pub fn apply_files(output: &mut ProfileOutput, paths: &[impl AsRef<Path>]) -> Re
             if let Some((time, space, first_path)) = costs_by_symbol.get(symbol) {
                 if time != &cost.time || space != &cost.space {
                     bail!(
-                        "conflicting complexity summaries for {symbol}: {} has {time}/{space}, {} has {}/{}",
+                        "conflicting complexity summaries for {symbol}: {} has {time}/{}, {} has {}/{}",
                         first_path,
+                        space.as_deref().unwrap_or("unstated"),
                         path.display(),
                         cost.time,
-                        cost.space
+                        cost.space.as_deref().unwrap_or("unstated")
                     );
                 }
             } else {
@@ -335,20 +340,25 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
         ) else {
             continue;
         };
+        // Only an axis the producer stated can contradict one this consumer
+        // already holds.
+        let Some(summary_space) = cost.space.as_deref() else {
+            continue;
+        };
         // A bound naming a callback or a reflective target states a cost it
         // never closed, so it is not a complete result and cannot contradict
         // one. Analysing a source that implements a library trait produces
         // exactly that, and it must not be read as the library's own contract.
-        if parametric_bound(&cost.time) || parametric_bound(&cost.space) {
+        if parametric_bound(&cost.time) || parametric_bound(summary_space) {
             continue;
         }
-        if existing_time != cost.time || existing_space != cost.space {
+        if existing_time != cost.time || existing_space != summary_space {
             bail!(
                 "complete complexity conflict for {symbol}: existing {} has {existing_time}/{existing_space}, generated {} has {}/{}; fix the source analysis or fallback model instead of overriding either complete result",
                 call.complexity_provenance.as_deref().unwrap_or("unknown provenance"),
                 cost.provenance,
                 cost.time,
-                cost.space
+                summary_space
             );
         }
     }
@@ -365,7 +375,9 @@ fn apply_summary(output: &mut ProfileOutput, summary: &SummaryFile) -> Result<us
             continue;
         };
         call.known_time_complexity = Some(cost.time.clone());
-        call.known_space_complexity = Some(cost.space.clone());
+        // A consumer holds each axis the producer proved. An unstated space
+        // bound leaves this call's space unresolved; its time is still priced.
+        call.known_space_complexity = cost.space.clone();
         call.complexity_provenance = Some(cost.provenance.clone());
         call.complexity_bound_quality = Some(cost.bound_quality.clone());
         call.complexity_candidates = cost.candidates.clone();
@@ -490,8 +502,11 @@ fn validate(summary: &SummaryFile) -> Result<()> {
         if symbol.trim().is_empty() {
             bail!("complexity summary contains an empty compiler symbol");
         }
-        if cost.time.trim().is_empty() || cost.space.trim().is_empty() {
-            bail!("complexity summary for {symbol} must contain non-empty time and space bounds");
+        if cost.time.trim().is_empty() {
+            bail!("complexity summary for {symbol} must contain a non-empty time bound");
+        }
+        if cost.space.as_ref().is_some_and(|space| space.trim().is_empty()) {
+            bail!("complexity summary for {symbol} states an empty space bound");
         }
         if cost.provenance.trim().is_empty() || cost.bound_quality.trim().is_empty() {
             bail!(

@@ -132,14 +132,17 @@ symbols = Array(profile["methods"]).filter_map do |method|
                   else
                     source_qualities.sort.first
                   end
-  [symbol, {
+  # A declaration publishes each axis it proved. Space is stated only when it
+  # was proven; a consumer pricing time is not made to wait on it.
+  entry = {
     "time" => quality[:big_o],
-    "space" => quality[:big_o_space],
     "provenance" => "analyzed_source_summary",
     "bound_quality" => bound_quality,
     "assumptions" => (source_assumptions +
       ["summary generated from the analyzed declaration body"]).uniq
-  }]
+  }
+  entry["space"] = quality[:big_o_space] if quality[:big_o_space_complete] == true
+  [symbol, entry]
 end
 
 # A compiler can attach a declaration symbol to a call while separately
