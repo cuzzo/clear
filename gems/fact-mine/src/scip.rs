@@ -375,6 +375,7 @@ pub(crate) fn indexed_signature_at(path: &str, line: usize, column: usize) -> Op
 /// What a declaration states its result is: a callable hands back what follows
 /// the arrow, anything else holds what follows the colon.
 pub(crate) fn declared_result_type(text: &str) -> Option<String> {
+    let text = without_declaration_kind(text);
     if let Some((_, returned)) = text.rsplit_once("->") {
         let returned = returned.trim().trim_end_matches(['{', ';']).trim();
         return (!returned.is_empty()).then(|| returned.to_string());
@@ -383,6 +384,24 @@ pub(crate) fn declared_result_type(text: &str) -> Option<String> {
         return None;
     }
     binding_signature(text).map(|(_, declared)| declared.to_string())
+}
+
+/// An indexer may lead a declaration with what kind of declaration it is:
+/// scip-typescript writes `(property) code: string`. The kind is not part of
+/// what the declaration states, and leaving it in reads as a call signature,
+/// which states no binding at all.
+fn without_declaration_kind(text: &str) -> &str {
+    let text = text.trim();
+    let Some(rest) = text.strip_prefix('(') else {
+        return text;
+    };
+    let Some((kind, rest)) = rest.split_once(')') else {
+        return text;
+    };
+    if kind.is_empty() || !kind.chars().all(|c| c.is_ascii_alphabetic() || c == ' ') {
+        return text;
+    }
+    rest.trim_start()
 }
 
 /// Local bindings the indexer has already typed, as (relative path, line,
@@ -4856,5 +4875,29 @@ mod local_binding_type_tests {
             .map(|signature| signature.text.trim())
             .and_then(binding_signature);
         assert_eq!(signature, Some(("kept", "Vec<String>")));
+    }
+
+    #[test]
+    fn a_declaration_states_its_type_behind_the_kind_the_indexer_names() {
+        // scip-typescript leads every member and parameter with what kind of
+        // declaration it is. The kind is not part of the type it states.
+        assert_eq!(
+            declared_result_type("(property) code: \"invalid_type\" | \"too_big\""),
+            Some("\"invalid_type\" | \"too_big\"".to_string())
+        );
+        assert_eq!(
+            declared_result_type("(parameter) count: number"),
+            Some("number".to_string())
+        );
+        // A callable still states its result after the arrow, and a call
+        // signature with no arrow still states no binding.
+        assert_eq!(
+            declared_result_type("(method) Array<T>.slice(start?: number): T[]"),
+            None
+        );
+        assert_eq!(
+            declared_result_type("fn kind(&self) -> &'static str"),
+            Some("&'static str".to_string())
+        );
     }
 }
