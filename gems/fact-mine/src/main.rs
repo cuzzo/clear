@@ -301,6 +301,23 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillFunctionInventory { files, plan, output, root } => {
+            let plan = plan
+                .as_deref()
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            let files = canonical_runtime_sources(&files, &root)?;
+            let profile = build_profile(&files, None, Profile::TracePlan)?;
+            let methods = serde_json::to_value(&profile.methods)?;
+            let count = fact_mine_rust::function_inventory::write(
+                methods.as_array().map_or(&[][..], Vec::as_slice),
+                &plan,
+                &root,
+                &output,
+            )?;
+            eprintln!("Inventoried {count} functions");
+        }
         Command::NilKillMergeEvidence { inputs, output, plan } => {
             let mut documents = inputs
                 .iter()
@@ -1097,6 +1114,13 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Stable function identities and fingerprints for an incremental collect.
+    NilKillFunctionInventory {
+        files: Vec<PathBuf>,
+        plan: Option<PathBuf>,
+        output: PathBuf,
+        root: PathBuf,
+    },
     /// Merge evidence documents into one canonical document.
     NilKillMergeEvidence {
         inputs: Vec<PathBuf>,
@@ -1247,6 +1271,27 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-function-inventory" => {
+            let mut files = Vec::new();
+            let mut plan = None;
+            let mut output = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--file" => files.push(PathBuf::from(iter.next().context("--file")?)),
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillFunctionInventory {
+                files,
+                plan,
+                output: output.context("--output is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "nil-kill-merge-evidence" => {

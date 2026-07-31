@@ -1,6 +1,9 @@
 # typed: false
 # frozen_string_literal: true
 
+require "open3"
+require "tempfile"
+
 module NilKill
   module Runtime
     # Stable, language-neutral function identities and semantic fingerprints
@@ -8,46 +11,25 @@ module NilKill
     class FunctionInventory
       attr_reader :root, :functions
 
+      # FactMine derives the identities and fingerprints; the lookups below are
+      # what an incremental collect asks of them, per shard.
       def self.build(root:, files:, trace_plan: nil)
-        new(root: root, files: files, trace_plan: trace_plan).tap(&:build)
-      end
+        Tempfile.create(["nil-kill-function-inventory", ".json"]) do |file|
+          args = [NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY,
+                  "nil-kill-function-inventory", "--output", file.path, "--root", root.to_s]
+          args.concat(["--plan", NilKill::TRACE_PLAN_PATH]) if
+            trace_plan && File.file?(NilKill::TRACE_PLAN_PATH)
+          Array(files).each { |path| args.concat(["--file", path.to_s]) }
+          _out, err, status = Open3.capture3(*args)
+          raise "fact-mine nil-kill-function-inventory failed: #{err}" unless status.success?
 
-      def initialize(root:, files:, trace_plan: nil)
-        @root = File.expand_path(root)
-        @files = Array(files)
-        @trace_plan = trace_plan || {}
-        @functions = {}
-      end
-
-      def build
-        static = StaticEvidence.build_trace_plan(@files, root: root)
-        occurrences = Hash.new(0)
-        @functions = static.fetch("methods", []).each_with_object({}) do |method, result|
-          path = relative(method.fetch("path"))
-          span = Array(method["span"])
-          identity = [
-            method["language"], path, method["owner"], method["name"], method["kind"]
-          ].map(&:to_s)
-          occurrence = occurrences[identity]
-          occurrences[identity] += 1
-          key = [*identity, occurrence].join("\0")
-          normalized = method["normalized_source"].to_s
-          normalized = method["raw_source"].to_s if normalized.empty?
-          result[key] = {
-            "key" => key,
-            "language" => method["language"].to_s,
-            "path" => path,
-            "owner" => method["owner"].to_s,
-            "name" => method["name"].to_s,
-            "kind" => method["kind"].to_s,
-            "occurrence" => occurrence,
-            "line" => method["line"].to_i,
-            "span" => span,
-            "fingerprint" => Digest::SHA256.hexdigest(normalized),
-            "runtime_demand" => runtime_demand?(method, span),
-          }
+          new(root: root, functions: JSON.parse(File.read(file.path)))
         end
-        self
+      end
+
+      def initialize(root:, functions: {})
+        @root = File.expand_path(root)
+        @functions = functions
       end
 
       def to_h
@@ -84,26 +66,6 @@ module NilKill
       end
 
       private
-
-      def runtime_demand?(method, span)
-        absolute = File.expand_path(method.fetch("path"), root)
-        method_key = [
-          method["owner"], method["name"], method["kind"], absolute, method["line"]
-        ].map(&:to_s).join("\0")
-        plan = @trace_plan.fetch("methods", {})[method_key]
-        return true if plan && (plan["sample"] || plan["frame"])
-
-        first_line, last_line = span.values_at(0, 2).map(&:to_i).minmax
-        %w[
-          runtime_call_sites runtime_result_call_sites
-          runtime_collection_receiver_sites loop_sites state_write_sites
-        ].any? do |field|
-          @trace_plan.fetch(field, {}).keys.any? do |key|
-            path, line = key.split("\0", 3)
-            path == absolute && line.to_i.between?(first_line, last_line)
-          end
-        end
-      end
 
       def relative(path)
         absolute = File.expand_path(path, root)
