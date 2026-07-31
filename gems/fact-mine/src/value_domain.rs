@@ -616,3 +616,51 @@ fn unique_sorted(keys: Vec<String>) -> Vec<String> {
     unique.dedup();
     unique
 }
+
+// ------------------------------------------------------------------ documents
+
+/// Turn a collector document's raw observations into value domains.
+///
+/// The traced program writes what it saw, in the order it saw it. Order is not
+/// incidental: a collection's shape is remembered against the classes it was
+/// carrying, so deriving out of order would answer differently. The table is
+/// therefore walked exactly as it was filled, which is the order the collector
+/// itself derived in.
+pub fn derive_document(document: &mut Value, nonproduction_paths: Vec<String>) -> usize {
+    let Some(observations) = document.get_mut("observations").map(Value::take) else {
+        return 0;
+    };
+    let Value::Array(observations) = observations else {
+        return 0;
+    };
+    let mut deriver = DomainDeriver::new(nonproduction_paths);
+    let domains = observations
+        .into_iter()
+        .map(|raw| match serde_json::from_value::<RawObservation>(raw) {
+            Ok(raw) => deriver.derive(&raw).to_value(),
+            // A malformed observation describes nothing rather than failing the
+            // collect; the record referencing it keeps its slot.
+            Err(_) => ValueDomain::empty().to_value(),
+        })
+        .collect::<Vec<_>>();
+    let derived = domains.len();
+    if let Some(object) = document.as_object_mut() {
+        object.remove("observations");
+        object.insert("domains".to_string(), Value::Array(domains));
+    }
+    derived
+}
+
+impl ValueDomain {
+    fn empty() -> Self {
+        Self {
+            types: Vec::new(),
+            singletons: Vec::new(),
+            elements: Vec::new(),
+            keys: Vec::new(),
+            values: Vec::new(),
+            shapes: Vec::new(),
+            nonproduction: None,
+        }
+    }
+}

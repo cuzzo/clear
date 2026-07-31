@@ -337,6 +337,20 @@ module NilKill
         abort "nil-kill: required trace shard(s) failed; canonical evidence was not replaced: " \
           "#{failed_shards.join(", ")}"
       end
+      # A traced program writes what it saw. What those observations *mean* --
+      # what counts as a shape, when two collections are the same shape, which
+      # names are test-only -- is the same arithmetic in every language, so it
+      # runs once here rather than being rewritten for each language's shim.
+      stage("derive-domains") do
+        Runtime::DomainDeriver.run(
+          documents: selected.flat_map do |shard|
+            Dir.glob(File.join(working_runtime_dir, shard.fetch("id"),
+                               Runtime::CollectorExport::RAW_GLOB))
+          end,
+          source_roles: source_roles_path,
+          root: ROOT
+        )
+      end
       # The traced programs wrote what the collector saw; shaping it into rows
       # needs no VM, so it happens here.
       stage("collector-export") do

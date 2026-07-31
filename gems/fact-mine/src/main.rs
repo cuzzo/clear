@@ -301,6 +301,47 @@ fn run() -> Result<()> {
             }
             std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
         }
+        Command::NilKillDeriveDomains { inputs, source_roles, root } => {
+            // Which files hold non-production code is a fact about the collect,
+            // not about the traced program, so it is read here rather than
+            // carried through every observation.
+            let nonproduction = source_roles
+                .as_deref()
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .map(|roles| {
+                    roles["nonproduction"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|entry| entry.as_str())
+                        .map(|entry| {
+                            root.join(entry).to_string_lossy().to_string()
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let derived = fact_mine_rust::parallel::map_ordered(&inputs, |path| {
+                let raw = fact_mine_rust::runtime_protocol::read_json(path)
+                    .with_context(|| format!("unreadable collector document {}", path.display()))?;
+                let mut document: serde_json::Value = serde_json::from_str(&raw)
+                    .with_context(|| format!("invalid collector document {}", path.display()))?;
+                let count = fact_mine_rust::value_domain::derive_document(
+                    &mut document,
+                    nonproduction.clone(),
+                );
+                fact_mine_rust::runtime_trace::write_json(
+                    path,
+                    &serde_json::to_string(&document)?,
+                )?;
+                Ok(count)
+            })?;
+            eprintln!(
+                "Derived {} value domains across {} collector documents",
+                derived.iter().sum::<usize>(),
+                inputs.len()
+            );
+        }
         Command::NilKillDecodeCalls { input, root } => {
             let text = std::fs::read_to_string(&input)?;
             let rows: Vec<serde_json::Value> = text
@@ -864,6 +905,12 @@ enum Command {
         target_dirs: Vec<String>,
         exclude_dirs: Vec<String>,
     },
+    /// Turn the collector's raw observations into value domains.
+    NilKillDeriveDomains {
+        inputs: Vec<PathBuf>,
+        source_roles: Option<PathBuf>,
+        root: PathBuf,
+    },
     NilKillDecodeCalls {
         input: PathBuf,
         root: PathBuf,
@@ -971,6 +1018,29 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 generated_at: generated_at.unwrap_or_default(),
                 target_dirs,
                 exclude_dirs,
+            })
+        }
+        "nil-kill-derive-domains" => {
+            let mut inputs = Vec::new();
+            let mut source_roles = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--input" => inputs.push(PathBuf::from(iter.next().context("--input")?)),
+                    "--source-roles" => {
+                        source_roles = Some(PathBuf::from(iter.next().context("--source-roles")?));
+                    }
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            if inputs.is_empty() {
+                bail!("nil-kill-derive-domains requires at least one --input");
+            }
+            Ok(Command::NilKillDeriveDomains {
+                inputs,
+                source_roles,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
             })
         }
         "nil-kill-decode-calls" => {

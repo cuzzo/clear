@@ -75,8 +75,14 @@ module MiniCollect
       MESSAGE
     end
     rd = NilKill::RUNTIME_DIR
-    # The traced program writes what the collector saw; shaping it into rows is
-    # the collector process's job, which this helper is standing in for.
+    # The traced program writes what the collector saw. Deriving what those
+    # observations mean, and then shaping them into rows, is the collector
+    # process's job -- which this helper is standing in for.
+    NilKill::Runtime::DomainDeriver.run(
+      documents: Dir.glob(File.join(rd, NilKill::Runtime::CollectorExport::RAW_GLOB)),
+      source_roles: ENV["NIL_KILL_SOURCE_ROLES"],
+      root: NilKill::ROOT
+    )
     NilKill::Runtime::CollectorExport.write(
       runtime_dir: rd,
       plan: (JSON.parse(File.read(NilKill::TRACE_PLAN_PATH)) if File.file?(NilKill::TRACE_PLAN_PATH)),

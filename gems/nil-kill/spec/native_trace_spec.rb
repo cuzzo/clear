@@ -153,7 +153,9 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     expect(rows_for("positive?").fetch(0).fetch(:result_truths)).to contain_exactly(true, false)
   end
 
-  it "delegates a container receiver to the Ruby value-domain implementation" do
+  # What the container was is recorded by index; what that *means* is derived
+  # afterwards, outside the traced program, and is held to its own corpus.
+  it "records a container receiver as what the VM saw, referenced by index" do
     trace(anchor_key(line_of("rows.length"), "length") => "anchor-container") do
       NativeTraceSubject.container([1, 2, 3])
     end
@@ -162,9 +164,14 @@ RSpec.describe "NilKillTraceNative", if: NATIVE_AVAILABLE do
     expect(row.fetch(:receiver_types)).to eq(["Array"])
     indices = row.fetch(:receiver_domain_indices)
     expect(indices.length).to eq(1)
-    domain = NilKillTraceNative.domains.fetch(indices.fetch(0))
-    expect(domain.fetch(:types)).to eq(["Array"])
-    expect(domain.fetch(:elements)).not_to be_empty
+    observed = NilKillTraceNative.observations.fetch(indices.fetch(0))
+    expect(observed.fetch("type")).to eq("Array")
+    expect(observed.fetch("kind")).to eq("array")
+    # The sample, and the true length beside it -- the two things a rule
+    # downstream cannot recover for itself.
+    expect(observed.fetch("length")).to eq(3)
+    expect(observed.fetch("elements").map { |element| element.fetch("type") })
+      .to eq(%w[Integer Integer Integer])
   end
 
   it "observes nothing while stopped" do

@@ -124,7 +124,7 @@ static st_table *state_owners;   // class identity -> reportable owner name, 0 =
 // from `entries` at export instead of being stored a second time.
 static st_table *edges;
 static VALUE roots_ary;          // analyzed-source path prefixes
-static VALUE domains_ary;        // Ruby domain Hashes, referenced by index
+static VALUE domains_ary;        // raw observations, referenced by index
 static VALUE tracepoint;
 static ID id_call, id_instance, id_return;
 // Binding#local_variables and #local_variable_get, the one pair of Ruby
@@ -396,8 +396,12 @@ static void add_alt(ID *alts, int *count, ID value) {
     if (*count < MAX_ALTS) alts[(*count)++] = value;
 }
 
+// What the VM saw, not what it means. The rules that turn one into the other
+// are the same in every language, so they run once, outside, over this table in
+// the order it was filled -- which is the order the collector derived in, and
+// the order the shape memo depends on.
 static long push_domain(VALUE value) {
-    rb_ary_push(domains_ary, nk_value_domain(value));
+    rb_ary_push(domains_ary, nk_raw_observation(value));
     return RARRAY_LEN(domains_ary) - 1;
 }
 
@@ -1216,7 +1220,7 @@ static VALUE nk_reset(VALUE self) {
 VALUE nk_core_tables(void) {
     VALUE tables = rb_hash_new();
     rb_hash_aset(tables, ID2SYM(rb_intern("records")), nk_records(Qnil));
-    rb_hash_aset(tables, ID2SYM(rb_intern("domains")), nk_domains(Qnil));
+    rb_hash_aset(tables, ID2SYM(rb_intern("observations")), nk_domains(Qnil));
     rb_hash_aset(tables, ID2SYM(rb_intern("executed_callsites")), nk_executed_callsites(Qnil));
     rb_hash_aset(tables, ID2SYM(rb_intern("function_entries")), nk_function_entries(Qnil));
     rb_hash_aset(tables, ID2SYM(rb_intern("state_values")), nk_state_values(Qnil));
@@ -1231,6 +1235,7 @@ void Init_nil_kill_trace(void) {
     rb_define_singleton_method(mod, "stop", nk_stop, 0);
     rb_define_singleton_method(mod, "records", nk_records, 0);
     rb_define_singleton_method(mod, "domains", nk_domains, 0);
+    rb_define_singleton_method(mod, "observations", nk_domains, 0);
     rb_define_singleton_method(mod, "executed_callsites", nk_executed_callsites, 0);
     rb_define_singleton_method(mod, "function_entries", nk_function_entries, 0);
     rb_define_singleton_method(mod, "state_values", nk_state_values, 0);
