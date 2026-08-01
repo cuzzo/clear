@@ -700,14 +700,23 @@ jobs:
           retention-days: 7
 
   ruby-integration:
-    name: Ruby integration specs (builds binaries via clear)
+    name: Ruby integration specs shard ${{ matrix.shard }}/4
     needs: changes
     if: ${{ needs.changes.outputs.run_src == 'true' }}
     runs-on: ubuntu-latest
-    env:
-      COVERAGE: "1"  # Picked up by spec_helper + clear-CLI's coverage_bootstrap;
-                     # makes integration-only files (clear_bin_spec, clear_fix_spec,
-                     # vm_bg_capture, etc.) contribute to the Ruby flag on Codecov.
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    # No COVERAGE here, deliberately. These specs shell out to `./clear`
+    # hundreds of times and COVERAGE=1 makes every one of those subprocesses
+    # boot SimpleCov and write a resultset at exit. Measured on a 2-core
+    # runner: c_ffi_integration_spec 3.1s -> 230.7s, and
+    # fixable_int_overflow_spec 1.1s -> 45.4s for ZERO examples. That tax,
+    # not the specs, is what made this job the pipeline's long pole. Ruby
+    # coverage comes from the unit job, transpile-tests, and the bc-lower
+    # shards.
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
@@ -741,25 +750,18 @@ jobs:
       # ahead of it.
       - name: Warm the register VM binary
         run: bundle exec ruby examples/minivm/bc_run.rb examples/minivm/arith.clear --run
-      - run: WORKERS="$(nproc)" bundle exec prspec compiler/spec/ --tag integration
-      # Collate workers + clear-CLI subprocess resultsets into a single
-      # Cobertura XML, same as the unit job. Both unit and integration
-      # uploads use `flags: ruby` so Codecov merges them server-side
-      # into one Ruby coverage view.
-      - run: bundle exec ruby compiler/spec/collate_coverage.rb
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ruby-coverage-integration
-          path: coverage/.resultset.json
-          include-hidden-files: true
-          retention-days: 7
-      - uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage/coverage.xml
-          disable_search: true
-          flags: ruby
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+      # Shard by spec file. Every shard restores the same clear-build cache,
+      # so each one reuses the Zig-compiled CLEAR runtime rather than
+      # re-analysing it per program.
+      - name: Run integration shard
+        run: |
+          mapfile -t files < <(
+            grep -rl ':integration' compiler/spec --include='*_spec.rb' | sort |
+              awk -v s=${{ matrix.shard }} 'NR % 4 == s'
+          )
+          if [ ${#files[@]} -eq 0 ]; then echo "shard ${{ matrix.shard }}: no files"; exit 0; fi
+          printf 'shard ${{ matrix.shard }}: %d files\n' "${#files[@]}"
+          WORKERS="$(nproc)" bundle exec prspec "${files[@]}" --tag integration
 
   transpile-tests:
     name: transpile-tests/ coverage (.clear via gen.rb)
