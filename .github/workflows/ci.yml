@@ -1629,63 +1629,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  architecture-sarif:
-    # Cross-module change coupling (gigasail/tools/change_coupling.rb),
-    # advisory (warning/note level): it annotates PRs and feeds the Lineage
-    # ledger via SARIF, it does not block merges.
-    #
-    # cycle_report.rb and reach_through_report.rb are deliberately NOT run
-    # here. Both are WIP experiments (beb2fe8cf, "WIP anti-pattern experiment
-    # tools") and both cost a whole-corpus FactMine projection - together they
-    # were the entire runtime of this job.
-    #
-    # reach_through additionally cannot model package-scoped languages: it
-    # derives owners per file, so two files in one Go package read as a
-    # cross-module private call, which is what its 81 self-quarantined
-    # "suspect" findings are.
-    #
-    # cycle_report is the sounder of the two - its four findings here are real
-    # cycles, not artifacts - but it is off pending a measurement of whether
-    # those findings are worth acting on. If they are, it belongs inside
-    # Espalier as a library check next to privacy_analyzer.rb, not as a tool
-    # shelling out to a whole-corpus projection. The tools and their tests stay
-    # in the tree meanwhile.
-    name: Architecture SARIF
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs:
-      - changes
-    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') }}
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: ${{ env.RUBY_VERSION }}
-          bundler-cache: true
-      - name: Generate architecture SARIFs
-        run: |
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          mkdir -p tmp
-          base="origin/${{ github.event.pull_request.base.ref }}"
-          ruby gems/gigasail/tools/change_coupling.rb . 8 \
-            --base="$base" --sarif=tmp/arch-change-coupling.sarif
-      - name: Upload change-coupling SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/arch-change-coupling.sarif
-          category: architecture-change-coupling
-      - uses: actions/upload-artifact@v4
-        with:
-          name: architecture-sarifs
-          path: tmp/arch-*.sarif
-          if-no-files-found: error
-          retention-days: 7
-
   # Keep each SARIF producer in its own job. Besides isolating failures, this
   # makes a producer job directly copyable into a downstream repository.
   # Native analyzers are the sole shared prerequisite and are built once here.
