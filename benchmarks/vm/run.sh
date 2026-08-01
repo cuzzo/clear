@@ -1,5 +1,5 @@
 #!/bin/bash
-# Benchmark runner: BC VM (CLEAR) vs Python / Ruby / Lua / Node.
+# Benchmark runner: register VM (CLEAR) vs Python / Ruby / Lua / Node.
 LUA=${LUA:-/tmp/lua-5.4.7/src/lua}
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$(dirname "$DIR")/.."
@@ -14,11 +14,11 @@ run_one() {
   printf "%-12s %10s\n" "lang" "ms"
   printf -- "------------ ----------\n"
 
-  # CLEAR BC VM
+  # CLEAR register VM
   if [ -f "$DIR/${name}.clear" ]; then
     out=$(timeout 60 ruby "$DIR/../../examples/minivm/bc_run.rb" "$DIR/${name}.clear" 2>&1)
     ms=$(echo "$out" | extract_bench_ms)
-    printf "%-12s %10s\n" "clear-bc" "${ms:-TIMEOUT}"
+    printf "%-12s %10s\n" "clear-reg" "${ms:-TIMEOUT}"
   fi
 
   # Puck tutorial Ruby VM (v9)

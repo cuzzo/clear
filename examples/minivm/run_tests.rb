@@ -568,9 +568,9 @@ def usage
   puts "    PASS percentage over supportable tests. Targets 100%."
   puts
   puts "  ruby examples/minivm/run_tests.rb --golden"
-  puts "    Runs the stack/register VM golden harness specs"
+  puts "    Runs the register VM golden harness specs"
   puts
-  puts "  ruby examples/minivm/run_tests.rb --vm=stack|register [tests...]"
+  puts "  ruby examples/minivm/run_tests.rb --vm=register [tests...]"
   puts "    Runs transpile tests through the selected MiniVM target. Register"
   puts "    defaults to register-transpile-allowlist.txt."
   puts
@@ -591,11 +591,11 @@ end
 vm_target = nil
 min_pass = nil
 ARGV.reject! do |arg|
-  if arg =~ /\A--vm=(stack|register|bc)\z/
+  if arg =~ /\A--vm=(register)\z/
     vm_target = Regexp.last_match(1)
     true
   elsif arg == "--vm"
-    vm_target = "stack"
+    vm_target = "register"
     true
   elsif arg =~ /\A--min-pass=(\d+)\z/
     # CI gate: assert at least N tests pass, regardless of pending/failed.
@@ -606,7 +606,7 @@ ARGV.reject! do |arg|
     false
   end
 end
-vm_target = "stack" if vm_target == "bc"
+
 
 if vm_target
   passed = run_vm_target_suite_with_count(vm_target, ARGV)
