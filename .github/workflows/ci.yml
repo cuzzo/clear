@@ -117,8 +117,8 @@ jobs:
 
   nil-kill-unit:
     name: nil-kill gem specs
-    needs: changes
-    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    needs: [changes, sarif-rust-binaries]
+    if: ${{ needs.changes.outputs.run_gems == 'true' && needs.sarif-rust-binaries.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       COVERAGE: "0"
@@ -137,11 +137,20 @@ jobs:
           node-version: 20
       - name: Install Tree-sitter grammars
         run: npm install --legacy-peer-deps
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build Rust binaries
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      # Built once by `sarif-rust-binaries` and copied to the target/release
+      # paths the specs resolve, rather than compiling the same two crates
+      # again on this runner. Waiting on that job costs nothing in run time:
+      # it is already the critical path (it gates seven other jobs), and this
+      # job finishes well inside the window its dependents occupy.
+      - name: Install shared Rust binaries
         run: |
-          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
-          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
+          chmod +x tmp/sarif-binaries/*
+          install -Dm755 tmp/sarif-binaries/fact-mine-rust gems/fact-mine/target/release/fact-mine-rust
+          install -Dm755 tmp/sarif-binaries/nil-kill-infer-rust gems/nil-kill/target/release/nil-kill-infer-rust
       # The collector IS this extension -- a collect loads it and no nil-kill
       # Ruby at all -- so without it every spec that runs one fails to require
       # it, and the specs guarded on its presence quietly test nothing.
@@ -157,8 +166,8 @@ jobs:
 
   test-miser-checkpoint:
     name: Test Miser corpus and runner integration
-    needs: changes
-    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    needs: [changes, sarif-rust-binaries]
+    if: ${{ needs.changes.outputs.run_gems == 'true' && needs.sarif-rust-binaries.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -177,12 +186,20 @@ jobs:
           java-version: "17"
       - name: Install Jest oracle fixture runtime
         run: npm install --no-save --no-package-lock jest@30.0.5
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build Gigasail release binary
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Install shared Gigasail binary
         # The ingestion round-trip test below skips silently (not fails)
         # when this binary is absent, so without this step CI could report
         # green while that contract was never actually exercised.
-        run: cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
+        #
+        # Built once by `sarif-rust-binaries` rather than compiling gigasail
+        # again here.
+        run: |
+          chmod +x tmp/sarif-binaries/giga
+          install -Dm755 tmp/sarif-binaries/giga gems/gigasail/target/release/giga
       - name: Verify runner adapters, dynamic planning, and canonical checkpoints
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/test_miser_test.rb
       - name: Verify PR step summary tallies
@@ -1629,63 +1646,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  architecture-sarif:
-    # Cross-module change coupling (gigasail/tools/change_coupling.rb),
-    # advisory (warning/note level): it annotates PRs and feeds the Lineage
-    # ledger via SARIF, it does not block merges.
-    #
-    # cycle_report.rb and reach_through_report.rb are deliberately NOT run
-    # here. Both are WIP experiments (beb2fe8cf, "WIP anti-pattern experiment
-    # tools") and both cost a whole-corpus FactMine projection - together they
-    # were the entire runtime of this job.
-    #
-    # reach_through additionally cannot model package-scoped languages: it
-    # derives owners per file, so two files in one Go package read as a
-    # cross-module private call, which is what its 81 self-quarantined
-    # "suspect" findings are.
-    #
-    # cycle_report is the sounder of the two - its four findings here are real
-    # cycles, not artifacts - but it is off pending a measurement of whether
-    # those findings are worth acting on. If they are, it belongs inside
-    # Espalier as a library check next to privacy_analyzer.rb, not as a tool
-    # shelling out to a whole-corpus projection. The tools and their tests stay
-    # in the tree meanwhile.
-    name: Architecture SARIF
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs:
-      - changes
-    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') }}
-    permissions:
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: ${{ env.RUBY_VERSION }}
-          bundler-cache: true
-      - name: Generate architecture SARIFs
-        run: |
-          git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          mkdir -p tmp
-          base="origin/${{ github.event.pull_request.base.ref }}"
-          ruby gems/gigasail/tools/change_coupling.rb . 8 \
-            --base="$base" --sarif=tmp/arch-change-coupling.sarif
-      - name: Upload change-coupling SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/arch-change-coupling.sarif
-          category: architecture-change-coupling
-      - uses: actions/upload-artifact@v4
-        with:
-          name: architecture-sarifs
-          path: tmp/arch-*.sarif
-          if-no-files-found: error
-          retention-days: 7
-
   # Keep each SARIF producer in its own job. Besides isolating failures, this
   # makes a producer job directly copyable into a downstream repository.
   # Native analyzers are the sole shared prerequisite and are built once here.
@@ -1713,7 +1673,7 @@ jobs:
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
           cargo build --release --manifest-path gems/sql-cov/Cargo.toml
           cargo build --release --manifest-path gems/nil-kill/Cargo.toml
-          cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
+          cargo build --release --manifest-path gems/gigasail/Cargo.toml --bin giga
           mkdir -p tmp/sarif-binaries
           install -m 755 gems/fact-mine/target/release/fact-mine-rust tmp/sarif-binaries/fact-mine-rust
           install -m 755 gems/decomplex/target/release/decomplex-rust tmp/sarif-binaries/decomplex-rust

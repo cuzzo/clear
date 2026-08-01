@@ -1,5 +1,19 @@
 # frozen_string_literal: true
 
+# WIP anti-pattern experiment. Not run in CI: the value of its findings was
+# never established, and the job that ran it existed for this tool alone.
+#
+# If the findings do prove worth acting on, this belongs in SlopCop::Bugspots
+# rather than here. Bugspots already shells the same `git log --no-merges
+# --name-only` and already accumulates co-change partners per file; this is a
+# second scorer over the same extracted events, differing only in scope (all
+# commits vs fix commits), weighting (support/confidence vs time decay), and
+# the cross-module pair filter. Merging would drop one full-history scan and
+# would let Bugspots reuse the rename-alias map below, which it lacks. It does
+# NOT belong in SlopCop::Constraints: that registry is language-keyed and its
+# findings are single-site and evidence-gated, while this is language-agnostic
+# and its unit is a pair of files with no line and no evidence requirement.
+#
 # Cross-module change coupling, from git history or (with --db) Lineage's
 # own rename-stable logical-unit ledger.
 #
