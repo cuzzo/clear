@@ -1472,10 +1472,14 @@ when 'test'
     end
     zig_code = zig_code.gsub('@import("runtime-header.zig")', '@import("runtime/runtime-header.zig")')
 
-    # Write to a minimal per-process build dir matching normal build layout.
-    # Transpiled tests import runtime/runtime-header.zig and lib/* via
-    # directory-relative paths; top-level zig/*.zig symlinks are no longer
-    # sufficient after the Zig 0.16 runtime/layout changes.
+    # Write to a build dir matching normal build layout. Transpiled tests
+    # import runtime/runtime-header.zig and lib/* via directory-relative
+    # paths; top-level zig/*.zig symlinks are no longer sufficient after the
+    # Zig 0.16 runtime/layout changes.
+    #
+    # The build dir stays per-process: it holds the generated
+    # ._clear_tmp_<base>.zig, and concurrent or successive tests sharing one
+    # would read each other's source.
     base_name = File.basename(source, '.clear')
     build_dir = coverage_mode ? ZIG_DIR : File.join(ZIG_DIR, ".build-#{$$}")
     cleanup_paths = []
@@ -1527,8 +1531,15 @@ when 'test'
     # filter narrows the run; without tags we keep filename filtering
     # as the default.
     cmd_parts = [ZIG, 'test']
-    cmd_parts += ['--cache-dir', File.join(build_dir, '.zig-cache')]
-    cmd_parts += ['--global-cache-dir', File.join(build_dir, '.zig-global-cache')]
+    # The Zig cache is content-addressed and safe to share, so point it at a
+    # stable location instead of inside the per-process build dir, which is
+    # deleted on exit. Every test program imports the same runtime/ and lib/
+    # modules, so a shared cache means only the generated root is analysed
+    # per run: 4.96s cold, 1.84s for every later program, same or not.
+    shared_zig_cache = File.join(ZIG_DIR, '.clear-cache', 'test-zig-cache')
+    FileUtils.mkdir_p(shared_zig_cache)
+    cmd_parts += ['--cache-dir', File.join(shared_zig_cache, 'local')]
+    cmd_parts += ['--global-cache-dir', File.join(shared_zig_cache, 'global')]
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc']
     cmd_parts.concat(c_ffi_link_flags(c_libraries, build_dir, cleanup_paths))

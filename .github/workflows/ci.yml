@@ -93,7 +93,7 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-      - run: bundle exec prspec compiler/spec/
+      - run: WORKERS="$(nproc)" bundle exec prspec compiler/spec/
       # Collate parallel_rspec workers' resultsets into a single Cobertura
       # XML before upload (each worker writes its own `RSpec-w<id>-<pid>`
       # entry into coverage/.resultset.json; collate_coverage merges them
@@ -736,12 +736,12 @@ jobs:
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       # Build the register VM binary once, serially, before the suite fans
       # out. bc_run.rb guards the build with an exclusive flock, so without
-      # this the first of 32 prspec workers builds it while the other 31
-      # block on the lock -- and a cache miss pays that cost inside the
-      # parallel run rather than ahead of it.
+      # this the first worker builds it while the rest block on the lock --
+      # and a cache miss pays that cost inside the parallel run rather than
+      # ahead of it.
       - name: Warm the register VM binary
         run: bundle exec ruby examples/minivm/bc_run.rb examples/minivm/arith.clear --run
-      - run: bundle exec prspec compiler/spec/ --tag integration
+      - run: WORKERS="$(nproc)" bundle exec prspec compiler/spec/ --tag integration
       # Collate workers + clear-CLI subprocess resultsets into a single
       # Cobertura XML, same as the unit job. Both unit and integration
       # uploads use `flags: ruby` so Codecov merges them server-side
