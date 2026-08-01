@@ -117,8 +117,8 @@ jobs:
 
   nil-kill-unit:
     name: nil-kill gem specs
-    needs: changes
-    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    needs: [changes, sarif-rust-binaries]
+    if: ${{ needs.changes.outputs.run_gems == 'true' && needs.sarif-rust-binaries.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       COVERAGE: "0"
@@ -137,11 +137,20 @@ jobs:
           node-version: 20
       - name: Install Tree-sitter grammars
         run: npm install --legacy-peer-deps
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build Rust binaries
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      # Built once by `sarif-rust-binaries` and copied to the target/release
+      # paths the specs resolve, rather than compiling the same two crates
+      # again on this runner. Waiting on that job costs nothing in run time:
+      # it is already the critical path (it gates seven other jobs), and this
+      # job finishes well inside the window its dependents occupy.
+      - name: Install shared Rust binaries
         run: |
-          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
-          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
+          chmod +x tmp/sarif-binaries/*
+          install -Dm755 tmp/sarif-binaries/fact-mine-rust gems/fact-mine/target/release/fact-mine-rust
+          install -Dm755 tmp/sarif-binaries/nil-kill-infer-rust gems/nil-kill/target/release/nil-kill-infer-rust
       # The collector IS this extension -- a collect loads it and no nil-kill
       # Ruby at all -- so without it every spec that runs one fails to require
       # it, and the specs guarded on its presence quietly test nothing.
@@ -157,8 +166,8 @@ jobs:
 
   test-miser-checkpoint:
     name: Test Miser corpus and runner integration
-    needs: changes
-    if: ${{ needs.changes.outputs.run_gems == 'true' }}
+    needs: [changes, sarif-rust-binaries]
+    if: ${{ needs.changes.outputs.run_gems == 'true' && needs.sarif-rust-binaries.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -177,16 +186,20 @@ jobs:
           java-version: "17"
       - name: Install Jest oracle fixture runtime
         run: npm install --no-save --no-package-lock jest@30.0.5
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build Gigasail release binary
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Install shared Gigasail binary
         # The ingestion round-trip test below skips silently (not fails)
         # when this binary is absent, so without this step CI could report
         # green while that contract was never actually exercised.
         #
-        # --bin giga, not --workspace: the test resolves
-        # gems/gigasail/target/release/giga and nothing here wants giga-ui,
-        # whose axum/tower-lsp/askama stack is 47 crates giga never links.
-        run: cargo build --release --manifest-path gems/gigasail/Cargo.toml --bin giga
+        # Built once by `sarif-rust-binaries` rather than compiling gigasail
+        # again here.
+        run: |
+          chmod +x tmp/sarif-binaries/giga
+          install -Dm755 tmp/sarif-binaries/giga gems/gigasail/target/release/giga
       - name: Verify runner adapters, dynamic planning, and canonical checkpoints
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/test_miser_test.rb
       - name: Verify PR step summary tallies
