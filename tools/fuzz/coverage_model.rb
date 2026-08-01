@@ -329,6 +329,9 @@ module FuzzCoverageModel
     pipeline_composite_element_matrix: profile(
       failure_proves: 'SELECT/UNNEST/REDUCE pipeline element and accumulator ownership: composite-literal elements keep their field-store-hoisted temp scoped to the per-element loop, and an owned (String) REDUCE accumulator is reassigned through ReassignWithCleanup.'
     ),
+    pipeline_consumer_position_matrix: profile(
+      failure_proves: 'Where a pipeline result LANDS decides its lifetime: a result bound inside FOR/WHILE (including through a MATCH arm) is rewound per iteration, and one handed to TAKES, a struct field, or an outer list promotes at declaration instead of escaping the rewound frame.'
+    ),
     pipeline_source_shape_matrix: profile(
       failure_proves: 'Pipeline source and terminal shapes preserve cleanup across stream and promise boundaries.'
     ),
