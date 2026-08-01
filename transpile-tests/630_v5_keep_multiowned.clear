@@ -1,0 +1,14 @@
+# Retained-identity v5: KEEP of a concrete @multiowned local is a non-atomic
+# retain -- both bindings observe the same identity, and the testing
+# allocator proves the refcount balances (no leak, no double-free).
+STRUCT Cell { n: Int64 }
+
+FN read(c: Cell) RETURNS Int64 -> RETURN c.n; END
+
+FN main() RETURNS Void ->
+    MUTABLE original = Cell{ n: 7 } @multiowned;
+    kept = KEEP original;
+    WITH original { ASSERT read(original) == 7, "original observes 7"; }
+    WITH kept { ASSERT read(kept) == 7, "kept observes the same identity"; }
+    RETURN;
+END

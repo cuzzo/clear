@@ -62,7 +62,18 @@ module MethodRewriter
     set
   end
 
-  sig { params(node: T.untyped, methods: Set, fns: Set).returns(T.untyped) }
+  # Struct-member walk domain: AST nodes plus the raw member values a
+  # Struct field can hold. Typed (not T.untyped) so the CLEAR translation
+  # can dispatch the reflection walk over a closed union.
+  WalkValue = T.type_alias do
+    T.nilable(T.any(AST::Node, AST::Param, AST::Binding, AST::Capability, AST::Capture,
+      AST::CatchClause, AST::CatchFilter, AST::CatchItem, AST::MatchCase,
+      AST::PatternField, AST::StructField, Type, T::Array[BasicObject],
+      T::Hash[T.untyped, T.untyped], String, Symbol, Integer, Float,
+      T::Boolean, Lexer::Token))
+  end
+
+  sig { params(node: WalkValue, methods: Set, fns: Set).returns(T.untyped).checked(:never) }
   def self.walk_collect_user_decls(node, methods, fns)
     case node
     when AST::FunctionDef
@@ -78,10 +89,10 @@ module MethodRewriter
       # `handle.values()` changes which ABI function the program calls.
       fns << node.name
     when Array
-      node.each { |n| walk_collect_user_decls(n, methods, fns) }
+      node.each { |n| walk_collect_user_decls(T.unsafe(n), methods, fns) }
     else
       return unless node.respond_to?(:each_pair)
-      node.each_pair { |_, v| walk_collect_user_decls(v, methods, fns) }
+      T.unsafe(node).each_pair { |_, v| walk_collect_user_decls(v, methods, fns) }
     end
   end
 
@@ -144,17 +155,17 @@ module MethodRewriter
   # Post-order walk: collect edits for inner calls first so outer
   # rewrites see the (logically) rewritten inner. Edits are applied
   # right-to-left on the source so positions don't shift.
-  sig { params(node: T.untyped, methods: Set, source: String, edits: Array).returns(T.nilable(Array)) }
+  sig { params(node: WalkValue, methods: Set, source: String, edits: Array).returns(T.nilable(Array)).checked(:never) }
   def self.walk_collect_edits(node, methods, source, edits)
     return if node.nil?
 
     if node.is_a?(Array)
-      node.each { |n| walk_collect_edits(n, methods, source, edits) }
+      node.each { |n| walk_collect_edits(T.unsafe(n), methods, source, edits) }
       return
     end
 
     if node.respond_to?(:each_pair)
-      node.each_pair { |_, v| walk_collect_edits(v, methods, source, edits) }
+      T.unsafe(node).each_pair { |_, v| walk_collect_edits(v, methods, source, edits) }
       return unless node.is_a?(AST::FuncCall)
     end
 

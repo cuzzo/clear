@@ -1,0 +1,13 @@
+diff --git a/compiler/ruby/semantic/escape_analysis.rb b/compiler/ruby/semantic/escape_analysis.rb
+index 7bdaeab61..66b610587 100644
+--- a/compiler/ruby/semantic/escape_analysis.rb
++++ b/compiler/ruby/semantic/escape_analysis.rb
+@@ -454,7 +454,7 @@ module EscapeAnalysis
+           end
+ 
+           already_rc = entry.rc_stored? || entry.type.any_rc?
+-          if !already_rc && entry.mutable && !last_use
++          if false && !already_rc && entry.mutable && !last_use # MUTANT: kept_identity_mutable_model
+             on_mutable_violation&.call(entry, arg, site.callee_name)
+             next
+           end

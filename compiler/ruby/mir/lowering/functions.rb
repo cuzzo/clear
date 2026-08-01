@@ -44,6 +44,7 @@ module MIRLoweringFunctions
     const :copy_to_owning, T::Boolean
     const :arg_alloc, Symbol
     const :param_index, Integer
+    const :edge_plan, T.nilable(CallEdgeOwnershipPlan), default: nil
   end
 
   class CallOwnershipFacts < T::Struct
@@ -271,7 +272,7 @@ module MIRLoweringFunctions
       root_module = T.must(mod_parts.first)
       tail_modules = mod_parts.drop(1)
       import_expr = "@import(\"#{root_module}\")" + tail_modules.map { |p| ".#{p}" }.join
-      mod_alias = mod.gsub(".", "_")
+      mod_alias = zig_module_alias(mod)
       module_path = MIRLowering::EXTERN_MODULE_ROOTS.include?(root_module) ? root_module : "#{root_module}.zig"
       MIR::Import.new(mod_alias, module_path, tail_modules.empty? ? nil : tail_modules.join("."))
     else
@@ -296,9 +297,10 @@ module MIRLoweringFunctions
       end
       return MIR::CExternStructDef.new(node.name, fields)
     end
-    if (mod = node.from_module)
+    mod = node.from_module
+    if mod
       mod_parts = mod.split(".")
-      mod_alias = mod.gsub(".", "_")
+      mod_alias = zig_module_alias(mod)
 
       items = T.let([], T::Array[MIR::Node])
       if program_state.emitted_extern_modules.add?(mod)
@@ -309,8 +311,13 @@ module MIRLoweringFunctions
         items << MIR::Import.new(mod_alias, module_path, member_chain)
       end
       # AS "ZigTypeExpr" allows aliasing to parameterized types like Parsed(JsonRecord).
-      zig_rhs = node.as_type ? "#{mod_alias}.#{node.as_type}" : "#{mod_alias}.#{node.name}"
-      items << MIR::TypeAlias.new(node.name, zig_rhs)
+      # A root and an inlined module (or two inlined modules) can declare the
+      # same EXTERN STRUCT; the alias reaches one Zig unit once.
+      if program_state.emitted_import_type_aliases.add?(node.name.to_s)
+        zig_rhs = node.as_type ? "#{mod_alias}.#{node.as_type}" : "#{mod_alias}.#{node.name}"
+        items << MIR::TypeAlias.new(node.name, zig_rhs)
+      end
+      return MIR::Noop.new("duplicate_extern_struct_alias") if items.empty?
       items.length == 1 ? T.must(items.first) : items
     elsif node.field_decls.empty?
       MIR::Noop.new("empty_local_extern_struct")
@@ -329,6 +336,8 @@ module MIRLoweringFunctions
 
   sig { params(node: AST::FunctionDef).returns(T.any(MIR::FnDef, T::Array[MIR::FnDef])) }
   def lower_function_def(node)
+    @kept_liveness_fn = T.let(node, T.nilable(AST::FunctionDef))
+    @kept_liveness = T.let(nil, T.nilable(EscapeAnalysis::KeptEdgeLiveness))
     T.bind(self, MIRLowering) rescue nil
     ret_type = node.lowering_return_type
     if ret_type.is_a?(Type) && ret_type.frame? && ret_type.struct?
@@ -464,7 +473,7 @@ module MIRLoweringFunctions
        build_post_outer_fn(node, params_mir, return_type_str, fn_needs_rt, vis, comptime_params)]
     elsif has_catch
       # Emit inner/outer function pair
-      inner_name = "__#{node.name}_body"
+      inner_name = "__#{zig_safe_name(node.name)}_body"
       inner_ret = if final_zig_type.error_union?
                     final_zig_type.source
                   elsif fn_can_fail
@@ -685,6 +694,14 @@ module MIRLoweringFunctions
                     false
                   end
     return "CheatLib.Arc(#{type_info.resolved})" if type_info.shared? && type_info.generic_type_parameter?
+    # Kept params (retained identity v4) have the concrete handle ABI: one
+    # compiled body, every call edge normalizes its argument to an owned
+    # handle. Never anytype, never a comptime fork.
+    if sym&.kept_identity
+      payload = type_info.optional? ? (type_info.wrapped_type&.resolved || type_sym) : type_sym
+      handle = "CheatLib.Rc(#{payload})"
+      return type_info.optional? ? "?#{handle}" : handle
+    end
     # TAKES transfers an Rc/Arc collection through a temporary pointer. The
     # callee reads the wrapper once (`param.*`) and marks the transfer moved;
     # it never mutates the wrapper slot itself. Give that boundary one
@@ -881,21 +898,37 @@ module MIRLoweringFunctions
     out
   end
 
+
+  # Liveness for orelse keep stores, built lazily per function: a store of
+  # a binding that is still used afterwards must retain, not move.
+  sig { returns(T.nilable(EscapeAnalysis::KeptEdgeLiveness)) }
+  def kept_store_liveness
+    fn = @kept_liveness_fn
+    return nil unless fn&.body
+    @kept_liveness ||= EscapeAnalysis::KeptEdgeLiveness.new(fn.body)
+  end
+
   sig { params(node: AST::FunctionDef).returns(T::Array[MIR::Node]) }
   def takes_param_ownership_mir(node)
     T.bind(self, MIRLowering) rescue nil
     out = T.let([], T::Array[MIR::Node])
-    node.params.select(&:takes).each do |p|
+    node.params.select { |p| p.takes || p.symbol&.kept_identity }.each do |p|
       entry = function_state.bindings[p.name.to_s] || CleanupEntry::NONE
       ti = p.type
-      next unless ownership_tracked_transfer_type?(ti) || (entry.present? && entry.heap?)
+      next unless p.symbol&.kept_identity ||
+                  ownership_tracked_transfer_type?(ti) || (entry.present? && entry.heap?)
 
+      kept = !p.takes && !p.symbol&.kept_identity.nil?
+      # A kept param's binding IS the Rc handle: the classifier's :rc entry
+      # is already the complete recipe, and the mark carries the handle's
+      # ownership so the checker matches allocator and cleanup kind.
+      ti = Type.new(ti.resolved.to_s, ownership: :multiowned, location: :heap) if kept
       drop_entry = entry.dup
       alloc = entry.present? ? entry.alloc : :heap
       scope = entry.present? ? entry.scope : :heap
       mark = MIR::AllocMark.new(p.name.to_s, alloc, ti, scope)
       if entry.needs_cleanup?
-        build_drop_entry!(drop_entry, ti, nil)
+        build_drop_entry!(drop_entry, ti, nil) unless kept
         function_state.guarded_cleanup_names[zig_safe_name(p.name.to_s)] = true if drop_entry.has_moved_guard?
         out.concat(MIR::MaterializationPacket.markers(mark, MIR::Cleanup.new(zig_safe_name(p.name.to_s), drop_entry)).statements)
       else
@@ -1128,16 +1161,26 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(a, context: "call boundary argument")
 
-    moved_arg = a.is_a?(AST::CopyNode) || a.is_a?(AST::CloneNode) ||
+    moved_arg = a.is_a?(AST::CopyNode) || a.is_a?(AST::KeepNode) ||
                 a.is_a?(AST::MoveNode) ||
                 (AST.moved?(a) &&
-                 !a.is_a?(AST::CopyNode) && !a.is_a?(AST::CloneNode) &&
+                 !a.is_a?(AST::CopyNode) && !a.is_a?(AST::KeepNode) &&
                  !arg.is_a?(MIR::DupeSlice) && !arg.is_a?(MIR::DeepCopy))
+    # A MONOMORPHIC parameter is emitted anytype and threads the caller's actual
+    # carrier (plain payload OR Rc/Arc handle) unchanged; Zig monomorphizes the
+    # callee per carrier. Never detach a handle to a plain payload here -- that
+    # would destroy the retained identity the contract exists to preserve. The
+    # callee's universal comptime cleanup releases whatever carrier arrived.
+    if callee_param&.takes && callee_param.carrier_contract == :monomorphic
+      return MIR::AddressOf.new(arg) if wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
+      return arg
+    end
     # See the corresponding TAKES branch below. This must precede the
     # list-to-slice fast path: an Rc/Arc list is a handle, not an ArrayList,
     # so `OwnedSlice` cannot consume it directly.
     if callee_param&.takes && ti.any_rc? && !callee_param_type.any_rc? &&
-       !callee_param_type.generic_type_parameter?
+       !callee_param_type.generic_type_parameter? &&
+       callee_param.carrier_contract != :monomorphic
       sink_alloc = allocator_for_takes_param!(callee_param)
       payload = rc_payload_value(arg, ti)
       materialized = MIR::DeepCopy.new(payload, callee_param_type.zig_type, nil, :full_value, sink_alloc)
@@ -1266,8 +1309,8 @@ module MIRLoweringFunctions
     MIR::CallableContract.new(sig, facts.ownership_contract, ast_args.length)
   end
 
-  sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[AST::Node], mir_args: T::Array[MIR::Node]).returns(T.nilable(MIR::CallableContract)) }
-  def callable_contract_for_lowered_args(sig, ast_args, mir_args)
+  sig { params(sig: T.nilable(FunctionSignature), ast_args: T::Array[AST::Node], mir_args: T::Array[MIR::Node], edge_plans: T::Hash[Integer, CallEdgeOwnershipPlan]).returns(T.nilable(MIR::CallableContract)) }
+  def callable_contract_for_lowered_args(sig, ast_args, mir_args, edge_plans: {})
     T.bind(self, MIRLowering) rescue nil
     return nil unless sig
 
@@ -1276,6 +1319,18 @@ module MIRLoweringFunctions
     operands = T.let([], T::Array[MIR::OwnershipOperandFact])
     ast_args.each_with_index do |arg, idx|
       param = sig.params[idx]
+      kept_edge = !edge_plans[idx].nil?
+      if kept_edge
+        # The lowered temp (or moving handle) is what the callee consumes;
+        # naming it in the contract licenses the consuming read after the
+        # pre-call transfer boundary.
+        takes_indices << idx
+        ownership_consumed_arg_names(mir_args[idx]).each do |name|
+          consumed << name.to_s
+          operands << MIR::OwnershipOperandFact.owned_binding(name.to_s, Type.new(:Any), "kept call argument #{idx}", :heap)
+        end
+        next
+      end
       next unless call_arg_consumes_ownership?(arg, param)
       arg_type = Type.new(T.unsafe(arg.respond_to?(:coerced_type_info) && arg.coerced_type_info ? arg.coerced_type_info :
         Type.from_node!(arg, context: "lowered call ownership argument")))
@@ -1311,8 +1366,8 @@ module MIRLoweringFunctions
     end
   end
 
-  sig { params(ast_arg: AST::Node, callee_sig: T.nilable(FunctionSignature), param_index: Integer).returns(CallArgFacts) }
-  def call_arg_facts(ast_arg, callee_sig, param_index)
+  sig { params(ast_arg: AST::Node, callee_sig: T.nilable(FunctionSignature), param_index: Integer, edge_plan: T.nilable(CallEdgeOwnershipPlan)).returns(CallArgFacts) }
+  def call_arg_facts(ast_arg, callee_sig, param_index, edge_plan: nil)
     T.bind(self, MIRLowering) rescue nil
     ti = Type.from_node!(ast_arg, context: "call argument")
     callee_param = callee_sig ? callee_sig.params[param_index] : nil
@@ -1333,6 +1388,7 @@ module MIRLoweringFunctions
       copy_to_owning: copy_to_owning,
       arg_alloc: takes ? allocator_for_takes_param!(callee_param) : :heap,
       param_index: param_index,
+      edge_plan: edge_plan || (ast_arg.respond_to?(:kept_edge_plan) ? T.unsafe(ast_arg).kept_edge_plan : nil),
     )
   end
 
@@ -1369,7 +1425,7 @@ module MIRLoweringFunctions
 
   sig { params(arg: AST::Node).returns(T::Boolean) }
   def borrowed_ownership_operand?(arg)
-    return false if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
+    return false if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::KeepNode)
 
     AST.borrowed_ownership_view?(arg)
   end
@@ -1450,13 +1506,142 @@ module MIRLoweringFunctions
     nil
   end
 
+  # Retained identity v4: execute the CallEdgeOwnershipPlan stamped by
+  # placement. MIR makes no ownership decision here - the plan already
+  # chose the op from the caller's declared model, the callee's contract,
+  # and caller liveness.
+  sig { params(facts: CallArgFacts).returns(T.nilable(MIR::Node)) }
+  def lower_kept_identity_arg(facts)
+    T.bind(self, MIRLowering) rescue nil
+    plan = facts.edge_plan
+    if plan.nil?
+      # The plan is the sole authority. A kept callee param without a plan
+      # means placement never saw this edge - fail closed, never guess.
+      if facts.callee_param&.symbol&.kept_identity
+        raise "kept parameter '#{facts.callee_param&.name}' has no CallEdgeOwnershipPlan for argument "               "#{facts.param_index} (#{facts.ast_arg.class}); placement must plan every kept edge"
+      end
+      return nil
+    end
+
+    arg = facts.ast_arg
+    inner = arg.is_a?(AST::MoveNode) ? arg.value : arg
+    case plan.op
+    when :pass_null, :move_handle
+      # Plain lowering already produces null / the moving handle bits;
+      # source cleanup suppression rides the existing moved machinery.
+      nil
+    when :retain_handle
+      ti = Type.from_node!(inner, context: "kept edge retain")
+      payload = ti.any_rc? ? rc_payload_zig_type(ti) : ti.zig_type
+      MIR::RcRetain.new(lower(inner), payload, plan.family == :shared ? "arcRetain" : "rcRetain")
+    when :move_payload_wrap, :copy_wrap
+      payload_ft = facts.callee_param_type.optional? ?
+        (facts.callee_param_type.wrapped_type || facts.callee_param_type) : facts.callee_param_type
+      source = inner.is_a?(AST::CopyNode) ? inner.value : inner
+      lowered = with_decl_alloc(:heap) do
+        with_expected_type(payload_ft) { lower(source) }
+      end
+      if plan.op == :copy_wrap
+        # COPY is the identity break: deep-copy the PAYLOAD (deref an rc
+        # source first - dupeValue on a handle would retain, not clone).
+        source_ti = Type.from_node!(source, context: "kept edge copy override")
+        lowered = MIR::CapabilityLockTarget.new(lowered, true, false) if source_ti.any_rc?
+        lowered = MIR::DeepCopy.new(lowered, payload_ft.zig_type, nil, :full_value, :heap)
+      end
+      handle_ft = Type.new(payload_ft.resolved.to_s, ownership: :multiowned, location: :heap)
+      compose_capability_wrap(lowered, payload_ft.zig_type, handle_ft, :heap)
+    else
+      raise "unhandled CallEdgeOwnershipPlan op #{plan.op}"
+    end
+  end
+
+  class KeptEdgeCallFrame < T::Struct
+    prop :temps, T::Array[String], factory: -> { [] }
+    prop :moved_sources, T::Array[String], factory: -> { [] }
+  end
+
+  # Owned-handle edge bookkeeping for the CURRENT call being lowered. Calls
+  # nest (an argument may itself contain a kept-edge call), so it's a stack.
+  sig { returns(T::Array[KeptEdgeCallFrame]) }
+  def kept_edge_temp_stack
+    @kept_edge_temp_stack = T.let(@kept_edge_temp_stack, T.nilable(T::Array[KeptEdgeCallFrame]))
+    @kept_edge_temp_stack ||= []
+  end
+
+  # Lower call arguments with kept-edge bookkeeping: handle-producing edges
+  # materialize a temp whose GUARDED errdefer stays armed through sibling
+  # argument evaluation; the transfer marks land after every argument and
+  # before the call, so the callee owns each handle exactly from entry.
+  # Fallible sibling expressions are value-hoisted so nothing can fail
+  # between the transfer boundary and the call itself.
+  sig do
+    params(blk: T.proc.returns(T::Array[MIR::Node])).returns(T::Array[MIR::Node])
+  end
+  def with_kept_edge_call_frame(&blk)
+    T.bind(self, MIRLowering)
+    kept_edge_temp_stack << KeptEdgeCallFrame.new
+    args_mir = blk.call
+    frame = T.must(kept_edge_temp_stack.pop)
+    return args_mir if frame.temps.empty? && frame.moved_sources.empty?
+
+    args_mir = args_mir.map do |mir|
+      next mir if mir.is_a?(MIR::Ident) || mir.is_a?(MIR::Lit) ||
+                  mir.is_a?(MIR::AllocatorRef) || mir.is_a?(MIR::UnaryOp)
+      stmts, ident = hoist_normalized_value_expr(mir)
+      function_state.pending_stmts.concat(stmts)
+      ident
+    end
+    function_state.pending_stmts.concat(
+      MIR.kept_edge_transfer_boundary(frame.temps + frame.moved_sources)
+    )
+    args_mir
+  end
+
   sig { params(facts: CallArgFacts).returns(MIR::Node) }
   def lower_call_arg_from_facts(facts)
     T.bind(self, MIRLowering) rescue nil
+    kept_edge = lower_kept_identity_arg(facts)
+    # A moving handle's transfer boundary must also precede the call: the
+    # callee owns and releases it on its own failure paths, so the source's
+    # guarded cleanup has to be disarmed before, not after, the invocation.
+    if kept_edge.nil? && facts.edge_plan&.op == :move_handle
+      inner = facts.ast_arg.is_a?(AST::MoveNode) ? T.cast(facts.ast_arg, AST::MoveNode).value : facts.ast_arg
+      if inner.is_a?(AST::Identifier)
+        kept_edge_temp_stack.last&.moved_sources&.push(zig_safe_name(inner.name.to_s))
+      end
+    end
+    # The handle temp's guarded errdefer covers sibling argument
+    # evaluation; with_kept_edge_call_frame disarms it at the transfer
+    # boundary, after which the callee owns the handle on every path.
+    if kept_edge
+      name = "__tmp_#{lowering_counters.next_tmp_id}"
+      materialized = MIR::BindingMaterialization.new(
+        name: name,
+        expr: kept_edge,
+        alloc: :heap,
+        type_info: mir_alloc_mark_type_info(kept_edge, facts.ast_arg, context: "kept edge handle"),
+        mutable: false,
+        cleanup_entry: CleanupEntry.build(:rc, alloc: :heap, has_moved_guard: true),
+        cleanup_mode: :err,
+      )
+      function_state.pending_stmts.concat(materialized.statements)
+      function_state.lowered_alloc_names.add(name)
+      function_state.guarded_cleanup_names[name] = true
+      kept_edge_temp_stack.last&.temps&.push(name)
+      return MIR::Ident.new(name)
+    end
+
+    # A MONOMORPHIC parameter is anytype and threads the caller's carrier; the
+    # plain payload type must NOT flow in as the expected type, or an Rc/Arc
+    # source would be coerced (deref+deep-copy) to a plain payload here, before
+    # cross_boundary_arg ever sees the handle.
+    monomorphic_dest = facts.callee_param&.carrier_contract == :monomorphic
     raw_arg = with_decl_alloc(facts.arg_alloc) do
       if facts.copy_source
         copy_type = facts.callee_param_type.is_a?(Type) ? facts.callee_param_type.zig_type : nil
         MIR::DeepCopy.new(lower(T.must(facts.copy_source)), copy_type, nil, :full_value, :heap)
+      elsif monomorphic_dest
+        lower(facts.ast_arg)
       else
         with_expected_type(facts.callee_param_type) { lower(facts.ast_arg) }
       end
@@ -1515,7 +1700,10 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     operands = T.let([], T::Array[MIR::OwnershipOperandFact])
     ast_args.each_with_index do |ast_arg, idx|
-      next unless ast_arg.is_a?(AST::MoveNode) || AST.moved?(ast_arg)
+      # A kept-identity edge (retained identity v4) consumes its retained
+      # handle temp exactly like an explicit move consumes its source.
+      kept_edge = !!contract&.signature&.params&.dig(idx)&.symbol&.kept_identity
+      next unless ast_arg.is_a?(AST::MoveNode) || AST.moved?(ast_arg) || kept_edge
       # `GIVE COPY managed` to a plain TAKES parameter is lowered as a fresh
       # payload copy, not a transfer of the Rc/Arc wrapper.  Keep the wrapper's
       # cleanup live so the retained source is released after the call.
@@ -1621,12 +1809,16 @@ module MIRLoweringFunctions
     # Standard call
     callee_sig = fn_sig_for(node.name)
     callee_sig ||= matched_call_signature(node)
-    args_mir = node.args.each_with_index.map do |a, idx|
-      lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx))
+    call_plans = node.kept_edge_plans || {}
+    call_args = node.args
+    args_mir = with_kept_edge_call_frame do
+      call_args.each_with_index.map do |a, idx|
+        lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx, edge_plan: call_plans[idx]))
+      end
     end
 
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
-    mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
+    mod_prefix = mod_alias ? "#{zig_module_alias(mod_alias)}." : ""
 
     if node.respond_to?(:fn_var_call) && node.fn_var_call
       # fn-type variable call
@@ -1661,7 +1853,7 @@ module MIRLoweringFunctions
 
     finalize_call_result(
       node, fn_zig, all_args, can_fail, owned_return,
-      callable_contract_for_lowered_args(callee_sig, node.args, args_mir),
+      callable_contract_for_lowered_args(callee_sig, node.args, args_mir, edge_plans: call_plans),
       node.args,
       args_mir,
     )
@@ -1716,13 +1908,24 @@ module MIRLoweringFunctions
     # Standard UFCS call: method(object, args...)
     callee_sig = fn_sig_for(node.name)
     callee_sig ||= matched_call_signature(node)
-    obj_mir = lower_call_arg_from_facts(call_arg_facts(node.object, callee_sig, 0))
-    args_mir = node.args.each_with_index.map do |a, idx|
-      lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx + 1))
+    lowered_recv_and_args = with_kept_edge_call_frame do
+      recv = lower_call_arg_from_facts(call_arg_facts(node.object, callee_sig, 0))
+      # A method called on a MONOMORPHIC receiver gets the payload projected out
+      # at comptime -- deref the Rc/Arc handle, or pass the plain value through --
+      # so `self.field` resolves for every carrier.
+      if node.object.is_a?(AST::Identifier) && node.object.symbol&.carrier_contract == :monomorphic
+        recv = MIR::ComptimeCarrierPayload.new(recv)
+      end
+      method_args = node.args
+      [recv] + method_args.each_with_index.map do |a, idx|
+        lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx + 1))
+      end
     end
+    obj_mir = T.must(lowered_recv_and_args.first)
+    args_mir = lowered_recv_and_args.drop(1)
 
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
-    mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
+    mod_prefix = mod_alias ? "#{zig_module_alias(mod_alias)}." : ""
     needs_rt = callee_needs_rt?(node.name)
     can_fail = callee_can_fail?(node.name)
     can_fail = false if node.respond_to?(:retain_error_channel) && T.unsafe(node).retain_error_channel
@@ -1744,7 +1947,7 @@ module MIRLoweringFunctions
 
     finalize_call_result(
       node, fn_zig, all_args, can_fail, owned_return,
-      callable_contract_for_lowered_args(callee_sig, [node.object] + node.args, [obj_mir] + args_mir),
+      callable_contract_for_lowered_args(callee_sig, [node.object] + node.args, [obj_mir] + args_mir, edge_plans: (node.kept_edge_plans || {}).transform_keys { |k| k + 1 }),
       [node.object] + node.args,
       [obj_mir] + args_mir,
     )
@@ -1864,10 +2067,10 @@ module MIRLoweringFunctions
     receiver = T.cast(lower(receiver_node), MIR::Node)
     receiver = MIR::AddressOf.new(receiver) unless collection_param_receiver?(receiver_node)
     sink_alloc = placement_for_node(receiver_node)
-    sink_type = TypeProjectionExpression.new(
+    sink_type = TypeExpression.of(TypeProjectionExpression.new(
       owner: receiver_node.full_type!(context: "Map protocol put receiver").resolved,
       member: :Value,
-    )
+    ))
     value = with_sink_type(Type.new(sink_type)) do
       with_decl_alloc(sink_alloc) { T.cast(lower(value_node), MIR::Node) }
     end
@@ -1941,9 +2144,13 @@ module MIRLoweringFunctions
           end
         bodies =
           if body_slots.empty?
-            %i[body then_body else_body do_branch].filter_map do |name|
-              stmt.respond_to?(name) ? stmt.public_send(name) : nil
-            end
+            reflected = T.unsafe(stmt)
+            [
+              stmt.respond_to?(:body) ? reflected.body : nil,
+              stmt.respond_to?(:then_body) ? reflected.then_body : nil,
+              stmt.respond_to?(:else_body) ? reflected.else_body : nil,
+              stmt.respond_to?(:do_branch) ? reflected.do_branch : nil,
+            ].compact
           else
             body_slots.map(&:body)
           end
@@ -2099,6 +2306,7 @@ module MIRLoweringFunctions
     receiver_type = intrinsic_receiver_type(node)
     stdlib_facts = stdlib_call_facts(node)
     ownership_facts = stdlib_facts.ownership
+    intrinsic_args = node.args
 
     # Template-based intrinsics: lower args to MIR, apply ownership transforms, emit
     mir_args = if node.is_a?(AST::MethodCall)
@@ -2113,7 +2321,7 @@ module MIRLoweringFunctions
       elsif receiver_type&.frozen?
         # *const T auto-derefs for method calls in Zig — no _root deref needed
       end
-      lowered_args = node.args.each_with_index.map do |a, ai|
+      lowered_args = intrinsic_args.each_with_index.map do |a, ai|
         fact = stdlib_facts.args[ai + 1]
         with_sink_type(fact&.sink_type) do
           takes = ownership_facts.takes?(ai + 1)
@@ -2122,7 +2330,7 @@ module MIRLoweringFunctions
       end
       [obj_mir] + lowered_args
     else
-      node.args.each_with_index.map do |a, ai|
+      intrinsic_args.each_with_index.map do |a, ai|
         fact = stdlib_facts.args[ai]
         with_sink_type(fact&.sink_type) do
           takes = ownership_facts.takes?(ai)
@@ -2196,9 +2404,10 @@ module MIRLoweringFunctions
     end
     receiver_mutates = node.mutates_receiver || entry.mutates_receiver?
     target_var = T.let(nil, T.nilable(String))
+    first_arg = node.args.first
     if node.is_a?(AST::MethodCall) && receiver_mutates && node.object.respond_to?(:name)
       target_var = extract_root_var_name(node.object)
-    elsif receiver_mutates && (first_arg = node.args.first)&.respond_to?(:name)
+    elsif receiver_mutates && first_arg&.respond_to?(:name)
       target_var = extract_root_var_name(first_arg)
     end
     MIR::RegistryCall.new(
@@ -2374,7 +2583,8 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     source = node.respond_to?(:extern_source) ? node.extern_source : nil
-    args = node.args.each_with_index.map do |arg, index|
+    ast_args = node.args
+    args = ast_args.each_with_index.map do |arg, index|
       param = sig&.params&.[](index)
       lowered = lower_c_abi_callback_arg(arg, param, source)
       source&.abi == :c && c_abi_param_uses_address?(param) ? MIR::AddressOf.new(lowered) : lowered
@@ -2384,19 +2594,19 @@ module MIRLoweringFunctions
       alloc_call = alloc_kind == :heap \
         ? MIR::MethodCall.new(rt, "heapAlloc",  [], false, MIR::CallableContract.no_ownership(0)) \
         : MIR::MethodCall.new(rt, "frameAlloc", [], false, MIR::CallableContract.no_ownership(0))
-      n_comptime = node.args.count { |a| a.full_type! == :Type }
+      n_comptime = ast_args.count { |a| a.full_type! == :Type }
       args = T.must(args[0, n_comptime]) + [alloc_call] + T.must(args[n_comptime..])
     end
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
     mod_alias = nil if source&.abi == :c
-    mod_prefix = mod_alias ? "#{mod_alias.gsub('.', '_')}." : ""
+    mod_prefix = mod_alias ? "#{zig_module_alias(mod_alias)}." : ""
     callee_name = source&.symbol || node.name
     MIR::Call.new(
       "#{mod_prefix}#{callee_name}",
       args,
       false,
       call_owned_return?(node),
-      callable_contract_for(sig, node.args),
+      callable_contract_for(sig, ast_args),
     )
   end
 
@@ -2404,9 +2614,10 @@ module MIRLoweringFunctions
   def lower_extern_direct_method(node)
     T.bind(self, MIRLowering) rescue nil
     obj = lower(node.object)
-    args = node.args.map { |a| lower(a) }
+    ast_args = node.args
+    args = ast_args.map { |a| lower(a) }
     sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
-    MIR::MethodCall.new(obj, node.name.to_s, args, false, callable_contract_for(sig, [node.object] + node.args))
+    MIR::MethodCall.new(obj, node.name.to_s, args, false, callable_contract_for(sig, [node.object] + ast_args))
   end
 
   # Lower an extern trampoline argument, stripping the Byte[N]→String coercion
@@ -2431,22 +2642,27 @@ module MIRLoweringFunctions
     id = lowering_counters.next_extern_id
     alloc_kind = node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
+    mod_alias = nil unless mod_alias.is_a?(String)
     source = node.respond_to?(:extern_source) ? node.extern_source : nil
     mod_alias = nil if source&.abi == :c
+    mod_alias = zig_module_alias(mod_alias) if mod_alias
 
     # Separate comptime type args (full_type == :Type) from runtime args.
     # Comptime args can't be struct fields; the emitter renders them directly
     # at the call site after MIRChecker has seen the expression children.
-    comptime_args, runtime_ast_args = node.args.partition { |a| a.full_type! == :Type }
+    ast_args = node.args
+    comptime_args, runtime_ast_args = ast_args.partition { |a| a.full_type! == :Type }
+    comptime_args = comptime_args
+    runtime_ast_args = runtime_ast_args
     comptime_mir = comptime_args.map { |a| lower_extern_arg(a) }
 
     sig = fn_sig_for(node.name)
     sig_params = sig ? sig.params.reject { |p| p.comptime } : []
-    args = runtime_ast_args.each_with_index.map do |arg, index|
+    args = T.let(runtime_ast_args.each_with_index.map do |arg, index|
       param = sig_params[index]
       lowered = lower_c_abi_callback_arg(arg, param, source)
       source&.abi == :c && c_abi_param_uses_address?(param) ? MIR::AddressOf.new(lowered) : lowered
-    end
+    end, T::Array[MIR::Node])
 
     # Use declared scalar param types for struct fields to avoid comptime_int
     # (e.g. @TypeOf(19876)). For module externs, keep non-scalars inferred:
@@ -2517,7 +2733,7 @@ module MIRLoweringFunctions
   sig { params(return_type: Type, alloc_kind: T.nilable(Symbol), ast_node: AST::Node).returns(FunctionSignature) }
   def extern_trampoline_stdlib_def(return_type, alloc_kind, ast_node)
     payload_t = return_type.error_union? ? T.must(return_type.payload_type) : return_type
-    ast_symbol = ast_node.respond_to?(:symbol) ? ast_node.public_send(:symbol) : nil
+    ast_symbol = ast_node.respond_to?(:symbol) ? T.unsafe(ast_node).symbol : nil
     is_heap = !payload_t.c_string? && (
       alloc_kind == :heap ||
       ast_symbol&.heap_storage? == true ||
@@ -2589,8 +2805,13 @@ module MIRLoweringFunctions
     body_mir.concat(lower_body(prefix_nodes))
     return_expr = T.must(body_nodes.last)
     lambda_return = AST::ReturnNode.new(return_expr.respond_to?(:token) ? T.unsafe(return_expr).token : nil, return_expr)
+    # Capture the return expression's pending hoists INSIDE the lambda: a
+    # hoisted allocation (a pipeline block, an owned call) that flushed to
+    # the enclosing function's statement list would reference lambda params
+    # from outside the lambda struct (undeclared identifier in Zig).
+    return_value, return_pending = lower_head { lower(return_expr) }
     body_mir.concat(hoist_unhoisted_return_allocs(
-      [MIR::ReturnStmt.new(lower(return_expr))],
+      [*return_pending, MIR::ReturnStmt.new(return_value)],
       [lambda_return],
     ))
     # Lambda bodies are nested functions, not ordinary expression children of

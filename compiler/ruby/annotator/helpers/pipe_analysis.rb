@@ -3,6 +3,7 @@ require "sorbet-runtime"
 require_relative "../../ast/ast"
 require_relative "../../ast/type"
 require_relative "../../semantic/tense_operation_plan"
+require_relative "../../mir/lower/pipeline/pipeline_placeholder_usage"
 require 'set'
 
 module PipeAnalysis
@@ -89,6 +90,7 @@ module PipeAnalysis
     end
 
     sig { returns(Type) }
+    # ruby-to-clear: fallible
     def leaf_type
       plan.leaf_type
     end
@@ -124,11 +126,53 @@ module PipeAnalysis
         error!(node, :PIPE_BAD_DESTINATION)
         stamp_type!(node, :Any)
       end
+
+      # Every materializing (finite, list-or-scalar-producing) pipeline
+      # allocates through the runtime (result list, scratch, sort buffers).
+      # The per-shape branches above each remember — or forget — to record
+      # that; a forgotten shape (UNNEST terminal in an IF condition) left
+      # needs_rt false and the rt parameter was DROPPED from a signature
+      # whose lowered body references it (undeclared 'rt' Zig). Record once
+      # here, at the dispatch level: over-recording only threads rt where it
+      # might be unused; under-recording emits uncompilable code.
+      result_ti = Type.from_node!(node, context: "pipeline effect recording")
+      unless result_ti.inf_stream?
+        current_fn_ctx&.record_frame_use!
+        if node.storage == :heap || result_ti.heap?
+          current_fn_ctx&.record_heap_use!
+          current_fn_ctx&.record_alloc_use!
+        end
+      end
     end
     smooth_depth
   end
 
   private
+
+  # True when a SELECT element expression will lower with per-iteration frame
+  # transients: a nested materializing pipeline (its whole loop apparatus is
+  # rebuilt every outer iteration) or a composite literal with constructed
+  # (owned) field values (each hoists an owned temp per iteration). Both
+  # force per-iteration rewind in the lowered loop, which is only sound with
+  # a heap result — see the storage stamp in visit_Smooth.
+  sig { params(expr: AST::Node).returns(T::Boolean) }
+  def select_element_forces_heap_result?(expr)
+    found = T.let(false, T::Boolean)
+    AST.each_locatable(expr) do |node|
+      case node
+      when AST::BinaryOp
+        found = true if node.smooth?
+      when AST::StructLit
+        constructed = node.fields.values.any? do |v|
+          v.is_a?(AST::CopyNode) || v.is_a?(AST::MoveNode) ||
+            v.is_a?(AST::FuncCall) || v.is_a?(AST::MethodCall) ||
+            v.is_a?(AST::StringConcat)
+        end
+        found = true if constructed
+      end
+    end
+    found
+  end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def pipe_complex_op?(node)
@@ -183,14 +227,14 @@ module PipeAnalysis
   #     raw: :"~Int64")
   #   lift_to_observable_if_terminal!(node, terminal: :distinct,
   #     raw: :"~Int64[]", collection: :set)
-  sig { params(node: AST::BinaryOp, terminal: Symbol, raw: Symbol, type_kwargs: ObservableTypeKwValue).returns(T.nilable(Type)) }
-  def lift_to_observable_if_terminal!(node, terminal:, raw:, **type_kwargs)
+  sig { params(node: AST::BinaryOp, terminal: Symbol, raw: Symbol, collection: T.nilable(Symbol)).returns(T.nilable(Type)) }
+  def lift_to_observable_if_terminal!(node, terminal:, raw:, collection: nil)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless node.observable_terminal
     stamp_type!(node, Type.new(raw,
                                observable: true,
                                observable_terminal: terminal,
-                               **type_kwargs))
+                               collection: collection))
   end
 
   # M5: collapse the stamp + lift pair that every analyze_*_op call site
@@ -202,11 +246,11 @@ module PipeAnalysis
   # stamp_observable_terminal!, the only argumentation a call site
   # carries is terminal kind + raw type + extra type kwargs, so a
   # single helper is enough.
-  sig { params(node: AST::BinaryOp, terminal: Symbol, raw: Symbol, type_kwargs: ObservableTypeKwValue).returns(T.nilable(Type)) }
-  def mark_observable_terminal!(node, terminal:, raw:, **type_kwargs)
+  sig { params(node: AST::BinaryOp, terminal: Symbol, raw: Symbol, collection: T.nilable(Symbol)).returns(T.nilable(Type)) }
+  def mark_observable_terminal!(node, terminal:, raw:, collection: nil)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     stamp_observable_terminal!(node)
-    lift_to_observable_if_terminal!(node, **T.unsafe({terminal: terminal, raw: raw, **type_kwargs}))
+    lift_to_observable_if_terminal!(node, terminal: terminal, raw: raw, collection: collection)
   end
 
   sig { params(node: AST::Locatable).returns(T::Boolean) }
@@ -219,21 +263,25 @@ module PipeAnalysis
   def pipeline_source_fact(source, source_type, include_inf_stream: false)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     if include_inf_stream && source_type.inf_stream?
-      return PipelineSourceFact.new(kind: :inf_stream, item_type: T.must(source_type.inf_stream_element_type))
+      item = source_type.canonical_stream_item_type || source_type.inf_stream_element_type
+      return PipelineSourceFact.new(kind: :inf_stream, item_type: T.must(item))
     end
 
     return PipelineSourceFact.new(kind: :range, item_type: range_element_type(source)) if source.is_a?(AST::RangeLit)
 
     if source_type.open_stream?
-      return PipelineSourceFact.new(kind: :open_stream, item_type: T.must(source_type.open_stream_element_type))
+      item = source_type.canonical_stream_item_type || source_type.open_stream_element_type
+      return PipelineSourceFact.new(kind: :open_stream, item_type: T.must(item))
     end
 
     if source_type.dynamic_stream?
-      return PipelineSourceFact.new(kind: :dynamic_stream, item_type: T.must(source_type.tense_type.element_type))
+      item = source_type.canonical_stream_item_type || source_type.tense_type.element_type
+      return PipelineSourceFact.new(kind: :dynamic_stream, item_type: T.must(item))
     end
 
     if source_type.bounded_stream?
-      return PipelineSourceFact.new(kind: :bounded_stream, item_type: T.must(source_type.tense_type.element_type))
+      item = source_type.canonical_stream_item_type || source_type.tense_type.element_type
+      return PipelineSourceFact.new(kind: :bounded_stream, item_type: T.must(item))
     end
 
     element_type = source_type.element_type
@@ -395,6 +443,12 @@ module PipeAnalysis
         validate_where_effect_contract!(node.right, selector_effect)
       elsif node.right.is_a?(AST::SelectOp)
         validate_select_effect_contract!(node.right, selector_effect)
+        # An infinite rendezvous stream never drains: a selector that MOVES
+        # the item (GIVE / TAKES) can leave moved payloads in flight at
+        # teardown, which the runtime cannot reclaim safely. Fail closed.
+        if source.inf_stream? && PipelinePlaceholderUsage.moved_placeholder?(node.right.expression)
+          error!(node.right, :INF_STREAM_SELECT_MOVES_ITEM)
+        end
       end
     end
 
@@ -430,10 +484,31 @@ module PipeAnalysis
     # container have one coherent cleanup allocator.
     node.storage = node.full_type!(context: "pipeline result storage").promise_list? ? :heap : :frame
 
+    # An element expression that allocates frame transients EVERY iteration
+    # (a nested materializing pipeline, an owned composite construction)
+    # forces a per-iteration arena rewind in the lowered loop. Rewind frees
+    # everything frame-allocated during the iteration, so the escaping result
+    # must live on the heap — the one storage decision that makes rewind
+    # sound. Stamped HERE (the storage fact owner) so hoist cleanup, binding
+    # classification, and lowering all read one coherent placement.
+    if node.storage == :frame && node.right.is_a?(AST::SelectOp) &&
+       select_element_forces_heap_result?(node.right.expression)
+      node.storage = :heap
+    end
+
     # WHERE/SELECT/ORDER_BY allocate intermediate ArrayListUnmanaged at the
-    # transpiler level via rt.frameAlloc(). InfStream results are not materialized;
-    # only count frame allocation for finite (list-producing) results.
-    current_fn_ctx&.record_frame_use! unless source.inf_stream? || node.storage == :heap
+    # transpiler level via rt.frameAlloc() / heapAlloc(). InfStream results are
+    # not materialized. A heap-storage result still ALLOCATES — recording
+    # nothing for it left needs_rt false, dropping the rt parameter from the
+    # signature while the lowered body references it (undeclared 'rt' Zig).
+    unless source.inf_stream?
+      if node.storage == :heap
+        current_fn_ctx&.record_heap_use!
+        current_fn_ctx&.record_alloc_use!
+      else
+        current_fn_ctx&.record_frame_use!
+      end
+    end
     nil
   end
 
@@ -442,8 +517,8 @@ module PipeAnalysis
       .returns(Type)
   end
   def select_stream_result_type(source_type, source, effect)
-    cardinality = if source.stream? && source_type.shape.expression.is_a?(StreamTypeExpression)
-      T.cast(source_type.shape.expression, StreamTypeExpression).cardinality
+    cardinality = if source.stream? && source_type.shape.expression.kind.is_a?(StreamTypeExpression)
+      T.cast(source_type.shape.expression.kind, StreamTypeExpression).cardinality
     else
       :FINITE
     end
@@ -1355,8 +1430,11 @@ module PipeAnalysis
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     shard_counts = sharded_names.map do |name|
       sc = lookup_scope_for(name)&.resolve_entry(name)&.type
-      t = sc.is_a?(Type) ? sc : Type.new(T.unsafe(sc))
-      t.shard_count
+      if sc.is_a?(Type)
+        sc.shard_count
+      else
+        Type.new(T.unsafe(sc)).shard_count
+      end
     end.compact.uniq
     names_str = sharded_names.to_a.join(', ')
     if shard_counts.length == 1
@@ -1480,7 +1558,7 @@ module PipeAnalysis
       return
     end
     if node.is_a?(AST::Capability)
-      node.each_pair do |_, val|
+      [node[:var_node], node[:guard_expr], node[:view_length]].each do |val|
         if val.is_a?(Array) || val.is_a?(AST::Capability) || val.is_a?(AST::Locatable)
           each_shard_scan_node(val, &blk)
         end
@@ -1564,16 +1642,11 @@ module PipeAnalysis
       error!(shard_op.target_map, :SHARD_TARGET_BAD, remediation: "SHARD routes items to owning schedulers — :locked maps don't have ownership.")
     end
 
-    map_key_type = target_info&.key_type&.resolved
-    if map_key_type == :String || map_key_type.nil?
-      unless key_type == :String
-        error!(shard_op.key_expr, :SHARD_KEY_NEEDS_STRING, got: key_type)
-      end
-    else
-      # Numeric-keyed map: key expression must match the map's key type
-      unless Type.new(key_type).numeric?
-        error!(shard_op.key_expr, :SHARD_KEY_NEEDS_NUMERIC, map_key_type: map_key_type, got: key_type)
-      end
+    map_key = target_info&.key_type
+    actual_key = shard_op.key_expr.full_type!(context: "SHARD key expression")
+    if map_key && target_info && !target_info.accepts_map_key?(actual_key)
+      error!(shard_op.key_expr, :GENERIC_MAP_KEY_MISMATCH,
+        expected: Type.surface_name(map_key), actual: Type.surface_name(actual_key))
     end
 
     # SHARD is consumed by the subsequent CONCURRENT EACH — not standalone.

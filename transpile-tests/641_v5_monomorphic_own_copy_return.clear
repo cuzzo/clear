@@ -1,0 +1,18 @@
+# Retained-identity v5: OWN COPY on a MONOMORPHIC parameter projects the payload
+# at comptime and deep-copies it into a fresh plain owner (detach) for every
+# carrier -- and it works in RETURN position: a consuming call reaching return
+# unbound is bound to a temp so its argument move-marks flush before the return
+# (no unreachable code).
+STRUCT User { id: Int64 }
+
+FN sink(TAKES u: User) RETURNS Int64 -> RETURN u.id; END
+FN relay(TAKES u: MONOMORPHIC User) RETURNS Int64 -> RETURN sink(OWN COPY u); END
+
+FN main() RETURNS Void ->
+    m = User{ id: 2 } @multiowned;
+    ASSERT relay(m) == 2, "OWN COPY detaches @multiowned in return position";
+    WITH m { ASSERT m.id == 2, "original handle survives"; }
+    p = User{ id: 5 };
+    ASSERT relay(p) == 5, "OWN COPY of plain in return position";
+    RETURN;
+END

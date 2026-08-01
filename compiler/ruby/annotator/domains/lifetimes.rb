@@ -139,14 +139,41 @@ module Annotator
       def finish_previsited_copy!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
+        # Static rule 6: bare COPY (a memcpy) on a carrier-polymorphic parameter
+        # cannot guarantee independent identity (the caller may have passed a
+        # retained value). Require KEEP or a UNIQUE contract. OWN COPY is exempt:
+        # it explicitly projects the payload out at comptime and deep-copies it,
+        # so it yields an independent plain value for every carrier. This applies
+        # only to a DIRECT reference to the parameter -- COPY of a field or
+        # element (`COPY items[0]`) copies that projection's own value, whose
+        # carrier is its element/field type, not the parameter's.
+        copy_root = node.value
+        if copy_root.is_a?(AST::Identifier) && !node.own
+          copy_entry = copy_root.symbol
+          if copy_entry.is_a?(SymbolEntry) && copy_entry.carrier_polymorphic
+            error!(node, :COPY_ON_POLYMORPHIC_PARAM, name: copy_root.name)
+          end
+        end
+
         # COPY produces an owned deep-copy. The source is NOT consumed.
         # Clone the Type so mutating provenance doesn't affect the inner node.
         inner_type = node.value.full_type!(context: "COPY value")
-        resolver = ->(name) { lookup_type_schema(name) }
-        if inner_type.is_a?(Type) && inner_type.contains_linear_resource?(resolver)
-          error!(node, :COPY_NON_COPYABLE, type: inner_type.to_s)
+        # Retained-identity v5 (V5-3b): a plain-source COPY is a payload_copy.
+        # A retained source gets :shared_to_unique_copy stamped at the UNIQUE
+        # call boundary (verify_copy_retained_boundary!), or is rejected.
+        if inner_type.is_a?(Type) && !inner_type.multiowned? && !inner_type.shared?
+          node.carrier_op = :payload_copy
         end
-        stamp_type!(node, inner_type.is_a?(Type) ? Type.new(inner_type) : inner_type)
+        # OWN COPY detaches: the result is an independent PLAIN value for
+        # every carrier, so a bound `x = OWN COPY handle` must not inherit
+        # the source's @shared/@multiowned wrapper (the inline-argument form
+        # already bypasses the carrier gate via the CopyNode exemption).
+        result_type = if inner_type.is_a?(Type)
+          node.own && inner_type.any_rc? ? inner_type.bare_data_type : Type.new(inner_type)
+        else
+          inner_type
+        end
+        stamp_type!(node, result_type)
         ti = node.full_type!(context: "COPY result")
 
         # COPY of a primitive, interned symbol, or Id<T> is a semantic no-op
@@ -271,35 +298,109 @@ module Annotator
         node.storage   = :frozen
       end
 
-      sig { params(node: AST::CloneNode).returns(T.nilable(T::Boolean)) }
-      def visit_CloneNode(node)
+      # Retained-identity v5 unified carrier-preserving fan-out KEEP (formerly
+      # CLONE, the narrow Rc/Arc-retain case, and COPY_OR_CLONE). The value's
+      # TYPE is unchanged; the ownership OPERATION (Rc retain / Arc retain /
+      # plain payload copy) is chosen by placement (V5-3a) from the source
+      # carrier. KEEP is valid on a retained carrier (@multiowned/@shared,
+      # stream) and on a carrier-polymorphic parameter; static rules 4/5
+      # reject it on a statically plain local or a UNIQUE parameter (use COPY).
+      sig { params(node: AST::KeepNode).returns(T.nilable(T::Boolean)) }
+      def visit_KeepNode(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         record_capture_site!(node, copied: true)
         without_capture_moves { visit(node.value) }
-        finish_previsited_clone!(node)
+        reject_keep_on_known_carrier!(node)
+        finish_previsited_keep!(node)
       end
 
-      # See finish_previsited_copy!: this consumes resolved semantic facts and
-      # deliberately does not revisit the source expression.
-      sig { params(node: AST::CloneNode).returns(T.nilable(T::Boolean)) }
-      def finish_previsited_clone!(node)
+      # Static rules 4 & 5: KEEP is only meaningful on a carrier-polymorphic
+      # value. A plain local (rule 4) or a UNIQUE parameter (rule 5) has a
+      # statically known carrier -- use COPY for an independent copy.
+      sig { params(node: AST::KeepNode).returns(NilClass) }
+      def reject_keep_on_known_carrier!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        type = node.value.full_type!(context: "CLONE value")
         root = get_root_object(node.value)
-        if root.is_a?(AST::Identifier) && root.symbol&.non_escaping
-          error!(node, :CLONE_WITH_SCOPED, name: root.name)
+        return nil unless root.is_a?(AST::Identifier)
+        entry = root.symbol
+        return nil unless entry.is_a?(SymbolEntry)
+        # A WITH-scoped (non-escaping) borrow is not a "plain local": the
+        # scoped-escape guard in finish_previsited_keep! handles it.
+        return nil if entry.non_escaping
+
+        ty = node.value.full_type!(context: "KEEP carrier")
+        # A retained carrier is any Rc/Arc, split stream, or shared promise --
+        # the same set KEEP retains rather than copies. Only a statically plain
+        # local falls through to rule 4.
+        retained = ty.is_a?(Type) &&
+          (ty.any_rc? || ty.split_open_stream? || ty.shared_promise? || ty.split?)
+        carrier = if entry.is_param && entry.carrier_contract == :unique
+          "UNIQUE parameter"
+        elsif !entry.is_param && !entry.carrier_polymorphic && !retained
+          "plain local"
+        end
+        return nil unless carrier
+
+        error!(node, :KEEP_ON_KNOWN_CARRIER, name: root.name, carrier: carrier)
+      end
+
+      # Consumes resolved semantic facts; deliberately does not revisit the
+      # source. KEEP allows a plain carrier (a payload copy at lowering), so
+      # there is no bad-target rejection -- only the scoped-escape guard.
+      sig { params(node: AST::KeepNode).returns(T.nilable(T::Boolean)) }
+      def finish_previsited_keep!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        type = node.value.full_type!(context: "KEEP value")
+        root = get_root_object(node.value)
+        # A WITH alias itself is only a protected borrow and still cannot
+        # escape. A retained field reached through that alias is different:
+        # KEEP duplicates the field's Rc handle while the protected owner is
+        # live, so the new strong reference is independent of the WITH scope.
+        retained_projection = type.is_a?(Type) && type.any_rc? && node.value != root
+        if root.is_a?(AST::Identifier) && root.symbol&.non_escaping && !retained_projection
+          error!(node, :KEEP_WITH_SCOPED, name: root.name)
         end
 
-        unless type&.split_open_stream? || type&.shared_promise? || type&.any_rc?
-          error!(node, :CLONE_BAD_TARGET, got: node.value.resolved_type)
-        end
-
-        stamp_type!(node, node.value.full_type!(context: "CLONE result"))
-        node.storage = node.value.storage
+        stamp_type!(node, node.value.full_type!(context: "KEEP result"))
+        node.storage = node.value.storage if node.value.respond_to?(:storage)
         current_fn_ctx&.mark_runtime_used! if type&.any_rc?
+        stamp_keep_carrier_op!(node, type, root)
         nil
+      end
+
+      # Retained-identity v5 (V5-3a wiring): record the physical KEEP op the
+      # OwnershipEdgePlanner selects from the source carrier -- the ONE writer.
+      # A carrier-polymorphic parameter source has no statically known carrier;
+      # its op is resolved per specialization (Phase 4), marked deferred here.
+      # Non-Rc/Arc retained carriers (@split streams, promises) stay on the
+      # existing lowering path until Phase 4 unifies them.
+      sig { params(node: AST::KeepNode, type: T.nilable(Type), root: AST::Node).void }
+      def stamp_keep_carrier_op!(node, type, root)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        if root.is_a?(AST::Identifier) && root.symbol.is_a?(SymbolEntry) &&
+            T.must(root.symbol).carrier_polymorphic
+          # A MONOMORPHIC param resolves KEEP per concrete carrier at Zig
+          # comptime (retain a handle, or copy a plain value). An unconstrained
+          # carrier-polymorphic param has no monomorphization, so its carrier
+          # stays statically unknown -> the deferred tag path.
+          node.carrier_op = T.must(root.symbol).carrier_contract == :monomorphic ?
+            :monomorphic_keep : :deferred_specialization
+          return
+        end
+        return unless type.is_a?(Type)
+
+        carrier = if type.multiowned? then :multiowned
+        elsif type.shared? then :shared
+        elsif !type.any_rc? && !type.split_open_stream? && !type.shared_promise? && !type.split?
+          :plain
+        end
+        return unless carrier
+
+        node.carrier_op = OwnershipEdgePlanner.select(source_carrier: carrier, fan_out: :keep).op
       end
 
       sig { params(node: AST::ShareNode).void }
@@ -347,23 +448,9 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         names = Set.new
-        traverse = T.let(nil, T.untyped)
-        traverse = lambda do |n|
-          case n
-          when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-          when Array
-            n.each { |item| traverse.call(item) }
-          when Hash
-            n.each_value { |v| traverse.call(v) }
-          when AST::FunctionDef
-            # Don't descend into nested function definitions.
-          when AST::Identifier
-            names.add(n.name)
-          else
-            n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
-          end
+        AST.each_locatable(nodes) do |node|
+          names.add(node.name) if node.is_a?(AST::Identifier)
         end
-        traverse.call(nodes)
         names
       end
 
@@ -955,7 +1042,7 @@ module Annotator
           init.is_a?(AST::Locatable) && init.heap_storage?
         when AST::Identifier
           !!init.symbol&.init_contents_heap
-        when AST::CopyNode, AST::CloneNode
+        when AST::CopyNode, AST::KeepNode
           true
         when AST::Cast
           init_value_contents_heap?(init.value)
@@ -1314,6 +1401,34 @@ module Annotator
           end
         end
         move_if_takes_ownership!(node, action: :takes, consumer_param_type: value_type)
+      end
+
+      # Keep-analysis (retained identity v4): a plain param flowing into an
+      # @multiowned identity field is kept, not borrow-rejected. Stamps
+      # kept_identity on the param's SymbolEntry; the call edge's cost
+      # (retain / move / create / copy) is derived later from the caller's
+      # declared model, never spelled at this use site.
+      sig { params(val_node: AST::Node, expected_type: Type, container_desc: String).returns(T::Boolean) }
+      def keep_param_identity!(val_node, expected_type, container_desc)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+
+        return false unless expected_type.multiowned?
+        # A generic identity field (T @multiowned) resolves its capability
+        # after substitution; pre-wrapping the generic param's ABI would
+        # double-wrap the substituted handle. Generic keeps stay on the
+        # existing anytype path.
+        return false if current_function_type_param?(expected_type.resolved)
+        # Zero-config row: `param OR_ELSE fresh-default` keeps the provided
+        # identity and constructs a private one when omitted. The param is
+        # kept; the default branch stays an ordinary owned payload.
+        if val_node.is_a?(AST::BinaryOp) && val_node.op == :OR_ELSE
+          return keep_param_identity!(val_node.left, expected_type, container_desc)
+        end
+        return false unless val_node.is_a?(AST::Identifier)
+        entry = current_scope.resolve_entry(val_node.name)
+        return false unless entry&.is_param
+        entry.kept_identity ||= KeptIdentityContract.new(family: :multiowned, sink: container_desc)
+        true
       end
 
       # Reject storing a borrowed value into an owned container (struct, union, TAKES param).

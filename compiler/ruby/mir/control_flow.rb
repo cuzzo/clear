@@ -1135,7 +1135,7 @@ class OwnershipDataflow
     when AST::ShareNode
       collect_share_transfer(node, step)
 
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
+    when AST::CopyNode, AST::KeepNode, AST::FreezeNode
       # COPY / FREEZE do NOT move the source.
 
     when AST::CapabilityWrap
@@ -1428,7 +1428,7 @@ class UseAfterMoveChecker
         check_reads_in_expr(arg, state) unless arg.value.is_a?(AST::Identifier)
       elsif arg.is_a?(AST::ShareNode)
         check_share_reads(arg, state)
-      elsif arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode) || arg.is_a?(AST::FreezeNode)
+      elsif arg.is_a?(AST::CopyNode) || arg.is_a?(AST::KeepNode) || arg.is_a?(AST::FreezeNode)
         # COPY/FREEZE: the source IS read (must be live to copy/freeze from).
         check_reads_in_expr(arg.value, state)
       else
@@ -1446,7 +1446,7 @@ class UseAfterMoveChecker
     when AST::Identifier
       check_identifier_node_read(node, state)
 
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
+    when AST::CopyNode, AST::KeepNode, AST::FreezeNode
       # COPY/FREEZE x: x IS read (must be live to copy/freeze from).
       check_reads_in_expr(node.value, state)
 

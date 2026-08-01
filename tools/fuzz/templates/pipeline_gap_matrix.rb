@@ -3,6 +3,8 @@
 PIPELINE_GAP_CELLS = [
   { shape: :take_while_sum },
   { shape: :skip_sum },
+  { shape: :skip_select_owned },
+  { shape: :limit_select_owned },
   { shape: :window_time_only },
   { shape: :unnest_bind_sum },
   { shape: :unnest_plain_sum },
@@ -29,6 +31,54 @@ FuzzGenerator.register(:pipeline_gap_matrix, cells: PIPELINE_GAP_CELLS) do |p|
         data = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
         total = data |> SKIP 2_i64 |> SUM _;
         ASSERT total == 12_i64, "skip sum";
+        RETURN;
+      END
+    CHT
+
+  when :skip_select_owned
+    # SKIP returns a BORROWED sub-slice of its source; feeding it into a
+    # materializing SELECT over cleanup-bearing (String) elements must NOT
+    # free the borrowed source. The `main()` body over frame-allocated source
+    # strings makes a wrong `defer cleanup` surface as an `Invalid free`.
+    <<~CHT
+      FN dup(s: String) RETURNS String ->
+        RETURN COPY s;
+      END
+
+      FN tail(parts: String[]) RETURNS String ->
+        RETURN ((parts |> SKIP 1) |> SELECT dup(_)).join(",");
+      END
+
+      FN main() RETURNS Void ->
+        MUTABLE ps: String[] = List[];
+        &ps.push("a");
+        &ps.push("b");
+        &ps.push("c");
+        r = tail(ps);
+        ASSERT r.length() == 3_i64, "skip select owned";
+        RETURN;
+      END
+    CHT
+
+  when :limit_select_owned
+    # LIMIT clamps with `@min` (needs a callable contract) and materializes a
+    # fresh owned list; the SELECT over String elements must round-trip clean.
+    <<~CHT
+      FN dup(s: String) RETURNS String ->
+        RETURN COPY s;
+      END
+
+      FN head(parts: String[]) RETURNS String ->
+        RETURN ((parts |> LIMIT 2) |> SELECT dup(_)).join(",");
+      END
+
+      FN main() RETURNS Void ->
+        MUTABLE ps: String[] = List[];
+        &ps.push("a");
+        &ps.push("b");
+        &ps.push("c");
+        r = head(ps);
+        ASSERT r.length() == 3_i64, "limit select owned";
         RETURN;
       END
     CHT

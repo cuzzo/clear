@@ -45,7 +45,7 @@ module ClearBuildSupport
     FileUtils.mkdir_p(File.dirname(path))
     return false if File.exist?(path) && File.read(path) == content
 
-    temporary = "#{path}.tmp.#{$$}.#{Thread.current.object_id}"
+    temporary = "#{path}.tmp.#{Process.pid}.#{Thread.current.object_id}"
     begin
       File.binwrite(temporary, content)
       File.rename(temporary, path)
@@ -131,8 +131,54 @@ module ClearBuildSupport
     write_if_changed(build_metadata_path(output), JSON.pretty_generate(signature))
   end
 
+  @registered_packages = T.let({}, T::Hash[String, String])
+
+  # Generated package trees (e.g. ruby-to-clear "rtoc_..." modules) live outside
+  # the packages/<name>/src/lib.clear layout, so builds register them explicitly
+  # with --pkg name=/path. Registrations take precedence over discovery.
+  sig { params(specs: T::Hash[String, String]).void }
+  def self.register_packages(specs)
+    specs.each do |name, path|
+      # A comma-separated value registers a MULTI-FILE package: every member
+      # must exist; the members compile together as one unit.
+      resolved_list = path.to_s.split(",").map { |member| File.expand_path(member.strip) }
+      resolved_list.each do |member|
+        unless File.file?(member)
+          raise BuildError, "--pkg #{name}=#{path}: package source not found: #{member}"
+        end
+      end
+
+      @registered_packages[name] = resolved_list.join(",")
+    end
+  end
+
+  sig { void }
+  def self.clear_registered_packages!
+    @registered_packages = {}
+  end
+
+  # Materialize a registered multi-file package as a single merged root
+  # source file (used by `clear test pkg:<name>` / `clear build pkg:<name>`).
+  # Returns the merged file path.
+  sig { params(pkg_name: String).returns(String) }
+  def self.materialize_package_root(pkg_name)
+    registered = @registered_packages[pkg_name]
+    raise BuildError, "pkg:#{pkg_name}: not registered (pass --pkg #{pkg_name}=a.clear,b.clear)" unless registered
+
+    require "tmpdir"
+    require_relative "../compiler/package_source"
+    members = registered.split(",")
+    merged = PackageSource.merge(members, resolve_pkg: ->(name) { @registered_packages[name] })
+    out = File.join(Dir.tmpdir, "clear_pkg_#{pkg_name}.clear")
+    File.write(out, merged.source)
+    out
+  end
+
   sig { params(pkg_name: String, start_dir: String).returns(T.nilable(String)) }
   def self.find_package_source(pkg_name, start_dir:)
+    registered = @registered_packages[pkg_name]
+    return registered if registered
+
     dir = File.expand_path(start_dir)
     loop do
       candidate = File.join(dir, "packages", pkg_name, "src", "lib.clear")
@@ -175,6 +221,26 @@ module ClearBuildSupport
     else
       File.expand_path(raw, caller_dir)
     end
+  end
+
+  # A multi-file package registers as one comma-separated value. Anything that
+  # walks a resolved REQUIRE as a filesystem path must see the members, not the
+  # joined spec.
+  sig { params(resolved: String).returns(T::Array[String]) }
+  def self.package_member_paths(resolved)
+    resolved.split(",").map { |member| member.strip }.reject(&:empty?)
+  end
+
+  # A member of a multi-file package never compiles alone, so requiring it by
+  # its own single-file name really depends on the owning package. Returns
+  # [name, spec] of that owner, or nil when the path stands on its own.
+  sig { params(path: String).returns(T.nilable([String, String])) }
+  def self.owning_package(path)
+    expanded = File.expand_path(path)
+    owner = @registered_packages.find do |_name, spec|
+      spec.include?(",") && package_member_paths(spec).include?(expanded)
+    end
+    owner && [owner.fetch(0), owner.fetch(1)]
   end
 
   # The root compiler resolves imports before the package-module build pass.
@@ -335,8 +401,10 @@ module ClearBuildSupport
     source = File.read(path)
     caller_dir = File.dirname(path)
     source.scan(/REQUIRE\s+"([^"]+)"/).flatten.uniq.each do |raw|
-      dep_path = resolve_clear_require(T.must(raw), caller_dir: caller_dir)
-      collect_clear_dependencies_into(dep_path, seen)
+      resolved = resolve_clear_require(T.must(raw), caller_dir: caller_dir)
+      package_member_paths(resolved).each do |dep_path|
+        collect_clear_dependencies_into(dep_path, seen)
+      end
     end
   end
 
@@ -361,7 +429,14 @@ module ClearBuildSupport
         raise PackageMissingError, "Package '#{package_name}' not found from #{caller_dir}" unless package_path
 
         packages[package_name] ||= package_path
-        collect_package_dependencies_into(package_path, packages, seen)
+        # Requiring a member by its own name really depends on the owning
+        # multi-file package; register that too so the importer can redirect
+        # the member to the whole unit instead of splitting it.
+        owner_name, owner_spec = owning_package(package_path)
+        packages[owner_name] ||= owner_spec if owner_name
+        package_member_paths(owner_spec || package_path).each do |member|
+          collect_package_dependencies_into(member, packages, seen)
+        end
       else
         collect_package_dependencies_into(File.expand_path(raw, caller_dir), packages, seen)
       end

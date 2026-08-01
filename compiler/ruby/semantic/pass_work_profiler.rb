@@ -302,11 +302,7 @@ module PassWorkProfiler
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f
       block.call
     ensure
-      if record && started
-        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f - started
-        record.seconds += elapsed
-        @stage_stack.pop
-      end
+      finish_measure(record, started)
     end
 
     sig { params(kind: String, yields: Integer, seconds: Float).void }
@@ -337,15 +333,29 @@ module PassWorkProfiler
       @work_stack.push(frame)
       block.call
     ensure
-      if frame
-        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f - frame.started_at
-        exclusive_seconds = elapsed - frame.child_seconds
-        exclusive_seconds = 0.0 if exclusive_seconds.negative?
-        @work_stack.pop
-        parent = @work_stack.current
-        parent.child_seconds += elapsed if parent
-        record_for(frame.stage_label).add_work(kind, units, elapsed, exclusive_seconds)
-      end
+      finish_measure_work(frame, kind, units)
+    end
+
+    sig { params(record: T.nilable(StageRecord), started: T.nilable(Float)).void }
+    def finish_measure(record, started)
+      return unless record && started
+
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f - started
+      record.seconds += elapsed
+      @stage_stack.pop
+    end
+
+    sig { params(frame: T.nilable(WorkFrame), kind: String, units: Integer).void }
+    def finish_measure_work(frame, kind, units)
+      return unless frame
+
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC).to_f - frame.started_at
+      exclusive_seconds = elapsed - frame.child_seconds
+      exclusive_seconds = 0.0 if exclusive_seconds.negative?
+      @work_stack.pop
+      parent = @work_stack.current
+      parent.child_seconds += elapsed if parent
+      record_for(frame.stage_label).add_work(kind, units, elapsed, exclusive_seconds)
     end
 
     sig { returns(T::Array[StageRecord]) }

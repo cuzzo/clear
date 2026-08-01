@@ -1,0 +1,20 @@
+# Retained-identity v5 (C-3b): a MONOMORPHIC parameter is emitted once as an
+# anytype and Zig monomorphizes it per concrete carrier at each call. The
+# caller threads its ACTUAL carrier (plain payload OR Rc/Arc handle) unchanged
+# -- never a silent detach -- and field access comptime-unwraps the payload
+# (`u.ctrl.data.*.id` for a handle, `u.id` for plain). The callee's universal
+# comptime cleanup releases whatever carrier arrived. The testing allocator
+# proves every variant (plain / @multiowned / @shared) balances.
+STRUCT User { id: Int64 }
+
+FN consume(TAKES u: MONOMORPHIC User) RETURNS Int64 -> RETURN u.id; END
+
+FN main() RETURNS Void ->
+    p = User{ id: 1 };
+    ASSERT consume(p) == 1, "plain carrier threads and frees";
+    m = User{ id: 2 } @multiowned;
+    ASSERT consume(m) == 2, "@multiowned handle threads and releases";
+    s = User{ id: 3 } @shared;
+    ASSERT consume(s) == 3, "@shared handle threads and releases";
+    RETURN;
+END

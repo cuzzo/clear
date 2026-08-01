@@ -1,0 +1,22 @@
+STRUCT Budget { count: Int64 }
+STRUCT Holder { budget: Budget @multiowned }
+
+# Retained identity v4: a plain param kept into an @multiowned field shares
+# the caller's identity. Nested keepers observe the same counter; the
+# testing allocator proves retain/release balance on every path.
+FN makeHolder(budget: Budget) RETURNS Holder ->
+    RETURN Holder{ budget: budget };
+END
+
+FN main() RETURNS Void ->
+    MUTABLE shared = Budget{ count: 0 } @multiowned;
+    a = makeHolder(shared);
+    b = makeHolder(shared);
+
+    shared.count = 5;
+
+    ASSERT shared.count == 5, "caller observes its own write";
+    ASSERT a.budget.count == 5, "first keeper shares the identity";
+    ASSERT b.budget.count == 5, "second keeper shares the identity";
+    RETURN;
+END

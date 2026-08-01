@@ -1,5 +1,6 @@
 # typed: strict
 require "sorbet-runtime"
+require_relative "lexer"
 
 module AST
   extend T::Sig
@@ -68,7 +69,7 @@ module AST
   #     first_site: <Token|nil>,  # for collision diagnostics
   #   }
   # Not thread-safe; the compiler is single-threaded per-program.
-  ERROR_TYPES = T.let({
+  BASE_ERROR_TYPES = T.let({
     LockTimeout:         { kind: :Transient, zig_name: "LockTimeout",         id: ERROR_NAME_LOCK_TIMEOUT,         first_site: nil },
     LockCycle:           { kind: :Transient, zig_name: "LockCycle",           id: ERROR_NAME_LOCK_CYCLE,           first_site: nil },
     Deadlock:            { kind: :System,    zig_name: "Deadlock",            id: ERROR_NAME_DEADLOCK,             first_site: nil },
@@ -79,19 +80,32 @@ module AST
     GuardFail:           { kind: :Transient, zig_name: "GuardFail",           id: ERROR_NAME_GUARD_FAIL,           first_site: nil },
     PreconditionFail:  { kind: :Input,     zig_name: "PreconditionFail",  id: ERROR_NAME_PRECONDITION_FAIL,  first_site: nil },
     OutOfMemory:         { kind: :System,    zig_name: "OutOfMemory",         id: ERROR_NAME_OUT_OF_MEMORY,        first_site: nil },
-  }, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
+  }.freeze, T::Hash[Symbol, T::Hash[Symbol, T.untyped]])
 
   # Counter for the next user-type id. Reset on a per-program basis via
   # reset_user_types! (called at the start of each SemanticAnnotator run
   # so parallel rspec runs don't bleed state).
   @next_user_id = T.let(ERROR_NAME_USER_FIRST, Integer)
-  @stdlib_frozen = T.let(ERROR_TYPES.keys.to_set, T::Set[Symbol])
+  # The mutable per-program registry is initialized lazily so the native
+  # self-host has no heap-owning module initializer.
+  @error_types = T.let(nil, T.nilable(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]))
   class << self
     extend T::Sig
     sig { returns(Integer) }
     attr_reader :next_user_id
-    sig { returns(T::Set[Symbol]) }
-    attr_reader :stdlib_frozen
+  end
+
+  sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
+  def self.error_types
+    return @error_types unless @error_types.nil?
+
+    @error_types = BASE_ERROR_TYPES.dup
+    @error_types
+  end
+
+  sig { returns(T::Array[Symbol]) }
+  def self.error_type_names
+    AST.error_types.keys
   end
 
   sig { params(sym: T.nilable(Symbol)).returns(T::Boolean) }
@@ -101,22 +115,22 @@ module AST
 
   sig { params(sym: T.nilable(Symbol)).returns(T::Boolean) }
   def self.error_type?(sym)
-    sym ? ERROR_TYPES.key?(sym) : false
+    sym ? AST.error_types.key?(sym) : false
   end
 
   sig { params(sym: Symbol).returns(T.nilable(Symbol)) }
   def self.kind_of_type(sym)
-    T.cast(ERROR_TYPES.dig(sym, :kind), T.nilable(Symbol))
+    T.cast(AST.error_types.dig(sym, :kind), T.nilable(Symbol))
   end
 
   sig { params(sym: Symbol).returns(T.nilable(String)) }
   def self.zig_name_of_type(sym)
-    T.cast(ERROR_TYPES.dig(sym, :zig_name), T.nilable(String))
+    T.cast(AST.error_types.dig(sym, :zig_name), T.nilable(String))
   end
 
   sig { params(sym: Symbol).returns(T.nilable(Integer)) }
   def self.id_of_type(sym)
-    T.cast(ERROR_TYPES.dig(sym, :id), T.nilable(Integer))
+    T.cast(AST.error_types.dig(sym, :id), T.nilable(Integer))
   end
 
   # Register a user-defined type with its kind. First call for a given
@@ -130,11 +144,12 @@ module AST
   # or nil when registration succeeded (or was a no-op re-use).
   sig { params(type_sym: Symbol, kind_sym: Symbol, site_token: T.nilable(Lexer::Token)).returns([T::Boolean, T.nilable(ErrorTypeConflict)]) }
   def self.register_type!(type_sym, kind_sym, site_token: nil)
-    entry = ERROR_TYPES[type_sym]
+    registry = AST.error_types
+    entry = registry[type_sym]
     if entry.nil?
       id = @next_user_id
       @next_user_id += 1
-      ERROR_TYPES[type_sym] = {
+      registry[type_sym] = {
         kind: kind_sym,
         zig_name: type_sym.to_s,
         id: id,
@@ -147,7 +162,7 @@ module AST
       existing_kind: entry[:kind],
       given_kind:    kind_sym,
       first_site:    entry[:first_site],
-      is_stdlib:     @stdlib_frozen.include?(type_sym),
+      is_stdlib:     BASE_ERROR_TYPES.key?(type_sym),
     }]
   end
 
@@ -156,9 +171,7 @@ module AST
   # from one parsed program into the next. Stdlib entries are preserved.
   sig { returns(Integer) }
   def self.reset_user_types!
-    ERROR_TYPES.keys.each do |sym|
-      ERROR_TYPES.delete(sym) unless @stdlib_frozen.include?(sym)
-    end
+    @error_types = BASE_ERROR_TYPES.dup
     @next_user_id = ERROR_NAME_USER_FIRST
   end
 
@@ -168,14 +181,21 @@ module AST
   # deterministic across runs.
   sig { returns(T::Array[[Symbol, Integer]]) }
   def self.enum_entries
+    entries = AST.error_types.map do |sym, meta|
+      [T.unsafe(sym), T.cast(meta[:id], Integer)]
+    end
     [[T.unsafe(:None), T.unsafe(ERROR_NAME_NONE)]] +
-      ERROR_TYPES.map { |sym, meta| [T.unsafe(sym), T.cast(meta[:id], Integer)] }.sort_by(&:last)
+      entries.sort_by { |_, id| id }
   end
 
   # Returns the Array of error-type Symbols whose :kind == kind. Used by
   # the annotator to expand kind selectors into their member types.
   sig { params(kind: Symbol).returns(T::Array[Symbol]) }
   def self.types_for_kind(kind)
-    ERROR_TYPES.select { |_, meta| meta[:kind] == kind }.keys
+    types = T.let([], T::Array[Symbol])
+    AST.error_types.each do |sym, meta|
+      types << sym if meta[:kind] == kind
+    end
+    types
   end
 end

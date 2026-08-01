@@ -1490,29 +1490,27 @@ RSpec.describe "error emission coverage" do
     end
   end
 
-  # @example_for: CLONE_BAD_TARGET
-  # @fix: CLONE bumps a refcount on a shared handle. It only applies
-  # @fix: to types that hold an Arc / Rc — `@split` streams,
-  # @fix: `@shared` promises, and owned shared handles
-  # @fix: (`x @multiowned` / `x @shared`). For plain affine values,
-  # @fix: use `COPY` to deep-copy.
-  describe ":CLONE_BAD_TARGET — CLONE on a non-shared value" do
-    it "raises when CLONE wraps a Copy primitive" do
+  # @example_for: KEEP_ON_KNOWN_CARRIER
+  # @fix: KEEP is the carrier-preserving fan-out; it is only meaningful on a
+  # @fix: carrier-polymorphic value. A plain local has a statically known
+  # @fix: carrier, so use `COPY` for an independent copy.
+  describe ":KEEP_ON_KNOWN_CARRIER — KEEP on a statically-plain local" do
+    it "raises when KEEP wraps a plain local" do
       expect {
         run(<<~CLEAR)
           FN main() RETURNS Void ->
               x = 5;
-              y = CLONE x;
+              y = KEEP x;
           END
         CLEAR
-      }.to raise_error(CompilerError, /CLONE is only supported on @split streams/)
+      }.to raise_error(CompilerError, /KEEP on 'x' is redundant/)
     end
 
-    it "compiles when CLONE bumps the refcount of a @split stream" do
+    it "compiles when KEEP retains a @split stream (retained carrier)" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            s: ~?Int64[]@split = BG STREAM { YIELD 1; };
-            t: ~?Int64[]@split = CLONE s;
+            s: [~]@split Int64 = BG STREAM { YIELD 1; };
+            t: [~]@split Int64 = KEEP s;
         END
       CLEAR
     end
@@ -2210,6 +2208,36 @@ RSpec.describe "error emission coverage" do
         END
       CLEAR
     end
+
+    it "raises when a pipeline SELECT feeds an optional stream element to a non-optional callee param" do
+      expect {
+        run(<<~CLEAR)
+          FN observeItem(x: String) RETURNS Int64 -> RETURN x.length(); END
+          FN main() RETURNS !Void ->
+              src: [~]?String = BG STREAM {
+                  x1: ?String = COPY "ab";
+                  YIELD x1;
+              };
+              out: [~]Int64 = src |> SELECT observeItem(_);
+              RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /argument 1 expects String, got \?String/)
+    end
+
+    it "compiles when a pipeline SELECT feeds a non-optional stream element to a non-optional callee param" do
+      run(<<~CLEAR)
+        FN observeItem(x: String) RETURNS Int64 -> RETURN x.length(); END
+        FN main() RETURNS !Void ->
+            src: [~]String = BG STREAM {
+                x1: String = COPY "ab";
+                YIELD x1;
+            };
+            out: [~]Int64 = src |> SELECT observeItem(_);
+            RETURN;
+        END
+      CLEAR
+    end
   end
 
   # @example_for: RETURN_MISMATCH
@@ -2227,7 +2255,21 @@ RSpec.describe "error emission coverage" do
           END
           FN main() RETURNS Void -> _ = compute(); END
         CLEAR
-      }.to raise_error(CompilerError, /Function expected to return 'Int64', but returned 'String'|Function expected to return 'Int64', but returned 'Byte\[/)
+      }.to raise_error(CompilerError, /Function expected to return 'Int64', but returned 'String'|Function expected to return 'Int64', but returned '\[\d+\]Byte'/)
+    end
+
+    it "renders collection types in current Inline Pivot syntax" do
+      expect {
+        run(<<~CLEAR)
+          FN names() RETURNS []Int64 ->
+              MUTABLE values: []String = [];
+              RETURN values;
+          END
+        CLEAR
+      }.to raise_error(
+        CompilerError,
+        /Function expected to return '\[\]Int64', but returned '\[\]String'/,
+      )
     end
 
     it "compiles when the returned value matches the declared return type" do
@@ -3649,7 +3691,7 @@ RSpec.describe "error emission coverage" do
               m["str"] = 1_i64;
           END
         CLEAR
-      }.to raise_error(CompilerError, /Numeric map keys must be a number type/)
+      }.to raise_error(CompilerError, /Map protocol indexing expects Int64, but this key is \[\d+\]Byte/)
     end
 
     it "compiles with a matching numeric key" do
@@ -3676,7 +3718,7 @@ RSpec.describe "error emission coverage" do
               m[5_i64] = 1_i64;
           END
         CLEAR
-      }.to raise_error(CompilerError, /Map keys must be Strings/)
+      }.to raise_error(CompilerError, /Map protocol indexing expects String, but this key is Int64/)
     end
 
     it "compiles with a String key" do
@@ -3731,6 +3773,21 @@ RSpec.describe "error emission coverage" do
           FN main() RETURNS Void ->
               n: Int64 = 5_i64;
               x = n[0_i64];
+              _ = x;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Unsupported Index/)
+    end
+
+    it "raises rather than crashing when indexing a struct with no element type" do
+      expect {
+        run(<<~CLEAR)
+          STRUCT Box {
+            v: Int64
+          }
+          FN main() RETURNS Void ->
+              b = Box{ v: 1_i64 };
+              x = b[1_i64];
               _ = x;
           END
         CLEAR
@@ -4813,7 +4870,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the stream is non-observable" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            s: ~?Int64[] = BG STREAM { YIELD 1; };
+            s: [~]Int64 = BG STREAM { YIELD 1; };
             _:~ = s;
         END
       CLEAR
@@ -4843,7 +4900,7 @@ RSpec.describe "error emission coverage" do
     it "compiles when the stream is non-observable" do
       run(<<~CLEAR)
         FN main() RETURNS Void ->
-            s: ~?Int64[] = BG STREAM { YIELD 1; };
+            s: [~]Int64 = BG STREAM { YIELD 1; };
             _:~ = s;
         END
       CLEAR

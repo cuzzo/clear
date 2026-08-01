@@ -357,12 +357,22 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # require another package, and the Ruby frontend resolves that import before
   # the later per-package Zig build pass.
   source_text = File.read(source)
-  package_imports = source_text.scan(/REQUIRE\s+"pkg:([^"]+)"(?:\s+AS\s+([A-Za-z_]\w*))?/)
   pkg_paths = begin
     ClearBuildSupport.collect_package_dependencies(source)
   rescue ClearBuildSupport::BuildError => e
     error e.message
   end
+  # A package import can live in a locally REQUIREd module, not just the root
+  # file. The emitted root Zig inlines local modules, so their package aliases
+  # must be rewritten to package-file imports as well.
+  closure_paths = begin
+    ClearBuildSupport.collect_clear_dependencies(source).to_a
+  rescue ClearBuildSupport::BuildError
+    [source]
+  end
+  package_imports = closure_paths.flat_map do |dep_path|
+    File.read(dep_path).scan(/REQUIRE\s+"pkg:([^"]+)"(?:\s+AS\s+([A-Za-z_]\w*))?/)
+  end.uniq
   pkg_requires = pkg_paths.keys
   pkg_flags = pkg_paths.map do |pkg_name, pkg_path|
     "--pkg #{pkg_name}=#{pkg_path}"
@@ -512,6 +522,11 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       zig_name = import_name.nil? || import_name.empty? ? np : import_name
       pkg_zig = pkg_zig.gsub("@import(\"#{zig_name}\")", "@import(\"#{np}.zig\")")
       pkg_zig = pkg_zig.gsub("@import(\"#{zig_name}.zig\")", "@import(\"#{np}.zig\")")
+    end
+    # A package can own EXTERN ... FROM "module" declarations; its emitted
+    # named imports must resolve to the FFI files copied into the build dir.
+    ffi_modules.each do |m, _src_mod|
+      pkg_zig = pkg_zig.gsub("@import(\"#{m}\")", "@import(\"#{m}.zig\")")
     end
     pkg_zig_file = File.join(build_dir, "#{pkg_name}.zig")
     preexisting_pkg = File.exist?(pkg_zig_file)
@@ -922,6 +937,16 @@ when 'build', 'watch'
     when '--mir'
       # No-op: MIR is the only pipeline. Flag kept for backward compat.
       i += 1
+    when '--pkg'
+      spec = args[i + 1]
+      error "--pkg requires name=/path/to/lib.clear" unless spec&.include?('=')
+      pkg_name, pkg_path = spec.split('=', 2)
+      begin
+        ClearBuildSupport.register_packages({ pkg_name => pkg_path })
+      rescue ClearBuildSupport::BuildError => e
+        error e.message
+      end
+      i += 2
     when '--use-c-allocator'
       use_c_allocator = true
       i += 1
@@ -1273,6 +1298,24 @@ when 'test'
   ENV['ZIG_COVERAGE'] ||= '1' if coverage_mode
   test_args.delete('--mir')  # No-op: MIR is the only pipeline
 
+  pkg_specs = []
+  while (pkg_index = test_args.index('--pkg'))
+    spec = test_args[pkg_index + 1]
+    error "--pkg requires name=/path/to/lib.clear" unless spec&.include?('=')
+    pkg_specs << spec
+    test_args.slice!(pkg_index, 2)
+  end
+  # Register the packages locally too: FFI module detection walks the REQUIRE
+  # closure through registered package paths.
+  pkg_specs.each do |spec|
+    pkg_name, pkg_path = spec.split('=', 2)
+    begin
+      ClearBuildSupport.register_packages({ pkg_name => pkg_path })
+    rescue ClearBuildSupport::BuildError => e
+      error e.message
+    end
+  end
+
   # `--tag <name>` (repeatable). Translates to Zig's `--test-filter "#<name>"`
   # — each WHEN-block's TAGS are encoded as ` #<name>` suffixes on the
   # emitted Zig test name, so substring filtering selects tagged tests.
@@ -1287,7 +1330,14 @@ when 'test'
   end
 
   source = test_args.first
-  error "Usage: clear test <file.clear|directory> [--profile] [--strict] [--debug-frame] [--coverage] [--tag <name>]" unless source
+  error "Usage: clear test <file.clear|directory|pkg:name> [--profile] [--strict] [--debug-frame] [--coverage] [--tag <name>]" unless source
+  if source.start_with?("pkg:")
+    begin
+      source = ClearBuildSupport.materialize_package_root(source.delete_prefix("pkg:"))
+    rescue ClearBuildSupport::BuildError => e
+      error e.message
+    end
+  end
   frame_env = frame_debug ? "CLEAR_FRAME_DEBUG=1 " : ""
 
   if File.directory?(source)
@@ -1411,18 +1461,25 @@ when 'test'
     gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
 
     # Transpile via gen.rb --single to get a proper zig test block
-    zig_code = `#{frame_env}ruby #{gen_script} --single #{source} 2>/dev/null`
-    unless $?.success?
+    generator_command = [RbConfig.ruby, gen_script, '--single', source]
+    pkg_specs.each { |spec| generator_command.concat(['--pkg', spec]) }
+    generator_env = frame_debug ? { 'CLEAR_FRAME_DEBUG' => '1' } : {}
+    zig_code, generator_error, generator_status = Open3.capture3(generator_env, *generator_command)
+    unless generator_status.success?
       # Re-run with stderr visible for error messages
-      system("ruby #{gen_script} --single #{source} > /dev/null")
+      $stderr.print(generator_error)
       error "Transpilation failed"
     end
     zig_code = zig_code.gsub('@import("runtime-header.zig")', '@import("runtime/runtime-header.zig")')
 
-    # Write to a minimal per-process build dir matching normal build layout.
-    # Transpiled tests import runtime/runtime-header.zig and lib/* via
-    # directory-relative paths; top-level zig/*.zig symlinks are no longer
-    # sufficient after the Zig 0.16 runtime/layout changes.
+    # Write to a build dir matching normal build layout. Transpiled tests
+    # import runtime/runtime-header.zig and lib/* via directory-relative
+    # paths; top-level zig/*.zig symlinks are no longer sufficient after the
+    # Zig 0.16 runtime/layout changes.
+    #
+    # The build dir stays per-process: it holds the generated
+    # ._clear_tmp_<base>.zig, and concurrent or successive tests sharing one
+    # would read each other's source.
     base_name = File.basename(source, '.clear')
     build_dir = coverage_mode ? ZIG_DIR : File.join(ZIG_DIR, ".build-#{$$}")
     cleanup_paths = []
@@ -1474,8 +1531,15 @@ when 'test'
     # filter narrows the run; without tags we keep filename filtering
     # as the default.
     cmd_parts = [ZIG, 'test']
-    cmd_parts += ['--cache-dir', File.join(build_dir, '.zig-cache')]
-    cmd_parts += ['--global-cache-dir', File.join(build_dir, '.zig-global-cache')]
+    # The Zig cache is content-addressed and safe to share, so point it at a
+    # stable location instead of inside the per-process build dir, which is
+    # deleted on exit. Every test program imports the same runtime/ and lib/
+    # modules, so a shared cache means only the generated root is analysed
+    # per run: 4.96s cold, 1.84s for every later program, same or not.
+    shared_zig_cache = File.join(ZIG_DIR, '.clear-cache', 'test-zig-cache')
+    FileUtils.mkdir_p(shared_zig_cache)
+    cmd_parts += ['--cache-dir', File.join(shared_zig_cache, 'local')]
+    cmd_parts += ['--global-cache-dir', File.join(shared_zig_cache, 'global')]
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc']
     cmd_parts.concat(c_ffi_link_flags(c_libraries, build_dir, cleanup_paths))
@@ -1484,8 +1548,11 @@ when 'test'
     else
       tag_filters.each { |t| cmd_parts += ['--test-filter', "##{t}"] }
     end
+    # CLEAR programs resolve relative filesystem paths from the user's
+    # invocation directory. Both run paths below have to honour that or the
+    # same test reads different files with and without --coverage.
+    invocation_cwd = Dir.pwd
     unless coverage_mode
-      invocation_cwd = Dir.pwd
       cmd_parts += [
         '--test-cmd', RbConfig.ruby,
         '--test-cmd', '-e',
@@ -1501,7 +1568,7 @@ when 'test'
         args: cmd_parts.drop(2),
         suite: 'examples-benchmarks',
         name: source.delete_prefix("#{CLEAR_ROOT}/"),
-        run_dir: source_dir
+        run_dir: invocation_cwd
       )
       success = compile_status.success?
       cleanup_paths.each { |path| FileUtils.rm_f(path) } unless ENV['ZIG_COVERAGE_KEEP_BUNDLE'] == '1'

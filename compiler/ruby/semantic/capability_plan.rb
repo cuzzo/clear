@@ -71,6 +71,7 @@ module CapabilityPlan
     const :live_symbol_refreshed, T::Boolean
 
     sig { returns(T.nilable(Symbol)) }
+    # ruby-to-clear: fallible
     def lock_identity
       resolved_type.base_type
     end
@@ -242,9 +243,19 @@ module CapabilityPlan
       return true if sym.atomic?
 
       fams = sym.sync_families
-      return false unless fams.is_a?(Set)
+      return false unless fams
 
-      expanded = fams.flat_map { |fam| fam == :SNAPSHOTTED ? [:VERSIONED, :ATOMIC] : [fam] }.to_set
+      expanded = T.let(Set.new, T::Set[Symbol])
+      fams.each do |fam|
+        if fam == :SNAPSHOTTED
+          expanded.add(:VERSIONED)
+          expanded.add(:ATOMIC)
+        else
+          # A loop element is borrowed from `fams`; Set#add stores it, so
+          # retain a value before inserting it into the expanded set.
+          expanded.add(fam.dup)
+        end
+      end
       expanded.include?(:ATOMIC)
     end
 
@@ -326,8 +337,8 @@ module CapabilityPlan
     ).returns(CapabilityTransition)
   end
   def self.transition_from(request, target, borrowed_qualifier)
-    capability = request.source[:capability] || request.capability
-    capability = T.cast(capability, Symbol)
+    capability = request.source.capability || request.capability
+    capability = capability
     CapabilityTransition.new(
       request: request,
       target: target,
@@ -363,7 +374,8 @@ module CapabilityPlan
       plan = node.capability_plan
       next unless plan
 
-      node.capability_plan = plan.refresh_live_symbols(live_symbols)
+      concrete_plan = plan
+      node.capability_plan = concrete_plan.refresh_live_symbols(live_symbols)
     end
   end
 

@@ -2,7 +2,7 @@ require "rspec"
 
 require_relative "../ruby/ast/error_registry" unless defined?(AST)
 
-# Unit tests for AST::ERROR_TYPES and the lookup helpers. The registry is
+# Unit tests for AST.error_types and the lookup helpers. The registry is
 # the single source of truth for error-kind / error-type classification
 # used by the parser, the annotator's handler-reachability check, and the
 # mir-lowering runtime emission. A regression here silently miscategorizes
@@ -22,54 +22,54 @@ RSpec.describe AST do
     end
   end
 
-  describe "ERROR_TYPES" do
+  describe ".error_types" do
     it "seeds LockTimeout as Transient with stable id 1" do
-      entry = AST::ERROR_TYPES[:LockTimeout]
+      entry = AST.error_types[:LockTimeout]
       expect(entry[:kind]).to eq(:Transient)
       expect(entry[:zig_name]).to eq("LockTimeout")
       expect(entry[:id]).to eq(AST::ERROR_NAME_LOCK_TIMEOUT)
     end
 
     it "seeds LockCycle as Transient with stable id 2" do
-      entry = AST::ERROR_TYPES[:LockCycle]
+      entry = AST.error_types[:LockCycle]
       expect(entry[:kind]).to eq(:Transient)
       expect(entry[:id]).to eq(AST::ERROR_NAME_LOCK_CYCLE)
     end
 
     it "seeds Deadlock as System with stable id 3" do
-      entry = AST::ERROR_TYPES[:Deadlock]
+      entry = AST.error_types[:Deadlock]
       expect(entry[:kind]).to eq(:System)
       expect(entry[:id]).to eq(AST::ERROR_NAME_DEADLOCK)
     end
 
     it "seeds UnexpectedRecursion as System with stable id 4" do
-      entry = AST::ERROR_TYPES[:UnexpectedRecursion]
+      entry = AST.error_types[:UnexpectedRecursion]
       expect(entry[:kind]).to eq(:System)
       expect(entry[:id]).to eq(AST::ERROR_NAME_UNEXPECTED_RECURSION)
     end
 
     it "seeds MaxDepthExceeded as System with stable id 5" do
-      entry = AST::ERROR_TYPES[:MaxDepthExceeded]
+      entry = AST.error_types[:MaxDepthExceeded]
       expect(entry[:kind]).to eq(:System)
       expect(entry[:id]).to eq(AST::ERROR_NAME_MAX_DEPTH_EXCEEDED)
     end
 
     it "seeds MvccConflict as Transient with stable id 6 (MVCC optimistic-write retry exhausted)" do
-      entry = AST::ERROR_TYPES[:MvccConflict]
+      entry = AST.error_types[:MvccConflict]
       expect(entry[:kind]).to eq(:Transient)
       expect(entry[:zig_name]).to eq("MvccConflict")
       expect(entry[:id]).to eq(AST::ERROR_NAME_MVCC_CONFLICT)
     end
 
     it "seeds AtomicConflict as Transient with stable id 7 (atomic CAS retry exhausted; bound lands in #330)" do
-      entry = AST::ERROR_TYPES[:AtomicConflict]
+      entry = AST.error_types[:AtomicConflict]
       expect(entry[:kind]).to eq(:Transient)
       expect(entry[:zig_name]).to eq("AtomicConflict")
       expect(entry[:id]).to eq(AST::ERROR_NAME_ATOMIC_CONFLICT)
     end
 
     it "the legacy Conflict symbol is no longer registered (split into MvccConflict + AtomicConflict)" do
-      expect(AST::ERROR_TYPES.key?(:Conflict)).to be false
+      expect(AST.error_types.key?(:Conflict)).to be false
     end
 
     it "user types start at id 11 (after the stdlib/control-flow types, incl. OutOfMemory=10)" do
@@ -121,9 +121,9 @@ RSpec.describe AST do
     end
 
     it "records the first_site token on first registration" do
-      tok = Object.new
+      tok = Lexer::Token.new(:TYPE_ID, "ParseError", 1, 1)
       AST.register_type!(:ParseError, :Input, site_token: tok)
-      expect(AST::ERROR_TYPES[:ParseError][:first_site]).to equal(tok)
+      expect(AST.error_types[:ParseError][:first_site]).to equal(tok)
     end
 
     it "assigns distinct ids to different user types in order of registration" do
@@ -193,7 +193,7 @@ RSpec.describe AST do
 
   describe ".error_type?" do
     it "accepts every registered type" do
-      AST::ERROR_TYPES.each_key { |t| expect(AST.error_type?(t)).to be true }
+      AST.error_types.each_key { |t| expect(AST.error_type?(t)).to be true }
     end
 
     it "rejects unregistered symbols" do
@@ -254,21 +254,21 @@ RSpec.describe AST do
 
   describe "consistency between kinds and types" do
     it "every type's kind is a registered ErrorKind" do
-      AST::ERROR_TYPES.each do |type_sym, meta|
+      AST.error_types.each do |type_sym, meta|
         expect(AST.error_kind?(meta[:kind])).to(be(true),
           "type #{type_sym.inspect} has unregistered kind #{meta[:kind].inspect}")
       end
     end
 
     it "types_for_kind is the inverse of kind_of_type" do
-      AST::ERROR_TYPES.each_key do |type_sym|
+      AST.error_types.each_key do |type_sym|
         kind = AST.kind_of_type(type_sym)
         expect(AST.types_for_kind(kind)).to include(type_sym)
       end
     end
 
     it "zig_name is non-empty for every registered type" do
-      AST::ERROR_TYPES.each do |type_sym, meta|
+      AST.error_types.each do |type_sym, meta|
         expect(meta[:zig_name]).to(be_a(String).and(satisfy { |s| !s.empty? }),
           "type #{type_sym.inspect} has missing or empty zig_name")
       end

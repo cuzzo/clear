@@ -557,7 +557,12 @@ module ClearFixSupport
     token = finding.token
     return nil unless token.respond_to?(method_name)
 
-    value = T.unsafe(token).public_send(method_name)
+    value = case method_name
+    when :line then T.unsafe(token).line
+    when :column then T.unsafe(token).column
+    else
+      raise "token_integer: unsupported token field #{method_name}"
+    end
     value.is_a?(Integer) ? value : nil
   end
   private_class_method :token_integer

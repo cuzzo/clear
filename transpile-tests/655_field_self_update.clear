@@ -1,0 +1,17 @@
+# F9 nastier: overwrite field with a value derived from the OLD field value
+STRUCT Holder { name: String }
+
+FN dup(s: String) RETURNS String ->
+    RETURN COPY s;
+END
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST F9bFieldFromOldField DO
+    MUTABLE h = Holder{ name: dup("ab") $+ "c" };
+    h.name = h.name $+ "d";
+    ASSERT h.name == "abcd";
+    h.name = dup("z") $+ h.name;
+    ASSERT h.name == "zabcd";
+    ASSERT h.name.length() == 5;
+END

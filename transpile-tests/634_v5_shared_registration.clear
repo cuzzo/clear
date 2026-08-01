@@ -1,0 +1,19 @@
+# Retained-identity v5: a SHARED parameter requires a retained-identity
+# family; multiple consuming uses auto-retain (no per-use KEEP) and are
+# leak-free. Each SHARED consumer receives the same shared identity.
+STRUCT Session { id: Int64 }
+
+FN sink(TAKES s: SHARED Session) RETURNS Void -> RETURN; END
+
+FN register(TAKES s: SHARED Session) RETURNS Void ->
+    sink(s);
+    sink(s);
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    sess = Session{ id: 4 } @shared;
+    register(sess);
+    WITH sess { ASSERT sess.id == 4, "shared identity intact after registration"; }
+    RETURN;
+END

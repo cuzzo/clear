@@ -173,9 +173,17 @@ end
 
 class AST::CopyNode
   sig { returns(T.untyped) }
+  def carrier_op; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def carrier_op=(value); end
+  sig { returns(T.untyped) }
   def deep_copy; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def deep_copy=(value); end
+  sig { returns(T.untyped) }
+  def own; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def own=(value); end
 end
 
 class AST::DestructureTarget
@@ -237,10 +245,6 @@ class AST::FuncCall
   def pipe_lhs; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def pipe_lhs=(value); end
-  sig { returns(T.untyped) }
-  def retain_error_channel; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def retain_error_channel=(value); end
 end
 
 class AST::FunctionDef
@@ -413,6 +417,13 @@ class AST::IsA
   def runtime_variant_name=(value); end
 end
 
+class AST::KeepNode
+  sig { returns(T.untyped) }
+  def carrier_op; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def carrier_op=(value); end
+end
+
 class AST::MatchStatement
   sig { returns(T.untyped) }
   def case_result_types; end
@@ -465,10 +476,6 @@ class AST::MethodCall
   def pool_method; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def pool_method=(value); end
-  sig { returns(T.untyped) }
-  def retain_error_channel; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def retain_error_channel=(value); end
   sig { returns(T.untyped) }
   def safe_nav_chain; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -706,6 +713,8 @@ class Annotator::Phases::TypedProgramFacts
   def body_summaries; end
   sig { returns(Semantic::LifecycleRegistry) }
   def lifecycle_registry; end
+  sig { returns(Semantic::LinearResourceFacts) }
+  def linear_resource_facts; end
   sig { returns(Annotator::Phases::TypedProgramFacts::LocalFacts) }
   def local_function_facts; end
   sig { returns(OwnershipGraph) }
@@ -947,9 +956,17 @@ end
 
 class CopyNode
   sig { returns(T.untyped) }
+  def carrier_op; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def carrier_op=(value); end
+  sig { returns(T.untyped) }
   def deep_copy; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def deep_copy=(value); end
+  sig { returns(T.untyped) }
+  def own; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def own=(value); end
 end
 
 class DestructureTarget
@@ -1073,10 +1090,6 @@ class FuncCall
   def pipe_lhs; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def pipe_lhs=(value); end
-  sig { returns(T.untyped) }
-  def retain_error_channel; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def retain_error_channel=(value); end
 end
 
 class FunctionCFG
@@ -1398,6 +1411,13 @@ class IsA
   def runtime_variant_name=(value); end
 end
 
+class KeepNode
+  sig { returns(T.untyped) }
+  def carrier_op; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def carrier_op=(value); end
+end
+
 class MIR::BodySlot
   sig { returns(MIR::BodySlot::Body) }
   def body; end
@@ -1583,10 +1603,6 @@ class MethodCall
   sig { params(value: T.untyped).returns(T.untyped) }
   def pool_method=(value); end
   sig { returns(T.untyped) }
-  def retain_error_channel; end
-  sig { params(value: T.untyped).returns(T.untyped) }
-  def retain_error_channel=(value); end
-  sig { returns(T.untyped) }
   def safe_nav_chain; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def safe_nav_chain=(value); end
@@ -1675,6 +1691,8 @@ class Schemas::ResourceSchema
   def methods; end
   sig { returns(Schemas::ResourceSchema::StaticMethodsMap) }
   def static_methods; end
+  sig { returns(T::Array[Symbol]) }
+  def type_params; end
   sig { returns(Symbol) }
   def visibility; end
 end
@@ -1692,11 +1710,15 @@ class Schemas::StructSchema
   def methods; end
   sig { returns(Schemas::StructSchema::MethodsMap) }
   def static_methods; end
+  sig { returns(T::Array[Symbol]) }
+  def type_params; end
   sig { returns(Symbol) }
   def visibility; end
 end
 
 class Schemas::UnionSchema
+  sig { returns(T::Array[Symbol]) }
+  def type_params; end
   sig { returns(Schemas::UnionSchema::VariantMap) }
   def variants; end
   sig { returns(Symbol) }
@@ -1704,6 +1726,8 @@ class Schemas::UnionSchema
 end
 
 class Scope
+  sig { returns(T::Hash[String, SymbolEntry]) }
+  def binding_entries; end
   sig { returns(T::Hash[String, String]) }
   def dependencies; end
   sig { returns(Integer) }
@@ -1785,74 +1809,26 @@ class StructLit
 end
 
 class SymbolEntry
-  sig { returns(T.nilable(AsyncResultShape)) }
-  def async_result_shape; end
-  sig { params(value: T.nilable(AsyncResultShape)).returns(T.nilable(AsyncResultShape)) }
-  def async_result_shape=(value); end
   sig { returns(Integer) }
   def binding_id; end
-  sig { returns(T::Boolean) }
-  def borrowed_alias; end
   sig { returns(T::Set[Symbol]) }
   def capabilities; end
   sig { params(value: T::Set[Symbol]).returns(T::Set[Symbol]) }
   def capabilities=(value); end
-  sig { returns(T.nilable(Schemas::ResourceClosePlan)) }
-  def close_plan; end
-  sig { params(value: T.nilable(Schemas::ResourceClosePlan)).returns(T.nilable(Schemas::ResourceClosePlan)) }
-  def close_plan=(value); end
-  sig { returns(T::Boolean) }
-  def foreign_out_owner; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def foreign_out_owner=(value); end
-  sig { returns(T::Boolean) }
-  def init_contents_heap; end
-  sig { returns(T.nilable(String)) }
-  def invalid_reason; end
-  sig { returns(T::Boolean) }
-  def is_param; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def is_param=(value); end
-  sig { returns(T.nilable(Symbol)) }
-  def layout; end
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
-  def layout=(value); end
   sig { returns(SymbolEntry::BindingLifecycleFacts) }
   def lifecycle; end
   sig { returns(T::Array[SymbolEntry]) }
   def lifetime; end
-  sig { returns(T.nilable(Symbol)) }
-  def link_source; end
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
-  def link_source=(value); end
   sig { returns(T::Boolean) }
   def mutable; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
   def mutable=(value); end
-  sig { returns(T::Boolean) }
-  def mutable_ref_target; end
-  sig { returns(T::Boolean) }
-  def mutated; end
-  sig { returns(T::Boolean) }
-  def non_escaping; end
-  sig { returns(T::Boolean) }
-  def owned_optional_capture; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def owned_optional_capture=(value); end
   sig { returns(Integer) }
   def ownership_binding_id; end
-  sig { returns(T.nilable(Symbol)) }
-  def ownership_kind; end
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
-  def ownership_kind=(value); end
   sig { returns(T.nilable(Lexer::Token)) }
   def param_decl_token; end
   sig { params(value: T.nilable(Lexer::Token)).returns(T.nilable(Lexer::Token)) }
   def param_decl_token=(value); end
-  sig { returns(T::Boolean) }
-  def poly_borrow_target; end
-  sig { returns(T::Boolean) }
-  def read; end
   sig { returns(T::Boolean) }
   def reassigned; end
   sig { params(value: T::Boolean).returns(T::Boolean) }
@@ -1865,10 +1841,6 @@ class SymbolEntry
   def reg; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def reg=(value); end
-  sig { returns(T.nilable(T::Boolean)) }
-  def resource; end
-  sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
-  def resource=(value); end
   sig { returns(T.nilable(Scope)) }
   def scope; end
   sig { params(value: T.nilable(Scope)).returns(T.nilable(Scope)) }
@@ -1881,26 +1853,10 @@ class SymbolEntry
   def size; end
   sig { params(value: Integer).returns(Integer) }
   def size=(value); end
-  sig { returns(Symbol) }
-  def storage; end
-  sig { params(value: Symbol).returns(Symbol) }
-  def storage=(value); end
-  sig { returns(T.nilable(Symbol)) }
-  def sync; end
-  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
-  def sync=(value); end
   sig { returns(T.nilable(T::Set[Symbol])) }
   def sync_families; end
   sig { params(value: T.nilable(T::Set[Symbol])).returns(T.nilable(T::Set[Symbol])) }
   def sync_families=(value); end
-  sig { returns(T::Boolean) }
-  def takes; end
-  sig { params(value: T::Boolean).returns(T::Boolean) }
-  def takes=(value); end
-  sig { returns(Type) }
-  def type; end
-  sig { returns(T::Boolean) }
-  def valid; end
 end
 
 class TestBlock

@@ -211,7 +211,7 @@ RSpec.describe "pipeline legacy matrix" do
   def observable_program(binding_line)
     <<~CLEAR
       FN main() RETURNS Void ->
-        gen: ~?Int64[] = BG STREAM {
+        gen: [~]Int64 = BG STREAM {
           MUTABLE i: Int64 = 0_i64;
           WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
         };

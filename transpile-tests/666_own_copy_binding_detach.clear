@@ -1,0 +1,56 @@
+# Test: OWN COPY in BINDING position detaches the carrier.
+# `copied = OWN COPY handle` must type `copied` as a plain owned value
+# (the payload deep-copied out of the @shared/@multiowned handle), so it
+# can fill a plain TAKES slot. The inline-argument form
+# `consume(OWN COPY handle)` already works; the bound form used to keep
+# the source's carrier on the binding and reject the GIVE with
+# RETAINED_NEEDS_OWN_COPY.
+
+FN heapString() RETURNS String -> RETURN COPY "one"; END
+
+STRUCT Box { v: Int64, s: String }
+
+FN consume(TAKES input: Box) RETURNS Void ->
+    ASSERT input.v == 1_i64, "payload int survives detach";
+    ASSERT input.s == "one", "heap payload survives detach";
+    RETURN;
+END
+
+FN consumeTuple(TAKES input: Tuple<Int64,String>) RETURNS Void ->
+    ASSERT input._0 == 1_i64, "tuple first";
+    ASSERT input._1 == "one", "tuple second";
+    RETURN;
+END
+
+STRUCT PlainHolder { inner: Box }
+
+FN detachReturn(h: Box@shared) RETURNS Box ->
+    RETURN OWN COPY h;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE shared_box = Box{ v: 1_i64, s: heapString() } @shared;
+    copied = OWN COPY shared_box;
+    consume(GIVE copied);
+
+    MUTABLE owned_box = Box{ v: 1_i64, s: heapString() } @multiowned;
+    copied2 = OWN COPY owned_box;
+    consume(GIVE copied2);
+
+    MUTABLE shared_tuple = Tuple{1_i64, heapString()} @shared;
+    copied3 = OWN COPY shared_tuple;
+    consumeTuple(GIVE copied3);
+
+    # Return-position detach.
+    returned = detachReturn(shared_box);
+    ASSERT returned.s == "one", "return-position detach carries payload";
+
+    # Plain struct-literal field detach.
+    held = PlainHolder{ inner: OWN COPY shared_box };
+    ASSERT held.inner.v == 1_i64, "field-position detach carries payload";
+
+    # The source handle stays usable after the detach.
+    ASSERT shared_box.v == 1_i64, "source handle still readable";
+
+    print("666: own copy binding detach PASSED");
+END

@@ -1,0 +1,17 @@
+# Retained-identity v5: OWN COPY of an @multiowned value at a UNIQUE parameter
+# boundary is a shared->unique conversion -- an independent payload the
+# callee owns exclusively, leaving the shared original untouched.
+STRUCT Doc { version: Int64 }
+
+FN persist(TAKES d: UNIQUE Doc) RETURNS Int64 ->
+    RETURN d.version;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE shared = Doc{ version: 3 } @multiowned;
+    snapshot = persist(OWN COPY shared);
+    ASSERT snapshot == 3, "snapshot is an independent copy at version 3";
+    shared.version = 9;
+    WITH shared { ASSERT shared.version == 9, "shared advanced independently"; }
+    RETURN;
+END

@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
   acc = Acc{ value: 0 } @shared:locked;
   t0 = timestampMs();
 
-  gen: ~?Int64[] = BG STREAM {
+  gen: [~]Int64 = BG STREAM {
     MUTABLE i = 0;
     WHILE i < 100_000 DO
       YIELD i;

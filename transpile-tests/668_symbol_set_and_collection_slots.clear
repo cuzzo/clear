@@ -1,0 +1,46 @@
+# Test: symbol-element sets and collection-valued map slots.
+# 1. `[Set]String@symbol` elements are intern-table handles the set never
+#    owns: duplicate insert, remove, and deinit must not free them (the
+#    owned-string Set freed rodata and crashed at cleanup).
+# 2. `Set[]` in RVALUE position (stored into a set-valued map slot) must
+#    construct a Set, not an ArrayList.
+# 3. IF-EXISTS captures of plain COLLECTION payloads (set/list-valued map
+#    slots) bind mutable pointer aliases, so `&slot.insert/append`
+#    mutates the slot in place - same rule as struct payloads.
+
+FN main() RETURNS Void ->
+    # Plain declared symbol set: dup insert + remove + deinit safe.
+    MUTABLE nodes: [Set]String@symbol = Set[];
+    &nodes.insert(:held);
+    &nodes.insert(:acquired);
+    &nodes.insert(:held);
+    ASSERT nodes.length() == 2, "symbol set dedupes";
+    &nodes.remove(:acquired);
+    ASSERT nodes.length() == 1, "symbol remove safe";
+
+    # Set-valued map slot: seed with Set[] rvalue, mutate through EXISTS.
+    MUTABLE adj: {String@symbol}[Set]String@symbol = {};
+    adj[:a] = Set[];
+    IF adj[:a] EXISTS AS slot THEN
+        &slot.insert(:b);
+        &slot.insert(:c);
+        &slot.insert(:b);
+    END
+    IF adj[:a] EXISTS AS s2 THEN
+        ASSERT s2.length() == 2, "slot inserts persisted and deduped";
+    END
+
+    # List-valued map slot mutates in place too.
+    MUTABLE m: {String}[]Int64 = {};
+    m["k"] = [];
+    IF m["k"] EXISTS AS lst THEN
+        &lst.append(7);
+        &lst.append(8);
+    END
+    IF m["k"] EXISTS AS l2 THEN
+        ASSERT l2.length() == 2, "list slot appends persisted";
+        ASSERT l2[0]? == 7, "first element";
+    END
+
+    print("668: symbol set and collection slots PASSED");
+END

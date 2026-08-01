@@ -9,7 +9,8 @@
           "name": "value",
           "type": {
             "type": "Int64"
-          }
+          },
+          "carrier_contract": "polymorphic"
         }
       ],
       "return_type": {

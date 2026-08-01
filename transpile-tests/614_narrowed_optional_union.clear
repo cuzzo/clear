@@ -1,0 +1,33 @@
+PUB STRUCT Unset { }
+
+PUB UNION Maybe { Unset: Unset, SymbolValue: String@symbol }
+
+FN isUnset(value: ?Maybe) RETURNS Bool ->
+    RETURN ((value != NIL) AND (value IS_A Unset));
+END
+
+FN isSymbol(value: ?Maybe) RETURNS Bool ->
+    RETURN ((value != NIL) AND (value IS_A String@symbol));
+END
+
+FN symbolText(value: ?Maybe) RETURNS String ->
+    IF value != NIL THEN
+        IF value IS_A String@symbol AS sym THEN
+            RETURN CAST(sym AS String);
+        END
+    END
+    RETURN "none";
+END
+
+FN main() RETURNS Void ->
+    ASSERT symbolText(Maybe{ SymbolValue: :sym }) == "sym";
+    ASSERT symbolText(NIL) == "none";
+    ASSERT symbolText(Maybe{ Unset: Unset{} }) == "none";
+    ASSERT isUnset(Maybe{ Unset: Unset{} });
+    ASSERT !isUnset(NIL);
+    ASSERT !isUnset(Maybe{ SymbolValue: :sym });
+    ASSERT isSymbol(Maybe{ SymbolValue: :sym });
+    ASSERT !isSymbol(NIL);
+    ASSERT !isSymbol(Maybe{ Unset: Unset{} });
+    RETURN;
+END

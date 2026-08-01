@@ -78,7 +78,7 @@ module Incremental
       raise ArgumentError, "incremental cache exceeds #{MAX_BYTES} bytes" if bytes.bytesize > MAX_BYTES
 
       FileUtils.mkdir_p(File.dirname(@path))
-      temporary = "#{@path}.tmp.#{$$}"
+      temporary = "#{@path}.tmp.#{Process.pid}"
       begin
         File.binwrite(temporary, bytes)
         File.rename(temporary, @path)
@@ -167,7 +167,7 @@ module Incremental
     sig { params(snapshots: T::Hash[String, MIRLoweringCounterSnapshot]).returns(T::Hash[String, T.untyped]) }
     def encode_counter_snapshots(snapshots)
       snapshots.transform_values do |snapshot|
-        snapshot.values.to_h { |kind, value| [kind.serialize, value] }
+        snapshot.values.dup
       end
     end
 
@@ -175,9 +175,9 @@ module Incremental
     def decode_counter_snapshots(value)
       result = T.let({}, T::Hash[String, MIRLoweringCounterSnapshot])
       hash!(value).each do |name, raw_snapshot|
-        values = T.let({}, T::Hash[MIRLoweringCounterKind, Integer])
+        values = T.let({}, T::Hash[String, Integer])
         hash!(raw_snapshot).each do |kind, counter|
-          values[MIRLoweringCounterKind.deserialize(String(kind))] = Integer(counter)
+          values[String(kind)] = Integer(counter)
         end
         result[String(name)] = MIRLoweringCounterSnapshot.new(values: values)
       end

@@ -33,7 +33,7 @@ FN main() RETURNS !Void ->
   MUTABLE wi = 0;
   WHILE wi < workers DO
     IF counters[wi] EXISTS AS ref0 THEN
-      ref = CLONE ref0;
+      ref = KEEP ref0;
       &futures
         .append(
           BG {

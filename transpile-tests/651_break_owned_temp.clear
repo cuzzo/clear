@@ -1,0 +1,19 @@
+# F3: BREAK with a live owned temp; result copied out before BREAK
+FN dup(s: String) RETURNS String ->
+    RETURN COPY s;
+END
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST F3bBreakOwned DO
+    MUTABLE found = dup("none");
+    FOR i IN (0_i64..<10_i64) DO
+        t = dup("v") $+ i.toString();
+        IF i == 2_i64 THEN
+            found = COPY t;
+            BREAK;
+        END
+    END
+    ASSERT found == "v2";
+    ASSERT found.length() == 2;
+END

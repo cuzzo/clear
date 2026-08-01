@@ -110,7 +110,6 @@ A new feature is an escape scenario if a frame-allocated value could be read aft
 Reference docs: `mir-bugs.md` (known MIR violations), `alloc-bugs.md` (frame-then-promote gaps), `memory-safety.md` (full plan).
 
 ## Language Semantics
-
 **Sigils:** `$` pipeline/interp, `&` mutation, `|>` SMOOTH (safe pipeline w/ error prop), `_` placeholder.
 
 **Tense Sigils:** `!` = Error / Error handling, `?` = Option / nil handling, `~` = Stream / future handling.

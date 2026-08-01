@@ -83,7 +83,14 @@ module Incremental
           start_line: range.start_line,
           end_line: range.end_line,
           exact_fingerprint: digest(exact_source),
-          interface_fingerprint: token_fingerprint(interface_source),
+          # Retained identity v4: keep-analysis infers a param's handle ABI
+          # from body shapes (struct-literal stores and call-argument
+          # positions of param identifiers), so those shapes are interface,
+          # not implementation - a body-only edit that changes them must
+          # invalidate callers.
+          interface_fingerprint: token_fingerprint(
+            interface_source + retention_shape_source(node)
+          ),
           called_functions: calls,
         )
       end
@@ -100,7 +107,7 @@ module Incremental
         source: source,
         module_path: module_path,
         functions: functions,
-        non_function_fingerprint: digest(without_functions(source, functions)),
+        non_function_fingerprint: digest(non_function_tokens(tokens, functions)),
         non_function_calls: non_function_calls,
       )
     end
@@ -162,21 +169,31 @@ module Incremental
             bytes[offset] = 0x20 unless byte == 0x0A || byte == 0x0D
           end
         end
-        bytes.pack("C*").force_encoding(source.encoding)
+        # Compiler sources are UTF-8. CLEAR strings do not carry a mutable
+        # encoding tag, so keep the Ruby host result aligned with that
+        # contract instead of deriving a dynamic encoding from the input.
+        bytes.pack("C*").force_encoding(Encoding::UTF_8)
       end
 
       private
 
-      sig { params(source: String, functions: T::Array[FunctionItem]).returns(String) }
-      def without_functions(source, functions)
-        cursor = 0
-        pieces = T.let([], T::Array[String])
-        functions.sort_by(&:start_offset).each do |item|
-          pieces << (source.byteslice(cursor...item.start_offset) || "")
-          cursor = item.end_offset
+      # Fingerprint the TOKENS outside function bodies, not the raw bytes.
+      # Digesting the source made a comment or a reflowed line read as a
+      # semantic change, which dropped the whole file off the incremental fast
+      # path -- the common edit during development. The lexer has already run
+      # by this point, so the token stream costs nothing extra, and it carries
+      # exactly what the compiler acts on.
+      sig { params(tokens: T::Array[Lexer::Token], functions: T::Array[FunctionItem]).returns(String) }
+      def non_function_tokens(tokens, functions)
+        ranges = functions.map { |item| [item.start_offset, item.end_offset] }
+        parts = T.let([], T::Array[String])
+        tokens.each do |token|
+          offset = token.start_offset
+          next if offset && ranges.any? { |from, to| offset >= from && offset < to }
+
+          parts << "#{token.type}\u0000#{token.value}"
         end
-        pieces << (source.byteslice(cursor..-1) || "")
-        pieces.join
+        parts.join("\u0001")
       end
 
       sig { params(module_path: String, name: String).returns(String) }
@@ -187,6 +204,51 @@ module Incremental
       sig { params(value: String).returns(String) }
       def digest(value)
         Digest::SHA256.hexdigest(value)
+      end
+
+      # Retained identity v4: the body shapes keep-analysis reads participate
+      # in the interface fingerprint - see the FunctionItem construction
+      # above. Each arm mirrors its semantic deriver EXACTLY (same unwraps,
+      # same bare-identifier requirement); a looser capture here would let a
+      # body edit flip the derived ABI without changing the fingerprint:
+      # - struct-literal fields and field assignments feed
+      #   Lifetimes#keep_param_identity!, which unwraps OR_ELSE (keeping the
+      #   provided identity) but treats COPY/GIVE wrappers as not-kept;
+      # - call args feed KeepAnalysis transitive propagation, which fires on
+      #   bare identifiers only.
+      sig { params(node: AST::FunctionDef).returns(String) }
+      def retention_shape_source(node)
+        param_names = node.params.map { |p| p.name.to_s }.to_set
+        shape = T.let([], T::Array[String])
+        AST.each_locatable(node.body, descend_functions: false) do |child|
+          case child
+          when AST::StructLit
+            child.fields.each do |field_name, value|
+              inner = unwrap_keep_value(value)
+              next unless inner.is_a?(AST::Identifier) && param_names.include?(inner.name)
+              shape << "#{child.name}.#{field_name}<-#{inner.name}"
+            end
+          when AST::Assignment
+            target = child.name
+            next unless target.is_a?(AST::GetField)
+            inner = unwrap_keep_value(child.value)
+            next unless inner.is_a?(AST::Identifier) && param_names.include?(inner.name)
+            shape << "#{target.field}=<-#{inner.name}"
+          when AST::FuncCall
+            child.args.each_with_index do |arg, idx|
+              next unless arg.is_a?(AST::Identifier) && param_names.include?(arg.name)
+              shape << "#{child.name}(#{idx})<-#{arg.name}"
+            end
+          end
+        end
+        shape.sort.join(";")
+      end
+
+      sig { params(value: AST::Node).returns(AST::Node) }
+      def unwrap_keep_value(value)
+        return unwrap_keep_value(value.left) if value.is_a?(AST::BinaryOp) && value.op == :OR_ELSE
+
+        value
       end
 
       sig { params(source: String).returns(String) }

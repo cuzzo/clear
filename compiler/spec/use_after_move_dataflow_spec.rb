@@ -508,7 +508,7 @@ RSpec.describe UseAfterMoveChecker do
       )
       expressions = [
         AST::CopyNode.new(Lexer::Token.new(:COPY, "COPY", 36, 3), id_node("copy_source", line: 36)),
-        AST::CloneNode.new(Lexer::Token.new(:CLONE, "CLONE", 37, 3), id_node("clone_source", line: 37)),
+        AST::KeepNode.new(Lexer::Token.new(:KEEP, "KEEP", 37, 3), id_node("clone_source", line: 37)),
         AST::FreezeNode.new(Lexer::Token.new(:FREEZE, "FREEZE", 38, 3), id_node("freeze_source", line: 38)),
         AST::StringConcat.new(
           Lexer::Token.new(:STRING, '"#{concat_part}"', 39, 3),
@@ -703,7 +703,7 @@ RSpec.describe UseAfterMoveChecker do
           already_moved,
           AST::MoveNode.new(Lexer::Token.new(:GIVE, "GIVE", 45, 3), id_node("simple_give_arg", line: 45)),
           AST::CopyNode.new(Lexer::Token.new(:COPY, "COPY", 46, 3), id_node("copy_arg", line: 46)),
-          AST::CloneNode.new(Lexer::Token.new(:CLONE, "CLONE", 47, 3), id_node("clone_arg", line: 47)),
+          AST::KeepNode.new(Lexer::Token.new(:KEEP, "KEEP", 47, 3), id_node("clone_arg", line: 47)),
           AST::FreezeNode.new(Lexer::Token.new(:FREEZE, "FREEZE", 48, 3), id_node("freeze_arg", line: 48)),
           AST::ShareNode.new(
             Lexer::Token.new(:SHARE, "SHARE", 49, 3),

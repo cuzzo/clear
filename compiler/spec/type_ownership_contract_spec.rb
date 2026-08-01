@@ -188,6 +188,32 @@ RSpec.describe Type, "ownership and cleanup contracts" do
       expect(Type.new(:Int64).value_payload_type).to eq(Type.new(:Int64))
     end
 
+    it "wraps collection types structurally without reparsing their surface names" do
+      list = Type.array_of(:Int64)
+
+      optional = Type.optional_of(list)
+      fallible_optional = Type.error_union_of(optional)
+      future = Type.tense_of(list)
+
+      expect(optional).to be_list_collection
+      expect(optional.value_payload_type.element_type).to eq(Type.new(:Int64))
+      expect(fallible_optional).to be_list_collection
+      expect(fallible_optional.value_payload_type.element_type).to eq(Type.new(:Int64))
+      expect(Type.surface_name_type(fallible_optional)).to eq("!?[]Int64")
+      expect(future.tense_type).to be_list_collection
+      expect(future.tense_type.element_type).to eq(Type.new(:Int64))
+      expect(Type.surface_name_type(future)).to eq("~[]Int64")
+    end
+
+    it "preserves collection shape in structurally constructed generic arguments" do
+      step = Type.stream_step_of(Type.array_of(:Int64))
+      item = step.stream_step_item_type
+
+      expect(item).to be_list_collection
+      expect(item&.element_type).to eq(Type.new(:Int64))
+      expect(Type.surface_name_type(step)).to eq("StreamStep<[]Int64>")
+    end
+
     it "accepts only compatible optional, error-union, array, and map values" do
       expect(Type.optional_of(:String).accepts?(Type.new(:String))).to eq(true)
       expect(Type.optional_of(:String).accepts?(Type.new(:NIL))).to eq(true)

@@ -1,0 +1,17 @@
+STRUCT Entry {
+  label: String,
+  weight: Int64
+}
+
+FN main() RETURNS Void ->
+    entries: []Entry = [Entry{ label: "a", weight: 1 }, Entry{ label: "b", weight: 2 }];
+    MUTABLE total = 0;
+    MUTABLE joined = "";
+    FOR _ IN entries DO
+        total = total + _.weight;
+        joined = joined $+ _.label;
+    END
+    ASSERT total == 3;
+    ASSERT joined == "ab";
+    RETURN;
+END

@@ -88,7 +88,18 @@ class TenseLayer < T::Struct
 
   sig { returns(String) }
   def marker
-    kind.serialize
+    case kind
+    when TenseLayerKind::Fallible
+      "!"
+    when TenseLayerKind::Future
+      "~"
+    when TenseLayerKind::Optional
+      "?"
+    else
+      # TenseLayerKind is closed; this keeps the self-hosted method total
+      # without introducing a fallible edge solely for an unreachable arm.
+      ""
+    end
   end
 
   sig { params(inner: TypeExpression).returns(TypeExpression) }
@@ -96,11 +107,22 @@ class TenseLayer < T::Struct
     layer_kind = kind
     case layer_kind
     when TenseLayerKind::Fallible
-      FallibleTypeExpression.new(inner: inner, error_set: error_set, capabilities: capabilities)
+      TypeExpression.new(
+        kind: FallibleTypeExpression.new(inner: inner, error_set: error_set),
+        capabilities: capabilities,
+      )
     when TenseLayerKind::Future
-      FutureTypeExpression.new(inner: inner, capabilities: capabilities)
+      TypeExpression.new(
+        kind: FutureTypeExpression.new(inner: inner),
+        capabilities: capabilities,
+      )
     when TenseLayerKind::Optional
-      OptionalTypeExpression.new(inner: inner, capabilities: capabilities)
+      TypeExpression.new(
+        kind: OptionalTypeExpression.new(inner: inner),
+        capabilities: capabilities,
+      )
+    else
+      raise ArgumentError, "unknown tense layer kind #{layer_kind.serialize}"
     end
   end
 end
@@ -113,7 +135,12 @@ end
 class TenseEnvelope < T::Struct
   extend T::Sig
 
-  VALID_ORDERS = TypeExpression::VALID_TENSE_ORDERS
+  # Keep the validation table local so this self-hosting unit does not depend
+  # on an unexported implementation constant in type_expression.rb.
+  VALID_ORDERS = T.let(
+    ["", "!", "?", "!?", "~", "~!", "~?", "~!?", "!~", "!~!", "!~?", "!~!?"].freeze,
+    T::Array[String],
+  )
 
   const :layers, T::Array[TenseLayer]
   const :payload_expression, TypeExpression
@@ -128,20 +155,24 @@ class TenseEnvelope < T::Struct
     layers = T.let([], T::Array[TenseLayer])
     current = T.let(expression, TypeExpression)
     loop do
-      case current
+      layer_kind = current.kind
+      case layer_kind
       when FallibleTypeExpression
+        fallible = layer_kind
         layers << TenseLayer.new(
           kind: TenseLayerKind::Fallible,
           capabilities: current.capabilities,
-          error_set: current.error_set,
+          error_set: fallible.error_set,
         )
-        current = current.inner
+        current = fallible.inner
       when FutureTypeExpression
+        future = layer_kind
         layers << TenseLayer.new(kind: TenseLayerKind::Future, capabilities: current.capabilities)
-        current = current.inner
+        current = future.inner
       when OptionalTypeExpression
+        optional = layer_kind
         layers << TenseLayer.new(kind: TenseLayerKind::Optional, capabilities: current.capabilities)
-        current = current.inner
+        current = optional.inner
       else
         break
       end
@@ -184,12 +215,26 @@ class TenseEnvelope < T::Struct
 
   sig { params(payload: TypeExpression).returns(TypeExpression) }
   def wrap(payload)
-    layers.reverse_each.reduce(payload) { |inner, layer| layer.wrap(inner) }
+    inner = payload
+    index = layers.length
+    while index > 0
+      index -= 1
+      inner = T.must(layers[index]).wrap(inner)
+    end
+    inner
   end
 
   sig { returns(TenseFutureSplit) }
   def split_future
-    index = layers.index { |layer| layer.kind == TenseLayerKind::Future }
+    index = T.let(nil, T.nilable(Integer))
+    cursor = T.let(0, Integer)
+    while cursor < layers.length
+      if T.must(layers[cursor]).kind == TenseLayerKind::Future
+        index = cursor
+        break
+      end
+      cursor += 1
+    end
     return TenseFutureSplit.new(outer: [].freeze, inner: layers.freeze) if index.nil?
 
     TenseFutureSplit.new(
@@ -199,19 +244,53 @@ class TenseEnvelope < T::Struct
   end
 
   sig { params(payload: TypeExpression, selected_layers: T::Array[TenseLayer]).returns(TypeExpression) }
+  # ruby-to-clear: fallible
   def self.wrap_layers(payload, selected_layers)
-    selected_layers.reverse_each.reduce(payload) { |inner, layer| layer.wrap(inner) }
+    inner = payload
+    index = selected_layers.length
+    while index > 0
+      index -= 1
+      inner = T.must(selected_layers[index]).wrap(inner)
+    end
+    inner
   end
 
   sig { params(kind: TenseLayerKind).returns(T.nilable(Integer)) }
   def layer_index(kind)
-    layers.index { |layer| layer.kind == kind }
+    index = T.let(0, Integer)
+    while index < layers.length
+      return index if T.must(layers[index]).kind == kind
+
+      index += 1
+    end
+    nil
+  end
+
+  sig { params(limit: Integer).returns(T::Boolean) }
+  def future_before?(limit)
+    index = T.let(0, Integer)
+    while index < limit
+      return true if T.must(layers[index]).kind == TenseLayerKind::Future
+      index += 1
+    end
+    false
   end
 
   sig { params(index: Integer).returns(Type) }
   def without_layer(index)
-    retained = layers.each_with_index.filter_map { |layer, layer_index| layer unless layer_index == index }
+    retained = layers_without(index)
     Type.new(TenseEnvelope.wrap_layers(payload_expression, retained))
+  end
+
+  sig { params(index: Integer).returns(T::Array[TenseLayer]) }
+  def layers_without(index)
+    retained = T.let([], T::Array[TenseLayer])
+    layer_index = T.let(0, Integer)
+    layers.each do |layer|
+      retained << layer unless layer_index == index
+      layer_index += 1
+    end
+    retained
   end
 end
 
@@ -307,7 +386,8 @@ class TenseSelectorPlan < T::Struct
   def stream_result_type(cardinality)
     split = envelope.split_future
     item = TenseEnvelope.wrap_layers(envelope.payload_expression, split.inner)
-    stream = StreamTypeExpression.new(cardinality: cardinality, item: item)
+    stream_kind = StreamTypeExpression.new(cardinality: cardinality, item: item)
+    stream = TypeExpression.of(stream_kind)
     Type.new(TenseEnvelope.wrap_layers(stream, split.outer))
   end
 end
@@ -315,10 +395,36 @@ end
 class TenseOperationPlanner
   extend T::Sig
 
-  NAVIGATION_MARKERS = T.let(
-    TypeExpression::VALID_TENSE_ORDERS.reject(&:empty?).freeze,
-    T::Array[String],
-  )
+  sig { returns(T::Array[String]) }
+  def self.navigation_markers
+    T.let(
+      ["!", "?", "!?", "~", "~!", "~?", "~!?", "!~", "!~!", "!~?", "!~!?"],
+      T::Array[String],
+    )
+  end
+
+  sig do
+    params(
+      envelopes: T::Array[TenseEnvelope],
+      kind: TenseLayerKind,
+    ).returns(T.nilable(TenseLayer))
+  end
+  def self.find_layer(envelopes, kind)
+    envelope_index = T.let(0, Integer)
+    while envelope_index < envelopes.length
+      envelope = envelopes.fetch(envelope_index)
+      layer_index = T.let(0, Integer)
+      while layer_index < envelope.layers.length
+        layer = envelope.layers.fetch(layer_index)
+        return layer.dup if layer.kind == kind
+
+        layer_index += 1
+      end
+      envelope_index += 1
+    end
+    nil
+  end
+  private_class_method :find_layer
 
   sig { params(type: Type).returns(TenseSelectorPlan) }
   def self.selector(type)
@@ -357,7 +463,7 @@ class TenseOperationPlanner
   def self.unwrap(type)
     envelope = TenseEnvelope.from_type(type)
     optional_index = envelope.layer_index(TenseLayerKind::Optional)
-    if optional_index.nil? || envelope.layers.take(optional_index).any? { |layer| layer.kind == TenseLayerKind::Future }
+    if optional_index.nil? || envelope.future_before?(optional_index)
       raise ArgumentError, "UNWRAP requires an immediately available optional layer, got #{envelope.order.inspect}"
     end
     index = optional_index
@@ -367,7 +473,7 @@ class TenseOperationPlanner
     result.copy_placement_from!(type)
     operation_plan(
       TenseOperationKind::Unwrap, type, result, TenseBackendForm::OptionalUnwrap,
-      consumed: [consumed], preserved: envelope.layers.each_with_index.filter_map { |layer, i| layer unless i == index },
+      consumed: [consumed], preserved: envelope.layers_without(index),
     )
   end
 
@@ -380,6 +486,11 @@ class TenseOperationPlanner
     end
     result = envelope.without_layer(0)
     result.copy_placement_from!(type)
+    handle_use = if shared
+      TenseHandleUse::SharedRead
+    else
+      TenseHandleUse::Consume
+    end
     backend = if type.observable? && envelope.payload_type.string?
       TenseBackendForm::ObservableStringNext
     elsif shared
@@ -391,7 +502,7 @@ class TenseOperationPlanner
       TenseOperationKind::Next, type, result,
       backend,
       consumed: [T.must(first)], preserved: envelope.layers.drop(1),
-      handle_use: shared ? TenseHandleUse::SharedRead : TenseHandleUse::Consume,
+      handle_use: handle_use,
       suspends: true,
     )
   end
@@ -414,7 +525,7 @@ class TenseOperationPlanner
   def self.exists(type)
     envelope = TenseEnvelope.from_type(type)
     optional_index = envelope.layer_index(TenseLayerKind::Optional)
-    if optional_index.nil? || envelope.layers.take(optional_index).any? { |layer| layer.kind == TenseLayerKind::Future }
+    if optional_index.nil? || envelope.future_before?(optional_index)
       raise ArgumentError, "EXISTS requires an immediately available optional layer, got #{envelope.order.inspect}"
     end
     operation_plan(
@@ -445,7 +556,7 @@ class TenseOperationPlanner
   end
   def self.navigate(receiver_type, mapped_type, markers:, shared: false)
     receiver = TenseEnvelope.from_type(receiver_type)
-    unless NAVIGATION_MARKERS.include?(markers) && receiver.order == markers
+    unless navigation_markers.include?(markers) && receiver.order == markers
       raise ArgumentError,
         "navigation marker #{markers.inspect} must match receiver tense order #{receiver.order.inspect}"
     end
@@ -461,6 +572,14 @@ class TenseOperationPlanner
     combined = normalize_navigation_layers(receiver.layers + mapped.layers)
     result = Type.new(TenseEnvelope.wrap_layers(mapped.payload_expression, combined))
     preserve_value_metadata!(result, mapped_type)
+    handle_use = TenseHandleUse::None
+    if receiver.asynchronous?
+      handle_use = if shared
+        TenseHandleUse::SharedRead
+      else
+        TenseHandleUse::Consume
+      end
+    end
     operation_plan(
       TenseOperationKind::Navigate,
       receiver_type,
@@ -468,11 +587,7 @@ class TenseOperationPlanner
       receiver.asynchronous? ? TenseBackendForm::FutureMap : TenseBackendForm::DirectMap,
       preserved: combined,
       navigation: receiver.layers,
-      handle_use: if receiver.asynchronous?
-        shared ? TenseHandleUse::SharedRead : TenseHandleUse::Consume
-      else
-        TenseHandleUse::None
-      end,
+      handle_use: handle_use,
     )
   end
 
@@ -486,7 +601,15 @@ class TenseOperationPlanner
   end
   def self.or_else(type, fallback_type, operation: TenseOperationKind::OrElseValue, recovery: TenseRecovery::Fallback)
     envelope = TenseEnvelope.from_type(type)
-    recoverable = envelope.layers.take_while { |layer| layer.kind != TenseLayerKind::Future }
+    recoverable = T.let([], T::Array[TenseLayer])
+    layer_index = T.let(0, Integer)
+    while layer_index < envelope.layers.length
+      layer = envelope.layers.fetch(layer_index)
+      break if layer.kind == TenseLayerKind::Future
+
+      recoverable << layer.dup
+      layer_index += 1
+    end
     available = recoverable.select { |layer| layer.kind == TenseLayerKind::Fallible || layer.kind == TenseLayerKind::Optional }
     raise ArgumentError, "OR_ELSE requires a recoverable outer layer, got #{envelope.order.inspect}" if available.empty?
 
@@ -533,15 +656,15 @@ class TenseOperationPlanner
     payload = Type.copy_type(first.payload_type)
     layers = T.let([], T::Array[TenseLayer])
     if future
-      future_layer = T.must(first.layers.find { |layer| layer.kind == TenseLayerKind::Future })
+      future_layer = T.must(find_layer([first], TenseLayerKind::Future))
       layers << future_layer
     end
     if envelopes.any?(&:fallible?)
-      fallible_layer = T.must(envelopes.flat_map(&:layers).find { |layer| layer.kind == TenseLayerKind::Fallible })
+      fallible_layer = T.must(find_layer(envelopes, TenseLayerKind::Fallible))
       layers << fallible_layer
     end
     if saw_nil || envelopes.any?(&:optional?)
-      optional_layer = envelopes.flat_map(&:layers).find { |layer| layer.kind == TenseLayerKind::Optional }
+      optional_layer = find_layer(envelopes, TenseLayerKind::Optional)
       layers << (optional_layer || TenseLayer.new(kind: TenseLayerKind::Optional, capabilities: TypeCapabilities.new))
     end
     joined = Type.new(TenseEnvelope.wrap_layers(payload.shape.expression, layers))
@@ -624,7 +747,10 @@ class TenseOperationPlanner
   def self.normalize_immediate_navigation_segment(layers)
     fallible = layers.find { |layer| layer.kind == TenseLayerKind::Fallible }
     optional = layers.find { |layer| layer.kind == TenseLayerKind::Optional }
-    [fallible, optional].compact
+    result = T.let([], T::Array[TenseLayer])
+    result << fallible if fallible
+    result << optional if optional
+    result
   end
   private_class_method :normalize_immediate_navigation_segment
 

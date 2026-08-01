@@ -1,0 +1,17 @@
+diff --git a/compiler/ruby/mir/lowering/expressions.rb b/compiler/ruby/mir/lowering/expressions.rb
+index 51b165c5c..1f9bbca23 100644
+--- a/compiler/ruby/mir/lowering/expressions.rb
++++ b/compiler/ruby/mir/lowering/expressions.rb
+@@ -855,9 +855,9 @@ module MIRLoweringExpressions
+     # owns no fresh allocation, so it has no owned-transfer sink allocator.
+     # Tagging it :heap/:frame would emit a `defer cleanup` that frees the
+     # source's elements (a double free).
+-    sink_alloc = if MIR::OwnershipEffect.borrowed_view_result?(mir_result)
+-      nil
+-    elsif result_type.observable?
++    # MUTANT: treat a borrowed-view (SKIP slice) result as owned, so the
++    # materializer frees the borrowed source's elements (double free).
++    sink_alloc = if result_type.observable?
+       :heap
+     elsif ownership_tracked_transfer_type?(result_type)
+       function_state.current_decl_alloc || placement_for_node(node)

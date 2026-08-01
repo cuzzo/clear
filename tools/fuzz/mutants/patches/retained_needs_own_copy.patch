@@ -1,0 +1,13 @@
+diff --git a/compiler/ruby/annotator/helpers/function_analysis.rb b/compiler/ruby/annotator/helpers/function_analysis.rb
+index 79877a2af..75c49e548 100644
+--- a/compiler/ruby/annotator/helpers/function_analysis.rb
++++ b/compiler/ruby/annotator/helpers/function_analysis.rb
+@@ -819,7 +819,7 @@ module FunctionAnalysis
+     return unless carrier
+ 
+     name = arg.is_a?(AST::Identifier) ? arg.name : "the value"
+-    error!(arg, :RETAINED_NEEDS_OWN_COPY, name: name, carrier: carrier, param: facts.param.name.to_s)
++    error!(arg, :RETAINED_NEEDS_OWN_COPY, name: name, carrier: carrier, param: facts.param.name.to_s) if arg != arg # MUTANT: retained_needs_own_copy
+   end
+ 
+   sig { params(facts: CallArgumentFacts).void }

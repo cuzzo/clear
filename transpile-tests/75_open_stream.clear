@@ -1,4 +1,5 @@
-# Open streams: ~?T[] — a generator-backed stream; NEXT returns ?T (null when exhausted).
+# Open streams: [~]T — a generator-backed stream; NEXT returns a StreamStep
+# unwrapped with EXISTS (absent = stream closed).
 # BG STREAM { YIELD x; } spawns a generator fiber that buffers values.
 # NEXT blocks until the generator completes, then pops one value per call.
 
@@ -10,54 +11,74 @@ FN main() RETURNS Void ->
     # -------------------------------------------------------
     # Test 1: Simple number stream with three YIELD statements.
     # -------------------------------------------------------
-    s: ~?Float64[] = BG STREAM {
+    s: [~]Float64 = BG STREAM {
         YIELD 1.0;
         YIELD 4.0;
         YIELD 9.0;
     };
 
-    v1: ?Float64 = NEXT s;
-    v2: ?Float64 = NEXT s;
-    v3: ?Float64 = NEXT s;
-    v4: ?Float64 = NEXT s;
-
-    ASSERT v1 == 1.0, "open stream: first NEXT returns first yield";
-    ASSERT v2 == 4.0, "open stream: second NEXT returns second yield";
-    ASSERT v3 == 9.0, "open stream: third NEXT returns third yield";
-    ASSERT v4 == NIL, "open stream: NEXT after exhaustion returns null";
+    IF NEXT s EXISTS AS v1 THEN
+        ASSERT v1 == 1.0, "open stream: first NEXT returns first yield";
+    ELSE
+        ASSERT FALSE, "open stream: first NEXT must produce an item";
+    END
+    IF NEXT s EXISTS AS v2 THEN
+        ASSERT v2 == 4.0, "open stream: second NEXT returns second yield";
+    ELSE
+        ASSERT FALSE, "open stream: second NEXT must produce an item";
+    END
+    IF NEXT s EXISTS AS v3 THEN
+        ASSERT v3 == 9.0, "open stream: third NEXT returns third yield";
+    ELSE
+        ASSERT FALSE, "open stream: third NEXT must produce an item";
+    END
+    IF NEXT s EXISTS AS v4 THEN
+        ASSERT FALSE, "open stream: NEXT after exhaustion must close";
+    ELSE
+        PASS;
+    END
 
     # -------------------------------------------------------
     # Test 2: Stream with a captured variable.
     # -------------------------------------------------------
     base: Float64 = 10.0;
-    s2: ~?Float64[] = BG STREAM {
+    s2: [~]Float64 = BG STREAM {
         YIELD base;
         YIELD base * 2.0;
     };
 
-    u1: ?Float64 = NEXT s2;
-    u2: ?Float64 = NEXT s2;
-    u3: ?Float64 = NEXT s2;
-
-    ASSERT u1 == 10.0, "stream with capture: first NEXT";
-    ASSERT u2 == 20.0, "stream with capture: second NEXT";
-    ASSERT u3 == NIL,  "stream with capture: exhausted";
+    MUTABLE capture_sum: Float64 = 0.0;
+    MUTABLE capture_count: Int64 = 0;
+    WHILE NEXT s2 EXISTS AS u DO
+        capture_sum = capture_sum + u;
+        capture_count = capture_count + 1;
+    END
+    ASSERT capture_sum == 30.0, "stream with capture: items sum to base + base*2";
+    ASSERT capture_count == 2, "stream with capture: exactly two items then closed";
 
     # -------------------------------------------------------
     # Test 3: Bool stream.
     # -------------------------------------------------------
-    flags: ~?Bool[] = BG STREAM {
+    flags: [~]Bool = BG STREAM {
         YIELD TRUE;
         YIELD FALSE;
     };
 
-    b1: ?Bool = NEXT flags;
-    b2: ?Bool = NEXT flags;
-    b3: ?Bool = NEXT flags;
-
-    ASSERT b1 == TRUE,  "bool stream: first NEXT";
-    ASSERT b2 == FALSE, "bool stream: second NEXT";
-    ASSERT b3 == NIL,   "bool stream: exhausted";
+    IF NEXT flags EXISTS AS b1 THEN
+        ASSERT b1 == TRUE, "bool stream: first NEXT";
+    ELSE
+        ASSERT FALSE, "bool stream: first NEXT must produce an item";
+    END
+    IF NEXT flags EXISTS AS b2 THEN
+        ASSERT b2 == FALSE, "bool stream: second NEXT";
+    ELSE
+        ASSERT FALSE, "bool stream: second NEXT must produce an item";
+    END
+    IF NEXT flags EXISTS AS b3 THEN
+        ASSERT FALSE, "bool stream: exhausted stream must close";
+    ELSE
+        PASS;
+    END
 
     RETURN;
 END

@@ -1,0 +1,29 @@
+# Regression: a user payload may have a field literally named `ctrl`. Carrier
+# identity must be NOMINAL (a reserved `__clear_ref_carrier` declaration on the
+# Rc/Arc runtime structs), never `@hasField(_, "ctrl")` -- the field-name probe
+# could not tell a user `ctrl` field from a refcount control block and mislowered
+# a plain payload as a carrier: `u.ctrl.data.*` on an Int64 -> ill-typed Zig.
+#
+# `User` deliberately carries a `ctrl` field. It flows through a MONOMORPHIC
+# param (comptime carrier dispatch) across all three carriers; every variant
+# must compile and be leak-/double-free-clean under the testing allocator.
+STRUCT User { ctrl: Int64, id: Int64 }
+
+FN cache(TAKES u: MONOMORPHIC User) RETURNS Int64 -> RETURN u.id; END
+FN queue(TAKES u: MONOMORPHIC User) RETURNS Int64 -> RETURN u.id; END
+
+FN distribute(TAKES u: MONOMORPHIC User) RETURNS Int64 ->
+    a = cache(KEEP u);
+    b = queue(u);
+    RETURN a + b;
+END
+
+FN main() RETURNS Void ->
+    p = User{ ctrl: 7, id: 1 };
+    ASSERT distribute(p) == 2, "plain: ctrl field is payload data, not a carrier";
+    m = User{ ctrl: 8, id: 2 } @multiowned;
+    ASSERT distribute(m) == 4, "@multiowned: real carrier, ctrl field untouched";
+    s = User{ ctrl: 9, id: 3 } @shared;
+    ASSERT distribute(s) == 6, "@shared: real carrier, ctrl field untouched";
+    RETURN;
+END

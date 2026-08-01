@@ -10,7 +10,7 @@
 
 FN main() RETURNS Void ->
     # COUNT
-    g_count: ~?Int64[] = BG STREAM {
+    g_count: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
     ASSERT (NEXT r_count) == 10_i64, "COUNT final";
 
     # MAX
-    g_max: ~?Int64[] = BG STREAM {
+    g_max: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
@@ -34,7 +34,7 @@ FN main() RETURNS Void ->
     ASSERT (NEXT r_max) == 9_i64, "MAX final";
 
     # MIN
-    g_min: ~?Int64[] = BG STREAM {
+    g_min: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 100_i64;
         WHILE i > 0_i64 DO YIELD i; i = i - 1_i64; END
     };
@@ -45,7 +45,7 @@ FN main() RETURNS Void ->
     ASSERT (NEXT r_min) == 1_i64, "MIN final";
 
     # AVG
-    g_avg: ~?Int64[] = BG STREAM {
+    g_avg: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
@@ -57,7 +57,7 @@ FN main() RETURNS Void ->
     ASSERT (NEXT r_avg) == 4.5, "AVG final";
 
     # ANY
-    g_any: ~?Int64[] = BG STREAM {
+    g_any: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
@@ -74,7 +74,7 @@ FN main() RETURNS Void ->
     ASSERT (NEXT r_any) == TRUE, "ANY final";
 
     # ALL
-    g_all: ~?Int64[] = BG STREAM {
+    g_all: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END
     };
@@ -86,7 +86,7 @@ FN main() RETURNS Void ->
     ASSERT (NEXT r_all) == TRUE, "ALL final";
 
     # FIND
-    g_find: ~?Int64[] = BG STREAM {
+    g_find: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
@@ -100,7 +100,7 @@ FN main() RETURNS Void ->
     ASSERT (NEXT r_find) == 6_i64, "FIND final";
 
     # REDUCE
-    g_red: ~?Int64[] = BG STREAM {
+    g_red: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 1_i64;
         WHILE i <= 5_i64 DO YIELD i; i = i + 1_i64; END
     };

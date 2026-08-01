@@ -37,6 +37,12 @@ RSpec.describe Lexer do
       expect_token(tokens[2], :VAR_ID, "if", 1, 7)
     end
 
+    it "tokenizes the v5 correctness keywords KEEP and UNIQUE" do
+      tokens = Lexer.new("KEEP UNIQUE").tokenize
+      expect_token(tokens[0], :KEYWORD, "KEEP", 1, 1)
+      expect_token(tokens[1], :KEYWORD, "UNIQUE", 1, 6)
+    end
+
     it "tokenizes SNAPSHOT as a keyword (used by `WITH SNAPSHOT x AS y`)" do
       tokens = Lexer.new("WITH SNAPSHOT x AS y").tokenize
       expect_token(tokens[0], :KEYWORD, "WITH", 1, 1)
@@ -213,6 +219,20 @@ RSpec.describe Lexer do
 
         expected.each do |source, (type, value)|
           expect(Lexer.new(source).tokenize.first).to have_attributes(type: type, value: value)
+        end
+      end
+
+      it "range-checks bare literals against their token domain" do
+        expect(Lexer.new("9223372036854775807").tokenize.first)
+          .to have_attributes(type: :INT64, value: 9_223_372_036_854_775_807)
+        expect(Lexer.new("0xFFFFFFFFFFFFFFFF").tokenize.first)
+          .to have_attributes(type: :PREFIXED_INT, value: 18_446_744_073_709_551_615)
+
+        %w[9223372036854775808 18446744073709551616].each do |source|
+          expect { Lexer.new(source).tokenize }.to raise_error(Lexer::Error, /overflows/)
+        end
+        %w[0x10000000000000000 0o2000000000000000000000 0b10000000000000000000000000000000000000000000000000000000000000000].each do |source|
+          expect { Lexer.new(source).tokenize }.to raise_error(Lexer::Error, /overflows/)
         end
       end
 

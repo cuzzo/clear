@@ -117,6 +117,15 @@ RSpec.describe Scope do
     expect(child.declare_with_new_capability(cap.tap { |c| c[:var_node] = AST::Identifier.new(Lexer::Token.new(:VAR_ID, "missing", 1, 1), "missing") })).to be_nil
   end
 
+  it "builds root-first ownership paths without array prepend support" do
+    root = AST::Identifier.new(tok("root"), "root")
+    field = AST::GetField.new(tok("child"), root, "child")
+    index = AST::GetIndex.new(tok("[]"), field, nil)
+    leaf = AST::GetField.new(tok("leaf"), index, "leaf")
+
+    expect(Scope.new.get_path_to_root(leaf)).to eq([:root, :child, :*, :leaf])
+  end
+
   it "exposes typed binding and type stores without requiring hash-style scope access" do
     bindings = Scope::ScopeBindings.new
     installed = entry

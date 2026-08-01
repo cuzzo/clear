@@ -119,9 +119,9 @@ RSpec.describe "automatic ownership transport" do
         ASSERT y.id == 2;
       END
     CLEAR
-    expect { transpile(source) }.to raise_error(/Aliasing Error.*COPY x.*CLONE x/m)
+    expect { transpile(source) }.to raise_error(/Aliasing Error.*COPY x.*KEEP x/m)
     finding = FixCollector.drain.find { |item| item.message.include?("Aliasing Error") }
-    expect(finding&.fixes&.map { |fix| fix.edits.first.replacement }).to contain_exactly("COPY ", "CLONE ")
+    expect(finding&.fixes&.map { |fix| fix.edits.first.replacement }).to contain_exactly("COPY ", "KEEP ")
   end
 
   it "does not conflate mutually exclusive branch uses and mutations" do

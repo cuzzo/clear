@@ -30,6 +30,16 @@ class PipelineRewriter
   def initialize(annotator = nil)
     @annotator = T.let(annotator, T.nilable(SemanticAnnotator))
     @var_counter = T.let(0, Integer)
+    # Shared SymbolEntry per REDUCE accumulator so the synthetic decl and its
+    # per-iteration reassignment resolve to one owned binding (like a real
+    # `MUTABLE acc = ...; acc = ...`), letting the cleanup classifier route an
+    # owned accumulator through ReassignWithCleanup.
+    @reduce_acc_symbols = T.let({}, T::Hash[String, SymbolEntry])
+    @dest_storage = T.let(nil, T.nilable(Symbol))
+    # Shared SymbolEntry per heap-destined list accumulator (same pattern as
+    # @reduce_acc_symbols): every res_var reference must resolve to the ONE
+    # heap binding or appends/final reads re-derive a frame allocator.
+    @list_res_symbols = T.let({}, T::Hash[String, SymbolEntry])
   end
 
   sig { params(node: AST::Node).returns(AST::Node) }
@@ -59,19 +69,58 @@ class PipelineRewriter
       node.statements.map! { |s| rewrite!(s) }
     when AST::FunctionDef
       node.body.map! { |s| rewrite!(s) }
-    when AST::VarDecl, AST::BindExpr, AST::Assignment, AST::DestructuringAssignment, AST::ReturnNode
-      node.value = rewrite!(node.value) if node.value
+    when AST::VarDecl
+      # The consuming declaration's storage is the pipeline's DESTINATION: a
+      # heap-stored decl (a hoisted RETURN value, a moved TAKES argument)
+      # receives the desugared accumulator wholesale, so the accumulator must
+      # be heap too — a frame accumulator returned/moved out is rewound under
+      # the consumer. build_init reads this while creating the result decl.
+      prev_dest = T.let(@dest_storage, T.nilable(Symbol))
+      @dest_storage = node.symbol&.storage || node.storage
+      begin
+        node.value = rewrite_optional_node(node.value)
+      ensure
+        @dest_storage = prev_dest
+      end
+    when AST::BindExpr, AST::Assignment
+      prev_dest = T.let(@dest_storage, T.nilable(Symbol))
+      @dest_storage = node.respond_to?(:symbol) ? node.symbol&.storage : nil
+      begin
+        node.value = rewrite_optional_node(node.value)
+      ensure
+        @dest_storage = prev_dest
+      end
+    when AST::ReturnNode
+      # A returned cleanup-bearing pipeline result escapes the frame: the
+      # accumulator must be heap (the RETURN hoist runs AFTER this rewrite,
+      # so the destination signal is the position itself).
+      prev_dest = T.let(@dest_storage, T.nilable(Symbol))
+      @dest_storage = :heap
+      begin
+        node.value = rewrite_optional_node(node.value)
+      ensure
+        @dest_storage = prev_dest
+      end
+    when AST::DestructuringAssignment
+      node.value = rewrite_optional_node(node.value)
     when AST::IfStatement
       node.condition = rewrite!(node.condition)
-      node.then_branch&.map! { |s| rewrite!(s) }
-      node.else_branch&.map! { |s| rewrite!(s) }
+      then_branch = node.then_branch
+      else_branch = node.else_branch
+      then_branch.map! { |s| rewrite!(s) } if then_branch
+      else_branch.map! { |s| rewrite!(s) } if else_branch
     when AST::MatchStatement
       node.expr = rewrite!(node.expr)
-      node.cases.each { |c| c.body&.map! { |s| rewrite!(s) } }
-      node.default_case.map! { |s| rewrite!(s) } if node.default_case
+      node.cases.each do |match_case|
+        body = match_case.body
+        body.map! { |s| rewrite!(s) } if body
+      end
+      default_case = node.default_case
+      default_case.map! { |s| rewrite!(s) } if default_case
     when AST::WhileLoop
       node.condition = rewrite!(node.condition)
-      node.do_branch&.map! { |s| rewrite!(s) } if node.do_branch.is_a?(Array)
+      do_branch = node.do_branch
+      do_branch.map! { |s| rewrite!(s) } if do_branch.is_a?(Array)
     when AST::ForRange
       node.start_expr = rewrite!(node.start_expr)
       node.end_expr = rewrite!(node.end_expr)
@@ -85,17 +134,56 @@ class PipelineRewriter
     when AST::UnaryOp
       node.right = rewrite!(node.right)
     when AST::FuncCall, AST::MethodCall
-      node.args.map! { |a| rewrite!(a) }
+      # A consumed (TAKES / GIVE) pipeline argument escapes into the callee:
+      # heap destination. The annotator's was_moved stamp (INV-13) lives on
+      # the ORIGINAL smooth node — carry it onto the fused replacement so the
+      # argument hoist still sees the move.
+      node.args.map! { |a| rewrite_call_argument(a) }
     when AST::StructLit
-      node.fields.each { |k, v| node.fields[k] = rewrite!(v) }
+      # A cleanup-bearing pipeline result stored in a composite field follows
+      # the field-store hoist convention: owned field temps are heap-placed
+      # (ownership transfers into the composite via ErrCleanup + move).
+      node.fields.each do |k, v|
+        node.fields[k] = rewrite_struct_field(v)
+      end
     when AST::ListLit
       node.items.map! { |i| rewrite!(i) }
     when AST::BlockExpr
       node.body.map! { |s| rewrite!(s) }
-      node.result = rewrite!(node.result) if node.result
+      node.result = rewrite_optional_node(node.result)
     end
 
     node
+  end
+
+  sig { params(value: T.nilable(AST::Node)).returns(T.nilable(AST::Node)) }
+  def rewrite_optional_node(value)
+    return nil unless value
+
+    rewrite!(value)
+  end
+
+  sig { params(argument: AST::Node).returns(AST::Node) }
+  def rewrite_call_argument(argument)
+    moved = AST.moved?(argument)
+    prev_dest = T.let(@dest_storage, T.nilable(Symbol))
+    @dest_storage = moved ? :heap : nil
+    replaced = rewrite!(argument)
+    if moved && !replaced.equal?(argument) && replaced.respond_to?(:was_moved=)
+      replaced.was_moved = true
+    end
+    replaced
+  ensure
+    @dest_storage = prev_dest
+  end
+
+  sig { params(value: AST::Node).returns(AST::Node) }
+  def rewrite_struct_field(value)
+    prev_dest = T.let(@dest_storage, T.nilable(Symbol))
+    @dest_storage = :heap
+    rewrite!(value)
+  ensure
+    @dest_storage = prev_dest
   end
 
   sig { params(node: AST::BinaryOp).returns(AST::Node) }
@@ -451,10 +539,20 @@ class PipelineRewriter
     when AST::ReduceOp
       decl = AST::VarDecl.new(token, res_var, nil, terminal.initial_value.dup, true)
       AST.stamp_synthetic_type!(decl, terminal.full_type!, context: "synthetic AST type")
-      decl.storage   = :stack
-      decl.slot_size = Type.new(decl.full_type!).slot_size(T.unsafe(schema_lookup))
+      acc_ty = Type.new(decl.full_type!)
+      # An owned accumulator (heap String / cleanup-bearing composite) holds a
+      # fresh heap value each step: it must live on the heap so its per-step
+      # ReassignWithCleanup frees the prior value with the matching allocator.
+      owned_acc = acc_ty.string? || acc_ty.needs_cleanup?(T.unsafe(schema_lookup))
+      decl.storage   = owned_acc ? :heap : :stack
+      decl.slot_size = acc_ty.slot_size(T.unsafe(schema_lookup))
       decl.var_used = true
       decl.var_mutated = true
+      if owned_acc
+        sym = SymbolEntry.new(reg: decl, type: acc_ty, mutable: true, storage: :heap)
+        decl.symbol = sym
+        @reduce_acc_symbols[res_var] = sym
+      end
       [decl]
     when AST::FindOp
       val = AST::Literal.new(token, :NIL, nil)
@@ -494,7 +592,14 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(lit, smooth_node.full_type!, context: "synthetic AST type")
       decl = AST::VarDecl.new(token, res_var, nil, lit, true)
       AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
-      decl.storage   = smooth_node.storage
+      # A heap destination (see rewrite_children! VarDecl) owns the accumulator
+      # wholesale; otherwise keep the pipeline expression's own stamp.
+      decl.storage   = @dest_storage == :heap ? :heap : smooth_node.storage
+      if @dest_storage == :heap
+        sym = SymbolEntry.new(reg: decl, type: Type.new(decl.full_type!), mutable: true, storage: :heap)
+        decl.symbol = sym
+        @list_res_symbols[res_var] = sym
+      end
       decl.slot_size = Type.new(decl.full_type!).slot_size(T.unsafe(schema_lookup))
       decl.var_used = true
       [decl]
@@ -621,6 +726,7 @@ class PipelineRewriter
   def build_terminal_action(terminal, current_val, res_var, token, res_type = nil)
     res_ident = AST::Identifier.new(token, res_var)
     AST.stamp_synthetic_type!(res_ident, res_type, context: "synthetic AST type") if res_type
+    res_ident.symbol = @list_res_symbols[res_var] if @list_res_symbols.key?(res_var)
     actions = case terminal
     when AST::SumOp
       expr = replace_placeholder(terminal.expression, current_val)
@@ -662,8 +768,14 @@ class PipelineRewriter
     when AST::ReduceOp
       expr = replace_placeholder(terminal.expression, current_val)
       expr = replace_named_placeholder(expr, "acc", res_ident)
-      assign = AST::Assignment.new(token, res_ident, expr)
-      AST.stamp_synthetic_type!(assign, Type.new(:Void), context: "synthetic AST type")
+      # Emit the accumulator update as a keywordless :assign bind (the shape a
+      # user `acc = ...` reassignment produces) linked to the accumulator's
+      # SymbolEntry, so cleanup classification + stamp_reassign_cleanup! give an
+      # owned accumulator a ReassignWithCleanup instead of a bare Set.
+      assign = AST::BindExpr.new(token, res_var, nil, expr, nil)
+      assign.mode = :assign
+      assign.symbol = @reduce_acc_symbols[res_var]
+      AST.stamp_synthetic_type!(assign, res_type || Type.new(:Void), context: "synthetic AST type")
       [assign]
     when AST::FindOp
       expr = replace_placeholder(terminal.expression, current_val)
@@ -763,7 +875,12 @@ class PipelineRewriter
   def build_final_result(terminal, res_var, token, smooth_node)
     res = AST::Identifier.new(token, res_var)
     AST.stamp_synthetic_type!(res, smooth_node.full_type!, context: "synthetic AST type")
-    res.storage = smooth_node.storage
+    if (sym = @list_res_symbols[res_var])
+      res.symbol = sym
+      res.storage = :heap
+    else
+      res.storage = smooth_node.storage
+    end
     res
   end
 
@@ -818,6 +935,11 @@ class PipelineRewriter
       val = T.unsafe(node)[member]
       if val.is_a?(Array)
         T.unsafe(new_node)[member] = val.map { |i| i.is_a?(AST::Locatable) ? replace_named_placeholder(i, name, replacement) : i }
+      elsif val.is_a?(Hash)
+        # StructLit/HashLit store field/entry values in a Hash; recurse into them
+        # so `acc.field` inside a struct-literal step expression is substituted
+        # (mirrors replace_placeholder for the `_` element).
+        T.unsafe(new_node)[member] = val.transform_values { |v| v.is_a?(AST::Locatable) ? replace_named_placeholder(v, name, replacement) : v }
       elsif val.is_a?(AST::Locatable)
         T.unsafe(new_node)[member] = replace_named_placeholder(val, name, replacement)
       end

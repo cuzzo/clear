@@ -34,6 +34,17 @@ module Annotator
         )
       end
 
+      sig { params(facts: FunctionAnalysis::CallArgumentFacts).void }
+      def record_deferred_give_validation!(facts)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        deferred_give_validations << DeferredGiveValidation.new(
+          arg_node: facts.arg_node,
+          callee_name: facts.site.node.name.to_s,
+          param_index: facts.index,
+          param_name: facts.param.name.to_s,
+        )
+      end
+
     end
 
     module DeferredCapabilityAudit
@@ -45,9 +56,44 @@ module Annotator
 
         flush_deferred_recovery_validations!
         flush_deferred_with_validations!
+        flush_deferred_give_validations!
+        flush_deferred_copy_retained_validations!
         finalize_capability_audit!
       end
       private :run_deferred_validations!
+
+      # Replay GIVE-into-borrow-param checks after the keep fixpoint: GIVE at
+      # a kept edge is a legal relinquishment assertion, everywhere else it
+      # remains an error.
+      sig { void }
+      def flush_deferred_give_validations!
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
+
+        deferred_give_validations.each do |d|
+          param = function_node_for(d.callee_name)&.params&.fetch(d.param_index, nil)
+          next if param&.symbol&.kept_identity
+          error!(d.arg_node, :GIVE_TO_BORROW_PARAM, param: d.param_name)
+        end
+        deferred_give_validations.clear
+      end
+      private :flush_deferred_give_validations!
+
+      # Retained-identity v5 (V5-3b): a COPY of a retained carrier at a
+      # non-UNIQUE edge is illegal (design "Parameter contracts"), UNLESS the
+      # callee param is a v4 kept-identity edge -- that temporary exception is
+      # removed when the v4 kept machinery is retired (Phase 6b).
+      sig { void }
+      def flush_deferred_copy_retained_validations!
+        T.bind(self, Annotator::Phases::CapabilityAuditSession)
+
+        deferred_copy_retained_validations.each do |d|
+          param = function_node_for(d.callee_name)&.params&.fetch(d.param_index, nil)
+          next if param&.symbol&.kept_identity # v4 kept-edge exception (Phase 6b removes this)
+          error!(d.arg_node, :COPY_RETAINED_NEEDS_UNIQUE, name: d.name, carrier: d.carrier)
+        end
+        deferred_copy_retained_validations.clear
+      end
+      private :flush_deferred_copy_retained_validations!
 
       sig { void }
       def flush_deferred_recovery_validations!

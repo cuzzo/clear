@@ -84,13 +84,15 @@ module Annotator
           stamp_type!(node, result_type)
           node.container_borrow = true if op[:container_borrow]
 
-          # Validate key types for maps
+          # Validate the index against the map's declared key type.  Maps are
+          # `{K}V`; K is not restricted to String or numeric primitives.
           if target_type_info.map?
             index_type_info = node.index.full_type!(context: "index key")
-            if target_type_info.numeric_map?
-              error!(node, :NUMERIC_MAP_KEY_BAD, got: node.index.resolved_type) unless index_type_info&.numeric?
-            else
-              error!(node, :STRING_MAP_KEY_BAD, got: node.index.resolved_type) unless index_type_info&.string?
+            expected_key_type = target_type_info.key_type
+            unless index_type_info && target_type_info.accepts_map_key?(index_type_info)
+              error!(node, :GENERIC_MAP_KEY_MISMATCH,
+                expected: Type.surface_name(expected_key_type),
+                actual: index_type_info ? Type.surface_name(index_type_info) : node.index.resolved_type)
             end
           end
 
@@ -103,7 +105,7 @@ module Annotator
           stamp_type!(node, Type.optional_of(Type.new(:"~#{elem_t.resolved}")))
         elsif target_type_info.string? && !target_type_info.raw?
           error!(node, :STRING_INDEX_BY_INT)
-        elsif node.target.metatype == :struct
+        elsif node.target.metatype == :struct && target_type_info.element_type
           # Struct field access via index (rare legacy path)
           stamp_type!(node, target_type_info.element_type)
           node.container_borrow = true
@@ -531,15 +533,17 @@ module Annotator
           expected_type = T.let(apply_type_subst(raw_expected, type_subst), Type)
 
           # BORROWED fields accept borrowed values — skip ownership checks.
-          # Non-borrowed fields require owned data.
-          unless field_is_borrowed
+          # Non-borrowed fields require owned data, except a kept param
+          # flowing into an @multiowned identity field (retained identity v4).
+          kept_param_store = keep_param_identity!(val_node, expected_type, "#{node.name}.#{field_name}")
+          unless field_is_borrowed || kept_param_store
             reject_borrowed_value!(val_node, "#{node.name}.#{field_name}")
           end
           # Skip CopyNode wrapping for rodata strings in call argument structs.
           # The struct is a temporary - rodata strings are valid for the call's
           # lifetime. The callee dupes strings it needs to escape.
           is_call_arg = struct_literal_call_argument_context?
-          owned = T.let(unless field_is_borrowed || is_call_arg
+          owned = T.let(unless field_is_borrowed || is_call_arg || kept_param_store
             ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
           end, T.nilable(AST::Node))
           if owned

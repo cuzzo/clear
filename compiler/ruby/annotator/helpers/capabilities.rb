@@ -17,7 +17,7 @@ require_relative "../../semantic/capability_plan"
 module Capabilities
     extend T::Sig
 
-  CaptureSiteNode = T.type_alias { T.any(AST::MoveNode, AST::CopyNode, AST::Copy, AST::CloneNode) }
+  CaptureSiteNode = T.type_alias { T.any(AST::MoveNode, AST::CopyNode, AST::Copy, AST::KeepNode) }
 
   # Capabilities that are mutually exclusive with each other.
   Conflict = Struct.new(:set_a, :set_b, :message)

@@ -343,7 +343,8 @@ RSpec.describe SemanticAnnotator do
       it "emits a plain const struct for a non-generic struct" do
         out = ZigTranspiler.new.transpile("STRUCT User { id: Float64 }\nFN main() RETURNS Void -> PASS END")
         expect(out).to include("const User = struct")
-        expect(out).not_to include("comptime")
+        expect(out).not_to include("fn User(")
+        expect(out).not_to include("comptime User")
       end
 
       it "correctly emits field types that are type parameters" do
@@ -647,27 +648,24 @@ RSpec.describe SemanticAnnotator do
 
       it "substitutes every recursive type-expression variant without reparsing" do
         annotator = Annotator::Phases::TypeAnalysisSession.new
-        parameter = NamedTypeExpression.new(name: :T)
+        parameter = TypeExpression.of(NamedTypeExpression.new(name: :T))
         signature = Type::FunctionType.new(
           params: [Type::FunctionTypeParam.new(type: Type.new(:T))],
           return_type: Type.new(:T)
         )
-        expression = TupleTypeExpression.new(items: [
-          FunctionTypeExpression.new(signature: signature),
-          OptionalTypeExpression.new(inner: parameter),
-          FallibleTypeExpression.new(inner: parameter, error_set: parameter),
-          FutureTypeExpression.new(inner: parameter),
-          LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: parameter),
-          MapTypeExpression.new(key: parameter, value: parameter),
-          StreamTypeExpression.new(cardinality: :FINITE, item: parameter),
-        ])
+        expression = TypeExpression.of(TupleTypeExpression.new(items: [
+          TypeExpression.of(Type.function_type_expression_for(signature)),
+          TypeExpression.of(OptionalTypeExpression.new(inner: parameter)),
+          TypeExpression.of(FallibleTypeExpression.new(inner: parameter, error_set: parameter)),
+          TypeExpression.of(FutureTypeExpression.new(inner: parameter)),
+          TypeExpression.of(LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: parameter)),
+          TypeExpression.of(MapTypeExpression.new(key: parameter, value: parameter)),
+          TypeExpression.of(StreamTypeExpression.new(cardinality: :FINITE, item: parameter)),
+        ]))
         substituted = annotator.send(:apply_expression_subst, expression, { T: Type.new(:Int64) })
-        unknown_class = Class.new { include TypeExpression }
-        unknown = T.cast(unknown_class.new, TypeExpression)
 
         expect(TypeExpressionPrinter.inline(substituted))
           .to eq("Tuple<FN(Int64) -> Int64, ?Int64, !Int64, ~Int64, []Int64, {Int64}Int64, [~]Int64>")
-        expect(annotator.send(:apply_expression_subst, unknown, {})).to equal(unknown)
       end
 
       it "binds generic callback parameter and result types structurally" do

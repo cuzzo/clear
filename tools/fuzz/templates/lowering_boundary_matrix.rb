@@ -175,7 +175,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
     when :pipeline_collect_distinct
       <<~CHT
         FN main() RETURNS Void ->
-            s: ~?Int64[] = BG STREAM {
+            s: [~]Int64 = BG STREAM {
                 YIELD 1_i64;
                 YIELD 2_i64;
                 YIELD 1_i64;
@@ -254,7 +254,7 @@ FuzzGenerator.register(:lowering_boundary_matrix, cells: LBM_CELLS) do |p|
         STRUCT Item { key: String, value: Int64 }
         FN item(k: String, v: Int64) RETURNS !Item -> RETURN Item{ key: COPY k, value: v }; END
         FN main() RETURNS !Void ->
-            s: ~?Item[] = BG STREAM { YIELD item("a", 1_i64) OR_ELSE RAISE; YIELD item("b", 2_i64) OR_ELSE RAISE; };
+            s: [~]Item = BG STREAM { YIELD item("a", 1_i64) OR_ELSE RAISE; YIELD item("b", 2_i64) OR_ELSE RAISE; };
             m = s |> INDEX _.key;
             ASSERT m["a"]?.length() == 1_i64, "pipeline index";
             RETURN;

@@ -143,7 +143,7 @@ module LSP
 
       DiagnosticRegistry::DIAGNOSTICS.each do |code, entry|
         template = entry[:template]
-        next unless template
+        next unless template.is_a?(String)
         # Skip umbrella templates whose body is a single placeholder
         # (e.g. "%{message}") — they'd match anything.
         next if template.start_with?('%{') && template.end_with?('}') && template.count('%') == 1

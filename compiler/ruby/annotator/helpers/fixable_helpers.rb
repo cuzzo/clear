@@ -304,7 +304,7 @@ module FixableHelper
   # When the move site isn't tracked (e.g., branch-merge paths, BG
   # captures), fall through to the plain `error!` so the legacy
   # diagnostic still surfaces.
-  sig { params(use_node: AST::Identifier, og_node: OwnershipGraph::Node).returns(NilClass) }
+  sig { params(use_node: AST::Identifier, og_node: OwnershipGraph::OwnershipNode).returns(NilClass) }
   def emit_use_of_moved_error!(use_node, og_node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     src = source_code
@@ -314,6 +314,17 @@ module FixableHelper
     unless move_line && move_col
       msg = "USE AFTER MOVE: You can't use `#{name}`."
       return error!(use_node, :USE_OF_MOVED_VALUE, detail: msg)
+    end
+
+    # Retained-identity v5: a carrier-polymorphic TAKES parameter consumed
+    # then used again is a fan-out. The caller chose the carrier, so neither
+    # a per-use COPY/CLONE nor a declaration capability-upgrade is correct
+    # here (rule 6). Guide to COPY_OR_CLONE at the first fan-out (rule 3),
+    # or UNIQUE+COPY if independent identity is the intended contract.
+    fanout_entry = lookup_scope_for(name)&.resolve_entry(name)
+    if fanout_entry.is_a?(SymbolEntry) && fanout_entry.is_param &&
+        fanout_entry.carrier_contract == :polymorphic
+      return emit_carrier_fanout_error!(use_node, og_node, name, move_line, move_col)
     end
 
     # Pick COPY vs CLONE for the consumer-site fix. CLEAR uses CLONE
@@ -328,8 +339,8 @@ module FixableHelper
     is_split  = type.respond_to?(:split?)      ? type.split?      : false
     use_clone = is_shared || is_multi || is_split
 
-    consumer_keyword = use_clone ? "CLONE" : "COPY"
-    consumer_description_code = use_clone ? :WRAP_CONSUMER_WITH_CLONE : :WRAP_CONSUMER_WITH_COPY
+    consumer_keyword = use_clone ? "KEEP" : "COPY"
+    consumer_description_code = use_clone ? :WRAP_CONSUMER_WITH_KEEP : :WRAP_CONSUMER_WITH_COPY
 
     replacement_col = move_col
     replacement_length = name.length
@@ -429,10 +440,45 @@ module FixableHelper
       raise_in_collector: true)
   end
 
+  # Retained-identity v5 carrier-polymorphic fan-out (design rule 3 +
+  # Diagnostics). Offers COPY_OR_CLONE at the consuming site, which preserves
+  # the caller's carrier, and names UNIQUE+COPY as the independent-identity
+  # alternative.
+  sig do
+    params(use_node: AST::Identifier, og_node: OwnershipGraph::OwnershipNode,
+           name: String, move_line: Integer, move_col: Integer).returns(NilClass)
+  end
+  def emit_carrier_fanout_error!(use_node, og_node, name, move_line, move_col)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    consumer = consumer_source_text(move_line)
+    consumer_clause = consumer ? "`#{consumer}` consumes it (line #{move_line})" : "it is consumed (line #{move_line})"
+    msg = "`#{name}` is used again after #{consumer_clause}. `#{name}` is a " \
+          "carrier-polymorphic parameter; choose how the additional owner is " \
+          "created: wrap the first consuming use as KEEP to preserve " \
+          "the caller's ownership model. If both consumers require independent " \
+          "identity, constrain the parameter as UNIQUE and use COPY."
+
+    fixes = [Fix.new(
+      description: fix_description(:WRAP_CONSUMER_WITH_KEEP, line: move_line),
+      confidence: :interactive,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: move_line, col: move_col, length: name.length),
+        replacement: "(KEEP #{name})"
+      )]
+    )]
+    fixable!(use_node,
+      code: :CARRIER_POLYMORPHIC_FANOUT,
+      detail: msg,
+      category: :ownership,
+      level: :error,
+      fixes: fixes,
+      raise_in_collector: true)
+  end
+
   # Loop-body use of a value that was moved on a prior iteration. The
   # coda "Values can only be TAKEN once; subsequent iterations have
   # nothing left to GIVE" is the canonical phrasing per WALKTHROUGH.md.
-  sig { params(node: T.any(AST::WhileBindLoop, AST::WhileLoop), name: String, og_node: T.nilable(OwnershipGraph::Node), code: Symbol).returns(NilClass) }
+  sig { params(node: T.any(AST::WhileBindLoop, AST::WhileLoop), name: String, og_node: T.nilable(OwnershipGraph::OwnershipNode), code: Symbol).returns(NilClass) }
   def emit_use_of_moved_in_loop_error!(node, name, og_node = nil, code: :USE_OF_MOVED_IN_LOOP)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     loop_move_line = og_node&.move_line
@@ -446,7 +492,7 @@ module FixableHelper
   # Sub-path use after the path's owner was consumed elsewhere. Uses
   # passive voice ("was already TAKEN / GIVEN") because the subject of
   # the sentence is the owner — what HAPPENED to it — not the consumer.
-  sig { params(node: AST::GetField, path: T::Array[NameCandidate], og_node: T.nilable(OwnershipGraph::Node)).returns(NilClass) }
+  sig { params(node: AST::GetField, path: T::Array[NameCandidate], og_node: T.nilable(OwnershipGraph::OwnershipNode)).returns(NilClass) }
   def emit_use_of_moved_path_error!(node, path, og_node = nil)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     path_str = path.map(&:to_s).join('.')

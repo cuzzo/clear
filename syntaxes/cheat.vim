@@ -124,7 +124,6 @@ syn match clearFunctionCall "\w\+[!?]\?(" contains=clearFunction
 " -------------------------------------------------------------------
 " Sigils and special operators
 " -------------------------------------------------------------------
-syn match clearPanic "!!"
 syn match clearMutationBang "[a-zA-Z0-9_]\@<=!"
 syn match clearErrorUnion "[a-zA-Z0-9_!]\@<!!"
 syn match clearOptional "?"

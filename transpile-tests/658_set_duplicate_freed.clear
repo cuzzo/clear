@@ -1,0 +1,15 @@
+FN dup(s: String) RETURNS String -> RETURN COPY s; END
+
+FN main() RETURNS Void ->
+    MUTABLE s: [Set]String = Set[];
+    &s.insert(dup("hello"));
+    &s.insert(dup("world"));
+    &s.insert(dup("hello"));
+    ASSERT s.length() == 2, "dedup to 2";
+    ASSERT s.contains?("hello"), "has hello";
+    ASSERT s.contains?("world"), "has world";
+    &s.remove("hello");
+    ASSERT s.length() == 1, "1 after remove";
+    ASSERT s.contains?("hello") == FALSE, "hello gone";
+    RETURN;
+END

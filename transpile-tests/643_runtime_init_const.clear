@@ -1,0 +1,37 @@
+# Runtime-initialized CONST: a heap-owning value that is not comptime-foldable
+# is emitted as a container-scope `var NAME = undefined`, constructed once (in
+# declaration order) at the top of clearMain with a real runtime, and freed at
+# program exit. Every use borrows it; a later const may read an earlier one.
+# Run under leak detection: the program-lifetime storage must be released.
+
+STRUCT Box { name: String }
+
+FN box__new(n: String) RETURNS Box ->
+  RETURN Box{ name: COPY n };
+END
+
+FN box_len(b: Box) RETURNS Int64 ->
+  RETURN b.name.length();
+END
+
+FN own_copy(TAKES b: Box) RETURNS Int64 ->
+  RETURN b.name.length();
+END
+
+CONST GREETING: Box = box__new("hello");
+CONST DERIVED: Box = box__new(GREETING.name);
+
+FN main() RETURNS Void ->
+  # Borrow at a field read.
+  ASSERT GREETING.name == "hello", "const field value";
+  ASSERT GREETING.name.length() == 5_i64, "const field length";
+  # Borrow through a plain (borrow) parameter.
+  ASSERT box_len(GREETING) == 5_i64, "const borrowed into call";
+  # A later const reads an earlier one (declaration order init).
+  ASSERT DERIVED.name == "hello", "derived const reads earlier const";
+  # COPY breaks the borrow into an owned value a TAKES param can consume.
+  ASSERT own_copy(COPY GREETING) == 5_i64, "COPY const into TAKES";
+  # The borrowed const is still usable after the COPY.
+  ASSERT GREETING.name == "hello", "const still readable after COPY";
+  RETURN;
+END

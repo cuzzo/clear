@@ -7,11 +7,11 @@
 # skips deinit; collection StreamSet runs it.
 
 FN main() RETURNS Void ->
-    gen1: ~?Int64[] = BG STREAM {
+    gen1: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END
     };
-    gen2: ~?Int64[] = BG STREAM {
+    gen2: [~]Int64 = BG STREAM {
         MUTABLE j: Int64 = 0_i64;
         WHILE j < 6_i64 DO YIELD j MOD 3_i64; j = j + 1_i64; END
     };

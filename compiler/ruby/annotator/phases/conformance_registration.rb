@@ -171,9 +171,9 @@ module Annotator
         binders = declaration.binders
         if binders.empty?
           names = declaration.protocol_type.generic_args.filter_map do |argument|
-            expression = argument.shape.expression
-            expression.name.to_s if expression.is_a?(NamedTypeExpression) && expression.arguments.empty? &&
-              !ResolutionSession::BUILTIN_TYPE_PARAMETER_NAMES.include?(expression.name)
+            kind = argument.shape.expression.kind
+            kind.name.to_s if kind.is_a?(NamedTypeExpression) && kind.arguments.empty? &&
+              !ResolutionSession::BUILTIN_TYPE_PARAMETER_NAMES.include?(kind.name)
           end.uniq
           if names.length != owner_params.length
             error!(declaration, :CONFORMANCE_BINDERS_CANNOT_INFER,
@@ -189,11 +189,10 @@ module Annotator
             expected: owner_params.length, got: binders.length)
         end
 
-        declaration.owner_type = Type.new(NamedTypeExpression.new(
+        declaration.owner_type = Type.new(TypeExpression.new(kind: NamedTypeExpression.new(
           name: owner_name.to_sym,
-          arguments: binders.map { |binder| NamedTypeExpression.new(name: binder.name.to_sym) },
-          capabilities: declaration.owner_type.capabilities,
-        ))
+          arguments: binders.map { |binder| TypeExpression.of(NamedTypeExpression.new(name: binder.name.to_sym)) },
+        ), capabilities: declaration.owner_type.capabilities))
       end
       private :infer_conformance_owner_application!
 

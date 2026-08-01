@@ -1,7 +1,26 @@
 # typed: strict
+require_relative "../source_error"
 
 class ClearParser
   extend T::Sig
+
+  sig { returns(T::Boolean) }
+  def parser_error_host?
+    true
+  end
+
+  include ErrorHelper
+
+  SYNTAX_TOKENS_AT_STATEMENT_END = T.let(
+    %w[; THEN DO ->].freeze,
+    T::Array[String],
+  )
+
+  # Partial-class files are compiled as separate CLEAR packages during
+  # self-hosting, so restate the storage types they read from parser.rb.
+  # ruby-to-clear: field-type pos=Int64
+  # ruby-to-clear: field-type source_code=String
+  # ruby-to-clear: field-type tokens=[]Token
 
   private
 
@@ -18,12 +37,12 @@ class ClearParser
       closings << nil
       next unless token.type == :CHAR
       value = token.text!
-      if OPEN_DELIMITERS.include?(value)
+      if "([{".include?(value)
         opening_chars << value
         opening_indices << index
       elsif !opening_chars.empty?
         opening = T.must(opening_chars.last)
-        closing = CLOSE_DELIMITERS[T.must(OPEN_DELIMITERS.index(opening))]
+        closing = ")]}"[T.must("([{".index(opening))]
         next unless closing == value
         opening_chars.pop
         opening_index = opening_indices.pop
@@ -35,7 +54,10 @@ class ClearParser
 
   sig { returns(Lexer::Token) }
   def peek
-    @tokens[@pos + 1] || Lexer::Token.new(:EOF, "", current.line, current.column)
+    token = T.let(@tokens[@pos + 1], T.nilable(Lexer::Token))
+    return token if token
+
+    Lexer::Token.new(:EOF, "", current.line, current.column)
   end
 
   sig { params(n: Integer).returns(T.nilable(Lexer::Token)) }
@@ -47,12 +69,12 @@ class ClearParser
 
   sig { returns(Lexer::Token) }
   def current
-    T.must(@tokens[@pos])
+    @tokens.fetch(@pos)
   end
 
   sig { returns(Lexer::Token) }
   def previous
-    T.must(@tokens[@pos-1])
+    @tokens.fetch(@pos - 1)
   end
 
   # Consume a numeric literal (either :NUMBER float or :INT64 integer).
@@ -71,9 +93,16 @@ class ClearParser
   def consume(type, value=nil)
     # Return the consumed token rather than `current`, which advances to the next token.
     token = current
+    matches_value = T.let(false, T::Boolean)
+    if value
+      expected_value = value
+      if token.value.is_a?(String)
+        matches_value = token.text! == expected_value
+      end
+    end
 
-    if (token.type == type) || (value && token.value == value)
-      if value && token.value != value
+    if (token.type == type) || matches_value
+      if value && !matches_value
          emit_consume_error_with_fix(token, type, value)
       end
 
@@ -102,7 +131,10 @@ class ClearParser
 
   sig { params(token: Lexer::Token, expected_type: Symbol, expected_value: T.nilable(String)).returns(T.noreturn) }
   def emit_consume_error_with_fix(token, expected_type, expected_value)
-    prev_tok = @pos > 0 ? @tokens[@pos - 1] : nil
+    prev_tok = T.let(nil, T.nilable(Lexer::Token))
+    if @pos > 0
+      prev_tok = @tokens[@pos - 1]
+    end
 
     if expected_value && SYNTAX_TOKENS_AT_STATEMENT_END.include?(expected_value) && prev_tok
       if prev_tok.line < token.line
@@ -111,6 +143,14 @@ class ClearParser
       if %w[THEN DO ->].include?(expected_value) && prev_tok.line == token.line
         return emit_syntax_insert_before_token!(token, expected_value)
       end
+    end
+
+    # Retired bang-mutation syntax: `name!` fails whatever the parser expected
+    # next, but the useful diagnostic is the registered migration, not the raw
+    # token expectation.
+    if token.type == :CHAR && token.text! == '!' && prev_tok &&
+       %i[VAR_ID TYPE_ID].include?(prev_tok.type) && prev_tok.end_offset == token.start_offset
+      error!(token, :LEGACY_MUTATION_NAME_SUFFIX)
     end
 
     error!(token, :PARSER_EXPECTED, expected: expected_value || expected_type, got: token.value, type: token.type, line: token.line)
@@ -150,7 +190,7 @@ class ClearParser
   sig { params(token: Lexer::Token, expected_value: String).returns(T.noreturn) }
   def emit_syntax_insert_before_token!(token, expected_value)
     fix = Fix.new(
-      description: fix_description(:INSERT_EXPECTED_BEFORE_TOKEN, expected: expected_value, got: token.value, line: token.line),
+      description: fix_description(:INSERT_EXPECTED_BEFORE_TOKEN, expected: expected_value, got: token.display_value, line: token.line),
       confidence: :auto,
       edits: [Edit.new(
         span: Span.new(file: nil, line: token.line, col: token.column, length: 0),
@@ -168,7 +208,12 @@ class ClearParser
 
   sig { params(type: Symbol, val: T.nilable(String)).returns(T::Boolean) }
   def match?(type, val=nil)
-    current.type == type && (val.nil? || current.value == val)
+    token = current
+    return false unless token.type == type
+    return true if val.nil?
+
+    expected_value = val
+    token.text! == expected_value
   end
 
   # `>>` is a shift in expression context, but it is also two adjacent generic
@@ -201,7 +246,11 @@ class ClearParser
   def match_at?(n, type, val=nil)
     tok = peek_at(n)
     return false unless tok
-    tok.type == type && (val.nil? || tok.value == val)
+    return false unless tok.type == type
+    return true if val.nil?
+
+    expected_value = val
+    tok.text! == expected_value
   end
 
   # Used by `parse_match_*` to decide whether the `,` at `current` is a
@@ -215,8 +264,8 @@ class ClearParser
     nxt = peek_at(1)
     return false unless nxt
     return false if nxt.type == :ARROW || nxt.type == :EOF
-    return false if nxt.type == :KEYWORD && %w[AS WHEN DEFAULT END].include?(nxt.value)
-    return false if nxt.type == :CHAR && nxt.value == '{'
+    return false if nxt.type == :KEYWORD && %w[AS WHEN DEFAULT END].include?(nxt.text!)
+    return false if nxt.type == :CHAR && nxt.text! == '{'
     true
   end
 
@@ -234,7 +283,7 @@ class ClearParser
   sig { params(node: AST::Node, first: Lexer::Token, last: Lexer::Token).returns(AST::Node) }
   def stamp_source_range!(node, first, last)
     start_offset = first.start_offset || 0
-    end_offset = last.end_offset || (start_offset + last.value.to_s.bytesize)
+    end_offset = last.end_offset || (start_offset + last.display_value.bytesize)
     node.source_range = AST::SourceRange.new(
       file: first.file || last.file,
       start_offset: start_offset,
@@ -253,7 +302,9 @@ class ClearParser
   # need the latter.
   sig { params(node: AST::Node, first: AST::Locatable, last: Lexer::Token).returns(AST::Node) }
   def stamp_source_range_from_node!(node, first, last)
-    range = first.source_range
+    source_range = first.source_range
+    raise "Internal: source range missing from postfix receiver" unless source_range
+    range = source_range
     end_offset = last.end_offset || ((last.start_offset || range.end_offset) + last.value.to_s.bytesize)
     node.source_range = AST::SourceRange.new(
       file: range.file || last.file,

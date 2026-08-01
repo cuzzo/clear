@@ -4,8 +4,288 @@ This document records the current state of the Ruby compiler to CLEAR
 translation effort and the work remaining before generated `compiler/src/*.clear`
 files should be committed as source.
 
-Measured on 2026-07-08 against `compiler/ruby/**/*.rb` using the current
-`gems/ruby-to-clear` translator.
+The original inventory below was measured on 2026-07-08. The preflight audit
+on 2026-07-20 supersedes its readiness conclusions because it tests generated
+code through the actual CLEAR frontend, MIR, Zig emission, and behavioral
+oracles rather than counting only translated Ruby syntax.
+
+## 2026-07-21 Defect Burn-Down and Second Snapshot Refresh
+
+The golden-migration defect catalog
+(`gems/ruby-to-clear/docs/agents/golden-migration-defects.md`) was worked
+down from seventeen defect families to two (aggregate receiver
+materialization needs an ownership design; struct member overrides). The
+translator suite is 591 examples with those 2 deliberate flags. Compiler
+fixes landed alongside: `contains?` on fixed-size arrays dispatches as array
+membership, inlined-module EXTERN declarations hoist to file scope with
+per-unit alias dedup, `clear test` registers `--pkg` specs for FFI closure
+scanning, module-scope owned values reject with `MODULE_SCOPE_OWNED_VALUE`,
+bang-suffix parse failures surface the migration diagnostic, and emitted
+type aliases carry a comptime reference so declared-but-unused aliases
+survive block-scoped units.
+
+The committed snapshot was regenerated from the post-fix translator. New
+baseline (promoted to `analysis/results/baseline.md`): G1 159/213, G2 70,
+G3 8, G4 7. G1 fell from 167 because the translator now honestly rejects
+typed rescue instead of silently widening it to a catch-all. `mir/mir.clear`
+and five more dependency files now generate; only
+`semantic/tense_operation_plan.clear` remains ungenerable.
+
+Known red: one fuzz negative cell
+(`fuzz_call_ownership_contract_matrix_6813d4e281`, optional stream element
+passed to a non-optional pipeline callee) compiles and leaks at every commit
+back to the rebase point - a pre-existing soundness gap that negative-batch
+packing masked until the corpus additions reshuffled batches. It stays red
+until the pipeline argument check lands; do not re-mask it.
+
+## 2026-07-20 Rebase and Snapshot Refresh
+
+The branch was rebased onto current `origin/master` (7 lowering/incremental
+bug-fix commits) with no conflicts. All post-rebase gates pass: 7,212 compiler
+specs, 601 transpile tests with zero leaks, the current-language translator
+suite (32/32), and the smoke lexer oracle. A fresh full-corpus verifier run
+reproduced the recorded baseline exactly: G1 167/213, G2 70/213, G3 7/213,
+G4 6/213. Results are now checked in at
+`gems/ruby-to-clear/analysis/results/latest.{json,md}`.
+
+The committed `compiler/src/**/*.clear` snapshot predated the current
+translator: it still used retired bang-identifier syntax the parser in the
+same tree rejects, so 9 of 14 files could not even parse. Every regenerable
+file has been replaced by the current generation from that verifier run,
+together with the 16 generated dependency files its REQUIRE closure needs.
+Known limits of the refreshed snapshot:
+
+- `ast/parser.clear` is retained stale: `parser.rb` fails G1 on the
+  resource-budget `rescue` boundary in `Parser#parse` (the complex-rescue
+  class already assigned to Ruby-source refactoring).
+- The `type.clear -> struct_field.clear -> type.clear` package cycle is real
+  in fresh generation (fresh `struct_field.clear` REQUIREs both `type.clear`
+  and `ast.clear`) and remains the dominant G3 blocker: 49 roots fail on it.
+  The previously committed `struct_field.clear` merely predated the REQUIRE
+  emission, which is why the stale snapshot appeared acyclic. The acyclic
+  parsed-type-syntax foundation is still prerequisite work.
+- `mir/mir.clear` and `semantic/tense_operation_plan.clear` cannot be
+  generated (their units fail G1), so `ast/std_lib.clear`, `mir/fsm_ops.clear`,
+  `annotator/helpers/auto_inference.clear`, and
+  `annotator/helpers/function_analysis.clear` fail G3 on missing dependencies.
+- The lexer behavioral oracle now drives the generated
+  `lexer__new`/`lexer__tokenize` entry points through a registered package
+  build. It compiles through every module-system stage and stops at the
+  documented retained-identity boundary: the optional `budget` parameter's
+  default branch mixes a borrowed payload with an owned
+  `FrontendResourceBudget@multiowned` (`expected FrontendResourceBudget,
+  found CheatLib.Rc(FrontendResourceBudget)`). That is stop/go criterion 6;
+  it is the retained-parameter contract, not a build defect.
+
+**G4 is weaker than it looks.** `clear test` compiles library-shaped modules
+whose functions nothing references, and Zig analyzes declarations lazily, so
+a unit can "pass G4" while unreachable functions contain type errors. The
+lexer's G4 pass survived an unqualified imported type this way. The verifier
+should force full analysis (emit a `std.testing.refAllDecls`-style reference
+block) before G4 counts are trusted for library units.
+
+Compiler fixes landed while making the refreshed snapshot buildable, each
+with specs:
+
+1. `clear build` now accepts `--pkg name=path` registrations (previously only
+   `clear test` did); registered paths take precedence over
+   `packages/<name>/src/lib.clear` discovery.
+2. Package aliases imported by locally REQUIREd modules (not just the root
+   file) are rewritten to package-file imports in the emitted root Zig.
+3. Cross-module package calls lowered inside an imported module now classify
+   `needs_rt`/`can_fail` from the module's imported signatures instead of
+   defaulting to worst case (which emitted `try f(rt)` for pure package
+   functions).
+4. Package/module emission carries `PUB` visibility onto emitted Zig type
+   defs, emits module-scope immutable bindings (frozen membership tables) as
+   file-scope consts, aliases imported package types at the import site (the
+   EXTERN STRUCT contract), dedupes repeated package imports landing in one
+   Zig unit, and rewrites EXTERN FFI module imports inside emitted package
+   files.
+
+## 2026-07-20 Preflight Decision
+
+Do not continue manual translation of `Type`, the parser, or later compiler
+phases yet. The rebase onto current `origin/master` preserves the current Ruby
+compiler architecture and its 7,197-example non-integration baseline, but the
+generated frontend exposed several semantic prerequisites. Hand-editing around
+them would hide compiler or language defects and make regeneration unsafe.
+
+The next workstream is deliberately narrow:
+
+1. make ruby-to-CLEAR's current-language suite green and keep generated files
+   reproducible;
+2. close the local retained-identity capability boundary exposed by the lexer;
+3. reject cleanup-bearing module globals before Zig emission;
+4. establish an acyclic parsed-type-syntax foundation for `Type` and
+   `StructField`;
+5. prove the lexer and then the Type foundation with behavioral/MessagePack
+   equivalence before translating the parser.
+
+`type__new(...)` is not a prerequisite failure. CLEAR already supports omitted
+and defaulted parameters. The generated factory represents Ruby's actual
+`new`/`initialize` sequence: construct a complete value, run translated
+initialization, and return it. Keep it unless `Type` is intentionally rewritten
+as pure aggregate construction. Adding constructor overloading or public
+constructor syntax merely to hide this generated helper would add language
+surface without improving correctness.
+
+### Must be done before more self-host translation
+
+#### 1. Make optional retention explicit in generated CLEAR
+
+CLEAR intentionally rejects silently inferred optional bindings. For a Ruby
+call statically known to return a nilable value, ruby-to-CLEAR must emit:
+
+```ruby clear
+value:? = maybeValue();
+```
+
+This lowering is implemented and regression-tested. Ruby has no native error
+union or temporal result type, so the translator must not speculate `:!` or
+`:~` bindings for ordinary Ruby calls.
+
+#### 2. Support sound retained local identity at function boundaries
+
+Nested lexers share one mutable `FrontendResourceBudget`. Generated code stores
+that identity as `FrontendResourceBudget@multiowned`, but ordinary function
+parameters expose only a borrowed payload. A structural `COPY` would create an
+independent budget; copying an Rc handle's bits without a retain would permit
+use-after-free or double release.
+
+Do not weaken the ownership verifier and do not silently promote this local
+identity to `@shared`. Preserve capability-at-bind-time semantics with a
+retained-parameter contract. The likely shape is a plain `T` parameter with a
+local capability requirement and an explicit retention effect:
+
+```ruby clear illustrative
+FN lexer(source: String, budget: FrontendResourceBudget) RETURNS Lexer
+  REQUIRES budget: LOCAL
+  EFFECTS RETAINS budget
+->
+  RETURN Lexer{ source: COPY source, budget: CLONE budget };
+END
+```
+
+The final spelling must fit the existing `REQUIRES`/`EFFECTS` model. Its
+semantics are non-negotiable: the caller supplies an existing local Rc
+identity, MIR emits one retain, the callee may store that retained handle, and
+ordinary borrowed parameters remain non-escaping. This is a general facility
+for local caches, compiler contexts, graph sessions, and similar identity
+graphs—not a lexer exception.
+
+#### 3. Reject unsupported module-global ownership
+
+The frontend currently accepts an owned module-level collection and later emits
+a top-level Zig `defer`, which Zig rejects. Until CLEAR has a defined module
+initialization/termination lifetime, reject cleanup-bearing top-level values
+with a source-level diagnostic. Frozen Ruby membership sets should instead
+lower to immutable compile-time data or generated membership predicates.
+
+#### 4. Break the Type package cycle at the model boundary
+
+Forty-nine independent compiler roots converge on the same generated package
+cycle:
+
+```text
+type.clear -> struct_field.clear -> type.clear
+```
+
+Do not solve this by allowing arbitrary cyclic packages. Extract immutable
+parsed type syntax and field-declaration metadata into an acyclic foundation.
+Semantic/capability-aware `Type` can depend on that foundation, and parser AST
+records can depend on syntax records without importing semantic `Type` back
+into the foundation.
+
+#### 5. Remove accidental dynamic boundaries
+
+Every generated `Any` and `CAST` in the frontend wire path needs an explicit
+disposition. Replace wire-facing `Any` with closed unions or typed syntax
+records. The self-hosted frontend should define one closed `TypeExpression`
+union so constructors produce it directly instead of repeatedly casting
+nominal syntax records back into an interface-like union.
+
+#### 6. Require stage-specific semantic oracles
+
+A generated file is ready only when it passes all of:
+
+- raw translation with no `unsupportedRuby`;
+- dependency closure generation;
+- CLEAR parser/annotator/MIR validation;
+- Zig emission/build validation;
+- its behavioral oracle against Ruby output.
+
+For the lexer, the oracle must cover the complete hostile and corpus inputs and
+must prove that nested lexers observe the same resource-budget counter. For the
+Type foundation, use stable MessagePack snapshots/equivalence before beginning
+the parser.
+
+### Work that belongs in ruby-to-CLEAR
+
+- Emit `:?` for known nilable Ruby results.
+- Preserve `# ruby-to-clear: value` through required files and class reopenings
+  instead of inventing `@multiowned` and `WITH POLYMORPHIC` scopes.
+- Retain constructor default expressions until all declaration metadata has
+  been collected.
+- Map known Ruby keyword constructors to exact positional CLEAR calls.
+- Lower enumerable blocks containing non-local returns to explicit loops.
+- Copy scanner-backed borrowed strings when Ruby retains them.
+- Inline immutable regex constants and lower frozen membership tables as
+  compile-time data.
+- Keep generated syntax current with CLEAR's collection, mutability, tense,
+  operator, Tuple, and explicit-return rules.
+
+### Work that belongs in the Ruby compiler source
+
+- Replace complex `rescue`/`ensure` with explicit fallible results and resource
+  scopes; do not import Ruby stack-unwinding semantics.
+- Replace `$stdout`, `$stderr`, `$?`, and other globals with an explicit
+  compiler/process context.
+- Replace `const_get`, dynamic `is_a?`, and open reflection with closed unions
+  or explicit registries.
+- Replace implicit regexp match state with explicit match values.
+- Prefer explicit loops where Ruby non-local block control flow obscures
+  ownership or lifetime behavior.
+- Remove metaprogramming and private-boundary `send` calls rather than teaching
+  CLEAR to reproduce them.
+
+### Work that should not block self-hosting
+
+- Named call arguments. Signature-aware positional lowering is exact; named
+  calls are a separate ergonomics decision touching parser, annotation, MIR,
+  formatting, and function-value rules.
+- Special constructor syntax solely to replace `type__new`.
+- Ruby-style non-local closure returns or general exception unwinding.
+- Runtime reflection, shell interpolation syntax, or arbitrary cyclic modules.
+- Generic `Auto` escape hatches that weaken the frontend's closed types.
+
+### Current measured status
+
+The fresh verifier covered 213 Ruby compiler files and 114,742 nonblank source
+lines:
+
+| Gate | Passing files | Passing source LoC |
+| --- | ---: | ---: |
+| G1: raw translation | 168 / 213 (78.87%) | 67.25% |
+| G2: dependency closure | 70 / 213 (32.86%) | 23.50% |
+| G3: CLEAR frontend/MIR | 7 / 213 (3.29%) | 0.62% |
+| G4: native Zig validation | 6 / 213 (2.82%) | 0.53% |
+
+After value-metadata and deferred-default fixes, generated `type.clear` fell
+from 6,121 to 4,817 lines, its 305 invented polymorphic receiver scopes fell to
+zero, and it contains no `unsupportedRuby` sites. It still has 30 casts and 24
+`Any` spellings requiring semantic classification; not every spelling is wrong,
+because `Any` is also a real source-language type name.
+
+The old ruby-to-CLEAR golden suite is not a valid green baseline after the
+language changes: 332 of 562 examples still expect legacy arrays, logical
+operators, bang mutation, implicit returns, and older ownership behavior. These
+expectations must be migrated and then kept green before committing regenerated
+compiler sources. The current-language focused suite passes 32/32 examples,
+Sorbet passes, and the rebased Ruby compiler baseline passes independently.
+
+The sections below retain the 2026-07-08 inventory for historical comparison;
+its syntax-coverage percentages must not be interpreted as self-host readiness.
 
 ## Commit Policy
 

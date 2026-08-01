@@ -34,7 +34,7 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
       # RHS stays Bool and disagrees with the LHS).
       src = <<~CLEAR
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
@@ -49,7 +49,7 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
     it "accepts ~Int64@observable = stream |> REDUCE(0, acc + _)" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
@@ -66,12 +66,12 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
     it "annotates two ~T@observable bindings sharing scope" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-            g1: ~?Int64[] = BG STREAM {
+            g1: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
             running_sum: ~Int64@observable = g1 |> SUM _;
-            g2: ~?Int64[] = BG STREAM {
+            g2: [~]Int64 = BG STREAM {
                 MUTABLE j: Int64 = 0_i64;
                 WHILE j < 4_i64 DO YIELD j; j = j + 1_i64; END
             };
@@ -87,12 +87,12 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
     it "transpiles two nested observable pipes to distinct ctx struct ids" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-            g1: ~?Int64[] = BG STREAM {
+            g1: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
             running_sum: ~Int64@observable = g1 |> SUM _;
-            g2: ~?Int64[] = BG STREAM {
+            g2: [~]Int64 = BG STREAM {
                 MUTABLE j: Int64 = 0_i64;
                 WHILE j < 4_i64 DO YIELD j; j = j + 1_i64; END
             };

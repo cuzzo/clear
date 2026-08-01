@@ -6,7 +6,7 @@ require_relative "../ruby/ast/fixable_error" unless defined?(FixCollector)
 require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 
 # Phase 1 of the USE-AFTER-MOVE fix refinement: the consumer-site fix
-# picks `COPY` for plain affine bindings and `CLONE` for shared /
+# picks `COPY` for plain affine bindings and `KEEP` for shared /
 # refcounted ones (`@shared`, `@multiowned`, `@split`). Capability
 # upgrades that the binding already carries are skipped (offering
 # `@shared` on an already-`@shared` binding is a no-op).
@@ -77,24 +77,24 @@ RSpec.describe UseAfterMoveChecker do
     end
   end
 
-  describe "@split stream — offers CLONE, no @multiowned/@shared upgrade" do
+  describe "@split stream — offers KEEP, no @multiowned/@shared upgrade" do
     let(:src) {
       <<~CLEAR
         FN main() RETURNS Void ->
-            s: ~?Int64[]@split = BG STREAM { YIELD 1; };
-            t: ~?Int64[]@split = s;
+            s: [~]@split Int64 = BG STREAM { YIELD 1; };
+            t: [~]@split Int64 = s;
             v: ?Int64 = NEXT s;
         END
       CLEAR
     }
 
-    it "offers CLONE at the consumer site (not COPY)" do
+    it "offers KEEP at the consumer site (not COPY)" do
       annotate(src) rescue nil
       finding = FixCollector.drain.find { |f| f.message =~ /USE AFTER MOVE/ }
       expect(finding).not_to be_nil
       consumer_fix = finding.fixes.first
-      expect(consumer_fix.description).to match(/Wrap the consuming reference with CLONE/)
-      expect(consumer_fix.edits.first.replacement).to eq("(CLONE s)")
+      expect(consumer_fix.description).to match(/Wrap the consuming reference with KEEP/)
+      expect(consumer_fix.edits.first.replacement).to eq("(KEEP s)")
     end
 
     it "does NOT offer @multiowned or @shared upgrades for an already-@split binding" do
@@ -105,8 +105,8 @@ RSpec.describe UseAfterMoveChecker do
       expect(descs).not_to include(match(/`@shared`/))
     end
 
-    it "applying the CLONE fix produces compilable CLEAR" do
-      fixed = src.sub("@split = s;", "@split = (CLONE s);")
+    it "applying the KEEP fix produces compilable CLEAR" do
+      fixed = src.sub("Int64 = s;", "Int64 = (KEEP s);")
       expect { annotate(fixed) }.not_to raise_error
     end
   end

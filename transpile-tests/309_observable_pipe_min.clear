@@ -1,7 +1,7 @@
 # Pipeline-terminal observable MIN. Mirror of 308_observable_pipe_max.
 
 FN main() RETURNS Void ->
-    gen: ~?Int64[] = BG STREAM {
+    gen: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 100_i64;
         WHILE i > 0_i64 DO
             YIELD i;

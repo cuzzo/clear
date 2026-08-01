@@ -8,6 +8,7 @@ class ZigType
   extend T::Sig
 
   RESERVED_IDENTIFIERS = T.let(Set.new(%w[
+    _
     addrspace align allowzero and anyframe anytype asm async await break callconv
     catch comptime const continue defer else enum errdefer error export extern false
     fn for if inline linksection noalias noinline nosuspend null opaque or orelse

@@ -12,7 +12,7 @@
 #   #42  COPY of @set/@pool/@map -- dupeValue missing arms
 #   #43  union_owned_payload -- variant store + missing rt (under investigation)
 #
-# CLONE is out of scope (CLONE of a non-RC value is a distinct front-end
+# KEEP is out of scope (KEEP of a non-RC value is a distinct front-end
 # concern, not the implicit-move-into-TAKES class).
 
 # Canonical per-shape construction. Keys match :cleanup_value_shapes naming

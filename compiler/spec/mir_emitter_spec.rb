@@ -14,6 +14,11 @@ RSpec.describe MIREmitter do
     expect(e.emit(MIR::Lit.new("42"))).to eq("42")
   end
 
+  it "escapes non-printable bytes in Zig string literals" do
+    expect(e.send(:zig_byte_string_literal, "\x00\x01\x1f\x7f"))
+      .to eq('"\\x00\\x01\\x1f\\x7f"')
+  end
+
   it "emits an identifier" do
     expect(e.emit(MIR::Ident.new("foo"))).to eq("foo")
   end
@@ -497,9 +502,23 @@ RSpec.describe MIREmitter do
     expect(zig).to include("    return 42;")
   end
 
+  it "omits statement-only suppressions from program and module container scope" do
+    let = MIR::Let.new("findings_value", MIR::Lit.new("0"), true, nil, "_ = &findings_value;")
+
+    program_zig = e.emit(MIR::Program.new([let]))
+    module_zig = e.emit(MIR::ModuleNamespace.new("registry", [let]))
+
+    expect(program_zig).to eq("var findings_value = 0;")
+    expect(module_zig).to include("    var findings_value = 0;")
+    expect(program_zig).not_to include("_ = &findings_value")
+    expect(module_zig).not_to include("_ = &findings_value")
+  end
+
   it "emits type alias" do
     node = MIR::TypeAlias.new("Alloc", "std.mem.Allocator")
-    expect(e.emit(node)).to eq("const Alloc = std.mem.Allocator;")
+    # pub: imported types re-export through the aliasing module. comptime
+    # reference: declared-but-unused aliases must survive block-scoped units.
+    expect(e.emit(node)).to eq("pub const Alloc = std.mem.Allocator;\ncomptime { _ = @typeName(Alloc); }")
   end
 
   it "emits test block" do

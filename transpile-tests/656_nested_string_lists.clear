@@ -1,0 +1,30 @@
+FN dup(s: String) RETURNS String -> RETURN COPY s; END
+
+FN build() RETURNS !String[][] ->
+    MUTABLE outer: String[][] = List[];
+    MUTABLE i: Int64 = 0;
+    WHILE i < 3 DO
+        MUTABLE inner: []String = List[];
+        &inner.append("r" $+ i.toString());
+        &inner.append(dup("x"));
+        &outer.append(inner);
+        i += 1;
+    END
+    RETURN outer;
+END
+
+FN main() RETURNS Void ->
+    grid = TRY build();
+    ASSERT grid.length() == 3, "3 rows";
+    MUTABLE count: Int64 = 0;
+    MUTABLE joined: String = "";
+    FOR row IN grid DO
+        FOR cell IN row DO
+            count += 1;
+            joined = joined $+ cell;
+        END
+    END
+    ASSERT count == 6, "6 cells";
+    ASSERT joined == "r0xr1xr2x", "joined contents";
+    RETURN;
+END

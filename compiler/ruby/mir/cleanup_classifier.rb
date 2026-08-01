@@ -343,6 +343,8 @@ module CleanupClassifier
     return if lifecycle && !lifecycle.needs_drop?
 
     ti = Type.from_node!(value, context: "cleanup lifetime promotion")
+    # Interned/borrowed slices never own storage, with or without a plan.
+    return if ti.symbol? || (ti.string? && ti.rodata?)
     entry_obj.promote_to_cleanup!(kind: ti.string? ? :heap_string : :uniform, alloc: :heap, has_moved_guard: true)
   end
 
@@ -466,6 +468,15 @@ module CleanupClassifier
       if child.is_a?(AST::BgBlock) || child.is_a?(AST::BgStreamBlock)
         body = child.body
         classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, bindings, entries_by_place) if body
+        next
+      end
+
+      # A value BlockExpr (`{ stmts...; result }`, e.g. a desugared pipeline
+      # fold) carries real bindings in its body that need cleanup classification
+      # like any other statement sequence.
+      if child.is_a?(AST::BlockExpr)
+        classify_cleanup_binding_body(child.body, schema_lookup, lifecycle_registry, bindings, entries_by_place) if child.body
+        classify_inline_bg_binding_body(child.result, schema_lookup, lifecycle_registry, bindings, entries_by_place) if child.result
         next
       end
 
@@ -602,6 +613,49 @@ module CleanupClassifier
       base[:via_pointer] = true if ti.respond_to?(:needs_pointer_passing?) && ti.needs_pointer_passing?
       bindings[name] = base
     end
+
+    # A MONOMORPHIC TAKES param is emitted anytype and threads the caller's
+    # actual carrier. Its declared payload type may need no drop, but the carrier
+    # that arrives may be an Rc/Arc handle that must be released. The carrier's
+    # release lifecycle is registered at param introduction (LifecycleRegistry
+    # keyed by LifecyclePlanner.monomorphic_carrier_key); fetch it here rather
+    # than reconstructing memory logic in this consumer. DROP lowering then emits
+    # the carrier-agnostic CheatLib.cleanup(@TypeOf(u), ...) (no-op for a plain
+    # carrier, releaseOne for Rc/Arc).
+    fn_node.params.each do |p|
+      next unless p.takes && p.carrier_contract == :monomorphic
+      next if bindings.key?(p.name.to_s)
+
+      base = entry(:rc, rc_alloc: :heap)
+      base.mark_moved_guard!
+      base.set_alloc!(:heap)
+      base[:source_kind] ||= :takes_param
+      plan = lifecycle_registry ? lifecycle_registry.fetch_monomorphic(p.type) : Semantic::LifecyclePlanner.monomorphic_carrier_plan(p.type)
+      base.set_lifecycle_plan!(plan)
+      bindings[p.name.to_s] = base
+    end
+
+    # Kept-identity params (retained identity v4) own the Rc handle their
+    # call edge normalized; release at scope exit unless a consumer moved it.
+    fn_node.params.each do |p|
+      next if p.takes
+      next unless p.symbol&.kept_identity
+
+      base = entry(:rc, rc_alloc: :heap)
+      base.mark_moved_guard!
+      base.set_alloc!(:heap)
+      base[:source_kind] ||= :kept_param
+      bindings[p.name.to_s] = base
+    end
+  end
+
+  # INV-14: consuming sites inherit the source's cleanup recipe via the same
+  # entry builders locals use. Pipeline consumer loops that dequeue OWNED
+  # stream items reuse the TAKES-param recipe for the item's type — an owned
+  # channel payload has exactly the ownership shape of a consumed TAKES arg.
+  sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
+  def self.owned_value_entry(ti, schema_lookup)
+    takes_param_base_entry(ti, schema_lookup)
   end
 
   # Build the base cleanup entry for a TAKES param of type ti. Defers to the
@@ -890,6 +944,12 @@ module CleanupClassifier
       if ti.string? && !mutable_owning_slot?(ti, node, schema_lookup)
         return nil if facts.rodata_provenance
       end
+      # The same rodata fact one level out: a non-escaping list whose items are
+      # all literals lowers to a comptime `[N][]const u8{ "a", "b" }` of static
+      # slices and allocates nothing. Cleaning it hands .rodata addresses to
+      # the allocator -- an invalid free the moment that allocator writes to
+      # what it frees, which the arena hides and the testing allocator does not.
+      return nil if literal_only_list?(node)
     end
 
     # Binding lifecycle may intentionally differ from the surface type. A
@@ -905,6 +965,14 @@ module CleanupClassifier
       entry = entry(:resource, resource_close_plan: schema.close_plan)
     end
 
+    # A tuple is a structural product with no schema, so unlike a named struct
+    # it has no generated __clear_drop and a :uniform entry hands it to
+    # CheatLib.cleanup's structural walk, which frees every []const u8 field.
+    # That walk is only sound while every slice element is owned. A symbol or
+    # borrowed element breaks it -- symbols are interned rodata and are never
+    # duped into owned storage -- so those tuples must clean per element, which
+    # is the one classifier that knows which elements own anything.
+    entry ||= classify_structural_product(ti, schema_lookup) if tuple_with_borrowed_element?(ti)
     entry ||= entry(:uniform, has_moved_guard: false) if ti.tense_observable? && !ti.promise_list?
     if !entry && ti.frozen?
       entry = entry(:frozen, has_moved_guard: false)
@@ -941,6 +1009,13 @@ module CleanupClassifier
     finalized = finalize_alloc_from_storage!(entry, node, ti, schema_lookup)
     finalized&.set_lifecycle_plan!(lifecycle) if lifecycle
     finalized
+  end
+
+  sig { params(ti: Type).returns(T::Boolean) }
+  private_class_method def self.tuple_with_borrowed_element?(ti)
+    return false unless ti.tuple?
+
+    ti.generic_args.any? { |arg| arg.symbol? || arg.borrowed_reference? }
   end
 
   sig { params(ti: Type, schema_lookup: Proc).returns(T.nilable(CleanupEntry)) }
@@ -1010,7 +1085,7 @@ module CleanupClassifier
     symbol = sym.is_a?(SymbolEntry) ? (AST.declaration_symbol(sym) || sym) : sym
     storage = symbol&.storage
     reflected = T.unsafe(node)
-    storage || (reflected.respond_to?(:storage) ? T.cast(reflected.public_send(:storage), T.nilable(Symbol)) : nil)
+    storage || (reflected.respond_to?(:storage) ? T.cast(reflected.storage, T.nilable(Symbol)) : nil)
   end
 
   # ── Individual classifiers ───────────────────────────────────────
@@ -1028,7 +1103,7 @@ module CleanupClassifier
 
   sig { params(ti: Type, node: AST::Node, schema_lookup: Proc).returns(T::Boolean) }
   private_class_method def self.mutable_owning_slot?(ti, node, schema_lookup)
-    return false unless node.respond_to?(:var_mutated) && node.var_mutated == true
+    return false unless node.var_mutated == true
     ownership_bearing_type?(ti, schema_lookup)
   end
 
@@ -1129,6 +1204,15 @@ module CleanupClassifier
     sym = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
     container_alloc = container_alloc_from(sym, node)
     entry(:uniform, alloc: container_alloc, has_moved_guard: false)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  private_class_method def self.literal_only_list?(node)
+    val = node.respond_to?(:value) ? T.unsafe(node).value : nil
+    return false unless val.is_a?(AST::ListLit)
+    items = val.items
+    return false if items.nil? || items.empty?
+    items.all? { |item| item.is_a?(AST::Literal) }
   end
 
   # Map binding storage to cleanup allocator. Heap-wrapper storage modes

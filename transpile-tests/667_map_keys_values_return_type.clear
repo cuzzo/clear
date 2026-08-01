@@ -1,0 +1,27 @@
+# Test: keys()/values() results are RETURN-compatible with declared
+# collection return types. The registry-built result type used to stamp
+# the DEFAULT element ownership (:affine) explicitly, while a declared
+# `[]String@symbol` return leaves element ownership nil; the capability
+# comparison then rejected `RETURN k;` with a RETURN_MISMATCH whose two
+# sides printed identically.
+
+FN codes(diagnostics: {String@symbol}Int64) RETURNS []String@symbol ->
+  k = diagnostics.keys();
+  RETURN k;
+END
+
+FN counts(diagnostics: {String@symbol}Int64) RETURNS []Int64 ->
+  v = diagnostics.values();
+  RETURN v;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE diagnostics: {String@symbol}Int64 = {};
+  diagnostics[:a] = 1;
+  diagnostics[:b] = 2;
+  c = codes(diagnostics);
+  ASSERT c.length() == 2, "two keys";
+  n = counts(diagnostics);
+  ASSERT n.length() == 2, "two values";
+  print("667: map keys/values return type PASSED");
+END

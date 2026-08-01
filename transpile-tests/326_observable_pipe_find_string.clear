@@ -9,7 +9,7 @@
 # ?String — null if nothing matched.
 
 FN main() RETURNS Void ->
-    gen: ~?String[] = BG STREAM {
+    gen: [~]String = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 5_i64 DO
             YIELD i.toString();

@@ -36,7 +36,7 @@ class FunctionSignature
       contract_param = params[index]
       validation_params << AST::Param.new(
         name: arg_spec.name || "arg#{index}",
-        type: arg_spec.type,
+        type: Type.new(arg_spec.type),
         required: true,
         # Receiver mutation and registry-level TAKES metadata are normalized
         # onto the signature params. Rebuilding solely from arg specs silently

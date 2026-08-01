@@ -2,7 +2,7 @@
 require "sorbet-runtime"
 
 require_relative "../../ast/ast"
-require_relative "../../ast/schemas"
+require_relative "../../ast/type"
 require_relative "../helpers/function_signature"
 require_relative "../helpers/with_match_check"
 
@@ -303,11 +303,11 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         substitutions = protocol.associated_types.each_with_object({Self: receiver}) do |associated, table|
-          table[associated.name.to_sym] = Type.new(TypeProjectionExpression.new(
+          table[associated.name.to_sym] = Type.new(TypeExpression.of(TypeProjectionExpression.new(
             owner: receiver.resolved,
             member: associated.name.to_sym,
             protocol: protocol.name.to_sym,
-          ))
+          )))
         end
         FunctionSignature.new(
           params: requirement.params.map do |param|
@@ -492,7 +492,16 @@ module Annotator
           call.mark_explicit_mutable_argument!(index, token)
         end
         resolve_call(call, node.args)
+        # The metadata copy assigns type_object wholesale, so it clears the
+        # type resolve_call just computed. Keep the resolved type first.
+        resolved_return = call.full_type!(context: "inherent static call")
         AST.copy_pipeline_rewrite_metadata!(call, node, include_call_metadata: true)
+        stamp_type!(call, resolved_return)
+        # The StaticCall is what survives in the AST, so it has to carry the
+        # resolved return type too. Without this, a binding whose value is a
+        # static call reaches full_type! with nothing stamped and raises
+        # "unresolved type info for AST::StaticCall".
+        stamp_type!(node, resolved_return)
         node.inherent_call = call
         record_predicate_call_site!(call)
         record_named_call_site!(call)

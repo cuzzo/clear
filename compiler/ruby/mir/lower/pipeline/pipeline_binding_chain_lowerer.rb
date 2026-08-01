@@ -66,7 +66,17 @@ class PipelineBindingChainLowerer < T::Struct
     return nil unless node.smooth?
 
     fold = node.right
-    return nil unless AST.pipeline_range_fold?(fold)
+    unless AST.pipeline_range_fold?(fold)
+      # A chain that binds names (AS $v) but ends in a materializing op has
+      # no supported lowering. Say so — falling through leaves the $v idents
+      # unresolved and produces a misleading "Undefined pipeline binding".
+      if binding_chain_shape?(node)
+        raise "Materializing terminals are not supported in AS $v binding chains. " \
+              "End the chain with a fold terminal (COUNT/SUM/MIN/MAX/AVERAGE/ANY/ALL/FIND), " \
+              "or restructure as nested pipelines (e.g. UNNEST _.field |> SELECT ...)."
+      end
+      return nil
+    end
 
     cursor = T.let(node.left, AST::Node)
     stages = T.let([], T::Array[AST::Node])
@@ -296,6 +306,31 @@ class PipelineBindingChainLowerer < T::Struct
       post_inner_stmts: post_inner,
       result_expr: result,
     )
+  end
+
+  # The UNNEST binding-chain shape unwrap_chain handles, minus the fold
+  # terminal: a BIND_VAR source AND an UNNEST stage in the left spine. A bare
+  # `xs AS $u |> SELECT:concurrent ...` (named CONCURRENT binding) is a
+  # different, SUPPORTED shape and must fall through to its own lowerer.
+  sig { params(node: AST::BinaryOp).returns(T::Boolean) }
+  def binding_chain_shape?(node)
+    has_bind_source = T.let(false, T::Boolean)
+    has_unnest_stage = T.let(false, T::Boolean)
+    cursor = T.let(node.left, AST::Node)
+    while cursor.is_a?(AST::BinaryOp)
+      has_bind_source = true if cursor.op == :BIND_VAR
+
+      rhs = cursor.right
+      if rhs.is_a?(AST::UnnestOp)
+        has_unnest_stage = true
+        unnest_expr = rhs.expression
+        has_bind_source = true if unnest_expr.is_a?(AST::BinaryOp) && unnest_expr.op == :BIND_VAR
+      end
+      break unless cursor.smooth?
+
+      cursor = cursor.left
+    end
+    has_bind_source && has_unnest_stage
   end
 
   sig { params(stages: T::Array[AST::Node], placeholder: String, accum_stmts: T::Array[MIR::Emittable]).returns(T::Array[MIR::Emittable]) }

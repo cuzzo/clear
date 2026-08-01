@@ -55,6 +55,19 @@ class PipelineNamedBinding < T::Struct
   const :zig, String
 end
 
+# A per-element pipeline expression lowered with its hoisted temps captured, so
+# the temps can be emitted INSIDE the loop body (per-iteration) rather than
+# flushing to the enclosing statement outside the loop.
+class PipelineElementHead < T::Struct
+  const :value, MIR::Node
+  const :pending, T::Array[MIR::Emittable]
+  # Whether the element yields a FRESH OWNED value, established from MIR facts at
+  # lowering time (the value's ownership effect, or an owned allocation among the
+  # captured hoists) -- BEFORE the enclosing consumer can only see a post-hoist
+  # Ident. Consumers read this instead of re-deriving ownership from AST syntax.
+  const :owned, T::Boolean
+end
+
 class PipelineLabelState
   extend T::Sig
 

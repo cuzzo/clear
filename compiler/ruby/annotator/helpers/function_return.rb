@@ -127,21 +127,28 @@ class FunctionReturn
       Type.optional_of(T.must(receiver).value_type)
     when Kind::ValueList
       value = T.must(receiver).value_type
-      list = Type.new(:"#{value.resolved}[]", collection: :list)
-      list.elem_ownership = value.ownership
-      list.elem_sync = value.sync
-      list
+      element_list(value)
     when Kind::KeyList
       key = T.must(receiver).key_type
-      list = Type.new(:"#{key.resolved}[]", collection: :list)
-      list.elem_ownership = key.ownership
-      list.elem_sync = key.sync
-      list
+      element_list(key)
     when Kind::Infer
       resolve_infer(args)
     else
       raise "unknown FunctionReturn kind: #{kind.to_s}"
     end
+  end
+
+  # List-of-element type for keys()/values(). Element capabilities are
+  # stamped only when NON-default: a declared `[]String@symbol` return
+  # leaves elem_ownership nil, and explicitly stamping the default
+  # (:affine) both fails the capability equality in return checking and
+  # flips the "has element capabilities" predicates.
+  sig { params(element: Type).returns(Type) }
+  def element_list(element)
+    list = Type.new(:"#{element.resolved}[]", collection: :list)
+    list.elem_ownership = element.ownership unless element.ownership.nil? || element.ownership == :affine
+    list.elem_sync = element.sync unless element.sync.nil?
+    list
   end
 
   sig { params(args: T::Array[AST::Node]).returns(Type) }
@@ -163,8 +170,12 @@ class FunctionReturn
   sig { params(args: T::Array[AST::Node]).returns(Type) }
   def infer_element_type(args)
     receiver = args.first
-    type = receiver.is_a?(AST::Locatable) ? receiver.full_type!(context: "element receiver") : nil
-    type&.element_type || Type.new(:Any)
+    return Type.new(:Any) unless receiver
+
+    type = receiver.type_object
+    return Type.new(:Any) unless type
+
+    type.element_type || Type.new(:Any)
   end
 
   sig { params(args: T::Array[AST::Node]).returns(Type) }
@@ -175,7 +186,10 @@ class FunctionReturn
   sig { params(args: T::Array[AST::Node]).returns(Type) }
   def infer_to_list(args)
     receiver = T.must(args.first)
-    receiver_type = receiver.full_type!(context: "toList receiver")
+    receiver_type = receiver.type_object
+    raise "toList receiver: unresolved type info" unless receiver_type
+    receiver_type = receiver_type
+    raise "toList receiver: unresolved type info" if receiver_type.untyped?
     element_type = if receiver_type.dynamic_stream? || receiver_type.promise_list?
       receiver_type.tense_type.element_type
     elsif receiver_type.bounded_stream?

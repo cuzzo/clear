@@ -1,0 +1,40 @@
+# Test: SKIP / LIMIT over a finite list feeding a materializing SELECT.
+#
+# Two bugs are exercised:
+#   1. SKIP/LIMIT clamp the count with a Zig `@min` builtin. That call is pure
+#      (no ownership effects) and must carry a callable contract, or MIRChecker
+#      rejects it as unverifiable (MIR_CALL_NO_CONTRACT).
+#   2. SKIP is the only list op that returns a BORROWED sub-slice of its source
+#      (`items[n..]`) instead of a fresh owned list. The pipeline materializer
+#      must NOT tag that borrowed result with an owned sink allocator, or it
+#      emits a `defer cleanup` that frees the source's (caller-owned) elements
+#      -- a double free the testing allocator catches as `Invalid free`.
+#
+# String elements (owned, cleanup-bearing) make the double free observable;
+# a `main()` body over frame-allocated source strings triggers the canary.
+
+FN dup(s: String) RETURNS String ->
+    RETURN COPY s;
+END
+
+FN tailJoin(parts: String[]) RETURNS String ->
+    RETURN ((parts |> SKIP 1) |> SELECT dup(_)).join(",");
+END
+
+FN headJoin(parts: String[]) RETURNS String ->
+    RETURN ((parts |> LIMIT 2) |> SELECT dup(_)).join(",");
+END
+
+FN main() RETURNS Void ->
+    MUTABLE ps: String[] = List[];
+    &ps.push("a");
+    &ps.push("b");
+    &ps.push("c");
+
+    tail = tailJoin(ps);
+    ASSERT tail.length() == 3_i64, "b,c";
+
+    head = headJoin(ps);
+    ASSERT head.length() == 3_i64, "a,b";
+    RETURN;
+END

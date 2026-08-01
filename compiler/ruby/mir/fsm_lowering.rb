@@ -124,17 +124,23 @@ module FsmLowering
         end
         expr_t = retained_error ? Type.new(retained_error) :
           (expr_type.is_a?(Type) ? expr_type : Type.new(expr_type))
-        result_alloc = escaping_value_alloc(expr_t)
+        # The tail expression can be more narrowly inferred than the promise
+        # slot (notably a string literal inside Tuple becomes `[N]Byte`). Its
+        # allocator must follow the declared async payload, because the value
+        # escapes the worker even when the source inference itself looks
+        # non-owning.
+        declared_result_type = async_result_shape&.payload_type || expr_t
+        result_alloc = escaping_value_alloc(declared_result_type)
         raw_last_mir = with_decl_alloc(result_alloc) { lower(last_step.expr) }
         last_mir = T.let(raw_last_mir.is_a?(MIR::Emittable) ? raw_last_mir : nil, T.nilable(MIR::Node))
         # The tail expression's annotated type describes the source. A rodata
         # String is borrowed there, but the promise result slot is an owning
         # cross-fiber destination. Give placement the destination contract so
         # it emits the ordinary lifecycle-approved heap copy before transfer.
-        result_destination_type = if expr_t.string? && expr_t.rodata?
+        result_destination_type = if declared_result_type.string? && expr_t.rodata?
           Type.new(:String, location: result_alloc)
         else
-          expr_t
+          declared_result_type
         end
         last_mir = place_value_for_destination(
           last_mir,
@@ -318,6 +324,27 @@ module FsmLowering
         name: safe.to_s,
         target_alloc: binding_entry.alloc,
         move_guarded: guarded,
+      )
+    end
+
+    # Aggregate results can own compiler-generated temporaries without
+    # consuming an AST binding. For example, `Tuple{COPY "x", 1}` lowers the
+    # copied string to a guarded `__tmp_N`, then stores a tuple containing that
+    # temp into the promise. The AST walk above intentionally skips COPY's
+    # source, but the generated copy still crosses the FSM boundary and must
+    # disarm its segment-local cleanup.
+    MIR.nodes(result_mir).grep(MIR::Ident).each do |ident|
+      name = ident.name.to_s
+      safe = rename_map.fetch(name, name)
+      entry = bindings[name] || bindings[safe] || CleanupEntry::NONE
+      guarded = guarded_cleanup_names[name] == true || guarded_cleanup_names[safe] == true
+      next unless guarded || entry.present?
+      next if facts.any? { |fact| fact.name == safe }
+
+      facts << MIR::FsmResultTransferFact.new(
+        name: safe,
+        target_alloc: entry.present? ? entry.alloc : :heap,
+        move_guarded: guarded || entry.has_moved_guard?,
       )
     end
     facts
@@ -512,7 +539,7 @@ module FsmLowering
     lock_field_ref = if any_rc
                        "#{base_field}.ctrl.data.*"
                      elsif polymorphic_locked
-                       "(if (comptime @hasField(@TypeOf(#{base_field}), \"ctrl\")) #{base_field}.ctrl.data.* else #{base_field})"
+                       "(if (comptime @hasDecl(@TypeOf(#{base_field}), \"__clear_ref_carrier\")) #{base_field}.ctrl.data.* else #{base_field})"
                      else
                        base_field
                      end

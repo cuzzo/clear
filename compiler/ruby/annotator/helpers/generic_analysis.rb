@@ -25,7 +25,7 @@ module GenericAnalysis
     TargetLongLong TargetULongLong String Any Void Range Map
   ].freeze
   DeclarationNode = T.type_alias { T.any(AST::VarDecl, AST::BindExpr) }
-  TypeShape = T.type_alias { T.any(Type, Symbol, String) }
+  AnnotationTypeShape = T.type_alias { T.any(Type, Symbol, String) }
   GenericSchema = T.type_alias { T.any(Schemas::EnumSchema, Schemas::StructSchema, Schemas::UnionSchema, Schemas::ResourceSchema) }
   GenericCallNode = T.type_alias { T.any(AST::FuncCall, AST::MethodCall) }
   GenericCallArgs = T.type_alias { T::Array[AST::Locatable] }
@@ -566,7 +566,7 @@ module GenericAnalysis
   def protocol_map_associated_type(type, member)
     return member == :Key ? type.key_type : type.value_type if type.map?
 
-    Type.new(TypeProjectionExpression.new(owner: type.resolved, member: member))
+    Type.new(TypeExpression.of(TypeProjectionExpression.new(owner: type.resolved, member: member)))
   end
   private :protocol_map_associated_type
 
@@ -691,105 +691,103 @@ module GenericAnalysis
   sig { params(expression: TypeExpression, subst: GenericSubstitution).returns(TypeExpression) }
   def apply_expression_subst(expression, subst)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
-    case expression
+    kind = expression.kind
+    cap = expression.capabilities
+    case kind
     when NamedTypeExpression
-      if expression.arguments.empty? && subst.key?(expression.name)
-        replacement = Type.new(T.unsafe(subst[expression.name]))
-        if replacement.generic_payload_type_arg? && !expression.capabilities.polymorphic_shared
+      if kind.arguments.empty? && subst.key?(kind.name)
+        replacement = Type.new(T.unsafe(subst[kind.name]))
+        if replacement.generic_payload_type_arg? && !cap.polymorphic_shared
           replacement.strip_runtime_capabilities!
         end
         parameter = Type.new(expression)
         replacement.merge_capabilities_from!(parameter) if generic_type_has_capabilities?(parameter)
         return replacement.shape.expression
       end
-      NamedTypeExpression.new(
-        name: expression.name,
-        arguments: expression.arguments.map { |argument| apply_expression_subst(argument, subst) },
-        capabilities: expression.capabilities
-      )
+      TypeExpression.new(kind: NamedTypeExpression.new(
+        name: kind.name,
+        arguments: kind.arguments.map { |argument| apply_expression_subst(argument, subst) },
+      ), capabilities: cap)
     when TypeProjectionExpression
-      binding = subst[expression.owner]
+      binding = subst[kind.owner]
       return expression unless binding
 
       concrete = Type.new(binding)
-      projected = case expression.member
-      when :Key then concrete.key_type if (expression.protocol.nil? || expression.protocol == :Map) && concrete.map?
-      when :Value then concrete.value_type if (expression.protocol.nil? || expression.protocol == :Map) && concrete.map?
+      projected = T.let(nil, T.nilable(Type))
+      if kind.member == :Key
+        if (kind.protocol.nil? || kind.protocol == :Map) && concrete.map?
+          projected = concrete.key_type
+        end
+      elsif kind.member == :Value
+        if (kind.protocol.nil? || kind.protocol == :Map) && concrete.map?
+          projected = concrete.value_type
+        end
       end
-      if projected.nil? && expression.protocol && expression.protocol != :Map
-        match = conformance_match(expression.protocol.to_s, concrete)
+      if projected.nil? && kind.protocol && kind.protocol != :Map
+        match = conformance_match(kind.protocol.to_s, concrete)
         if match
-          associated = match.resolution.associated_types[expression.member]
+          associated = match.resolution.associated_types[kind.member]
           projected = apply_type_subst(associated, match.substitutions) if associated
         end
       end
       unless projected
-        return TypeProjectionExpression.new(
+        return TypeExpression.new(kind: TypeProjectionExpression.new(
           owner: concrete.resolved,
-          member: expression.member,
-          protocol: expression.protocol,
-          capabilities: expression.capabilities,
-        )
+          member: kind.member,
+          protocol: kind.protocol,
+        ), capabilities: cap)
       end
 
       TypeExpressionTree.with_root_capabilities(
         projected.shape.expression,
-        expression.capabilities,
+        cap,
       )
     when FunctionTypeExpression
-      signature = expression.signature
-      FunctionTypeExpression.new(
-        signature: Type::FunctionType.new(
-          params: signature.params.map do |param|
-            Type::FunctionTypeParam.new(type: apply_type_subst(param.type, subst))
-          end,
-          return_type: apply_type_subst(signature.return_type, subst),
-          reentrant: signature.reentrant,
-          source_signature: signature.source_signature,
-          abi: signature.abi,
-        ),
-        capabilities: expression.capabilities
-      )
+      signature = Type.function_type_for_expression(kind)
+      TypeExpression.new(kind: Type.function_type_expression_for(Type::FunctionType.new(
+        params: signature.params.map do |param|
+          Type::FunctionTypeParam.new(type: apply_type_subst(param.type, subst))
+        end,
+        return_type: apply_type_subst(signature.return_type, subst),
+        reentrant: signature.reentrant,
+        source_signature: signature.source_signature,
+        abi: signature.abi,
+      )), capabilities: cap)
     when TupleTypeExpression
-      TupleTypeExpression.new(
-        items: expression.items.map { |item| apply_expression_subst(item, subst) },
-        capabilities: expression.capabilities
-      )
+      TypeExpression.new(kind: TupleTypeExpression.new(
+        items: kind.items.map { |item| apply_expression_subst(item, subst) },
+      ), capabilities: cap)
     when OptionalTypeExpression
-      OptionalTypeExpression.new(inner: apply_expression_subst(expression.inner, subst),
-        capabilities: expression.capabilities)
+      TypeExpression.new(kind: OptionalTypeExpression.new(inner: apply_expression_subst(kind.inner, subst)),
+        capabilities: cap)
     when FallibleTypeExpression
-      error_set = expression.error_set
-      FallibleTypeExpression.new(
-        inner: apply_expression_subst(expression.inner, subst),
+      error_set = kind.error_set
+      TypeExpression.new(kind: FallibleTypeExpression.new(
+        inner: apply_expression_subst(kind.inner, subst),
         error_set: error_set.nil? ? nil : apply_expression_subst(error_set, subst),
-        capabilities: expression.capabilities
-      )
+      ), capabilities: cap)
     when FutureTypeExpression
-      FutureTypeExpression.new(inner: apply_expression_subst(expression.inner, subst),
-        capabilities: expression.capabilities)
+      TypeExpression.new(kind: FutureTypeExpression.new(inner: apply_expression_subst(kind.inner, subst)),
+        capabilities: cap)
     when LinearTypeExpression
-      LinearTypeExpression.new(
-        kind: expression.kind,
-        dimensions: expression.dimensions,
-        item: apply_expression_subst(expression.item, subst),
-        allocation_hint: expression.allocation_hint,
-        capabilities: expression.capabilities
-      )
+      TypeExpression.new(kind: LinearTypeExpression.new(
+        kind: kind.kind,
+        dimensions: kind.dimensions,
+        item: apply_expression_subst(kind.item, subst),
+        allocation_hint: kind.allocation_hint,
+      ), capabilities: cap)
     when MapTypeExpression
-      MapTypeExpression.new(
-        key: apply_expression_subst(expression.key, subst),
-        value: apply_expression_subst(expression.value, subst),
-        key_implicit: expression.key_implicit,
-        legacy_separator: expression.legacy_separator,
-        capabilities: expression.capabilities
-      )
+      TypeExpression.new(kind: MapTypeExpression.new(
+        key: apply_expression_subst(kind.key, subst),
+        value: apply_expression_subst(kind.value, subst),
+        key_implicit: kind.key_implicit,
+        legacy_separator: kind.legacy_separator,
+      ), capabilities: cap)
     when StreamTypeExpression
-      StreamTypeExpression.new(
-        cardinality: expression.cardinality,
-        item: apply_expression_subst(expression.item, subst),
-        capabilities: expression.capabilities
-      )
+      TypeExpression.new(kind: StreamTypeExpression.new(
+        cardinality: kind.cardinality,
+        item: apply_expression_subst(kind.item, subst),
+      ), capabilities: cap)
     else
       expression
     end
@@ -900,7 +898,7 @@ module GenericAnalysis
     if node.type.multiowned?
       error!(node, :RC_PROMISE_NEEDS_SHARED)
     end
-    if node.type.split? && !node.type.open_stream?
+    if node.type.split? && !node.type.split_open_stream?
       error!(node, :ATSPLIT_NEEDS_OPEN_STREAM)
     end
   end
@@ -908,7 +906,7 @@ module GenericAnalysis
   # After coerce! validates type compatibility, propagate declared-type metadata
   # into the value node so the transpiler sees the correct runtime type.
   # Handles: BgStreamBlock ~T[INF] retyping, shard_count, @shared promise ownership.
-  sig { params(node: DeclarationNode, final_type: TypeShape).void }
+  sig { params(node: DeclarationNode, final_type: AnnotationTypeShape).void }
   def propagate_declared_type_to_value!(node, final_type)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return unless node.type
@@ -996,7 +994,7 @@ module GenericAnalysis
   # Propagate collection, shard_count, soa, and sync metadata from the declared
   # type annotation (or inferred value type) into node.full_type and node.full_type.
   # These fields are lost during finalize_storage! and coerce!.
-  sig { params(node: DeclarationNode, final_type: TypeShape).void }
+  sig { params(node: DeclarationNode, final_type: AnnotationTypeShape).void }
   def propagate_collection_metadata!(node, final_type)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     _ = final_type
@@ -1042,10 +1040,12 @@ module GenericAnalysis
     container = find_container_source(node.value)
     return unless container
     var_name = node.name.is_a?(String) ? node.name : node.name.to_s
-    ownership_graph[var_name]&.kind = :borrowed
+    graph_node = ownership_graph[var_name]
+    graph_node.kind = :borrowed if graph_node
     T.must(node.symbol).mark_borrowed_alias! if node.respond_to?(:symbol) && node.symbol
     node.container_borrow = true
-    node.value.container_borrow = true if node.value.respond_to?(:container_borrow=)
+    value_node = node.value
+    value_node.container_borrow = true if value_node.respond_to?(:container_borrow=)
     node.storage = :borrow if node.respond_to?(:storage=)
     true
   end
@@ -1059,7 +1059,7 @@ module GenericAnalysis
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     return nil unless expr
     # COPY/CLONE produce owned/retained values; no borrow relationship.
-    return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
+    return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::KeepNode)
     if expr.respond_to?(:container_borrow) && expr.container_borrow
       receiver = if expr.respond_to?(:object)
         T.unsafe(expr).object

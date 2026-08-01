@@ -514,8 +514,28 @@ end
       return
     end
     yield node
-    T.unsafe(node).each_pair do |_, v|
-      walk(v, &block)
-    end if node.respond_to?(:each_pair)
+    case node
+    when AssignField, LetConst
+      walk(node.value, &block)
+    when ErrDeferCall, StmtCall, CallExpr
+      walk(node.args, &block)
+    when IoSubmit
+      walk(node.waiter, &block)
+      walk(node.extra_args, &block)
+    when IfFieldSubLtZeroReturnCall
+      walk(node.return_args, &block)
+    when SubField
+      walk(node.base, &block)
+    when AddrOf, IntCast
+      walk(node.expr, &block)
+    when AllocExpr
+      walk(node.count, &block)
+    when SliceUntilIntCast
+      walk(node.base, &block)
+      walk(node.end_expr, &block)
+    when BinOp
+      walk(node.left, &block)
+      walk(node.right, &block)
+    end
   end
 end

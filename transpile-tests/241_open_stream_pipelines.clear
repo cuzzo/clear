@@ -1,4 +1,4 @@
-# Test: Pipeline operators on ~?T[] (open stream / BG STREAM generator).
+# Test: Pipeline operators on [~]T (open stream / BG STREAM generator).
 # Sequential ops (WHERE, SELECT, EACH, SUM, COUNT, fused chains) and
 # CONCURRENT ops (SELECT, WHERE, EACH with BoundedChannel back pressure).
 # All generators are self-closing (finite); tests use sums/counts for
@@ -10,9 +10,9 @@ STRUCT Acc {
 
 FN main() RETURNS Void ->
     # -------------------------------------------------------
-    # Test 1: ~?T[] | sequential WHERE
+    # Test 1: [~]T | sequential WHERE
     # -------------------------------------------------------
-    gen1: ~?Int64[] = BG STREAM {
+    gen1: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 1;
         WHILE i <= 8 DO
             YIELD i;
@@ -26,9 +26,9 @@ FN main() RETURNS Void ->
     ASSERT sum1 == 20, "open stream WHERE: 2+4+6+8=20";
 
     # -------------------------------------------------------
-    # Test 2: ~?T[] | sequential SELECT
+    # Test 2: [~]T | sequential SELECT
     # -------------------------------------------------------
-    gen2: ~?Int64[] = BG STREAM {
+    gen2: [~]Int64 = BG STREAM {
         YIELD 1;
         YIELD 2;
         YIELD 3;
@@ -43,10 +43,10 @@ FN main() RETURNS Void ->
     ASSERT sum2 == 30, "open stream SELECT: 2+4+6+8+10=30";
 
     # -------------------------------------------------------
-    # Test 3: ~?T[] | sequential EACH (side effects)
+    # Test 3: [~]T | sequential EACH (side effects)
     # -------------------------------------------------------
     MUTABLE sum3: Int64 = 0;
-    gen3: ~?Int64[] = BG STREAM {
+    gen3: [~]Int64 = BG STREAM {
         YIELD 10;
         YIELD 20;
         YIELD 30;
@@ -55,9 +55,9 @@ FN main() RETURNS Void ->
     ASSERT sum3 == 60, "open stream EACH: 10+20+30=60";
 
     # -------------------------------------------------------
-    # Test 4: ~?T[] | sequential SUM (fold)
+    # Test 4: [~]T | sequential SUM (fold)
     # -------------------------------------------------------
-    gen4: ~?Int64[] = BG STREAM {
+    gen4: [~]Int64 = BG STREAM {
         MUTABLE i4: Int64 = 1;
         WHILE i4 <= 5 DO
             YIELD i4;
@@ -70,9 +70,9 @@ FN main() RETURNS Void ->
     ASSERT total4 == 15, "open stream SUM: 1+2+3+4+5=15";
 
     # -------------------------------------------------------
-    # Test 5: ~?T[] | sequential COUNT
+    # Test 5: [~]T | sequential COUNT
     # -------------------------------------------------------
-    gen5: ~?Int64[] = BG STREAM {
+    gen5: [~]Int64 = BG STREAM {
         YIELD 100;
         YIELD 200;
         YIELD 300;
@@ -84,9 +84,9 @@ FN main() RETURNS Void ->
     ASSERT n5 == 3, "open stream COUNT: 200+300+400 > 150";
 
     # -------------------------------------------------------
-    # Test 6: ~?T[] | fused WHERE + SUM
+    # Test 6: [~]T | fused WHERE + SUM
     # -------------------------------------------------------
-    gen6: ~?Int64[] = BG STREAM {
+    gen6: [~]Int64 = BG STREAM {
         MUTABLE i6: Int64 = 1;
         WHILE i6 <= 10 DO
             YIELD i6;
@@ -99,9 +99,9 @@ FN main() RETURNS Void ->
     ASSERT total6 == 30, "open stream WHERE+SUM: 2+4+6+8+10=30";
 
     # -------------------------------------------------------
-    # Test 7: ~?T[] | CONCURRENT SELECT
+    # Test 7: [~]T | CONCURRENT SELECT
     # -------------------------------------------------------
-    gen7: ~?Int64[] = BG STREAM {
+    gen7: [~]Int64 = BG STREAM {
         YIELD 1;
         YIELD 2;
         YIELD 3;
@@ -115,9 +115,9 @@ FN main() RETURNS Void ->
     ASSERT sum7 == 30, "concurrent open stream SELECT: 2+4+6+8+10=30";
 
     # -------------------------------------------------------
-    # Test 8: ~?T[] | CONCURRENT WHERE
+    # Test 8: [~]T | CONCURRENT WHERE
     # -------------------------------------------------------
-    gen8: ~?Int64[] = BG STREAM {
+    gen8: [~]Int64 = BG STREAM {
         MUTABLE i8: Int64 = 1;
         WHILE i8 <= 9 DO
             YIELD i8;
@@ -131,10 +131,10 @@ FN main() RETURNS Void ->
     ASSERT sum8 == 20, "concurrent open stream WHERE: 2+4+6+8=20";
 
     # -------------------------------------------------------
-    # Test 9: ~?T[] | CONCURRENT EACH (shared locked accumulator)
+    # Test 9: [~]T | CONCURRENT EACH (shared locked accumulator)
     # -------------------------------------------------------
     acc9 = Acc{ value: 0 } @shared:locked;
-    gen9: ~?Int64[] = BG STREAM {
+    gen9: [~]Int64 = BG STREAM {
         YIELD 100;
         YIELD 200;
         YIELD 300;

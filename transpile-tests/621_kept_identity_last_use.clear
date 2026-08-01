@@ -1,0 +1,17 @@
+STRUCT Budget { count: Int64 }
+STRUCT Holder { budget: Budget @multiowned }
+
+# Retained identity v4: GIVE at a keep edge relinquishes the caller's
+# handle - the keeper owns it, the caller never touches it again, and the
+# testing allocator proves no leak and no double release.
+FN makeHolder(budget: Budget) RETURNS Holder ->
+    RETURN Holder{ budget: budget };
+END
+
+FN main() RETURNS Void ->
+    shared = Budget{ count: 3 } @multiowned;
+    h = makeHolder(GIVE shared);
+
+    ASSERT h.budget.count == 3, "keeper owns the moved handle";
+    RETURN;
+END

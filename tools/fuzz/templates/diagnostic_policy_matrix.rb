@@ -222,7 +222,7 @@ FuzzGenerator.register(:diagnostic_policy_matrix, cells: DIAGNOSTIC_POLICY_CELLS
       FN leak() RETURNS !C ->
         c = C{ v: COPY "abc" } @locked;
         WITH EXCLUSIVE c AS ref {
-          RETURN CLONE ref;
+          RETURN KEEP ref;
         }
       END
 

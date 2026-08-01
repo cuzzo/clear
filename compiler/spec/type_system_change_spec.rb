@@ -57,7 +57,7 @@ RSpec.describe "type-system change contracts" do
 
   it "parses BG STREAM YIELDS as an item contract before its body" do
     ast = parse(<<~CLEAR)
-      stream: ~?Int64[] = BG STREAM YIELDS ?Int64 {
+      stream: [~]?Int64 = BG STREAM YIELDS ?Int64 {
         YIELD 10_i64;
         YIELD NIL;
       };
@@ -72,7 +72,7 @@ RSpec.describe "type-system change contracts" do
   it "allows definite and NIL yields under an optional item contract" do
     expect {
       annotate(<<~CLEAR)
-        stream: ~?Int64[] = BG STREAM YIELDS ?Int64 {
+        stream: [~]?Int64 = BG STREAM YIELDS ?Int64 {
           YIELD 10_i64;
           YIELD NIL;
         };
@@ -82,7 +82,7 @@ RSpec.describe "type-system change contracts" do
 
   it "infers optionality without synthesizing a union" do
     ast = annotate(<<~CLEAR)
-      stream: ~?Int64[] = BG STREAM {
+      stream: [~]?Int64 = BG STREAM {
         YIELD 10_i64;
         YIELD NIL;
       };
@@ -123,7 +123,7 @@ RSpec.describe "type-system change contracts" do
   it "rejects a yield that conflicts with an explicit item contract" do
     expect {
       annotate(<<~CLEAR)
-        stream: ~?Int64[] = BG STREAM YIELDS Int64 {
+        stream: [~]Int64 = BG STREAM YIELDS Int64 {
           YIELD 10_i64;
           YIELD "OK";
         };
@@ -186,7 +186,7 @@ RSpec.describe "type-system change contracts" do
   it "diagnoses heterogeneous yields with both viable remedies" do
     expect {
       annotate('stream = BG STREAM { YIELD 10_i64; YIELD "OK"; };')
-    }.to raise_error(CompilerError, /Union<Int64, Byte\[2\]>.*add `YIELDS YourUnion`.*OR change one of the YIELD/m)
+      }.to raise_error(CompilerError, /Union<Int64, \[2\]Byte>.*add `YIELDS YourUnion`.*OR change one of the YIELD/m)
   end
 
   it "parses CLOSE as an explicit stream terminator" do
@@ -211,9 +211,11 @@ RSpec.describe "type-system change contracts" do
 
   it "uses EXISTS AS to bind a StreamStep item without unwrapping its optional payload" do
     zig = transpile(<<~CLEAR)
-      stream:~ = BG STREAM { YIELD 10_i64; YIELD NIL; };
-      IF NEXT stream EXISTS AS item THEN
-        seen:? = item;
+      FN main() RETURNS Void ->
+        stream:~ = BG STREAM { YIELD 10_i64; YIELD NIL; };
+        IF NEXT stream EXISTS AS item THEN
+          seen:? = item;
+        END
       END
     CLEAR
 
@@ -267,8 +269,10 @@ RSpec.describe "type-system change contracts" do
 
   it "lowers explicit CLOSE and relies on idempotent deferred close for fallthrough" do
     zig = transpile(<<~CLEAR)
-      stream:~ = BG STREAM { YIELD 1_i64; CLOSE; };
-      step = NEXT stream;
+      FN main() RETURNS Void ->
+        stream:~ = BG STREAM { YIELD 1_i64; CLOSE; };
+        step = NEXT stream;
+      END
     CLEAR
 
     expect(zig).to include(".close();")
@@ -361,9 +365,10 @@ RSpec.describe "type-system change contracts" do
     tuple = ast.statements.first.value
 
     expect(tuple).to be_a(AST::TupleLit)
-    expect(tuple.full_type!.generic_args.map(&:resolved)).to eq([:Int64, :"Byte[2]", :Bool])
-    expect(ast.statements.drop(1).map { |statement| statement.value.resolved_type })
-      .to eq([:Int64, :"Byte[2]", :Bool])
+    expect(tuple.full_type!.generic_args.map { |type| Type.surface_name_type(type) })
+      .to eq(["Int64", "[2]Byte", "Bool"])
+    expect(ast.statements.drop(1).map { |statement| Type.surface_name_type(statement.value.full_type!) })
+      .to eq(["Int64", "[2]Byte", "Bool"])
   end
 
   it "keeps Tuple access distinct from homogeneous array indexing" do
@@ -571,6 +576,42 @@ RSpec.describe "type-system change contracts" do
     }.not_to raise_error
   end
 
+  it "accepts structural value types as map keys and lowers the declared key type" do
+    source = <<~CLEAR
+      STRUCT MapKey {
+        path: String,
+        generation: Int64
+      }
+
+      FN main() RETURNS !Void ->
+        key: MapKey = MapKey{ path: "alpha", generation: 7_i64 };
+        MUTABLE values: {MapKey}String = {};
+        values[key] = "present";
+        found: ?String = values[key];
+        &values.put(key, "updated");
+        present: Bool = values.contains?(key);
+        &values.delete(key);
+        RETURN;
+      END
+    CLEAR
+
+    expect { annotate(source) }.not_to raise_error
+    zig = transpile(source)
+    expect(zig).to include("CheatLib.NumericMapType(MapKey, []const u8)")
+    expect(zig).to include("CheatLib.numericMapPut(MapKey, []const u8")
+    expect(zig).to include("CheatLib.numericMapGet(MapKey, []const u8")
+  end
+
+  it "rejects a key that does not match the declared structural key type" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT MapKey { id: Int64 }
+        MUTABLE values: {MapKey}String = {};
+        missing: ?String = values[1_i64];
+      CLEAR
+    }.to raise_error(CompilerError, /expects MapKey, but this key is Int64/)
+  end
+
   it "lowers canonical collection layers and their allocation hints" do
     zig = transpile(<<~CLEAR)
       FN main() RETURNS !Void ->
@@ -634,15 +675,15 @@ RSpec.describe "type-system change contracts" do
     fallible, future, callbacks = ast.statements.map(&:type)
 
     expect(fallible).to be_error_union
-    fallible_expression = T.cast(fallible.shape.expression, FallibleTypeExpression)
+    fallible_expression = T.cast(fallible.shape.expression.kind, FallibleTypeExpression)
     fallible_list = Type.from_child_expression(fallible_expression.inner)
     expect(fallible_list.collection).to eq(:list)
-    expect(fallible_list.shape.expression).to be_a(LinearTypeExpression)
-    expect(T.cast(fallible_list.shape.expression, LinearTypeExpression).allocation_hint).to eq(8)
+    expect(fallible_list.shape.expression.kind).to be_a(LinearTypeExpression)
+    expect(T.cast(fallible_list.shape.expression.kind, LinearTypeExpression).allocation_hint).to eq(8)
     expect(future).to be_future
     expect(future.tense_type.collection).to eq(:set)
     expect(callbacks.key_type.resolved).to eq(:Symbol)
-    expect(callbacks.value_type.shape.expression).to be_a(FunctionTypeExpression)
+    expect(callbacks.value_type.shape.expression.kind).to be_a(FunctionTypeExpression)
   end
 
   it "rejects unsupported dimensions before accepting ambiguous type syntax" do
@@ -753,7 +794,7 @@ RSpec.describe "type-system change contracts" do
   it "does not auto-migrate overloaded legacy async collection annotations" do
     source = <<~CLEAR
       bounded: ~Int64[2] = DEFAULT;
-      open: ~?Int64[] = DEFAULT;
+      open: [~]Int64 = DEFAULT;
       infinite: ~Int64[INF] = DEFAULT;
       ambiguous_list: ~Int64[]@list = DEFAULT;
       nested_future: ?~Int64[]@list = NIL;
@@ -860,8 +901,10 @@ RSpec.describe "type-system change contracts" do
   end
 
   it "does not migrate an ambiguous capability attached to a tense wrapper" do
-    expression = FutureTypeExpression.new(
-      inner: NamedTypeExpression.new(name: :Int64),
+    expression = TypeExpression.new(
+      kind: FutureTypeExpression.new(
+        inner: TypeExpression.of(NamedTypeExpression.new(name: :Int64)),
+      ),
       capabilities: TypeCapabilities.new(ownership: :shared)
     )
 

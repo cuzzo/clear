@@ -1,0 +1,32 @@
+# Test: Mutation through a plain-map struct payload bound by IF-EXISTS.
+# `IF map[key] EXISTS AS slot` must capture a mutable pointer into the
+# map slot (getPtr) when the payload is a plain struct, exactly like
+# list captures (167) and union captures already do. A value capture
+# compiles to Zig `get()` whose const copy rejects `&slot.field.append`.
+
+STRUCT Slot { sources: []String }
+
+FN addSource(MUTABLE slots: {String}Slot, key: String, value: String) RETURNS Void ->
+    IF slots[key] EXISTS AS slot THEN
+        &slot.sources.append(COPY value);
+    END
+END
+
+FN main() RETURNS Void ->
+    MUTABLE slots: {String}Slot = {};
+    k = "a";
+    slots[k] = Slot{ sources: [] };
+    addSource(&slots, k, "x");
+    addSource(&slots, k, "y");
+
+    # The mutation must be visible through the map afterwards.
+    IF slots[k] EXISTS AS slot THEN
+        ASSERT slot.sources.length() == 2, "both appends persisted in the map slot";
+        ASSERT slot.sources[0]? == "x", "first append visible";
+        ASSERT slot.sources[1]? == "y", "second append visible";
+    ELSE
+        ASSERT FALSE, "slot must exist";
+    END
+
+    print("665: map struct exists mutation PASSED");
+END

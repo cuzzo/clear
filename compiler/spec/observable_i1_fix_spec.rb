@@ -47,7 +47,7 @@ RSpec.describe "A20: I1 fixable error (drop @observable)" do
   it "does not emit any I1 fix for the canonical fold-pipe form" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-          gen: ~?Int64[] = BG STREAM {
+          gen: [~]Int64 = BG STREAM {
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
           };

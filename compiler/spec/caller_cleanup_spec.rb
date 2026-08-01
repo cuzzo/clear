@@ -127,4 +127,29 @@ RSpec.describe CleanupClassifier do
       expect(zig).to match(/cleanup\(@TypeOf/)
     end
   end
+
+  # =========================================================================
+  # A list literal whose items are ALL literals allocates nothing: it lowers
+  # to a comptime `[N][]const u8{ "a", "b" }` of static slices. Cleaning it
+  # passes .rodata addresses to the allocator, which segfaults as soon as the
+  # allocator writes to freed bytes (the testing/debug allocator memsets;
+  # the frame arena's free is a no-op, which is why this hid).
+  # =========================================================================
+  describe "literal-only list argument" do
+    let(:zig) do
+      transpile(<<~CLEAR)
+        FN takeStrs(ys: String[]) RETURNS Int64 -> RETURN ys.length(); END
+        FN main() RETURNS Void ->
+            ASSERT takeStrs(["a:b", "c"]) >= 0_i64, "lit";
+            RETURN;
+        END
+      CLEAR
+    end
+
+    it "hoists the literal array without a cleanup" do
+      hoist = zig[/const (__hoist_\d+) = \[\d+\]\[\]const u8\{/, 1]
+      expect(hoist).not_to be_nil, "expected a hoisted comptime array of literals"
+      expect(zig).not_to include("cleanup(@TypeOf(#{hoist})")
+    end
+  end
 end

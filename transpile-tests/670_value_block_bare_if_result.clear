@@ -1,0 +1,89 @@
+# Regression: a value block ({ ... }) whose trailing/result content is a
+# bare expression-form IF/ELSE_IF/ELSE chain failed to parse ("Expected `;`
+# ... got 'ELSE_IF'") because parse_value_block_expr treats a LEADING IF
+# token as a forced statement (VALUE_BLOCK_STATEMENT_KEYWORDS), routing it
+# through the statement-form IF parser (parse_if_chain), which requires
+# every branch to be a `;`-terminated statement list - not the bare
+# single-expression-per-branch shape an expression-IF actually has.
+# Parenthesizing the trailing IF routes it through parse_expression's
+# expression-position IF parser instead, which correctly accepts bare
+# branches. That alone was not enough: the annotator's visit_BlockExpr
+# never called promote_to_expr_if! on its own result (every OTHER
+# expression position - VarDecl, BindExpr, ReturnNode, FuncCall arg -
+# already does), so the block's own result type stayed Void even once
+# parsing succeeded. Both are fixed together here.
+
+FN classify(value: Int64) RETURNS Int64 ->
+  RETURN (IF value > 10_i64 THEN
+    1_i64
+  ELSE_IF value > 5_i64 THEN
+    2_i64
+  ELSE
+    3_i64
+  END);
+END
+
+# The exact bug shape: a value block whose SOLE content is a parenthesized
+# bare expression-IF with an ELSE_IF arm.
+FN classifyViaBlock(value: Int64) RETURNS Int64 ->
+  RETURN { MUTABLE rtoc_value_block_marker = 0; (IF value > 10_i64 THEN
+    1_i64
+  ELSE_IF value > 5_i64 THEN
+    2_i64
+  ELSE
+    3_i64
+  END) };
+END
+
+# A preceding declaration before the parenthesized trailing IF (the real
+# corpus shape: `value = node[member]; if value.is_a?(...) ... end`).
+FN classifyWithSetup(values: Int64[], idx: Int64) RETURNS Int64 ->
+  RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE value = values[idx]; (IF value > 10_i64 THEN
+    1_i64
+  ELSE_IF value > 5_i64 THEN
+    2_i64
+  ELSE
+    3_i64
+  END) };
+END
+
+# Regression: a value block whose trailing content is NOT an IF (a plain
+# identifier) must be unaffected - no parens added, no change in shape.
+FN plainValueBlock(x: Int64) RETURNS Int64 ->
+  RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE y = x + 1_i64; y };
+END
+
+# Regression: a bare (non-parenthesized) expression-IF directly after
+# RETURN, with no value block at all, must still work exactly as before.
+FN bareReturnIf(value: Int64) RETURNS Int64 ->
+  RETURN IF value > 10_i64 THEN
+    1_i64
+  ELSE_IF value > 5_i64 THEN
+    2_i64
+  ELSE
+    3_i64
+  END;
+END
+
+FN main() RETURNS Void ->
+  ASSERT classify(15_i64) == 1_i64, "classify high";
+  ASSERT classify(7_i64) == 2_i64, "classify mid";
+  ASSERT classify(1_i64) == 3_i64, "classify low";
+
+  ASSERT classifyViaBlock(15_i64) == 1_i64, "block high";
+  ASSERT classifyViaBlock(7_i64) == 2_i64, "block mid";
+  ASSERT classifyViaBlock(1_i64) == 3_i64, "block low";
+
+  nums: Int64[] = [1_i64, 7_i64, 15_i64];
+  ASSERT classifyWithSetup(nums, 0_i64) == 3_i64, "setup low";
+  ASSERT classifyWithSetup(nums, 1_i64) == 2_i64, "setup mid";
+  ASSERT classifyWithSetup(nums, 2_i64) == 1_i64, "setup high";
+
+  ASSERT plainValueBlock(4_i64) == 5_i64, "plain value block";
+
+  ASSERT bareReturnIf(15_i64) == 1_i64, "bare return high";
+  ASSERT bareReturnIf(7_i64) == 2_i64, "bare return mid";
+  ASSERT bareReturnIf(1_i64) == 3_i64, "bare return low";
+
+  RETURN;
+END

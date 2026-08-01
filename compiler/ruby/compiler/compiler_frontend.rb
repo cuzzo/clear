@@ -112,20 +112,7 @@ class CompilerFrontend
       end
     end
 
-    fn_sigs = T.let({}, T::Hash[String, FunctionSignature])
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef)
-      fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
-    end
-
-    # Include module-imported function signatures so MIRLowering can
-    # determine needs_rt/can_fail for cross-module calls.
-    annotator.semantic_root_scope.visible_entries.each do |name, entry|
-      next if fn_sigs.key?(name)
-      sig = entry.fn_signature
-      next unless sig && sig.module_alias
-      fn_sigs[name] = sig
-    end
+    fn_sigs = FunctionSignature.lowering_signatures(ast, annotator.semantic_root_scope)
 
     moved_guard_info = T.let({}, MIRLoweringInput::MovedGuardInfo)
     fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }

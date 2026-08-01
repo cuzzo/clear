@@ -15,6 +15,16 @@ RSpec.describe Semantic::LifecyclePlan do
     expect(stack.semantic_type_key).not_to eq(heap.semantic_type_key)
   end
 
+  it "materializes generic schema fields from type parameters without a schema value" do
+    concrete = Semantic::LifecycleRegistry.concrete_schema_type(
+      Type.new("Box<Probe>"),
+      Type.new(:T),
+      [:T],
+    )
+
+    expect(concrete.resolved).to eq(:Probe)
+  end
+
   it "pairs drop and copy behavior for owned, borrowed, static, RC, and generic values" do
     owned = Semantic::LifecyclePlanner.plan(Type.new(:String), no_schema)
     borrowed = Semantic::LifecyclePlanner.plan(Type.new(:String, location: :borrow), no_schema)
@@ -350,5 +360,94 @@ RSpec.describe Semantic::LifecyclePlan do
     CLEAR
 
     expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
+  end
+end
+
+RSpec.describe Semantic::LinearResourceFacts do
+  let(:resource) do
+    Schemas::ResourceSchema.new(close_plan: Schemas::ResourceClosePlan.method("close"))
+  end
+
+  it "computes one transitive closure across wrappers, schemas, unions, and generic substitutions" do
+    schemas = {
+      Probe: resource,
+      Owner: Schemas::StructSchema.new(fields: { "probe" => Type.new(:Probe) }),
+      Box: Schemas::StructSchema.new(fields: { "value" => Type.new(:T) }, type_params: [:T]),
+      OptionalBox: Schemas::StructSchema.new(fields: { "value" => Type.optional_of(:T) }, type_params: [:T]),
+      Choice: Schemas::UnionSchema.new(variants: {
+        Empty: nil,
+        Wrapped: Schemas::InlineStructVariant.new(fields: { "owner" => Type.new(:Owner) }),
+      }),
+      Maybe: Schemas::UnionSchema.new(variants: { Value: Type.new(:T) }, type_params: [:T]),
+    }
+    lookup = ->(name) { schemas[name.to_sym] }
+    roots = [
+      Type.new(:Probe),
+      Type.optional_of(:Probe),
+      Type.error_union_of(:Probe),
+      Type.new("Tuple<Probe, Int64>"),
+      Type.array_of(:Probe),
+      Type.new("HashMap<Probe>"),
+      Type.new(:Owner),
+      Type.new(:Choice),
+      Type.new("Box<Probe>"),
+      Type.new("Maybe<Probe>"),
+      Type.new("OptionalBox<Probe>"),
+      Type.new(TypeExpression.of(MapTypeExpression.new(
+        key: Type.new(:Probe).shape.expression,
+        value: Type.new(:Int64).shape.expression,
+      ))),
+      Type.new(:Int64),
+    ]
+
+    facts = described_class.build_types(roots, lookup)
+
+    expect(roots.first(12)).to all(satisfy { |type| facts.contains?(type) })
+    expect(facts.contains?(roots.last)).to eq(false)
+  end
+
+  it "finds resources through cycles without recursively walking at query time" do
+    lookup_count = 0
+    schemas = {
+      Left: Schemas::StructSchema.new(fields: { "right" => Type.new(:Right) }),
+      Right: Schemas::StructSchema.new(fields: {
+        "left" => Type.new(:Left),
+        "probe" => Type.new(:Probe),
+      }),
+      Probe: resource,
+    }
+    lookup = lambda do |name|
+      lookup_count += 1
+      schemas[name.to_sym]
+    end
+
+    facts = described_class.build_types([Type.new(:Left)], lookup)
+    lookups_after_build = lookup_count
+
+    expect(facts.contains?(Type.new(:Left))).to eq(true)
+    expect(facts.contains?(Type.new(:Right))).to eq(true)
+    expect(lookup_count).to eq(lookups_after_build)
+  end
+
+  it "marks a resource-free recursive type false and fails closed for uninventoried types" do
+    schemas = {
+      Left: Schemas::StructSchema.new(fields: { "right" => Type.new(:Right) }),
+      Right: Schemas::StructSchema.new(fields: { "left" => Type.new(:Left) }),
+    }
+    lookup = ->(name) { schemas[name.to_sym] }
+    facts = described_class.build_types([Type.new(:Left)], lookup)
+
+    expect(facts.contains?(Type.new(:Left))).to eq(false)
+    expect(facts.contains?(Type.new(:Right))).to eq(false)
+    expect { facts.contains?(Type.new(:Absent)) }
+      .to raise_error(RuntimeError, /missing linear-resource fact/)
+  end
+
+  it "shares facts across storage placement because placement cannot alter reachability" do
+    lookup = ->(name) { name.to_sym == :Probe ? resource : nil }
+    facts = described_class.build_types([Type.new(:Probe)], lookup)
+
+    expect(facts.contains?(Type.new(:Probe, location: :borrow))).to eq(true)
+    expect(facts.contains?(Type.new(:Probe, location: :heap))).to eq(true)
   end
 end

@@ -20,8 +20,8 @@ class FunctionSignature
   LifetimeInput = T.type_alias { T.nilable(T.any(LifetimeSource, T::Array[LifetimeSource])) }
   RequiresMap = T.type_alias { T::Hash[String, T::Set[Symbol]] }
   GenericBounds = T.type_alias { T::Hash[Symbol, T::Array[Type]] }
-  ExternEffectValue = T.type_alias { T.any(Symbol, TrueClass) }
-  ExternEffects = T.type_alias { T::Hash[Symbol, ExternEffectValue] }
+  ExternEffectValue = T.type_alias { AST::ExternEffectValue }
+  ExternEffects = T.type_alias { AST::ExternEffects }
   SignatureEffectSet = T.type_alias { T::Set[Symbol] }
   SyncSource = T.type_alias { T.any(AST::FunctionDef, Struct) }
 
@@ -288,6 +288,34 @@ class FunctionSignature
     nil
   end
 
+  # Signatures MIRLowering needs to classify every call site: the program's
+  # own function definitions plus module-imported signatures, so needs_rt and
+  # can_fail resolve for cross-module calls instead of defaulting to worst case.
+  # ruby-to-clear: skip
+  sig { params(ast: AST::Program, scope: Scope).returns(T::Hash[String, FunctionSignature]) }
+  # ruby-to-clear: skip
+  def self.lowering_signatures(ast, scope)
+    sigs = T.let({}, T::Hash[String, FunctionSignature])
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      sigs[stmt.name] = from_function_def(stmt)
+    end
+    merge_imported_signatures!(sigs, scope)
+    sigs
+  end
+
+  # ruby-to-clear: skip
+  sig { params(sigs: T::Hash[T.untyped, FunctionSignature], scope: Scope).void }
+  # ruby-to-clear: skip
+  def self.merge_imported_signatures!(sigs, scope)
+    scope.visible_entries.each do |name, entry|
+      next if sigs.key?(name)
+      imported = entry.fn_signature
+      next unless imported && imported.module_alias
+      sigs[name] = imported
+    end
+  end
+
   # ruby-to-clear: skip
   sig { params(fn: AST::FunctionDef).returns(FunctionSignature) }
   # ruby-to-clear: skip
@@ -519,10 +547,17 @@ class FunctionSignature
 
   # Signature can_fail is explicit source-visible behavior. Allocation-only
   # effects are stamped on call nodes separately and must not turn every
-  # allocating expression into !T.
+  # allocating expression into !T. A resolved signature carries the ERROR
+  # channel in error_fallible; only when that is unset (extern/legacy sigs that
+  # predate the error_fallible split) do we fall back to can_fail. Reading
+  # can_fail unconditionally would mark a callee error-recoverable purely
+  # because it allocates - the exact conflation this contract forbids, and the
+  # same rule the cross-module import seed applies (see effects.rb).
   sig { returns(T::Boolean) }
   def recoverable_result?
-    @facts.error_fallible == true || can_fail == true
+    return can_fail == true if @facts.error_fallible.nil?
+
+    @facts.error_fallible == true
   end
 
   sig { returns(T::Boolean) }
@@ -743,6 +778,20 @@ class FunctionSignature
     self
   end
   public :sync_from_function_def!
+
+  # Signature params are fresh AST::Param copies; call-edge lowering reads
+  # keep-analysis stamps through the shared SymbolEntry. Adopting the
+  # definition's symbols is the signature's own mutation - callers must
+  # not reach through the params accessor to write elements (the accessor
+  # returns copies under CLEAR's ownership model).
+  sig { params(fn: AST::FunctionDef).void }
+  def adopt_param_symbols!(fn)
+    @contract.params.each_with_index do |sig_param, idx|
+      src = fn.params[idx]
+      sig_param[:symbol] ||= src&.symbol
+    end
+  end
+  public :adopt_param_symbols!
 
   sig { params(requires: T.nilable(RequiresMap)).void }
   def replace_requires_storage!(requires)

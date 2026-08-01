@@ -14,7 +14,7 @@
 # transfer, the 3 dropped strings would leak.
 
 FN main() RETURNS Void ->
-    gen: ~?String[] = BG STREAM {
+    gen: [~]String = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 6_i64 DO
             YIELD (i MOD 3_i64).toString();

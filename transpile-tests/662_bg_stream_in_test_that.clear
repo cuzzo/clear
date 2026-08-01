@@ -1,0 +1,30 @@
+FN main() RETURNS Void ->
+    gen: [~]String = BG STREAM {
+        MUTABLE i: Int64 = 0;
+        WHILE i < 3 DO
+            YIELD i.toString();
+            i = i + 1;
+        END
+    };
+    MUTABLE n: Int64 = 0;
+    gen |> EACH { n = n + _.length(); };
+    ASSERT n == 3, "lens";
+    RETURN;
+END
+
+TEST Probe DO
+  WHEN "run" DO
+    TEST THAT "string stream each" DO
+      gen: [~]String = BG STREAM {
+          MUTABLE i: Int64 = 0;
+          WHILE i < 3 DO
+              YIELD i.toString();
+              i = i + 1;
+          END
+      };
+      MUTABLE n: Int64 = 0;
+      gen |> EACH { n = n + _.length(); };
+      ASSERT n == 3;
+    END
+  END
+END

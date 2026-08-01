@@ -1,7 +1,7 @@
 REQUIRE "interpreter.clear";
 
 FN testPath(name: String) RETURNS !String ->
-  RETURN "../../examples/mal/" $+ name;
+  RETURN "examples/mal/" $+ name;
 END
 
 FN stripCr(line: String) RETURNS !String ->

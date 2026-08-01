@@ -24,6 +24,7 @@ class MIRLoweringGeneratedId < T::Struct
   const :kind, MIRLoweringCounterKind
   const :value, Integer
 
+  # ruby-to-clear: skip
   sig { params(other: T.untyped).returns(T::Boolean) }
   def ==(other)
     return false unless other.is_a?(MIRLoweringGeneratedId)
@@ -31,11 +32,13 @@ class MIRLoweringGeneratedId < T::Struct
     other.kind == kind && other.value == value
   end
 
+  # ruby-to-clear: skip
   sig { params(other: T.untyped).returns(T::Boolean) }
   def eql?(other)
     self == other
   end
 
+  # ruby-to-clear: skip
   sig { returns(Integer) }
   def hash
     [kind, value].hash
@@ -48,7 +51,7 @@ class MIRLoweringGeneratedId < T::Struct
 end
 
 class MIRLoweringCounterSnapshot < T::Struct
-  const :values, T::Hash[MIRLoweringCounterKind, Integer]
+  const :values, T::Hash[String, Integer]
 end
 
 class MIRLoweringCounters
@@ -70,8 +73,8 @@ class MIRLoweringCounters
 
   sig { void }
   def initialize
-    @values = T.let({}, T::Hash[MIRLoweringCounterKind, Integer])
-    COUNTER_KINDS.each { |kind| @values[kind] = 0 }
+    @values = T.let({}, T::Hash[String, Integer])
+    COUNTER_KINDS.each { |kind| @values[counter_key(kind)] = 0 }
   end
 
   sig { returns(MIRLoweringGeneratedId) }
@@ -153,8 +156,25 @@ class MIRLoweringCounters
 
   sig { params(kind: MIRLoweringCounterKind, offset: Integer).returns(MIRLoweringGeneratedId) }
   def next_id(kind, offset:)
-    value = @values.fetch(kind)
-    @values[kind] = value + 1
+    key = counter_key(kind)
+    value = @values.fetch(key)
+    @values[key] = value + 1
     MIRLoweringGeneratedId.new(kind: kind, value: value + offset)
+  end
+
+  sig { params(kind: MIRLoweringCounterKind).returns(String) }
+  def counter_key(kind)
+    return "tmp" if kind == MIRLoweringCounterKind::Tmp
+    return "block_expr" if kind == MIRLoweringCounterKind::BlockExpr
+    return "safe_nav" if kind == MIRLoweringCounterKind::SafeNav
+    return "extern" if kind == MIRLoweringCounterKind::Extern
+    return "lambda" if kind == MIRLoweringCounterKind::Lambda
+    return "stream_literal" if kind == MIRLoweringCounterKind::StreamLiteral
+    return "do_block" if kind == MIRLoweringCounterKind::DoBlock
+    return "background_block" if kind == MIRLoweringCounterKind::BackgroundBlock
+    return "stream_generator" if kind == MIRLoweringCounterKind::StreamGenerator
+    return "loop_mark" if kind == MIRLoweringCounterKind::LoopMark
+
+    "for_loop"
   end
 end

@@ -44,22 +44,22 @@ class FunctionContext
 
   sig { void }
   def record_frame_use!
-    self.frame_count += 1
+    @frame_count += 1
   end
 
   sig { void }
   def record_heap_use!
-    self.heap_count += 1
+    @heap_count += 1
   end
 
   sig { void }
   def record_alloc_use!
-    self.alloc_count += 1
+    @alloc_count += 1
   end
 
   sig { params(bytes: Integer).void }
   def record_stack_bytes!(bytes)
-    self.stack_vars_bytes += bytes
+    @stack_vars_bytes += bytes
   end
 
   sig { void }
@@ -69,22 +69,22 @@ class FunctionContext
 
   sig { void }
   def enter_loop!
-    self.loop_depth += 1
+    @loop_depth += 1
   end
 
   sig { void }
   def exit_loop!
-    self.loop_depth -= 1
+    @loop_depth -= 1
   end
 
   sig { void }
   def enter_conditional!
-    self.conditional_depth += 1
+    @conditional_depth += 1
   end
 
   sig { void }
   def exit_conditional!
-    self.conditional_depth -= 1
+    @conditional_depth -= 1
   end
 
   sig { params(name: String, return_type: T.nilable(Type::TypeInput), lifetime: T::Array[LifetimeSource], type_params: T::Array[Symbol], generic_params: T::Array[AST::GenericParamDecl]).void }

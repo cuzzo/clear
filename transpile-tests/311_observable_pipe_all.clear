@@ -5,7 +5,7 @@
 # AtomicAll inside an `*ObservableAll()` wrapper).
 
 FN main() RETURNS Void ->
-    gen_all_true: ~?Int64[] = BG STREAM {
+    gen_all_true: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 50_i64 DO
             YIELD i;
@@ -17,7 +17,7 @@ FN main() RETURNS Void ->
     final1 = NEXT running1;
     ASSERT final1 == TRUE, "ALL true: every item < 100";
 
-    gen_one_false: ~?Int64[] = BG STREAM {
+    gen_one_false: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 50_i64 DO
             YIELD i;

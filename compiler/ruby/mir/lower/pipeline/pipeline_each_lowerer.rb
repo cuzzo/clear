@@ -48,6 +48,7 @@ class PipelineEachLowerer < T::Struct
   const :lower_sharded_each, T.proc.params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ScopeBlock)
   const :ast_stmts_use_placeholder, T.proc.params(body_stmts: T::Array[AST::Node]).returns(T::Boolean)
   const :next_index_name, T.proc.returns(String)
+  const :source_alloc_fact, T.proc.params(value: MIR::Node, name: String, type_info: Type).returns(T.nilable([MIR::AllocMark, CleanupEntry]))
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(PipelineEachResult) }
   def lower(list_node, each_op)
@@ -109,6 +110,11 @@ class PipelineEachLowerer < T::Struct
     return PipelineEachSourceKind::List if lhs_type.list_collection? || lhs_type.fixed_soa?
     return PipelineEachSourceKind::Set if lhs_type.set_collection?
     return PipelineEachSourceKind::RangeLiteral if list_node.is_a?(AST::RangeLit)
+    # Bare arrays LAST: the rewriter fuses most array EACHes, but a source it
+    # must bypass (an ORDER_BY chain) arrives here typed as a plain array —
+    # materialize it and iterate like any list. After the capability checks so
+    # set/pool/sharded shapes keep their dedicated routes.
+    return PipelineEachSourceKind::List if lhs_type.array?
 
     PipelineEachSourceKind::Unsupported
   end
@@ -223,12 +229,18 @@ class PipelineEachLowerer < T::Struct
       return MIR::ScopeBlock.new([lower_bc_indexed_each(list_node, list_body_mir, skip_nil: false)])
     end
 
-    MIR::ScopeBlock.new([
-      MIR::Let.new("__each_src", source_mir, false, nil, nil),
-      MIR::Let.new("__each_items",
-        MIR::ItemsAccess.new(MIR::Ident.new("__each_src"), true), false, nil, nil),
-      MIR::ForStmt.new(MIR::Ident.new("__each_items"), "__each_item", list_body_mir, nil),
-    ])
+    # An OWNED materialized source (an ORDER_BY chain the rewriter must
+    # bypass) is a first-class synthetic binding: AllocMark + Cleanup, so the
+    # checker can verify it and the list is freed after the loop.
+    stmts = T.let([], T::Array[MIR::Emittable])
+    fact = self.source_alloc_fact.call(source_mir, "__each_src", list_node.full_type!)
+    stmts << fact[0] if fact
+    stmts << MIR::Let.new("__each_src", source_mir, false, nil, nil)
+    stmts << MIR::Cleanup.new("__each_src", fact[1]) if fact
+    stmts << MIR::Let.new("__each_items",
+      MIR::ItemsAccess.new(MIR::Ident.new("__each_src"), true), false, nil, nil)
+    stmts << MIR::ForStmt.new(MIR::Ident.new("__each_items"), "__each_item", list_body_mir, nil)
+    MIR::ScopeBlock.new(stmts)
   end
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ScopeBlock) }

@@ -1,0 +1,32 @@
+# A @node handle bound by IF-EXISTS must stay assignable.
+#
+# The handle is itself a pointer into the NodeStore, so writing a field
+# through the capture lands in the stored node. Excluding node_reference?
+# from the mutable-slot-payload rule made this fail with
+# IMMUTABLE_FIELD_ASSIGNMENT (regression caught by the graph-slotmap
+# benchmark in the buildable-corpus gate).
+
+STRUCT Item {
+    id: Int64,
+    next: ?Item@node
+}
+
+FN main() RETURNS Void ->
+    MUTABLE items: []Item@node = [];
+    TIGHT FOR i IN (0_i64 ..< 4_i64) DO
+        &items.append(Item{ id: i, next: NIL });
+    END
+
+    TIGHT FOR i IN (0_i64 ..< 3_i64) DO
+        IF items[i] EXISTS AS node THEN
+            node.next = items[(i + 1_i64)];
+        END
+    END
+
+    MUTABLE hops = 0_i64;
+    ASSERT items[0_i64]?.next?.id OR_ELSE -1_i64 == 1_i64, "field assignment through a node handle must persist";
+    ASSERT items[1_i64]?.next?.id OR_ELSE -1_i64 == 2_i64, "second link must persist";
+    _ = hops;
+
+    RETURN;
+END

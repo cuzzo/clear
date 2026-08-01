@@ -41,7 +41,7 @@ class PipelineSetIndexLowerer < T::Struct
   const :next_label, T.proc.returns(String)
   const :typed_block_expr, T.proc.params(label: String, body: T::Array[MIR::Emittable], result_type: Type).returns(MIR::BlockExpr)
   const :range_chain, T.proc.params(node: AST::Node).returns(T.nilable(PipelineRangeChain))
-  const :lazy_range_prefix, T.proc.params(source_node: AST::Node, stages: T::Array[AST::Node], on_skip: T.nilable(PipelineRangeSkipHook)).returns(PipelineLazyRangePrefix)
+  const :lazy_range_prefix, T.proc.params(source_node: AST::Node, stages: T::Array[AST::Node], on_skip: T.nilable(PipelineRangeSkipHook), track_owned_items: T::Boolean).returns(PipelineLazyRangePrefix)
   const :range_fold_observable_distinct, T.proc.params(prefix: PipelineLazyRangePrefix, distinct_op: AST::DistinctOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Node).returns(MIR::BlockExpr)
   const :cleanup_bearing_type, T.proc.params(type_info: Type).returns(T::Boolean)
   const :pipeline_alloc_mark_fact, T.proc.params(value: MIR::Node, name: String, fallback_alloc: Symbol, ast_node: T.nilable(AST::Node), context: String, include_cleanup: T::Boolean).returns(T.nilable(PipelineIndexAllocationFact))
@@ -56,21 +56,24 @@ class PipelineSetIndexLowerer < T::Struct
       return observable if observable
     end
 
-    elem_zig = self.transpile_type.call(T.must(smooth_node.full_type!.element_type).resolved.to_s)
+    elem_type = T.must(smooth_node.full_type!.element_type)
+    elem_zig = self.transpile_type.call(elem_type.resolved.to_s)
     set_zig = "CheatLib.Set(#{elem_zig})"
-    alloc = :heap
+    # Placement decides the set's allocator (escape-analysis stamp), the same
+    # source every other pipeline op reads — a hardcoded :heap here diverges
+    # from the hoist temp's cleanup allocator and leaks the backing map.
+    alloc = self.pipeline_alloc.call(smooth_node)
     expr_mir = self.visit_mir_with_placeholder.call(distinct_node.expression, "it")
 
     range_chain = self.range_chain.call(list_node)
-    return lower_range_distinct(range_chain, distinct_node, set_zig, alloc) if range_chain
+    return lower_range_distinct(range_chain, smooth_node, distinct_node, set_zig, alloc) if range_chain
 
+    insert_body = distinct_insert_body(expr_mir, distinct_node.expression, elem_type, elem_zig, alloc, uses_allocator: true)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
-        MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("dist_key", expr_mir, false, nil, nil),
-          distinct_insert_stmt(alloc, uses_allocator: true),
-        ], nil),
+        *distinct_set_alloc_stmts(smooth_node, set_zig, alloc),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", insert_body, nil),
+        *distinct_set_transfer_marks(alloc),
         MIR::BreakStmt.new(label, MIR::Ident.new("dist_set")),
       ]
     end)
@@ -122,7 +125,9 @@ class PipelineSetIndexLowerer < T::Struct
     range_chain = self.range_chain.call(list_node)
     return nil unless range_chain
 
-    prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, nil)
+    # DISTINCT's submit contract consumes the item; track loop ownership so
+    # the dequeued item gets its AllocMark/defer and the transfer suppresses it.
+    prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, nil, true)
     self.range_fold_observable_distinct.call(
       prefix,
       distinct_node,
@@ -132,14 +137,24 @@ class PipelineSetIndexLowerer < T::Struct
     )
   end
 
-  sig { params(range_chain: PipelineRangeChain, distinct_node: AST::DistinctOp, set_zig: String, alloc: Symbol).returns(MIR::BlockExpr) }
-  def lower_range_distinct(range_chain, distinct_node, set_zig, alloc)
-    prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, nil)
+  sig { params(range_chain: PipelineRangeChain, smooth_node: AST::BinaryOp, distinct_node: AST::DistinctOp, set_zig: String, alloc: Symbol).returns(MIR::BlockExpr) }
+  def lower_range_distinct(range_chain, smooth_node, distinct_node, set_zig, alloc)
+    prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, nil, false)
     item_var = prefix.item_var
     key_expr_mir = self.visit_mir_with_placeholder.call(distinct_node.expression, item_var)
     label = self.next_label.call
     source_type = range_chain.source.full_type!
     defer_deinit = source_type.bounded_stream? ? prefix.deinit_stmt : nil
+    elem_type = smooth_node.full_type!.element_type
+    elem_zig = set_zig[/CheatLib\.Set\((.*)\)/, 1].to_s
+    insert_body = if elem_type
+      distinct_insert_body(key_expr_mir, distinct_node.expression, elem_type, elem_zig, alloc, uses_allocator: true)
+    else
+      [
+        MIR::Let.new("dist_key", key_expr_mir, false, nil, nil),
+        distinct_insert_stmt(alloc, MIR::Ident.new("dist_key"), uses_allocator: true),
+      ]
+    end
 
     if self.bc_target.call && range_chain.source.is_a?(AST::Identifier) && source_type.runtime_stream?
       return MIR::BlockExpr.new(label, [
@@ -147,7 +162,7 @@ class PipelineSetIndexLowerer < T::Struct
         MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
         prefix.loop_stmt(self.visit_mir.call(range_chain.source), [
           MIR::Let.new("dist_key", key_expr_mir, false, nil, nil),
-          distinct_insert_stmt(alloc, uses_allocator: false),
+          distinct_insert_stmt(alloc, MIR::Ident.new("dist_key"), uses_allocator: false),
         ]),
         MIR::BreakStmt.new(label, MIR::Ident.new("dist_set")),
       ])
@@ -155,22 +170,90 @@ class PipelineSetIndexLowerer < T::Struct
 
     MIR::BlockExpr.new(label, [
       *prefix.setup_stmts,
-      MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
+      *distinct_set_alloc_stmts(smooth_node, set_zig, alloc),
       *([defer_deinit].compact),
-      prefix.loop_stmt(nil, [
-        MIR::Let.new("dist_key", key_expr_mir, false, nil, nil),
-        distinct_insert_stmt(alloc, uses_allocator: true),
-      ]),
+      prefix.loop_stmt(nil, insert_body),
+      *distinct_set_transfer_marks(alloc),
       MIR::BreakStmt.new(label, MIR::Ident.new("dist_set")),
     ])
   end
 
-  sig { params(alloc: Symbol, uses_allocator: T::Boolean).returns(MIR::ExprStmt) }
-  def distinct_insert_stmt(alloc, uses_allocator:)
-    args = if uses_allocator
-      [MIR::AllocatorRef.new(alloc), MIR::Ident.new("dist_key")]
+  # Set.insert has OWNING semantics: it frees the value when the key already
+  # exists and the set's cleanup deep-frees every stored key with the set's
+  # allocator. A borrowed key therefore must be copied into the set's
+  # allocator; an owned key (the expr allocated it) moves in directly. Either
+  # way the inserted value transfers to the set — the call carries a consuming
+  # contract and the temp is marked moved so no defer frees it behind the set.
+  sig { params(expr_mir: MIR::Node, expr_node: AST::Node, elem_type: Type, elem_zig: String, alloc: Symbol, uses_allocator: T::Boolean).returns(T::Array[MIR::Emittable]) }
+  def distinct_insert_body(expr_mir, expr_node, elem_type, elem_zig, alloc, uses_allocator:)
+    key_let = MIR::Let.new("dist_key", expr_mir, false, nil, nil)
+    unless self.cleanup_bearing_type.call(elem_type)
+      return [key_let, distinct_insert_stmt(alloc, MIR::Ident.new("dist_key"), uses_allocator: uses_allocator)]
+    end
+
+    key_owned = !self.pipeline_owned_cleanup_entry.call(expr_mir, expr_node).nil?
+    owned_value = if key_owned
+      MIR::Ident.new("dist_key")
     else
-      [MIR::Ident.new("dist_key")]
+      MIR::DeepCopy.new(MIR::Ident.new("dist_key"), elem_zig, nil, :full_value, alloc)
+    end
+    temp_name = self.index_temp_name.call
+    fact = self.pipeline_alloc_mark_fact.call(owned_value, temp_name, alloc, expr_node, "DISTINCT owned key", true)
+    return [key_let, distinct_insert_stmt(alloc, owned_value, uses_allocator: uses_allocator)] unless fact
+
+    # The key transfers into the set, which outlives the iteration — the
+    # allocation is not iteration-scoped (no per-iteration rewind wanted).
+    fact.mark.scope = MIR::Placement.heap?(fact.alloc) ? :heap : :function
+    entry = fact.cleanup_entry
+    stmts = T.let([key_let, fact.mark, MIR::Let.new(temp_name, owned_value, false, nil, nil)], T::Array[MIR::Emittable])
+    stmts << MIR::ErrCleanup.new(temp_name, entry.with_moved_guard) if entry
+    stmts << distinct_insert_stmt(alloc, MIR::Ident.new(temp_name), uses_allocator: uses_allocator,
+      consumes: MIR::OwnershipOperandFact.owned_binding(temp_name, elem_type, "DISTINCT insert transfers the key to the set", alloc))
+    stmts.concat(MIR::OwnershipTransferPlan.new(
+      name: temp_name,
+      target: :owned_sink,
+      target_alloc: alloc,
+      move_guarded: !entry.nil?,
+    ).marks)
+    stmts
+  end
+
+  # Explicit allocation + block-result transfer facts: statement-level
+  # finalization stamps these when the pipeline is a statement, but NOT when
+  # the block is nested in an expression position (IF cond, FOREACH source).
+  sig { params(smooth_node: AST::BinaryOp, set_zig: String, alloc: Symbol).returns(T::Array[MIR::Emittable]) }
+  def distinct_set_alloc_stmts(smooth_node, set_zig, alloc)
+    [
+      MIR::AllocMark.new("dist_set", alloc, Type.new(smooth_node.full_type!), MIR::Placement.alloc_scope(alloc)),
+      MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
+    ]
+  end
+
+  sig { params(alloc: Symbol).returns(T::Array[MIR::Emittable]) }
+  def distinct_set_transfer_marks(alloc)
+    MIR::OwnershipTransferPlan.new(
+      name: "dist_set",
+      target: :block_result,
+      target_alloc: alloc,
+      move_guarded: false,
+    ).marks
+  end
+
+  sig { params(alloc: Symbol, insert_value: MIR::Node, uses_allocator: T::Boolean, consumes: T.nilable(MIR::OwnershipOperandFact)).returns(MIR::ExprStmt) }
+  def distinct_insert_stmt(alloc, insert_value, uses_allocator:, consumes: nil)
+    args = if uses_allocator
+      [MIR::AllocatorRef.new(alloc), insert_value]
+    else
+      [insert_value]
+    end
+    contract = if consumes
+      MIR::CallableContract.new(
+        MIR::CallableContract.no_ownership(args.length).signature,
+        MIR::OwnershipContract.consume_operands([consumes]),
+        args.length,
+      )
+    else
+      MIR::CallableContract.no_ownership(args.length)
     end
     MIR::ExprStmt.new(
       MIR::MethodCall.new(
@@ -178,7 +261,7 @@ class PipelineSetIndexLowerer < T::Struct
         "insert",
         args,
         true,
-        MIR::CallableContract.no_ownership(args.length),
+        contract,
       ),
       nil,
     )
@@ -202,7 +285,7 @@ class PipelineSetIndexLowerer < T::Struct
         ], false, false, MIR::CallableContract.no_ownership(3)), nil)]
     end, PipelineRangeSkipHook)
 
-    prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, on_skip)
+    prefix = self.lazy_range_prefix.call(range_chain.source, range_chain.stages, on_skip, false)
     item_var = prefix.item_var
     expr_mir = self.visit_mir_with_placeholder.call(expr_node, item_var)
     label = self.next_label.call
@@ -222,7 +305,7 @@ class PipelineSetIndexLowerer < T::Struct
             expr_node: expr_node,
             item_type: elem_type,
             value_ownership: PipelineIndexValueOwnership::Owned,
-          ), owns_item: false),
+          )),
           MIR::BreakStmt.new(label, MIR::Ident.new("idx_result")),
         ], result_type)
       end
@@ -232,9 +315,6 @@ class PipelineSetIndexLowerer < T::Struct
       *prefix.setup_stmts,
       index_result_let(map_type, :heap),
       *([defer_deinit].compact),
-      # owns_item: false -- build_index_gop_body's Owned value_ownership
-      # already emits a full AllocMark + transfer-into-map contract for the
-      # raw item; the loop's blanket item-ownership prelude would double it.
       prefix.loop_stmt(nil, build_index_gop_body(
         expr_mir,
         :heap,
@@ -242,7 +322,7 @@ class PipelineSetIndexLowerer < T::Struct
         expr_node: expr_node,
         item_type: elem_type,
         value_ownership: PipelineIndexValueOwnership::Owned,
-      ), owns_item: false),
+      )),
       MIR::BreakStmt.new(label, MIR::Ident.new("idx_result")),
     ], result_type)
   end

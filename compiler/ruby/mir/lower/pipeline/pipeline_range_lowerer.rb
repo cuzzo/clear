@@ -6,8 +6,10 @@ require "sorbet-runtime"
 require_relative "../../../ast/ast"
 require_relative "../../../ast/type"
 require_relative "../../lowering/schema_registry"
-require_relative "../../cleanup_entry"
 require_relative "../../mir"
+require_relative "../../cleanup_classifier"
+require_relative "./pipeline_placeholder_usage"
+require_relative "./pipeline_lowering_bridge"
 
 PipelineBcIterRange = T.type_alias { [MIR::IterRange, T.nilable(String)] }
 PipelineRangeSkipHook = T.type_alias { T.proc.params(item_var: String).returns(T::Array[MIR::Emittable]) }
@@ -53,12 +55,13 @@ class PipelineLazyRangePrefix < T::Struct
   const :item_used, T::Boolean
   const :elem_zig, String
   const :next_method, String
-  # Ownership statements for the raw popped stream item (AllocMark +
-  # guarded Cleanup). Streams hand each item over OWNED; the defer-based
-  # pair frees it on every loop exit path (including stage `continue`/
-  # `break`) unless a transfer site emits MIR::MoveMark first. Empty for
-  # range/list sources and non-owning element types.
-  const :item_ownership_prelude, T::Array[MIR::Emittable], default: []
+  # Type of the value item_var holds after all stages ran (the last SELECT
+  # stage's expression type, or the source element type with no SELECT stage).
+  const :item_type, T.nilable(Type), default: nil
+  # Whether item_var holds a value the loop owns (guarded per-iteration
+  # defer emitted in stage_stmts). Terminals that transfer the item out
+  # (FIND match, publish-with-transfer) must set its moved flag.
+  const :item_owned, T::Boolean, default: false
 
   sig { returns(T::Array[MIR::Emittable]) }
   def setup_stmts
@@ -91,23 +94,13 @@ class PipelineLazyRangePrefix < T::Struct
     MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(source_name), "deinit", [], false, MIR::CallableContract.no_ownership(0)))
   end
 
-  sig { params(iter: T.nilable(MIR::Emittable), body_stmts: T::Array[MIR::Emittable], capture_name: T.nilable(String), owns_item: T::Boolean).returns(T.any(MIR::ForStmt, MIR::WhileStmt)) }
-  def loop_stmt(iter, body_stmts, capture_name: initial_capture, owns_item: true)
+  sig { params(iter: T.nilable(MIR::Emittable), body_stmts: T::Array[MIR::Emittable], capture_name: T.nilable(String)).returns(T.any(MIR::ForStmt, MIR::WhileStmt)) }
+  def loop_stmt(iter, body_stmts, capture_name: initial_capture)
     body = stage_body(body_stmts)
     if iter
       MIR::ForStmt.new(iter, capture_name, body, nil)
     else
-      cap = capture_name
-      # owns_item: false opts out for consumers (e.g. INDEX's owned-transfer
-      # path) that already emit their own full AllocMark/transfer contract
-      # for the raw item; the blanket prelude below would double-mark it.
-      unless !owns_item || item_ownership_prelude.empty?
-        # The ownership pair references the raw item, so the capture cannot
-        # be discarded even when the user body ignores it.
-        cap = initial_capture
-        body = item_ownership_prelude + body
-      end
-      MIR::WhileStmt.new(next_call, body, T.must(cap), nil, nil, nil)
+      MIR::WhileStmt.new(next_call, body, T.must(capture_name), nil, nil, nil)
     end
   end
   private :next_call
@@ -169,6 +162,21 @@ class PipelineRangeLowerer
     sig { abstract.params(node: AST::Node, placeholder: T.nilable(String), acc: T.nilable(String)).returns(MIR::Node) }
     def range_visit_mir_with_context(node, placeholder:, acc: nil); end
 
+    # Like range_visit_mir_with_context, but captures pending statements
+    # (COPY temps, allocating sub-expressions) produced while lowering the
+    # expression so per-item stages can place them inside the loop body.
+    sig { abstract.params(node: AST::Node, placeholder: T.nilable(String)).returns(PipelineLowerHeadResult) }
+    def range_lower_head_with_context(node, placeholder:); end
+
+    # Lower under a fiber's runtime binding name so calls that need the
+    # runtime bake the consumer fiber's rt, not the spawning frame's.
+    sig do
+      abstract.type_parameters(:U)
+        .params(rt_name: String, blk: T.proc.returns(T.type_parameter(:U)))
+        .returns(T.type_parameter(:U))
+    end
+    def range_with_fiber_rt(rt_name, &blk); end
+
     sig { abstract.params(body_stmts: T::Array[AST::Node], placeholder: String).returns(T::Array[MIR::Emittable]) }
     def range_visit_pipeline_body_mir(body_stmts, placeholder:); end
 
@@ -207,6 +215,8 @@ class PipelineRangeLowerer
         visit_mir: T.proc.params(node: AST::Node).returns(MIR::Node),
         visit_mir_with_decl_alloc: T.proc.params(node: AST::Node, alloc: Symbol).returns(MIR::Node),
         visit_mir_with_context: T.proc.params(node: AST::Node, placeholder: T.nilable(String), acc: T.nilable(String)).returns(MIR::Node),
+        lower_head_with_context: T.proc.params(node: AST::Node, placeholder: T.nilable(String)).returns(PipelineLowerHeadResult),
+        with_fiber_rt: T.proc.params(rt_name: String, blk: T.proc.returns(T.untyped)).returns(T.untyped),
         visit_pipeline_body_mir: T.proc.params(body_stmts: T::Array[AST::Node], placeholder: String).returns(T::Array[MIR::Emittable]),
         ast_stmts_use_placeholder: T.proc.params(body_stmts: T::Array[AST::Node]).returns(T::Boolean),
         bc_target: T.proc.returns(T::Boolean),
@@ -218,7 +228,9 @@ class PipelineRangeLowerer
         task_config_variant: T.proc.returns(String),
       ).void
     end
-    def initialize(visit_mir:, visit_mir_with_decl_alloc:, visit_mir_with_context:, visit_pipeline_body_mir:,
+    def initialize(visit_mir:, visit_mir_with_decl_alloc:, visit_mir_with_context:, lower_head_with_context:,
+                   with_fiber_rt:,
+                   visit_pipeline_body_mir:,
                    ast_stmts_use_placeholder:, bc_target:, next_label:,
                    transpile_type:, schema_lookup:, runtime_name:, next_observable_id:,
                    task_config_variant:)
@@ -227,6 +239,10 @@ class PipelineRangeLowerer
         T.proc.params(node: AST::Node, alloc: Symbol).returns(MIR::Node))
       @visit_mir_with_context = T.let(visit_mir_with_context,
         T.proc.params(node: AST::Node, placeholder: T.nilable(String), acc: T.nilable(String)).returns(MIR::Node))
+      @lower_head_with_context = T.let(lower_head_with_context,
+        T.proc.params(node: AST::Node, placeholder: T.nilable(String)).returns(PipelineLowerHeadResult))
+      @with_fiber_rt = T.let(with_fiber_rt,
+        T.proc.params(rt_name: String, blk: T.proc.returns(T.untyped)).returns(T.untyped))
       @visit_pipeline_body_mir = T.let(visit_pipeline_body_mir,
         T.proc.params(body_stmts: T::Array[AST::Node], placeholder: String).returns(T::Array[MIR::Emittable]))
       @ast_stmts_use_placeholder = T.let(ast_stmts_use_placeholder,
@@ -253,6 +269,20 @@ class PipelineRangeLowerer
     sig { override.params(node: AST::Node, placeholder: T.nilable(String), acc: T.nilable(String)).returns(MIR::Node) }
     def range_visit_mir_with_context(node, placeholder:, acc: nil)
       @visit_mir_with_context.call(node, placeholder, acc)
+    end
+
+    sig { override.params(node: AST::Node, placeholder: T.nilable(String)).returns(PipelineLowerHeadResult) }
+    def range_lower_head_with_context(node, placeholder:)
+      @lower_head_with_context.call(node, placeholder)
+    end
+
+    sig do
+      override.type_parameters(:U)
+        .params(rt_name: String, blk: T.proc.returns(T.type_parameter(:U)))
+        .returns(T.type_parameter(:U))
+    end
+    def range_with_fiber_rt(rt_name, &blk)
+      @with_fiber_rt.call(rt_name, blk)
     end
 
     sig { override.params(body_stmts: T::Array[AST::Node], placeholder: String).returns(T::Array[MIR::Emittable]) }
@@ -342,9 +372,12 @@ class PipelineRangeLowerer
       stages: T::Array[AST::Node],
       on_skip: T.nilable(PipelineRangeSkipHook),
       source_alloc: T.nilable(Symbol),
+      fiber_rt: T.nilable(String),
+      track_owned_items: T::Boolean,
     ).returns(PipelineLazyRangePrefix)
   end
-  def build_lazy_range_prefix(source_node, stages, on_skip: nil, source_alloc: nil)
+  def build_lazy_range_prefix(source_node, stages, on_skip: nil, source_alloc: nil, fiber_rt: nil,
+                              track_owned_items: false)
     source_ti = source_node.full_type!
     elem_t = source_ti.runtime_stream_storage_element_type || range_literal_element_type(source_node)
     elem_zig = elem_t.zig_type
@@ -355,16 +388,70 @@ class PipelineRangeLowerer
     item_used = T.let(false, T::Boolean)
     outer_stmts = T.let([], T::Array[MIR::Emittable])
     stage_stmts = T.let([], T::Array[MIR::Emittable])
+    # Runtime streams dequeue OWNED items (the producer's YIELD moved them
+    # into the channel; the runtime :heap allocator frees them — the same
+    # allocator identity the WHILE-NEXT consumer path uses). When the
+    # terminal opts in (track_owned_items — folds and other item-OBSERVING
+    # terminals), each owned item (the dequeued capture, fresh SELECT
+    # outputs) gets a guarded per-iteration defer at its creation point;
+    # consuming stages/terminals set its moved flag. Item-CONSUMING
+    # terminals (INDEX, DISTINCT) take ownership of the item themselves and
+    # keep the untracked behavior. Range literals produce scalar values; BC
+    # targets have no native cleanup calls.
+    track_owned = track_owned_items && !@host.range_bc_target?
+    current_type = T.let(elem_t, Type)
+    current_owned = T.let(false, T::Boolean)
+    if track_owned && source_ti.runtime_stream?
+      owned_stmts = owned_stream_item_stmts(initial_capture, elem_t)
+      stage_stmts.concat(owned_stmts)
+      current_owned = !owned_stmts.empty?
+    end
 
+    # Stage expressions run inside the consumer fiber when the terminal is
+    # observable: lower them under that fiber's runtime binding so rt-needing
+    # calls reference the fiber's rt, not the spawning frame's.
+    lower_stages = lambda do
     stages.each do |stage|
       case stage
       when AST::SelectOp
         item_used = true
+        if PipelinePlaceholderUsage.identity_placeholder?(stage.expression)
+          # `SELECT _` is a pure rename: keep the current item (and its
+          # ownership) instead of aliasing it under a new name.
+          next
+        end
         item_counter += 1
         next_item = "__each_item_#{item_counter}"
-        expr_mir = @host.range_visit_mir_with_context(stage.expression, placeholder: item_var)
-        stage_stmts << MIR::Let.new(next_item, expr_mir, false, nil, nil)
+        # Scope pending statements (COPY temps, allocating sub-expressions)
+        # into the loop body: they reference the per-item capture.
+        head = @host.range_lower_head_with_context(stage.expression, placeholder: item_var)
+        stage_stmts.concat(head.pending)
+        stage_stmts << MIR::Let.new(next_item, head.value, false, nil, nil)
         item_var = next_item
+        current_type = Type.new(stage.expression.full_type!)
+        # A projection output borrows from its source item — not a fresh
+        # owned value.
+        if !track_owned || PipelinePlaceholderUsage.placeholder_projection?(stage.expression)
+          current_owned = false
+        else
+          owned_stmts = owned_stream_item_stmts(next_item, current_type)
+          stage_stmts.concat(owned_stmts)
+          current_owned = !owned_stmts.empty?
+          if current_owned
+            # Finalize the stage value's ownership for the checker: the
+            # OwnedCreate's source names the producing call so the fused
+            # inline loop (no fiber boundary) covers it — the same
+            # source-naming rule ownership finalization uses for plain
+            # `v = call()` bindings.
+            stage_value = T.let(head.value, MIR::Node)
+            fact_source = case stage_value
+            when MIR::Call then stage_value.callee.to_s
+            when MIR::MethodCall then stage_value.method.to_s
+            else next_item
+            end
+            stage_stmts << MIR::OwnedCreate.new(next_item, :heap, current_type, fact_source)
+          end
+        end
 
       when AST::WhereOp
         item_used = true if item_var == initial_capture
@@ -409,11 +496,25 @@ class PipelineRangeLowerer
         stage_stmts.concat(@host.range_visit_pipeline_body_mir(stage.body, placeholder: item_var))
       end
     end
+    end
+    if fiber_rt
+      @host.range_with_fiber_rt(fiber_rt) { lower_stages.call }
+    else
+      lower_stages.call
+    end
 
     is_var_stream = source_node.is_a?(AST::Identifier) &&
       (source_ti.dynamic_stream? || source_ti.open_stream? ||
        source_ti.bounded_stream? || source_ti.inf_stream?)
-    source_name = is_var_stream ? source_node.name.to_s : "__range_src"
+    # Resolve the stream binding through identifier lowering, not the raw AST
+    # name: a TEST-body decl disambiguated to `name_LN` would otherwise be
+    # consumed under its original name (undeclared identifier Zig).
+    source_name = if is_var_stream
+      resolved = @host.range_visit_mir(source_node)
+      resolved.is_a?(MIR::Ident) ? resolved.name.to_s : source_node.name.to_s
+    else
+      "__range_src"
+    end
     range_let = unless is_var_stream
       source_mir = if source_alloc
         @host.range_visit_mir_with_decl_alloc(source_node, source_alloc)
@@ -432,27 +533,7 @@ class PipelineRangeLowerer
       outer_stmts: outer_stmts, stage_stmts: stage_stmts,
       item_var: item_var, initial_capture: initial_capture, item_used: item_used,
       elem_zig: elem_zig, next_method: next_method,
-      item_ownership_prelude: stream_item_ownership_prelude(source_ti, elem_t, initial_capture))
-  end
-
-  # Streams transfer each popped item to the consumer OWNED (the producer
-  # move-marks it at YIELD). Mirror the FOR-over-stream contract from
-  # lower_while_bind: a per-iteration AllocMark + moved-guarded Cleanup so
-  # the item is freed on every exit path unless a transfer site emits
-  # MIR::MoveMark. Range literals and borrowing list sources emit nothing.
-  sig { params(source_ti: Type, elem_t: Type, item_var: String).returns(T::Array[MIR::Emittable]) }
-  def stream_item_ownership_prelude(source_ti, elem_t, item_var)
-    return [] if @host.range_bc_target?
-    stream_source = source_ti.dynamic_stream? || source_ti.open_stream? ||
-      source_ti.bounded_stream? || source_ti.inf_stream?
-    return [] unless stream_source && pipeline_element_owns_heap?(elem_t)
-
-    kind = elem_t.any_rc? ? :rc : :uniform
-    entry = CleanupEntry.build(kind, alloc: :heap, has_moved_guard: true)
-    [
-      MIR::AllocMark.new(item_var, :heap, elem_t, :iteration),
-      MIR::Cleanup.new(item_var, entry),
-    ]
+      item_type: current_type, item_owned: current_owned)
   end
 
   sig { params(source_node: AST::Node).returns(Type) }
@@ -463,7 +544,11 @@ class PipelineRangeLowerer
 
   sig { params(range_lit: AST::Node, stages: T::Array[AST::Node], each_op: AST::EachOp).returns(MIR::ScopeBlock) }
   def lower_each_range(range_lit, stages, each_op)
-    prefix = build_lazy_range_prefix(range_lit, stages)
+    # EACH is an item-OBSERVING terminal like the folds: an owned mid-chain
+    # SELECT output (e.g. `SELECT dup(_)`) needs its guarded per-iteration
+    # lifecycle here too, or the checker rightly rejects the untracked owned
+    # value (OWNED_RETURN_WITHOUT_ALLOC).
+    prefix = build_lazy_range_prefix(range_lit, stages, track_owned_items: true)
     item_var = prefix.item_var
     initial_capture = prefix.initial_capture
     item_used = prefix.item_used
@@ -538,13 +623,6 @@ class PipelineRangeLowerer
 
   sig { params(range_lit: AST::Node, stages: T::Array[AST::Node], fold_op: PipelineDefaultObservableFoldOp, smooth_node: AST::BinaryOp).returns(MIR::BlockExpr) }
   def lower_range_fold(range_lit, stages, fold_op, smooth_node)
-    prefix = build_lazy_range_prefix(
-      range_lit,
-      stages,
-      source_alloc: smooth_node.observable_dest ? :heap : nil,
-    )
-    label = @host.range_next_label
-
     if smooth_node.observable_dest
       terminal = FOLD_OP_OBSERVABLE_TERMINAL[fold_op.class]
       if terminal.nil?
@@ -554,11 +632,22 @@ class PipelineRangeLowerer
           nil,
         )
       end
+      fid = @host.range_next_observable_id
+      prefix = build_lazy_range_prefix(
+        range_lit,
+        stages,
+        source_alloc: :heap,
+        fiber_rt: "__rt_obs_#{fid}",
+        track_owned_items: true,
+      )
+      label = @host.range_next_label
       return lower_range_fold_observable_default(
-        prefix, fold_op, smooth_node, label, range_lit, terminal: terminal,
+        prefix, fold_op, smooth_node, label, range_lit, terminal: terminal, observable_id: fid,
       )
     end
 
+    prefix = build_lazy_range_prefix(range_lit, stages, track_owned_items: true)
+    label = @host.range_next_label
     names = PipelineRangeFoldNames.for_label(label, @host.range_bc_target?)
     plan = scalar_fold_plan(prefix, fold_op, smooth_node, names)
     range_accumulating_block(range_lit, prefix, label, plan, prefix.initial_capture)
@@ -570,6 +659,7 @@ class PipelineRangeLowerer
       range_lit,
       stages,
       source_alloc: smooth_node&.observable_dest ? :heap : nil,
+      track_owned_items: true,
     )
     item_var = prefix.item_var
 
@@ -749,6 +839,18 @@ class PipelineRangeLowerer
         MIR::Let.new(names.found, MIR::Lit.new("false"), true, nil, nil),
       ],
       loop_acc_stmts: [MIR::IfStmt.new(pred_mir, [
+        # The matched item transfers to the fold result: suppress its
+        # per-iteration defer before the transfer.
+        *(if prefix.item_owned
+            MIR::OwnershipTransferPlan.new(
+              name: prefix.item_var,
+              target: :owned_sink,
+              target_alloc: :heap,
+              move_guarded: true,
+            ).marks
+          else
+            []
+          end),
         MIR::Set.new(MIR::Ident.new(names.result), MIR::Ident.new(prefix.item_var)),
         MIR::Set.new(MIR::Ident.new(names.found), MIR::Lit.new("true")),
         MIR::BreakStmt.new(nil, nil),
@@ -836,10 +938,9 @@ class PipelineRangeLowerer
       MIR::ExprStmt.new(set_completion, nil),
     ]
 
-    body_mir = [p.loop_stmt(nil, [
-      *(p.item_var == p.initial_capture ? [] : observable_stream_item_alloc_marks(p.item_var, source_node)),
-      *publish_stmts,
-    ])]
+    # AllocMarks and per-iteration defers for loop-owned items are emitted
+    # by the prefix's stage statements; this body only publishes.
+    body_mir = [p.loop_stmt(nil, publish_stmts)]
     fid = observable_id || @host.range_next_observable_id
     spawn = MIR::ObservableConsumerSpawn.new(
       id: fid,
@@ -862,36 +963,41 @@ class PipelineRangeLowerer
     ])
   end
 
-  sig { params(p: PipelineLazyRangePrefix, fold_op: PipelineDefaultObservableFoldOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, terminal: Symbol).returns(MIR::BlockExpr) }
-  def lower_range_fold_observable_default(p, fold_op, smooth_node, label, source_node, terminal:)
+  sig { params(p: PipelineLazyRangePrefix, fold_op: PipelineDefaultObservableFoldOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Node, terminal: Symbol, observable_id: T.nilable(Integer)).returns(MIR::BlockExpr) }
+  def lower_range_fold_observable_default(p, fold_op, smooth_node, label, source_node, terminal:, observable_id: nil)
     spec = PUBLISH_SPEC.fetch(terminal)
-    source_elem = source_node.full_type!(context: "observable pipeline source").tense_type&.element_type
     item = p.item_var
     inner_recv = MIR::FieldGet.new(MIR::Ident.new("__obs_acc"), "inner")
 
-    arg = case spec.expr
-    when :typed
-      inner_zig = @host.range_transpile_type(smooth_node.full_type!.tense_type)
-      [numeric_fold_expr_typed(fold_op.expression, item, inner_zig)]
-    when :f64
-      [numeric_fold_expr_typed(fold_op.expression, item, "f64")]
-    when :pred
-      [@host.range_visit_mir_with_context(fold_op.expression, placeholder: item)]
-    when :item
-      [MIR::Ident.new(item)]
-    when :none
-      []
-    else
-      raise "unsupported observable publish expr #{spec.expr}"
+    fid = observable_id || @host.range_next_observable_id
+    # The publish expression runs inside the consumer fiber: lower it under
+    # the fiber's runtime binding.
+    arg = @host.range_with_fiber_rt("__rt_obs_#{fid}") do
+      case spec.expr
+      when :typed
+        inner_zig = @host.range_transpile_type(smooth_node.full_type!.tense_type)
+        [numeric_fold_expr_typed(fold_op.expression, item, inner_zig)]
+      when :f64
+        [numeric_fold_expr_typed(fold_op.expression, item, "f64")]
+      when :pred
+        [@host.range_visit_mir_with_context(fold_op.expression, placeholder: item)]
+      when :item
+        [MIR::Ident.new(item)]
+      when :none
+        []
+      else
+        raise "unsupported observable publish expr #{spec.expr}"
+      end
     end
 
-    callable_contract = if spec.transfers_item_on_success && source_elem && pipeline_element_owns_heap?(source_elem)
+    published_item_type = p.item_owned ? p.item_type : nil
+    callable_contract = if spec.transfers_item_on_success && published_item_type
       MIR::CallableContract.new(
         FunctionSignature.new(params: [
-          AST::Param.new(name: "item", type: source_elem, takes: true),
+          AST::Param.new(name: "item", type: published_item_type, takes: true),
         ], return_type: Type.new(:Void)),
         MIR::OwnershipContract.consume_operands([
-          MIR::OwnershipOperandFact.owned_binding(item.to_s, source_elem, "observable publish item", :heap),
+          MIR::OwnershipOperandFact.owned_binding(item.to_s, published_item_type, "observable publish item", :heap),
         ]),
         1,
       )
@@ -901,23 +1007,27 @@ class PipelineRangeLowerer
     call = MIR::ExprStmt.new(
       MIR::MethodCall.new(inner_recv, spec.publish_method, arg, false, callable_contract), nil)
 
-    # The raw popped item is owned by the loop's defer-based ownership
-    # prelude (see stream_item_ownership_prelude): the publish call's
-    # consume-operands contract move-marks it on transfer, and every other
-    # path is freed by the guarded defer. Only a stage-produced item
-    # (item != initial_capture) still needs the positional cleanup,
-    # because the prelude does not know about it.
-    raw_item = item == p.initial_capture
-    item_cleanup = raw_item ? [] : consumed_stream_item_cleanup(item, source_node)
+    # The prefix's per-iteration defer releases an owned item on every path;
+    # a publish that transfers the item out suppresses it via its moved flag.
     publish = case spec.gate
     when :always
-      [call, *item_cleanup]
+      [call]
     when :pred
-      pred_mir = @host.range_visit_mir_with_context(fold_op.expression, placeholder: item)
-      if spec.transfers_item_on_success
-        [MIR::IfStmt.new(pred_mir, [call], item_cleanup.empty? ? nil : item_cleanup)]
+      pred_mir = @host.range_with_fiber_rt("__rt_obs_#{fid}") do
+        @host.range_visit_mir_with_context(fold_op.expression, placeholder: item)
+      end
+      if spec.transfers_item_on_success && published_item_type
+        [MIR::IfStmt.new(pred_mir, [
+          *MIR::OwnershipTransferPlan.new(
+            name: item.to_s,
+            target: :call,
+            target_alloc: :heap,
+            move_guarded: true,
+          ).marks,
+          call,
+        ], nil)]
       else
-        [MIR::IfStmt.new(pred_mir, [call], nil), *item_cleanup]
+        [MIR::IfStmt.new(pred_mir, [call], nil)]
       end
     else
       raise "unsupported observable publish gate #{spec.gate}"
@@ -925,7 +1035,8 @@ class PipelineRangeLowerer
 
     lower_range_fold_observable(p, smooth_node, label, source_node,
       acc_alloc_expr: default_obs_alloc_expr(smooth_node),
-      publish_stmts: publish)
+      publish_stmts: publish,
+      observable_id: fid)
   end
 
   sig { params(type_info: Type).returns(T::Boolean) }
@@ -953,40 +1064,26 @@ class PipelineRangeLowerer
     )
   end
 
-  sig { params(item_var: String, source_node: AST::Node).returns(T::Array[MIR::Emittable]) }
-  def observable_stream_item_alloc_marks(item_var, source_node)
-    src_t = source_node.full_type!(context: "observable pipeline source item")
-    elem_t = src_t.tense_type&.element_type
+  # An owned stream-loop item's checker mark plus its release. The release
+  # is a guarded per-iteration `defer` (MIR::Cleanup) — it covers every exit
+  # from the iteration (fallthrough, WHERE/SKIP continue, LIMIT/TAKEWHILE
+  # break) with one unconditional statement, and consuming paths suppress it
+  # by setting the moved flag (MIR::MoveMark). The entry comes from the same
+  # INV-14 recipe builder TAKES params use; :heap matches the channel
+  # producer's allocator (INV-9).
+  sig { params(item_var: String, elem_t: T.nilable(Type)).returns(T::Array[MIR::Emittable]) }
+  def owned_stream_item_stmts(item_var, elem_t)
     return [] unless elem_t && pipeline_element_owns_heap?(elem_t)
 
-    [MIR::AllocMark.new(item_var, :heap, elem_t, :heap)]
-  end
+    entry = CleanupClassifier.owned_value_entry(elem_t, T.unsafe(@host.range_schema_lookup))
+    return [] unless entry&.needs_cleanup?
 
-  sig { params(item_var: String, source_node: AST::Node).returns(T::Array[MIR::Emittable]) }
-  def consumed_stream_item_cleanup(item_var, source_node)
-    src_t = source_node.full_type!(context: "pipeline source cleanup")
-    elem_t = src_t.tense_type&.element_type
-    return [] unless elem_t && pipeline_element_owns_heap?(elem_t)
-
-    contract = MIR::CallableContract.new(
-      FunctionSignature.new(params: [
-        AST::Param.new(name: "__type", type: Type.new(:Any)),
-        AST::Param.new(name: "__alloc", type: Type.new(:Any)),
-        AST::Param.new(name: "__ptr", type: Type.new(:Any)),
-      ], return_type: Type.new(:Void)),
-      MIR::OwnershipContract.consume_operands([
-        MIR::OwnershipOperandFact.owned_binding(item_var, elem_t, "pipeline item cleanup", :heap),
-      ]),
-      3,
-    )
-    [MIR::ExprStmt.new(
-      MIR::Call.new("CheatLib.cleanup", [
-        MIR::TypeOf.new(MIR::Ident.new(item_var)),
-        MIR::AllocatorRef.new(:heap),
-        MIR::AddressOf.new(MIR::Ident.new(item_var)),
-      ], false, false, contract),
-      nil,
-    )]
+    entry = entry.with_alloc(:heap)
+    entry.mark_moved_guard!
+    [
+      MIR::AllocMark.new(item_var, :heap, elem_t, :heap),
+      MIR::Cleanup.new(item_var, entry),
+    ]
   end
 
   sig { params(p: PipelineLazyRangePrefix, reduce_op: AST::ReduceOp, smooth_node: AST::BinaryOp, label: String, source_node: AST::Node).returns(MIR::BlockExpr) }
@@ -1181,7 +1278,6 @@ class PipelineRangeLowerer
   private :max_fold_plan
   private :min_fold_plan
   private :min_max_fold_plan
-  private :observable_stream_item_alloc_marks
   private :range_literal_element_type
   private :scalar_fold_plan
   private :sum_fold_plan

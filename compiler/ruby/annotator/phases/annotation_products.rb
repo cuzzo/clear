@@ -106,6 +106,8 @@ module Annotator
       attr_reader :ownership_graph
       sig { returns(Semantic::LifecycleRegistry) }
       attr_reader :lifecycle_registry
+      sig { returns(Semantic::LinearResourceFacts) }
+      attr_reader :linear_resource_facts
 
       sig do
         params(
@@ -115,10 +117,11 @@ module Annotator
           unresolved_node_count: Integer,
           ownership_graph: OwnershipGraph,
           lifecycle_registry: Semantic::LifecycleRegistry,
+          linear_resource_facts: Semantic::LinearResourceFacts,
           local_function_facts: T.nilable(LocalFacts)
         ).void
       end
-      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:, ownership_graph:, lifecycle_registry: Semantic::LifecycleRegistry.empty, local_function_facts: nil)
+      def initialize(resolution:, body_summaries:, typed_node_count:, unresolved_node_count:, ownership_graph:, lifecycle_registry: Semantic::LifecycleRegistry.empty, linear_resource_facts: Semantic::LinearResourceFacts.empty, local_function_facts: nil)
         raise "typed program cannot publish unresolved nodes" unless unresolved_node_count.zero?
 
         @resolution = T.let(resolution, ResolutionFacts)
@@ -129,6 +132,7 @@ module Annotator
         @unresolved_node_count = T.let(unresolved_node_count, Integer)
         @ownership_graph = T.let(ownership_graph, OwnershipGraph)
         @lifecycle_registry = T.let(lifecycle_registry, Semantic::LifecycleRegistry)
+        @linear_resource_facts = T.let(linear_resource_facts, Semantic::LinearResourceFacts)
         freeze
       end
 

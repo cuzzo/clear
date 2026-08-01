@@ -130,17 +130,6 @@ class_walk = lambda do |node, scope|
           kind = stmt.name
           names = (stmt.arguments&.arguments || []).filter_map { |a| extract_symbol_arg.call(a) }
           names.each { |n| declared[class_path] << [kind, n] }
-        elsif stmt.is_a?(Prism::CallNode) && [:lifecycle_attr, :flow_attr].include?(stmt.name)
-          name = extract_symbol_arg.call((stmt.arguments&.arguments || [])[0])
-          next unless name
-
-          source_class = stmt.name == :lifecycle_attr ? "#{class_path}::BindingLifecycleFacts" : "#{class_path}::BindingFlowFacts"
-          prop_type = struct_props.dig(source_class, name.to_s)
-          next unless prop_type
-
-          kind = stmt.name == :lifecycle_attr ? :attr_accessor : :attr_reader
-          declared[class_path] << [kind, name]
-          ivar_types[class_path][name.to_s] = prop_type
         elsif stmt.is_a?(Prism::DefNode)
           defined_methods[class_path] << stmt.name.to_s
           collect_ivar_types.(stmt, class_path)

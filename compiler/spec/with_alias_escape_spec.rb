@@ -46,16 +46,32 @@ RSpec.describe "WITH alias escape rules" do
     expect { annotate(src) }.to raise_error(CompilerError, /Cannot SHARE WITH-scoped 'y'/)
   end
 
-  it "rejects RETURN CLONE of an EXCLUSIVE alias even when the payload is cloneable" do
+  it "rejects RETURN KEEP of an EXCLUSIVE alias even when the payload is cloneable" do
     src = <<~CLEAR
       FN reclone() RETURNS ~Int64@shared ->
         p: ~Int64@shared = BG { 1; };
         c:~ = p @shared:locked;
-        WITH EXCLUSIVE c AS y { RETURN CLONE y; }
+        WITH EXCLUSIVE c AS y { RETURN KEEP y; }
       END
     CLEAR
 
-    expect { annotate(src) }.to raise_error(CompilerError, /Cannot CLONE WITH-scoped 'y'/)
+    expect { annotate(src) }.to raise_error(CompilerError, /Cannot KEEP WITH-scoped 'y'/)
+  end
+
+  it "allows KEEP of an Rc field projected through a WITH-scoped owner" do
+    src = <<~CLEAR
+      STRUCT Item { value: String }
+      STRUCT Holder { item: Item@multiowned }
+      FN retainField(self: Holder) RETURNS Item@multiowned
+        REQUIRES self: LOCAL
+      ->
+        WITH POLYMORPHIC self AS view {
+          RETURN KEEP view.item;
+        }
+      END
+    CLEAR
+
+    expect { ZigTranspiler.new.transpile(src) }.not_to raise_error
   end
 
   it "rejects RETURN of a POLYMORPHIC alias" do

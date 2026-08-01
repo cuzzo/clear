@@ -139,7 +139,13 @@ outer layer.
 
 ## Legacy Compatibility
 
-Legacy stream spellings such as `~T[N]`, `~?T[]`, `~T[?]`, and `~T[INF]` are
-accepted only during the compatibility window. They are not automatically
-rewritten where the old spelling is overloaded and a local edit could change
-`NEXT` behavior. New code should use `[~N]T`, `[~]T`, and `[~INF]T`.
+Legacy stream spellings such as `~T[N]`, `~T[?]`, and `~T[INF]` are accepted
+only during the compatibility window. They are not automatically rewritten
+where the old spelling is overloaded and a local edit could change `NEXT`
+behavior. New code should use `[~N]T`, `[~]T`, and `[~INF]T`.
+
+The `~?T[]` open-stream alias is retired: the parser rejects it with
+`RETIRED_OPTIONAL_STREAM_SYNTAX` and points at the `[~]T` replacement. The
+alias parsed as "future of optional array" and then flowed through a
+reinterpretation path that silently changed ownership behavior; it now fails
+closed instead.

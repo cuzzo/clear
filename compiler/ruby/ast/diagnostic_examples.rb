@@ -189,20 +189,21 @@ module DiagnosticExamples
   # non-whitespace is the matching marker name.
   sig { params(body: String).returns(T.nilable(String)) }
   def self.extract_heredoc(body)
-    return nil unless body =~ /<<~(CLEAR|FLUX)\b/
-    marker = $~[1]
-    after = $~.post_match
+    heredoc_match = body.match(/<<~(CLEAR|FLUX)\b/)
+    return nil unless heredoc_match
+    marker = heredoc_match[1]
+    after = heredoc_match.post_match
     # Skip the rest of the marker line (e.g. ` ) }.to raise_error(...)`).
     nl = after.index("\n")
     return nil unless nl
-    after_lines = after[(nl + 1)..].lines
+    after_lines = T.must(after[(nl + 1)..]).lines
     end_idx = after_lines.index { |l| l =~ /^\s*#{marker}\s*$/ }
     return nil unless end_idx
     raw_lines = after_lines[0...end_idx]
-    nonempty = raw_lines.reject { |l| l.strip.empty? }
-    return raw_lines.join if nonempty.empty?
-    min_indent = nonempty.map { |l| l[/\A( *)/].length }.min
-    raw_lines.map { |l| l.sub(/\A {0,#{min_indent}}/, "") }.join
+    nonempty = T.must(raw_lines).reject { |l| l.strip.empty? }
+    return T.must(raw_lines).join if nonempty.empty?
+    min_indent = nonempty.map { |l| T.must(l[/\A( *)/]).length }.min
+    T.must(raw_lines).map { |l| l.sub(/\A {0,#{min_indent}}/, "") }.join
   end
 
   private_class_method :extract_first_heredoc_in_it

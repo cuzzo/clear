@@ -126,8 +126,8 @@ FuzzGenerator.register(:bind_capture_cleanup, cells: BIND_CAPTURE_CELLS) do |p|
         #{type_decl}
         FN main() RETURNS Void ->
             source: ?RefItem#{cap} = RefItem{ value: 7_i64 } #{cap};
-            IF CLONE source EXISTS AS item THEN ASSERT item.value == 7_i64, "owned optional CLONE bind"; END
-            IF source EXISTS AS item THEN ASSERT item.value == 7_i64, "CLONE retained source owner"; END
+            IF KEEP source EXISTS AS item THEN ASSERT item.value == 7_i64, "owned optional KEEP bind"; END
+            IF source EXISTS AS item THEN ASSERT item.value == 7_i64, "KEEP retained source owner"; END
             RETURN;
         END
       CHT

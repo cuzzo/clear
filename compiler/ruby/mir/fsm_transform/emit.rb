@@ -1242,11 +1242,11 @@ module FsmTransform
       # which locks are still held.
       try_success_idx = held_set_idx
 
-      prior_meta = prior.map { |c|
+      prior_meta = T.let(prior.map { |c|
         m = lowering_api.fsm_cap_metadata(c, with_node, id, captured)
         return nil if m.nil?
-        m
-      }
+        T.cast(m, FsmLowering::FsmCapMetadata)
+      }, T::Array[FsmLowering::FsmCapMetadata])
 
       pointer_captures = ctx.pointer_captures
       err =

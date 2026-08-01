@@ -183,7 +183,7 @@ RSpec.describe "SHARE keyword" do
       STRUCT Box { value: Int64 }
 
       FN clone_only(b: Box @shared) RETURNS Void ->
-        retained = CLONE b;
+        retained = KEEP b;
         RETURN;
       END
 
@@ -219,17 +219,17 @@ RSpec.describe "SHARE keyword" do
     }.not_to raise_error
   end
 
-  it "rejects CLONE on a bare non-shared value" do
+  it "rejects KEEP on a bare non-shared value" do
     expect {
       annotate(<<~CLEAR)
         STRUCT Box { value: Int64 }
         FN main() RETURNS Void ->
           b = Box{ value: 1 };
-          c = CLONE b;
+          c = KEEP b;
           RETURN;
         END
       CLEAR
-    }.to raise_error(CompilerError, /CLONE is only supported/)
+    }.to raise_error(CompilerError, /KEEP on 'b' is redundant/)
   end
 
   it "records GIVE as the move action for explicit GIVE expressions" do

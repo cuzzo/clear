@@ -44,10 +44,16 @@ RSpec.describe "ClearParser collection capability chains" do
     expect(optional_collection.optional?).to be true
     expect(T.must(optional_collection.wrapped_type).list_collection?).to be true
     expect(T.must(T.must(optional_collection.wrapped_type).element_type).optional?).to be false
-    expect(Type.surface_name_type(optional_collection)).to eq("?(Counter[])")
+    expect(Type.surface_name_type(optional_collection)).to eq("?[]Counter")
 
     parser = ClearParser.new(Lexer.new("").tokenize, "")
     expect(parser.send(:type_annotation_source, optional_collection)).to eq("?(Counter[]@list)")
+  end
+
+  it "renders maps with canonical arbitrary-key CLEAR syntax" do
+    map = Type.new("{Symbol}[]Int64")
+
+    expect(Type.surface_name(map)).to eq("{Symbol}[]Int64")
   end
 
   it "preserves String@symbol element representation when inferring a symbol list literal" do
@@ -61,7 +67,7 @@ RSpec.describe "ClearParser collection capability chains" do
     expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
   end
 
-  it "does not attach cleanup temporaries to top-level symbol collections" do
+  it "rejects top-level runtime symbol lists that would need module-scope cleanup" do
     source = <<~CLEAR
       keywords: []String@symbol = [:alpha, :beta, :gamma];
 
@@ -70,7 +76,11 @@ RSpec.describe "ClearParser collection capability chains" do
       END
     CLEAR
 
-    expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
+    # A dynamic []String@symbol list is heap-built at runtime; top level has
+    # no frame to own its cleanup. The comptime-legal spelling is the
+    # fixed-size [3]String@symbol form covered below.
+    expect { ZigTranspiler.new.transpile(source) }
+      .to raise_error(CompilerError, /MODULE_SCOPE_OWNED_VALUE/)
   end
 
   it "uses static storage for keyword-shaped literal symbols" do

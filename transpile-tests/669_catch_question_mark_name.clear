@@ -1,0 +1,26 @@
+# Regression: a ?-suffixed function name with a CATCH clause must sanitize
+# the inner helper's Zig identifier the same way the outer function does.
+# zig_safe_name strips the trailing ? before use as a Zig identifier;
+# mir/lowering/functions.rb's has_catch branch built its inner helper's
+# name directly from node.name without that sanitization, producing an
+# illegal Zig identifier (a bare `?` inside `fn __isPositive?_body(...)`)
+# only when a rescue-bearing function's CLEAR name ends in `?`.
+
+FN isPositive?(n: Int64) RETURNS !Bool ->
+    IF n < 0 THEN
+        RAISE Input, InvalidJson, "negative";
+    END
+    RETURN n > 0;
+CATCH Input
+    RETURN FALSE;
+END
+
+FN main() RETURNS Void ->
+    r1 = TRY isPositive?(5_i64);
+    ASSERT r1 == TRUE, "positive value";
+
+    r2 = TRY isPositive?(-1_i64);
+    ASSERT r2 == FALSE, "negative caught by CATCH -> FALSE";
+
+    RETURN;
+END

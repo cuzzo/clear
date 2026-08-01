@@ -321,7 +321,7 @@ module DiagnosticBuckets
         BG_STREAM_NO_YIELD BG_STREAM_INCONSISTENT_YIELD BG_STREAM_YIELDS_REQUIRED
         YIELD_OUTSIDE_BG_STREAM CLOSE_OUTSIDE_BG_STREAM
         NEXT_NEEDS_FUTURE
-        ATSPLIT_STREAM_ONLY ATSPLIT_NEEDS_OPEN_STREAM
+        ATSPLIT_STREAM_ONLY ATSPLIT_NEEDS_OPEN_STREAM RETIRED_OPTIONAL_STREAM_SYNTAX INF_STREAM_SELECT_MOVES_ITEM
         RC_PROMISE_NEEDS_SHARED SOA_TO_EXTERN_FN C_EXTERN_UNSUPPORTED_TYPE
       ],
     },
@@ -559,25 +559,29 @@ module DiagnosticBuckets
     },
   ].freeze, T::Array[T::Hash[Symbol, T.untyped]])
 
-  COVERED_CODES = T.let(BUCKETS.flat_map { |bucket|
-    T.cast(bucket[:codes], T::Array[Symbol])
-  }.to_set.freeze, T::Set[Symbol])
-
-  BUCKETS_BY_CATEGORY = T.let(BUCKETS.group_by { |bucket|
-    T.cast(bucket[:category], Symbol)
-  }.transform_values { |buckets| buckets.freeze }.freeze, T::Hash[Symbol, T::Array[T::Hash[Symbol, T.untyped]]])
-
   # All codes referenced by any bucket — used by the audit to confirm
   # bucket assignments are exhaustive for their category.
   sig { returns(T::Set[Symbol]) }
   def self.covered_codes
-    COVERED_CODES
+    codes = T.let(Set.new, T::Set[Symbol])
+    DiagnosticRegistry.codes.each do |code|
+      entry = DiagnosticRegistry.lookup(code)
+      next unless entry
+
+      category = entry[:category]
+      codes.add(code) if category == :type || category == :capability
+    end
+    codes
   end
 
   # Buckets for a specific category (e.g. `:type`).
   sig { params(cat: Symbol).returns(T::Array[T::Hash[Symbol, T.untyped]]) }
   def self.for_category(cat)
-    BUCKETS_BY_CATEGORY.fetch(cat, [])
+    matches = T.let([], T::Array[T::Hash[Symbol, T.untyped]])
+    BUCKETS.each do |bucket|
+      matches << bucket if T.cast(bucket[:category], Symbol) == cat
+    end
+    matches
   end
 
   # Status of a single code:

@@ -1,0 +1,42 @@
+# Non-owning strings must stay non-owning under every wrapper.
+#
+# Symbols are interned and raw strings are borrowed, so neither owns its bytes.
+# Type#needs_cleanup? re-derived ownership in its optional and error-union
+# branches with a bare `|| payload.string?`, which flipped both to owning. The
+# cleanup classifier then asked for a DROP the lifecycle plan refused to
+# provide, and lowering aborted with an internal error:
+#   lowering attempted DROP for non-owning type Caps|own=affine|...
+#
+# The error-union branch needed the markers read off the union itself, since
+# payload_type drops @symbol/@raw.
+
+STRUCT Caps {
+    sync: ?String@symbol,
+    tag: ?String@raw
+}
+
+FN caps__empty() RETURNS Caps ->
+    RETURN Caps{ sync: NIL, tag: NIL };
+END
+
+FN caps__tagged() RETURNS Caps ->
+    RETURN Caps{ sync: :locked, tag: NIL };
+END
+
+FN caps__fallible_symbol() RETURNS !String@symbol ->
+    RETURN :shared;
+END
+
+FN main() RETURNS Void ->
+    empty = caps__empty();
+    ASSERT empty.sync == NIL, "Optional symbol field should default to NIL";
+    ASSERT empty.tag == NIL, "Optional raw field should default to NIL";
+
+    tagged = caps__tagged();
+    ASSERT tagged.sync == :locked, "Optional symbol field should round-trip";
+
+    fallible = TRY (caps__fallible_symbol());
+    ASSERT fallible == :shared, "Fallible symbol should round-trip";
+
+    RETURN;
+END

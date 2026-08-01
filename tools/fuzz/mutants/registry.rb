@@ -25,6 +25,54 @@ module FuzzMutants
 
   REGISTRY = T.let([
     Mutant.new(
+      name: :pipeline_reduce_owned_accumulator_unclassified,
+      description: 'Stop descending value-BlockExpr bodies during cleanup classification, so a desugared REDUCE\'s owned (String) accumulator never gets a cleanup entry and its per-step reassignment falls back to a bare Set. The composite-element matrix must reject the resulting unhoisted/leaked owned accumulator.',
+      invariant: :pipeline_reduce_owned_accumulator,
+      patch: File.join(PATCH_DIR, 'pipeline_reduce_owned_accumulator_unclassified.patch'),
+      templates: [:pipeline_composite_element_matrix],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :pipeline_element_hoist_escape,
+      description: 'Drop the per-element hoist capture so a pipeline element expression\'s field-store-hoisted owned temps flush to the enclosing statement outside the loop. The temp is then allocated once but consumed every iteration; the composite-element matrix must reject the unprovable loop-invariant ownership state.',
+      invariant: :pipeline_element_hoist_scope,
+      patch: File.join(PATCH_DIR, 'pipeline_element_hoist_escape.patch'),
+      templates: [:pipeline_composite_element_matrix],
+      kill: { bucket: :mir_error, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :pipeline_skip_borrowed_source_freed,
+      description: 'Treat a SKIP terminal\'s borrowed sub-slice result as owned, so the pipeline materializer emits a `defer cleanup` that frees the borrowed source\'s (caller-owned) elements. The gap matrix\'s skip-into-SELECT cell must catch the resulting double free.',
+      invariant: :pipeline_borrowed_view_sink,
+      patch: File.join(PATCH_DIR, 'pipeline_skip_borrowed_source_freed.patch'),
+      templates: [:pipeline_gap_matrix],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :kept_identity_mutable_model,
+      description: 'Skip the declaration-sited model check for plain MUTABLE bindings at keep edges. A kept MUTABLE binding must declare @multiowned/@value or GIVE; silently promoting it makes sharing-vs-copying unobservable at the declaration.',
+      invariant: :kept_identity_mutable_model,
+      patch: File.join(PATCH_DIR, 'kept_identity_mutable_model.patch'),
+      templates: [:kept_identity_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :retained_needs_own_copy,
+      description: 'Skip the check that rejects a bare @multiowned/@shared handle passed to a plain (RawT) parameter. Without it the handle is silently deep-copied out (identity-destroying); crossing that carrier boundary must be explicit via OWN COPY.',
+      invariant: :retained_needs_own_copy,
+      patch: File.join(PATCH_DIR, 'retained_needs_own_copy.patch'),
+      templates: [:carrier_ownership_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
+      name: :carrier_copy_polymorphic,
+      description: 'Skip the rule-6 check that rejects COPY on a carrier-polymorphic parameter. COPY cannot guarantee independent identity when the caller may pass a retained value; admitting it silently aliases instead of copying.',
+      invariant: :carrier_copy_polymorphic,
+      patch: File.join(PATCH_DIR, 'carrier_copy_polymorphic.patch'),
+      templates: [:carrier_ownership_matrix],
+      kill: { bucket: :unexpected_pass, min_delta: 1 }
+    ),
+    Mutant.new(
       name: :protocol_conformance_signature,
       description: 'Accept incompatible protocol member signatures. A concrete implementation must match the declared return and parameter contracts.',
       invariant: :protocol_conformance_signature,

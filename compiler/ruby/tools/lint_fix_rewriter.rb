@@ -207,7 +207,10 @@ module LintFixRewriter
       node.each { |n| walk_for_redundant_type(n, source, edits) }
       return
     end
-    if (node.is_a?(AST::VarDecl) || decl_mode_bind_expr?(node)) && node.type
+    # A module CONST must keep its explicit type - the parser requires it
+    # (CONST_NEEDS_TYPE), so it is never redundant.
+    if (node.is_a?(AST::VarDecl) || decl_mode_bind_expr?(node)) && node.type &&
+       !(node.is_a?(AST::VarDecl) && node.module_const)
       edit = compute_redundant_type_edit(node, source)
       edits << edit if edit
     end

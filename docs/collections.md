@@ -268,17 +268,20 @@ n = 1000000;
 `@sharded(N)` is a one-line declaration change. Functions don't need to know — a function that takes `{String}String` can accept the same map payload behind a sharded binding:
 
 ```clear
-# One-line change: add @sharded(8) to the declaration
-MUTABLE map: {String}@sharded(8) String = {};
-
 # Functions: no @sharded needed in parameter types
 FN doWork(MUTABLE map: {String}String, key: String) RETURNS !Void ->
     map[key] = "value";
 END
 
-# BG blocks: auto-pinned when they capture a @sharded map
-BG { doWork(&map, "hello"); }
-# [Note] BG block auto-pinned — captures shared/locked resource.
+FN main() RETURNS Void ->
+    # One-line change: add @sharded(8):locked to the declaration
+    # (:locked lets any fiber reach any key — see the variant table above)
+    MUTABLE map: {String}@sharded(8):locked String = {};
+
+    # BG blocks: auto-pinned when they capture a @sharded map
+    BG { doWork(&map, "hello"); }
+    # [Note] BG block auto-pinned — captures shared/locked resource.
+END
 ```
 
 The compiler handles everything:

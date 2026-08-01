@@ -1,0 +1,63 @@
+# pkg:regex - Ruby/Elixir-flavored regular expressions.
+#
+# A `Regexp` is compiled once and matched many times. Ruby regex literals
+# (`/pattern/`) are hoisted by the compiler to a compiled `Regexp` constant,
+# so matching never recompiles the pattern. The PCRE2 engine lives in the
+# native `compiler_regex` module; this package is the CLEAR-facing surface.
+#
+# Argument order is Elixir's `Regex` (regex first), which reads well for the
+# hoisted-constant style: `firstMatch(TENSE_PREFIX, source)`.
+
+EXTERN STRUCT Regexp {} FROM "compiler_regex";
+EXTERN STRUCT RegexpMatch {} CLOSE "deinit" FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS Regexp EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexMatch(subject: String, regex: Regexp) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexMatchData(subject: String, regex: Regexp) RETURNS ?RegexpMatch EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexCapture(match: RegexpMatch, index: Int64) RETURNS match:String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexFirstMatch(subject: String, regex: Regexp) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexMatchGroup(subject: String, regex: Regexp, index: Int64) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceAll(subject: String, regex: Regexp, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceFirst(subject: String, regex: Regexp, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+
+# Ruby `Regexp.new(pattern)` / Elixir `Regex.compile!(pattern)`.
+PUB FN compile(pattern: String) RETURNS Regexp ->
+  RETURN compilerRegexCompile(pattern);
+END
+
+# Ruby `re.match?(subject)` / Elixir `Regex.match?(re, subject)`.
+PUB FN match?(re: Regexp, subject: String) RETURNS Bool ->
+  RETURN compilerRegexMatch(subject, re);
+END
+
+# Ruby `subject[/re/]`: the whole first match, or NIL when there is no match.
+# Returns an owned copy (Ruby's `str[/re/]` is a fresh String, not a view).
+PUB FN firstMatch(re: Regexp, subject: String) RETURNS ?String ->
+  RETURN COPY compilerRegexFirstMatch(subject, re);
+END
+
+# Ruby `subject[/re/, n]`: capture group n of the first match (0 = whole match).
+PUB FN matchGroup(re: Regexp, subject: String, index: Int64) RETURNS ?String ->
+  RETURN COPY compilerRegexMatchGroup(subject, re, index);
+END
+
+# Ruby `subject.gsub(re, replacement)` / Elixir `Regex.replace(re, subject, r)`.
+PUB FN replaceAll(re: Regexp, subject: String, replacement: String) RETURNS String ->
+  RETURN compilerRegexReplaceAll(subject, re, replacement);
+END
+
+# Ruby `subject.sub(re, replacement)`.
+PUB FN replaceFirst(re: Regexp, subject: String, replacement: String) RETURNS String ->
+  RETURN compilerRegexReplaceFirst(subject, re, replacement);
+END
+
+# Ruby `re.match(subject)` / `subject.match(re)`: a match with capture groups,
+# or NIL when there is no match. The result owns its buffers and is closed
+# automatically at scope exit.
+PUB FN match(re: Regexp, subject: String) RETURNS ?RegexpMatch ->
+  RETURN compilerRegexMatchData(subject, re);
+END
+
+# Ruby `matchdata[n]`: capture group n (0 = whole match). Returns an owned copy.
+PUB FN group(m: RegexpMatch, index: Int64) RETURNS String ->
+  RETURN COPY compilerRegexCapture(m, index);
+END

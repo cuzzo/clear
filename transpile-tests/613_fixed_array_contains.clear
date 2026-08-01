@@ -1,0 +1,11 @@
+text_types: [3]String@symbol = [:STRING, :CHAR, :ARROW];
+weights: [2]Int64 = [10, 20];
+
+FN main() RETURNS Void ->
+    ASSERT text_types.contains?(:STRING);
+    ASSERT text_types.contains?(:ARROW);
+    ASSERT !text_types.contains?(:NUMBER);
+    ASSERT weights.contains?(20);
+    ASSERT !weights.contains?(30);
+    RETURN;
+END

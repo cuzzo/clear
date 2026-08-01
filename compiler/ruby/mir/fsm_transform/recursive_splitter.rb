@@ -204,11 +204,8 @@ end
 
       builder = Builder.new
       done_idx = builder.reserve_index
-      begin
-        entry = emit_stmts(body, done_idx, builder, lowering, ctx || {})
-      rescue UnsupportedShape
-        return nil
-      end
+      entry = emit_stmts_or_nil(body, done_idx, builder, lowering, ctx || {})
+      return nil unless entry
 
       # The Done segment has no body; it's the final exit.
       builder.fill(done_idx, [], Segments::Done.new)
@@ -228,6 +225,21 @@ end
         synthetic_fields: synth,
         alias_overrides_by_index: alias_table,
       )
+    end
+
+    sig do
+      params(
+        body: T::Array[AST::Node],
+        after_idx: Integer,
+        builder: Builder,
+        lowering: FsmTransform::LoweringApi,
+        ctx: SplitContext,
+      ).returns(T.nilable(Integer))
+    end
+    def self.emit_stmts_or_nil(body, after_idx, builder, lowering, ctx)
+      emit_stmts(body, after_idx, builder, lowering, ctx)
+    rescue UnsupportedShape
+      nil
     end
 
     class UnsupportedShape < StandardError; end
@@ -317,17 +329,18 @@ end
     sig { params(stmts: T.nilable(T.any(SegmentStmt, T::Array[SegmentStmt]))).returns(T::Boolean) }
     def self.contains_suspend_anywhere?(stmts)
       T.bind(self, T.untyped) rescue nil
-      Array(stmts).any? do |stmt|
-        next true if stmt.is_a?(AST::Locatable) && Segments.classify_suspend(stmt)
+      Array(stmts).each do |stmt|
+        return true if stmt.is_a?(AST::Locatable) && Segments.classify_suspend(stmt)
         case stmt
         when AST::WithBlock
-          with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
+          return true if with_lock_suspend?(stmt) || contains_suspend_anywhere?(stmt.body)
         else
-          next false unless stmt.is_a?(Struct)
+          next unless stmt.is_a?(Struct)
 
-          AST.child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
+          return true if AST.child_bodies(stmt).any? { |body| contains_suspend_anywhere?(body) }
         end
       end
+      false
     end
 
     # A WITH "lock-suspends" if any of its capabilities require the
@@ -632,6 +645,7 @@ end
     private_class_method :emit_for_range_fragment
     private_class_method :emit_if_fragment
     private_class_method :emit_stmts
+    private_class_method :emit_stmts_or_nil
     private_class_method :emit_suspend
     private_class_method :emit_suspend_with_pre
     private_class_method :emit_while_fragment

@@ -1,5 +1,7 @@
 # typed: strict
 
+require_relative "state"
+
 class ClearParser
   extend T::Sig
 
@@ -126,8 +128,8 @@ class ClearParser
       token = peek_at(offset)
       return false unless token
       if token.type == :CHAR
-        depth += 1 if OPEN_DELIMITERS.include?(token.text!)
-        depth -= 1 if CLOSE_DELIMITERS.include?(token.text!)
+        depth += 1 if "([{".include?(token.text!)
+        depth -= 1 if ")]}".include?(token.text!)
       end
       return false if depth == 0 && ((token.type == :KEYWORD && %w[THEN ELSE END].include?(token.value)) || token.type == :ARROW || token.type == :EOF)
       if token.type == :KEYWORD && %w[EXISTS IS_OK].include?(token.value)

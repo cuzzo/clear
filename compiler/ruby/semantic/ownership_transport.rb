@@ -131,22 +131,37 @@ class OwnershipTransportFacts
 
   sig { params(node: T.any(AST::VarDecl, AST::BindExpr), ancestors: T::Array[AST::Node]).void }
   def record_alias(node, ancestors)
-    source = node.value
-    symbol = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
-    return unless self.class.source?(source) && symbol.is_a?(SymbolEntry)
+    source = T.let(node, AST::Node)
+    symbol = T.let(nil, T.nilable(SymbolEntry))
+    if node.is_a?(AST::VarDecl)
+      source = T.cast(node.value, AST::Node)
+      symbol = node.symbol
+    elsif node.is_a?(AST::BindExpr)
+      source = T.cast(node.value, AST::Node)
+      symbol = node.symbol
+    end
+    return unless self.class.source?(source)
+    return unless symbol.is_a?(SymbolEntry)
     root = source_root_identifier(source)
     return unless root
     source_id = binding_id(root)
     return unless source_id
     source_name = self.class.source_display(source)
-    root_id, root_name = @alias_roots.fetch(source_id, [source_id, source_name])
+    fallback_root = T.let([source_id, source_name], [Integer, String])
+    root_id, root_name = @alias_roots.fetch(source_id, fallback_root)
+    destination_name = T.let("", String)
+    if node.is_a?(AST::VarDecl)
+      destination_name = node.name.to_s
+    elsif node.is_a?(AST::BindExpr)
+      destination_name = node.name.to_s
+    end
     fact = Alias.new(
       declaration: node,
       source: source,
       source_id: source_id,
       destination_id: symbol.binding_id,
       source_name: source_name,
-      destination_name: node.name.to_s,
+      destination_name: destination_name,
       root_id: root_id,
       root_name: root_name,
       ordinal: next_ordinal,
@@ -173,26 +188,10 @@ class OwnershipTransportFacts
   sig { returns(T::Array[Decision]) }
   def decisions
     @aliases.map do |fact|
-      source_reads = @reads.select do |event|
-        event.ordinal > fact.ordinal && (event.binding_id == fact.source_id || event.binding_id == fact.root_id)
-      end
-      destination_reads = @reads.select do |event|
-        event.ordinal > fact.ordinal && event.binding_id == fact.destination_id
-      end
-      mutations = @mutations.select do |event|
-        event.ordinal > fact.ordinal && [fact.source_id, fact.root_id, fact.destination_id].include?(event.binding_id)
-      end
-      conflict = mutations.find do |mutation|
-        counterpart_reads = if mutation.binding_id == fact.destination_id
-          source_reads
-        else
-          destination_reads
-        end
-        counterpart_reads.any? do |use|
-          ((use.ordinal > mutation.ordinal) || loop_backedge_reaches?(fact, mutation, use)) &&
-            !mutually_exclusive?(mutation, use)
-        end
-      end
+      source_reads = source_reads_after(fact)
+      destination_reads = destination_reads_after(fact)
+      mutations = mutations_after(fact)
+      conflict = conflict_for(fact, source_reads, destination_reads, mutations)
       last_alias = destination_reads.last&.node
       escapes = destination_reads.any?(&:escape)
       action = if fact.whole_binding && source_reads.empty? && !@parameter_ids.include?(fact.source_id) && !@alias_roots.key?(fact.source_id)
@@ -217,29 +216,106 @@ class OwnershipTransportFacts
     end
   end
 
+  sig { params(fact: Alias).returns(T::Array[Event]) }
+  def source_reads_after(fact)
+    @reads.select do |event|
+      event.ordinal > fact.ordinal && (event.binding_id == fact.source_id || event.binding_id == fact.root_id)
+    end
+  end
+  private :source_reads_after
+
+  sig { params(fact: Alias).returns(T::Array[Event]) }
+  def destination_reads_after(fact)
+    @reads.select do |event|
+      event.ordinal > fact.ordinal && event.binding_id == fact.destination_id
+    end
+  end
+  private :destination_reads_after
+
+  sig { params(fact: Alias).returns(T::Array[Event]) }
+  def mutations_after(fact)
+    @mutations.select do |event|
+      event.ordinal > fact.ordinal && [fact.source_id, fact.root_id, fact.destination_id].include?(event.binding_id)
+    end
+  end
+  private :mutations_after
+
+  sig do
+    params(
+      fact: Alias,
+      source_reads: T::Array[Event],
+      destination_reads: T::Array[Event],
+      mutations: T::Array[Event],
+    ).returns(T.nilable(Event))
+  end
+  def conflict_for(fact, source_reads, destination_reads, mutations)
+    mutations.find do |mutation|
+      mutation_conflicts?(fact, source_reads, destination_reads, mutation)
+    end
+  end
+  private :conflict_for
+
+  sig do
+    params(
+      fact: Alias,
+      source_reads: T::Array[Event],
+      destination_reads: T::Array[Event],
+      mutation: Event,
+    ).returns(T::Boolean)
+  end
+  def mutation_conflicts?(fact, source_reads, destination_reads, mutation)
+    counterpart_reads = if mutation.binding_id == fact.destination_id
+      source_reads
+    else
+      destination_reads
+    end
+    counterpart_reads.any? do |use|
+      conflicting_use?(fact, mutation, use)
+    end
+  end
+  private :mutation_conflicts?
+
+  sig { params(fact: Alias, mutation: Event, use: Event).returns(T::Boolean) }
+  def conflicting_use?(fact, mutation, use)
+    ((use.ordinal > mutation.ordinal) || loop_backedge_reaches?(fact, mutation, use)) &&
+      !mutually_exclusive?(mutation, use)
+  end
+  private :conflicting_use?
+
 
   sig { returns(T::Array[TransferDecision]) }
   def transfer_decisions
     @transfers.map do |transfer|
-      later_read = @reads.any? do |event|
-        event.ordinal > transfer.ordinal && event.binding_id == transfer.source_id
-      end
+      later_read = later_read_after_transfer?(transfer)
       # Function parameters are borrows unless declared TAKES. They can never
       # be transferred into an owned field/container, even when this is their
       # final read. Generic parameters make this especially important: the
       # concrete specialization may require cleanup even though annotation
       # cannot see that representation yet.
-      borrowed_parameter = @parameter_ids.include?(transfer.source_id) && transfer.source.symbol&.takes != true
+      borrowed_parameter = borrowed_parameter_transfer?(transfer)
       TransferDecision.new(transfer: transfer, materialize: later_read || borrowed_parameter)
     end
   end
+
+  sig { params(transfer: Transfer).returns(T::Boolean) }
+  def later_read_after_transfer?(transfer)
+    @reads.any? do |event|
+      event.ordinal > transfer.ordinal && event.binding_id == transfer.source_id
+    end
+  end
+  private :later_read_after_transfer?
+
+  sig { params(transfer: Transfer).returns(T::Boolean) }
+  def borrowed_parameter_transfer?(transfer)
+    @parameter_ids.include?(transfer.source_id) && transfer.source.symbol&.takes != true
+  end
+  private :borrowed_parameter_transfer?
 
   private
 
   sig { params(node: AST::Identifier).returns(T.nilable(Integer)) }
   def binding_id(node)
-    symbol = node.symbol
-    symbol.is_a?(SymbolEntry) ? symbol.ownership_binding_id : nil
+    node.symbol&.ownership_binding_id
   end
 
   sig { params(node: AST::Node).returns(T.nilable(AST::Identifier)) }
@@ -256,22 +332,43 @@ class OwnershipTransportFacts
 
   sig { params(left: Event, right: Event).returns(T::Boolean) }
   def mutually_exclusive?(left, right)
-    left.ancestors.filter_map do |node|
-      node if node.is_a?(AST::IfStatement)
-    end.any? do |conditional|
+    left.ancestors.each do |node|
+      next unless node.is_a?(AST::IfStatement)
+
+      conditional = node
       left_side = conditional_side(left, conditional)
       right_side = conditional_side(right, conditional)
-      left_side && right_side && left_side != right_side
+      return true if left_side && right_side && left_side != right_side
     end
+    false
   end
 
   sig { params(event: Event, conditional: AST::IfStatement).returns(T.nilable(Symbol)) }
   def conditional_side(event, conditional)
-    index = event.ancestors.index(conditional)
+    index = conditional_index(event, conditional)
     return nil unless index
-    child = event.ancestors[index + 1] || event.node
+    child = T.let(event.node, AST::Node)
+    child_index = index + 1
+    child = event.ancestors.fetch(child_index) if child_index < event.ancestors.length
     return :then if conditional.then_branch.include?(child)
-    return :else if conditional.else_branch.include?(child)
+    else_branch = conditional.else_branch
+    if else_branch
+      return :else if else_branch.include?(child)
+    end
+    nil
+  end
+
+  sig { params(event: Event, conditional: AST::IfStatement).returns(T.nilable(Integer)) }
+  def conditional_index(event, conditional)
+    index = T.let(0, Integer)
+    while index < event.ancestors.length
+      candidate = event.ancestors.fetch(index)
+      if candidate.is_a?(AST::IfStatement)
+        narrowed = candidate
+        return index if narrowed == conditional
+      end
+      index += 1
+    end
     nil
   end
 

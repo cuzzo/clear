@@ -1,230 +1,193 @@
-# Parser Type-Slop Assessment
+# Parser type slop blocks readable Ruby-to-CLEAR output
+
+Status: source cleanup required before resuming whole-parser transpilation.
+
+This note records why work on the generated CLEAR parser was stopped. It is a
+diagnosis and handoff, not an implementation plan for the current branch. The
+parser cleanup will be performed elsewhere.
 
 ## Decision
 
-`compiler/ruby/ast/parser.rb` is not ready to be used as the source of a
-readable Ruby-to-CLEAR translation. The parser is valid Ruby and much of its
-complexity is intrinsic to a language parser, but several source contracts
-erase facts that CLEAR needs. Translating those contracts literally produces
-large casts, nested tuple casts, optional checks that cannot execute, and
-dictionary-shaped records whose fields must be rediscovered during emission.
+Do not continue repairing `compiler/src/ast/parser.clear` around the current
+Ruby types. The generated failures are no longer merely isolated Ruby-to-CLEAR
+lowering defects. Several important parser invariants are absent or incorrectly
+typed in the Ruby source, and the transpiler consequently emits defensive casts,
+optional recovery, and erased aggregate types.
 
-Do not repair these symptoms in generated CLEAR. Clean the Ruby contracts in a
-separate parser-focused branch, then regenerate. This assessment deliberately
-does not modify parser source.
+Fix the Ruby parser/AST typing first, then regenerate the CLEAR parser. Resume
+manual CLEAR work only for residual target-language issues after the regenerated
+code is readable and structurally faithful.
 
-## Evidence Collected
+## Triggering example
 
-The assessment covered `parser.rb` plus its direct AST, lexer, type, diagnostic,
-and fixable-helper dependencies. All graph-backed tools used the same FactMine
-facts.
+The immediate warning sign was generated code equivalent to:
 
-| Tool | Material result | Interpretation |
-|---|---:|---|
-| Decomplex | 350 convergence methods, 165 root clusters, 66 decision-pressure findings | The largest parser methods are credible decomposition targets; this is ranking evidence, not proof that every branch is accidental complexity. |
-| Decomplex | `ClearParser` temporal score 361 over 8 owner fields | Parser position and mode transitions need explicit phase/state contracts before mechanical translation. |
-| Espalier | 182 functions, 8 state slots, 1,801 delegation edges, owner pressure 836.95 | Owner/state attribution is now credible. The parser is a large stateful coordinator, not a collection of isolated functions. |
-| Espalier | 649 architecture nodes and 1,964 edges | Most apparent external receivers are dependencies, not parser-owned state. |
-| Nil-kill | 9 high-confidence false-nilable return signatures | Declared return types disagree with non-nil return flow and should be tightened in Ruby. |
-| Nil-kill | 2 genuinely redundant nil guards in the reviewed sources | `current.nil?` and a non-nil declaration safe-navigation site are source-contract issues, not transpiler workarounds. |
+```clear
+CAST([
+  CAST([
+    castTokenValueToString(
+      (name_tok OR_ELSE CAST(panic("T.must failed") AS Token)).value
+    ),
+    v
+  ] AS Tuple<String, Node>),
+  name_tok
+] AS Tuple<Tuple<String, Node>, ?Token>)
+```
 
-The nine return signatures identified by static flow are `parse`, `consume`,
-`parse_extern_fn`, `parse_extern_struct`, `parse_struct_def`, `parse_union_def`,
-`parse_function_def`, `parse_sync_policy_block`, and `parse_do_block`. Each must
-still be reviewed at its public boundary before changing the signature, but the
-tool now provides a concrete, high-confidence action instead of merely counting
-nil checks.
+The Ruby operation is conceptually simple: consume a required identifier token,
+obtain its text, parse its value, and retain the token for source diagnostics.
+The generated expression is not an acceptable long-term representation of that
+operation.
 
-The highest-ranked parser methods include `parse_type_annotation`,
-`parse_assert_raises`, `parse_when_block`, `try_parse_bind_or_assign`, the match
-statement/expression parsers, `parse_function_def`, `parse_extern_fn`, and
-`parse_cap_join`. These are the first places to split parsing, validation, and
-node construction when source cleanup begins.
+## Concrete findings
 
-## Confirmed Source Problems
+The following counts were observed in `compiler/ruby/ast/parser.rb` on
+2026-07-13. They are snapshots, not permanent acceptance thresholds:
 
-### 1. Broad token values cross textual parser boundaries
+- 163 `T.must` calls.
+- 59 `T.cast` calls.
+- 54 occurrences of `T.must(consume(...))`.
+- 73 generated `castTokenValueToString` calls in the CLEAR parser.
+- 182 generated `OR_ELSE ... panic("T.must failed") ... Token` recoveries.
 
-`Lexer::Token#value` legitimately represents strings, numbers, and nil. The
-problem is not that the lexer union exists; it is that parser routines which
-require an identifier or keyword repeatedly consume the broad field and recover
-`String` using `T.must` and `T.cast`. That directly creates unreadable CLEAR such
-as casts nested inside tuple casts.
+Raw counts do not prove that every use is wrong. They do show that nullability
+and token-value narrowing are being repeatedly reconstructed at use sites.
 
-The source-level repair is a small typed token API (`string_value`,
-`identifier_value`, or an equivalent checked accessor) used at the boundary.
-The accessor must fail with the parser's normal diagnostic when the token kind
-does not carry text. It must not silently stringify numeric values.
+### `consume` has false nullability
 
-### 2. Generic sequence parsing erases element and tuple shape
+`ClearParser#consume` is declared to return `T.nilable(Lexer::Token)`. Its success
+path returns the consumed token. Its failure path calls
+`emit_consume_error_with_fix`, which is declared `T.noreturn`; that helper either
+raises through a fixable diagnostic or calls `error!`.
 
-`parse_comma_seq`-style helpers return values whose precise element type is
-known by the caller but lost in the helper contract. Call sites then destructure
-and cast the result. A typed result object or a small number of domain-specific
-sequence helpers would preserve the relationship between values, tokens, and
-separators. This is preferable to teaching Ruby-to-CLEAR to reproduce nested
-Sorbet casts.
+Therefore the semantic return type of `consume` is `Lexer::Token`, not an
+optional token. The false optional propagates into nearly every grammar rule as
+`T.must` in Ruby and `OR_ELSE panic` in CLEAR.
 
-### 3. Hashes are being used as heterogeneous records
+This is source type slop, not a reason to weaken CLEAR's type checker or teach an
+autofixer to insert more recovery expressions.
 
-The following aliases have stable, named slots but are represented as hashes or
-wide nullable unions:
+### The lexer value union is legitimate
 
-- `EffectMetadata` / `EffectMetadataValue`
-- `ElementCapability`
-- `WithMatchArm` / `WithMatchArmValue`
-- `SigilAttrs` / `SigilTable`
-- `CapDims`
+It would be incorrect to make every token value a `String`. CLEAR's generated
+lexer accurately represents token values as:
 
-These should be reviewed for `T::Struct` or another explicit record type.
-Presence, field type, and defaults then survive into CLEAR without key-based
-recovery. This is a targeted recommendation; ordinary homogeneous lookup tables
-should remain hashes.
+```clear
+UNION TokenValue {
+  Nil,
+  Str: String,
+  Int: Int64,
+  UInt: UInt64,
+  Float: Float64
+}
+```
 
-### 4. Some aliases combine unrelated domain states
+Numeric literals should remain numeric. EOF may have no payload. The problem is
+not the existence of this union; the problem is that parser operations that
+require text do not express that requirement at a typed boundary.
 
-`PatternCapture`, `ReturnLifetime`, and several match/capability aliases admit
-many unrelated variants and nil. Their consumers commonly branch on both type
-and sentinel meaning. Split these into named result types or tagged variants
-where the states are semantically distinct. Do not mechanically replace every
-`T.any`: narrow, closed AST unions can be appropriate.
+Ruby currently defines `Lexer::Token` with an untyped `Struct.new`. Although
+`Lexer#add` restricts values to `Float`, `Integer`, or `String`, Sorbet cannot
+derive the dependent invariant “this token kind has this value variant.” The
+parser then repeatedly casts `.value` to `String` after it has already consumed a
+string-valued token kind.
 
-### 5. Nilable collections encode two states where one often suffices
+### Required textual values need a named boundary
 
-The reviewed parser contains nilable arrays for union-method requirements and
-default bodies. In this codebase an empty collection is normally the correct
-absence representation. Review each site and retain nil only if it represents a
-third state distinct from both "not initialized" and "initialized but empty."
-This is source design work; CLEAR optional syntax must not be changed to conceal
-it.
+Identifier, type-identifier, keyword, punctuation, and string-token consumers
+should obtain text through a typed operation. Possible designs include:
 
-### 6. Proven non-nil values are checked or declared nilable
+- typed token variants;
+- a checked `Token#text`/`token_text(token)` accessor;
+- `consume_text(...)` and `consume_identifier(...)` parser primitives that
+  return both the token and its `String` value.
 
-`current` returns a required `Lexer::Token`, yet a caller checks
-`current.nil?`. Nil-kill also proves nine return signatures broader than their
-flow. These contracts make downstream narrowing and call resolution harder and
-should be corrected in Ruby after call-site review.
+Whichever design is selected, an invalid non-text payload must fail once at that
+boundary as an internal lexer/parser invariant. Grammar rules should not contain
+unchecked casts or know how the token payload union is represented in CLEAR.
 
-### 7. Parser state and phases are implicit
+Do not replace every token payload with `String`, stringify numeric values, or
+make CLEAR casts implicit. Those approaches hide the invariant instead of
+encoding it.
 
-Espalier identifies exactly eight `ClearParser` fields:
-`gradual`, `gradual_mode`, `last_requires_clauses`, `ownership_mode`, `pos`,
-`source_code`, `suppress_struct_lit`, and `tokens`. Position and temporary mode
-flags are mutated across a very large call graph. Scoped mode helpers and
-explicit parse-result records would make save/restore obligations visible. The
-analysis does not justify turning external receiver fields into parser state.
+### Generic parser combinators cross an erasure boundary
 
-### 8. Dynamic diagnostic helpers leak untyped operations inward
+The Ruby `parse_comma_seq` method has a Sorbet type parameter and is reasonable
+for homogeneous values such as `AST::Node[]`. Ruby-to-CLEAR currently lowers its
+element result to an erased target representation. Complex element shapes, such
+as a nested tuple containing a field name, AST node, and diagnostic token, then
+require nested `CAST` expressions at the caller.
 
-`source_error.rb`, `fixable_error.rb`, and `fixable_helpers.rb` use dynamic
-dispatch and `T.unsafe` around heterogeneous diagnostic objects. Some reflection
-is legitimate at an adapter boundary, but parser-facing methods should expose a
-typed diagnostic protocol. Keep unavoidable reflection in the helper boundary
-rather than propagating it through parsing code.
+For structured results, prefer one of the following:
 
-## Tool Defects Found and Corrected
+- a named typed record that survives lowering;
+- a specialized parsing helper that directly produces the typed maps or arrays
+  consumed by the AST constructor;
+- a future Ruby-to-CLEAR generic-IR improvement that preserves the instantiated
+  element type through block lowering.
 
-The assessment exposed tool defects before source findings were trusted:
+The struct-literal case should not encode a transient
+`[[String, AST::Node], Token]` value only to immediately split it into two maps.
+A typed helper can directly return the field-value and field-token maps.
 
-- FactMine previously promoted mutations through arbitrary local receivers to
-  owner state. Receiver ownership is now normalized generically, while concrete
-  receiver spellings remain in language adapters.
-- External receiver reads/writes are no longer counted in Decomplex or Espalier
-  owner-state metrics.
-- FactMine now propagates declared return types through branches whose other
-  path calls a `noreturn` function. This enabled Nil-kill to prove the parser's
-  false-nilable returns.
-- FactMine now expands declared type aliases recursively before nil-flow
-  reasoning. Nilable aliases no longer produce false dead-nil diagnostics.
-- Ruby `Module#name` is modeled as nilable in the Ruby syntax adapter. Generic
-  flow analysis no longer marks `self.class.name&.` as dead navigation.
-- Nil-kill preserves structured declared return types and emits a
-  language-neutral `fix_sig_return` action when a nilable declaration has a
-  strong non-nil return origin.
-- Espalier's direct static-evidence load path now initializes its shared root
-  constant without duplicate-constant warnings or load-order failure.
+### The AST also exposes untyped state
 
-Regression tests cover each corrected fact boundary. FactMine's architecture
-suite additionally enforces that type grammars and other language semantics do
-not migrate into generic analysis.
+`AST::StructLit` is another legacy `Struct.new`. Its core members (`name`,
+`fields`, `storage`, and `type_args`) currently lower to `Any`. Its
+`field_tokens` and `borrowed_field_names` accessors have no Sorbet signatures.
+The generated `field_tokens` field was manually made
+`HashMap<String, ?Token>`, but that target-only repair does not make the Ruby AST
+contract sound.
 
-## Missing Analyzer Capabilities
+The parser cleanup should include the AST records it constructs. Otherwise a
+clean parser boundary will immediately lose its types when values enter the AST.
 
-The current tools find flow and structural pressure, but they do not yet model
-all of the type slop that matters to translation.
+## Recommended cleanup sequence
 
-### FactMine: emit structured declaration-pressure facts
+1. Correct `consume` to return a required token and verify all failure helpers
+   are genuinely non-returning in both Ruby and CLEAR lowering.
+2. Define the lexer token payload union explicitly in Ruby, or provide checked,
+   typed payload accessors that preserve the legitimate numeric variants.
+3. Introduce typed parser primitives for required textual tokens and replace
+   repeated `T.cast(T.must(consume(...)).value, String)` patterns.
+4. Type the AST records and accessors touched by parser construction, beginning
+   with `AST::StructLit`.
+5. Replace structured uses of erased generic combinators with named records or
+   specialized typed helpers. Retain the generic combinator for simple
+   homogeneous sequences.
+6. Add Ruby parser tests for the invariants and Ruby-to-CLEAR translation tests
+   for the resulting source shapes.
+7. Regenerate the CLEAR parser and assess readability before resuming the
+   compatibility/message-pack gate.
 
-FactMine should derive language-neutral facts from its normalized `TypeExpr`:
+## Tests that should accompany the cleanup
 
-- union width and nested union width;
-- untyped/unknown leaf count;
-- nilability and nilable-collection shape;
-- collection nesting depth;
-- stable hash-key use that suggests a record;
-- casts or assertions immediately following a typed boundary;
-- result-shape erasure across helper calls.
+- `consume` returns `Lexer::Token` on success and raises on mismatch; no caller
+  should need `T.must`.
+- Every token kind used as parser text rejects a numeric or empty payload at the
+  typed boundary with a clear internal-invariant failure.
+- Numeric literal tokens retain `Int64`, `UInt64`, or `Float64` payloads without
+  string conversion.
+- Struct literal parsing produces typed field-value and field-token maps for
+  empty, single-field, multi-field, generic, and trailing-comma forms.
+- Ruby-to-CLEAR output for a representative struct literal contains no nested
+  tuple casts and no optional recovery around required consumed tokens.
+- The parser message-pack compatibility stage remains the end-to-end acceptance
+  gate after regeneration.
 
-Only parsing Sorbet spelling belongs in Ruby language modules. The facts above
-operate on normalized type trees and therefore belong in shared FactMine passes.
+## Readiness criteria for transpilation
 
-### Nil-kill: own optionality and contract contradictions
+The parser is ready to transpile when:
 
-Nil-kill should consume those type facts and report:
+- required token consumption is non-null in source and generated code;
+- textual payload narrowing is named and centralized;
+- parser-created AST values do not immediately degrade to `Any`;
+- common grammar rules are readable without stacked `T.must`/`T.cast` recovery;
+- representative generated CLEAR reads like the Ruby operation rather than a
+  serialization of Sorbet escape hatches;
+- the remaining casts correspond to real dynamic language cases and are
+  documented locally.
 
-- a nilable collection initialized and consumed identically to an empty one;
-- nilable returns whose paths are all non-nil;
-- non-nil parameters or locals guarded for nil;
-- safe navigation on proven non-nil values;
-- optionality introduced only by a broad alias.
-
-Only the first item needs a cautious recommendation rather than an automatic
-edit: nil can represent a meaningful third state.
-
-### Decomplex: rank type-driven complexity without parsing Ruby
-
-Decomplex currently reports no fat unions for this corpus because its detector
-is driven by dispatch shape rather than declared type trees. It should consume
-FactMine's normalized declaration-pressure facts and combine them with branch,
-fan-in, and state pressure. It must not recognize `T.any`, `T::Hash`, or any
-other language spelling itself.
-
-### Espalier: expose architectural concentration
-
-Espalier should aggregate generic pressure facts by owner, helper boundary, and
-phase. Useful additions are cast concentration across an edge, untyped values
-crossing owner boundaries, record candidates used by multiple phases, and state
-slots whose writes span unrelated parser phases. Espalier should not decide
-whether a Ruby alias is good or bad.
-
-## Recommended Source-Cleanup Order
-
-1. Add typed token accessors and replace repeated textual `T.cast`/`T.must`
-   chains.
-2. Correct the proven false-nilable signatures and redundant nil guards after
-   checking callers.
-3. Replace heterogeneous metadata hashes with named records.
-4. Remove nilable collections where nil has no distinct meaning.
-5. Replace erased generic parse results with typed result records.
-6. Split only the highest-pressure methods where parsing, validation, and AST
-   construction can form stable boundaries.
-7. Rerun Sorbet and parser/message-pack tests, then regenerate CLEAR once.
-
-Do not interleave manual CLEAR cleanup with these changes: regeneration would
-discard it, and the source contracts would continue producing the same slop.
-
-## Completion Criteria Before Transpilation
-
-The parser is ready for another Ruby-to-CLEAR attempt when:
-
-- identifier/name consumers no longer cast the raw token union repeatedly;
-- all high-confidence false-nilable return actions have been resolved;
-- each remaining nilable collection documents a distinct nil state;
-- stable heterogeneous metadata has named fields;
-- the worst generic parse-result casts are gone;
-- FactMine emits no known false owner-state or nil-flow facts for the corpus;
-- Sorbet and the parser's message-pack stage pass before generation.
-
-At that point remaining failures should be classified one by one as a small
-Ruby-to-CLEAR lowering defect, a CLEAR autofix opportunity, or a genuinely
-manual translation decision.
+Until those conditions hold, manually making the generated parser compile is
+likely to make the codebase harder to maintain and will be overwritten by the
+next parser regeneration.

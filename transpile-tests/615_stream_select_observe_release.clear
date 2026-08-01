@@ -1,0 +1,50 @@
+# Stream SELECT over OWNED items where the selector only OBSERVES the item:
+# the fused consumer loop must release each dequeued payload (one leak per
+# yielded item before the fix). Covers fn-call and method-call selectors
+# through both the observable-fold path and the re-streamed path.
+
+FN size(s: String) RETURNS Int64 -> RETURN s.length(); END
+
+FN sumViaFnSelector() RETURNS !Int64 ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    running: ~Int64@observable = src |> SELECT size(_) |> SUM _;
+    RETURN NEXT running;
+END
+
+FN sumViaMethodSelector() RETURNS !Int64 ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    running: ~Int64@observable = src |> SELECT _.length() |> SUM _;
+    RETURN NEXT running;
+END
+
+FN sumViaRestream() RETURNS !Int64 ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    out: [~]Int64 = src |> SELECT size(_);
+    MUTABLE total = 0_i64;
+    WHILE NEXT out EXISTS AS item DO
+        total = total + item;
+    END
+    RETURN total;
+END
+
+FN main() RETURNS !Void ->
+    ASSERT (sumViaFnSelector() OR_ELSE RAISE) == 3_i64, "observable fold releases observed stream items (fn selector)";
+    ASSERT (sumViaMethodSelector() OR_ELSE RAISE) == 3_i64, "observable fold releases observed stream items (method selector)";
+    ASSERT (sumViaRestream() OR_ELSE RAISE) == 3_i64, "re-streamed select releases observed stream items";
+    RETURN;
+END

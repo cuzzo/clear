@@ -2,6 +2,7 @@
 require "sorbet-runtime"
 
 require "set"
+require_relative "package_source"
 
 class ModuleImportError < StandardError; end
 class CircularDependencyError < ModuleImportError; end
@@ -48,10 +49,24 @@ class ModuleImporter
     @base_dir     = T.let(File.expand_path(base_dir), String)
     @module_cache = T.let({}, T::Hash[T.untyped, T.untyped])  # abs_path => CompiledModule
     @compiling    = T.let(Set.new, T::Set[T.untyped])  # abs_paths currently being compiled (cycle detection)
-    # pkg_paths: { "name" => "/abs/path/to/lib.clear" } -- registered package sources.
+    # pkg_paths: { "name" => "/abs/path/to/lib.clear" } -- registered package
+    # sources. A comma-separated value registers a MULTI-FILE package: all
+    # listed files compile together as ONE unit (Go model — the acyclic
+    # import rule applies between packages, not between a package's files).
     @pkg_paths    = T.let(pkg_paths.transform_keys(&:to_s), T::Hash[T.untyped, T.untyped])
     @inline_packages = T.let(inline_packages.map(&:to_s).to_set, T::Set[String])
     @stdlib_root  = T.let(stdlib_root, String)
+    # abs member file -> owning multi-file package name. Any compile of a
+    # member file (directly or via its own single-file pkg name) is aliased
+    # to the whole package so the unit is never split.
+    @package_members = T.let({}, T::Hash[String, String])
+    @pkg_paths.each do |name, value|
+      next unless value.to_s.include?(",")
+
+      value.to_s.split(",").each do |member|
+        @package_members[File.expand_path(member.strip)] = name.to_s
+      end
+    end
   end
 
   # Compile a .clear package by name and return a CompiledModule.
@@ -68,7 +83,62 @@ class ModuleImporter
             "Register it with --pkg #{pkg_name}=/path/to/lib.clear " \
             "or place it under #{@stdlib_root}/#{pkg_name}/src/lib.clear"
     end
+    return compile_package_group(pkg_name.to_s, path.to_s.split(",").map(&:strip)) if path.to_s.include?(",")
+
+    # A single-file package whose file belongs to a multi-file package
+    # compiles as that whole package — a unit is never split.
+    owner = @package_members[File.expand_path(path)]
+    return compile_package(owner, caller_dir: caller_dir) if owner && owner != pkg_name.to_s
+
     compile_file(path, caller_dir: File.dirname(File.expand_path(path)))
+  end
+
+  # Compile a multi-file package: all members merged into ONE compilation
+  # unit (source-level, sibling REQUIREs dropped, externals deduplicated).
+  # Cycles BETWEEN packages are still rejected by the ordinary @compiling
+  # guard; references between members never re-enter the importer at all.
+  sig { params(pkg_name: String, members: T::Array[String]).returns(T.nilable(ModuleImporter::CompiledModule)) }
+  def compile_package_group(pkg_name, members)
+    cache_key = "pkg-group:#{pkg_name}"
+    return @module_cache[cache_key] if @module_cache.key?(cache_key)
+
+    if @compiling.include?(cache_key)
+      cycle = @compiling.to_a.map { |p| File.basename(p.to_s) }.join(" -> ")
+      raise CircularDependencyError, "Circular dependency detected: #{cycle} -> pkg:#{pkg_name}"
+    end
+
+    members.each do |member|
+      abs = File.expand_path(member)
+      raise ModuleImportError, "REQUIRE error: package '#{pkg_name}' member not found: #{abs}" unless File.exist?(abs)
+    end
+
+    @compiling.add(cache_key)
+    begin
+      merged = PackageSource.merge(members, resolve_pkg: ->(name) { @pkg_paths[name] || resolve_stdlib_package(name) })
+      source_dir = File.dirname(T.must(merged.member_paths.first))
+
+      saved_gradual = ClearParser.gradual_mode
+      ClearParser.gradual_mode = false
+      ast = begin
+        budget = FrontendResourceBudget.new
+        tokens = Lexer.new(merged.source, file: "pkg:#{pkg_name}", budget: budget).tokenize
+        ClearParser.new(tokens, merged.source, budget: budget).parse
+      ensure
+        ClearParser.gradual_mode = saved_gradual
+      end
+
+      reject_auto_in_public_signatures!(ast, "pkg:#{pkg_name}")
+
+      annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: merged.source)
+      annotator.annotate!(ast)
+
+      mod = compile_module_mir(ast, annotator, source_dir)
+
+      @module_cache[cache_key] = mod
+      mod
+    ensure
+      @compiling.delete(cache_key)
+    end
   end
 
   sig { params(pkg_name: String).returns(T.nilable(String)) }
@@ -99,6 +169,10 @@ class ModuleImporter
   sig { params(path: String, caller_dir: String).returns(T.nilable(ModuleImporter::CompiledModule)) }
   def compile_file(path, caller_dir: @base_dir)
     abs_path = File.expand_path(path, caller_dir)
+
+    # A member of a multi-file package always compiles as the whole package.
+    owner = @package_members[abs_path]
+    return compile_package(owner, caller_dir: caller_dir) if owner
 
     return @module_cache[abs_path] if @module_cache.key?(abs_path)
 
@@ -202,11 +276,7 @@ class ModuleImporter
       end
     end
 
-    fn_sigs = T.let({}, T::Hash[String, FunctionSignature])
-    ast.statements.each do |stmt|
-      next unless stmt.is_a?(AST::FunctionDef)
-      fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
-    end
+    fn_sigs = FunctionSignature.lowering_signatures(ast, annotator.semantic_root_scope)
 
     moved_guard_info = T.let({}, MIRLoweringInput::MovedGuardInfo)
     fn_nodes.each { |name, fn| moved_guard_info[name] = fn.moved_guard_info if fn.moved_guard_info }

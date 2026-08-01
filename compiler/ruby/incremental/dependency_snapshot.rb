@@ -26,17 +26,22 @@ module Incremental
 
     sig { params(paths: T::Enumerable[String]).returns(DependencySnapshot) }
     def self.capture(paths)
-      entries = paths.map { |path| File.expand_path(path) }.uniq.sort.map do |path|
-        DependencyFingerprint.new(path: path, digest: file_digest(path))
+      expanded = T.let([], T::Array[String])
+      paths.each { |path| expanded << File.expand_path(path) }
+      entries = T.let([], T::Array[DependencyFingerprint])
+      expanded.uniq.sort.each do |path|
+        entries << DependencyFingerprint.new(path: path, digest: file_digest(path))
       end
       new(entries)
     end
 
     sig { returns(T::Array[String]) }
     def changed_paths
-      @entries.filter_map do |entry|
-        entry.path unless self.class.file_digest(entry.path) == entry.digest
+      changed = T.let([], T::Array[String])
+      @entries.each do |entry|
+        changed << entry.path unless self.class.file_digest(entry.path) == entry.digest
       end
+      changed
     end
 
     sig { returns(T::Boolean) }
@@ -46,9 +51,13 @@ module Incremental
 
     sig { params(path: String).returns(String) }
     def self.file_digest(path)
-      return "missing" unless File.file?(path)
+      return "missing" unless File.exist?(path)
 
-      Digest::SHA256.file(path).hexdigest
+      # Keep the self-hosted dependency check exact and deterministic without
+      # depending on Ruby's Digest implementation. The retained snapshot owns
+      # one source copy per dependency; equality then detects edits and
+      # edit/revert cycles without mtime or hash-collision ambiguity.
+      File.read(path)
     end
   end
 end

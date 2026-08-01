@@ -57,7 +57,10 @@ class TestGenerator
       end
     }
     body_items = program.items.reject { |item| preamble_items.include?(item) || item.is_a?(MIR::Import) || item.is_a?(MIR::TypeAlias) }
+    # The preamble lands inside the `test { ... }` block, where `pub` is not a
+    # valid statement modifier; container-scope visibility is meaningless there.
     preamble = preamble_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
+      .gsub(/^pub const /, "const ")
     transpiled_body = body_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
     symbol_pool = emitter.symbol_pool_declarations
 

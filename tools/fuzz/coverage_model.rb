@@ -106,6 +106,14 @@ module FuzzCoverageModel
       failure_proves: 'Normal, TAKES, GIVE, receiver, BG, and pipeline calls obey ownership contracts.',
       high_risk: true
     ),
+    kept_identity_matrix: profile(
+      failure_proves: 'Kept-identity edges derive the sound op from the caller declaration (retain, GIVE move, born-as-Rc, zero-config default), release exactly once on error paths, and reject plain MUTABLE keeps at the declaration.',
+      high_risk: true
+    ),
+    carrier_ownership_matrix: profile(
+      failure_proves: 'Retained-identity v5 carrier-preserving fan-out: @multiowned/@shared KEEP retains (no copy), shared->unique OWN COPY at a UNIQUE boundary detaches an independent payload, last-use moves without retain, SHARED admits only a retained family, OWN COPY detaches a handle into a plain slot, MONOMORPHIC threads each carrier and resolves KEEP per carrier, and the KEEP/COPY/OWN correctness rules (KEEP_ON_KNOWN_CARRIER, COPY_ON_POLYMORPHIC_PARAM, COPY_RETAINED_NEEDS_UNIQUE, CARRIER_POLYMORPHIC_FANOUT, ARG_NEEDS_SHARED, RETAINED_NEEDS_OWN_COPY, OWN_ALONE_UNSUPPORTED) each fire.',
+      high_risk: true
+    ),
     capability_wrap_matrix: profile(
       failure_proves: 'Capability wrapper construction admits valid wrappers, observable values require scoped WITH VIEW access, and invalid combinations or direct observable access are rejected.'
     ),
@@ -274,6 +282,9 @@ module FuzzCoverageModel
     mir_lowering_shape_matrix: profile(
       failure_proves: 'MIR lowering shapes for declarations, returns, branches, calls, loops, and dispatch keep ownership facts.'
     ),
+    module_const_matrix: profile(
+      failure_proves: 'Top-level CONST declarations are comptime-pure container-scope constants readable by value at every reference position (bare, field, argument, default parameter), and the SCREAMING_CASE / explicit-type / initializer / heap-ownership boundaries fail closed.'
+    ),
     module_graph_matrix: profile(
       failure_proves: 'REQUIRE graphs (single, chain, diamond) import PUB/package symbols and types correctly and keep PRIVATE declarations invisible.'
     ),
@@ -315,8 +326,17 @@ module FuzzCoverageModel
     pipeline_gap_matrix: profile(
       failure_proves: 'Focused pipeline operator gaps continue to compile and run through lowering/emission.'
     ),
+    pipeline_composite_element_matrix: profile(
+      failure_proves: 'SELECT/UNNEST/REDUCE pipeline element and accumulator ownership: composite-literal elements keep their field-store-hoisted temp scoped to the per-element loop, and an owned (String) REDUCE accumulator is reassigned through ReassignWithCleanup.'
+    ),
+    pipeline_consumer_position_matrix: profile(
+      failure_proves: 'Where a pipeline result LANDS decides its lifetime: a result bound inside FOR/WHILE (including through a MATCH arm) is rewound per iteration, and one handed to TAKES, a struct field, or an outer list promotes at declaration instead of escaping the rewound frame.'
+    ),
     pipeline_source_shape_matrix: profile(
       failure_proves: 'Pipeline source and terminal shapes preserve cleanup across stream and promise boundaries.'
+    ),
+    stream_selector_matrix: profile(
+      failure_proves: 'Stream SELECT push is an ownership transfer: owned selector results move into the channel (unfused WHILE-NEXT and fused EACH), borrowing projections push an independent deep copy while the dequeued item is freed, and identity keeps the item moving into the push -- leak- and double-free-clean under the testing allocator.'
     ),
     select_tense_assignment_matrix: profile(
       failure_proves: 'Every legal ordered SELECT effect/tense modifier preserves its exact wrapper order and stream cardinality; forbidden orders and obsolete stream spellings fail closed.',

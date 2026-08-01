@@ -1,0 +1,40 @@
+# Test: REDUCE with an OWNED (heap String) accumulator releases the
+# accumulator's prior value each step and accepts the step result -- a
+# ConcatStr -- in an owned position, on both the var-assigned and the
+# heap-carry-return paths.
+#
+# The pipeline rewriter desugars REDUCE into a value-BlockExpr holding the
+# accumulator decl + a per-iteration reassignment. That reassignment only joins
+# the owned-reassignment machinery (ReassignWithCleanup: free the old value,
+# heap-place the step result) when (a) the synthetic decl and reassignment share
+# one SymbolEntry and (b) the cleanup-classification / reassign-stamp passes
+# descend into the value-BlockExpr. Without both, an owned accumulator either
+# fails to compile (UNHOISTED_ALLOC) or leaks/UAFs the overwritten value. Leak
+# detection here confirms per-step cleanup.
+
+FN suffix(n: Int64) RETURNS String ->
+    RETURN "-${toString(n)}";
+END
+
+# Heap-carry-return path: the accumulator IS the returned value.
+FN joinReturned(dims: Int64[], base: String) RETURNS String ->
+    RETURN dims |> REDUCE(COPY base) "${acc}${suffix(_)}";
+END
+
+FN main() RETURNS Void ->
+    MUTABLE ds: Int64[] = List[];
+    &ds.push(1_i64);
+    &ds.push(2_i64);
+    &ds.push(3_i64);
+
+    # Returned owned-String accumulator.
+    joined = joinReturned(ds, "d");
+    ASSERT joined.length() == 7_i64, "d-1-2-3 has 7 chars";
+    joined2 = joinReturned(ds, "start");
+    ASSERT joined2.length() == 11_i64, "start-1-2-3 has 11 chars";
+
+    # Var-assigned owned-String accumulator, folded in place.
+    local = ds |> REDUCE("") "${acc}${suffix(_)}";
+    ASSERT local.length() == 6_i64, "-1-2-3 has 6 chars";
+    RETURN;
+END

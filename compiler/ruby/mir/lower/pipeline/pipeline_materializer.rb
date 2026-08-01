@@ -81,6 +81,9 @@ class PipelineMaterializer
     sig { abstract.params(label: String).void }
     def materializer_set_current_label(label); end
 
+    sig { abstract.returns(T.nilable(String)) }
+    def materializer_current_label; end
+
     sig { abstract.returns(String) }
     def materializer_next_item_temp_name; end
   end
@@ -125,6 +128,7 @@ class PipelineMaterializer
       @next_label = T.let(next_label, T.proc.returns(String))
       @set_current_label = T.let(set_current_label, T.proc.params(label: String).void)
       @next_item_temp_name = T.let(next_item_temp_name, T.proc.returns(String))
+      @current_label = T.let(nil, T.nilable(String))
     end
 
     sig { override.params(node: AST::Node).returns(MIR::Node) }
@@ -173,7 +177,13 @@ class PipelineMaterializer
 
     sig { override.params(label: String).void }
     def materializer_set_current_label(label)
+      @current_label = label
       @set_current_label.call(label)
+    end
+
+    sig { override.returns(T.nilable(String)) }
+    def materializer_current_label
+      @current_label
     end
 
     sig { override.returns(String) }
@@ -197,9 +207,40 @@ class PipelineMaterializer
     @host.materializer_schema_lookup
   end
 
+  # The pipeline source binding is named per labeled block so nested and
+  # sibling pipelines never share a `pipe_src_list` name. The linear ownership
+  # checker keys allocations by name across the whole function; two pipelines
+  # reusing one name (an inner pipeline feeding an outer one) would look like a
+  # double-allocation of the same binding.
+  sig { params(label: T.nilable(String)).returns(String) }
+  def source_binding_name(label = @host.materializer_current_label)
+    # Labels are already unique per block (`__pblk1`, `__mat1`, ...); strip the
+    # leading underscores so the binding reads as `pipe_src_list_pblk1`.
+    raw = label.to_s
+    raw = T.must(raw[1..]) while raw.start_with?("_")
+    "pipe_src_list_#{raw}"
+  end
+
+  # Per-label items binding: nested pipelines each get their own
+  # `pipe_items_<label>` — a shared literal name shadows in Zig when one
+  # pipeline is lowered inside another's loop body.
+  sig { returns(String) }
+  def items_binding_name
+    label = (@host.materializer_current_label || "items").to_s
+    raw = label
+    raw = T.must(raw[1..]) while raw.start_with?("_")
+    "pipe_items_#{raw}"
+  end
+
+  sig { returns(MIR::Ident) }
+  def source_ident
+    MIR::Ident.new(source_binding_name)
+  end
+
   sig { params(list_node: AST::Node, blk: T.proc.params(items_ident: String, label: String).returns(T::Array[MIR::Emittable])).returns(MIR::BlockExpr) }
   def pipeline_block(list_node, &blk)
     label = @host.materializer_next_label
+    src_name = source_binding_name(label)
     source_mir = @host.materializer_visit_mir(list_node)
     source_prefix = T.let([], T::Array[MIR::Emittable])
     source_cleanup = T.let(nil, T.nilable(MIR::Cleanup))
@@ -207,7 +248,7 @@ class PipelineMaterializer
 
     fact = @host.materializer_alloc_mark_fact(
       source_mir,
-      "pipe_src_list",
+      src_name,
       fallback_alloc: forced_alloc || :heap,
       type_info: list_node.full_type!,
       known_allocating: !forced_alloc.nil?,
@@ -215,7 +256,7 @@ class PipelineMaterializer
     if fact
       source_prefix << fact.mark
       source_cleanup = MIR::Cleanup.new(
-        "pipe_src_list",
+        src_name,
         CleanupEntry.build(:uniform,
           alloc: fact.alloc,
           has_moved_guard: false,
@@ -224,23 +265,29 @@ class PipelineMaterializer
     end
     @host.materializer_set_current_label(label)
 
-    item_setup = items_setup(list_node.full_type!)
+    item_setup = items_setup(list_node.full_type!, per_label: true)
     body_stmts = blk.call(item_setup.items_ident, label)
 
     MIR::BlockExpr.new(label, [
       *source_prefix,
-      MIR::Let.new("pipe_src_list", source_mir, false, nil, nil),
+      MIR::Let.new(src_name, source_mir, false, nil, nil),
       source_cleanup,
       *item_setup.statements,
       *body_stmts,
     ].compact)
   end
 
-  sig { params(lhs_type: Type).returns(PipelineMaterializer::ItemSetup) }
-  def items_setup(lhs_type)
-    setup = item_setup_stmts(item_kind(lhs_type), lhs_type)
+  sig { params(lhs_type: Type, per_label: T::Boolean).returns(PipelineMaterializer::ItemSetup) }
+  def items_setup(lhs_type, per_label: false)
+    kind = item_kind(lhs_type)
+    # Per-label items only for the Default (plain list) kind under
+    # pipeline_block, where nested pipelines shadow a shared literal name.
+    # Pool/set/sharded builders and the concurrent consumers bind/reference
+    # the fixed name.
+    name = (per_label && kind == ItemKind::Default) ? items_binding_name : "pipe_items"
+    setup = item_setup_stmts(kind, lhs_type, name)
 
-    ItemSetup.new(statements: setup, items_ident: "pipe_items")
+    ItemSetup.new(statements: setup, items_ident: name)
   end
 
   sig { params(lhs_type: Type).returns(PipelineMaterializer::ItemKind) }
@@ -256,8 +303,8 @@ class PipelineMaterializer
     ItemKind::Default
   end
 
-  sig { params(kind: PipelineMaterializer::ItemKind, lhs_type: Type).returns(T::Array[MIR::Emittable]) }
-  def item_setup_stmts(kind, lhs_type)
+  sig { params(kind: PipelineMaterializer::ItemKind, lhs_type: Type, items_name: String).returns(T::Array[MIR::Emittable]) }
+  def item_setup_stmts(kind, lhs_type, items_name)
     case kind
     when ItemKind::ShardedPool
       build_sharded_pool(lhs_type)
@@ -272,7 +319,7 @@ class PipelineMaterializer
     when ItemKind::Set
       build_set(lhs_type)
     when ItemKind::Default
-      [MIR::Let.new("pipe_items", MIR::ItemsAccess.new(MIR::Ident.new("pipe_src_list"), true), false, nil, nil)]
+      [MIR::Let.new(items_name, MIR::ItemsAccess.new(source_ident, true), false, nil, nil)]
     end
   end
 
@@ -299,22 +346,53 @@ class PipelineMaterializer
     ]
   end
 
-  sig { params(receiver: String, alloc: Symbol, value_expr: MIR::Node).returns(MIR::Emittable) }
-  def append_owned_value_stmt(receiver, alloc, value_expr)
+  sig { params(receiver: String, alloc: Symbol, value_expr: MIR::Node, known_owned: T::Boolean, owned_type: T.nilable(Type)).returns(MIR::Emittable) }
+  def append_owned_value_stmt(receiver, alloc, value_expr, known_owned: false, owned_type: nil)
+    # `known_owned` forces the owned temp + guarded cleanup + move even when the
+    # value's MIR ownership effect cannot see it (a composite literal whose owned
+    # parts were hoisted to plain Idents). The caller guarantees ownership from
+    # the element's type + syntactic shape.
     fact = @host.materializer_alloc_mark_fact(
       value_expr,
       @host.materializer_next_item_temp_name,
       fallback_alloc: alloc,
+      type_info: owned_type,
       ast_node: nil,
       context: "pipeline owned append item",
+      known_allocating: known_owned,
     )
+    if fact && fact.alloc != alloc
+      # CROSS-ALLOCATOR element transfer: a heap-owned element (dup() result)
+      # cannot be MOVED into a frame-owned list — the list's recursive cleanup
+      # frees elements with ITS allocator, so the heap original is never freed
+      # (leak; INV-10). Copy once into the destination allocator and free the
+      # source; the recursive append handles the copy's own owned transfer.
+      # A frame source dies within this statement (freed right after the
+      # copy) — iteration-scoped, so a rewound loop verifies clean.
+      fact.mark.scope = MIR::Placement.heap?(fact.alloc) ? :heap : :iteration
+      src_name = fact.mark.name.to_s
+      src_entry = CleanupEntry.build(:uniform,
+        alloc: fact.alloc,
+        has_moved_guard: false,
+        zig_type: owned_type&.zig_type || zig_type_for(value_expr))
+      copy = MIR::DeepCopy.new(MIR::Ident.new(src_name),
+        owned_type&.zig_type || zig_type_for(value_expr), nil, :full_value, alloc)
+      return MIR::ScopeBlock.new([
+        fact.mark,
+        MIR::Let.new(src_name, value_expr, false, nil, nil),
+        MIR::Cleanup.new(src_name, src_entry),
+        append_owned_value_stmt(receiver, alloc, copy,
+          known_owned: true, owned_type: owned_type),
+      ])
+    end
+
     if fact
       fact.mark.scope = MIR::Placement.heap?(fact.alloc) ? :heap : :function
       temp_name = fact.mark.name.to_s
       entry = CleanupEntry.build(:uniform,
         alloc: fact.alloc,
         has_moved_guard: true,
-        zig_type: zig_type_for(value_expr))
+        zig_type: owned_type&.zig_type || zig_type_for(value_expr))
       return MIR::ScopeBlock.new([
         fact.mark,
         MIR::Let.new(temp_name, value_expr, false, nil, nil),
@@ -342,21 +420,24 @@ class PipelineMaterializer
     return range_concurrent_source_setup(lhs) if lhs.is_a?(AST::RangeLit)
 
     lhs_type = lhs.full_type!
+    label = @host.materializer_next_label
+    src_name = source_binding_name(label)
     source_mir = @host.materializer_visit_mir(lhs)
     source_prefix = T.let([], T::Array[MIR::Emittable])
     source_cleanup = T.let(nil, T.nilable(MIR::Cleanup))
-    fact = @host.materializer_alloc_mark_fact(source_mir, "pipe_src_list",
+    fact = @host.materializer_alloc_mark_fact(source_mir, src_name,
       fallback_alloc: :heap,
       type_info: lhs.full_type!)
     if fact
       source_prefix << fact.mark
-      source_cleanup = MIR::Cleanup.new("pipe_src_list",
+      source_cleanup = MIR::Cleanup.new(src_name,
         CleanupEntry.build(:uniform, alloc: fact.alloc, has_moved_guard: false, zig_type: lhs_type.zig_type))
     end
+    @host.materializer_set_current_label(label)
     item_setup = items_setup(lhs_type)
     [
       *source_prefix,
-      MIR::Let.new("pipe_src_list", source_mir, !source_cleanup.nil?, nil, "_ = &pipe_src_list;"),
+      MIR::Let.new(src_name, source_mir, !source_cleanup.nil?, nil, "_ = &#{src_name};"),
       source_cleanup,
       *item_setup.statements,
     ].compact
@@ -432,7 +513,7 @@ class PipelineMaterializer
     buffer = var_and_defer(elem_zig)
 
     shard_expr = MIR::IndexGet.new(
-      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "shards"),
+      MIR::FieldGet.new(source_ident, "shards"),
       MIR::Ident.new("__psi"))
     inner_loop = MIR::ForStmt.new(
       MIR::IterRange.new(MIR::Lit.new("0"),
@@ -459,15 +540,15 @@ class PipelineMaterializer
     buffer = var_and_defer(elem_zig)
 
     value_expr = MIR::MethodCall.new(
-      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data"),
+      MIR::FieldGet.new(source_ident, "data"),
       "get", [MIR::Ident.new("__psi")], false,
       MIR::CallableContract.no_ownership(1))
     alive_check = MIR::IndexGet.new(
-      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "alive"),
+      MIR::FieldGet.new(source_ident, "alive"),
       MIR::Ident.new("__psi"))
 
     loop_node = MIR::ForStmt.new(
-      MIR::IterRange.new(MIR::Lit.new("0"), MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data")), "usize", :intCast), :usize),
+      MIR::IterRange.new(MIR::Lit.new("0"), MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(source_ident, "data")), "usize", :intCast), :usize),
       "__psi",
       [MIR::IfStmt.new(alive_check, [append(value_expr)], nil)],
       nil)
@@ -482,11 +563,11 @@ class PipelineMaterializer
 
     loop_node = MIR::ForStmt.new(
       MIR::IterRange.new(MIR::Lit.new("0"),
-        MIR::Cast.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "capacity"), "usize", :intCast), :usize),
+        MIR::Cast.new(MIR::FieldGet.new(source_ident, "capacity"), "usize", :intCast), :usize),
       "__pslot_idx",
       [MIR::IfStmt.new(
-        MIR::MethodCall.new(MIR::Ident.new("pipe_src_list"), "isAliveIndex", [MIR::Ident.new("__pslot_idx")], false, MIR::CallableContract.no_ownership(1)),
-        [append(MIR::IndexGet.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "values"), MIR::Ident.new("__pslot_idx")))],
+        MIR::MethodCall.new(source_ident, "isAliveIndex", [MIR::Ident.new("__pslot_idx")], false, MIR::CallableContract.no_ownership(1)),
+        [append(MIR::IndexGet.new(MIR::FieldGet.new(source_ident, "values"), MIR::Ident.new("__pslot_idx")))],
         nil)],
       nil)
 
@@ -499,7 +580,7 @@ class PipelineMaterializer
     buffer = var_and_defer(elem_zig)
 
     iter_let = MIR::Let.new("__skit",
-      MIR::MethodCall.new(MIR::Ident.new("pipe_src_list"), "keyIterator", [], false, MIR::CallableContract.no_ownership(0)),
+      MIR::MethodCall.new(source_ident, "keyIterator", [], false, MIR::CallableContract.no_ownership(0)),
       true, nil, nil)
     deref = MIR::FieldGet.new(MIR::Ident.new("__skptr"), "*")
     loop_node = MIR::WhileStmt.new(
@@ -516,12 +597,12 @@ class PipelineMaterializer
     buffer = var_and_defer(elem_zig)
 
     value_expr = MIR::MethodCall.new(
-      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data"),
+      MIR::FieldGet.new(source_ident, "data"),
       "get", [MIR::Ident.new("__psi")], false,
       MIR::CallableContract.no_ownership(1))
 
     loop_node = MIR::ForStmt.new(
-      MIR::IterRange.new(MIR::Lit.new("0"), MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data")), "usize", :intCast), :usize),
+      MIR::IterRange.new(MIR::Lit.new("0"), MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(source_ident, "data")), "usize", :intCast), :usize),
       "__psi",
       [append(value_expr)],
       nil)
@@ -535,7 +616,7 @@ class PipelineMaterializer
     buffer = var_and_defer(elem_zig)
 
     shard_items = MIR::FieldGet.new(
-      MIR::IndexGet.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "shards"),
+      MIR::IndexGet.new(MIR::FieldGet.new(source_ident, "shards"),
                         MIR::Ident.new("__psi")),
       "items")
 

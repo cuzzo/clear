@@ -186,7 +186,7 @@ module MIRLoweringControlFlow
     capture_markers = T.let([], T::Array[MIR::Stmt])
     mir_bindings = node.bindings.map do |b|
       expr, pending = lower_head do
-        if plain_map_union_bind?(b.expr)
+        if plain_map_pointer_bind?(b.expr)
           index = T.cast(b.expr, AST::GetIndex)
           expr_target = lower(index.target)
           MIR::MethodCall.new(
@@ -252,24 +252,39 @@ module MIRLoweringControlFlow
 
   # A union capture is matched by tag inside the IF body. MIR deliberately
   # models borrowed union captures as pointers so MATCH can inspect the
-  # collection slot without copying an ownership-bearing payload. Plain Zig
-  # hash maps expose that shape through getPtr(); ordinary indexed lowering
-  # uses get(), which returns a value and contradicts the pointer-alias fact.
+  # collection slot without copying an ownership-bearing payload. Plain
+  # struct captures need the same pointer shape so mutation through the
+  # capture (`&slot.field.append(...)`) lands in the map slot instead of a
+  # const value copy. Plain Zig hash maps expose that shape through
+  # getPtr(); ordinary indexed lowering uses get(), which returns a value
+  # and contradicts the pointer-alias fact.
   #
-  # Shared/sharded maps must keep their lock-scoped get path: a pointer into
-  # those maps cannot safely escape the operation that holds the lock.
+  # This predicate only sees the *declared* receiver type. Map shape is erased
+  # whenever the receiver is a `{K}V` parameter -- a `{K}@sharded(N):writeLocked V`
+  # argument arrives here looking plain -- so the shape guards below are an
+  # opt-out for directly-typed shared-nothing maps, not the safety decision.
+  # Every shape a plain-map parameter can bind to answers `getPtr` (see the
+  # getPtr contract note in zig/lib/data-structures.zig); shared-nothing
+  # partitioned maps answer with a @compileError naming the fix.
   sig { params(expr: AST::Node).returns(T::Boolean) }
-  def plain_map_union_bind?(expr)
+  def plain_map_pointer_bind?(expr)
     T.bind(self, MIRLowering) rescue nil
     return false unless expr.is_a?(AST::GetIndex)
 
-    receiver = expr.target.full_type!(context: "IF map union binding receiver")
+    receiver = expr.target.full_type!(context: "IF map binding receiver")
     return false unless receiver.map? && !receiver.sharded? && !receiver.any_rc? && !receiver.any_sync?
 
-    result = expr.full_type!(context: "IF map union binding result")
+    result = expr.full_type!(context: "IF map binding result")
     inner = result.optional? ? T.must(result.wrapped_type) : result
     union_name = inner.generic_instance? ? inner.generic_base : inner.resolved
-    union_schemas.key?(union_name)
+    return true if union_schemas.key?(union_name)
+    # Plain collection payloads (list/set/map-valued slots) need the same
+    # pointer capture so `&slot.insert(...)` mutates the slot in place;
+    # the annotator grants these captures a mutable borrow alias.
+    return true if inner.collection? && !inner.node_reference? && !inner.any_rc?
+
+    (inner.struct? && !inner.collection? && !inner.node_reference? &&
+      !inner.link? && !inner.any_rc?) == true
   end
 
   sig { params(target: AST::Node).returns(T::Boolean) }
@@ -330,7 +345,7 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     if expr.is_a?(AST::GetIndex)
       receiver = Type.from_node!(expr.target, context: "IF binding runtime shape")
-      return receiver.pool? || mutable_struct_list_bind?(expr) || plain_map_union_bind?(expr)
+      return receiver.pool? || mutable_struct_list_bind?(expr) || plain_map_pointer_bind?(expr)
     end
 
     expr.is_a?(AST::MethodCall) && expr.pool_method == :get
@@ -386,24 +401,21 @@ module MIRLoweringControlFlow
 
   sig { params(stmts: T::Array[MIR::Node], scope: Symbol).void }
   def stamp_loop_frame_alloc_scopes!(stmts, scope)
-    stmts.each do |s|
-      case s
-      when MIR::AllocMark
-        s.scope = scope if MIR::Placement.frame?(s.alloc)
-      when MIR::IfStmt, MIR::IfBindStmt
-        stamp_loop_frame_alloc_scopes!(s.then_body, scope)
-        stamp_loop_frame_alloc_scopes!(T.must(s.else_body), scope) if s.else_body
-      when MIR::ScopeBlock, MIR::BlockExpr, MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
-        stamp_loop_frame_alloc_scopes!(s.body, scope)
-      when MIR::SwitchStmt
-        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
-        stamp_loop_frame_alloc_scopes!(T.must(s.default_body), scope) if s.default_body
-      when MIR::IfChain
-        s.branches&.each { |b| stamp_loop_frame_alloc_scopes!(b.body, scope) }
-        stamp_loop_frame_alloc_scopes!(T.must(s.default_body), scope) if s.default_body
-      when MIR::WithMatchDispatch
-        s.arms&.each { |a| stamp_loop_frame_alloc_scopes!(a.body, scope) }
-      end
+    # EXACTLY the traversal MIRChecker#verify_frame_rewind! uses to look for
+    # iteration-scoped frame allocations (each_loop_local_node): every node
+    # the checker will see inside this loop body must carry the loop's scope
+    # stamp, including allocations in VALUE position — a pipeline lowers to a
+    # BlockExpr in a Let init, and a statement-shaped walk never reached its
+    # marks, so any pipeline bound inside a loop was rejected as "loop restore
+    # encloses frame allocations not scoped to one iteration" despite safe
+    # emission. Nested loops / fibers are boundaries: their bodies are stamped
+    # by their own lowering with their own mark_per_iter.
+    boundary = ->(node) do
+      node.is_a?(MIR::WhileStmt) || node.is_a?(MIR::ForStmt) ||
+        node.is_a?(MIR::BgBlock) || node.is_a?(MIR::LambdaExpr)
+    end
+    MIR.each_node_until(stmts, boundary) do |node|
+      node.scope = scope if node.is_a?(MIR::AllocMark) && MIR::Placement.frame?(node.alloc)
     end
     nil
   end
@@ -513,7 +525,11 @@ module MIRLoweringControlFlow
     body = lower_body(node.body)
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
     rt = MIR::Ident.new(runtime_binding_name)
-    coll = lower(node.collection)
+    # A loop source is not in coercion position: an ambient expected type
+    # (the enclosing declaration's collection type leaking through a pipeline
+    # desugar) must not coerce a fixed literal source into a MakeList while
+    # the iteration branch below picks its shape from the node's OWN type.
+    coll = with_expected_type(nil) { lower(node.collection) }
     coll_type = node.collection.full_type!
     ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
     collection_setup = T.let([], T::Array[MIR::Node])
@@ -925,10 +941,7 @@ module MIRLoweringControlFlow
       "__match_#{lowering_counters.next_block_expr_id}"
     end
     subject = lower(node.expr)
-    union_lookup = begin
-      t = Type.new(node.expr.resolved_type || :Any)
-      t.generic_instance? ? t.generic_base : t.resolved
-    end
+    union_lookup = match_union_lookup(node.expr)
     is_union = union_schemas.key?(union_lookup)
     match_ident = T.cast(node.expr, T.nilable(AST::Identifier)) if node.expr.is_a?(AST::Identifier)
     if is_union && match_ident &&
@@ -955,6 +968,14 @@ module MIRLoweringControlFlow
       is_enum_match: is_enum_match,
       expr_type_sym: T.cast(is_union ? union_lookup : expr_type_sym, Symbol)
     )
+  end
+
+  sig { params(expression: AST::Node).returns(Symbol) }
+  def match_union_lookup(expression)
+    type = Type.new(expression.resolved_type || :Any)
+    return type.generic_base if type.generic_instance?
+
+    type.resolved
   end
 
   sig { params(stmts: T::Array[AST::Node], expr_label: T.nilable(String)).returns(MatchBody) }
@@ -1139,8 +1160,27 @@ module MIRLoweringControlFlow
       # allocation in the only verifier-visible ownership position.
       # ErrCleanup: the caller takes ownership on success.
       value = hoist_alloc(value, node.value, err_cleanup: true, transfer_on_success: false) if value && !value.is_a?(MIR::Ident)
+      value = bind_consuming_call_return_value(value) if value
       return return_with_transfer_marks(plan, value, MIR::ReturnStmt.new(value))
     end
+  end
+
+  # A consuming call that reaches return position still unbound (e.g. a
+  # MONOMORPHIC `RETURN cache(KEEP u)`) emits its argument move-marks AFTER the
+  # call. Inline in `return <call>;` those marks land after the return ->
+  # unreachable code. Bind the call to a temp so the marks flush before the
+  # return. Calls that were already materialized arrive as an Ident and are
+  # skipped, so this does not perturb existing bound returns.
+  sig { params(value: MIR::Node).returns(MIR::Node) }
+  def bind_consuming_call_return_value(value)
+    T.bind(self, MIRLowering) rescue nil
+    return value unless value.is_a?(MIR::Call) || value.is_a?(MIR::MethodCall)
+    fact = value.ownership_consumption
+    return value unless fact.is_a?(MIR::OwnershipConsumptionFact) && !fact.operands.empty?
+
+    name = "__ret_#{lowering_counters.next_tmp_id}"
+    function_state.pending_stmts << MIR::Let.new(name, value, false, nil, nil, nil)
+    MIR::Ident.new(name)
   end
 
   sig { params(node: AST::ReturnNode, value: T.nilable(MIR::Node)).returns(T.nilable(MIR::Node)) }
@@ -1471,7 +1511,7 @@ module MIRLoweringControlFlow
       names << name if name
     when AST::Cast, AST::MoveNode, AST::ShareNode
       collect_returned_binding_names(expr.value, names)
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
+    when AST::CopyNode, AST::KeepNode, AST::FreezeNode
       return
     when AST::StructLit, AST::UnionVariantLit
       expr.fields.each_value { |v| collect_returned_binding_names(v, names) }
@@ -1614,6 +1654,7 @@ module MIRLoweringControlFlow
   private :union_match_default_body
   private :union_match_payload_bindings
   private :union_match_switchable?
+  private :match_union_lookup
   private :union_match_variant_name
   private :union_tag_condition
   private :value_if_chain_match_case

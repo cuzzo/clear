@@ -1,12 +1,24 @@
 # typed: strict
 
 require "sorbet-runtime"
+require_relative "type_capabilities"
 
-module TypeExpression
+# The variant-specific payload of a type expression. Every concrete node kind
+# includes this marker. The per-node `capabilities` field is NOT duplicated into
+# each variant -- it is hoisted onto the `TypeExpression` wrapper below and
+# stored once, so reading it off any node is a direct field access with no
+# per-variant dispatch. A node kind is always paired with its capabilities via
+# the wrapper (`TypeExpression#kind` / `#capabilities`).
+module TypeExpressionKind
   extend T::Helpers
-  extend T::Sig
   include Kernel
-  interface!
+  sealed!
+end
+
+# A type expression: a variant payload (`kind`) plus the capabilities that apply
+# to this node. Capabilities live here (once) rather than on every variant.
+class TypeExpression < T::Struct
+  extend T::Sig
 
   Dimension = T.type_alias { T.any(Integer, Symbol) }
   VALID_TENSE_ORDERS = T.let(
@@ -14,23 +26,35 @@ module TypeExpression
     T::Array[String],
   )
 
-  sig { abstract.returns(TypeCapabilities) }
-  def capabilities; end
+  const :kind, TypeExpressionKind
+  const :capabilities, TypeCapabilities, factory: -> { TypeCapabilities::AFFINE }
+
+  # Build a wrapper around a freshly-constructed variant payload, defaulting
+  # capabilities to AFFINE when the caller does not care.
+  sig { params(kind: TypeExpressionKind, capabilities: TypeCapabilities).returns(TypeExpression) }
+  def self.of(kind, capabilities = TypeCapabilities::AFFINE)
+    new(kind: kind, capabilities: capabilities)
+  end
+
+  # Replace this node's capabilities, keeping the variant payload.
+  sig { params(capabilities: TypeCapabilities).returns(TypeExpression) }
+  def with_capabilities(capabilities)
+    TypeExpression.new(kind: kind, capabilities: capabilities)
+  end
 end
 
 class NamedTypeExpression < T::Struct
-  include TypeExpression
+  include TypeExpressionKind
 
   const :name, Symbol
   const :arguments, T::Array[TypeExpression], default: []
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 end
 
 # A protocol-associated type selected from a generic type parameter, such as
 # M::Key or M::Value.  This remains symbolic while a generic body is checked
 # and is replaced from the concrete conformance witness at instantiation.
 class TypeProjectionExpression < T::Struct
-  include TypeExpression
+  include TypeExpressionKind
 
   const :owner, Symbol
   const :member, Symbol
@@ -38,54 +62,63 @@ class TypeProjectionExpression < T::Struct
   # this on the immutable syntax node makes `M::Item` unambiguous when M is
   # constrained by more than one protocol with an Item associated type.
   const :protocol, T.nilable(Symbol), default: nil
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
+end
+
+class FunctionParamExpression < T::Struct
+  const :expression, TypeExpression
+end
+
+# Foundation-native function signature: parameters and return spelled as
+# TypeExpressions. `semantic_payload` is an opaque backref (the semantic
+# Type::FunctionType) owned entirely by type.rb; the foundation never
+# inspects it.
+class FunctionSignatureExpression < T::Struct
+  const :params, T::Array[FunctionParamExpression]
+  const :return_expression, TypeExpression
+  const :reentrant, T::Boolean, default: false
+  const :abi, Symbol, default: :clear
+  const :semantic_payload, T.nilable(BasicObject), default: nil
 end
 
 class FunctionTypeExpression < T::Struct
-  include TypeExpression
+  include TypeExpressionKind
 
-  const :signature, Type::FunctionType
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
+  const :signature, FunctionSignatureExpression
 end
 
 class TupleTypeExpression < T::Struct
-  include TypeExpression
+  include TypeExpressionKind
 
   const :items, T::Array[TypeExpression]
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 end
 
 class OptionalTypeExpression < T::Struct
-  include TypeExpression
+  include TypeExpressionKind
 
   const :inner, TypeExpression
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 end
 
 class FallibleTypeExpression < T::Struct
-  include TypeExpression
+  include TypeExpressionKind
 
   const :inner, TypeExpression
   const :error_set, T.nilable(TypeExpression), default: nil
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 end
 
 class FutureTypeExpression < T::Struct
-  include TypeExpression
+  include TypeExpressionKind
 
   const :inner, TypeExpression
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 end
 
 class LinearTypeExpression < T::Struct
   extend T::Sig
-  include TypeExpression
+  include TypeExpressionKind
 
   const :kind, Symbol
   const :dimensions, T::Array[TypeExpression::Dimension]
   const :item, TypeExpression
   const :allocation_hint, T.nilable(Integer), default: nil
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 
   sig { returns(T::Boolean) }
   def list?
@@ -104,7 +137,7 @@ class LinearTypeExpression < T::Struct
 end
 
 class MapTypeExpression < T::Struct
-  include TypeExpression
+  include TypeExpressionKind
 
   const :key, TypeExpression
   const :value, TypeExpression
@@ -113,15 +146,13 @@ class MapTypeExpression < T::Struct
   # still expected to round-trip both accepted spellings.
   const :key_implicit, T::Boolean, default: false
   const :legacy_separator, String, default: ","
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 end
 
 class StreamTypeExpression < T::Struct
-  include TypeExpression
+  include TypeExpressionKind
 
   const :cardinality, TypeExpression::Dimension
   const :item, TypeExpression
-  const :capabilities, TypeCapabilities, default: TypeCapabilities.new(ownership: :affine), override: true
 end
 
 class TypeExpressionTree
@@ -129,88 +160,80 @@ class TypeExpressionTree
 
   sig { params(expression: TypeExpression).returns(TypeCapabilities) }
   def self.root_capabilities(expression)
-    expression.capabilities
+    # ruby-to-clear represents the wrapper as its closed kind union and
+    # distributes wrapper fields onto each payload. Keep the read under a
+    # kind refinement so the generated frontend can select the concrete
+    # payload field; Ruby still reads the single wrapper field.
+    kind = expression.kind
+    return expression.capabilities if kind.is_a?(NamedTypeExpression)
+    return expression.capabilities if kind.is_a?(TypeProjectionExpression)
+    return expression.capabilities if kind.is_a?(FunctionTypeExpression)
+    return expression.capabilities if kind.is_a?(TupleTypeExpression)
+    return expression.capabilities if kind.is_a?(OptionalTypeExpression)
+    return expression.capabilities if kind.is_a?(FallibleTypeExpression)
+    return expression.capabilities if kind.is_a?(FutureTypeExpression)
+    return expression.capabilities if kind.is_a?(LinearTypeExpression)
+    return expression.capabilities if kind.is_a?(MapTypeExpression)
+    return expression.capabilities if kind.is_a?(StreamTypeExpression)
+
+    # TypeExpressionKind is sealed, so this is unreachable. Keep a concrete
+    # fallback because the generated CLEAR frontend has no T.absurd helper.
+    TypeCapabilities::AFFINE
   end
 
   sig { params(expression: TypeExpression, capabilities: TypeCapabilities).returns(TypeExpression) }
   def self.with_root_capabilities(expression, capabilities)
-    case expression
-    when OptionalTypeExpression
-      OptionalTypeExpression.new(inner: expression.inner, capabilities: capabilities)
-    when FallibleTypeExpression
-      FallibleTypeExpression.new(inner: expression.inner, error_set: expression.error_set, capabilities: capabilities)
-    when FutureTypeExpression
-      FutureTypeExpression.new(inner: expression.inner, capabilities: capabilities)
-    when NamedTypeExpression
-      NamedTypeExpression.new(name: expression.name, arguments: expression.arguments, capabilities: capabilities)
-    when TypeProjectionExpression
-      TypeProjectionExpression.new(owner: expression.owner, member: expression.member,
-        protocol: expression.protocol, capabilities: capabilities)
-    when FunctionTypeExpression
-      FunctionTypeExpression.new(signature: expression.signature, capabilities: capabilities)
-    when TupleTypeExpression
-      TupleTypeExpression.new(items: expression.items, capabilities: capabilities)
-    when LinearTypeExpression
-      LinearTypeExpression.new(kind: expression.kind, dimensions: expression.dimensions,
-        item: expression.item, allocation_hint: expression.allocation_hint, capabilities: capabilities)
-    when MapTypeExpression
-      MapTypeExpression.new(key: expression.key, value: expression.value,
-        key_implicit: expression.key_implicit, legacy_separator: expression.legacy_separator,
-        capabilities: capabilities)
-    when StreamTypeExpression
-      StreamTypeExpression.new(cardinality: expression.cardinality, item: expression.item,
-        capabilities: capabilities)
-    else
-      expression
-    end
+    # Capabilities are hoisted onto the wrapper, so replacing the root's
+    # capabilities is a single field swap that keeps the variant payload.
+    expression.with_capabilities(capabilities)
   end
 
   sig { params(expression: TypeExpression).returns(T.nilable(TypeCapabilities)) }
   def self.linear_item_capabilities(expression)
     node = T.let(expression, TypeExpression)
     loop do
-      case node
+      kind = node.kind
+      case kind
       when FallibleTypeExpression, FutureTypeExpression, OptionalTypeExpression
-        node = node.inner
+        node = kind.inner
       else
         break
       end
     end
-    return nil unless node.is_a?(LinearTypeExpression)
+    linear = node.kind
+    return nil unless linear.is_a?(LinearTypeExpression)
 
-    root_capabilities(node.item)
+    root_capabilities(linear.item)
   end
 
   sig { params(expression: TypeExpression, capabilities: TypeCapabilities).returns(TypeExpression) }
   def self.with_linear_item_capabilities(expression, capabilities)
-    if expression.is_a?(FallibleTypeExpression)
-      return FallibleTypeExpression.new(
-        inner: with_linear_item_capabilities(expression.inner, capabilities),
-        error_set: expression.error_set,
-        capabilities: expression.capabilities
-      )
+    kind = expression.kind
+    cap = expression.capabilities
+    if kind.is_a?(FallibleTypeExpression)
+      return TypeExpression.new(kind: FallibleTypeExpression.new(
+        inner: with_linear_item_capabilities(kind.inner, capabilities),
+        error_set: kind.error_set,
+      ), capabilities: cap)
     end
-    if expression.is_a?(FutureTypeExpression)
-      return FutureTypeExpression.new(
-        inner: with_linear_item_capabilities(expression.inner, capabilities),
-        capabilities: expression.capabilities
-      )
+    if kind.is_a?(FutureTypeExpression)
+      return TypeExpression.new(kind: FutureTypeExpression.new(
+        inner: with_linear_item_capabilities(kind.inner, capabilities),
+      ), capabilities: cap)
     end
-    if expression.is_a?(OptionalTypeExpression)
-      return OptionalTypeExpression.new(
-        inner: with_linear_item_capabilities(expression.inner, capabilities),
-        capabilities: expression.capabilities
-      )
+    if kind.is_a?(OptionalTypeExpression)
+      return TypeExpression.new(kind: OptionalTypeExpression.new(
+        inner: with_linear_item_capabilities(kind.inner, capabilities),
+      ), capabilities: cap)
     end
-    return expression unless expression.is_a?(LinearTypeExpression)
+    return expression unless kind.is_a?(LinearTypeExpression)
 
-    LinearTypeExpression.new(
-      kind: expression.kind,
-      dimensions: expression.dimensions,
-      item: with_root_capabilities(expression.item, capabilities),
-      allocation_hint: expression.allocation_hint,
-      capabilities: expression.capabilities
-    )
+    TypeExpression.new(kind: LinearTypeExpression.new(
+      kind: kind.kind,
+      dimensions: kind.dimensions,
+      item: with_root_capabilities(kind.item, capabilities),
+      allocation_hint: kind.allocation_hint,
+    ), capabilities: cap)
   end
 
   # Return the item beneath one linear collection while retaining every tense
@@ -219,28 +242,26 @@ class TypeExpressionTree
   # envelope that aggregate NEXT later reconstructs around the result list.
   sig { params(expression: TypeExpression).returns(T.nilable(TypeExpression)) }
   def self.linear_item_envelope(expression)
-    case expression
+    kind = expression.kind
+    cap = expression.capabilities
+    case kind
     when FallibleTypeExpression
-      inner = linear_item_envelope(expression.inner)
+      inner = linear_item_envelope(kind.inner)
       return nil unless inner
 
-      FallibleTypeExpression.new(
-        inner: inner,
-        error_set: expression.error_set,
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: FallibleTypeExpression.new(inner: inner, error_set: kind.error_set), capabilities: cap)
     when FutureTypeExpression
-      inner = linear_item_envelope(expression.inner)
+      inner = linear_item_envelope(kind.inner)
       return nil unless inner
 
-      FutureTypeExpression.new(inner: inner, capabilities: expression.capabilities)
+      TypeExpression.new(kind: FutureTypeExpression.new(inner: inner), capabilities: cap)
     when OptionalTypeExpression
-      inner = linear_item_envelope(expression.inner)
+      inner = linear_item_envelope(kind.inner)
       return nil unless inner
 
-      OptionalTypeExpression.new(inner: inner, capabilities: expression.capabilities)
+      TypeExpression.new(kind: OptionalTypeExpression.new(inner: inner), capabilities: cap)
     when LinearTypeExpression
-      expression.item
+      kind.item
     else
       nil
     end
@@ -260,59 +281,55 @@ class TypeExpressionTree
     ).returns(TypeExpression)
   end
   def self.with_nominal_arguments(expression, name, arguments)
-    case expression
+    kind = expression.kind
+    cap = expression.capabilities
+    case kind
     when OptionalTypeExpression
-      OptionalTypeExpression.new(
-        inner: with_nominal_arguments(expression.inner, name, arguments),
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: OptionalTypeExpression.new(
+        inner: with_nominal_arguments(kind.inner, name, arguments),
+      ), capabilities: cap)
     when FallibleTypeExpression
-      FallibleTypeExpression.new(
-        inner: with_nominal_arguments(expression.inner, name, arguments),
-        error_set: expression.error_set,
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: FallibleTypeExpression.new(
+        inner: with_nominal_arguments(kind.inner, name, arguments),
+        error_set: kind.error_set,
+      ), capabilities: cap)
     when FutureTypeExpression
-      FutureTypeExpression.new(
-        inner: with_nominal_arguments(expression.inner, name, arguments),
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: FutureTypeExpression.new(
+        inner: with_nominal_arguments(kind.inner, name, arguments),
+      ), capabilities: cap)
     when LinearTypeExpression
-      LinearTypeExpression.new(
-        kind: expression.kind,
-        dimensions: expression.dimensions,
-        item: with_nominal_arguments(expression.item, name, arguments),
-        allocation_hint: expression.allocation_hint,
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: LinearTypeExpression.new(
+        kind: kind.kind,
+        dimensions: kind.dimensions,
+        item: with_nominal_arguments(kind.item, name, arguments),
+        allocation_hint: kind.allocation_hint,
+      ), capabilities: cap)
     when StreamTypeExpression
-      StreamTypeExpression.new(
-        cardinality: expression.cardinality,
-        item: with_nominal_arguments(expression.item, name, arguments),
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: StreamTypeExpression.new(
+        cardinality: kind.cardinality,
+        item: with_nominal_arguments(kind.item, name, arguments),
+      ), capabilities: cap)
     when FunctionTypeExpression
       expression
     when TupleTypeExpression
       return expression unless name == :Tuple
 
-      TupleTypeExpression.new(items: arguments, capabilities: expression.capabilities)
+      TypeExpression.new(kind: TupleTypeExpression.new(items: arguments), capabilities: cap)
     when NamedTypeExpression
-      return expression unless expression.name == name
+      return expression unless kind.name == name
 
-      NamedTypeExpression.new(name: name, arguments: arguments, capabilities: expression.capabilities)
+      TypeExpression.new(kind: NamedTypeExpression.new(name: name, arguments: arguments), capabilities: cap)
     when MapTypeExpression
       return expression unless name == :HashMap
 
-      key = arguments.length == 1 ? expression.key : arguments.fetch(0)
+      key = arguments.length == 1 ? kind.key : arguments.fetch(0)
       value = arguments.length == 1 ? arguments.fetch(0) : arguments.fetch(1)
-      MapTypeExpression.new(
+      TypeExpression.new(kind: MapTypeExpression.new(
         key: key,
         value: value,
         key_implicit: arguments.length == 1,
-        legacy_separator: expression.legacy_separator,
-        capabilities: expression.capabilities,
-      )
+        legacy_separator: kind.legacy_separator,
+      ), capabilities: cap)
     else
       expression
     end
@@ -330,88 +347,69 @@ class TypeExpressionTree
     ).returns(TypeExpression)
   end
   def self.transform(expression, &visitor)
-    rebuilt = T.let(case expression
+    kind = expression.kind
+    cap = expression.capabilities
+    rebuilt = T.let(case kind
     when NamedTypeExpression
-      NamedTypeExpression.new(
-        name: expression.name,
-        arguments: expression.arguments.map { |argument| transform(argument, &visitor) },
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: NamedTypeExpression.new(
+        name: kind.name,
+        arguments: kind.arguments.map { |argument| transform(argument, &visitor) },
+      ), capabilities: cap)
     when TypeProjectionExpression
       expression
     when FunctionTypeExpression
-      signature = expression.signature
-      FunctionTypeExpression.new(
-        signature: Type::FunctionType.new(
+      signature = kind.signature
+      TypeExpression.new(kind: FunctionTypeExpression.new(
+        signature: FunctionSignatureExpression.new(
           params: signature.params.map do |param|
-            Type::FunctionTypeParam.new(type: transformed_type(param.type, &visitor))
+            FunctionParamExpression.new(expression: transform(param.expression, &visitor))
           end,
-          return_type: transformed_type(signature.return_type, &visitor),
+          return_expression: transform(signature.return_expression, &visitor),
           reentrant: signature.reentrant,
-          source_signature: signature.source_signature,
           abi: signature.abi,
         ),
-        capabilities: expression.capabilities,
-      )
+      ), capabilities: cap)
     when TupleTypeExpression
-      TupleTypeExpression.new(
-        items: expression.items.map { |item| transform(item, &visitor) },
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: TupleTypeExpression.new(
+        items: kind.items.map { |item| transform(item, &visitor) },
+      ), capabilities: cap)
     when OptionalTypeExpression
-      OptionalTypeExpression.new(inner: transform(expression.inner, &visitor),
-        capabilities: expression.capabilities)
+      TypeExpression.new(kind: OptionalTypeExpression.new(inner: transform(kind.inner, &visitor)), capabilities: cap)
     when FallibleTypeExpression
-      error_set = expression.error_set
+      error_set = kind.error_set
       transformed_error_set = if error_set
         transform(error_set, &visitor)
       end
-      FallibleTypeExpression.new(
-        inner: transform(expression.inner, &visitor),
+      TypeExpression.new(kind: FallibleTypeExpression.new(
+        inner: transform(kind.inner, &visitor),
         error_set: transformed_error_set,
-        capabilities: expression.capabilities,
-      )
+      ), capabilities: cap)
     when FutureTypeExpression
-      FutureTypeExpression.new(inner: transform(expression.inner, &visitor),
-        capabilities: expression.capabilities)
+      TypeExpression.new(kind: FutureTypeExpression.new(inner: transform(kind.inner, &visitor)), capabilities: cap)
     when LinearTypeExpression
-      LinearTypeExpression.new(
-        kind: expression.kind,
-        dimensions: expression.dimensions,
-        item: transform(expression.item, &visitor),
-        allocation_hint: expression.allocation_hint,
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: LinearTypeExpression.new(
+        kind: kind.kind,
+        dimensions: kind.dimensions,
+        item: transform(kind.item, &visitor),
+        allocation_hint: kind.allocation_hint,
+      ), capabilities: cap)
     when MapTypeExpression
-      MapTypeExpression.new(
-        key: transform(expression.key, &visitor),
-        value: transform(expression.value, &visitor),
-        key_implicit: expression.key_implicit,
-        legacy_separator: expression.legacy_separator,
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: MapTypeExpression.new(
+        key: transform(kind.key, &visitor),
+        value: transform(kind.value, &visitor),
+        key_implicit: kind.key_implicit,
+        legacy_separator: kind.legacy_separator,
+      ), capabilities: cap)
     when StreamTypeExpression
-      StreamTypeExpression.new(
-        cardinality: expression.cardinality,
-        item: transform(expression.item, &visitor),
-        capabilities: expression.capabilities,
-      )
+      TypeExpression.new(kind: StreamTypeExpression.new(
+        cardinality: kind.cardinality,
+        item: transform(kind.item, &visitor),
+      ), capabilities: cap)
     else
       expression
     end, TypeExpression)
     visitor.call(rebuilt)
   end
-
-  sig do
-    params(
-      type: Type,
-      visitor: T.proc.params(node: TypeExpression).returns(TypeExpression),
-    ).returns(Type)
-  end
-  def self.transformed_type(type, &visitor)
-    Type.new(transform(type.shape.expression, &visitor))
-  end
-  private_class_method :transformed_type
 
   sig { params(expression: TypeExpression).returns(Integer) }
   def self.node_count(expression)
@@ -438,7 +436,7 @@ class TypeExpressionTree
 
   sig { params(expression: TypeExpression).returns(T::Boolean) }
   def self.tense_wrapper?(expression)
-    case expression
+    case expression.kind
     when OptionalTypeExpression, FallibleTypeExpression, FutureTypeExpression then true
     else false
     end
@@ -468,18 +466,19 @@ class TypeExpressionTree
 
   sig { params(expression: TypeExpression).returns(T::Array[TypeExpression]) }
   def self.children(expression)
-    case expression
-    when NamedTypeExpression then expression.arguments
+    kind = expression.kind
+    case kind
+    when NamedTypeExpression then kind.arguments
     when TypeProjectionExpression then []
     when FunctionTypeExpression
-      expression.signature.params.map { |param| param.type.shape.expression } +
-        [expression.signature.return_type.shape.expression]
-    when TupleTypeExpression then expression.items
-    when OptionalTypeExpression, FutureTypeExpression then [expression.inner]
+      kind.signature.params.map(&:expression) +
+        [kind.signature.return_expression]
+    when TupleTypeExpression then kind.items
+    when OptionalTypeExpression, FutureTypeExpression then [kind.inner]
     when FallibleTypeExpression
-      expression.error_set.nil? ? [expression.inner] : [expression.inner, T.must(expression.error_set)]
-    when LinearTypeExpression, StreamTypeExpression then [expression.item]
-    when MapTypeExpression then [expression.key, expression.value]
+      kind.error_set.nil? ? [kind.inner] : [kind.inner, T.must(kind.error_set)]
+    when LinearTypeExpression, StreamTypeExpression then [kind.item]
+    when MapTypeExpression then [kind.key, kind.value]
     else []
     end
   end
@@ -495,10 +494,10 @@ class TypeExpressionParser
     const :arguments, T::Array[String]
   end
 
-  sig { params(raw: T.any(Type::FunctionType, Symbol, String)).returns(TypeExpression) }
+  # Semantic function-type raws (Type::FunctionType) convert at the type.rb
+  # boundary (Type.function_type_expression); the foundation parses spellings.
+  sig { params(raw: T.any(Symbol, String)).returns(TypeExpression) }
   def self.parse(raw)
-    return FunctionTypeExpression.new(signature: raw) if raw.is_a?(Type::FunctionType)
-
     source = raw.to_s
     if source.start_with?("[~")
       closing = source.index("]")
@@ -516,7 +515,7 @@ class TypeExpressionParser
         )
         unless cardinality.nil?
           item_source = source[(closing + 1)..].to_s
-          return StreamTypeExpression.new(cardinality: cardinality, item: parse(item_source)) unless item_source.empty?
+          return TypeExpression.of(StreamTypeExpression.new(cardinality: cardinality, item: parse(item_source))) unless item_source.empty?
         end
       end
     end
@@ -554,9 +553,9 @@ class TypeExpressionParser
     when "~"
       raise ArgumentError, "double future type is not allowed" if inner_source.start_with?("~")
 
-      FutureTypeExpression.new(inner: parse_source(inner_source))
+      TypeExpression.of(FutureTypeExpression.new(inner: parse_source(inner_source)))
     when "!"
-      FallibleTypeExpression.new(inner: parse_source(inner_source))
+      TypeExpression.of(FallibleTypeExpression.new(inner: parse_source(inner_source)))
     when "?"
       parse_optional_source(inner_source)
     end
@@ -566,20 +565,20 @@ class TypeExpressionParser
   def self.parse_optional_source(inner_source)
     raise ArgumentError, "double optional type is not allowed" if inner_source.start_with?("?")
     if grouped_type?(inner_source)
-      return OptionalTypeExpression.new(inner: parse_source(inner_source[1..-2].to_s))
+      return TypeExpression.of(OptionalTypeExpression.new(inner: parse_source(inner_source[1..-2].to_s)))
     end
 
     optional_array_parts = split_array_suffix(inner_source)
     unless optional_array_parts.nil?
       item_source, dimension = optional_array_parts
-      return LinearTypeExpression.new(
+      return TypeExpression.of(LinearTypeExpression.new(
         kind: dimension.nil? ? :list : :array,
         dimensions: [dimension || :LIST],
-        item: OptionalTypeExpression.new(inner: parse_source(item_source))
-      )
+        item: TypeExpression.of(OptionalTypeExpression.new(inner: parse_source(item_source))),
+      ))
     end
 
-    OptionalTypeExpression.new(inner: parse_source(inner_source))
+    TypeExpression.of(OptionalTypeExpression.new(inner: parse_source(inner_source)))
   end
 
   sig { params(source: String).returns(TypeExpression) }
@@ -590,26 +589,26 @@ class TypeExpressionParser
     parse_generic_or_named_source(source)
   end
 
-  sig { params(source: String).returns(T.nilable(LinearTypeExpression)) }
+  sig { params(source: String).returns(T.nilable(TypeExpression)) }
   def self.parse_array_source(source)
     array_parts = split_array_suffix(source)
     return nil if array_parts.nil?
 
     item_source, dimension = array_parts
-    LinearTypeExpression.new(
+    TypeExpression.of(LinearTypeExpression.new(
       kind: dimension.nil? ? :list : :array,
       dimensions: [dimension || :LIST],
-      item: parse_source(item_source)
-    )
+      item: parse_source(item_source),
+    ))
   end
 
   sig { params(source: String).returns(TypeExpression) }
   def self.parse_generic_or_named_source(source)
     if (projection = /\A([A-Z]\w*)::([A-Z]\w*)\z/.match(source))
-      return TypeProjectionExpression.new(
+      return TypeExpression.of(TypeProjectionExpression.new(
         owner: T.must(projection[1]).to_sym,
         member: T.must(projection[2]).to_sym,
-      )
+      ))
     end
 
     generic = split_generic(source)
@@ -617,31 +616,31 @@ class TypeExpressionParser
       arguments = generic.arguments.map { |argument| parse_source(argument) }
       if generic.base == "HashMap"
         if arguments.length == 1
-          return MapTypeExpression.new(
-            key: NamedTypeExpression.new(name: :String),
+          return TypeExpression.of(MapTypeExpression.new(
+            key: TypeExpression.of(NamedTypeExpression.new(name: :String)),
             value: T.must(arguments.first),
-            key_implicit: true
-          )
+            key_implicit: true,
+          ))
         end
         if arguments.length == 2
           key = T.must(arguments.first)
           value = T.must(arguments.last)
-          return MapTypeExpression.new(
+          return TypeExpression.of(MapTypeExpression.new(
             key: key,
             value: value,
-            legacy_separator: top_level_argument_separator(source)
-          )
+            legacy_separator: top_level_argument_separator(source),
+          ))
         end
         raise ArgumentError, "HashMap expects one or two type arguments"
       elsif generic.base == "Tuple"
-        return TupleTypeExpression.new(items: arguments)
+        return TypeExpression.of(TupleTypeExpression.new(items: arguments))
       end
 
-      return NamedTypeExpression.new(name: generic.base.to_sym, arguments: arguments)
+      return TypeExpression.of(NamedTypeExpression.new(name: generic.base.to_sym, arguments: arguments))
     end
 
     base, capabilities = split_legacy_capability_suffix(source)
-    NamedTypeExpression.new(name: base.to_sym, capabilities: capabilities)
+    TypeExpression.new(kind: NamedTypeExpression.new(name: base.to_sym), capabilities: capabilities)
   end
 
   sig { params(source: String).returns([String, TypeCapabilities]) }
@@ -788,141 +787,168 @@ end
 class TypeExpressionPrinter
   extend T::Sig
 
+  # A collection dimension is either an Integer size or a Symbol marker. Branch
+  # the union variant explicitly instead of matching the union value against
+  # symbol literals: the typed self-host cannot compare `Integer | Symbol` to a
+  # bare `:LIST`, so narrowing to Symbol first keeps the inner case well-typed.
+  sig { params(dimension: TypeExpression::Dimension).returns(String) }
+  def self.dimension_suffix(dimension)
+    if dimension.is_a?(Symbol)
+      case dimension
+      when :LIST then "[]"
+      when :STREAM_OPEN then "[?]"
+      when :INF then "[INF]"
+      when :INFERRED then "[*]"
+      else "[#{dimension}]"
+      end
+    else
+      "[#{dimension}]"
+    end
+  end
+
+  # Inline Pivot dimension marker: same variant split as `dimension_suffix`.
+  sig { params(dimension: TypeExpression::Dimension).returns(String) }
+  def self.dimension_marker(dimension)
+    if dimension.is_a?(Symbol)
+      case dimension
+      when :LIST then "List"
+      when :STREAM_OPEN then "~"
+      when :INF then "~INF"
+      when :INFERRED then "*"
+      else dimension.to_s
+      end
+    else
+      dimension.to_s
+    end
+  end
+
   # Canonical semantic spelling used for type identity. Unlike `legacy`, this
   # deliberately normalizes stream syntax and omits representation
   # capabilities, which are keyed separately by Type.
   sig { params(expression: TypeExpression).returns(String) }
   def self.semantic(expression)
-    case expression
+    kind = expression.kind
+    case kind
     when NamedTypeExpression
-      return expression.name.to_s if expression.arguments.empty?
+      return kind.name.to_s if kind.arguments.empty?
 
-      "#{expression.name}<#{expression.arguments.map { |argument| semantic(argument) }.join(",")}>"
+      "#{kind.name}<#{kind.arguments.map { |argument| semantic(argument) }.join(",")}>"
     when TypeProjectionExpression
-      "#{expression.owner}::#{expression.member}"
+      "#{kind.owner}::#{kind.member}"
     when FunctionTypeExpression
-      params = expression.signature.params.map { |param| semantic(param.type.shape.expression) }.join(",")
-      "FN(#{params}) -> #{semantic(expression.signature.return_type.shape.expression)}"
+      params = kind.signature.params.map { |param| semantic(param.expression) }.join(",")
+      "FN(#{params}) -> #{semantic(kind.signature.return_expression)}"
     when TupleTypeExpression
-      "Tuple<#{expression.items.map { |item| semantic(item) }.join(",")}>"
+      "Tuple<#{kind.items.map { |item| semantic(item) }.join(",")}>"
     when OptionalTypeExpression
-      inner = semantic(expression.inner)
-      grouped = expression.inner.is_a?(LinearTypeExpression) || expression.inner.is_a?(MapTypeExpression)
+      inner = semantic(kind.inner)
+      inner_kind = kind.inner.kind
+      grouped = inner_kind.is_a?(LinearTypeExpression) || inner_kind.is_a?(MapTypeExpression)
       grouped ? "?(#{inner})" : "?#{inner}"
     when FallibleTypeExpression
-      "!#{semantic(expression.inner)}"
+      "!#{semantic(kind.inner)}"
     when FutureTypeExpression
-      "~#{semantic(expression.inner)}"
+      "~#{semantic(kind.inner)}"
     when LinearTypeExpression
-      expression.dimensions.reduce(semantic(expression.item)) do |surface, dimension|
-        suffix = case dimension
-        when :LIST then "[]"
-        when :STREAM_OPEN then "[?]"
-        when :INF then "[INF]"
-        when :INFERRED then "[*]"
-        else "[#{dimension}]"
-        end
-        "#{surface}#{suffix}"
+      kind.dimensions.reduce(semantic(kind.item)) do |surface, dimension|
+        "#{surface}#{dimension_suffix(dimension)}"
       end
     when MapTypeExpression
-      "HashMap<#{semantic(expression.key)},#{semantic(expression.value)}>"
+      "HashMap<#{semantic(kind.key)},#{semantic(kind.value)}>"
     when StreamTypeExpression
-      suffix = expression.cardinality == :FINITE ? "[]" : "[#{expression.cardinality}]"
-      "~#{semantic(expression.item)}#{suffix}"
+      suffix = kind.cardinality == :FINITE ? "[]" : "[#{kind.cardinality}]"
+      "~#{semantic(kind.item)}#{suffix}"
     else
-      raise "unknown type expression #{expression.class}"
+      raise "unknown type expression #{kind.class}"
     end
   end
 
   sig { params(expression: TypeExpression).returns(String) }
   def self.legacy(expression)
-    case expression
+    kind = expression.kind
+    cap = expression.capabilities
+    case kind
     when NamedTypeExpression
-      base = if expression.arguments.empty?
-        expression.name.to_s
+      base = if kind.arguments.empty?
+        kind.name.to_s
       else
-        "#{expression.name}<#{expression.arguments.map { |argument| legacy(argument) }.join(",")}>"
+        "#{kind.name}<#{kind.arguments.map { |argument| legacy(argument) }.join(",")}>"
       end
 
-      "#{base}#{capability_suffix(expression.capabilities)}"
+      "#{base}#{capability_suffix(cap)}"
     when TypeProjectionExpression
-      "#{expression.owner}::#{expression.member}#{capability_suffix(expression.capabilities)}"
+      "#{kind.owner}::#{kind.member}#{capability_suffix(cap)}"
     when FunctionTypeExpression
-      "FN(#{expression.signature.params.map { |param| legacy(TypeExpressionParser.parse(param.type.raw)) }.join(",")}) -> #{legacy(TypeExpressionParser.parse(expression.signature.return_type.raw))}#{capability_suffix(expression.capabilities)}"
+      "FN(#{kind.signature.params.map { |param| legacy(param.expression) }.join(",")}) -> #{legacy(kind.signature.return_expression)}#{capability_suffix(cap)}"
     when TupleTypeExpression
-      "Tuple<#{expression.items.map { |item| legacy(item) }.join(",")}>#{capability_suffix(expression.capabilities)}"
+      "Tuple<#{kind.items.map { |item| legacy(item) }.join(",")}>#{capability_suffix(cap)}"
     when OptionalTypeExpression
-      inner = legacy(expression.inner)
-      inner_expression = expression.inner
-      base = inner_expression.is_a?(LinearTypeExpression) || inner_expression.is_a?(MapTypeExpression) ? "?(#{inner})" : "?#{inner}"
-      "#{base}#{capability_suffix(expression.capabilities)}"
+      inner = legacy(kind.inner)
+      inner_kind = kind.inner.kind
+      base = inner_kind.is_a?(LinearTypeExpression) || inner_kind.is_a?(MapTypeExpression) ? "?(#{inner})" : "?#{inner}"
+      "#{base}#{capability_suffix(cap)}"
     when FallibleTypeExpression
-      "!#{legacy(expression.inner)}#{capability_suffix(expression.capabilities)}"
+      "!#{legacy(kind.inner)}#{capability_suffix(cap)}"
     when FutureTypeExpression
-      "~#{legacy(expression.inner)}#{capability_suffix(expression.capabilities)}"
+      "~#{legacy(kind.inner)}#{capability_suffix(cap)}"
     when LinearTypeExpression
-      surface = expression.dimensions.reduce(legacy(expression.item)) do |item_surface, dimension|
-        suffix = case dimension
-        when :LIST then "[]"
-        when :STREAM_OPEN then "[?]"
-        when :INF then "[INF]"
-        when :INFERRED then "[*]"
-        else "[#{dimension}]"
-        end
-        "#{item_surface}#{suffix}"
+      surface = kind.dimensions.reduce(legacy(kind.item)) do |item_surface, dimension|
+        "#{item_surface}#{dimension_suffix(dimension)}"
       end
-      "#{surface}#{capability_suffix(expression.capabilities, include_collection: false)}"
+      "#{surface}#{capability_suffix(cap, include_collection: false)}"
     when MapTypeExpression
-      key = legacy(expression.key)
-      value = legacy(expression.value)
-      base = expression.key_implicit ? "HashMap<#{value}>" : "HashMap<#{key}#{expression.legacy_separator}#{value}>"
-      "#{base}#{capability_suffix(expression.capabilities)}"
+      key = legacy(kind.key)
+      value = legacy(kind.value)
+      base = kind.key_implicit ? "HashMap<#{value}>" : "HashMap<#{key}#{kind.legacy_separator}#{value}>"
+      "#{base}#{capability_suffix(cap)}"
     when StreamTypeExpression
-      cardinality = expression.cardinality
+      cardinality = kind.cardinality
       marker = cardinality == :FINITE ? "" : cardinality.to_s
-      "[~#{marker}]#{legacy(expression.item)}#{capability_suffix(expression.capabilities)}"
+      "[~#{marker}]#{legacy(kind.item)}#{capability_suffix(cap)}"
     else
-      raise "unknown type expression #{expression.class}"
+      raise "unknown type expression #{kind.class}"
     end
   end
 
   sig { params(expression: TypeExpression).returns(String) }
   def self.inline(expression)
-    case expression
+    kind = expression.kind
+    cap = expression.capabilities
+    case kind
     when NamedTypeExpression
-      base = if expression.arguments.empty?
-        expression.name.to_s
+      base = if kind.arguments.empty?
+        kind.name.to_s
       else
-        "#{expression.name}<#{expression.arguments.map { |argument| inline(argument) }.join(", ")}>"
+        "#{kind.name}<#{kind.arguments.map { |argument| inline(argument) }.join(", ")}>"
       end
 
-      "#{base}#{capability_suffix(expression.capabilities)}"
+      "#{base}#{capability_suffix(cap)}"
     when TypeProjectionExpression
-      "#{expression.owner}::#{expression.member}#{capability_suffix(expression.capabilities)}"
+      "#{kind.owner}::#{kind.member}#{capability_suffix(cap)}"
     when FunctionTypeExpression
-      "FN(#{expression.signature.params.map { |param| inline(TypeExpressionParser.parse(param.type.raw)) }.join(", ")}) -> #{inline(TypeExpressionParser.parse(expression.signature.return_type.raw))}#{capability_suffix(expression.capabilities)}"
+      "FN(#{kind.signature.params.map { |param| inline(param.expression) }.join(", ")}) -> #{inline(kind.signature.return_expression)}#{capability_suffix(cap)}"
     when TupleTypeExpression
-      "Tuple<#{expression.items.map { |item| inline(item) }.join(", ")}>#{capability_suffix(expression.capabilities)}"
+      "Tuple<#{kind.items.map { |item| inline(item) }.join(", ")}>#{capability_suffix(cap)}"
     when OptionalTypeExpression
-      "?#{inline(expression.inner)}#{capability_suffix(expression.capabilities)}"
+      "?#{inline(kind.inner)}#{capability_suffix(cap)}"
     when FallibleTypeExpression
-      "!#{inline(expression.inner)}#{capability_suffix(expression.capabilities)}"
+      "!#{inline(kind.inner)}#{capability_suffix(cap)}"
     when FutureTypeExpression
-      "~#{inline(expression.inner)}#{capability_suffix(expression.capabilities)}"
+      "~#{inline(kind.inner)}#{capability_suffix(cap)}"
     when LinearTypeExpression
-      prefix = inline_linear_prefix(expression)
-      caps = capability_suffix(expression.capabilities, include_collection: false)
-      "#{prefix}#{caps.empty? ? "" : "#{caps} "}#{inline(expression.item)}"
+      prefix = inline_linear_prefix(kind)
+      caps = capability_suffix(cap, include_collection: false)
+      "#{prefix}#{caps.empty? ? "" : "#{caps} "}#{inline(kind.item)}"
     when MapTypeExpression
-      caps = capability_suffix(expression.capabilities)
-      "{#{inline(expression.key)}}#{caps.empty? ? "" : "#{caps} "}#{inline(expression.value)}"
+      caps = capability_suffix(cap)
+      "{#{inline(kind.key)}}#{caps.empty? ? "" : "#{caps} "}#{inline(kind.value)}"
     when StreamTypeExpression
-      cardinality = expression.cardinality
+      cardinality = kind.cardinality
       marker = cardinality == :FINITE ? "" : cardinality.to_s
-      caps = capability_suffix(expression.capabilities)
-      "[~#{marker}]#{caps.empty? ? "" : "#{caps} "}#{inline(expression.item)}"
+      caps = capability_suffix(cap)
+      "[~#{marker}]#{caps.empty? ? "" : "#{caps} "}#{inline(kind.item)}"
     else
-      raise "unknown type expression #{expression.class}"
+      raise "unknown type expression #{kind.class}"
     end
   end
 
@@ -940,15 +966,7 @@ class TypeExpressionPrinter
       return "[Pool(#{T.must(pool_size)})]"
     end
 
-    dimensions = expression.dimensions.map do |dimension|
-      case dimension
-      when :LIST then "List"
-      when :STREAM_OPEN then "~"
-      when :INF then "~INF"
-      when :INFERRED then "*"
-      else dimension.to_s
-      end
-    end
+    dimensions = expression.dimensions.map { |dimension| dimension_marker(dimension) }
     "[#{dimensions.join(", ")}]"
   end
   private_class_method :inline_linear_prefix
@@ -958,13 +976,13 @@ class TypeExpressionPrinter
     parts = T.let([], T::Array[String])
     ownership = capabilities.ownership
     if ownership && ownership != :affine
-      parts << T.must(Type.ownership_surface_name_for(ownership))
+      parts << T.must(TypeCapabilities.ownership_surface_name_for(ownership))
     end
     parts << "@boxed" if capabilities.layout == :indirect
     parts << "@soa" if capabilities.soa
     parts << "@sharded(#{capabilities.shard_count})" unless capabilities.shard_count.nil?
     sync = capabilities.sync
-    parts << T.must(Type.sync_surface_name_for(sync)) unless sync.nil?
+    parts << T.must(TypeCapabilities.sync_surface_name_for(sync)) unless sync.nil?
     parts << "@observable" if capabilities.observable
     if include_collection && !capabilities.collection.nil?
       parts << "@#{capabilities.collection}"

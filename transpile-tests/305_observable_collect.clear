@@ -5,7 +5,7 @@
 # terminals start producing observables by default in a followup).
 
 FN main() RETURNS Void ->
-    gen: ~?Int64[] = BG STREAM {
+    gen: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO
             YIELD i;

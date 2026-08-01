@@ -1,0 +1,29 @@
+STRUCT Env { name: String, x: Int64 }
+
+FN dup(s: String) RETURNS String -> RETURN COPY s; END
+
+FN main() RETURNS Void ->
+    MUTABLE pool: [Pool(8)]Env = [];
+    id1: Id<Env> = &pool.insert(Env{ name: dup("first"), x: 1_i64 });
+    id2: Id<Env> = &pool.insert(Env{ name: dup("second"), x: 2_i64 });
+    id3: Id<Env> = &pool.insert(Env{ name: dup("third"), x: 3_i64 });
+    ASSERT pool.length() == 3, "3 live";
+
+    IF pool[id2] EXISTS AS e THEN
+        ASSERT e.name == "second", "id2 name";
+    END
+
+    # remove: does it free the owned String payload? (leak check decides)
+    &pool.remove(id1);
+    ASSERT pool.length() == 2, "2 after remove";
+
+    MUTABLE total: Int64 = 0;
+    MUTABLE names: String = "";
+    FOR e IN pool DO
+        total = total + e.x;
+        names = names $+ e.name;
+    END
+    ASSERT total == 5, "x sum 2+3";
+    ASSERT names.length() == 11, "secondthird = 11 chars";
+    RETURN;
+END

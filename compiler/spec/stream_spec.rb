@@ -405,7 +405,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /Type Mismatch.*~!String\[1\].*~String\[1\]/)
+        expect { run(src) }.to raise_error(SourceError, /Type Mismatch.*~!\[1\]String.*~\[1\]String/)
       end
     end
 
@@ -597,7 +597,7 @@ RSpec.describe SemanticAnnotator do
       it "allows CONCURRENT with explicit capacity on a stream" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; YIELD 3; };
+            s: [~]Int64 = BG STREAM { YIELD 1; YIELD 2; YIELD 3; };
             vals = s |> CONCURRENT(workers: 2, capacity: 4) SELECT _ * 2;
             RETURN;
           END
@@ -608,7 +608,7 @@ RSpec.describe SemanticAnnotator do
       it "rejects CONCURRENT capacity of zero" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~?Int64[] = BG STREAM { YIELD 1; };
+            s: [~]Int64 = BG STREAM { YIELD 1; };
             vals = s |> CONCURRENT(workers: 2, capacity: 0) SELECT _ * 2;
             RETURN;
           END
@@ -619,7 +619,7 @@ RSpec.describe SemanticAnnotator do
       it "rejects CONCURRENT capacity of negative value" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~?Int64[] = BG STREAM { YIELD 1; };
+            s: [~]Int64 = BG STREAM { YIELD 1; };
             vals = s |> CONCURRENT(workers: 2, capacity: -1) SELECT _ * 2;
             RETURN;
           END
@@ -630,7 +630,7 @@ RSpec.describe SemanticAnnotator do
       it "rejects unknown CONCURRENT options" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~?Int64[] = BG STREAM { YIELD 1; };
+            s: [~]Int64 = BG STREAM { YIELD 1; };
             vals = s |> CONCURRENT(workers: 2, buffer: 4) SELECT _ * 2;
             RETURN;
           END
@@ -641,9 +641,9 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===================================================================
-  # ~?T[] Open Streams — Phase 3
+  # [~]T Open Streams — Phase 3
   # ===================================================================
-  describe "~?T[] Open Streams" do
+  describe "[~]T Open Streams" do
     def transpile_fn(clear_src)
       ZigTranspiler.new.transpile(clear_src)
     end
@@ -652,7 +652,7 @@ RSpec.describe SemanticAnnotator do
     # Type predicates
     # -------------------------------------------------------------------
     describe "Type predicates" do
-      it "open_stream? is true for ~?Float64[]" do
+      it "open_stream? is true for [~]Float64" do
         t = Type.new(:"~?Float64[]")
         expect(t.open_stream?).to be true
       end
@@ -672,12 +672,12 @@ RSpec.describe SemanticAnnotator do
         expect(t.open_stream?).to be false
       end
 
-      it "open_stream_element_type returns Float64 for ~?Float64[]" do
+      it "open_stream_element_type returns Float64 for [~]Float64" do
         t = Type.new(:"~?Float64[]")
         expect(t.open_stream_element_type.resolved).to eq :Float64
       end
 
-      it "open_stream_element_type returns Bool for ~?Bool[]" do
+      it "open_stream_element_type returns Bool for [~]Bool" do
         t = Type.new(:"~?Bool[]")
         expect(t.open_stream_element_type.resolved).to eq :Bool
       end
@@ -734,12 +734,12 @@ RSpec.describe SemanticAnnotator do
     # Zig type emission
     # -------------------------------------------------------------------
     describe "zig_type" do
-      it "emits CheatLib.Stream(f64) for ~?Float64[]" do
+      it "emits CheatLib.Stream(f64) for [~]Float64" do
         t = Type.new(:"~?Float64[]")
         expect(t.zig_type).to eq "CheatLib.Stream(f64)"
       end
 
-      it "emits CheatLib.Stream(bool) for ~?Bool[]" do
+      it "emits CheatLib.Stream(bool) for [~]Bool" do
         t = Type.new(:"~?Bool[]")
         expect(t.zig_type).to eq "CheatLib.Stream(bool)"
       end
@@ -749,10 +749,10 @@ RSpec.describe SemanticAnnotator do
     # ClearParser: [?] in type annotations
     # -------------------------------------------------------------------
     describe "parser" do
-      it "parses ~?Float64[] as a type annotation" do
+      it "parses [~]Float64 as a type annotation" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -764,31 +764,32 @@ RSpec.describe SemanticAnnotator do
     # Annotator: BgStreamBlock
     # -------------------------------------------------------------------
     describe "BgStreamBlock annotation" do
-      it "infers ~?Float64[] type from YIELD Float64" do
+      it "infers [~]Float64 type from YIELD Float64" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
         ast = run(src)
         fn_node = ast.statements.first
         decl = fn_node.body.first
-        expect(decl.value.full_type.open_stream?).to be true
-        expect(decl.value.full_type.open_stream_element_type.resolved).to eq :Float64
+        value_type = Type.new(decl.value.full_type)
+        expect(value_type.dynamic_stream?).to be true
+        expect(value_type.runtime_stream_storage_element_type.resolved).to eq :Float64
       end
 
-      it "infers ~?Bool[] from YIELD Bool" do
+      it "infers [~]Bool from YIELD Bool" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Bool[] = BG STREAM { YIELD TRUE; };
+            s: [~]Bool = BG STREAM { YIELD TRUE; };
             RETURN;
           END
         CLEAR
         ast = run(src)
         fn_node = ast.statements.first
         decl = fn_node.body.first
-        expect(decl.value.full_type.open_stream_element_type.resolved).to eq :Bool
+        expect(Type.new(decl.value.full_type).runtime_stream_storage_element_type.resolved).to eq :Bool
       end
 
       it "errors when BG STREAM has no YIELD statements" do
@@ -825,35 +826,37 @@ RSpec.describe SemanticAnnotator do
     # -------------------------------------------------------------------
     # Annotator: NextExpr on open streams
     # -------------------------------------------------------------------
-    describe "NextExpr on ~?T[]" do
-      it "NEXT on ~?Float64[] returns ?Float64" do
+    describe "NextExpr on [~]T" do
+      it "NEXT on [~]Float64 returns StreamStep<Float64>" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
-            v: ?Float64 = NEXT s;
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
+            v = NEXT s;
             RETURN;
           END
         CLEAR
         ast = run(src)
         fn_node = ast.statements.first
         next_decl = fn_node.body[1]
-        expect(next_decl.value.full_type.optional?).to be true
-        expect(next_decl.value.full_type.wrapped_type.resolved).to eq :Float64
+        next_type = Type.new(next_decl.value.full_type)
+        expect(next_type.stream_step?).to be true
+        expect(next_type.stream_step_item_type.resolved).to eq :Float64
       end
 
-      it "NEXT on ~?Bool[] returns ?Bool" do
+      it "NEXT on [~]Bool returns StreamStep<Bool>" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Bool[] = BG STREAM { YIELD TRUE; };
-            v: ?Bool = NEXT s;
+            s: [~]Bool = BG STREAM { YIELD TRUE; };
+            v = NEXT s;
             RETURN;
           END
         CLEAR
         ast = run(src)
         fn_node = ast.statements.first
         next_decl = fn_node.body[1]
-        expect(next_decl.value.full_type.optional?).to be true
-        expect(next_decl.value.full_type.wrapped_type.resolved).to eq :Bool
+        next_type = Type.new(next_decl.value.full_type)
+        expect(next_type.stream_step?).to be true
+        expect(next_type.stream_step_item_type.resolved).to eq :Bool
       end
     end
 
@@ -963,25 +966,25 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===================================================================
-  # ~?T[]@split Split Streams
+  # [~]T@split Split Streams
   # ===================================================================
-  describe "~?T[]@split Split Streams" do
+  describe "[~]T@split Split Streams" do
     def transpile_fn(clear_src)
       ZigTranspiler.new.transpile(clear_src)
     end
 
     describe "Type predicates" do
-      it "split_open_stream? is true for ~?Float64[]@split" do
+      it "split_open_stream? is true for [~]Float64@split" do
         t = Type.new(:"~?Float64[]", ownership: :split)
         expect(t.split_open_stream?).to be true
       end
 
-      it "split_open_stream? is false for plain ~?Float64[]" do
+      it "split_open_stream? is false for plain [~]Float64" do
         t = Type.new(:"~?Float64[]")
         expect(t.split_open_stream?).to be false
       end
 
-      it "emits CheatLib.SplitStream(f64) for ~?Float64[]@split" do
+      it "emits CheatLib.SplitStream(f64) for [~]Float64@split" do
         t = Type.new(:"~?Float64[]", ownership: :split)
         expect(t.zig_type).to eq("CheatLib.SplitStream(f64)")
       end
@@ -1013,7 +1016,7 @@ RSpec.describe SemanticAnnotator do
       it "propagates @split onto the BG STREAM runtime type" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
+            s: [~]@split Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1024,11 +1027,11 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    describe "NextExpr on ~?T[]@split" do
-      it "NEXT on ~?Float64[]@split returns ?Float64" do
+    describe "NextExpr on [~]T@split" do
+      it "NEXT on [~]Float64@split returns ?Float64" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
+            s: [~]@split Float64 = BG STREAM { YIELD 1.0; };
             v: ?Float64 = NEXT s;
             RETURN;
           END
@@ -1045,7 +1048,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.SplitStream in the BG STREAM binding" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
+            s: [~]@split Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1054,11 +1057,11 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("spawnNew")
       end
 
-      it "emits CheatLib.splitRetain when CLONE is used on a split stream handle" do
+      it "emits CheatLib.splitRetain when KEEP is used on a split stream handle" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
-            t: ~?Float64[] @split = CLONE s;
+            s: [~]@split Float64 = BG STREAM { YIELD 1.0; };
+            t: [~]@split Float64 = KEEP s;
             RETURN;
           END
         CLEAR
@@ -1069,8 +1072,8 @@ RSpec.describe SemanticAnnotator do
       it "plain assignment moves a split stream handle" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
-            t: ~?Float64[] @split = s;
+            s: [~]@split Float64 = BG STREAM { YIELD 1.0; };
+            t: [~]@split Float64 = s;
             v: ?Float64 = NEXT s;
             RETURN;
           END
@@ -1078,11 +1081,11 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.to raise_error(SourceError, /USE AFTER MOVE.*`s`/)
       end
 
-      it "allows CLONE inside a BG block capture" do
+      it "allows KEEP inside a BG block capture" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
-            cloned: ~?Float64[] @split = CLONE s;
+            s: [~]@split Float64 = BG STREAM { YIELD 1.0; };
+            cloned: [~]@split Float64 = KEEP s;
             p: ~?Float64 = BG {
               NEXT cloned;
             };
@@ -1093,18 +1096,18 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "allows CLONE inline inside DO branches" do
-        # The point of this test is "CLONE works as an arg to NEXT inline
+      it "allows KEEP inline inside DO branches" do
+        # The point of this test is "KEEP works as an arg to NEXT inline
         # inside a DO branch." The original fixture wrapped each branch
         # in WITH EXCLUSIVE on a @locked counter, but that pattern holds
         # the lock across NEXT (P3.3 hold-lock-across-yield). The lock
-        # was incidental — drop it to keep the CLONE coverage clean.
+        # was incidental — drop it to keep the KEEP coverage clean.
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Int64[] @split = BG STREAM { YIELD 1; };
+            s: [~]@split Int64 = BG STREAM { YIELD 1; };
             DO {
-              (NEXT (CLONE s))?,
-              (NEXT (CLONE s))?
+              (NEXT (KEEP s))?,
+              (NEXT (KEEP s))?
             }
             RETURN;
           END
@@ -1112,11 +1115,11 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "allows returning CLONE of a split stream" do
+      it "allows returning KEEP of a split stream" do
         src = <<~CLEAR
-          FN tail() RETURNS ~?Int64[] @split ->
-            s: ~?Int64[] @split = BG STREAM { YIELD 1; YIELD 2; };
-            RETURN CLONE s;
+          FN tail() RETURNS [~]@split Int64 ->
+            s: [~]@split Int64 = BG STREAM { YIELD 1; YIELD 2; };
+            RETURN KEEP s;
           END
         CLEAR
         expect { run(src) }.not_to raise_error
@@ -1399,7 +1402,7 @@ RSpec.describe SemanticAnnotator do
       it "raises an error when an open stream is declared @multiowned (BindExpr path)" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~?Float64[] @multiowned = BG STREAM { YIELD 1.0; };
+            s: [~]@multiowned Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1476,21 +1479,21 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("CheatLib.cleanup(@TypeOf(value), __clear_heap_alloc, &value)")
       end
 
-      it "allows ~?T[] in BindExpr declarations" do
+      it "allows [~]T in BindExpr declarations" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
         expect { run(src) }.not_to raise_error
       end
 
-      it "allows ~?T[] in VarDecl (MUTABLE declaration) path" do
+      it "allows [~]T in VarDecl (MUTABLE declaration) path" do
         # VarDecl path: MUTABLE declarations
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            MUTABLE s: ~?Float64[] = BG STREAM { YIELD 1.0; };
+            MUTABLE s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1504,7 +1507,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /Type Mismatch: Cannot assign ~Float64\[] to ~Float64\[3\]/)
+        expect { run(src) }.to raise_error(SourceError, /Type Mismatch: Cannot assign ~\[\]Float64 to ~\[3\]Float64/)
       end
 
       it "rejects an infinite stream producer that can fall through" do
@@ -1517,10 +1520,10 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.to raise_error(SourceError, /infinite stream producer can reach the end/i)
       end
 
-      it "accepts the new open-stream spelling ~?T[]" do
+      it "accepts the new open-stream spelling [~]T" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
+            s: [~]Float64 = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -1590,7 +1593,7 @@ RSpec.describe SemanticAnnotator do
       it "accepts EACH on BG/open streams as sequential pipeline op" do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
+            s: [~]Int64 = BG STREAM { YIELD 1; YIELD 2; };
             s |> EACH { print(_); };
             RETURN;
           END
@@ -1603,7 +1606,7 @@ RSpec.describe SemanticAnnotator do
         # -- consume via COLLECT.
         src = <<~CLEAR
           FN f() RETURNS !Void ->
-            s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
+            s: [~]Int64 = BG STREAM { YIELD 1; YIELD 2; };
             _ = s |> REDUCE(0) acc + _ |> COLLECT;
             RETURN;
           END

@@ -1,5 +1,7 @@
 # typed: strict
 
+require_relative "state"
+
 class ClearParser
   extend T::Sig
 
@@ -224,6 +226,15 @@ class ClearParser
       end
     end
 
+    # Retired open-stream alias: ~?T[] (and ~?T[N] / ~?T[INF]) accepted-then-
+    # leaked through the alias compat path. Fail closed with the migration.
+    if tense_prefix == "~" && optional_prefix == "?" && error_prefix == "" &&
+        (legacy_card = inner[/\A\[(\d*|INF)\]\z/, 1])
+      error!(current, :RETIRED_OPTIONAL_STREAM_SYNTAX,
+        got: "~?#{base}#{inner}",
+        replacement: "[~#{legacy_card}]#{base}")
+    end
+
     # Capability suffix: T @shared, T[]@list:soa, T[N]@soa:shared:locked, HashMap<V>@sharded(N), etc.
     # ClearParser only does token consumption and duplicate detection. Semantic validation
     # (e.g., "@list requires array", "@soa requires fixed array") is in the annotator.
@@ -266,7 +277,7 @@ class ClearParser
     return unless FixCollector.type_migrations_enabled?
     return unless start_token.line == end_token.line
     return unless TypeExpressionTree.each_node(type.shape.expression).any? do |node|
-      node.is_a?(LinearTypeExpression) || node.is_a?(MapTypeExpression) || node.is_a?(StreamTypeExpression)
+      node.kind.is_a?(LinearTypeExpression) || node.kind.is_a?(MapTypeExpression) || node.kind.is_a?(StreamTypeExpression)
     end
 
     replacement = Type.inline_migration_name(type)
@@ -349,7 +360,7 @@ class ClearParser
     parse_inline_atom_expression
   end
 
-  sig { returns(StreamTypeExpression) }
+  sig { returns(TypeExpression) }
   def parse_inline_stream_expression
     consume(:CHAR, '[')
     consume(:CHAR, '~')
@@ -362,11 +373,10 @@ class ClearParser
     end
     consume(:CHAR, ']')
     caps = parse_inline_capabilities
-    StreamTypeExpression.new(
+    TypeExpression.new(kind: StreamTypeExpression.new(
       cardinality: cardinality,
       item: parse_inline_type_expression,
-      capabilities: caps,
-    )
+    ), capabilities: caps)
   end
 
   sig { returns(TypeExpression) }
@@ -375,16 +385,16 @@ class ClearParser
     prefix = prefix_token.text!
     inner = parse_inline_type_expression
     if prefix == "?"
-      if inner.is_a?(StreamTypeExpression)
+      if inner.kind.is_a?(StreamTypeExpression)
         error!(prefix_token, :PARSER_EXPECTED,
           expected: "an optional stream item such as [~]?T",
           got: "?[~]T", type: prefix_token.type, line: prefix_token.line)
       end
-      return OptionalTypeExpression.new(inner: inner)
+      return TypeExpression.of(OptionalTypeExpression.new(inner: inner))
     end
-    return FallibleTypeExpression.new(inner: inner) if prefix == "!"
+    return TypeExpression.of(FallibleTypeExpression.new(inner: inner)) if prefix == "!"
 
-    FutureTypeExpression.new(inner: inner)
+    TypeExpression.of(FutureTypeExpression.new(inner: inner))
   end
 
   sig { returns(TypeExpression) }
@@ -398,8 +408,8 @@ class ClearParser
     if match?(:DOUBLE_COLON)
       consume(:DOUBLE_COLON)
       member = consume(:TYPE_ID).text!
-      expression = TypeProjectionExpression.new(owner: name.to_sym, member: member.to_sym)
-      return TypeExpressionTree.with_root_capabilities(expression, parse_inline_capabilities)
+      projection = TypeProjectionExpression.new(owner: name.to_sym, member: member.to_sym)
+      return TypeExpression.new(kind: projection, capabilities: parse_inline_capabilities)
     end
     arguments = T.let([], T::Array[TypeExpression])
     if match?(:CHAR, '<')
@@ -410,22 +420,22 @@ class ClearParser
       end
       consume_generic_close
     end
-    expression = if name == "Tuple"
+    node = if name == "Tuple"
       TupleTypeExpression.new(items: arguments)
     else
       NamedTypeExpression.new(name: name.to_sym, arguments: arguments)
     end
 
-    TypeExpressionTree.with_root_capabilities(expression, parse_inline_capabilities)
+    TypeExpression.new(kind: node, capabilities: parse_inline_capabilities)
   end
 
-  sig { returns(LinearTypeExpression) }
+  sig { returns(TypeExpression) }
   def parse_inline_linear_expression
     consume(:CHAR, '[')
     if match!(:CHAR, ']')
       caps = parse_inline_capabilities(collection: :list)
-      return LinearTypeExpression.new(kind: :list, dimensions: [:LIST],
-        item: parse_inline_type_expression, capabilities: caps)
+      return TypeExpression.new(kind: LinearTypeExpression.new(kind: :list, dimensions: [:LIST],
+        item: parse_inline_type_expression), capabilities: caps)
     end
 
     kind = T.let(:array, Symbol)
@@ -472,20 +482,19 @@ class ClearParser
     kind = :rank if dimensions.length > 1
     collection = %i[list set pool].include?(kind) ? kind : nil
     caps = parse_inline_capabilities(collection: collection)
-    LinearTypeExpression.new(
+    TypeExpression.new(kind: LinearTypeExpression.new(
       kind: kind,
       dimensions: dimensions,
       item: parse_inline_type_expression,
       allocation_hint: allocation_hint,
-      capabilities: caps
-    )
+    ), capabilities: caps)
   end
 
-  sig { returns(MapTypeExpression) }
+  sig { returns(TypeExpression) }
   def parse_inline_map_expression
     consume(:CHAR, '{')
     key = if match?(:CHAR, '}')
-      NamedTypeExpression.new(name: :Symbol)
+      TypeExpression.of(NamedTypeExpression.new(name: :Symbol))
     else
       parsed_key = parse_inline_type_expression
       if match?(:CHAR, ',')
@@ -495,7 +504,7 @@ class ClearParser
     end
     consume(:CHAR, '}')
     caps = parse_inline_capabilities
-    MapTypeExpression.new(key: key, value: parse_inline_type_expression, capabilities: caps)
+    TypeExpression.new(kind: MapTypeExpression.new(key: key, value: parse_inline_type_expression), capabilities: caps)
   end
 
   sig { params(collection: T.nilable(Symbol)).returns(TypeCapabilities) }

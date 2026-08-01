@@ -74,6 +74,49 @@ RSpec.describe "owned composite argument materialization" do
     END
   CLEAR
 
+  COPIED_MAP_MERGE_RETURN_SOURCE = <<~CLEAR
+    UNION Field {
+      SymbolValue: String@symbol,
+      StringValue: String,
+    }
+
+    STRUCT Context {
+      placeholder_name: ?String,
+      acc_placeholder: ?String,
+      join_param_map: ?{String}String,
+      bindings: {String}String,
+      each_mode: Bool,
+      rewrite_active: Bool,
+      needed_fields: [Set]Field,
+    }
+
+    FN withBinding(self: Context, clear_name: String, zig_var: String) RETURNS Context ->
+      RETURN Context{
+        placeholder_name: COPY self.placeholder_name,
+        acc_placeholder: COPY self.acc_placeholder,
+        join_param_map: COPY self.join_param_map,
+        bindings: COPY {clear_name: zig_var}.keys() |> REDUCE(COPY self.bindings) {
+          acc[_] = COPY ({clear_name: zig_var}[_] OR_ELSE panic("missing hash key"));
+          acc
+        },
+        each_mode: self.each_mode,
+        rewrite_active: self.rewrite_active,
+        needed_fields: COPY self.needed_fields,
+      };
+    END
+  CLEAR
+
+  RETAINED_DESTINATION_COPY_SOURCE = <<~CLEAR
+    STRUCT Item {
+      value: String,
+    }
+
+    FN retainBorrowed(item: Item) RETURNS Item@multiowned ->
+      retained: Item@multiowned = COPY item;
+      RETURN retained;
+    END
+  CLEAR
+
   def lower(source)
     importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
     frontend = CompilerFrontend.compile(source, importer: importer, source_dir: Dir.pwd)
@@ -95,14 +138,17 @@ RSpec.describe "owned composite argument materialization" do
 
   it "uses the standard owned-binding lifecycle for COPY and scalar union arguments" do
     body = materialize_body(lower(OWNED_COMPOSITE_SOURCE))
-    composite_lets = body.grep(MIR::Let).select do |stmt|
-      stmt.init.is_a?(MIR::StructInit) && stmt.init.zig_type.to_s == "RegisterValue"
-    end
+    nodes = []
+    MIR.each_node(body) { |node| nodes << node }
+    composite_names = nodes.grep(MIR::AllocMark).filter_map do |mark|
+      mark.name.to_s if mark.type_info.resolved.to_s == "RegisterValue"
+    end.to_set
+    composite_lets = nodes.grep(MIR::Let).select { |stmt| composite_names.include?(stmt.name.to_s) }
 
     expect(composite_lets.length).to eq(3)
     composite_lets.each do |let|
       name = let.name.to_s
-      marker_classes = body.select do |stmt|
+      marker_classes = nodes.select do |stmt|
         stmt.respond_to?(:name) && stmt.name.to_s == name &&
           (stmt.is_a?(MIR::AllocMark) || stmt.is_a?(MIR::Let) ||
            stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup) ||
@@ -116,15 +162,15 @@ RSpec.describe "owned composite argument materialization" do
         MIR::TransferMark,
       ])
 
-      cleanup = body.find do |stmt|
+      cleanup = nodes.find do |stmt|
         stmt.is_a?(MIR::ErrCleanup) && stmt.name.to_s == name
       end
       expect(cleanup.cleanup_entry.lifecycle_plan).not_to be_nil
       expect(cleanup.cleanup_entry.lifecycle_plan.type_key).to start_with("RegisterValue|")
     end
 
-    allocated = body.grep(MIR::AllocMark).map { |mark| mark.name.to_s }.to_set
-    transferred = body.grep(MIR::TransferMark).map { |mark| mark.name.to_s }.to_set
+    allocated = nodes.grep(MIR::AllocMark).map { |mark| mark.name.to_s }.to_set
+    transferred = nodes.grep(MIR::TransferMark).map { |mark| mark.name.to_s }.to_set
     expect(transferred - allocated).to be_empty
   end
 
@@ -162,5 +208,31 @@ RSpec.describe "owned composite argument materialization" do
 
     expect { MIRChecker.new.check_program!(program, strict: true) }.not_to raise_error
     expect(main.body.grep(MIR::TransferMark).map(&:name)).not_to include("current")
+  end
+
+  it "keeps copied map-merge parameters borrowed and transfers only allocated temporaries" do
+    program = lower(COPIED_MAP_MERGE_RETURN_SOURCE)
+    fn = T.must(program.items.grep(MIR::FnDef).find { |item| item.name.to_s == "withBinding" })
+    allocated = fn.body.grep(MIR::AllocMark).map { |mark| mark.name.to_s }.to_set
+    transferred = fn.body.grep(MIR::TransferMark).map { |mark| mark.name.to_s }.to_set
+
+    expect(transferred).not_to include("clear_name", "zig_var")
+    expect(transferred - allocated).to be_empty
+    expect { MIRChecker.new.check_program!(program, strict: true) }.not_to raise_error
+  end
+
+  it "never structurally copies an Rc handle when a plain payload fills a retained destination" do
+    program = lower(RETAINED_DESTINATION_COPY_SOURCE)
+    copies = []
+    wrappers = []
+    MIR.each_node(program.items) do |node|
+      copies << node if node.is_a?(MIR::DeepCopy)
+      wrappers << node if node.is_a?(MIR::CapWrap)
+    end
+
+    expect(copies.map(&:zig_type)).not_to include("CheatLib.Rc(Item)")
+    expect(copies.map(&:zig_type)).to include("Item")
+    expect(wrappers.map(&:own_fn)).to include("rcCreate")
+    expect { MIRChecker.new.check_program!(program, strict: true) }.not_to raise_error
   end
 end

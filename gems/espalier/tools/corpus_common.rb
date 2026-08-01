@@ -39,6 +39,19 @@ module CorpusCommon
     end
   end
 
+  # Built front-end bundles: minified, single-logical-line output that the
+  # structural analyzers cannot usefully parse. fact-mine's call-resolution
+  # pass spends the Architecture SARIF job's entire 45-minute budget on
+  # gems/lineage/src/ui/assets/diff/assets/index--_D05yx7.js (222 KB in 61
+  # lines), which stalls every queued job behind it. Matched by path prefix
+  # rather than a bare `assets` directory name so hand-written assets
+  # elsewhere stay in the corpus. The gigasail path is the same tree after
+  # the lineage -> gigasail gem rename.
+  EXCLUDE_PATH_PREFIXES = %w[
+    gems/lineage/src/ui/assets/
+    gems/gigasail/giga-ui/src/ui/assets/
+  ].freeze
+
   def production_files(repo)
     files = Dir.chdir(repo) { Dir["**/*"] }.select do |path|
       next false unless File.file?(File.join(repo, path))
@@ -46,6 +59,7 @@ module CorpusCommon
         down = part.downcase
         EXCLUDE_DIRS.include?(down) || down.end_with?(".tests", ".test", "-tests", "_tests")
       end
+      next false if EXCLUDE_PATH_PREFIXES.any? { |prefix| path.start_with?(prefix) }
       next false if path.end_with?(".d.ts", "_test.go", ".min.js")
       next false if File.basename(path).match?(TEST_BASENAME)
       EXT_LANGUAGE.key?(File.extname(path))

@@ -1,0 +1,14 @@
+diff --git a/compiler/ruby/mir/lower/pipeline/pipeline_host.rb b/compiler/ruby/mir/lower/pipeline/pipeline_host.rb
+--- a/compiler/ruby/mir/lower/pipeline/pipeline_host.rb
++++ b/compiler/ruby/mir/lower/pipeline/pipeline_host.rb
+@@ -617,8 +617,8 @@
+   sig { params(node: AST::Node).returns(PipelineElementHead) }
+   def visit_mir_head(node)
+     substituted = substitute_placeholders(node)
+-    head = @lowering_bridge.lower_head { @lowering_bridge.lower_node(substituted) }
+-    PipelineElementHead.new(value: head.value, pending: head.pending)
++    # MUTANT: drop the element hoist capture; hoists flush to the enclosing statement outside the per-element loop.
++    PipelineElementHead.new(value: @lowering_bridge.lower_node(substituted), pending: [])
+   end
+ 
+   # Lower an array of AST body statements to MIR nodes, with pipeline

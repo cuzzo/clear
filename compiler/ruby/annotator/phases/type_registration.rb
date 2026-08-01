@@ -3,7 +3,7 @@ require "sorbet-runtime"
 require_relative "../protocol_projection_resolver"
 
 require_relative "../../ast/ast"
-require_relative "../../ast/schemas"
+require_relative "../../ast/type"
 require_relative "declaration_index"
 
 module Annotator
@@ -161,6 +161,50 @@ module Annotator
       end
       private :inline_recursive_target
 
+      sig do
+        params(
+          node: Symbol,
+          adjacency: T::Hash[Symbol, T::Array[Symbol]],
+          index: Integer,
+          indices: T::Hash[Symbol, Integer],
+          low: T::Hash[Symbol, Integer],
+          stack: T::Array[Symbol],
+          on_stack: T::Set[Symbol],
+          result: T::Array[T::Set[Symbol]]
+        ).returns(Integer)
+      end
+      def visit_recursive_component(node, adjacency, index, indices, low, stack, on_stack, result)
+        indices[node] = index
+        low[node] = index
+        next_index = index + 1
+        stack << node
+        on_stack.add(node)
+
+        T.must(adjacency[node]).each do |target|
+          unless indices.key?(target)
+            next_index = visit_recursive_component(
+              target, adjacency, next_index, indices, low, stack, on_stack, result
+            )
+            low[node] = [T.must(low[node]), T.must(low[target])].min
+          else
+            low[node] = [T.must(low[node]), T.must(indices[target])].min if on_stack.include?(target)
+          end
+        end
+        return next_index unless low[node] == indices[node]
+
+        component = T.let(Set.new, T::Set[Symbol])
+        while true
+          member = T.must(stack.pop)
+          on_stack.delete(member)
+          component.add(member)
+          break if member == node
+        end
+        self_loop = T.must(adjacency[node]).include?(node)
+        result << component if component.length > 1 || self_loop
+        next_index
+      end
+      private :visit_recursive_component
+
       sig { params(names: T::Set[Symbol], edges: T::Array[RecursiveFieldEdge]).returns(T::Array[T::Set[Symbol]]) }
       def recursive_components(names, edges)
         adjacency = T.let(Hash.new { |h, k| h[k] = T.let([], T::Array[Symbol]) }, T::Hash[Symbol, T::Array[Symbol]])
@@ -172,34 +216,13 @@ module Annotator
         on_stack = T.let(Set.new, T::Set[Symbol])
         result = T.let([], T::Array[T::Set[Symbol]])
 
-        visit = T.let(nil, T.nilable(T.proc.params(node: Symbol).void))
-        visit = Kernel.lambda do |node|
-          indices[node] = index
-          low[node] = index
-          index += 1
-          stack << node
-          on_stack.add(node)
-          T.must(adjacency[node]).each do |target|
-            unless indices.key?(target)
-              T.must(visit).call(target)
-              low[node] = [T.must(low[node]), T.must(low[target])].min
-            else
-              low[node] = [T.must(low[node]), T.must(indices[target])].min if on_stack.include?(target)
-            end
-          end
-          next unless low[node] == indices[node]
+        names.each do |name|
+          next if indices.key?(name)
 
-          component = T.let(Set.new, T::Set[Symbol])
-          Kernel.loop do
-            member = T.must(stack.pop)
-            on_stack.delete(member)
-            component.add(member)
-            break if member == node
-          end
-          self_loop = T.must(adjacency[node]).include?(node)
-          result << component if component.length > 1 || self_loop
+          index = visit_recursive_component(
+            name, adjacency, index, indices, low, stack, on_stack, result
+          )
         end
-        names.each { |name| visit.call(name) unless indices.key?(name) }
         result
       end
       private :recursive_components
@@ -264,6 +287,18 @@ module Annotator
         end
         node.field_decls.each_value do |field|
           error!(node, :COLLECTION_HINT_VALUE_ONLY) if field.type.preallocation_hint?
+        end
+        # Fail closed: identity capabilities on generic type parameters are
+        # not implemented (no combination compiles today - the wrap and the
+        # substituted binding double-apply or under-apply). Reject at the
+        # declaration until generic keep-analysis lands.
+        tp_names = type_params(node.type_params)
+        node.field_decls.each do |field_name, field|
+          ft = field.type
+          next unless ft.is_a?(Type) && tp_names.include?(ft.resolved)
+          next unless ft.multiowned? || ft.shared?
+          error!(node, :GENERIC_IDENTITY_FIELD_UNSUPPORTED,
+            struct: node.name.to_s, field: field_name.to_s, param: ft.resolved.to_s)
         end
         stamp_field_defaults!(node.field_decls)
 

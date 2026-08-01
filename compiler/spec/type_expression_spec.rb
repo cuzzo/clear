@@ -12,13 +12,13 @@ RSpec.describe TypeExpressionParser do
   it "represents nested legacy types as recursive semantic nodes" do
     parsed = expression("?HashMap<Symbol,Tuple<Int64,String[]>>")
 
-    expect(parsed).to be_a(OptionalTypeExpression)
-    map = parsed.inner
+    expect(parsed.kind).to be_a(OptionalTypeExpression)
+    map = parsed.kind.inner.kind
     expect(map).to be_a(MapTypeExpression)
-    expect(map.key).to be_a(NamedTypeExpression)
-    expect(map.key.name).to eq(:Symbol)
-    expect(map.value).to be_a(TupleTypeExpression)
-    expect(map.value.items.last).to be_a(LinearTypeExpression)
+    expect(map.key.kind).to be_a(NamedTypeExpression)
+    expect(map.key.kind.name).to eq(:Symbol)
+    expect(map.value.kind).to be_a(TupleTypeExpression)
+    expect(map.value.kind.items.last.kind).to be_a(LinearTypeExpression)
   end
 
   it "round-trips legacy spellings without reparsing raw child symbols" do
@@ -54,8 +54,8 @@ RSpec.describe TypeExpressionParser do
   it "keeps tuple positions as semantic children" do
     tuple = expression("Tuple<Int64,String,?Bool>")
 
-    expect(tuple).to be_a(TupleTypeExpression)
-    expect(tuple.items.map { |item| TypeExpressionPrinter.inline(item) }).to eq(["Int64", "String", "?Bool"])
+    expect(tuple.kind).to be_a(TupleTypeExpression)
+    expect(tuple.kind.items.map { |item| TypeExpressionPrinter.inline(item) }).to eq(["Int64", "String", "?Bool"])
     expect(TypeExpressionPrinter.inline(tuple)).to eq("Tuple<Int64, String, ?Bool>")
   end
 
@@ -67,11 +67,13 @@ RSpec.describe TypeExpressionParser do
   end
 
   it "refuses to migrate a capability-bearing tense wrapper across its child" do
-    expression = OptionalTypeExpression.new(
-      inner: LinearTypeExpression.new(
-        kind: :list,
-        dimensions: [:LIST],
-        item: NamedTypeExpression.new(name: :Int64),
+    expression = TypeExpression.new(
+      kind: OptionalTypeExpression.new(
+        inner: TypeExpression.of(LinearTypeExpression.new(
+          kind: :list,
+          dimensions: [:LIST],
+          item: TypeExpression.of(NamedTypeExpression.new(name: :Int64)),
+        )),
       ),
       capabilities: TypeCapabilities.new(ownership: :shared, collection: :list),
     )
@@ -92,11 +94,11 @@ RSpec.describe TypeExpressionParser do
   end
 
   it "prints an explicit dynamic array dimension without changing its rank" do
-    dynamic = LinearTypeExpression.new(
+    dynamic = TypeExpression.of(LinearTypeExpression.new(
       kind: :array,
       dimensions: [:LIST],
-      item: NamedTypeExpression.new(name: :Int64)
-    )
+      item: TypeExpression.of(NamedTypeExpression.new(name: :Int64))
+    ))
 
     expect(TypeExpressionPrinter.inline(dynamic)).to eq("[List]Int64")
   end
@@ -106,9 +108,9 @@ RSpec.describe TypeExpressionParser do
       params: [Type::FunctionTypeParam.new(type: Type.new(:Int64))],
       return_type: Type.new(:String)
     )
-    function = FunctionTypeExpression.new(signature: signature)
-    finite = StreamTypeExpression.new(cardinality: :FINITE, item: NamedTypeExpression.new(name: :Int64))
-    bounded = StreamTypeExpression.new(cardinality: 10, item: NamedTypeExpression.new(name: :String))
+    function = TypeExpression.of(Type.function_type_expression_for(signature))
+    finite = TypeExpression.of(StreamTypeExpression.new(cardinality: :FINITE, item: TypeExpression.of(NamedTypeExpression.new(name: :Int64))))
+    bounded = TypeExpression.of(StreamTypeExpression.new(cardinality: 10, item: TypeExpression.of(NamedTypeExpression.new(name: :String))))
 
     expect(TypeExpressionPrinter.legacy(function)).to eq("FN(Int64) -> String")
     expect(TypeExpressionPrinter.inline(function)).to eq("FN(Int64) -> String")
@@ -123,21 +125,21 @@ RSpec.describe TypeExpressionParser do
     infinite = expression("[~INF]String")
     bounded = expression("[~12]Bool")
 
-    expect(T.cast(finite, StreamTypeExpression).cardinality).to eq(:FINITE)
-    expect(T.cast(infinite, StreamTypeExpression).cardinality).to eq(:INF)
-    expect(T.cast(bounded, StreamTypeExpression).cardinality).to eq(12)
+    expect(T.cast(finite.kind, StreamTypeExpression).cardinality).to eq(:FINITE)
+    expect(T.cast(infinite.kind, StreamTypeExpression).cardinality).to eq(:INF)
+    expect(T.cast(bounded.kind, StreamTypeExpression).cardinality).to eq(12)
     expect(TypeShape.from_core("[~]Int64").tense_type_raw).to eq(:"Int64[]")
   end
 
   it "projects inline stream nodes through the runtime stream API without losing optional items" do
-    finite = Type.new(StreamTypeExpression.new(
+    finite = Type.new(TypeExpression.of(StreamTypeExpression.new(
       cardinality: :FINITE,
-      item: OptionalTypeExpression.new(inner: NamedTypeExpression.new(name: :Int64))
-    ))
-    infinite = Type.new(StreamTypeExpression.new(
+      item: TypeExpression.of(OptionalTypeExpression.new(inner: TypeExpression.of(NamedTypeExpression.new(name: :Int64))))
+    )))
+    infinite = Type.new(TypeExpression.of(StreamTypeExpression.new(
       cardinality: :INF,
-      item: NamedTypeExpression.new(name: :String)
-    ))
+      item: TypeExpression.of(NamedTypeExpression.new(name: :String))
+    )))
 
     expect(finite).to be_future
     expect(finite).to be_dynamic_stream
@@ -175,16 +177,13 @@ RSpec.describe TypeExpressionParser do
     expect { expression("?~Int64") }.to raise_error(ArgumentError, /unsupported tense order/)
     expect { expression("HashMap<A,B,C>") }.to raise_error(ArgumentError, /one or two/)
   end
+end
 
-
-  it "rejects unknown expression implementations at the printer boundary" do
-    unknown_class = Class.new do
-      include TypeExpression
-    end
-    unknown = unknown_class.new
-
-    expect { TypeExpressionPrinter.legacy(unknown) }.to raise_error(/unknown type expression/)
-    expect { TypeExpressionPrinter.inline(unknown) }.to raise_error(/unknown type expression/)
+RSpec.describe "AST::StructField semantic type accessor" do
+  it "returns the stored semantic Type through the type.rb reopening" do
+    field = AST::StructField.new(type: Type.new(:Int64), default: nil, borrowed: false)
+    expect(field.type).to be_a(Type)
+    expect(field.type.resolved).to eq(:Int64)
   end
 end
 
@@ -217,61 +216,56 @@ RSpec.describe "recursive Type accessors" do
 end
 
 RSpec.describe TypeExpressionTree do
+  def named(name)
+    TypeExpression.of(NamedTypeExpression.new(name: name))
+  end
+
   it "replaces nominal arguments through streams and leaves unrelated nodes intact" do
-    tuple = TupleTypeExpression.new(items: [NamedTypeExpression.new(name: :Old)])
-    stream = StreamTypeExpression.new(cardinality: :FINITE, item: tuple)
-    replacement = NamedTypeExpression.new(name: :Int64)
+    tuple = TypeExpression.of(TupleTypeExpression.new(items: [named(:Old)]))
+    stream = TypeExpression.of(StreamTypeExpression.new(cardinality: :FINITE, item: tuple))
+    replacement = named(:Int64)
     updated = described_class.with_nominal_arguments(stream, :Tuple, [replacement])
 
-    expect(updated).to be_a(StreamTypeExpression)
-    updated_tuple = T.cast(T.cast(updated, StreamTypeExpression).item, TupleTypeExpression)
+    expect(updated.kind).to be_a(StreamTypeExpression)
+    updated_tuple = updated.kind.item.kind
+    expect(updated_tuple).to be_a(TupleTypeExpression)
     expect(updated_tuple.items).to contain_exactly(replacement)
 
     wrapped = [
-      OptionalTypeExpression.new(inner: tuple),
-      FallibleTypeExpression.new(inner: tuple),
-      FutureTypeExpression.new(inner: tuple),
-      LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: tuple),
+      TypeExpression.of(OptionalTypeExpression.new(inner: tuple)),
+      TypeExpression.of(FallibleTypeExpression.new(inner: tuple)),
+      TypeExpression.of(FutureTypeExpression.new(inner: tuple)),
+      TypeExpression.of(LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: tuple)),
     ]
-    expect(wrapped.map { |node| described_class.with_nominal_arguments(node, :Tuple, [replacement]).class })
-      .to eq(wrapped.map(&:class))
+    expect(wrapped.map { |node| described_class.with_nominal_arguments(node, :Tuple, [replacement]).kind.class })
+      .to eq(wrapped.map { |node| node.kind.class })
 
-    named = NamedTypeExpression.new(name: :Box)
-    updated_named = T.cast(described_class.with_nominal_arguments(named, :Box, [replacement]), NamedTypeExpression)
-    expect(updated_named.arguments).to contain_exactly(replacement)
-    expect(described_class.with_nominal_arguments(named, :Other, [replacement])).to equal(named)
+    box = named(:Box)
+    updated_named = described_class.with_nominal_arguments(box, :Box, [replacement])
+    expect(updated_named.kind.arguments).to contain_exactly(replacement)
+    expect(described_class.with_nominal_arguments(box, :Other, [replacement])).to equal(box)
 
     signature = Type::FunctionType.new(params: [], return_type: Type.new(:Void))
-    function = FunctionTypeExpression.new(signature: signature)
+    function = TypeExpression.of(Type.function_type_expression_for(signature))
     expect(described_class.with_nominal_arguments(function, :Tuple, [replacement])).to equal(function)
 
-    map = MapTypeExpression.new(
-      key: NamedTypeExpression.new(name: :String),
-      value: NamedTypeExpression.new(name: :Old),
-    )
-    updated_map = T.cast(described_class.with_nominal_arguments(map, :HashMap, [replacement]), MapTypeExpression)
-    expect(updated_map.value).to equal(replacement)
-
-    unknown_class = Class.new do
-      include TypeExpression
-      define_method(:capabilities) { TypeCapabilities.new(ownership: :affine) }
-    end
-    unknown = T.cast(unknown_class.new, TypeExpression)
-    expect(described_class.with_nominal_arguments(unknown, :Tuple, [replacement])).to equal(unknown)
+    map = TypeExpression.of(MapTypeExpression.new(key: named(:String), value: named(:Old)))
+    updated_map = described_class.with_nominal_arguments(map, :HashMap, [replacement])
+    expect(updated_map.kind.value).to equal(replacement)
   end
 
   it "updates capability-bearing unary and stream nodes exhaustively" do
-    item = NamedTypeExpression.new(name: :Item)
-    linear = LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: item)
-    wrapped = FutureTypeExpression.new(
-      inner: FallibleTypeExpression.new(inner: OptionalTypeExpression.new(inner: linear))
-    )
+    item = named(:Item)
+    linear = TypeExpression.of(LinearTypeExpression.new(kind: :list, dimensions: [:LIST], item: item))
+    wrapped = TypeExpression.of(FutureTypeExpression.new(
+      inner: TypeExpression.of(FallibleTypeExpression.new(inner: TypeExpression.of(OptionalTypeExpression.new(inner: linear))))
+    ))
     caps = TypeCapabilities.new(ownership: :shared, sync: :locked)
     updated = described_class.with_linear_item_capabilities(wrapped, caps)
 
     expect(described_class.linear_item_capabilities(updated)).to eq(caps)
 
-    stream = StreamTypeExpression.new(cardinality: :FINITE, item: item)
+    stream = TypeExpression.of(StreamTypeExpression.new(cardinality: :FINITE, item: item))
     updated_stream = described_class.with_root_capabilities(stream, caps)
     expect(described_class.root_capabilities(updated_stream)).to eq(caps)
   end
@@ -285,23 +279,14 @@ RSpec.describe TypeExpressionTree do
     expect(caps.with(sync: :atomic)).not_to equal(caps)
   end
 
-  it "counts function parameter and result nodes and keeps unknown variants total" do
+  it "counts function parameter and result nodes" do
     signature = Type::FunctionType.new(
       params: [Type::FunctionTypeParam.new(type: Type.new(:Int64))],
       return_type: Type.new(:String)
     )
-    function = FunctionTypeExpression.new(signature: signature)
-    unknown_class = Class.new do
-      include TypeExpression
-      define_method(:capabilities) { TypeCapabilities.new(ownership: :affine) }
-    end
-    unknown = T.cast(unknown_class.new, TypeExpression)
-    caps = TypeCapabilities.new(ownership: :shared)
+    function = TypeExpression.of(Type.function_type_expression_for(signature))
 
     expect(described_class.node_count(function)).to eq(3)
-    expect(described_class.root_capabilities(unknown).ownership).to eq(:affine)
-    expect(described_class.with_root_capabilities(unknown, caps)).to equal(unknown)
-    expect(described_class.node_count(unknown)).to eq(1)
   end
 
   it "normalizes every supported legacy capability dimension" do
@@ -330,7 +315,7 @@ RSpec.describe TypeShape do
   it "keeps one recursive expression instead of raw child-symbol fields" do
     shape = described_class.from_core("!?HashMap<Symbol,String[]>")
 
-    expect(shape.expression).to be_a(FallibleTypeExpression)
+    expect(shape.expression.kind).to be_a(FallibleTypeExpression)
     expect(shape.instance_variables.sort).to eq([:@auto, :@expression, :@legacy_raw, :@semantic_key_value])
     expect(shape.error_union).to be(true)
     expect(shape.optional).to be(true)
@@ -411,7 +396,7 @@ RSpec.describe TypeShape do
 
   it "keeps String-keyed maps non-numeric and rejects fallible futures" do
     expect(described_class.from_core("HashMap<String>").numeric_map?).to be(false)
-    expect(described_class.from_core("!~Int64").expression).to be_a(FallibleTypeExpression)
+    expect(described_class.from_core("!~Int64").expression.kind).to be_a(FallibleTypeExpression)
   end
 
   it "does not mistake a leading Zig builtin marker for CLEAR capabilities" do
@@ -430,5 +415,40 @@ RSpec.describe TypeShape do
     expect(TypeExpressionPrinter.semantic(T.must(parenthesized))).to eq("~?String")
     expect(TypeExpressionTree.linear_item_envelope(TypeExpressionParser.parse("?String"))).to be_nil
     expect(TypeExpressionTree.linear_item_envelope(TypeExpressionParser.parse("String"))).to be_nil
+  end
+
+  it "shares one frozen TypeCapabilities instance across default-capability nodes" do
+    # The wrapper's `factory:` prop hands back the frozen TypeCapabilities::AFFINE
+    # instance instead of deep-cloning a fresh 160-byte value per node.
+    a = TypeExpression.of(NamedTypeExpression.new(name: :Foo))
+    b = TypeExpression.of(OptionalTypeExpression.new(inner: a))
+
+    expect(a.capabilities).to equal(TypeCapabilities::AFFINE)
+    expect(b.capabilities).to equal(a.capabilities)
+    expect(a.capabilities).to be_frozen
+    expect(a.capabilities.ownership).to eq(:affine)
+  end
+
+  it "shares the default across every wrapped TypeExpression variant" do
+    inner = TypeExpression.of(NamedTypeExpression.new(name: :Foo))
+    signature = FunctionSignatureExpression.new(params: [], return_expression: inner)
+    variants = [
+      NamedTypeExpression.new(name: :Foo),
+      TypeProjectionExpression.new(owner: :M, member: :Item),
+      FunctionTypeExpression.new(signature: signature),
+      TupleTypeExpression.new(items: [inner]),
+      OptionalTypeExpression.new(inner: inner),
+      FallibleTypeExpression.new(inner: inner, error_set: nil),
+      FutureTypeExpression.new(inner: inner),
+      LinearTypeExpression.new(kind: :list, dimensions: [], item: inner),
+      StreamTypeExpression.new(cardinality: :finite, item: inner),
+      MapTypeExpression.new(key: inner, value: inner)
+    ]
+
+    variants.each do |kind|
+      wrapper = TypeExpression.new(kind: kind)
+      expect(wrapper.capabilities).to equal(TypeCapabilities::AFFINE),
+        "TypeExpression wrapping #{kind.class} allocated its own default TypeCapabilities"
+    end
   end
 end

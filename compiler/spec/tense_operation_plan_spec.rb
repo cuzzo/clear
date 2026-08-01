@@ -14,13 +14,15 @@ RSpec.describe TenseOperationPlanner do
   end
 
   def expression_for(order, payload = NamedTypeExpression.new(name: :Int64))
-    order.reverse.each_char.reduce(payload) do |inner, marker|
-      case marker
+    wrapped_payload = payload.is_a?(TypeExpression) ? payload : TypeExpression.of(payload)
+    order.reverse.each_char.reduce(wrapped_payload) do |inner, marker|
+      kind = case marker
       when "!" then FallibleTypeExpression.new(inner: inner)
       when "~" then FutureTypeExpression.new(inner: inner)
       when "?" then OptionalTypeExpression.new(inner: inner)
       else raise "unknown test marker #{marker}"
       end
+      TypeExpression.of(kind)
     end
   end
 
@@ -87,26 +89,30 @@ RSpec.describe TenseOperationPlanner do
   it "preserves capabilities and fallible error sets while rebuilding layers" do
     future_capabilities = TypeCapabilities.new(ownership: :shared, ownership_set: true)
     optional_capabilities = TypeCapabilities.new(sync: :locked)
-    error_set = NamedTypeExpression.new(name: :Failure)
-    expression = FutureTypeExpression.new(
+    error_set = TypeExpression.of(NamedTypeExpression.new(name: :Failure))
+    expression = TypeExpression.new(
       capabilities: future_capabilities,
-      inner: FallibleTypeExpression.new(
-        error_set: error_set,
-        inner: OptionalTypeExpression.new(
-          capabilities: optional_capabilities,
-          inner: NamedTypeExpression.new(name: :Value),
-        ),
+      kind: FutureTypeExpression.new(
+        inner: TypeExpression.of(FallibleTypeExpression.new(
+          error_set: error_set,
+          inner: TypeExpression.new(
+            capabilities: optional_capabilities,
+            kind: OptionalTypeExpression.new(
+              inner: TypeExpression.of(NamedTypeExpression.new(name: :Value)),
+            ),
+          ),
+        )),
       ),
     )
 
-    rebuilt = TenseEnvelope.from_type(Type.new(expression)).wrap(NamedTypeExpression.new(name: :Other))
-    expect(rebuilt).to be_a(FutureTypeExpression)
-    future = rebuilt
-    expect(future.capabilities).to equal(future_capabilities)
-    expect(future.inner).to be_a(FallibleTypeExpression)
-    fallible = future.inner
+    rebuilt = TenseEnvelope.from_type(Type.new(expression)).wrap(TypeExpression.of(NamedTypeExpression.new(name: :Other)))
+    expect(rebuilt.kind).to be_a(FutureTypeExpression)
+    expect(rebuilt.capabilities).to equal(future_capabilities)
+    fallible_wrapper = rebuilt.kind.inner
+    expect(fallible_wrapper.kind).to be_a(FallibleTypeExpression)
+    fallible = fallible_wrapper.kind
     expect(fallible.error_set).to equal(error_set)
-    expect(fallible.inner).to be_a(OptionalTypeExpression)
+    expect(fallible.inner.kind).to be_a(OptionalTypeExpression)
     expect(fallible.inner.capabilities).to equal(optional_capabilities)
   end
 
@@ -182,7 +188,7 @@ RSpec.describe TenseOperationPlanner do
   end
 
   it "maps every valid ordered receiver envelope without flattening it" do
-    TenseOperationPlanner::NAVIGATION_MARKERS.each do |order|
+    TenseOperationPlanner.navigation_markers.each do |order|
       source = Type.new(expression_for(order))
       plan = described_class.navigate(source, Type.new(:String), markers: order)
 

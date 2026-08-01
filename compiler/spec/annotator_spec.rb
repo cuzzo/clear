@@ -3504,7 +3504,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
-        expect(output).to include("const Vec2 = native_math.Vec2;")
+        expect(output).to include("pub const Vec2 = __clear_module_native_math.Vec2;")
       end
 
       it "emits onRootStack trampoline for EXTERN FN without :safe (default)" do
@@ -3955,7 +3955,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(CompilerError, /HashMap.*\.contains\? requires exactly 1 argument/)
       end
 
-      it "raises when contains key is not a String" do
+      it "raises when contains receives a value that does not match its declared key type" do
         expect {
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
@@ -3964,7 +3964,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
             END
           CLEAR
-        }.to raise_error(CompilerError, /HashMap.contains\?: key must be a String/)
+        }.to raise_error(CompilerError, /HashMap.contains\?: key must be String, got Int64/)
       end
     end
 
@@ -4737,6 +4737,21 @@ RSpec.describe SemanticAnnotator do
 
       zig = ZigTranspiler.new.transpile(src)
       expect(zig).to include("CheatLib.clearList(rt.heapAlloc(), &items)")
+    end
+
+    it "does not treat a mutable method on a TRY expression as an identifier access path" do
+      src = <<~CLEAR
+        FN values() RETURNS ![]Int64 ->
+          RETURN [1];
+        END
+
+        FN clear_values() RETURNS !Void ->
+          (TRY values()).clear();
+          RETURN;
+        END
+      CLEAR
+
+      expect { run(src) }.not_to raise_error
     end
 
     it "supports String.indexOf with a starting offset" do

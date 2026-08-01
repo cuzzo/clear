@@ -49,7 +49,7 @@ RSpec.describe "I1/I2: @observable lockdown" do
     it "accepts the canonical fold-pipe form" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
@@ -66,7 +66,7 @@ RSpec.describe "I1/I2: @observable lockdown" do
     it "rejects ~Int64@observable:locked" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
@@ -82,7 +82,7 @@ RSpec.describe "I1/I2: @observable lockdown" do
     it "rejects ~Int64@observable:shared" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
@@ -98,7 +98,7 @@ RSpec.describe "I1/I2: @observable lockdown" do
     it "still accepts the DISTINCT collection shape ~T[]@set:observable" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-            gen: ~?Int64[] = BG STREAM {
+            gen: [~]Int64 = BG STREAM {
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };

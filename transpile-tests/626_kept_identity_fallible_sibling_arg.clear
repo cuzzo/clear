@@ -1,0 +1,36 @@
+STRUCT Budget { count: Int64 }
+STRUCT Holder { budget: Budget @multiowned, tag: Int64 }
+
+# Retained identity v4: a retained handle must not leak when a LATER
+# argument's evaluation fails before the callee is ever entered. The
+# caller's guarded cleanup covers argument evaluation; ownership hands
+# over exactly at the call boundary.
+FN makeHolder(budget: Budget, tag: Int64) RETURNS Holder ->
+    RETURN Holder{ budget: budget, tag: tag };
+END
+
+FN riskyTag(bad: Bool) RETURNS !Int64 ->
+    IF bad THEN
+        RAISE GuardFail;
+    END
+    RETURN 7;
+END
+
+FN tryMake(shared: Budget, bad: Bool) RETURNS !Holder ->
+    RETURN makeHolder(shared, TRY riskyTag(bad));
+END
+
+FN main() RETURNS !Void ->
+    MUTABLE shared = Budget{ count: 2 } @multiowned;
+
+    ok = TRY tryMake(shared, FALSE);
+    ASSERT ok.tag == 7, "later arg evaluated";
+
+    failed = tryMake(shared, TRUE) OR_ELSE Holder{ budget: shared, tag: 0 };
+    ASSERT failed.tag == 0, "later arg failure fell back";
+
+    shared.count = 4;
+    ASSERT ok.budget.count == 4, "keeper shares";
+    ASSERT failed.budget.count == 4, "fallback shares";
+    RETURN;
+END

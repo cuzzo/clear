@@ -29,6 +29,7 @@ class PipelineListLowerer < T::Struct
   extend T::Sig
   const :visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :visit_expr, T.proc.params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node)
+  const :visit_expr_head, T.proc.params(expr_node: AST::Node, placeholder: String, alloc: Symbol).returns(PipelineElementHead)
   const :visit_reduce_expr, T.proc.params(expr_node: AST::Node, item_placeholder: String, acc_placeholder: String).returns(MIR::Node)
   const :visit_body, T.proc.params(body_stmts: T::Array[AST::Node], placeholder: String).returns(T::Array[MIR::Emittable])
   const :visit_join_lambda, T.proc.params(body: AST::Node, join_params: T::Hash[String, String]).returns(MIR::Node)
@@ -40,9 +41,11 @@ class PipelineListLowerer < T::Struct
   const :next_label, T.proc.returns(String)
   const :set_current_label, T.proc.params(label: String).void
   const :append_owned_value_stmt, T.proc.params(receiver: String, alloc: Symbol, value_expr: MIR::Node).returns(MIR::Emittable)
+  const :append_fresh_owned_value_stmt, T.proc.params(receiver: String, alloc: Symbol, value_expr: MIR::Node, owned_type: Type).returns(MIR::Emittable)
   const :borrowed_pipeline_value, T.proc.params(value: MIR::Node, type_info: Type, alloc: Symbol).returns(MIR::Node)
   const :cleanup_bearing_type, T.proc.params(type_info: Type).returns(T::Boolean)
   const :owning_pipeline_temp_stmts, T.proc.params(name: String, source: MIR::Node, type_info: Type, zig_type: String, alloc: Symbol).returns(T::Array[MIR::Emittable])
+  const :loop_mark_stmts, T.proc.returns(T::Array[MIR::Emittable])
 
   sig { params(site: PipelineSite, op: PipelineListTerminalOp).returns(MIR::BlockExpr) }
   def lower(site, op)
@@ -98,17 +101,18 @@ class PipelineListLowerer < T::Struct
     alloc = self.pipeline_alloc.call(smooth_node)
     pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
     self.pipeline_block.call(list_node, lambda do |items, label|
+      res = result_binding_name(label)
       [
-        MIR::Let.new("res_list",
+        MIR::Let.new(res,
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("matches", pred_mir, false, nil, nil),
           MIR::IfStmt.new(MIR::Ident.new("matches"), [
-            self.append_owned_value_stmt.call("res_list", alloc,
+            self.append_owned_value_stmt.call(res, alloc,
               self.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
           ], nil),
         ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
+        MIR::BreakStmt.new(label, MIR::Ident.new(res)),
       ]
     end)
   end
@@ -120,19 +124,87 @@ class PipelineListLowerer < T::Struct
     res_type = select_result_type(expr_node)
     res_zig = self.transpile_type.call(res_type)
     alloc = self.pipeline_alloc.call(smooth_node)
-    expr_mir = visit_pipeline_expr_mir(list_node, expr_node)
     self.pipeline_block.call(list_node, lambda do |items, label|
+      res = result_binding_name(label)
+      # Per-label capture: a nested pipeline in the element expression emits
+      # its own loop, and a shared literal `it` shadows in Zig.
+      raw_it = label.to_s
+      raw_it = T.must(raw_it[1..]) while raw_it.start_with?("_")
+      it_name = "it_#{raw_it}"
+      # Lower the element INSIDE the loop body so its hoisted temps stay
+      # per-iteration instead of flushing to the enclosing statement.
+      head = self.visit_expr_head.call(expr_node, it_name, alloc)
+      # An element that allocates frame TRANSIENTS each iteration (a nested
+      # pipeline's apparatus, an owned composite field hoist) needs a
+      # per-iteration arena rewind (FRAME_OVERFLOW otherwise). Rewind frees
+      # everything frame-allocated during the iteration, so it is only sound
+      # when the escaping result is HEAP (the annotator stamps such pipelines
+      # heap; the append's transfer copies elements out of the doomed region
+      # before the rewind). If the stamp missed a shape, DON'T rewind — the
+      # checker's FRAME_NO_REWIND rejection stays fail-closed instead of
+      # emitting a rewind that frees moved frame elements (UAF).
+      rewind_per_iter = alloc == :heap && element_head_frame_transients?(head)
+      # A SELECT element that yields a FRESH owned value is MOVED into res_list;
+      # a borrowed element (a plain field/`it` projection) is COPIED so res_list
+      # owns an independent value. Ownership is carried on the head, established
+      # from MIR facts at lowering time (value effect + captured owned hoists) --
+      # not re-derived from AST syntax after hoisting has flattened the value.
+      element_owned = head.owned
+      body = T.let(rewind_per_iter ? self.loop_mark_stmts.call.dup : [], T::Array[MIR::Emittable])
+      body.concat(head.pending)
+      if element_owned
+        body << self.append_fresh_owned_value_stmt.call(res, alloc, head.value, res_type)
+      else
+        body << MIR::Let.new("val", head.value, false, nil, nil)
+        body << self.append_owned_value_stmt.call(res, alloc,
+          self.borrowed_pipeline_value.call(MIR::Ident.new("val"), res_type, alloc))
+      end
       [
-        MIR::Let.new("res_list",
+        # Explicit allocation + block-result transfer facts (mirrors
+        # lower_order_by): statement-level finalization stamps these when the
+        # pipeline is a statement, but NOT when the block is nested in an
+        # expression position — the hoist's cleanup allocator is read from
+        # these marks (a heap result with no mark got a frame defer: leak).
+        MIR::AllocMark.new(res, alloc, Type.new(smooth_node.full_type!),
+          MIR::Placement.alloc_scope(alloc)),
+        MIR::Let.new(res,
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("val", expr_mir, false, nil, nil),
-          self.append_owned_value_stmt.call("res_list", alloc,
-            self.borrowed_pipeline_value.call(MIR::Ident.new("val"), res_type, alloc)),
-        ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
+        MIR::ForStmt.new(MIR::Ident.new(items), it_name, body, nil),
+        *MIR::OwnershipTransferPlan.new(
+          name: res,
+          target: :block_result,
+          target_alloc: alloc,
+          move_guarded: false,
+        ).marks,
+        MIR::BreakStmt.new(label, MIR::Ident.new(res)),
       ]
     end)
+  end
+
+  # True when the lowered element carries frame AllocMarks — per-iteration
+  # frame transients that require the loop rewind above. Fibers/lambdas are
+  # boundaries (their frames are their own); nested loops are NOT (their
+  # allocations still land in this function's arena every outer iteration).
+  sig { params(head: PipelineElementHead).returns(T::Boolean) }
+  def element_head_frame_transients?(head)
+    found = T.let(false, T::Boolean)
+    boundary = ->(node) { node.is_a?(MIR::BgBlock) || node.is_a?(MIR::LambdaExpr) }
+    nodes = T.let([*head.pending, head.value], T::Array[MIR::Emittable])
+    MIR.each_node_until(nodes, boundary) do |node|
+      found = true if node.is_a?(MIR::AllocMark) && MIR::Placement.frame?(node.alloc)
+    end
+    found
+  end
+
+  # Per-label result binding (mirrors pipe_src_list_<label>): the linear
+  # ownership checker keys allocations by name across the whole function, so
+  # a nested pipeline reusing one name looks like re-allocating a live
+  # binding (OWNERSHIP_UNVERIFIED_PATH).
+  sig { params(label: String).returns(String) }
+  def result_binding_name(label)
+    raw = label.to_s
+    raw = T.must(raw[1..]) while raw.start_with?("_")
+    "res_list_#{raw}"
   end
 
   sig { params(expr_node: AST::Node).returns(Type) }
@@ -186,7 +258,8 @@ class PipelineListLowerer < T::Struct
           MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
         MIR::Let.new("lim_actual",
           MIR::Call.new("@min", [MIR::Ident.new("lim_requested"),
-                                 MIR::ListLength.new(MIR::Ident.new(items))], false),
+                                 MIR::ListLength.new(MIR::Ident.new(items))], false,
+            false, MIR::CallableContract.no_ownership(2)),
           false, nil, nil),
         MIR::Let.new("lim_result",
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
@@ -214,17 +287,18 @@ class PipelineListLowerer < T::Struct
     alloc = self.pipeline_alloc.call(smooth_node)
     pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
     self.pipeline_block.call(list_node, lambda do |items, label|
+      res = result_binding_name(label)
       [
-        MIR::Let.new("res_list",
+        MIR::Let.new(res,
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("matches", pred_mir, false, nil, nil),
           MIR::IfStmt.new(MIR::UnaryOp.new("!", MIR::Ident.new("matches")),
             [MIR::BreakStmt.new(nil, nil)], nil),
-          self.append_owned_value_stmt.call("res_list", alloc,
+          self.append_owned_value_stmt.call(res, alloc,
             self.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
         ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
+        MIR::BreakStmt.new(label, MIR::Ident.new(res)),
       ]
     end)
   end
@@ -237,7 +311,7 @@ class PipelineListLowerer < T::Struct
     self.set_current_label.call(label)
     count_mir = self.visit_mir.call(skip_node.count)
 
-    MIR::BlockExpr.new(label, [
+    block = MIR::BlockExpr.new(label, [
       MIR::Let.new("__skip_src", source_mir, false, nil, nil),
       MIR::Let.new("__skip_items",
         MIR::ItemsAccess.new(MIR::Ident.new("__skip_src"), true), false, nil, nil),
@@ -245,12 +319,17 @@ class PipelineListLowerer < T::Struct
         MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
       MIR::Let.new("skip_actual",
         MIR::Call.new("@min", [MIR::Ident.new("skip_requested"),
-                               MIR::ListLength.new(MIR::Ident.new("__skip_items"))], false),
+                               MIR::ListLength.new(MIR::Ident.new("__skip_items"))], false,
+          false, MIR::CallableContract.no_ownership(2)),
         false, nil, nil),
       MIR::BreakStmt.new(label,
         MIR::SliceExpr.new(MIR::Ident.new("__skip_items"),
                            MIR::Ident.new("skip_actual"), nil, nil)),
     ])
+    # SKIP yields a borrowed sub-slice of its source, not a fresh owned list.
+    # Declare it so ownership is read from the marker, not the break node shape.
+    block.borrowed_view = true
+    block
   end
 
   sig { params(site: PipelineSite, unnest_node: AST::UnnestOp).returns(MIR::BlockExpr) }
@@ -260,23 +339,43 @@ class PipelineListLowerer < T::Struct
     inner_elem_type = T.must(unnest_node.full_type!.element_type).resolved.to_s
     inner_zig = self.transpile_type.call(inner_elem_type)
     alloc = self.pipeline_alloc.call(smooth_node)
+    elem_ti = Type.new(inner_elem_type)
+    inner_list_ti = Type.new(unnest_node.expression.full_type!)
     expr_mir = visit_pipeline_expr_mir(list_node, unnest_node.expression)
+    # A per-item inner list produced by the UNNEST expression (`_.split(":")`,
+    # a list literal) is an OWNED per-iteration transient: it gets a
+    # first-class lifecycle (AllocMark + Cleanup, freed each iteration after
+    # its elements are copied out). A borrowing projection (`$u.orders`) owns
+    # nothing and keeps a bare binding. Elements are DEEP-COPIED into
+    # res_list either way — res_list owns independent values, exactly like
+    # every other materializing op's borrowed-element path.
+    inner_owned = MIR::OwnershipEffect.of(expr_mir).produces_owned ||
+      expr_mir.is_a?(MIR::MakeList)
+    inner_stmts = T.let([], T::Array[MIR::Emittable])
+    if inner_owned
+      entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false,
+        zig_type: inner_list_ti.zig_type)
+      inner_stmts << MIR::AllocMark.new("unn_inner", :heap, inner_list_ti, :heap)
+      inner_stmts << MIR::Let.new("unn_inner", expr_mir, false, nil, nil)
+      inner_stmts << MIR::Cleanup.new("unn_inner", entry)
+    else
+      inner_stmts << MIR::Let.new("unn_inner", expr_mir, false, nil, nil)
+    end
     self.pipeline_block.call(list_node, lambda do |items, label|
+      res = result_binding_name(label)
       [
-        MIR::Let.new("res_list",
+        MIR::Let.new(res,
           MIR::MakeList.new(inner_zig, [], alloc), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("unn_inner", expr_mir, false, nil, nil),
+          *inner_stmts,
           MIR::Let.new("unn_inner_items",
             MIR::ItemsAccess.new(MIR::Ident.new("unn_inner"), true), false, nil, nil),
           MIR::ForStmt.new(MIR::Ident.new("unn_inner_items"), "inner_it", [
-            MIR::ExprStmt.new(MIR::MethodCall.new(
-              MIR::Ident.new("res_list"), "append",
-              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("inner_it")], true,
-              MIR::CallableContract.no_ownership(2)), nil),
+            self.append_owned_value_stmt.call(res, alloc,
+              self.borrowed_pipeline_value.call(MIR::Ident.new("inner_it"), elem_ti, alloc)),
           ], nil),
         ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
+        MIR::BreakStmt.new(label, MIR::Ident.new(res)),
       ]
     end)
   end
@@ -308,8 +407,9 @@ class PipelineListLowerer < T::Struct
     size_mir = self.visit_mir.call(window_node.size)
     expr_mir = self.visit_expr.call(list_node, window_node.expression, "window_slice")
     self.pipeline_block.call(list_node, lambda do |items, label|
+      res = result_binding_name(label)
       [
-        MIR::Let.new("res_list",
+        MIR::Let.new(res,
           MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
         MIR::ScopeBlock.new([
           MIR::Let.new("__w_size",
@@ -335,7 +435,7 @@ class PipelineListLowerer < T::Struct
                     false, nil, nil),
                   MIR::Let.new("val", expr_mir, false, nil, nil),
                   MIR::ExprStmt.new(MIR::MethodCall.new(
-                    MIR::Ident.new("res_list"), "append",
+                    MIR::Ident.new(res), "append",
                     [MIR::AllocatorRef.new(alloc), MIR::Ident.new("val")],
                     true, MIR::CallableContract.no_ownership(2)), nil),
                 ],
@@ -345,7 +445,7 @@ class PipelineListLowerer < T::Struct
                 nil, nil),
             ], nil),
         ]),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list")),
+        MIR::BreakStmt.new(label, MIR::Ident.new(res)),
       ]
     end)
   end
@@ -363,6 +463,11 @@ class PipelineListLowerer < T::Struct
     self.pipeline_block.call(list_node, lambda do |items, label|
       result_name = "#{label}_ord_result"
       [
+        # Explicit allocation fact: statement-level implicit finalization
+        # stamps this when the pipeline is a statement, but NOT when the
+        # block is nested inside another lowerer's scope (ORDER_BY |> EACH).
+        MIR::AllocMark.new(result_name, alloc, Type.new(smooth_node.full_type!),
+          MIR::Placement.alloc_scope(alloc)),
         MIR::Let.new(result_name,
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, "_ = &#{result_name};"),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
@@ -371,7 +476,19 @@ class PipelineListLowerer < T::Struct
         ], nil),
         MIR::Sort.new(elem_zig,
           MIR::FieldGet.new(MIR::Ident.new(result_name), "items"),
-          key_a, key_b),
+          key_a, key_b,
+          # String keys compare by content, not pointer/len bits — the emitter
+          # reads this stamp (INV-7: no type inspection in the emitter).
+          Type.new(key_expr.full_type!(context: "ORDER_BY key")).string?),
+        # The result transfers out as the block value — the transfer fact that
+        # statement-level finalization adds implicitly, made explicit for
+        # nested consumers (ORDER_BY |> EACH).
+        *MIR::OwnershipTransferPlan.new(
+          name: result_name,
+          target: :block_result,
+          target_alloc: alloc,
+          move_guarded: false,
+        ).marks,
         MIR::BreakStmt.new(label, MIR::Ident.new(result_name)),
       ]
     end)

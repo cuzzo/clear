@@ -1,0 +1,14 @@
+# Retained-identity v5: moving an @multiowned handle at its LAST use transfers
+# the handle -- no retain is emitted (the final consuming use just hands the
+# owner over). Moving between @multiowned bindings keeps the carrier (a handle
+# stays a handle); it is not a plain-slot detach. Leak-free: one handle,
+# released once through its new owner. (Filling a plain RawT parameter from a
+# handle instead requires OWN COPY -- see 636.)
+STRUCT Cell { n: Int64 }
+
+FN main() RETURNS Void ->
+    original = Cell{ n: 42 } @multiowned;
+    moved = GIVE original;
+    WITH moved { ASSERT moved.n == 42, "moved handle delivers 42"; }
+    RETURN;
+END

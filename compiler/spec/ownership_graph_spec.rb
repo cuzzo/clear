@@ -20,6 +20,17 @@ RSpec.describe OwnershipGraph do
     end
   end
 
+  describe "scope pruning" do
+    it "removes only nodes at or below the requested scope" do
+      graph.declare("outer", scope_depth: 0)
+      graph.declare("inner", scope_depth: 1)
+
+      expect(graph.send(:prune_scope!, 1, archive: false)).to eq(1)
+      expect(graph["outer"]).not_to be_nil
+      expect(graph["inner"]).to be_nil
+    end
+  end
+
   describe "#transfer (move)" do
     before do
       graph.declare("x", kind: :affine)

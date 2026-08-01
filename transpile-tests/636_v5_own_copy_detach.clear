@@ -1,0 +1,16 @@
+# Retained-identity v5: OWN COPY is the sole handle->owned-RawT downgrade. It
+# dereferences the @multiowned/@shared payload and deep-copies it into a fresh
+# uniquely-owned value; the original handle is untouched and still usable. The
+# testing allocator proves the detached copy AND the surviving handle both
+# balance (no leak, no double-free).
+STRUCT User { id: Int64 }
+
+FN consume(TAKES u: User) RETURNS Int64 -> RETURN u.id; END
+
+FN main() RETURNS Void ->
+    m = User{ id: 7 } @multiowned;
+    r = consume(OWN COPY m);
+    ASSERT r == 7, "OWN COPY detaches an independent payload";
+    WITH m { ASSERT m.id == 7, "the original handle is still live after OWN COPY"; }
+    RETURN;
+END

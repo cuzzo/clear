@@ -502,6 +502,21 @@ module FuzzSurfaceRegistry
       mir_ownership_contracts: [:cleanup_on_all_paths, :error_path_allocator_identity],
     },
 
+    # The position axis the other pipeline templates leave open: they pin
+    # where the result lands and vary the operator/source/element. This one
+    # fixes the operator and varies the landing site, which is what selects
+    # loop rewind vs promote-at-declaration for a pipeline temporary.
+    pipeline_consumer_position_matrix: {
+      cleanup_value_shapes: [:string, :heap_list, :struct_owned_fields],
+      escape_sources: [:frame_local, :loop_local],
+      escape_sinks: [:struct_field_store, :list_append, :takes_arg, :function_arg],
+      execution_boundaries: [:stream_pipeline],
+      mir_ownership_contracts: [
+        :loop_frame_rewind, :promotion_on_escape, :cleanup_on_all_paths,
+        :move_suppresses_cleanup,
+      ],
+    },
+
     select_tense_assignment_matrix: {
       escape_sources: [:stream_next],
       execution_boundaries: [:stream_pipeline, :future_promise],

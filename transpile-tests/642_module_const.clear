@@ -1,0 +1,30 @@
+# Top-level CONST: comptime-pure, container-scope, referenced by bare all-caps
+# name. Covers a value-struct const, a scalar const, a const passed as an
+# argument, and a const used as a default parameter value (the pattern that
+# forced an ownership-materialization CAST before CONST existed).
+
+STRUCT Caps { ownership: Int64, observable: Bool }
+
+FN caps__new(kind: Int64) RETURNS Caps ->
+  RETURN Caps{ ownership: kind, observable: FALSE };
+END
+
+CONST AFFINE: Caps = caps__new(7);
+CONST MAX_RANK: Int64 = 42;
+
+FN describe(c: Caps) RETURNS Int64 ->
+  RETURN c.ownership;
+END
+
+FN with_default(c: Caps = AFFINE) RETURNS Int64 ->
+  RETURN describe(c);
+END
+
+FN main() RETURNS Void ->
+  ASSERT AFFINE.ownership == 7, "const struct field read";
+  ASSERT AFFINE.observable == FALSE, "const struct bool field";
+  ASSERT MAX_RANK == 42, "scalar const";
+  ASSERT describe(AFFINE) == 7, "const passed as argument";
+  ASSERT with_default() == 7, "const as default parameter";
+  RETURN;
+END

@@ -346,11 +346,11 @@ END
 
 # envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet(envId: Id<Env>, name: String, TAKES val: Value, MUTABLE pool: [Pool(50000)]Env) RETURNS !Bool EFFECTS REENTRANT ->
+FN envSet(envId: Id<Env>, name: String, TAKES val: MONOMORPHIC Value, MUTABLE pool: [Pool(50000)]Env) RETURNS !Bool EFFECTS REENTRANT ->
     MUTABLE parentVal: Value = Value.Nil;
     IF pool[envId] EXISTS AS env THEN
         IF env.vars.contains?(name) THEN
-            env.vars[name] = val;
+            env.vars[name] = KEEP val;
             RETURN TRUE;
         END
         parentVal = COPY (env.vars["__p"] OR_ELSE Value.Nil);

@@ -77,13 +77,15 @@ module ParserCompat
     options = {
       out_dir: File.join(LexerHarnessSupport::ROOT, 'tmp', 'parser-compat'),
       keep: false,
-      corpus: 'smoke'
+      corpus: 'smoke',
+      generated_root: File.join(LexerHarnessSupport::ROOT, 'compiler', 'src')
     }
 
     OptionParser.new do |parser|
       parser.banner = 'Usage: ruby tools/parser_compat.rb [--out DIR] [--keep]'
       parser.on('--out DIR', 'Output directory for MessagePack artifacts') { |value| options[:out_dir] = File.expand_path(value) }
       parser.on('--corpus NAME', 'Corpus to run: smoke (default)') { |value| options[:corpus] = value }
+      parser.on('--generated-root DIR', 'Root of the generated CLEAR tree to test') { |value| options[:generated_root] = File.expand_path(value) }
       parser.on('--keep', 'Keep generated CLEAR harness source and binary') { options[:keep] = true }
     end.parse!(argv)
 
@@ -221,18 +223,19 @@ module ParserCompat
     Dir.mktmpdir('parser-compat-', options[:out_dir]) do |dir|
       source = File.join(dir, 'parser_compat.clear')
       binary = File.join(dir, 'parser_compat')
-      File.write(source, clear_harness_source(cases))
+      File.write(source, clear_harness_source(cases, options[:generated_root]))
 
       env = {
         'CLEAR_DISABLE_BUILD_ZIG' => '1',
         'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8',
-        'CLEAR_EXTRA_NATIVE_DIRS' => File.join(LexerHarnessSupport::ROOT, 'compiler', 'src')
+        'CLEAR_EXTRA_NATIVE_DIRS' => options[:generated_root]
       }
       LexerHarnessSupport.run!(
         LexerHarnessSupport::CLEAR, 'build', source,
         '-o', binary,
         '--no-stack-check',
-        '--force',
+        # '--force' removed: it defeated incremental compilation on every build
+        *package_flags(options[:generated_root]),
         env: env
       )
       stdout, stderr = LexerHarnessSupport.run!(binary)
@@ -251,8 +254,141 @@ module ParserCompat
     end
   end
 
-  def clear_harness_source(cases)
-    parser_path = File.join(LexerHarnessSupport::ROOT, 'compiler', 'src', 'ast', 'parser.clear')
+  # Generated CLEAR REQUIREs each dependency as `pkg:rtoc_<hex of relative path>`,
+  # so every file in the tree must be registered before the root will resolve.
+  STDLIB_PACKAGES = { 'fs' => 'stdlib/fs/src/lib.clear', 'path' => 'stdlib/path/src/lib.clear' }.freeze
+
+  def generated_relatives(generated_root)
+    Dir[File.join(generated_root, '**/*.clear')].sort.map { |t| t.delete_prefix("#{generated_root}/") }
+  end
+
+  def package_name(relative)
+    "rtoc_#{relative.unpack1('H*')}"
+  end
+
+  # Generated REQUIRE graph over the tree, keyed by relative path.
+  #
+  # ruby-to-clear emits two REQUIRE spellings: the older `pkg:rtoc_<hex>` form
+  # and a plain relative path (`REQUIRE "../ast/type.clear"`). Reading only the
+  # hex form leaves the graph almost edgeless, so no SCC is found, no multi-file
+  # package is formed, and the compiler reports a raw circular dependency.
+  def generated_graph(generated_root)
+    present = generated_relatives(generated_root).to_h { |rel| [rel, true] }
+    present.keys.to_h do |rel|
+      dir = File.dirname(File.join(generated_root, rel))
+      deps = File.read(File.join(generated_root, rel))
+                 .scan(/REQUIRE\s+"([^"]+)"/).flatten
+                 .filter_map { |spec| resolve_require(spec, dir, generated_root) }
+                 .select { |dep| present[dep] && dep != rel }
+                 .uniq
+      [rel, deps]
+    end
+  end
+
+  # A REQUIRE spec as a path relative to the generated root, or nil when it
+  # names something outside the tree (a stdlib package).
+  def resolve_require(spec, dir, generated_root)
+    if spec.start_with?('pkg:rtoc_')
+      [spec.delete_prefix('pkg:rtoc_')].pack('H*')
+    elsif spec.end_with?('.clear')
+      File.expand_path(spec, dir).delete_prefix("#{generated_root}/")
+    end
+  end
+
+  # Mutually-referential generated modules must compile as ONE multi-file
+  # package: CLEAR's acyclic-import rule applies between packages, not within
+  # one. Each SCC larger than a single file becomes a package group.
+  def package_groups(generated_root)
+    graph = generated_graph(generated_root)
+    groups = {}
+    strongly_connected_components(graph).each do |component|
+      next unless component.length > 1
+
+      members = component.sort
+      groups["scc_#{File.basename(members.fetch(0), '.clear')}_#{members.length}"] = members
+    end
+    groups
+  end
+
+  def strongly_connected_components(graph)
+    index = {}
+    low = {}
+    on_stack = {}
+    stack = []
+    components = []
+    counter = 0
+
+    graph.each_key do |root_node|
+      next if index.key?(root_node)
+
+      work = [[root_node, 0]]
+      until work.empty?
+        node, child = work.last
+        if child.zero?
+          index[node] = counter
+          low[node] = counter
+          counter += 1
+          stack.push(node)
+          on_stack[node] = true
+        end
+
+        recursed = false
+        neighbours = graph.fetch(node, [])
+        while child < neighbours.length
+          neighbour = neighbours[child]
+          child += 1
+          work[-1][1] = child
+          unless index.key?(neighbour)
+            work.push([neighbour, 0])
+            recursed = true
+            break
+          end
+          low[node] = [low[node], index[neighbour]].min if on_stack[neighbour]
+        end
+        next if recursed
+
+        if low[node] == index[node]
+          component = []
+          loop do
+            member = stack.pop
+            on_stack.delete(member)
+            component << member
+            break if member == node
+          end
+          components << component
+        end
+        work.pop
+        low[work.last[0]] = [low[work.last[0]], low[node]].min unless work.empty?
+      end
+    end
+    components
+  end
+
+  def package_flags(generated_root)
+    generated = generated_relatives(generated_root).flat_map do |relative|
+      ['--pkg', "#{package_name(relative)}=#{File.join(generated_root, relative)}"]
+    end
+    grouped = package_groups(generated_root).flat_map do |name, members|
+      spec = members.map { |rel| File.join(generated_root, rel) }.join(',')
+      ['--pkg', "#{name}=#{spec}"]
+    end
+    stdlib = STDLIB_PACKAGES.flat_map do |name, path|
+      ['--pkg', "#{name}=#{File.join(LexerHarnessSupport::ROOT, path)}"]
+    end
+    generated + grouped + stdlib
+  end
+
+  # The harness must enter the parser through whatever package actually owns
+  # it: its SCC group when it is cyclic, otherwise the file itself.
+  def parser_require_spec(generated_root)
+    group = package_groups(generated_root).find { |_name, members| members.include?('ast/parser.clear') }
+    return "pkg:#{group.first}" if group
+
+    File.join(generated_root, 'ast', 'parser.clear')
+  end
+
+  def clear_harness_source(cases, generated_root)
+    parser_path = parser_require_spec(generated_root)
     calls = cases.each_with_index.map do |entry, index|
       "  dumpCase(#{LexerHarnessSupport.clear_string_expr(entry['source'])}, #{index}, #{LexerHarnessSupport.clear_string_expr(entry['name'])}) OR_ELSE RAISE;"
     end.join("\n")

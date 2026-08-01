@@ -1,0 +1,87 @@
+# Ownership-moving and copying selectors over OWNED stream items.
+# - GIVE _ into a TAKES fn / struct constructor moves the item: the transfer
+#   suppresses the loop's release (no double-free), and the moved payload is
+#   freed by its new owner.
+# - COPY _ observes: the loop still releases the original.
+
+STRUCT Box { name: String }
+
+FN consume(TAKES s: String) RETURNS Int64 -> RETURN s.length(); END
+
+FN moveIntoTakesFn() RETURNS !Int64 ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    out: [~]Int64 = src |> SELECT consume(GIVE _);
+    MUTABLE total = 0_i64;
+    WHILE NEXT out EXISTS AS item DO
+        total = total + item;
+    END
+    RETURN total;
+END
+
+FN moveIntoTakesFnBare() RETURNS !Int64 ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    out: [~]Int64 = src |> SELECT consume(_);
+    MUTABLE total = 0_i64;
+    WHILE NEXT out EXISTS AS item DO
+        total = total + item;
+    END
+    RETURN total;
+END
+
+FN moveIntoConstructor() RETURNS !Int64 ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        YIELD a;
+    };
+    out: [~]Box = src |> SELECT Box{ name: GIVE _ };
+    MUTABLE total = 0_i64;
+    WHILE NEXT out EXISTS AS item DO
+        total = total + item.name.length();
+    END
+    RETURN total;
+END
+
+FN copyIntoConstructor() RETURNS !Int64 ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    out: [~]Box = src |> SELECT Box{ name: COPY _ };
+    MUTABLE total = 0_i64;
+    WHILE NEXT out EXISTS AS item DO
+        total = total + item.name.length();
+    END
+    RETURN total;
+END
+
+FN moveIntoTakesFnThenSum() RETURNS !Int64 ->
+    src: [~]String = BG STREAM {
+        a: String = COPY "a";
+        b: String = COPY "bb";
+        YIELD a;
+        YIELD b;
+    };
+    running: ~Int64@observable = src |> SELECT consume(GIVE _) |> SUM _;
+    RETURN NEXT running;
+END
+
+FN main() RETURNS !Void ->
+    ASSERT (moveIntoTakesFn() OR_ELSE RAISE) == 3_i64, "GIVE into TAKES fn moves the stream item";
+    ASSERT (moveIntoTakesFnBare() OR_ELSE RAISE) == 3_i64, "bare TAKES arg moves the stream item (was_moved stamp)";
+    ASSERT (moveIntoConstructor() OR_ELSE RAISE) == 1_i64, "GIVE into constructor moves the stream item";
+    ASSERT (copyIntoConstructor() OR_ELSE RAISE) == 3_i64, "COPY into constructor observes; loop releases the original";
+    ASSERT (moveIntoTakesFnThenSum() OR_ELSE RAISE) == 3_i64, "moving selector fused with SUM stays leak-free";
+    RETURN;
+END

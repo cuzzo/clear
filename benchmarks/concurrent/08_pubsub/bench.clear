@@ -22,13 +22,13 @@ END
 FN main() RETURNS Void ->
   t0 = timestampMs();
 
-  msgs: ~?Msg[]@split = BG STREAM {
+  msgs: [~]@split Msg = BG STREAM {
     FOR i IN (0 ..< 10_000) -> YIELD Msg{ seed: i };
   };
 
   MUTABLE futures: ~Int64[]@list = [];
   FOR i IN (0 ..< 64) DO
-    subscriber_msgs: ~?Msg[]@split = CLONE msgs;
+    subscriber_msgs: [~]@split Msg = KEEP msgs;
     &futures
       .append(
         BG {

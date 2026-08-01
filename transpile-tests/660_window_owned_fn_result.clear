@@ -1,0 +1,13 @@
+FN tag(b: Int64[]) RETURNS String ->
+    t = b.length().toString();
+    RETURN COPY t;
+END
+
+FN main() RETURNS Void ->
+    arr: Int64[] = [1, 2, 3, 4];
+    parts = arr |> WINDOW(size: 2) tag(_);
+    MUTABLE n: Int64 = 0;
+    parts |> EACH { n = n + _.length(); };
+    ASSERT n == 2, "lens";
+    RETURN;
+END

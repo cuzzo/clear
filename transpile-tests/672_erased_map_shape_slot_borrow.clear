@@ -1,0 +1,38 @@
+# Test: slot borrow through a plain-map parameter whose shape is erased.
+# `IF map[key] EXISTS AS slot` borrows the slot (getPtr) rather than copying
+# an ownership-bearing payload. A `{String}Slot` parameter accepts any map
+# shape, so the same function body reaches a plain map AND a
+# @sharded(N):writeLocked map. Every shape a plain-map parameter can bind to
+# must answer the borrow -- 665 only covered the plain shape, and the sharded
+# instantiation used to fail Zig compilation with "no member named 'getPtr'".
+
+STRUCT Slot { sources: []String }
+
+FN addSource(MUTABLE slots: {String}Slot, key: String, value: String) RETURNS Void ->
+    IF slots[key] EXISTS AS slot THEN
+        &slot.sources.append(COPY value);
+    END
+END
+
+FN sourceCount(slots: {String}Slot, key: String) RETURNS Int64 ->
+    IF slots[key] EXISTS AS slot THEN RETURN slot.sources.length(); END
+    RETURN -1_i64;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE plain: {String}Slot = {};
+    plain["a"] = Slot{ sources: [] };
+    addSource(&plain, "a", "x");
+    addSource(&plain, "a", "y");
+    ASSERT sourceCount(plain, "a") == 2, "plain map slot borrow persisted both appends";
+    ASSERT sourceCount(plain, "missing") == -1, "plain map reports absent key";
+
+    MUTABLE sharded: {String}@sharded(4):writeLocked Slot = {};
+    sharded["a"] = Slot{ sources: [] };
+    addSource(&sharded, "a", "x");
+    addSource(&sharded, "a", "y");
+    ASSERT sourceCount(sharded, "a") == 2, "sharded map slot borrow persisted both appends";
+    ASSERT sourceCount(sharded, "missing") == -1, "sharded map reports absent key";
+
+    print("672: erased map shape slot borrow PASSED");
+END

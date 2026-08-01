@@ -69,18 +69,25 @@ module Annotator
     end
     def resolve(expression, parameters)
       issues = T.let([], T::Array[ProtocolProjectionIssue])
-      parameter_map = parameters.to_h { |parameter| [parameter.name.to_sym, parameter] }
+      parameter_map = T.let({}, T::Hash[String, AST::GenericParamDecl])
+      parameters.each { |parameter| parameter_map[parameter.name] = parameter }
       resolved = TypeExpressionTree.transform(expression) do |candidate|
-        next candidate unless candidate.is_a?(TypeProjectionExpression)
-        next candidate if candidate.protocol
+        kind = candidate.kind
+        next candidate unless kind.is_a?(TypeProjectionExpression)
+        projection = kind
+        next candidate if projection.protocol
 
-        protocol = projection_protocol(candidate, parameter_map, issues)
+        protocol = projection_protocol(projection, parameter_map, issues)
         next candidate unless protocol
+        protocol_value = protocol
 
-        TypeProjectionExpression.new(
-          owner: candidate.owner,
-          member: candidate.member,
-          protocol: protocol.to_sym,
+        projection_kind = TypeProjectionExpression.new(
+          owner: projection.owner,
+          member: projection.member,
+          protocol: protocol_value.to_sym,
+        )
+        TypeExpression.new(
+          kind: projection_kind,
           capabilities: candidate.capabilities,
         )
       end
@@ -92,12 +99,12 @@ module Annotator
     sig do
       params(
         projection: TypeProjectionExpression,
-        parameters: T::Hash[Symbol, AST::GenericParamDecl],
+        parameters: T::Hash[String, AST::GenericParamDecl],
         issues: T::Array[ProtocolProjectionIssue],
       ).returns(T.nilable(String))
     end
     def projection_protocol(projection, parameters, issues)
-      parameter = parameters[projection.owner]
+      parameter = parameters[projection.owner.to_s]
       unless parameter
         issues << issue(:GENERIC_PROJECTION_UNKNOWN_OWNER,
           owner: projection.owner, member: projection.member)
@@ -128,14 +135,21 @@ module Annotator
           owner: projection.owner, member: projection.member, protocols: matching.join(", "))
         return nil
       end
-      matching.first
+      result = matching.first
+      return nil unless result
+
+      result.dup
     end
 
     sig { params(code: Symbol, values: T.untyped).returns(ProtocolProjectionIssue) }
     def issue(code, **values)
+      arguments = T.let({}, T::Hash[Symbol, String])
+      values.each do |key, value|
+        arguments[key] = value.to_s
+      end
       ProtocolProjectionIssue.new(
         code: code,
-        arguments: values.transform_values(&:to_s),
+        arguments: arguments,
       )
     end
 

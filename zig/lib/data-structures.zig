@@ -30,7 +30,7 @@ pub fn bind(comptime deps: type) type {
 
         pub fn PolymorphicInner(comptime Wrapped: type) type {
             const M = stripPointers(Wrapped);
-            if (@typeInfo(M) == .@"struct" and @hasField(M, "ctrl")) {
+            if (@typeInfo(M) == .@"struct" and @hasDecl(M, "__clear_ref_carrier")) {
                 const CtrlPtr = std.meta.fieldInfo(M, .ctrl).type;
                 const Ctrl = @typeInfo(CtrlPtr).pointer.child;
                 const DataPtr = std.meta.fieldInfo(Ctrl, .data).type;
@@ -358,9 +358,9 @@ pub fn bind(comptime deps: type) type {
     // (MapGetReturnType removed — mapGet now returns ?V directly)
 
     // =========================================================================
-    // Numeric-keyed HashMap (Option 3)
+    // Typed-key HashMap
     //
-    // For integer keys (i64, u64, …): std.AutoHashMapUnmanaged(K, V).
+    // For ordinary value keys: HashMapUnmanaged with structural hashing.
     // For float keys (f64, f32):      std.HashMapUnmanaged with a custom
     //   context that bit-casts the float to u64 before hashing — avoids
     //   NaN/+0/-0 equality issues and satisfies Zig's hashability rules.
@@ -368,13 +368,73 @@ pub fn bind(comptime deps: type) type {
     //   MUTABLE m: HashMap<Number, Number> = {};  →  NumericMapType(f64,f64)
     //   MUTABLE m: HashMap<Int64, Number>  = {};  →  NumericMapType(i64,f64)
     //
-    // All numericMap* functions accept *NumericMapType(K,V) so callers never
-    // need to know the distinction.
+    // The public names retain "Numeric" for compatibility, but K may be any
+    // CLEAR value type. String itself still uses StringMap so it can preserve
+    // its specialized owned-key representation.
     // =========================================================================
 
-    /// Returns the concrete Zig map type for a numeric-keyed CLEAR HashMap.
-    /// Integer keys → AutoHashMapUnmanaged (Zig default).
-    /// Float keys   → HashMapUnmanaged with a bit-cast context (NaN-safe).
+    fn mapKeyEql(a: anytype, b: @TypeOf(a)) bool {
+        const K = @TypeOf(a);
+        return switch (@typeInfo(K)) {
+            .pointer => |info| switch (info.size) {
+                .slice => blk: {
+                    if (a.len != b.len) break :blk false;
+                    for (a, b) |av, bv| {
+                        if (!mapKeyEql(av, bv)) break :blk false;
+                    }
+                    break :blk true;
+                },
+                else => a == b,
+            },
+            .@"struct" => |info| blk: {
+                inline for (info.fields) |field| {
+                    if (!mapKeyEql(@field(a, field.name), @field(b, field.name))) break :blk false;
+                }
+                break :blk true;
+            },
+            .@"union" => |info| blk: {
+                const Tag = info.tag_type orelse
+                    @compileError("untagged unions cannot be map keys");
+                const tag_a: Tag = a;
+                const tag_b: Tag = b;
+                if (tag_a != tag_b) break :blk false;
+                break :blk switch (a) {
+                    inline else => |value, tag| mapKeyEql(value, @field(b, @tagName(tag))),
+                };
+            },
+            .optional => blk: {
+                const av = a orelse break :blk b == null;
+                const bv = b orelse break :blk false;
+                break :blk mapKeyEql(av, bv);
+            },
+            .array => blk: {
+                for (a, b) |av, bv| {
+                    if (!mapKeyEql(av, bv)) break :blk false;
+                }
+                break :blk true;
+            },
+            .vector => @reduce(.And, a == b),
+            .float => std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b)),
+            .error_union => blk: {
+                if (a) |av| {
+                    if (b) |bv| break :blk mapKeyEql(av, bv) else |_| break :blk false;
+                } else |ae| {
+                    if (b) |_| break :blk false else |be| break :blk ae == be;
+                }
+            },
+            else => a == b,
+        };
+    }
+
+    fn mapKeyHash(key: anytype) u64 {
+        var hasher = std.hash.Wyhash.init(0);
+        std.hash.autoHashStrat(&hasher, key, .DeepRecursive);
+        return hasher.final();
+    }
+
+    /// Returns the concrete Zig map type for a typed-key CLEAR HashMap.
+    /// Floats retain bitwise equality (including stable NaN behavior);
+    /// structural keys use recursive value hashing and equality.
     pub fn NumericMapType(comptime K: type, comptime V: type) type {
         if (@typeInfo(K) == .float) {
             const Ctx = struct {
@@ -394,22 +454,37 @@ pub fn bind(comptime deps: type) type {
             };
             return std.HashMapUnmanaged(K, V, Ctx, 80);
         }
-        return std.AutoHashMapUnmanaged(K, V);
+        const Ctx = struct {
+            pub fn hash(_: @This(), key: K) u64 {
+                if (comptime refInnerType(K) != null) {
+                    return std.hash.Wyhash.hash(0, std.mem.asBytes(&key.ctrl));
+                }
+                return mapKeyHash(key);
+            }
+            pub fn eql(_: @This(), a: K, b: K) bool {
+                if (comptime refInnerType(K) != null) return a.ctrl == b.ctrl;
+                return mapKeyEql(a, b);
+            }
+        };
+        return std.HashMapUnmanaged(K, V, Ctx, std.hash_map.default_max_load_percentage);
     }
 
     /// Select the ordinary CLEAR map representation after a generic
     /// associated key type becomes concrete. String keys retain StringMap's
-    /// owned-key behavior; numeric keys use NumericMapType.
+    /// owned-key behavior; all other key types use NumericMapType.
     pub fn MapType(comptime K: type, comptime V: type) type {
         return if (K == []const u8) StringMap(V) else NumericMapType(K, V);
     }
 
     pub fn numericMapPut(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V), key: K, value: V) !void {
-        const gop = try map.getOrPut(alloc, key);
-        if (gop.found_existing) {
-            if (comptime needsCleanup(V)) cleanup(V, alloc, gop.value_ptr);
+        if (map.getPtr(key)) |value_ptr| {
+            if (comptime needsCleanup(V)) cleanup(V, alloc, value_ptr);
+            value_ptr.* = value;
+            return;
         }
-        gop.value_ptr.* = value;
+        const owned_key = if (comptime needsCleanup(K)) try dupeValue(K, key, alloc) else key;
+        errdefer if (comptime needsCleanup(K)) cleanup(K, alloc, &owned_key);
+        try map.put(alloc, owned_key, value);
     }
 
     pub fn numericMapGet(comptime K: type, comptime V: type, map: NumericMapType(K, V), key: K) ?V {
@@ -418,6 +493,10 @@ pub fn bind(comptime deps: type) type {
 
     pub fn numericMapDelete(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V), key: K) void {
         if (map.fetchRemove(key)) |kv| {
+            if (comptime needsCleanup(K)) {
+                var owned_key = kv.key;
+                cleanup(K, alloc, &owned_key);
+            }
             if (comptime needsCleanup(V)) {
                 var val = kv.value;
                 cleanup(V, alloc, &val);
@@ -434,9 +513,12 @@ pub fn bind(comptime deps: type) type {
     }
 
     pub fn numericMapDeinit(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V)) void {
-        if (comptime needsCleanup(V)) {
-            var it = map.valueIterator();
-            while (it.next()) |val_ptr| cleanup(V, alloc, val_ptr);
+        if (comptime needsCleanup(K) or needsCleanup(V)) {
+            var it = map.iterator();
+            while (it.next()) |entry| {
+                if (comptime needsCleanup(K)) cleanup(K, alloc, entry.key_ptr);
+                if (comptime needsCleanup(V)) cleanup(V, alloc, entry.value_ptr);
+            }
         }
         map.deinit(alloc);
     }
@@ -447,10 +529,18 @@ pub fn bind(comptime deps: type) type {
     // actual storage shape.
     pub fn numericMapKeys(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) !std.ArrayListUnmanaged(K) {
         var list: std.ArrayListUnmanaged(K) = .empty;
-        errdefer list.deinit(allocator);
+        errdefer {
+            if (comptime needsCleanup(K)) {
+                for (list.items) |*key| cleanup(K, allocator, key);
+            }
+            list.deinit(allocator);
+        }
         try list.ensureTotalCapacity(allocator, map.count());
         var it = map.keyIterator();
-        while (it.next()) |k| list.appendAssumeCapacity(k.*);
+        while (it.next()) |k| {
+            const key_copy = if (comptime needsCleanup(K)) try dupeValue(K, k.*, allocator) else k.*;
+            list.appendAssumeCapacity(key_copy);
+        }
         return list;
     }
 
@@ -2353,6 +2443,17 @@ pub fn bind(comptime deps: type) type {
     // AutoHashMapUnmanaged(T, void) for other types.
     // -----------------------------------------------------------------------
     pub fn Set(comptime T: type) type {
+        return SetImpl(T, true);
+    }
+
+    /// Set of interned strings (CLEAR `[Set]String@symbol`): elements are
+    /// intern-table/rodata handles the set never owns. No frees on
+    /// duplicate insert, remove, or deinit; COPY reuses element pointers.
+    pub fn InternedStringSet() type {
+        return SetImpl([]const u8, false);
+    }
+
+    fn SetImpl(comptime T: type, comptime owned_elements: bool) type {
         const is_string = T == []const u8;
         const Context = struct {
             pub fn hash(_: @This(), key: T) u64 {
@@ -2379,6 +2480,7 @@ pub fn bind(comptime deps: type) type {
             std.HashMapUnmanaged(T, void, Context, std.hash_map.default_max_load_percentage);
         return struct {
             const Self = @This();
+            pub const interned_elements = !owned_elements;
             inner: Map = .{},
 
             pub fn initCapacity(alloc: std.mem.Allocator, capacity: u32) !Self {
@@ -2390,7 +2492,7 @@ pub fn bind(comptime deps: type) type {
             pub fn insert(self: *Self, alloc: std.mem.Allocator, value: T) !void {
                 if (is_string) {
                     if (self.inner.contains(value)) {
-                        alloc.free(value);
+                        if (owned_elements) alloc.free(value);
                     } else {
                         try self.inner.put(alloc, value, {});
                     }
@@ -2410,7 +2512,9 @@ pub fn bind(comptime deps: type) type {
 
             pub fn remove(self: *Self, alloc: std.mem.Allocator, value: T) void {
                 if (is_string) {
-                    if (self.inner.fetchRemove(value)) |kv| alloc.free(kv.key);
+                    if (self.inner.fetchRemove(value)) |kv| {
+                        if (owned_elements) alloc.free(kv.key);
+                    }
                 } else {
                     if (self.inner.fetchRemove(value)) |kv| {
                         var removed = kv.key;
@@ -2433,8 +2537,10 @@ pub fn bind(comptime deps: type) type {
 
             pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
                 if (is_string) {
-                    var it = self.inner.keyIterator();
-                    while (it.next()) |key_ptr| alloc.free(key_ptr.*);
+                    if (owned_elements) {
+                        var it = self.inner.keyIterator();
+                        while (it.next()) |key_ptr| alloc.free(key_ptr.*);
+                    }
                 } else if (comptime needsCleanup(T)) {
                     var it = self.inner.keyIterator();
                     while (it.next()) |key_ptr| cleanup(T, alloc, key_ptr);
@@ -2710,6 +2816,14 @@ pub fn bind(comptime deps: type) type {
                 // PutCtx.run dupes slice values with remote_alloc for thread safety.
                 // Free the caller's copy since ownership has been transferred.
                 if (comptime is_slice_value) caller_alloc.free(value);
+            }
+
+            pub fn getPtr(self: *Self, key: []const u8) ?*V {
+                _ = self;
+                _ = key;
+                @compileError("@sharded(N) string maps are shared-nothing: each shard is owned by " ++
+                    "a scheduler, so a slot cannot be borrowed in place. Bind the value instead " ++
+                    "(`v = map[k] OR_ELSE ...`), or declare the map @sharded(N):writeLocked.");
             }
 
             pub fn get(self: *Self, key: []const u8) ?V {
@@ -3142,6 +3256,14 @@ pub fn bind(comptime deps: type) type {
                 if (had_err) return error.OutOfMemory;
             }
 
+            pub fn getPtr(self: *Self, key: K) ?*V {
+                _ = self;
+                _ = key;
+                @compileError("@sharded(N) numeric maps are shared-nothing: each shard is owned by " ++
+                    "a scheduler, so a slot cannot be borrowed in place. Bind the value instead " ++
+                    "(`v = map[k] OR_ELSE ...`), or declare the map @sharded(N):writeLocked.");
+            }
+
             pub fn get(self: *Self, key: K) ?V {
                 self.ensureOwnership();
                 const s = shardIndex(key);
@@ -3256,6 +3378,16 @@ pub fn bind(comptime deps: type) type {
     // N independent shards, each protected by a RwLock. Readers are concurrent
     // within a shard; writers are exclusive per-shard. Thread-safe for @parallel.
     // Emitted for @sharded(N):locked and @sharded(N):writeLocked.
+    //
+    // getPtr contract (shared by every lock-based map shape below): CLEAR's
+    // `IF map[k] EXISTS AS slot` borrows the slot rather than copying an
+    // ownership-bearing payload, so every map shape a plain `{K}V` parameter
+    // can be instantiated with must expose `getPtr`. The returned pointer
+    // aliases shard storage after the shard lock is released, so it stays
+    // valid only while no other fiber writes that shard -- the same window
+    // `get` already hands out for aggregate values, widened to include
+    // rehash. Shared-nothing shapes cannot honour it at all and say so with
+    // @compileError.
     pub fn ShardedStringMap(comptime V: type, comptime N: usize) type {
         comptime std.debug.assert(N >= 2);
         return struct {
@@ -3295,6 +3427,16 @@ pub fn bind(comptime deps: type) type {
                 self.shards[s].lock.lockShared();
                 defer self.shards[s].lock.unlockShared();
                 return self.shards[s].map.get(key);
+            }
+
+            /// Borrow a slot in place. See the `getPtr` contract note above
+            /// ShardedStringMap: the borrow is only valid while no other
+            /// fiber writes this shard.
+            pub fn getPtr(self: *Self, key: []const u8) ?*V {
+                const s = shardIndex(key);
+                self.shards[s].lock.lockShared();
+                defer self.shards[s].lock.unlockShared();
+                return self.shards[s].map.getPtr(key);
             }
 
             pub fn contains(self: *Self, key: []const u8) bool {
@@ -3484,6 +3626,13 @@ pub fn bind(comptime deps: type) type {
                 return self.shards[s].map.get(key);
             }
 
+            pub fn getPtr(self: *Self, key: []const u8) ?*V {
+                const s = shardIndex(key);
+                instrumentedLock(&self.shards[s]);
+                defer self.shards[s].lock.unlock();
+                return self.shards[s].map.getPtr(key);
+            }
+
             pub fn contains(self: *Self, key: []const u8) bool {
                 const s = shardIndex(key);
                 self.shards[s].lock.lock();
@@ -3629,6 +3778,14 @@ pub fn bind(comptime deps: type) type {
                 return self.shards[s].map.get(key);
             }
 
+            pub fn getPtr(self: *Self, key: K) ?*V {
+                const s = shardIndex(key);
+                const elided = self.locks_elided.load(.monotonic);
+                acquire(&self.shards[s], elided);
+                defer release(&self.shards[s], elided);
+                return self.shards[s].map.getPtr(key);
+            }
+
             pub fn contains(self: *Self, key: K) bool {
                 const s = shardIndex(key);
                 const elided = self.locks_elided.load(.monotonic);
@@ -3697,6 +3854,9 @@ pub fn bind(comptime deps: type) type {
                 }
                 pub fn get(self: *Self, k: K) ?V {
                     return self.inner.get(k);
+                }
+                pub fn getPtr(self: *Self, k: K) ?*V {
+                    return self.inner.getPtr(k);
                 }
                 pub fn contains(self: *Self, k: K) bool {
                     return self.inner.contains(k);

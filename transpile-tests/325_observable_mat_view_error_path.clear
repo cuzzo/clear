@@ -9,7 +9,7 @@
 # Successful run prints "ok" and exits clean.
 
 FN runMatViewWithRaise(early: Bool) RETURNS !Int64 ->
-    gen: ~?Int64[] = BG STREAM {
+    gen: [~]Int64 = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 8_i64 DO YIELD i MOD 3_i64; i = i + 1_i64; END
     };

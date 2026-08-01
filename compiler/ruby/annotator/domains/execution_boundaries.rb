@@ -600,7 +600,7 @@ module Annotator
           when :type
             unless AST.error_type?(name)
               emit_registry_mismatch!(
-                diagnostic_token, name, AST::ERROR_TYPES.keys,
+                diagnostic_token, name, AST.error_type_names,
                 "Unknown error type '#{name}'. Register it in src/ast/error_registry.rb.",
                 "closest registered type"
               )
@@ -695,10 +695,10 @@ module Annotator
         end
 
         element_type = node.declared_yield_type || inferred_join.result_type || Type.new(:Any)
-        stamp_type!(node, Type.new(StreamTypeExpression.new(
+        stamp_type!(node, Type.new(TypeExpression.of(StreamTypeExpression.new(
           cardinality: :FINITE,
           item: element_type.shape.expression,
-        )))
+        ))))
 
         node.capture_analysis = stream_analysis_result
 
@@ -967,6 +967,11 @@ module Annotator
           elem_sym = T.must(promise_type.tense_type.element_type).to_sym
           stamp_type!(node, Type.new(:"#{elem_sym}[]"))
           node.storage   = :heap
+        elsif promise_type.split_open_stream?
+          # NEXT on split streams returns ?T — null signals stream exhaustion.
+          # Split handles advance independently through shared memoized state.
+          elem_sym = T.must(promise_type.open_stream_element_type).to_sym
+          stamp_type!(node, Type.new(:"?#{elem_sym}"))
         elsif promise_type.dynamic_stream?
           elem_sym = T.must(promise_type.tense_type.element_type).to_sym
           if promise_type.canonical_stream?

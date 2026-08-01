@@ -42,7 +42,7 @@ RSpec.describe FsmLowering do
     meta = lowering.fsm_cap_metadata(transition, with_node, 7, { "c" => Type.new(:Counter, sync: :locked) })
 
     expect(meta).not_to be_nil
-    expect(meta[:lock_field_ref]).to include("comptime @hasField")
+    expect(meta[:lock_field_ref]).to include("comptime @hasDecl")
     expect(meta[:try_method]).to eq("tryLockForFsm")
   end
 
@@ -74,7 +74,7 @@ RSpec.describe FsmLowering do
     meta = lowering.fsm_cap_metadata(transition, with_node, 7, { "c" => Type.new(:Counter, sync: :write_locked) })
 
     expect(meta).not_to be_nil
-    expect(meta[:lock_field_ref]).to include("comptime @hasField")
+    expect(meta[:lock_field_ref]).to include("comptime @hasDecl")
     expect(meta[:try_method]).to eq("tryWriteLockForFsm")
   end
 

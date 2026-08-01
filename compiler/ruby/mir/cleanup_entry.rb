@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 require "sorbet-runtime"
-require_relative "../ast/schemas"
+require_relative "../ast/type"
 require_relative "../semantic/lifecycle_plan"
 require_relative "placement"
 

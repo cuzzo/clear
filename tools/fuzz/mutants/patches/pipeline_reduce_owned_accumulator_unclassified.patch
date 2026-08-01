@@ -1,0 +1,22 @@
+diff --git a/compiler/ruby/mir/cleanup_classifier.rb b/compiler/ruby/mir/cleanup_classifier.rb
+--- a/compiler/ruby/mir/cleanup_classifier.rb
++++ b/compiler/ruby/mir/cleanup_classifier.rb
+@@ -471,15 +471,9 @@
+         next
+       end
+ 
+-      # A value BlockExpr (`{ stmts...; result }`, e.g. a desugared pipeline
+-      # fold) carries real bindings in its body that need cleanup classification
+-      # like any other statement sequence.
+-      if child.is_a?(AST::BlockExpr)
+-        classify_cleanup_binding_body(child.body, schema_lookup, lifecycle_registry, bindings, entries_by_place) if child.body
+-        classify_inline_bg_binding_body(child.result, schema_lookup, lifecycle_registry, bindings, entries_by_place) if child.result
+-        next
+-      end
+-
++      # MUTANT: value BlockExpr bodies (desugared pipeline folds) are not
++      # descended for cleanup classification, so an owned REDUCE accumulator
++      # never gets a cleanup entry.
+       classify_inline_bg_binding_body(child, schema_lookup, lifecycle_registry, bindings, entries_by_place)
+     end
+   end

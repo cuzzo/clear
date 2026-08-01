@@ -476,7 +476,17 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "copies each element using the collection element sink type" do
-        zig = ZigTranspiler.new.transpile(code)
+        zig = ZigTranspiler.new.transpile(<<~FLUX)
+          STRUCT Item { name: String, value: Int64 }
+          FN main() RETURNS Void ->
+            items = [
+              Item{ name: "a", value: 10_i64 },
+              Item{ name: "b", value: 20_i64 },
+              Item{ name: "c", value: 30_i64 }
+            ];
+            limited = items |> LIMIT 2;
+          END
+        FLUX
         expect(zig).to match(/dupeValue\(Item, __copy_src/)
         expect(zig).not_to match(/dupeValue\(std\.ArrayListUnmanaged\(Item\), __copy_src/)
       end
@@ -1588,10 +1598,10 @@ RSpec.describe SemanticAnnotator do
       }.to raise_error(CompilerError, /WINDOW time must be a string literal/)
     end
 
-    it "accepts open stream source (~?T[])" do
+    it "accepts open stream source ([~]T)" do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
-            gen: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
+            gen: [~]Int64 = BG STREAM { YIELD 1; YIELD 2; };
             result = gen |> WINDOW(size: 2) _.length();
         END
       CLEAR
@@ -2556,7 +2566,12 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "emits shard flattening with appendSlice" do
-        zig = ZigTranspiler.new.transpile(code)
+        zig = ZigTranspiler.new.transpile(<<~FLUSH)
+          FN main() RETURNS Void ->
+            MUTABLE slist: Float64[]@list:sharded(3) = [];
+            total = slist |> SUM _;
+          END
+        FLUSH
         expect(zig).to include("appendSlice")
         expect(zig).to include("shards[__psi].items")
         expect(zig).to include("sum_result")
@@ -2685,7 +2700,13 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "emits sharded-list EACH helper" do
-        zig = ZigTranspiler.new.transpile(code)
+        zig = ZigTranspiler.new.transpile(<<~FLUX)
+          STRUCT Item { value: Float64 }
+          FN main() RETURNS Void ->
+            MUTABLE slist: []@sharded(2) Item = [];
+            slist |> EACH { _.value = 0.0; };
+          END
+        FLUX
         expect(zig).to include("concurrentShardedListEachInPlace")
         expect(zig).to include("__BoundedConcurrentCtx")
         expect(zig).to include("__sh_each_src = &slist")
@@ -2827,9 +2848,15 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "emits slot materialization loop" do
-        zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("pipe_src_list.isAliveIndex(__pslot_idx)")
-        expect(zig).to include("pipe_src_list.values[__pslot_idx]")
+        zig = ZigTranspiler.new.transpile(<<~FLUX)
+          STRUCT Item { value: Float64 }
+          FN main() RETURNS Void ->
+            MUTABLE pool: [Pool(100)]Item = [];
+            total = pool |> SUM _.value;
+          END
+        FLUX
+        expect(zig).to match(/pipe_src_list_\w+\.isAliveIndex\(__pslot_idx\)/)
+        expect(zig).to match(/pipe_src_list_\w+\.values\[__pslot_idx\]/)
         expect(zig).to include("pipe_mat.append")
         expect(zig).to include("sum_result")
       end
@@ -2886,7 +2913,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits alive-slot materialization before the find loop" do
         zig = ZigTranspiler.new.transpile(code)
-        expect(zig).to include("pipe_src_list.isAliveIndex(__pslot_idx)")
+        expect(zig).to match(/pipe_src_list_\w+\.isAliveIndex\(__pslot_idx\)/)
         expect(zig).to include("pipe_mat.append")
       end
 
