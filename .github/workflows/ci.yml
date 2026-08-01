@@ -237,7 +237,7 @@ jobs:
 
   ruby-gems-coverage:
     name: Ruby gems coverage
-    needs: changes
+    needs: [changes, sarif-rust-binaries]
     if: ${{ needs.changes.outputs.run_gems == 'true' }}
     runs-on: ubuntu-latest
     env:
@@ -258,18 +258,27 @@ jobs:
       - name: Install Tree-sitter grammars
         run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build Rust binaries
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Place the shared Rust binaries where the tests look for them
         # gems/slopcop/test/cross_gem_contract_integration_test.rb and
         # gems/espalier/test/architecture_tools_test.rb both exercise the
-        # Lineage binary; building it here is required, not optional - the
+        # gigasail binary; having it here is required, not optional - the
         # SlopCop test hard-flunks without it (this job would otherwise be
         # broken), and the Espalier one silently skips without it (so its
         # contract would go untested with no visible failure).
+        #
+        # They are built once by `sarif-rust-binaries` and copied to the
+        # target/release paths the tests resolve, rather than four crates
+        # being compiled again on this runner.
         run: |
-          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
-          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
-          cargo build --release --manifest-path gems/decomplex/Cargo.toml
-          cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
+          chmod +x tmp/sarif-binaries/*
+          install -Dm755 tmp/sarif-binaries/fact-mine-rust gems/fact-mine/target/release/fact-mine-rust
+          install -Dm755 tmp/sarif-binaries/nil-kill-infer-rust gems/nil-kill/target/release/nil-kill-infer-rust
+          install -Dm755 tmp/sarif-binaries/decomplex-rust gems/decomplex/target/release/decomplex-rust
+          install -Dm755 tmp/sarif-binaries/giga gems/gigasail/target/release/giga
       - name: Run Ruby gem tests with SimpleCov
         run: bundle exec ruby tools/run_ruby_gem_coverage.rb
         env:
@@ -447,7 +456,7 @@ jobs:
 
   fact-mine-rust-coverage:
     name: FactMine Rust coverage
-    needs: changes
+    needs: [changes, sarif-rust-binaries]
     if: ${{ needs.changes.outputs.run_gems == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -469,22 +478,22 @@ jobs:
         run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
       - name: Run cargo llvm-cov for FactMine
         run: |
           mkdir -p tmp/fact-mine-rust-coverage
           cargo llvm-cov clean --manifest-path gems/fact-mine/Cargo.toml
           cargo llvm-cov --no-report --manifest-path gems/fact-mine/Cargo.toml --all-features
-          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
-          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
-          cargo build --release --manifest-path gems/decomplex/Cargo.toml
-          cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
-          # The release FactMine binary is built once above. The focused Ruby
-          # consumer suite reuses that same executable; LLVM coverage comes
-          # from FactMine's instrumented Rust test run rather than rebuilding
-          # a second binary for every cross-gem invocation.
-          FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/release/fact-mine-rust \
-          NIL_KILL_INFER_RUST_BINARY=${{ github.workspace }}/gems/nil-kill/target/release/nil-kill-infer-rust \
-          DECOMPLEX_RUST_BINARY=${{ github.workspace }}/gems/decomplex/target/release/decomplex-rust \
+          # Only the instrumented build happens here -- it has to, coverage
+          # comes from it. The release binaries the consumer suite calls are
+          # the ones `sarif-rust-binaries` already built.
+          chmod +x tmp/sarif-binaries/*
+          FACT_MINE_RUST_BINARY=${{ github.workspace }}/tmp/sarif-binaries/fact-mine-rust \
+          NIL_KILL_INFER_RUST_BINARY=${{ github.workspace }}/tmp/sarif-binaries/nil-kill-infer-rust \
+          DECOMPLEX_RUST_BINARY=${{ github.workspace }}/tmp/sarif-binaries/decomplex-rust \
           bundle exec ruby tools/run_ruby_gem_coverage.rb --fact-mine-consumers --without-coverage
           cargo llvm-cov report \
             --manifest-path gems/fact-mine/Cargo.toml \
@@ -1690,21 +1699,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') }}
+    # Not restricted to same-repo pull requests any more: the coverage jobs
+    # consume these binaries too, and they run on pushes. The SARIF jobs keep
+    # their own restriction, which is about where a SARIF upload may come from
+    # rather than about compiling anything.
+    if: ${{ needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true' }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # Every release binary the run consumes is built here, once, and
+      # downloaded by the jobs that need one. Three jobs used to build the same
+      # crates from scratch on three fresh runners.
       - name: Build release binaries once
         run: |
           cargo build --release --manifest-path gems/fact-mine/Cargo.toml
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
           cargo build --release --manifest-path gems/sql-cov/Cargo.toml
+          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
+          cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
           mkdir -p tmp/sarif-binaries
           install -m 755 gems/fact-mine/target/release/fact-mine-rust tmp/sarif-binaries/fact-mine-rust
           install -m 755 gems/decomplex/target/release/decomplex-rust tmp/sarif-binaries/decomplex-rust
           install -m 755 gems/sql-cov/target/release/sql-cov tmp/sarif-binaries/sql-cov
+          install -m 755 gems/nil-kill/target/release/nil-kill-infer-rust tmp/sarif-binaries/nil-kill-infer-rust
+          install -m 755 gems/gigasail/target/release/giga tmp/sarif-binaries/giga
       - uses: actions/upload-artifact@v4
         with:
           name: sarif-rust-binaries
