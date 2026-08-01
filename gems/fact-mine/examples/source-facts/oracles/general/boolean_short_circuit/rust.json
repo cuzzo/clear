@@ -123,6 +123,18 @@
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "short_circuit"
       }
     ],
     "control_flow_metrics": [
@@ -140,8 +152,13 @@
         "line": 5
       },
       {
-        "id": "cfg:(top-level)#method_seven:stmt:1:2:4",
+        "id": "cfg:(top-level)#method_seven:stmt:0.then.0:3:8",
         "kind": "statement",
+        "line": 3
+      },
+      {
+        "id": "cfg:(top-level)#method_seven:stmt:1:2:4",
+        "kind": "branch",
         "line": 2
       }
     ],
@@ -172,6 +189,7 @@
     "dominators": [
       {},
       {},
+      {},
       {}
     ],
     "flow_types": [
@@ -193,6 +211,7 @@
       }
     ],
     "liveness": [
+      {},
       {},
       {},
       {}
@@ -260,6 +279,10 @@
           "place:(top-level)#method_seven:local:y",
           "place:(top-level)#method_seven:local:z"
         ]
+      },
+      {
+        "reads": [],
+        "writes": []
       },
       {
         "reads": [],
@@ -338,6 +361,7 @@
       }
     ],
     "reachability": [
+      {},
       {},
       {},
       {}

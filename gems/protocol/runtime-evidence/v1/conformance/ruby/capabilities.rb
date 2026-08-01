@@ -1,0 +1,566 @@
+# frozen_string_literal: true
+
+require "open3"
+require "optparse"
+require "ostruct"
+require "json"
+require "set"
+require "sorbet-runtime"
+
+module RuntimeEvidenceConformance
+  module LocalModuleFunctions
+    module_function
+
+    def classify(_value)
+      true
+    end
+  end
+
+  class Value
+    attr_reader :payload
+
+    def initialize(payload)
+      @payload = payload
+    end
+
+    def child
+      self
+    end
+
+    def normalize
+      payload.to_s
+    end
+  end
+
+  class AlternateValue
+    def initialize(payload)
+      @payload = payload
+    end
+
+    def normalize
+      [@payload.to_s.upcase]
+    end
+  end
+
+  Generated = Struct.new(:payload, :count)
+  GeneratedStatus = Struct.new(:decision_line)
+  ProductionArm = Struct.new(:line)
+  ProductionArmCoverage = Struct.new(:arm, :covered)
+  class TypedGenerated < T::Struct
+    const :payload, Object
+  end
+
+  GeneratedOverride = Struct.new(:payload) do
+    def payload
+      "override:#{self[:payload]}"
+    end
+  end
+
+  class ProductionDispatcher
+    def dispatch
+      Value.new(:production)
+    end
+  end
+
+  class ProductionCapture
+    def capture
+      system(RbConfig.ruby, "-e", "exit 0")
+      ["", "", $CHILD_STATUS]
+    end
+  end
+
+  class NestedLoader
+    def load(values)
+      values.map { |value| value.normalize }
+    end
+  end
+
+  class Raiser
+    def fail!
+      raise "expected conformance exception"
+    end
+  end
+
+  class InternalRescuer
+    def recover
+      raise "internally rescued"
+    rescue RuntimeError
+      Value.new(:recovered)
+    end
+  end
+
+  class Subject
+    def exact_call(value)
+      value.normalize
+    end
+
+    def nil_return(value)
+      value.normalize
+      nil
+    end
+
+    def ambiguous_calls(left, right)
+      left.normalize; right.normalize
+    end
+
+    def nested_receiver(value)
+      value.child.normalize
+    end
+
+    def multiline_receiver(value)
+      value
+        .child
+        .normalize
+    end
+
+    def nested_argument(value)
+      accept(value.normalize)
+    end
+
+    def accept(value)
+      value
+    end
+
+    def assignment_flow(source)
+      value = source.fetch(:direct)
+      value.normalize
+    end
+
+    def destructuring_flow(source)
+      first, second = source.values_at(:first, :second)
+      [first.normalize, second.normalize]
+    end
+
+    def short_circuit_flow(source)
+      value = nil
+      value ||= source.fetch(:cached)
+      value.normalize
+    end
+
+    def short_circuit_guard(enabled, value)
+      enabled && value.normalize
+    end
+
+    def safe_navigation(value)
+      value&.normalize
+    end
+
+    def native_call(value)
+      value.upcase
+    end
+
+    def instrumented_array_writes(values, value)
+      values << value
+      values.push(value)
+      values.append(value)
+      values.unshift(value)
+      values[0] = value
+      values.concat([value])
+      values
+    end
+
+    def instrumented_hash_writes(values, value)
+      values[:index] = value
+      values.store(:store, value)
+      values.merge!(merge: value)
+      values.update(update: value)
+      values
+    end
+
+    def instrumented_set_writes(values, value)
+      values.add(value)
+      values << value
+      values.merge([value])
+      values
+    end
+
+    def append_string(value)
+      value << "suffix"
+    end
+
+    def local_module_function(value)
+      LocalModuleFunctions.classify(value)
+    end
+
+    def nested_local_module_function(value)
+      LocalModuleFunctions.classify(value.strip)
+    end
+
+    def binary_search(values, target)
+      values.bsearch { |value| value >= target }
+    end
+
+    def binary_search_index(values, target)
+      values.bsearch_index { |value| value >= target }
+    end
+
+    def option_parser_banner(parser)
+      parser.banner = "usage: conformance"
+    end
+
+    def converted_index(value, index)
+      Array(value)[index]
+    end
+
+    def sorbet_typed_passthrough(value)
+      T.let(value, Object)
+    end
+
+    def typed_generated_constructor(value)
+      TypedGenerated.new(payload: value)
+    end
+
+    def typed_generated_accessor(value)
+      value.payload
+    end
+
+    def open_struct_index_write(value)
+      record = OpenStruct.new
+      record[:payload] = value
+      record[:payload]
+    end
+
+    def generated_accessor(value)
+      value.payload
+    end
+
+    def excluded_generated_accessor(value)
+      value.payload
+    end
+
+    def generated_constructor(value)
+      Generated.new(value, 2)
+    end
+
+    def generated_accessor_chain(value)
+      value.payload.normalize
+    end
+
+    def generated_accessor_write(value, replacement)
+      value.payload = replacement
+      value.payload
+    end
+
+    def repeated_generated_accessor_write(value, replacement)
+      value.payload = value.payload == replacement.payload ? value.payload : replacement.payload
+      value.payload
+    end
+
+    def generated_override(value)
+      value.payload
+    end
+
+    def local_generated_constructor(value)
+      Struct.new(:payload, :count, keyword_init: true).new(payload: value, count: 2)
+    end
+
+    def local_generated_accessors(value)
+      record_type = Struct.new(
+        :kind,
+        :decision_line,
+        :decision_span,
+        keyword_init: true
+      )
+      record = record_type.new(
+        kind: :branch,
+        decision_line: 7,
+        decision_span: [7, 0, 7, 4]
+      )
+      [record.kind, record.decision_line, record.decision_span, value]
+    end
+
+    def local_generated_writer(value)
+      record_type = Struct.new(:payload, keyword_init: true)
+      record = record_type.new(payload: value)
+      record.payload = Value.new(:replacement)
+      record.payload
+    end
+
+    def nested_generated_accessors(coverage)
+      [coverage.arm.line, coverage.arm.span]
+    end
+
+    def generated_result_accessor(provider)
+      provider.capture.arm.span
+    end
+
+    def callback_flow(values)
+      values.map { |value| yield(value) }
+    end
+
+    def nested_callback_flow(values)
+      values.map { |value| value.normalize }.select { |value| !value.empty? }
+    end
+
+    def callback_local_flow(values)
+      values.each_with_object([]) do |value, output|
+        output << value.normalize
+      end
+    end
+
+    def dynamic_dispatch(receiver)
+      receiver.dispatch
+    end
+
+    def alternative_target(receiver)
+      result = receiver.normalize
+      result.to_s
+    end
+
+    def container_shape(source)
+      rows = source.fetch(:rows)
+      rows.each { |row| row.normalize }
+      rows
+    end
+
+    def mapping_shape(source)
+      mapping = source.fetch(:mapping)
+      mapping.keys
+    end
+
+    def record_shape(source)
+      record = source.fetch(:record)
+      record.payload
+    end
+
+    def predicate(value)
+      value.respond_to?(:normalize) ? :supported : :unsupported
+    end
+
+    def false_predicate(value)
+      value.respond_to?(:missing_runtime_evidence_method) ? :unexpected : :expected
+    end
+
+    def repeated_call(value)
+      3.times { value.normalize }
+    end
+
+    def subprocess_result
+      system(RbConfig.ruby, "-e", "exit 0")
+      $CHILD_STATUS.success?
+    end
+
+    def mixed_provenance_status(status)
+      status.success?
+    end
+
+    def mixed_generated_accessor(status)
+      status.decision_line
+    end
+
+    def status_after_capture(provider)
+      _stdout, _stderr, status = provider.capture
+      status.success?
+    end
+
+    def direct_capture_status
+      _stdout, _stderr, status = Open3.capture3(
+        RbConfig.ruby,
+        "-e",
+        "exit 0"
+      )
+      status.success?
+    end
+
+    def exception_flow(receiver)
+      receiver.fail!
+    rescue RuntimeError
+      :rescued
+    end
+
+    def exception_result_flow(receiver)
+      value = receiver.fail!
+      value.normalize
+    rescue RuntimeError
+      :rescued
+    end
+
+    def uncaught_exception_flow(receiver)
+      receiver.fail!
+    end
+
+    def internally_rescued_result(receiver)
+      value = receiver.recover
+      value.normalize
+    end
+
+    def rescued_native_exception_then_result(values)
+      begin
+        missing = values.fetch(99)
+        missing.normalize
+      rescue IndexError
+        # A demanded native result may have no value. Its missing c_return
+        # must not poison a later demanded result in the same process.
+      end
+      mapped = values.map { |value| value.normalize }
+      mapped.first
+    end
+
+    def nonlocal_callback_exit_then_result(values)
+      stopped = values.each { |_value| break :stopped }
+      stopped.to_s
+      mapped = values.map { |value| value.normalize }
+      mapped.first
+    end
+
+    def replaced_dispatch(receiver)
+      receiver.dispatch
+    end
+
+    def anonymous_replaced_dispatch(receiver)
+      receiver.dispatch
+    end
+
+    def mixed_anonymous_dispatch(receiver)
+      receiver.dispatch
+    end
+
+    def state_flow(value)
+      @state = value
+      @state.normalize
+    end
+
+    def state_receiver_flow(value)
+      @cached = value
+      @cached.normalize
+    end
+
+    def chained_result_flow(source)
+      source.fetch(:rows).first.normalize
+    end
+
+    def exception_value_flow
+      raise "runtime evidence"
+    rescue RuntimeError => error
+      error.message
+    end
+
+    def dependency_call(left, right)
+      Diff::LCS.diff(left, right)
+    end
+
+    def native_dependency_class_call(receiver)
+      receiver.languages
+    end
+
+    def native_dependency_constant_call
+      TreeSitter.languages
+    end
+
+    def interpolation_with_index_calls(index, row, field, message)
+      index[message] << "#{row[:owner]}##{field[:name]}"
+    end
+
+    def production_interpolation_caller(index, row, field, message)
+      interpolation_with_index_calls(index, row, field, message)
+    end
+
+    def modifier_with_repeated_index_calls(target, source, key)
+      target[key].concat(source[key]) if source[key]
+    end
+
+    def nested_callbacks_with_interpolation(groups)
+      groups.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |group, index|
+        group[:fields].each do |field|
+          index["message"] << "#{group[:owner]}##{field[:name]}"
+        end
+      end
+    end
+
+    def native_yield_then_same_line_sibling(index, row, key)
+      index[key]; row[:owner]
+    end
+
+    def constructor_result_flow(klass)
+      value = klass.new(:constructed)
+      value.normalize
+    end
+
+    def yielding_native_result_flow(values)
+      normalized = values.map { |value| value.normalize }
+      normalized.first
+    end
+
+    def nested_index_receiver_flow(constant_operations, owner, message)
+      constant_operations[owner].include?(message)
+    end
+
+    def ternary_callback_result_flow(flag, values, fallback, key)
+      selected = flag ? values.map { |value| value.normalize } : fallback[key]
+      selected.first
+    end
+
+    def repeated_short_circuit_env
+      ENV["NIL_KILL_CONFORMANCE_VALUE"] &&
+        !ENV["NIL_KILL_CONFORMANCE_VALUE"].empty?
+    end
+
+    def splat_boundary(*args)
+      args.length
+    end
+
+    def keyword_splat_boundary(**kwargs)
+      kwargs.keys
+    end
+
+    def all_parameter_kinds(
+      required,
+      optional = :optional_default,
+      *rest,
+      keyword:,
+      optional_keyword: :keyword_default,
+      **keyword_rest,
+      &callback
+    )
+      [
+        required,
+        optional,
+        rest,
+        keyword,
+        optional_keyword,
+        keyword_rest,
+        callback
+      ].map(&:class)
+    end
+
+    def nested_project_result_flow(loader, values)
+      loaded = loader.load(values)
+      loaded.first
+    end
+
+    def stdlib_json_result_flow(payload)
+      parsed = JSON.parse(payload)
+      parsed.fetch("value")
+    end
+
+    def constructor_callback_result_flow(klass, value)
+      created = klass.new(value).tap { |instance| instance.normalize }
+      created.normalize
+    end
+
+    def iterator_nested_project_result_flow(values)
+      normalized = values.map { |value| nested_result_builder(value) }
+      normalized.first
+    end
+
+    def nested_result_builder(value)
+      { payload: value.normalize }
+    end
+
+    def callback_generated_accessor_result(coverages)
+      index = coverages.each_with_object({}) do |coverage, out|
+        out[coverage.arm.line] = coverage.covered
+      end
+      index.keys
+    end
+
+    def callback_index_result(rows)
+      facts = rows.filter_map do |row|
+        fact = row[:verification_fact]
+        fact.normalize
+        fact
+      end
+      facts.first
+    end
+  end
+end

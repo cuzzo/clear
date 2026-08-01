@@ -569,7 +569,7 @@ pipeline, not universal language quality.
 The eventual prototype should expose commands shaped like:
 
 ```bash
-bundle exec ruby gems/lineage/tools/import_repo.rb --help  # existing context only
+bundle exec ruby gems/gigasail/tools/import_repo.rb --help  # existing context only
 
 gems/fact-mine/target/release/fact-mine-rust \
   profile espalier \

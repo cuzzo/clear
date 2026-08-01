@@ -325,14 +325,17 @@ RSpec.describe NilKill::SlotCoverage do
     summary = described_class.new([path]).summaries.fetch(0)
 
     expect(summary.fetch("path")).to eq(rel)
-    expect(summary.fetch("params")).to include("total" => 4, "strong" => 1, "weak" => 1, "untyped" => 2)
-    expect(summary.fetch("returns")).to include("total" => 3, "strong" => 2, "weak" => 0, "untyped" => 1)
+    # Mutable Struct fields generate both a reader and a one-argument writer.
+    # Until the fields have declared types, the generated writer inputs and
+    # the reader/writer return slots are honestly untyped too.
+    expect(summary.fetch("params")).to include("total" => 6, "strong" => 1, "weak" => 1, "untyped" => 4)
+    expect(summary.fetch("returns")).to include("total" => 7, "strong" => 2, "weak" => 0, "untyped" => 5)
     expect(summary.fetch("ivars")).to include("total" => 3, "strong" => 1, "weak" => 1, "untyped" => 1)
     expect(summary.fetch("struct_fields")).to include("total" => 5, "strong" => 2, "weak" => 1, "untyped" => 2)
     expect(summary.fetch("arrays")).to include("total" => 3, "strong" => 2, "weak" => 1, "untyped" => 0)
     expect(summary.fetch("hashes")).to include("total" => 2, "strong" => 0, "weak" => 2, "untyped" => 0)
-    expect(summary.fetch("structural")).to include("total" => 15, "strong" => 6, "weak" => 3, "untyped" => 6)
-    expect(summary.fetch("typed_percent")).to eq(40.0)
+    expect(summary.fetch("structural")).to include("total" => 21, "strong" => 6, "weak" => 3, "untyped" => 12)
+    expect(summary.fetch("typed_percent")).to eq(28.6)
   end
 
   it "rolls up totals across files" do

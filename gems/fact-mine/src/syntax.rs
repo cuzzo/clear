@@ -68,6 +68,25 @@ pub(crate) fn external_symbol_call_complexity(
     normalized_behavior::behavior(language).external_symbol_call_complexity(symbol, message)
 }
 
+/// Price a compiler-indexed preprocessor definition through its owning
+/// language adapter. The SCIP importer supplies the exact definition text;
+/// generic ingestion never interprets C/C++ preprocessor grammar.
+pub(crate) fn preprocessor_definition_call_complexity(
+    language: &str,
+    definition: &str,
+) -> Option<ExternalCallComplexity> {
+    let language = Language::parse(language).ok()?;
+    normalized_behavior::behavior(language).preprocessor_definition_call_complexity(definition)
+}
+
+pub(crate) fn preprocessor_definition_location(
+    language: &str,
+    symbol: &str,
+) -> Option<(String, usize)> {
+    let language = Language::parse(language).ok()?;
+    normalized_behavior::behavior(language).preprocessor_definition_location(symbol)
+}
+
 /// Classify an exact external symbol at the language boundary. Shared SCIP
 /// ingestion and diagnostics consume only these normalized values.
 pub(crate) fn external_symbol_metadata(language: &str, symbol: &str) -> ExternalSymbolMetadata {
@@ -100,6 +119,18 @@ pub(crate) fn scip_noncall_access_is_callable(language: &str, symbol: &str) -> b
         .unwrap_or(false)
 }
 
+pub(crate) fn scip_occurrence_matches_call(
+    language: &str,
+    symbol: &str,
+    source_text: &str,
+    message: &str,
+) -> bool {
+    Language::parse(language)
+        .ok()
+        .map(normalized_behavior::behavior)
+        .is_some_and(|behavior| behavior.scip_occurrence_matches_call(symbol, source_text, message))
+}
+
 /// Shared algebra for calls whose target identity is proven but whose cost is
 /// parameterized by callback/implementation work.
 pub(crate) fn parametric_call_complexity(kind: &str) -> Option<(&'static str, &'static str)> {
@@ -108,6 +139,15 @@ pub(crate) fn parametric_call_complexity(kind: &str) -> Option<(&'static str, &'
         "callback_linear" => Some(("O(N*C)", "O(N*S)")),
         "callback_sort" => Some(("O(N log N*C)", "O(N+S)")),
         "reflective_once" => Some(("O(R)", "O(S)")),
+        // A native dynamic-language primitive has a concrete scan/materialize
+        // phase after exactly one user-overridable coercion (for example
+        // String#to_str or File#to_path).  These are language-neutral algebra
+        // atoms, not Ruby-specific behavior.
+        "coercive_linear_scan" => Some(("O(N+C)", "O(S)")),
+        "coercive_linear_materialize" => Some(("O(N+C)", "O(N+S)")),
+        // A loader executes the selected program body.  `R` is its open
+        // target cost; `N` covers lookup/path processing done by the loader.
+        "loader_once" => Some(("O(N+R)", "O(N+S)")),
         _ => None,
     }
 }
@@ -274,8 +314,18 @@ pub struct Document {
     /// `normalization_call_origins` but not here.
     #[serde(default)]
     pub call_raw_origin_projections: Vec<CallRawOriginProjection>,
+    /// Exact selector span for each normalized call. Enclosing call spans may
+    /// include a multiline callback body, while SCIP references must anchor
+    /// the callable selector itself.
+    #[serde(default)]
+    pub call_selector_projections: Vec<CallSelectorProjection>,
     #[serde(default)]
     pub call_receiver_projections: Vec<CallReceiverProjection>,
+    /// Complete executable range for a normalized call. This differs from
+    /// the call's semantic span when an attached callback body belongs to the
+    /// invocation.
+    #[serde(default)]
+    pub call_execution_projections: Vec<CallExecutionProjection>,
     #[serde(default)]
     pub state_declarations: Vec<StateDeclaration>,
     #[serde(default)]
@@ -330,6 +380,8 @@ pub struct Document {
     #[serde(default)]
     pub flow_types: Vec<cfg::FlowTypeFact>,
     #[serde(default)]
+    pub callback_bindings: Vec<cfg::CallbackBindingFact>,
+    #[serde(default)]
     pub protocol_method_effects: Vec<ProtocolMethodEffect>,
     #[serde(default)]
     pub protocol_call_paths: Vec<ProtocolMethodPath>,
@@ -359,6 +411,10 @@ pub struct Document {
     pub method_param_types: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default)]
     pub method_local_types: BTreeMap<String, BTreeMap<String, String>>,
+    /// Source-proven C++ type template parameters, scoped to one normalized
+    /// callable identity. Empty for languages without type templates.
+    #[serde(default)]
+    pub method_template_types: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     pub state_param_origins: Vec<StateParamOrigin>,
     #[serde(default)]
@@ -413,6 +469,8 @@ pub struct SymbolScope {
     pub explicit_imports: BTreeMap<String, String>,
     #[serde(default)]
     pub preprocessor_callables: BTreeSet<String>,
+    #[serde(default)]
+    pub preprocessor_definitions: BTreeMap<String, BTreeSet<String>>,
     /// Language-owned namespace enclosing a particular declaration span.
     /// File-level namespaces are insufficient for languages such as C++
     /// where one translation unit may contain several namespace blocks.
@@ -436,6 +494,9 @@ pub struct FunctionDef {
     pub params: Vec<String>,
     #[serde(default)]
     pub callback_params: Vec<String>,
+    /// Language-owned proof that this declaration contains an executable body.
+    #[serde(default)]
+    pub source_export_eligible: bool,
     #[serde(default)]
     pub signature: String,
 }
@@ -450,6 +511,7 @@ impl FunctionDef {
         line: usize,
         span: Span,
         params: Vec<String>,
+        declaration_source: String,
     ) -> Self {
         Self {
             file,
@@ -460,7 +522,10 @@ impl FunctionDef {
             span,
             body: RawNode {
                 kind: "SYNTHETIC_ACCESSOR".to_string(),
-                text: String::new(),
+                // Preserve the language-owned declaration witness. The
+                // shared profile never interprets it; the adapter's
+                // generated-callable contract does.
+                text: declaration_source,
                 span,
                 named: false,
                 field_name: None,
@@ -469,6 +534,7 @@ impl FunctionDef {
             visibility: Some("public".to_string()),
             params,
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: String::new(),
         }
     }
@@ -488,6 +554,12 @@ pub struct OwnerDef {
     /// them before any hierarchy traversal.
     #[serde(default)]
     pub supertypes: Vec<String>,
+    /// For an abstract-dispatch type (interface/protocol) in a structurally-typed
+    /// language, the method names it requires. Used to compute which concrete
+    /// types satisfy it. Empty for concrete types and nominal-satisfaction
+    /// languages (which express conformance through `supertypes`).
+    #[serde(default)]
+    pub requirements: Vec<String>,
     pub line: usize,
     pub span: Span,
 }
@@ -523,6 +595,21 @@ pub struct CallRawOriginProjection {
 pub struct CallReceiverProjection {
     pub outer_span: Span,
     pub receiver_call_span: Span,
+}
+
+/// The callable selector emitted for a normalized semantic call. This stays
+/// separate from `CallSite::span`: the latter describes the full invocation
+/// for CFG/complexity analysis and may include a block body.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CallSelectorProjection {
+    pub call_span: Span,
+    pub selector_span: Span,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CallExecutionProjection {
+    pub call_span: Span,
+    pub execution_span: Span,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -749,6 +836,19 @@ pub fn parse_files(files: &[PathBuf], language: Language) -> Result<Vec<Document
     parallel::map_ordered(files, |file| parse_file(file.clone(), language))
 }
 
+/// The synthetic name a lambda is extracted under. It encodes the start
+/// position so it is stable and unique within a file.
+pub(crate) fn lambda_function_name(row: usize, column: usize) -> String {
+    format!("<lambda@{row}:{column}>")
+}
+
+/// Whether a function name is one of those synthetic names. The `:` inside it
+/// separates row from column, not a namespace from a member, so qualified-name
+/// handling must leave it alone.
+pub(crate) fn is_lambda_function_name(name: &str) -> bool {
+    name.starts_with("<lambda@") && name.ends_with('>')
+}
+
 pub(crate) fn protocol_method_effects(document: &Document) -> Vec<ProtocolMethodEffect> {
     document.protocol_method_effects.clone()
 }
@@ -815,6 +915,22 @@ mod tests {
                     .iter()
                     .any(|call| call.span == origin.normalized_call_span)
         }));
+    }
+
+    #[test]
+    fn parametric_contract_algebra_keeps_coercion_and_loader_work_symbolic() {
+        assert_eq!(
+            parametric_call_complexity("coercive_linear_scan"),
+            Some(("O(N+C)", "O(S)"))
+        );
+        assert_eq!(
+            parametric_call_complexity("coercive_linear_materialize"),
+            Some(("O(N+C)", "O(N+S)"))
+        );
+        assert_eq!(
+            parametric_call_complexity("loader_once"),
+            Some(("O(N+R)", "O(N+S)"))
+        );
     }
 
     #[test]

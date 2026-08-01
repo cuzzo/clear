@@ -189,6 +189,26 @@ const KOTLIN_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct KotlinNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for KotlinNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        let source = node.text.trim_end();
+        source.ends_with('}')
+            || source
+                .rfind(')')
+                .is_some_and(|parameters_end| source[parameters_end + 1..].contains('='))
+    }
+
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "kotlin-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
@@ -484,6 +504,55 @@ mod tests {
         );
         assert_eq!(external_symbol_metadata(dependency).scope, "dependency");
         assert!(external_symbol_call_complexity(dependency, "readByte").is_none());
+    }
+
+    #[test]
+    fn current_kotlin_compiler_overloads_have_reviewed_costs() {
+        let exact = [
+            ("kotlin/checkNotNull(+1).", "checkNotNull", "O(1)"),
+            (
+                "kotlin/collections/contentHashCode().",
+                "contentHashCode",
+                "O(N)",
+            ),
+            (
+                "kotlin/collections/contentToString(+3).",
+                "contentToString",
+                "O(N)",
+            ),
+            ("kotlin/collections/MutableList#add().", "add", "O(N)"),
+            ("kotlin/collections/toList(+10).", "toList", "O(N)"),
+            ("kotlin/text/trimMargin().", "trimMargin", "O(N)"),
+        ];
+        for (descriptor, message, expected) in exact {
+            let symbol = format!("scip-java maven . . {descriptor}");
+            let cost = external_symbol_call_complexity(&symbol, message)
+                .unwrap_or_else(|| panic!("missing exact Kotlin cost for {descriptor}"));
+            assert_eq!(cost.time, expected, "descriptor={descriptor}");
+            assert_eq!(cost.bound_quality, "upper_bound_exact_target");
+        }
+
+        let parametric = [
+            ("kotlin/collections/count(+1).", "callback_linear"),
+            ("kotlin/collections/filter(+9).", "callback_linear"),
+            ("kotlin/collections/map().", "callback_linear"),
+            ("kotlin/collections/sortedBy(+9).", "callback_sort"),
+            ("kotlin/collections/sumOf(+66).", "callback_linear"),
+        ];
+        for (descriptor, expected) in parametric {
+            let symbol = format!("scip-java maven . . {descriptor}");
+            let metadata = external_symbol_metadata(&symbol);
+            assert_eq!(metadata.scope, "stdlib", "descriptor={descriptor}");
+            assert_eq!(
+                metadata.parametric_cost.as_deref(),
+                Some(expected),
+                "descriptor={descriptor}"
+            );
+            assert!(
+                external_symbol_call_complexity(&symbol, "ignored").is_none(),
+                "parametric contract must not flatten callback cost: {descriptor}"
+            );
+        }
     }
 
     fn node(kind: &str, text: &str) -> Node {

@@ -14,6 +14,11 @@
     },
     {
       "boundaries": [],
+      "method": "method",
+      "statements": []
+    },
+    {
+      "boundaries": [],
       "method": "OtherFunc",
       "statements": []
     }
@@ -99,6 +104,12 @@
         "kind": "entry"
       },
       {
+        "kind": "callback_return"
+      },
+      {
+        "kind": "callback_body"
+      },
+      {
         "kind": "fallthrough"
       },
       {
@@ -106,6 +117,7 @@
       }
     ],
     "control_flow_metrics": [
+      {},
       {},
       {}
     ],
@@ -121,8 +133,13 @@
         "line": 5
       },
       {
-        "id": "cfg:(top-level)#MyFunc:stmt:1:2:2",
+        "id": "cfg:(top-level)#MyFunc:stmt:0.callback.0:3:4",
         "kind": "statement",
+        "line": 3
+      },
+      {
+        "id": "cfg:(top-level)#MyFunc:stmt:1:2:2",
+        "kind": "callback",
         "line": 2
       },
       {
@@ -134,12 +151,25 @@
         "id": "cfg:(top-level)#OtherFunc:exit:1:7:18",
         "kind": "exit",
         "line": 7
+      },
+      {
+        "id": "cfg:(top-level)#method:entry:0:3:4",
+        "kind": "entry",
+        "line": 3
+      },
+      {
+        "id": "cfg:(top-level)#method:exit:1:3:19",
+        "kind": "exit",
+        "line": 3
       }
     ],
     "decisions": [],
     "def_use": [],
     "dispatch_sites": [],
     "dominators": [
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -175,6 +205,9 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
       {}
     ],
     "local_complexity_scores": [
@@ -187,6 +220,11 @@
       },
       {
         "id": "(top-level)#OtherFunc",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "(top-level)#method",
         "score": 0.0,
         "signals": {}
       }
@@ -226,9 +264,30 @@
         "name": "OtherFunc",
         "owner": "(top-level)",
         "statements": []
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#method",
+        "line": 3,
+        "local_contract_assignments": {},
+        "name": "method",
+        "owner": "(top-level)",
+        "statements": []
       }
     ],
     "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
       {
         "reads": [],
         "writes": []
@@ -298,6 +357,9 @@
       }
     ],
     "reachability": [
+      {},
+      {},
+      {},
       {},
       {},
       {},

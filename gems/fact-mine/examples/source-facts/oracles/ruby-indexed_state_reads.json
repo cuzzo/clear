@@ -107,6 +107,19 @@
         "safe_navigation": false
       },
       {
+        "arguments": [
+          "\"- [Lineage Unit Risk (#{@lineage[:units].size})]\""
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "lineage_summary",
+        "line": 11,
+        "message": "<<",
+        "receiver": "out",
+        "safe_navigation": false
+      },
+      {
         "arguments": [],
         "block": false,
         "conditional": false,
@@ -366,7 +379,13 @@
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "return"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
       },
       {
         "kind": "entry"
@@ -391,8 +410,13 @@
         "line": 8
       },
       {
+        "id": "cfg:SourceFactIndexedStateReads#label:return:0.then.0:5:4",
+        "kind": "jump",
+        "line": 5
+      },
+      {
         "id": "cfg:SourceFactIndexedStateReads#label:stmt:1:5:4",
-        "kind": "statement",
+        "kind": "branch",
         "line": 5
       },
       {
@@ -422,9 +446,11 @@
       {},
       {},
       {},
+      {},
       {}
     ],
     "flow_types": [
+      {},
       {},
       {},
       {}
@@ -448,6 +474,7 @@
       }
     ],
     "liveness": [
+      {},
       {},
       {},
       {},
@@ -533,6 +560,12 @@
       },
       {
         "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactIndexedStateReads#label:instance_field:@data"
+        ],
         "writes": []
       },
       {
@@ -631,9 +664,11 @@
       {},
       {},
       {},
+      {},
       {}
     ],
     "reaching_definitions": [
+      {},
       {},
       {},
       {}

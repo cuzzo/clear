@@ -25,5 +25,32 @@
     ],
     "method_count": 5
   },
-  "options": {}
+  "options": {},
+  "expected_by_language": {
+    "kotlin": {
+      "edges": [
+        {
+          "callee_name": "prepare",
+          "caller_name": "run",
+          "type": "always"
+        },
+        {
+          "callee_name": "ready",
+          "caller_name": "run",
+          "type": "conditional"
+        },
+        {
+          "callee_name": "validate",
+          "caller_name": "run",
+          "type": "conditional"
+        },
+        {
+          "callee_name": "helper",
+          "caller_name": "run",
+          "type": "iterates"
+        }
+      ],
+      "method_count": 6
+    }
+  }
 }

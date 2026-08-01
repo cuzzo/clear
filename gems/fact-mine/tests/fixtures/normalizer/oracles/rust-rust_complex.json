@@ -160,6 +160,17 @@
                                 "text": "{\n        break;\n    }",
                                 "type": "BLOCK"
                               }
+                            },
+                            {
+                              "Node": {
+                                "children": [],
+                                "first_column": 8,
+                                "first_lineno": 8,
+                                "last_column": 13,
+                                "last_lineno": 8,
+                                "text": "break",
+                                "type": "BREAK"
+                              }
                             }
                           ],
                           "first_column": 4,
@@ -167,7 +178,7 @@
                           "last_column": 5,
                           "last_lineno": 9,
                           "text": "loop {\n        break;\n    }",
-                          "type": "LOOP_EXPRESSION"
+                          "type": "WHILE"
                         }
                       },
                       {

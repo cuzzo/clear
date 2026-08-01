@@ -381,7 +381,13 @@
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
       }
     ],
     "control_flow_metrics": [
@@ -420,18 +426,26 @@
         "line": 9
       },
       {
-        "id": "cfg:SourceFactBlockConstantEffects#resolve:stmt:1:7:4",
+        "id": "cfg:SourceFactBlockConstantEffects#resolve:stmt:0.loop.0:8:34",
         "kind": "statement",
+        "line": 8
+      },
+      {
+        "id": "cfg:SourceFactBlockConstantEffects#resolve:stmt:1:7:4",
+        "kind": "loop",
         "line": 7
       }
     ],
     "decisions": [],
     "def_use": [
       {},
+      {},
+      {},
       {}
     ],
     "dispatch_sites": [],
     "dominators": [
+      {},
       {},
       {},
       {},
@@ -468,6 +482,7 @@
       }
     ],
     "liveness": [
+      {},
       {},
       {},
       {},
@@ -601,7 +616,12 @@
       },
       {
         "reads": [
-          "place:SourceFactBlockConstantEffects#resolve:local:candidate",
+          "place:SourceFactBlockConstantEffects#resolve:local:candidate"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
           "place:SourceFactBlockConstantEffects#resolve:local:path",
           "place:SourceFactBlockConstantEffects#resolve:local:rel"
         ],
@@ -673,6 +693,7 @@
       }
     ],
     "reachability": [
+      {},
       {},
       {},
       {},

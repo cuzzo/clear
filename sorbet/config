@@ -1,6 +1,15 @@
 --dir
 .
 --ignore=vendor/
+# Local caches and scratch, none of it this project's source. `.cache/`
+# holds 7,800 files of downloaded CRuby and Kotlin stdlib source, and
+# type-checking those segfaults sorbet outright -- so a developer who has run
+# the stdlib tooling gets a crash with no explanation, while CI's fresh
+# checkout is fine.
+--ignore=.cache/
+--ignore=.ci-local/
+--ignore=.giga/
+--ignore=.claude/
 --ignore=zig/
 --ignore=zig-old/
 --ignore=zig-out/
@@ -18,6 +27,7 @@
 --ignore=gems/slopcop/
 --ignore=gems/fix-cache/
 --ignore=gems/nil-kill/
+--ignore=gems/protocol/
 --ignore=gems/espalier/
 --ignore=gems/fact-mine/
 --ignore=gems/ruby-to-clear/

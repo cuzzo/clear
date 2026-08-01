@@ -697,7 +697,7 @@ fn parse_range(value: &Value) -> Option<[usize; 4]> {
     ])
 }
 
-fn path_to_file_uri(path: &Path) -> String {
+pub(crate) fn path_to_file_uri(path: &Path) -> String {
     let path = path.to_string_lossy();
     let encoded = path
         .bytes()
@@ -784,6 +784,7 @@ mod tests {
             target_provenance: None,
             candidate_targets: Vec::new(),
             candidate_reason: None,
+            consumer_closed_candidate_set: false,
             kind: String::new(),
             owner: String::new(),
             function: String::new(),
@@ -794,7 +795,10 @@ mod tests {
             lexical_symbol: None,
             lexical_symbol_origin: None,
             receiver_call_span: None,
+            selector_span: None,
+            execution_span: None,
             receiver_definition_call_spans: Vec::new(),
+            receiver_definition_sequence_projection: None,
             receiver_symbol: None,
             receiver_type: None,
             receiver_type_origin: None,
@@ -813,6 +817,7 @@ mod tests {
             complexity_assumptions: Vec::new(),
             message: String::new(),
             argument_count: 0,
+            arguments: Vec::new(),
             path: String::new(),
             line: 1,
             span: [1, 0, 1, 0],
@@ -821,6 +826,7 @@ mod tests {
             unresolved_reason: None,
             resolution_missing_proof: None,
             empty_domain_cause: None,
+            runtime_evidence_observed: false,
         }
     }
 }

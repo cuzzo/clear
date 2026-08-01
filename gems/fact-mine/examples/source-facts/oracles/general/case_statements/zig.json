@@ -380,16 +380,49 @@
         "kind": "fallthrough"
       },
       {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
         "kind": "entry"
       },
       {
         "kind": "fallthrough"
       },
       {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_default"
+      },
+      {
         "kind": "entry"
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_arm"
+      },
+      {
+        "kind": "case_default"
       }
     ],
     "control_flow_metrics": [
@@ -409,8 +442,13 @@
         "line": 13
       },
       {
-        "id": "cfg:i32#method_case_no_val:stmt:1:10:4",
+        "id": "cfg:i32#method_case_no_val:stmt:0.then.0:10:16",
         "kind": "statement",
+        "line": 10
+      },
+      {
+        "id": "cfg:i32#method_case_no_val:stmt:1:10:4",
+        "kind": "branch",
         "line": 10
       },
       {
@@ -424,8 +462,13 @@
         "line": 20
       },
       {
-        "id": "cfg:i32#method_case_one_pattern:stmt:1:16:4",
+        "id": "cfg:i32#method_case_one_pattern:stmt:0.case0.0:17:13",
         "kind": "statement",
+        "line": 17
+      },
+      {
+        "id": "cfg:i32#method_case_one_pattern:stmt:1:16:4",
+        "kind": "case",
         "line": 16
       },
       {
@@ -439,8 +482,23 @@
         "line": 7
       },
       {
-        "id": "cfg:i32#method_eight:stmt:1:2:4",
+        "id": "cfg:i32#method_eight:stmt:0.case0.0:3:16",
         "kind": "statement",
+        "line": 3
+      },
+      {
+        "id": "cfg:i32#method_eight:stmt:0.case1.0:4:13",
+        "kind": "statement",
+        "line": 4
+      },
+      {
+        "id": "cfg:i32#method_eight:stmt:0.case2.0:5:16",
+        "kind": "statement",
+        "line": 5
+      },
+      {
+        "id": "cfg:i32#method_eight:stmt:1:2:4",
+        "kind": "case",
         "line": 2
       }
     ],
@@ -493,6 +551,11 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {}
     ],
     "flow_types": [
@@ -530,6 +593,11 @@
       }
     ],
     "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -662,6 +730,10 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:i32#method_case_no_val:local:x"
         ],
@@ -678,6 +750,10 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:i32#method_case_one_pattern:local:x"
         ],
@@ -688,6 +764,18 @@
         "writes": [
           "place:i32#method_eight:local:x"
         ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
       },
       {
         "reads": [],
@@ -864,6 +952,11 @@
       }
     ],
     "reachability": [
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},

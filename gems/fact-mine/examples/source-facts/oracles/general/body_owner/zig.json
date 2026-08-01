@@ -52,7 +52,7 @@
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "return"
       },
       {
         "kind": "fallthrough"
@@ -74,8 +74,8 @@
         "line": 5
       },
       {
-        "id": "cfg:(top-level)#MyFunc:stmt:1:4:4",
-        "kind": "statement",
+        "id": "cfg:(top-level)#MyFunc:return:0:4:4",
+        "kind": "jump",
         "line": 4
       },
       {

@@ -9,9 +9,12 @@ module NilKill
   # Shim that delegates to the compiled Rust fact-mine-rust binary.
   # Retained for test compatibility and backward compatibility.
   module FactMineStaticFacts
+    # Found where nil-kill is installed, the way the collector extension is,
+    # and not under the root being analyzed -- that root is someone else's
+    # project and has no reason to contain a build of FactMine.
     FACT_MINE_RUST_BINARY = ENV.fetch(
       "FACT_MINE_RUST_BINARY",
-      File.join(NilKill::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
+      File.expand_path("../../../fact-mine/target/release/fact-mine-rust", __dir__)
     ).freeze
 
     module_function

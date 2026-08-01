@@ -19,13 +19,28 @@ module Espalier
   # Static, language-neutral evidence for Espalier. Uses the Rust FactMine
   # binary exclusively for fact extraction.
   class StaticEvidence
-    FACT_MINE_RUST_BINARY = ENV.fetch(
-      "FACT_MINE_RUST_BINARY",
-      File.join(Espalier::ROOT, "gems", "fact-mine", "target", "release", "fact-mine-rust")
-    ).freeze
+    FACT_MINE_RUST_BINARY = begin
+      configured = ENV["FACT_MINE_RUST_BINARY"]
+      if configured
+        File.expand_path(configured)
+      else
+        candidates = %w[release debug].map do |profile|
+          File.join(
+            Espalier::ROOT,
+            "gems",
+            "fact-mine",
+            "target",
+            profile,
+            "fact-mine-rust"
+          )
+        end
+        candidates.select { |path| File.executable?(path) }
+          .max_by { |path| File.mtime(path) } || candidates.first
+      end
+    end.freeze
 
-    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [])
-      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations, scip_indexes: scip_indexes).build
+    def self.build(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [], semantic_environments: [], complexity_summaries: [])
+      new(targets, root: root, language: language, vcs: vcs, include_annotations: include_annotations, scip_indexes: scip_indexes, semantic_environments: semantic_environments, complexity_summaries: complexity_summaries).build
     end
 
     def self.project_modules(evidence, source_roles: ["production"])
@@ -83,6 +98,10 @@ module Espalier
       end.to_set
       raw_methods.each do |m|
         next unless allowed_roles.include?(role_for.call(m["path"]))
+        # Macro-generated accessors remain in the FactMine profile so their
+        # declaration contract can price callers, but they are not authored
+        # production functions and must not inflate a completion denominator.
+        next if m["generated_declaration"] == true
         overload_key = [m["path"].to_s, m["owner"].to_s, m["name"].to_s, m["kind"].to_s]
         # TypeScript overload signatures are declarations immediately followed
         # by a concrete implementation. Reporting both as executable methods
@@ -101,6 +120,7 @@ module Espalier
           signature: m["signature"],
           parameters: Array(m["params"]),
           visibility: (m["visibility"] || :public).to_sym,
+          callback_params: Array(m["callback_params"]).map(&:to_s),
           line: m["line"]&.to_i,
           span: m["span"],
           file: m["path"],
@@ -166,6 +186,7 @@ module Espalier
           confidence: call["confidence"],
           unresolved_reason: (target || known_time || known_space) ? nil : call["unresolved_reason"],
           call_id: call["id"],
+          arguments: Array(call["arguments"]).map(&:to_s),
           target_id: target && target[:id],
           target_owner: target && target[:projected_owner],
           target_method: target && target[:name],
@@ -173,6 +194,7 @@ module Espalier
           target_provenance: call["target_provenance"],
           candidate_target_ids: Array(call["candidate_targets"]),
           candidate_reason: call["candidate_reason"],
+          consumer_closed_candidate_set: call["consumer_closed_candidate_set"] == true,
           complexity_provenance: call["complexity_provenance"],
           complexity_bound_quality: call["complexity_bound_quality"],
           complexity_candidates: Array(call["complexity_candidates"]),
@@ -355,7 +377,15 @@ module Espalier
       return "example" if (parts & %w[example examples sample samples]).any?
       return "test" if (parts & %w[test tests spec specs __tests__ jvmtest androidtest commontest nativetest nonwasmtest wasmtest integrationtest unittest uitest functionaltest]).any?
       return "test" if parts.any? { |part| part.end_with?("test") && part.match?(/\A(?:android|common|functional|integration|jvm|native|nonwasm|unit|ui|wasm)/) }
-      return "test" if basename.match?(/(?:\A|[_\.])test(?:[_\.]|\z)|(?:\A|[_\.])spec(?:[_\.]|\z)/)
+      test_named_basename = basename.match?(
+        /(?:\A|[-_\.])test(?:[-_\.]|\z)|(?:\A|[-_\.])spec(?:[-_\.]|\z)/
+      )
+      # A production library may legitimately expose a `test_*` or `spec_*`
+      # entrypoint (for example TestMiser's `lib/test_miser.rb`). Directory
+      # role is stronger evidence than that filename prefix; helper products
+      # remain covered by the dedicated test-helper rule below.
+      library_entrypoint = parts.include?("lib") && basename.match?(/\A(?:test|spec)[-_]/)
+      return "test" if test_named_basename && !library_entrypoint
       # Test-helper products are executable support code, not production
       # library surface. Match common portable path spellings, including the
       # Swift Package Manager `ArgumentParserTestHelpers` convention.
@@ -364,14 +394,64 @@ module Espalier
       "production"
     end
 
+    # Classify callable records more precisely than their containing file.
+    # Rust commonly keeps `#[cfg(test)] mod tests` at the bottom of a
+    # production source file. rust-analyzer's SCIP symbol retains that module
+    # boundary, and synthetic closures inherit the role of the exact enclosing
+    # test callable by source span.
+    def self.method_source_roles(methods)
+      rows = Array(methods)
+      roles = rows.to_h do |method|
+        role = method["generated_declaration"] == true ? "generated" : source_role(method["path"])
+        [method.fetch("id").to_s, role]
+      end
+      test_spans_by_path = Hash.new { |hash, path| hash[path] = [] }
 
-    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [])
+      rows.each do |method|
+        next unless roles.fetch(method.fetch("id").to_s) == "production"
+        next unless method["language"].to_s == "rust"
+        next unless rust_test_semantic_symbol?(method["semantic_symbol"])
+
+        roles[method.fetch("id").to_s] = "test"
+        test_spans_by_path[method["path"].to_s] << Array(method["span"])
+      end
+
+      rows.each do |method|
+        id = method.fetch("id").to_s
+        next unless roles.fetch(id) == "production"
+        next unless method["language"].to_s == "rust"
+
+        span = Array(method["span"])
+        next unless span.length == 4
+        next unless test_spans_by_path[method["path"].to_s].any? { |outer| span_contains?(outer, span) }
+
+        roles[id] = "test"
+      end
+
+      roles
+    end
+
+    def self.rust_test_semantic_symbol?(symbol)
+      symbol.to_s.match?(%r{(?:\s|/)(?:tests?|test_helpers?)/})
+    end
+
+    def self.span_contains?(outer, inner)
+      return false unless outer.length == 4 && inner.length == 4
+
+      ([inner[0].to_i, inner[1].to_i] <=> [outer[0].to_i, outer[1].to_i]) >= 0 &&
+        ([inner[2].to_i, inner[3].to_i] <=> [outer[2].to_i, outer[3].to_i]) <= 0
+    end
+
+
+    def initialize(targets = nil, root: Espalier::ROOT, language: nil, vcs: nil, include_annotations: true, scip_indexes: [], semantic_environments: [], complexity_summaries: [])
       @targets = Array(targets).compact
       @root = root
       @language = normalize_language(language)
       @vcs = normalize_vcs(vcs)
       @include_annotations = include_annotations
       @scip_indexes = Array(scip_indexes).compact
+      @semantic_environments = Array(semantic_environments).compact
+      @complexity_summaries = Array(complexity_summaries).compact
     end
 
     def build
@@ -390,6 +470,10 @@ module Espalier
       args = [FACT_MINE_RUST_BINARY, "profile", profile, "--output", tmp.path]
       args.concat(["--language", @language.to_s]) if @language
       @scip_indexes.each { |index| args.concat(["--scip-index", index.to_s]) }
+      @semantic_environments.each do |environment|
+        args.concat(["--semantic-environment", environment.to_s])
+      end
+      @complexity_summaries.each { |summary| args.concat(["--complexity-summary", summary.to_s]) }
       args.concat(files)
       ok = system(*args)
       raise "fact-mine-rust failed with exit status #{$?.exitstatus}" unless ok

@@ -7,9 +7,11 @@ require "digest"
 require "json"
 require "open3"
 require "pathname"
+require "securerandom"
 require "set"
 require "shellwords"
 require "time"
+require "uri"
 require "sorbet-runtime"
 
 # Ensure espalier is on load path and require type_profile to load FactMine::Syntax::TypeExpr
@@ -28,10 +30,11 @@ module NilKill
          end
   TMP_DIR = File.expand_path(ENV.fetch("NIL_KILL_TMP_DIR", File.join(ROOT, "tmp", "nil-kill")), ROOT)
   RUNTIME_DIR = File.join(TMP_DIR, "runtime")
-  INSTRUMENTED_DIR = File.join(TMP_DIR, "instrumented")
   EVIDENCE_PATH = File.join(TMP_DIR, "evidence.json")
   REPORT_PATH = File.join(TMP_DIR, "report.md")
   TRACE_PLAN_PATH = File.join(TMP_DIR, "trace-plan.json")
+  COLLECTOR_PLAN_NAME = "collector-plan.tsv"
+  COLLECTOR_EXTENSION = File.expand_path("../ext/nil_kill_trace/nil_kill_trace.so", __dir__)
   SORBET_PAYLOAD_DIR = File.join(TMP_DIR, "sorbet-payload")
 end
 
@@ -47,8 +50,11 @@ require_relative "nil_kill/schema/evidence_bundle"
 require_relative "nil_kill/actions/record"
 require_relative "nil_kill/languages"
 require_relative "nil_kill/runtime/static_index"
+require_relative "nil_kill/runtime/json_io"
 require_relative "nil_kill/runtime/trace_loader"
 require_relative "nil_kill/runtime/normalizer"
+require_relative "nil_kill/runtime/domain_deriver"
+require_relative "nil_kill/runtime/trace_artifact"
 require_relative "nil_kill/analyzers/runtime_evidence_analyzer"
 require_relative "nil_kill/reporting/multi_language_report"
 require_relative "nil_kill/spec_dependency_index"
@@ -69,14 +75,11 @@ require_relative "nil_kill/trace_plan"
 require_relative "nil_kill/infer"
 require_relative "nil_kill/slot_coverage"
 require_relative "nil_kill/static_diff_audit"
-require_relative "nil_kill/source_instrumenter"
 require_relative "nil_kill/focus_hash_record"
 require_relative "nil_kill/report"
 require_relative "nil_kill/struct_rbi"
 require_relative "nil_kill/doctor"
 require_relative "nil_kill/commands/static_command"
-require_relative "nil_kill/commands/collect_runtime_command"
-require_relative "nil_kill/commands/collect_python_command"
 require_relative "nil_kill/commands/normalize_command"
 require_relative "nil_kill/commands/analyze_command"
 require_relative "nil_kill/commands/trace_spec_command"

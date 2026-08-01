@@ -72,10 +72,10 @@ ruby tools/generate_generalized_gem_sarif.rb \
   --coverage /tmp/cov-artifacts/lineage/cobertura.xml
 
 echo "=== [3/5] Importing Codebase & Coverage into Lineage ==="
-gems/lineage/bin/lineage-import \
+gems/gigasail/bin/giga-import \
   --repo . \
   --db "$DB_PATH" \
-  --out-dir tmp/lineage-import \
+  --out-dir tmp/gigasail-import \
   --no-build-tools \
   --max-commits 100 \
   --coverage "$ROOT_DIR/coverage/coverage.xml" \
@@ -88,46 +88,46 @@ gems/lineage/bin/lineage-import \
   --sarif-input tmp/generalized-gems-sarif
 
 echo "=== [4/5] Ingesting Mutant & Test Exposure Facts ==="
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-fuzz-mutants-new.json
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-transpile-mutants-new.json
+cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-fuzz-mutants-new.json
+cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/clear-transpile-mutants-new.json
 if [ -f /tmp/zig-system-exposure.json ]; then
-  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/zig-system-exposure.json
+  cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-test-exposure --db "$DB_PATH" --repo . --commit "$COMMIT_HASH" --input /tmp/zig-system-exposure.json
 fi
 
 # Stochastic/Unit mutant facts
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/boobytrap-go-mutants.json --commit "$COMMIT_HASH" --test-type unit
+cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/boobytrap-go-mutants.json --commit "$COMMIT_HASH" --test-type unit
 if [ -f /tmp/rust-mutants-lineage-100/mutant-facts.json ]; then
-  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/rust-mutants-lineage-100/mutant-facts.json --commit "$COMMIT_HASH" --test-type unit
+  cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/rust-mutants-lineage-100/mutant-facts.json --commit "$COMMIT_HASH" --test-type unit
 fi
 if [ -f /tmp/litedb-mutant-facts-normalized.json ]; then
-  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/litedb-mutant-facts-normalized.json --commit "$COMMIT_HASH" --test-type unit
+  cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/litedb-mutant-facts-normalized.json --commit "$COMMIT_HASH" --test-type unit
 fi
 
 # PR 141 shards (if present)
 for file in /tmp/pr141-*/mutant-facts.json; do
   if [ -f "$file" ]; then
     echo "Ingesting shard: $file"
-    cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input "$file" --commit "$COMMIT_HASH"
+    cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-mutants --db "$DB_PATH" --repo . --input "$file" --commit "$COMMIT_HASH"
   fi
 done
 
 # ClearParser mutants (if present)
 if [ -f /tmp/ruby-mutants-parser-new/mutant-facts.json ]; then
-  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/ruby-mutants-parser-new/mutant-facts.json --commit "$COMMIT_HASH"
+  cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/ruby-mutants-parser-new/mutant-facts.json --commit "$COMMIT_HASH"
 fi
 
 # Zig mutants shards
 for i in {0..7}; do
   if [ -f "/tmp/zig-mutants-runtime-final-normalized/shard-$i.json" ]; then
-    cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input "/tmp/zig-mutants-runtime-final-normalized/shard-$i.json" --commit "$COMMIT_HASH" --test-type unit
+    cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-mutants --db "$DB_PATH" --repo . --input "/tmp/zig-mutants-runtime-final-normalized/shard-$i.json" --commit "$COMMIT_HASH" --test-type unit
   fi
 done
 
 if [ -f /tmp/scheduler-mutants.json ]; then
-  cargo run --release --manifest-path gems/lineage/Cargo.toml -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/scheduler-mutants.json --commit "$COMMIT_HASH" --test-type unit
+  cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- ingest-mutants --db "$DB_PATH" --repo . --input /tmp/scheduler-mutants.json --commit "$COMMIT_HASH" --test-type unit
 fi
 
 echo "=== [5/5] Refreshing UI Summaries ==="
-cargo run --release --manifest-path gems/lineage/Cargo.toml -- refresh-ui --db "$DB_PATH"
+cargo run --release --manifest-path gems/gigasail/Cargo.toml --bin giga -- refresh-ui --db "$DB_PATH"
 
 echo "=== Lineage Database Rebuild Complete! ==="

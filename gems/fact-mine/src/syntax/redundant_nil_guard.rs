@@ -408,6 +408,15 @@ impl<'a> RedundantNilGuard<'a> {
     }
 
     fn inspect_node(&mut self, node: &Node, defstack: &[String], known: &BTreeSet<String>) {
+        // Control-flow regions can be nested inside expressions in the
+        // normalized tree (Ruby iterator bodies are the common example).
+        // Walk those regions with branch semantics so their edge-local
+        // refinements are not lost merely because the enclosing iterator is
+        // represented as one statement.
+        if matches!(node.r#type.as_str(), "IF" | "UNLESS") {
+            self.process_branch(node, defstack, known);
+            return;
+        }
         let recorded = self.record_redundant(node, defstack, known);
         if matches!(node.r#type.as_str(), "DEFN" | "DEFS") {
             return;

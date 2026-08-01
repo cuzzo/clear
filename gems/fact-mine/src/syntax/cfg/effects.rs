@@ -1,5 +1,6 @@
 use super::{
-    branches, loops, ControlFlowFacts, ControlFlowNode, ControlFlowProfile, NodeEffect, Place,
+    branches, loops, CallbackBindingFact, ControlFlowFacts, ControlFlowNode, ControlFlowProfile,
+    NodeEffect, Place,
 };
 use crate::ast::{self, Child, Node};
 use crate::syntax::normalized_behavior::NormalizedLanguageBehavior;
@@ -27,11 +28,21 @@ struct RawEffect {
     write_value_hints: BTreeMap<String, String>,
     write_sources: BTreeMap<String, String>,
     write_call_sources: BTreeMap<String, Span>,
+    write_call_source_sets: BTreeMap<String, Vec<Span>>,
+    write_sequence_projections: BTreeMap<String, usize>,
     write_nullable_contracts: BTreeMap<String, String>,
+    callback_bindings: Vec<RawCallbackBinding>,
     return_state_hint: Option<String>,
     unknown_call: bool,
     complete: bool,
     unknown_reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct RawCallbackBinding {
+    name: String,
+    position: usize,
+    span: Span,
 }
 
 impl RawEffect {
@@ -55,6 +66,7 @@ pub(crate) fn extract(
     let mut declaration_spans = BTreeMap::<(GraphKey, String), Span>::new();
     let mut method_spans = BTreeMap::<GraphKey, Span>::new();
     let mut graph_key_by_node = BTreeMap::new();
+    let mut lambda_entry_by_graph: BTreeMap<GraphKey, (String, Span)> = BTreeMap::new();
     let duplicate_functions = methods
         .iter()
         .fold(BTreeMap::new(), |mut counts, method| {
@@ -83,6 +95,9 @@ pub(crate) fn extract(
         };
 
         if node.kind == "entry" {
+            if method.node.r#type == "LAMBDA" {
+                lambda_entry_by_graph.insert(graph_key.clone(), (node.id.clone(), node.span));
+            }
             raw.writes.extend(method.params.iter().cloned());
             for name in &method.params {
                 raw.record_place(name.clone(), "local");
@@ -112,6 +127,7 @@ pub(crate) fn extract(
                         target,
                         &mut raw,
                         behavior.function_value_calls_are_local_reads(),
+                        Some(behavior),
                     );
                     for (name, producer_span) in raw.write_call_sources.clone() {
                         let contract = [
@@ -127,7 +143,7 @@ pub(crate) fn extract(
                                 .insert(name, contract.to_string());
                         }
                     }
-                    apply_normalized_local_contract(method, node, &mut raw);
+                    apply_normalized_local_contract(method, node, target, &mut raw, behavior);
                     let declared_candidates = raw
                         .writes
                         .iter()
@@ -177,6 +193,85 @@ pub(crate) fn extract(
         raw_by_node.insert(node.id.clone(), raw);
     }
 
+    // Index the local place names used in each graph so captures can be told
+    // apart from a lambda's own locals.
+    let mut graph_local_names: BTreeMap<GraphKey, BTreeSet<String>> = BTreeMap::new();
+    for (node_id, node_graph_key) in &graph_key_by_node {
+        let raw = &raw_by_node[node_id];
+        let names = graph_local_names.entry(node_graph_key.clone()).or_default();
+        for name in raw.reads.iter().chain(raw.writes.iter()) {
+            if raw
+                .place_kinds
+                .get(name)
+                .is_some_and(|kind| kind == "local")
+            {
+                names.insert(name.clone());
+            }
+        }
+    }
+
+    // A lambda's free variables (captured from the enclosing scope) are inputs
+    // to the closure. In the lambda's own graph they are read with no local
+    // definition, which would strand them as disconnected reads. A capture is a
+    // local read with no local write in the lambda that is also a local of an
+    // enclosing method -- this excludes the lambda's own multi-assign locals,
+    // whose declarations are recorded as reads rather than writes. Seed each
+    // capture as a definition at the lambda's entry node, exactly as params are.
+    for (graph_key, (entry_id, entry_span)) in &lambda_entry_by_graph {
+        let lambda_span = method_spans[graph_key];
+        let enclosing_locals = graph_local_names
+            .iter()
+            .filter(|(other_key, _)| {
+                *other_key != graph_key && span_contains(method_spans[*other_key], lambda_span)
+            })
+            .flat_map(|(_, names)| names.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        let local_reads = graph_local_names
+            .get(graph_key)
+            .cloned()
+            .unwrap_or_default();
+        let local_writes = graph_key_by_node
+            .iter()
+            .filter(|(_, node_graph_key)| *node_graph_key == graph_key)
+            .flat_map(|(node_id, _)| {
+                let raw = &raw_by_node[node_id];
+                raw.writes
+                    .iter()
+                    .filter(|name| {
+                        raw.place_kinds
+                            .get(*name)
+                            .is_some_and(|kind| kind == "local")
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .collect::<BTreeSet<_>>();
+        let captures = local_reads
+            .difference(&local_writes)
+            .filter(|name| enclosing_locals.contains(*name))
+            .cloned()
+            .collect::<Vec<_>>();
+        if captures.is_empty() {
+            continue;
+        }
+        let entry_raw = raw_by_node
+            .get_mut(entry_id)
+            .expect("lambda entry node has a raw effect");
+        for name in &captures {
+            entry_raw.writes.insert(name.clone());
+            entry_raw.record_place(name.clone(), "local");
+        }
+        let places = all_places.entry(graph_key.clone()).or_default();
+        for name in &captures {
+            places
+                .entry(name.clone())
+                .or_insert_with(|| "local".to_string());
+            declaration_spans
+                .entry((graph_key.clone(), name.clone()))
+                .or_insert(*entry_span);
+        }
+    }
+
     let mut place_id_by_name = BTreeMap::new();
     for (graph_key, places) in all_places {
         let (file, owner, function, discriminator_line, discriminator_column) = &graph_key;
@@ -219,6 +314,17 @@ pub(crate) fn extract(
                     format!("place:{}#{}:unknown:{}", node.owner, node.function, name)
                 })
         };
+        for binding in &raw.callback_bindings {
+            facts.callback_bindings.push(CallbackBindingFact {
+                node_id: node.id.clone(),
+                file: node.file.clone(),
+                function: node.function.clone(),
+                owner: node.owner.clone(),
+                place_id: id_for(&binding.name),
+                position: binding.position,
+                span: binding.span,
+            });
+        }
         facts.effects.push(NodeEffect {
             node_id: node.id.clone(),
             file: node.file.clone(),
@@ -247,6 +353,16 @@ pub(crate) fn extract(
                 .into_iter()
                 .map(|(target, producer_span)| (id_for(&target), producer_span))
                 .collect(),
+            write_call_source_sets: raw
+                .write_call_source_sets
+                .into_iter()
+                .map(|(target, producer_spans)| (id_for(&target), producer_spans))
+                .collect(),
+            write_sequence_projections: raw
+                .write_sequence_projections
+                .into_iter()
+                .map(|(target, position)| (id_for(&target), position))
+                .collect(),
             write_nullable_contracts: raw
                 .write_nullable_contracts
                 .into_iter()
@@ -272,20 +388,57 @@ pub(crate) fn extract(
 fn apply_normalized_local_contract(
     method: &MethodSummary,
     node: &ControlFlowNode,
+    target: &Node,
     effect: &mut RawEffect,
+    behavior: &dyn NormalizedLanguageBehavior,
 ) {
-    let contracts = crate::syntax::local_flow::local_contract_assignments(method);
+    // Compound CFG nodes deliberately summarize their control expression,
+    // while the assignments in their bodies have their own child nodes.
+    // A local-flow statement may span the whole compound expression and list
+    // nested writes; treating one of those as a write on the loop/branch node
+    // kills the real reaching definitions at the next iteration.
+    if node.role != "linear_statement" {
+        return;
+    }
     let Some(statement) = method
         .statements
         .iter()
-        .find(|statement| statement.span == node.span && statement.writes.len() == 1)
+        .find(|statement| statement.span == node.span)
     else {
         return;
     };
+    if statement.writes.len() != 1 {
+        return;
+    }
     let name = statement.writes.iter().next().expect("single local write");
-    if contracts.get(name).is_some_and(|value| value == "nil")
-        && !effect.write_value_hints.contains_key(name)
-    {
+    if !plain_local_name(name) {
+        return;
+    }
+    if effect.place_kinds.iter().any(|(raw_name, kind)| {
+        kind != "local"
+            && (raw_name == name
+                || raw_name.trim_start_matches(|character: char| {
+                    !character.is_alphanumeric() && character != '_'
+                }) == name)
+    }) {
+        return;
+    }
+    // The syntax tree owns producer relations. When it proves this exact
+    // statement is a direct call-result assignment, retain the normalized
+    // local-flow target even if an equal parser span hid the write node.
+    if !effect.write_call_sources.contains_key(name) {
+        if let Some(span) = direct_call_result_span(target) {
+            effect.writes.insert(name.clone());
+            effect.record_place(name.clone(), "local");
+            effect.write_call_sources.insert(name.clone(), span);
+        }
+    }
+    let Some(value) =
+        crate::syntax::local_flow::raw_local_assignment_source(name, &statement.source)
+    else {
+        return;
+    };
+    if value == "nil" && !effect.write_value_hints.contains_key(name) {
         effect.writes.insert(name.clone());
         effect.record_place(name.clone(), "local");
         effect
@@ -294,7 +447,20 @@ fn apply_normalized_local_contract(
         effect
             .write_value_hints
             .insert(name.clone(), "nil".to_string());
+    } else if !effect.write_type_hints.contains_key(name) {
+        if let Some(type_name) = behavior.local_assignment_type_hint(&value) {
+            effect.writes.insert(name.clone());
+            effect.record_place(name.clone(), "local");
+            effect.write_type_hints.insert(name.clone(), type_name);
+        }
     }
+}
+
+fn plain_local_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
 }
 
 fn method_for_node<'a>(
@@ -368,7 +534,7 @@ fn effect_target<'a>(node: &'a Node, role: &str, profile: &ControlFlowProfile) -
 fn collect_control_bindings(node: &Node, role: &str, effect: &mut RawEffect) {
     if role == "for_loop" && node.r#type == "FOR" {
         if let Some(target) = node.children.first().and_then(ast::node) {
-            collect(target, effect, false);
+            collect(target, effect, false, None);
         }
         return;
     }
@@ -387,7 +553,37 @@ fn collect_scope_bindings(scope: Option<&Node>, effect: &mut RawEffect) {
         None
     };
     if let Some(args) = args {
-        collect(args, effect, false);
+        let mut names = Vec::new();
+        collect_binding_names(args, &mut names);
+        let span = [
+            scope.first_lineno,
+            scope.first_column,
+            scope.last_lineno,
+            scope.last_column,
+        ];
+        for (position, name) in names.into_iter().enumerate() {
+            let binding = RawCallbackBinding {
+                name,
+                position,
+                span,
+            };
+            if !effect.callback_bindings.contains(&binding) {
+                effect.callback_bindings.push(binding);
+            }
+        }
+        collect(args, effect, false, None);
+    }
+}
+
+fn collect_binding_names(node: &Node, names: &mut Vec<String>) {
+    if WRITE_TYPES.contains(&node.r#type.as_str()) {
+        if let Some(name) = node_name(node) {
+            names.push(name);
+        }
+        return;
+    }
+    for child in node.children.iter().filter_map(ast::node) {
+        collect_binding_names(child, names);
     }
 }
 
@@ -396,8 +592,16 @@ fn collect_nested_bindings(node: &Node, effect: &mut RawEffect) {
         return;
     }
     match node.r#type.as_str() {
-        "ITER" => collect_scope_bindings(node.children.get(1).and_then(ast::node), effect),
-        "LAMBDA" => collect_scope_bindings(node.children.first().and_then(ast::node), effect),
+        // Nested callbacks can share one compound CFG node. Retain their
+        // exact regions and restart positions for each scope:
+        // `rows.map { |row| ... }.sort_by { |result| ... }` has two position
+        // zero bindings, not one two-argument callback.
+        "ITER" => {
+            collect_scope_bindings(node.children.get(1).and_then(ast::node), effect);
+        }
+        "LAMBDA" => {
+            collect_scope_bindings(node.children.first().and_then(ast::node), effect);
+        }
         _ => {}
     }
     for child in node.children.iter().filter_map(ast::node) {
@@ -405,8 +609,60 @@ fn collect_nested_bindings(node: &Node, effect: &mut RawEffect) {
     }
 }
 
-fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_reads: bool) {
+fn collect(
+    node: &Node,
+    effect: &mut RawEffect,
+    function_value_calls_are_local_reads: bool,
+    behavior: Option<&dyn NormalizedLanguageBehavior>,
+) {
     if NESTED_SCOPE_TYPES.contains(&node.r#type.as_str()) {
+        return;
+    }
+    // MASGN is a normalized AST contract shared by adapters: child zero is
+    // the produced value and child one is the ordered target list. Preserve
+    // the positional projection alongside the ordinary call-result edge so
+    // the generic CFG/DFG overlay can type each destructured binding.
+    if node.r#type == "MASGN" {
+        let value = node.children.first().and_then(ast::node);
+        let targets = node
+            .children
+            .get(1)
+            .and_then(ast::node)
+            .into_iter()
+            .flat_map(|list| list.children.iter().filter_map(ast::node))
+            .collect::<Vec<_>>();
+        let producer_spans = value.and_then(|value| call_result_source_spans(value, behavior));
+        for (position, target) in targets.into_iter().enumerate() {
+            let Some(name) = node_name(target) else {
+                effect.complete = false;
+                effect
+                    .unknown_reasons
+                    .push("MASGN target has no normalized name".to_string());
+                continue;
+            };
+            effect.writes.insert(name.clone());
+            effect.record_place(name.clone(), place_kind_for_node(&target.r#type));
+            if let Some(producer_spans) = producer_spans.as_ref() {
+                if producer_spans.len() == 1 {
+                    effect
+                        .write_call_sources
+                        .insert(name.clone(), producer_spans[0]);
+                } else if !producer_spans.is_empty() {
+                    effect
+                        .write_call_source_sets
+                        .insert(name.clone(), producer_spans.clone());
+                }
+                effect.write_sequence_projections.insert(name, position);
+            }
+        }
+        if let Some(value) = value {
+            collect(
+                value,
+                effect,
+                function_value_calls_are_local_reads,
+                behavior,
+            );
+        }
         return;
     }
     if WRITE_TYPES.contains(&node.r#type.as_str()) {
@@ -430,10 +686,14 @@ fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_r
                     }
                 } else if let Some(source) = direct_read_name(rhs) {
                     effect.write_sources.insert(name, source);
-                } else if let Some(producer_span) = direct_call_result_span(rhs) {
-                    effect.write_call_sources.insert(name, producer_span);
+                } else if let Some(producer_spans) = call_result_source_spans(rhs, behavior) {
+                    if producer_spans.len() == 1 {
+                        effect.write_call_sources.insert(name, producer_spans[0]);
+                    } else {
+                        effect.write_call_source_sets.insert(name, producer_spans);
+                    }
                 }
-                collect(rhs, effect, function_value_calls_are_local_reads);
+                collect(rhs, effect, function_value_calls_are_local_reads, behavior);
             }
         } else {
             effect.complete = false;
@@ -461,7 +721,12 @@ fn collect(node: &Node, effect: &mut RawEffect, function_value_calls_are_local_r
         effect.unknown_call = true;
     }
     for child in node.children.iter().filter_map(ast::node) {
-        collect(child, effect, function_value_calls_are_local_reads);
+        collect(
+            child,
+            effect,
+            function_value_calls_are_local_reads,
+            behavior,
+        );
     }
 }
 
@@ -529,6 +794,11 @@ fn direct_return_state_hint(node: &Node) -> Option<String> {
 /// preserving assignment edges.
 fn direct_call_result_span(node: &Node) -> Option<Span> {
     match node.r#type.as_str() {
+        "ITER" => node
+            .children
+            .first()
+            .and_then(ast::node)
+            .and_then(direct_call_result_span),
         "PAREN" | "BEGIN" | "EXPRESSION_LIST" => {
             let mut children = node.children.iter().filter_map(ast::node);
             let only = children.next()?;
@@ -546,12 +816,39 @@ fn direct_call_result_span(node: &Node) -> Option<Span> {
     }
 }
 
+/// Return all direct call producers of a value-preserving assignment. The
+/// shared CFG understands direct calls and transparent grouping; an adapter
+/// explicitly vouches for any native compound expression whose result is one
+/// of its operands.
+fn call_result_source_spans(
+    node: &Node,
+    behavior: Option<&dyn NormalizedLanguageBehavior>,
+) -> Option<Vec<Span>> {
+    if let Some(span) = direct_call_result_span(node) {
+        return Some(vec![span]);
+    }
+    let operands = behavior?.value_preserving_call_result_operands(node)?;
+    let mut spans = BTreeSet::new();
+    for operand in operands {
+        let operand_spans = call_result_source_spans(operand, behavior)?;
+        spans.extend(operand_spans);
+    }
+    (!spans.is_empty()).then(|| spans.into_iter().collect())
+}
+
 fn direct_call_result_node(node: &Node) -> Option<&Node> {
     if matches!(
         node.r#type.as_str(),
         "CALL" | "QCALL" | "FCALL" | "VCALL" | "NEW_EXPRESSION"
     ) {
         return Some(node);
+    }
+    if node.r#type == "ITER" {
+        return node
+            .children
+            .first()
+            .and_then(ast::node)
+            .and_then(direct_call_result_node);
     }
     if matches!(node.r#type.as_str(), "LASGN" | "DASGN") {
         return node
@@ -639,6 +936,22 @@ fn find_by_span(node: &Node, span: Span, prefer_innermost: bool) -> Option<&Node
             .filter_map(ast::node)
             .find_map(|child| find_by_span(child, span, true))
         {
+            // Argument containers may be assigned the same range and source
+            // text as their enclosing normalized expression. They are not a
+            // complete effect boundary: selecting one drops the receiver and
+            // callee. Prefer the enclosing semantic node in that exact case,
+            // while still unwrapping ordinary transparent expression groups.
+            if ["LIST", "ARGS"].contains(&match_.r#type.as_str())
+                && CALL_TYPES.contains(&node.r#type.as_str())
+                && [
+                    node.first_lineno,
+                    node.first_column,
+                    node.last_lineno,
+                    node.last_column,
+                ] == span
+            {
+                return Some(node);
+            }
             return Some(match_);
         }
     }
@@ -673,6 +986,18 @@ fn find_syntax_node<'a>(node: &'a Node, span: Span, role: &str) -> Option<&'a No
     };
     preferred_kind
         .and_then(|kind| find_by_span_and_kind(node, span, kind))
+        // Some normalized parsers assign the same span to an assignment and
+        // its value expression. A linear CFG node represents the whole
+        // statement, so retain the normalized write node instead of selecting
+        // the innermost call and silently dropping the definition edge.
+        .or_else(|| {
+            (role == "linear_statement").then(|| {
+                WRITE_TYPES
+                    .iter()
+                    .chain(std::iter::once(&"MASGN"))
+                    .find_map(|kind| find_by_span_and_kind(node, span, kind))
+            })?
+        })
         .or_else(|| find_by_span(node, span, role == "linear_statement"))
 }
 
@@ -722,12 +1047,12 @@ mod tests {
             text: "callback()".to_string(),
         };
         let mut enabled = RawEffect::default();
-        collect(&call, &mut enabled, true);
+        collect(&call, &mut enabled, true, None);
         assert!(enabled.reads.contains("callback"));
         assert!(enabled.unknown_call);
 
         let mut disabled = RawEffect::default();
-        collect(&call, &mut disabled, false);
+        collect(&call, &mut disabled, false, None);
         assert!(disabled.reads.is_empty());
         assert!(disabled.unknown_call);
     }

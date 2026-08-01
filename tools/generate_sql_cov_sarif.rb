@@ -5,6 +5,7 @@ require "fileutils"
 require "json"
 require "open3"
 require "optparse"
+require "pathname"
 require "tempfile"
 
 ROOT = File.expand_path("..", __dir__)
@@ -12,7 +13,7 @@ ROOT = File.expand_path("..", __dir__)
 options = {
   repo: ".",
   out_dir: "tmp/generalized-gems-sarif",
-  setup: "gems/lineage/sql/storage/init_schema.sql",
+  setup: "gems/gigasail/giga-core/sql/storage/init_schema.sql",
   sql_cov_bin: "gems/sql-cov/target/release/sql-cov"
 }
 
@@ -31,8 +32,14 @@ sql_cov_bin = File.expand_path(options[:sql_cov_bin], ROOT)
 
 FileUtils.mkdir_p(out_dir)
 
-# Find all SQL files in gems/lineage/sql
-sql_files = Dir.glob(File.join(repo, "gems/lineage/sql/**/*.sql"))
+# The schema being scanned against decides which tree to scan: the setup file
+# lives at <sql root>/storage/init_schema.sql, so its `sql` ancestor is the
+# root. Naming the gem here meant renaming the gem silently scanned nothing --
+# zero SQL files is a clean run, not an error.
+sql_root = Pathname.new(setup_file).ascend.find { |path| path.basename.to_s == "sql" }
+abort "no sql/ directory above #{setup_file}" unless sql_root
+
+sql_files = Dir.glob(File.join(sql_root.to_s, "**/*.sql"))
              .reject { |path| path == setup_file || File.basename(path) == "ensure_natural_key_indexes.sql" }
              .sort
 

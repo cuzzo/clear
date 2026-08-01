@@ -10,7 +10,7 @@ Dir.chdir(ROOT)
 PACKAGES = {
   "decomplex-rust" => "gems/decomplex",
   "fact-mine-rust" => "gems/fact-mine",
-  "lineage" => "gems/lineage"
+  "gigasail" => "gems/gigasail"
 }.freeze
 
 def run_cmd(cmd, cwd)

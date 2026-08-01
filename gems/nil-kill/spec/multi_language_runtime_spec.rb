@@ -67,14 +67,6 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(NilKill::Languages.provider_for_path("src/probe.txt")).to be_nil
   end
 
-  it "keeps Zig runtime collection explicitly unsupported behind the provider API" do
-    provider = NilKill::Languages.provider_for("zig")
-
-    expect {
-      provider.collect_runtime(argv: ["--", "zig", "test", "sample.zig"], root: NilKill::ROOT,
-        output: NilKill::RUNTIME_DIR, targets: ["zig"], append: false)
-    }.to raise_error(NilKill::Languages::UnsupportedRuntimeTracer, /Zig/)
-  end
 
   it "does not expose static field policy through the language provider" do
     %w[python typescript lua go rust zig c cpp csharp java kotlin swift].each do |language|
@@ -749,41 +741,6 @@ RSpec.describe "nil-kill multi-language runtime pipeline" do
     expect(canonical.dig("language_extensions", "nil_kill_static_evidence", "language_capabilities", "zig", "runtime_tracing")).to be(false)
   end
 
-  it "collects Python raw trace events through sitecustomize" do
-    Dir.mktmpdir("nil-kill-python-tracer", NilKill::ROOT) do |dir|
-      src = File.join(dir, "src")
-      trace_dir = File.join(dir, "runtime")
-      FileUtils.mkdir_p(src)
-      File.write(File.join(src, "demo.py"), <<~PY)
-        class Worker:
-            def __init__(self):
-                self.items = []
-
-            def call(self, value):
-                self.items.append(value)
-                return {"value": value}
-      PY
-
-      env = {
-        "PYTHONPATH" => [File.join(NilKill::ROOT, "gems", "nil-kill", "lib"), src].join(File::PATH_SEPARATOR),
-        "NIL_KILL_PY_TRACE" => "1",
-        "NIL_KILL_PY_TRACE_OUT" => trace_dir,
-        "NIL_KILL_TRACE_ROOT" => dir,
-        "NIL_KILL_TARGETS" => src,
-      }
-      out, err, status = Open3.capture3(env, "python3", "-c", "from demo import Worker; Worker().call('x')", chdir: dir)
-
-      expect(status).to be_success, "#{out}\n#{err}"
-      events = Dir.glob(File.join(trace_dir, "python-events-*.jsonl")).flat_map do |path|
-        File.readlines(path, chomp: true).map { |line| JSON.parse(line) }
-      end
-      expect(events).to include(a_hash_including("event" => "method_call", "locator" => a_hash_including("owner" => "Worker", "name" => "call")))
-      expect(events).to include(a_hash_including("event" => "param_observed", "payload" => a_hash_including("param" => "value")))
-      expect(events).to include(a_hash_including("event" => "method_return", "payload" => a_hash_including("type" => a_hash_including("kind" => "map"))))
-      expect(events).to include(a_hash_including("event" => "field_observed", "payload" => a_hash_including("field" => "@items")))
-      expect(events).to include(a_hash_including("event" => "coverage", "path" => "src/demo.py"))
-    end
-  end
 
   it "normalizes a minimal Python tracer JSONL stream into v2 evidence and report actions" do
     Dir.mktmpdir("nil-kill-python-trace", NilKill::ROOT) do |dir|

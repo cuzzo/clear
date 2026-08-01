@@ -298,7 +298,7 @@ SemanticSymbol:
   "java/lang/Object#clone().": linear_materialize
   "java/lang/String#valueOf(+4).": constant
   "java/util/Comparator#comparing(+1).": constant
-  "java/util/Objects#hash().": linear_materialize
+  "java/util/Objects#hash().": linear_scan
   "java/util/stream/Stream#filter().": constant
   "java/util/stream/Stream#map().": constant
   "java/util/regex/Matcher#lookingAt().": exponential

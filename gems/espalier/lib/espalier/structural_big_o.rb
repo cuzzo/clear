@@ -100,7 +100,7 @@ module Espalier
               space: candidate_bound.fetch(:space),
               is_dynamic: true,
               operation: message,
-              reason: "conservative upper bound over compiler-provided implementation candidates",
+              reason: "conservative upper bound over closed implementation candidates",
               confidence: "partial",
               time_complete: true,
               space_complete: true,
@@ -108,6 +108,26 @@ module Espalier
                 candidate_bound.fetch(:qualities)).uniq,
               complexity_candidates: candidate_bound.fetch(:ids),
               complexity_assumptions: candidate_bound.fetch(:assumptions),
+              fact_source: "fact_mine"
+            }
+            next
+          end
+          # FactMine already priced this call site (a builtin operator, a
+          # language intrinsic, or a stdlib-registry hit). Use that proven bound
+          # directly instead of demanding a resolved project target - otherwise
+          # a trivially O(1) operator leaves the function unknown.
+          if (known_time = context["known_time_complexity"])
+            hints << {
+              type: :structural,
+              line: line,
+              complexity: propagated_call_complexity(context, known_time),
+              space: context["known_space_complexity"] || "O(1)",
+              is_dynamic: known_time != "O(1)",
+              operation: message,
+              reason: "fact-mine modeled call cost",
+              confidence: "high",
+              time_complete: true,
+              space_complete: true,
               fact_source: "fact_mine"
             }
             next
@@ -127,6 +147,7 @@ module Espalier
                                 state_rescan_recursion_summary(owner.to_s, caller)
                             end
               recursive_bound = state_bound || resolved_recursive_bound(context)
+              proven = recursive_bound.fetch(:time) != "unknown"
               hints << {
                 type: :structural,
                 line: line,
@@ -135,9 +156,14 @@ module Espalier
                 is_dynamic: true,
                 operation: message,
                 reason: recursive_bound.fetch(:reason),
-                confidence: recursive_bound[:quality] ? "partial" : "high",
-                time_complete: true,
-                space_complete: true,
+                confidence: if proven
+                              recursive_bound[:quality] ? "partial" : "high"
+                            else
+                              "unknown"
+                            end,
+                time_complete: proven,
+                space_complete: proven,
+                evidence_gaps: proven ? nil : ["unresolved_recursive_progress"],
                 complexity_bound_quality: recursive_bound[:quality],
                 complexity_assumptions: Array(recursive_bound[:assumption]),
                 fact_source: "fact_mine"
@@ -169,8 +195,9 @@ module Espalier
                 confidence: mutual ? "high" : "unknown",
                 time_complete: !mutual.nil?,
                 space_complete: !mutual.nil?,
+                evidence_gaps: mutual ? nil : ["unresolved_recursive_progress"],
                 fact_source: "fact_mine"
-              }
+              }.compact
             end
             next
           end
@@ -183,8 +210,6 @@ module Espalier
           callee_bound_qualities = Array(summary_value(@method_bound_qualities, callee_id, callee_owner, callee))
           callee_assumptions = Array(summary_value(@method_assumptions, callee_id, callee_owner, callee))
           next unless callee_complexity || callee_space
-          next if callee_complexity == "O(1)" && (!callee_space || callee_space == "O(1)") &&
-            callee_time_complete && callee_space_complete
 
           propagated_symbolic = propagated_call_symbolic(
             callee_owner,
@@ -196,16 +221,17 @@ module Espalier
             receiver_state_dependent: receiver_state_dependent?(callee_owner, callee)
           )
           rendered_symbolic = Espalier::SymbolicComplexity.render(propagated_symbolic)&.first
+          propagated_complexity = rendered_symbolic || propagated_call_complexity(
+            context,
+            callee_complexity || "O(1)",
+            receiver_state_dependent: receiver_state_dependent?(callee_owner, callee)
+          )
           hints << {
             type: :structural,
             line: context.fetch("line", method[:line]).to_i,
-            complexity: rendered_symbolic || propagated_call_complexity(
-              context,
-              callee_complexity || "O(1)",
-              receiver_state_dependent: receiver_state_dependent?(callee_owner, callee)
-            ),
+            complexity: propagated_complexity,
             space: callee_space,
-            is_dynamic: true,
+            is_dynamic: propagated_complexity != "O(1)" || callee_space.to_s != "O(1)",
             operation: context["message"],
             reason: "normalized call containment and propagated callee complexity",
             confidence: "high",
@@ -274,8 +300,16 @@ module Espalier
 
         [propagated_call_complexity(context, time), space]
       end
-      source_qualities = ids.flat_map { |id| Array(@method_bound_qualities[id]) }
-      source_assumptions = ids.flat_map { |id| Array(@method_assumptions[id]) }
+      if candidate_call[:external_time] && candidate_call[:external_space]
+        rows << [
+          propagated_call_complexity(context, candidate_call[:external_time]),
+          candidate_call[:external_space]
+        ]
+      end
+      source_qualities = ids.flat_map { |id| Array(@method_bound_qualities[id]) } +
+        Array(candidate_call[:qualities])
+      source_assumptions = ids.flat_map { |id| Array(@method_assumptions[id]) } +
+        Array(candidate_call[:assumptions])
       closed_set_assumption = "#{candidate_call[:reason]} implementation set is closed for this analysis"
       {
         ids: ids.sort,
@@ -321,6 +355,15 @@ module Espalier
           mapping[domain["id"]] = Array(actual) if domain && actual
         end
       end
+      # Substitute the callee's callback cost C with the cost of the callable
+      # passed at this call site, under the same rule the externally-parametric
+      # path uses.
+      callable = callback_argument_cost(caller_fact["path"], context["span"])
+      if callable
+        callee_symbolic = Espalier::SymbolicComplexity.substitute_callback_cost(
+          callee_symbolic, callable.fetch(:expression), callable_constant: callable.fetch(:constant)
+        )
+      end
       substituted = Espalier::SymbolicComplexity.substitute(
         callee_symbolic,
         mapping,
@@ -351,6 +394,23 @@ module Espalier
       end
     end
 
+    # The cost of the callable passed at one call site, as the shared
+    # substitution rule wants it.
+    def callback_argument_cost(path, span)
+      ids = Array(@callback_arg_by_call && @callback_arg_by_call[[path, normalized_call_span(span)]])
+      return nil if ids.empty?
+
+      Espalier::SymbolicComplexity.worst_callable(
+        ids.map do |id|
+          key = id.to_s
+          {
+            expression: @method_symbolic_time && @method_symbolic_time[key],
+            constant: @method_complexities[key] == "O(1)" && @method_time_complete[key] != false
+          }
+        end
+      )
+    end
+
     def annotate_propagated_domains(expression, callee_expression, mapping, caller_domains, owner, callee, caller_fact, context)
       return expression unless expression
 
@@ -373,7 +433,7 @@ module Espalier
           "line" => context["line"]
         }.compact
       end
-      Espalier::SymbolicComplexity.normalize(expression.merge(domains: domains))
+      Espalier::SymbolicComplexity.with_domains(expression, domains)
     end
 
     def mutual_recursion_summary(owner, member)
@@ -666,6 +726,9 @@ module Espalier
       state_replay = owner && state_replay_recursion_summary(owner, method[:name].to_s)
       state_rescan = owner && state_rescan_recursion_summary(owner, method[:name].to_s)
       state_recursion = state_replay || state_rescan
+      structural_recursion = !state_recursion &&
+        recursion.fetch("structural_calls", 0).to_i.positive? &&
+        recursion.fetch("unknown_progress_calls", 0).to_i.zero?
       recursion_time, recursion_space, recursion_reason = if state_recursion
                                                             state_recursion.values_at(:time, :space, :reason)
                                                           else
@@ -688,14 +751,23 @@ module Espalier
         is_dynamic: complexity != "O(1)",
         operation: "normalized_complexity_facts",
         reason: recursion_reason || iteration_reason(iterations),
-        confidence: complexity == "unknown" ? "unknown" : "high",
+        confidence: if complexity == "unknown"
+                      "unknown"
+                    elsif structural_recursion
+                      "partial"
+                    else
+                      "high"
+                    end,
         time_complete: complexity != "unknown" && (!symbolic_time || symbolic_time.fetch(:complete, true)),
         space_complete: max_space_complexity(allocation_space, recursion_space) != "unknown",
         evidence_gaps: evidence_gaps.uniq.sort,
         symbolic_time: symbolic_time,
         symbolic_space: symbolic_space,
+        complexity_bound_quality: structural_recursion ? "upper_bound_structural_descent" : nil,
+        complexity_assumptions: structural_recursion ?
+          ["the traversed input structure is finite and acyclic, so descent terminates"] : nil,
         fact_source: "fact_mine"
-      }
+      }.compact
     end
 
     def allocation_complexity(allocations, domains)
@@ -730,6 +802,9 @@ module Espalier
       visited = recursion.fetch("visited_guarded_calls", 0).to_i
       if visited.positive?
         return ["O(N)", "O(N)", "visited-set guarded structural recursion"]
+      end
+      if recursion.fetch("structural_calls", 0).to_i.positive?
+        return ["O(N)", "O(N)", "recursive descent into a projection of the input"]
       end
 
       shrinking = recursion.fetch("shrinking_calls", 0).to_i
@@ -840,6 +915,38 @@ module Espalier
       if multiplicity == "O(1)" && progress == "shrinking"
         return { time: "O(N)", space: "O(N)", reason: "exact recursive edge with normalized shrinking progress" }
       end
+      # Descending into a projection of the input - `walk(node.left)` - moves
+      # strictly one level down a finite structure, so every node is reached
+      # once and the work is linear in the structure. This holds however many
+      # continuations the body has: two children still visit N nodes total.
+      # The bound is conditional on the traversed graph being acyclic, which is
+      # recorded rather than assumed silently.
+      # Flat in the structure, exactly as `partition_of` below: the enclosing
+      # loop is what enumerates the children, and the descent visits each
+      # child's subtree once, so multiplying by the loop multiplicity would
+      # count the same N nodes twice. It also keeps the bound out of the middle
+      # of the lattice, where it would widen again on every fixpoint round.
+      if progress == "structural"
+        return {
+          time: "O(N)", space: "O(N)",
+          reason: "recursive descent into a projection of the input reaches each element once",
+          quality: "upper_bound_structural_descent",
+          assumption: "the traversed input structure is finite and acyclic, so descent terminates"
+        }
+      end
+      # A recursive edge whose argument is a partition of the receiver - the
+      # loop's own iteration binding over a decomposition, i.e. a tree/graph
+      # traversal - reaches every element exactly once, so the work is linear
+      # in the structure. This proof outranks the multiplicity reading below:
+      # a traversal argument that merely happens to spell an offset
+      # (`walk(kids[i - 1])`) reads as loop-contained shrinking progress and
+      # would otherwise be priced O(N!).
+      if context["argument_cardinality_relation"] == "partition_of"
+        return {
+          time: "O(N)", space: "O(N)",
+          reason: "recursive traversal over a partition of the input reaches each element once"
+        }
+      end
       if %w[halving shrinking].include?(progress)
         return {
           time: "O(N!)", space: "O(N)",
@@ -848,11 +955,14 @@ module Espalier
         }
       end
 
+      # Nothing proved this edge makes progress, and one call context cannot
+      # establish a branching factor, so no bound follows - not even an
+      # exponential one. Report the missing proof the way the syntactic
+      # classifier does, so the gap is attributable instead of being published
+      # as a complete result.
       {
-        time: "O(2^N)", space: "O(N)",
-        reason: "conservative upper bound for an exact project recursive component",
-        quality: "upper_bound_acyclic_project_scc",
-        assumption: "the reachable input object graph is finite and acyclic; repeated subgraphs are conservatively treated as independent recursive branches"
+        time: "unknown", space: "unknown",
+        reason: "exact recursive edge progress is unknown"
       }
     end
 

@@ -1,0 +1,971 @@
+# frozen_string_literal: true
+
+require "yaml"
+require_relative "spec_helper"
+
+RSpec.describe "runtime evidence v1 shared executable conformance" do
+  CONFORMANCE_ROOT = File.join(
+    NilKill::ROOT,
+    "gems",
+    "protocol",
+    "runtime-evidence",
+    "v1",
+    "conformance"
+  )
+
+  # v1 evidence is sparse: an anchor with no entry was not executed in these
+  # runs, which is what an explicit NOT_EXECUTED entry used to say at the cost
+  # of making every shard's document scale with the plan. The oracle asserts
+  # against the dense view, so absence is expanded here, in one place.
+  def anchors_by_symbol(collector)
+    present = collector.fetch(:evidence).fetch("anchors").to_h do |row|
+      [row.fetch("anchor_symbol"), row]
+    end
+    collector.fetch(:plan).fetch("requests").each_with_object(present) do |request, out|
+      anchor = request.fetch("anchor")
+      symbol = anchor.fetch("symbol")
+      next if out.key?(symbol)
+
+      out[symbol] = {
+        "anchor_symbol" => symbol,
+        "anchor_semantic_digest" => anchor.fetch("semantic_digest"),
+        "capture" => {
+          "status" => "NOT_EXECUTED",
+          "run_ids" => collector.fetch(:evidence).fetch("runs").map { |run| run.fetch("id") },
+          "observed_executions" => "0",
+          "dropped_executions" => "0",
+          "reason" => "no matching execution in the modeled runs",
+          "complete_kinds" => request.fetch("required"),
+        },
+        "executions" => [],
+      }
+    end
+  end
+
+  def catalog
+    @catalog ||= YAML.safe_load(
+      File.read(File.join(CONFORMANCE_ROOT, "capabilities.yml")),
+      aliases: false
+    )
+  end
+
+  def fixture(path)
+    File.read(File.join(CONFORMANCE_ROOT, path))
+  end
+
+  def run_collector_oracle(target_driver:)
+    dir = Dir.mktmpdir("nk-runtime-conformance", NilKill::ROOT)
+    production_dir = File.join(dir, "production")
+    collect_dir = File.join(dir, ".nil-kill")
+    source = catalog.fetch("fixture").fetch("source")
+    lib(production_dir, fixture(source), File.basename(source))
+    catalog.dig("fixture", "support").each do |support|
+      relative = support.sub(%r{\Aruby/}, "")
+      lib(dir, fixture(support), relative)
+    end
+    driver = fixture(catalog.fetch("fixture").fetch("driver"))
+      .sub('require_relative "capabilities"', 'require_relative "production/capabilities"')
+    driver_path = lib(dir, driver, "driver.rb")
+    executable = File.join(NilKill::ROOT, "gems", "nil-kill", "lib", "nil_kill.rb")
+    stdout, stderr, status = Open3.capture3(
+      {
+        "NIL_KILL_ROOT" => NilKill::ROOT,
+        "NIL_KILL_TARGETS" => (
+          # Exercise both entry modes: ordinary tests outside the production
+          # surface and a selected-source executable/callback entering the
+          # same production methods.
+          target_driver ? [production_dir, driver_path] : [production_dir]
+        ).join(File::PATH_SEPARATOR),
+        "NIL_KILL_TMP_DIR" => collect_dir,
+        "NIL_KILL_SHARD_JOBS" => "1",
+        "FACT_MINE_RUST_BINARY" =>
+          Espalier::StaticEvidence::FACT_MINE_RUST_BINARY,
+      },
+      RbConfig.ruby,
+      executable,
+      "collect",
+      "--",
+      RbConfig.ruby,
+      driver_path,
+      chdir: NilKill::ROOT
+    )
+    unless status.success?
+      raise <<~MESSAGE
+        production collector oracle failed with status #{status.exitstatus}
+        stdout:
+        #{stdout}
+        stderr:
+        #{stderr}
+      MESSAGE
+    end
+
+    trace_plan_path = File.join(collect_dir, "trace-plan.json")
+    runtime_dir = File.join(collect_dir, "runtime")
+    evidence_path = File.join(
+      runtime_dir,
+      NilKill::Runtime::TraceArtifact::EVIDENCE_NAME
+    )
+    plan = JSON.parse(File.read(trace_plan_path)).fetch("runtime_evidence")
+    runtime_calls = Dir.glob(
+      File.join(runtime_dir, "runs", "**", "runtime-calls-*.jsonl{,.gz}")
+    ).sort.flat_map do |path|
+      NilKill::Runtime::JsonIO.foreach(path).filter_map do |line|
+        JSON.parse(line) unless line.strip.empty?
+      end
+    end
+    {
+      status: status,
+      out: stdout,
+      err: stderr,
+      fixture_root: dir,
+      source: File.join(production_dir, File.basename(source)),
+      runtime_dir: runtime_dir,
+      trace_plan_path: trace_plan_path,
+      support: catalog.dig("fixture", "support").map do |support|
+        File.join(dir, support.sub(%r{\Aruby/}, ""))
+      end,
+      runtime_calls: runtime_calls,
+      plan: plan,
+      evidence_path: evidence_path,
+      evidence: NilKill::Runtime::JsonIO.parse(evidence_path),
+    }
+  rescue StandardError
+    FileUtils.remove_entry(dir) if dir && File.directory?(dir)
+    raise
+  end
+
+  def anchor_requests(plan, raw_events, anchor)
+    events = raw_events.select do |event|
+      event.dig("caller", "method") == anchor.fetch("method") &&
+        event.dig("callee", "name") == anchor.fetch("selector")
+    end
+    exact_symbols = events.filter_map do |event|
+      symbol = event.dig("callsite", "anchor_symbol").to_s
+      symbol unless symbol.empty?
+    end.uniq
+    unless exact_symbols.empty?
+      exact = plan.fetch("requests").select do |request|
+        exact_symbols.include?(request.dig("anchor", "symbol"))
+      end
+      paths = exact.map { |request| request.dig("anchor", "relative_path") }.uniq
+      lines = events.map { |event| event.dig("callsite", "line").to_i - 1 }.uniq
+      # An absent sibling event is precisely what this oracle must expose.
+      # Do not let the first successfully correlated same-line event hide
+      # other planned occurrences of the same selector.
+      same_source_occurrences = plan.fetch("requests").select do |request|
+        source_anchor = request.fetch("anchor")
+        paths.include?(source_anchor.fetch("relative_path")) &&
+          source_anchor.fetch("display_name") == anchor.fetch("selector") &&
+          lines.include?(source_anchor.dig("range", "start_line").to_i)
+      end
+      return (exact | same_source_occurrences).sort_by do |request|
+        range = request.fetch("anchor").fetch("range")
+        [
+          range.fetch("start_line"),
+          range.fetch("start_character"),
+          range.fetch("end_line"),
+          range.fetch("end_character"),
+        ]
+      end
+    end
+    if events.empty?
+      selector_requests = plan.fetch("requests").select do |request|
+        request.dig("anchor", "display_name") == anchor.fetch("selector") &&
+          %w[CALL_SELECTOR COLLECTION_OPERATION BRANCH_PREDICATE]
+            .include?(request.dig("anchor", "kind"))
+      end
+      return selector_requests if selector_requests.one?
+    end
+    expect(events).not_to be_empty,
+      "collector emitted no raw event for #{anchor.fetch("method")}##{anchor.fetch("selector")}; " \
+      "selector events=#{raw_events.select { |event|
+        event.dig("callee", "name") == anchor.fetch("selector")
+      }.map { |event| [event["caller"], event["callee"]] }}; " \
+      "all events=#{raw_events.map { |event|
+        [event.dig("caller", "method"), event.dig("callee", "name"), event.dig("callsite", "line")]
+      }}"
+    lines = events.map { |event| event.dig("callsite", "line").to_i - 1 }.uniq
+    plan.fetch("requests").select do |request|
+      source_anchor = request.fetch("anchor")
+      source_anchor.fetch("display_name") == anchor.fetch("selector") &&
+        lines.include?(source_anchor.dig("range", "start_line").to_i)
+    end.sort_by do |request|
+      range = request.fetch("anchor").fetch("range")
+      [
+        range.fetch("start_line"),
+        range.fetch("start_character"),
+        range.fetch("end_line"),
+        range.fetch("end_character"),
+      ]
+    end
+  end
+
+  def selected_request(result, anchor)
+    matches = anchor_requests(result.fetch(:plan), result.fetch(:runtime_calls), anchor)
+    matches.fetch(anchor.fetch("occurrence").to_i - 1) do
+      raise(
+        "no planned occurrence #{anchor.fetch('occurrence')} for " \
+        "#{anchor.fetch('method')}##{anchor.fetch('selector')}; " \
+        "matching requests=#{matches.map { |request| request.fetch('anchor') }}"
+      )
+    end
+  end
+
+  def type_names(value_set)
+    Array(value_set && value_set["alternatives"]).filter_map do |alternative|
+      symbol = alternative.dig("value", "type_symbol").to_s
+      next if symbol.empty?
+
+      descriptor = symbol.split.last.to_s.delete_suffix("#").delete_suffix(".")
+      descriptor.split("/").join("::").delete_prefix("`").delete_suffix("`")
+    end
+  end
+
+  before(:context) do
+    @collector = run_collector_oracle(target_driver: true)
+    @external_collector = run_collector_oracle(target_driver: false)
+  end
+
+  after(:context) do
+    [@collector, @external_collector].compact.each do |result|
+      root = result[:fixture_root]
+      FileUtils.remove_entry(root) if root && File.directory?(root)
+    end
+  end
+
+  it "uses one shared catalog that covers the complete v1 behavior matrix" do
+    capabilities = (
+      catalog.fetch("cases").flat_map { |row| row.fetch("capabilities") } +
+      catalog.fetch("static_closures").flat_map { |row| row.fetch("capabilities") } +
+      catalog.fetch("merge_cases").flat_map { |row| row.fetch("capabilities") }
+    ).to_set
+    expect(capabilities).to include(
+      "exact-anchor",
+      "ambiguous-anchor",
+      "exact-execution-range",
+      "nested-receiver",
+      "multiline-call",
+      "nested-argument",
+      "assignment",
+      "destructuring",
+      "short-circuit-assignment",
+      "native-call",
+      "set",
+      "chained-index",
+      "kernel-conversion",
+      "sorbet",
+      "typed-record",
+      "open-struct",
+      "string-builder",
+      "module-function",
+      "project-call",
+      "statically-indexed-target",
+      "binary-search",
+      "logarithmic-iteration",
+      "callback-multiplicity",
+      "setter-method",
+      "runtime-symbol-escaping",
+      "excluded-source",
+      "structural-runtime-identity",
+      "generated-accessor",
+      "anonymous-class",
+      "transparent-wrapper",
+      "callback",
+      "yield",
+      "block-parameter",
+      "block-local",
+      "dynamic-dispatch",
+      "alternative-targets",
+      "safe-navigation",
+      "test-replacement",
+      "container-shape",
+      "exception",
+      "non-returning-call",
+      "subprocess",
+      "result-object",
+      "nonproduction-provenance",
+      "dependency-provenance",
+      "third-party-target",
+      "repeated-run",
+      "sharded-run",
+      "incremental",
+      "replacement"
+    )
+    matrix = catalog.fetch("wire_matrix")
+    expect(matrix.fetch("anchor_kinds")).to contain_exactly(
+      "FUNCTION_ENTRY",
+      "FUNCTION_RETURN",
+      "CALL_SELECTOR",
+      "STATE_READ",
+      "STATE_WRITE",
+      "CALLBACK_ENTRY",
+      "COLLECTION_OPERATION",
+      "BRANCH_PREDICATE"
+    )
+    expect(matrix.fetch("evidence_kinds")).to contain_exactly(
+      "PARAMETER_VALUE",
+      "RETURN_VALUE",
+      "RECEIVER_VALUE",
+      "CALL_TARGET",
+      "RESULT_VALUE",
+      "BOOLEAN_RESULT",
+      "STATE_VALUE",
+      "COLLECTION_VALUE"
+    )
+    expect(matrix.fetch("capture_statuses").length).to eq(7)
+    expect(matrix.fetch("source_roles").length).to eq(6)
+    expect(matrix.fetch("value_shapes")).to contain_exactly(
+      "sequence", "mapping", "record", "tuple"
+    )
+    expect(matrix.fetch("negative_controls").length).to be >= 10
+    expect(matrix.fetch("request_contracts").keys)
+      .to contain_exactly(*matrix.fetch("anchor_kinds"))
+    expect(matrix.fetch("request_contracts").values.flatten.uniq)
+      .to match_array(matrix.fetch("evidence_kinds"))
+    planned = matrix.fetch("planner_anchor_kinds")
+    reserved = matrix.fetch("reserved_anchor_kinds")
+    expect(planned & reserved.keys).to be_empty
+    expect(planned | reserved.keys).to match_array(matrix.fetch("anchor_kinds"))
+    expect(reserved.values).to all(satisfy { |reason| !reason.to_s.empty? })
+  end
+
+  it "does not manufacture evidence for calls FactMine closed statically" do
+    names = catalog.fetch("static_closures")
+      .map { |row| row.dig("anchor", "selector") }
+      .uniq
+    requests = @collector.fetch(:plan).fetch("requests").select do |request|
+      names.include?(request.dig("anchor", "display_name"))
+    end
+    expect(requests).to be_empty
+  end
+
+  it "negative control: cannot pass if an executed planned call has no raw event" do
+    expect(@collector.fetch(:runtime_calls)).not_to be_empty
+    exact = catalog.fetch("cases").find { |row| row.fetch("id") == "exact_ruby_call" }
+    request = selected_request(@collector, exact.fetch("anchor"))
+    without_exact = @collector.fetch(:runtime_calls).reject do |event|
+      event.dig("caller", "method") == "exact_call" &&
+        event.dig("callee", "name") == "normalize"
+    end
+    expect do
+      anchor_requests(@collector.fetch(:plan), without_exact, exact.fetch("anchor"))
+    end.to raise_error(RSpec::Expectations::ExpectationNotMetError, /no raw event/)
+    expect(request.dig("anchor", "symbol")).not_to be_empty
+  end
+
+  it "collector oracle: every exact capability emits every requested field" do
+    by_symbol = anchors_by_symbol(@collector)
+    catalog.fetch("cases").reject { |row| row.dig("expect", "correlation") }.each do |test_case|
+      request = selected_request(@collector, test_case.fetch("anchor"))
+      expected = test_case.fetch("expect")
+      expect(request.fetch("required")).to include(*expected.fetch("required")),
+        "#{test_case.fetch("id")} was not requested completely by FactMine"
+      row = by_symbol.fetch(request.dig("anchor", "symbol"))
+      expected_status = expected.fetch("allowed_status", "COMPLETE_FOR_RUNS")
+      expect(row.dig("capture", "status")).to eq(expected_status),
+        "#{test_case.fetch("id")}: #{row.dig("capture", "reason")}\n" \
+        "request=#{JSON.generate(request)}\n" \
+        "evidence=#{JSON.generate(row)}\n" \
+        "events=#{JSON.generate(@collector.fetch(:runtime_calls).select { |event|
+          event.dig("caller", "method") == test_case.dig("anchor", "method")
+        })}"
+      complete_kinds =
+        if expected_status == "COMPLETE_FOR_RUNS"
+          request.fetch("required")
+        else
+          expected.fetch("complete_kinds", [])
+        end
+      if expected_status != "COMPLETE_FOR_RUNS"
+        expect(row.dig("capture", "reason")).not_to be_empty
+        expect(row.dig("capture", "complete_kinds"))
+          .to contain_exactly(*complete_kinds)
+        next if row.fetch("executions").empty?
+      else
+        expect(row.dig("capture", "complete_kinds")).to include(*complete_kinds)
+      end
+      if expected["observed_executions"]
+        expect(row.dig("capture", "observed_executions"))
+          .to(
+            satisfy { |count| count.to_i == expected.fetch("observed_executions") },
+            "#{test_case.fetch('id')} observed the wrong execution count"
+          )
+      end
+      expect(row.fetch("executions")).not_to be_empty
+      row.fetch("executions").each do |bucket|
+        complete_kinds.each do |kind|
+          field = {
+            "RECEIVER_VALUE" => "receiver",
+            "COLLECTION_VALUE" => "receiver",
+            "CALL_TARGET" => "target",
+            "RESULT_VALUE" => "result",
+            "BOOLEAN_RESULT" => "boolean_result",
+            "PARAMETER_VALUE" => "value",
+            "RETURN_VALUE" => "value",
+            "STATE_VALUE" => "value",
+          }.fetch(kind)
+          expect(bucket).to have_key(field),
+            "#{test_case.fetch("id")} omitted requested #{kind}"
+        end
+      end
+      first =
+        if expected["source_role"]
+          row.fetch("executions").find do |bucket|
+            bucket.dig("target", "source_role") == expected.fetch("source_role")
+          end
+        end
+      first ||= row.fetch("executions").first
+      matching_raw = @collector.fetch(:runtime_calls).select do |event|
+        event.dig("caller", "method") == test_case.dig("anchor", "method") &&
+          event.dig("callee", "name") == test_case.dig("anchor", "selector")
+      end
+      if expected["receiver_type"]
+        expect(type_names(first["receiver"])).to include(expected.fetch("receiver_type"))
+      end
+      if expected["receiver_types"]
+        observed = row.fetch("executions").flat_map { |bucket| type_names(bucket["receiver"]) }
+        expect(observed).to include(*expected.fetch("receiver_types"))
+      end
+      if expected["result_type"]
+        expect(type_names(first["result"])).to include(expected.fetch("result_type"))
+      end
+      if expected["result_types"]
+        receiver_types = expected.fetch("receiver_types")
+        target_owners = expected.fetch("target_owners")
+        result_types = expected.fetch("result_types")
+        expect(receiver_types.length).to eq(target_owners.length)
+        expect(receiver_types.length).to eq(result_types.length)
+        receiver_types.each_index do |index|
+          raw = matching_raw.find do |event|
+            event.dig("callee", "owner") == target_owners.fetch(index) &&
+              Array(event.dig("receiver_domain", "types"))
+                .include?(receiver_types.fetch(index))
+          end
+          expect(raw).not_to be_nil,
+            "#{test_case.fetch("id")} lost receiver/target correlation at #{index}"
+          expect(Array(raw.dig("result_domain", "types")))
+            .to include(result_types.fetch(index))
+        end
+      end
+      if expected["result_element_type"]
+        elements = first.dig(
+          "result", "alternatives", 0, "value", "sequence", "elements"
+        )
+        expect(type_names(elements)).to include(expected.fetch("result_element_type"))
+      end
+      if expected["result_shape"]
+        expect(first.dig("result", "alternatives", 0, "value"))
+          .to have_key(expected.fetch("result_shape"))
+      end
+      if expected["target_owner"]
+        expect(matching_raw.map { |event| event.dig("callee", "owner") })
+          .to include(expected.fetch("target_owner"))
+        definition_anchor = first.dig("target", "definition", "anchor_symbol")
+        if definition_anchor.to_s.empty?
+          expect(first.dig("target", "symbol"))
+            .to include(expected.fetch("target_owner").gsub("::", "/"))
+        else
+          expect(@collector.fetch(:plan).fetch("requests").any? do |candidate|
+            candidate.dig("anchor", "symbol") == definition_anchor
+          end).to be(true)
+        end
+      end
+      if expected["target_owners"]
+        observed = matching_raw.map { |event| event.dig("callee", "owner") }
+        expect(observed).to include(*expected.fetch("target_owners"))
+        observed_targets = row.fetch("executions").filter_map do |bucket|
+          bucket["target"]
+        end
+        identities = observed_targets.map do |target|
+          definition_anchor = target.dig("definition", "anchor_symbol").to_s
+          if definition_anchor.empty?
+            target.fetch("symbol")
+          else
+            expect(@collector.fetch(:plan).fetch("requests").any? do |candidate|
+              candidate.dig("anchor", "symbol") == definition_anchor
+            end).to be(true)
+            definition_anchor
+          end
+        end
+        expect(identities.uniq.length).to be >= expected.fetch("target_owners").length
+      end
+      if expected["excluded_target_owner"]
+        excluded = expected.fetch("excluded_target_owner")
+        excluded_raw = matching_raw.select do |event|
+          event.dig("callee", "owner") == excluded
+        end
+        expect(excluded_raw).not_to be_empty,
+          "#{test_case.fetch("id")} did not preserve its nonproduction replacement"
+        expect(row.fetch("executions").filter_map { |bucket|
+          bucket["target"] if bucket.dig("target", "source_role") == "NON_PRODUCTION"
+        }).not_to be_empty
+      end
+      if expected["excluded_target_owner_prefix"]
+        excluded = expected.fetch("excluded_target_owner_prefix")
+        excluded_raw = matching_raw.select do |event|
+          event.dig("callee", "owner").to_s.start_with?(excluded)
+        end
+        expect(excluded_raw).not_to be_empty,
+          "#{test_case.fetch("id")} did not preserve its anonymous nonproduction replacement"
+        expect(row.fetch("executions").any? do |bucket|
+          bucket.dig("target", "source_role") == "NON_PRODUCTION" &&
+            bucket.dig("target", "symbol").to_s.include?(excluded)
+        end).to be(true)
+      end
+      if expected["source_role"]
+        expect(first.dig("target", "source_role")).to eq(expected.fetch("source_role")),
+          "#{test_case.fetch('id')} attributed the target to the wrong source role: " \
+          "#{JSON.generate(first)} raw=#{JSON.generate(matching_raw)}"
+      end
+      unless expected["boolean_result"].nil?
+        expect(first.fetch("boolean_result")).to eq(expected.fetch("boolean_result"))
+      end
+    end
+  end
+
+  it "collector oracle: the same catalog is complete from an unselected workload entrypoint" do
+    by_symbol = anchors_by_symbol(@external_collector)
+    fields = {
+      "RECEIVER_VALUE" => "receiver",
+      "COLLECTION_VALUE" => "receiver",
+      "CALL_TARGET" => "target",
+      "RESULT_VALUE" => "result",
+      "BOOLEAN_RESULT" => "boolean_result",
+    }
+    catalog.fetch("cases").reject { |row| row.dig("expect", "correlation") }.each do |test_case|
+      expected = test_case.fetch("expect")
+      request = selected_request(@external_collector, test_case.fetch("anchor"))
+      row = by_symbol.fetch(request.dig("anchor", "symbol"))
+      status = expected.fetch("allowed_status", "COMPLETE_FOR_RUNS")
+      expect(row.dig("capture", "status")).to eq(status), test_case.fetch("id")
+      complete =
+        if status == "COMPLETE_FOR_RUNS"
+          expected.fetch("required")
+        else
+          expected.fetch("complete_kinds", [])
+        end
+      expect(row.dig("capture", "complete_kinds")).to include(*complete),
+        test_case.fetch("id")
+      next if row.fetch("executions").empty?
+
+      row.fetch("executions").each do |bucket|
+        complete.grep(fields.keys).each do |kind|
+          expect(bucket).to have_key(fields.fetch(kind)),
+            "#{test_case.fetch('id')} omitted #{kind} from external-entry collection"
+        end
+      end
+    end
+  end
+
+  it "collector oracle: FactMine supplies every call's closed execution range" do
+    catalog.fetch("cases").each do |test_case|
+      request = selected_request(@collector, test_case.fetch("anchor"))
+      selector = request.fetch("anchor").fetch("range")
+      execution = request.fetch("execution_range")
+      start_before = ([
+        execution.fetch("start_line"),
+        execution.fetch("start_character"),
+      ] <=> [
+        selector.fetch("start_line"),
+        selector.fetch("start_character"),
+      ]) <= 0
+      end_after = ([
+        execution.fetch("end_line"),
+        execution.fetch("end_character"),
+      ] <=> [
+        selector.fetch("end_line"),
+        selector.fetch("end_character"),
+      ]) >= 0
+      expect(start_before && end_after).to be(true), test_case.fetch("id")
+      next unless (
+        test_case.fetch("capabilities") &
+          %w[attached-block-range nested-attached-blocks]
+      ).any?
+
+      expect(([
+        execution.fetch("end_line"),
+        execution.fetch("end_character"),
+      ] <=> [
+        selector.fetch("end_line"),
+        selector.fetch("end_character"),
+      ])).to be_positive
+    end
+  end
+
+  it "collector oracle: exact execution ranges disambiguate same-line calls" do
+    test_cases = catalog.fetch("cases").select do |row|
+      row.fetch("capabilities").include?("ambiguous-anchor")
+    end
+    requests = test_cases.map { |test_case| selected_request(@collector, test_case.fetch("anchor")) }
+    symbols = requests.map { |request| request.dig("anchor", "symbol") }.sort
+    rows = @collector.fetch(:evidence).fetch("anchors").select do |row|
+      symbols.include?(row.fetch("anchor_symbol"))
+    end
+    expect(symbols.length).to eq(2)
+    expect(rows.map { |row| row.dig("capture", "status") })
+      .to contain_exactly("COMPLETE_FOR_RUNS", "COMPLETE_FOR_RUNS")
+    expect(rows.map { |row| row.fetch("executions").length }).to eq([1, 1])
+    expect(@collector.fetch(:evidence).fetch("correlations").none? do |row|
+      row.fetch("candidate_anchor_symbols") == symbols
+    end).to be(true)
+  end
+
+  it "collector oracle: function boundary parameters and returns satisfy the same requests" do
+    by_symbol = anchors_by_symbol(@collector)
+    catalog.fetch("boundary_cases").each do |boundary|
+      call_case = catalog.fetch("cases").find do |candidate|
+        candidate.dig("anchor", "method") == boundary.fetch("method")
+      end
+      call_request = selected_request(@collector, call_case.fetch("anchor"))
+      request = @collector.fetch(:plan).fetch("requests").find do |candidate|
+        anchor = candidate.fetch("anchor")
+        anchor.fetch("enclosing_symbol") == call_request.dig("anchor", "enclosing_symbol") &&
+          anchor.fetch("kind") == boundary.fetch("anchor_kind") &&
+          anchor.fetch("display_name") == boundary.fetch("display_name")
+      end
+      expect(request).not_to be_nil, boundary.fetch("id")
+      expect(request.fetch("required")).to include(boundary.fetch("evidence_kind"))
+      row = by_symbol.fetch(request.dig("anchor", "symbol"))
+      expected_status = boundary.fetch("allowed_status", "COMPLETE_FOR_RUNS")
+      expect(row.dig("capture", "status")).to eq(expected_status),
+        "#{boundary.fetch("id")}: #{row.dig("capture", "reason")}"
+      if expected_status != "COMPLETE_FOR_RUNS"
+        expect(row.dig("capture", "reason")).not_to be_empty
+        if expected_status == "NOT_EXECUTED"
+          expect(row.dig("capture", "complete_kinds"))
+            .to include(boundary.fetch("evidence_kind"))
+        else
+          expect(row.dig("capture", "complete_kinds")).to be_empty
+        end
+        expect(row.fetch("executions")).to be_empty
+        next
+      end
+      expect(row.dig("capture", "complete_kinds")).to include(boundary.fetch("evidence_kind"))
+      expect(type_names(row.dig("executions", 0, "value")))
+        .to include(boundary.fetch("expected_type"))
+    end
+  end
+
+
+  it "generic invariant: every requested kind is complete or has a precise fail-closed explanation" do
+    requests = @collector.fetch(:plan).fetch("requests").to_h do |request|
+      [request.dig("anchor", "symbol"), request]
+    end
+    # Sparse evidence still accounts for every planned anchor: one entry, or
+    # absence, which means it was not executed. What it must never do is carry
+    # an anchor twice, or one the plan never asked for.
+    emitted = @collector.fetch(:evidence).fetch("anchors").map { |row| row.fetch("anchor_symbol") }
+    expect(emitted.uniq.length).to eq(emitted.length), "evidence repeats an anchor"
+    expect(emitted.to_set - requests.keys.to_set).to be_empty,
+      "evidence carries an anchor the plan never requested"
+    evidence_symbols = anchors_by_symbol(@collector).keys.to_set
+    expect(evidence_symbols).to eq(requests.keys.to_set),
+      "canonical evidence must account for every planned anchor exactly once"
+    allowed_partial_symbols = catalog.fetch("cases").filter_map do |test_case|
+      next unless test_case.dig("expect", "allowed_status") == "PARTIAL"
+
+      selected_request(@collector, test_case.fetch("anchor")).dig("anchor", "symbol")
+    end.to_set
+    @collector.fetch(:evidence).fetch("anchors").each do |row|
+      request = requests.fetch(row.fetch("anchor_symbol"))
+      capture = row.fetch("capture")
+      complete = capture.fetch("complete_kinds").to_set
+      missing = request.fetch("required").to_set - complete
+      if missing.empty?
+        expect(%w[COMPLETE_FOR_RUNS NOT_EXECUTED]).to include(capture.fetch("status"))
+      else
+        expect(capture.fetch("status")).not_to eq("COMPLETE_FOR_RUNS")
+        expect(capture.fetch("reason")).not_to be_empty,
+          "#{row.fetch("anchor_symbol")} omitted #{missing.to_a.sort} without explanation"
+      end
+      if capture.fetch("status") == "PARTIAL" &&
+          capture.fetch("observed_executions").to_i.positive?
+        expect(allowed_partial_symbols).to include(row.fetch("anchor_symbol")),
+          "executed anchor #{row.fetch('anchor_symbol')} was partial without " \
+          "an explicit semantic exception in the shared catalog: " \
+          "#{capture.fetch('reason')} request=#{JSON.generate(request)}"
+      end
+      row.fetch("executions").each do |bucket|
+        complete.each do |kind|
+          field = {
+            "RECEIVER_VALUE" => "receiver",
+            "COLLECTION_VALUE" => "receiver",
+            "CALL_TARGET" => "target",
+            "RESULT_VALUE" => "result",
+            "BOOLEAN_RESULT" => "boolean_result",
+            "PARAMETER_VALUE" => "value",
+            "RETURN_VALUE" => "value",
+            "STATE_VALUE" => "value",
+          }.fetch(kind)
+          expect(bucket).to have_key(field),
+            "#{row.fetch("anchor_symbol")} claims complete #{kind} without #{field}"
+        end
+      end
+    end
+  end
+
+  # Evidence for a chosen set of events, produced the way a collect produces
+  # it: a shard directory holding those events, a trace document built from it,
+  # and FactMine's join over that. There is one join, so a merge oracle has to
+  # go through it rather than around it.
+  def evidence_for(run_id, events)
+    shard = File.join(NilKill::TMP_DIR, "merge-#{run_id}")
+    FileUtils.rm_rf(shard)
+    FileUtils.mkdir_p(shard)
+    source = @collector.fetch(:runtime_dir)
+    Dir.glob(File.join(source, "runs", "**", "*.jsonl{,.gz}")).each do |path|
+      next if File.basename(path).start_with?("runtime-calls-")
+
+      FileUtils.cp(path, File.join(shard, File.basename(path)))
+    end
+    File.write(
+      File.join(shard, "runtime-calls-0.jsonl"),
+      events.map { |event| JSON.generate(event.merge("run_id" => run_id)) }.join("\n") + "\n"
+    )
+    # The run a shard was traced under is the traced program's own claim, so a
+    # synthetic shard states it the same way a real one does.
+    NilKill::Runtime::JsonIO.write(
+      File.join(shard, "collector-raw-0.json.gz"),
+      JSON.generate("pid" => 0, "run_id" => run_id, "ruby_version" => RUBY_VERSION,
+                    "ruby_engine" => RUBY_ENGINE, "ruby_engine_version" => RUBY_ENGINE_VERSION)
+    )
+    NilKill::Runtime::DomainDeriver.trace_documents(
+      runtime_dirs: [shard], plan: @collector.fetch(:trace_plan_path),
+      root: NilKill::ROOT
+    )
+    join(shard, run_id)
+    File.join(shard, NilKill::Runtime::TraceArtifact::EVIDENCE_NAME)
+  end
+
+  # The merge under test is the one a collect performs.
+  def merge(paths)
+    output = File.join(NilKill::TMP_DIR, "merged-#{paths.length}-#{paths.hash.abs}.json.gz")
+    NilKill::Runtime::DomainDeriver.merge_evidence(inputs: paths, output: output)
+    NilKill::Runtime::JsonIO.parse(output)
+  end
+
+  def join(shard, run_id)
+    binary = NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY
+    trace = File.join(shard, NilKill::Runtime::TraceArtifact::DEFAULT_NAME)
+    _out, err, status = Open3.capture3(
+      binary, "runtime-trace", "--plan", @collector.fetch(:trace_plan_path),
+      "--root", NilKill::ROOT, "--runtime-trace", trace
+    )
+    raise "fact-mine runtime-trace failed for #{run_id}: #{err}" unless status.success?
+  end
+
+  it "shared merge oracle: repeated shards add and a replaced shard owns no stale run" do
+    exact = catalog.fetch("cases").find { |row| row.fetch("id") == "exact_ruby_call" }
+    request = selected_request(@collector, exact.fetch("anchor"))
+    paths = %w[run-a run-b].map do |run_id|
+      evidence_for(run_id, @collector.fetch(:runtime_calls))
+    end
+    merged = merge(paths)
+    repeated = catalog.fetch("merge_cases").find do |row|
+      row.fetch("id") == "repeated_runs_are_additive"
+    end
+    expect(merged.fetch("runs").map { |run| run.fetch("id") })
+      .to eq(repeated.fetch("expected_runs"))
+    row = merged.fetch("anchors").find do |candidate|
+      candidate.fetch("anchor_symbol") == request.dig("anchor", "symbol")
+    end
+    # ProtoJSON spells an int64 as a string; the claim is about the count.
+    expect(row.dig("capture", "observed_executions").to_i)
+      .to eq(repeated.fetch("expected_count"))
+
+    mixed_case = catalog.fetch("cases").find do |candidate|
+      candidate.fetch("id") == "direct_subprocess_result_with_anonymous_replacement"
+    end
+    mixed_request = selected_request(@collector, mixed_case.fetch("anchor"))
+    mixed_events = @collector.fetch(:runtime_calls).select do |event|
+      event.dig("caller", "method") == "direct_capture_status" &&
+        event.dig("callee", "name") == "success?"
+    end
+    production, replacement = mixed_events.partition do |event|
+      event.dig("callee", "owner") == "Process::Status"
+    end
+    expect(production).not_to be_empty
+    expect(replacement).not_to be_empty
+    split_paths = [
+      ["production-run", production],
+      ["replacement-run", replacement],
+    ].map do |run_id, shard_events|
+      evidence_for(run_id, shard_events)
+    end
+    split = merge(split_paths)
+    split_contract = catalog.fetch("merge_cases").find do |candidate|
+      candidate.fetch("id") == "production_and_replacement_shards_remain_complete"
+    end
+    expect(split.fetch("runs").map { |run| run.fetch("id") })
+      .to eq(split_contract.fetch("expected_runs"))
+    split_row = split.fetch("anchors").find do |candidate|
+      candidate.fetch("anchor_symbol") == mixed_request.dig("anchor", "symbol")
+    end
+    expect(split_row.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+    expect(split_row.fetch("executions").map { |bucket|
+      bucket.dig("target", "source_role")
+    }).to contain_exactly(*split_contract.fetch("expected_source_roles"))
+
+    anonymous_case = catalog.fetch("cases").find do |candidate|
+      candidate.fetch("id") == "mixed_production_and_anonymous_replacement"
+    end
+    anonymous_request = selected_request(@collector, anonymous_case.fetch("anchor"))
+    anonymous_events = @collector.fetch(:runtime_calls).select do |event|
+      event.dig("callsite", "anchor_symbol") ==
+        anonymous_request.dig("anchor", "symbol")
+    end
+    anonymous_production, anonymous_replacement = anonymous_events.partition do |event|
+      !event.dig("callee", "path").to_s.split(File::SEPARATOR).include?("test")
+    end
+    expect(anonymous_production).not_to be_empty
+    expect(anonymous_replacement).not_to be_empty,
+      "anonymous shard events=#{JSON.generate(anonymous_events)}"
+    anonymous_paths = [
+      ["anonymous-production-run", anonymous_production],
+      ["anonymous-replacement-run", anonymous_replacement],
+    ].map do |run_id, shard_events|
+      evidence_for(run_id, shard_events)
+    end
+    anonymous_split = merge(anonymous_paths)
+    anonymous_contract = catalog.fetch("merge_cases").find do |candidate|
+      candidate.fetch("id") ==
+        "production_and_anonymous_replacement_shards_remain_complete"
+    end
+    expect(anonymous_split.fetch("runs").map { |run| run.fetch("id") })
+      .to eq(anonymous_contract.fetch("expected_runs"))
+    anonymous_row = anonymous_split.fetch("anchors").find do |candidate|
+      candidate.fetch("anchor_symbol") == anonymous_request.dig("anchor", "symbol")
+    end
+    expect(anonymous_row.dig("capture", "status")).to eq("COMPLETE_FOR_RUNS")
+    expect(anonymous_row.fetch("executions").map { |bucket|
+      bucket.dig("target", "source_role")
+    }).to contain_exactly(*anonymous_contract.fetch("expected_source_roles"))
+
+    replacement = catalog.fetch("merge_cases").find do |candidate|
+      candidate.fetch("id") == "changed_shard_replaces_owned_evidence"
+    end
+    replacement_run = replacement.fetch("expected_runs").fetch(0)
+    replacement_path = evidence_for(replacement_run, @collector.fetch(:runtime_calls))
+    replaced = merge([replacement_path])
+    expect(replaced.fetch("runs").map { |run| run.fetch("id") })
+      .to eq(replacement.fetch("expected_runs"))
+    expect(replaced.fetch("runs").map { |run| run.fetch("id") })
+      .not_to include(*replacement.fetch("forbidden_runs"))
+  end
+
+  it "collector output is accepted by FactMine's independent canonical validator" do
+    binary = Espalier::StaticEvidence::FACT_MINE_RUST_BINARY
+    plan_path = File.join(NilKill::TMP_DIR, "conformance-plan.json")
+    FileUtils.mkdir_p(File.dirname(plan_path))
+    File.write(plan_path, JSON.pretty_generate(@collector.fetch(:plan)))
+    _stdout, stderr, status = Open3.capture3(
+      binary,
+      "runtime-evidence",
+      "validate",
+      "--plan",
+      plan_path,
+      "--evidence",
+      @collector.fetch(:evidence_path)
+    )
+    expect(status).to be_success, stderr
+  end
+
+  it "end-to-end oracle: source, plan, real trace, validation, and FactMine join agree" do
+    output = File.join(NilKill::TMP_DIR, "runtime-conformance.scip.json")
+    FileUtils.mkdir_p(File.dirname(output))
+    plan_file = Tempfile.new(["conformance-plan", ".json"])
+    plan_file.write(JSON.generate(@collector.fetch(:plan)))
+    plan_file.close
+    attestation = File.join(NilKill::TMP_DIR, "runtime-conformance-attestation.json.gz")
+    _out, stderr, status = Open3.capture3(
+      Espalier::StaticEvidence::FACT_MINE_RUST_BINARY,
+      "nil-kill-scip-index",
+      "--root", NilKill::ROOT,
+      "--runtime-dir", @collector.fetch(:runtime_dir),
+      "--evidence", @collector.fetch(:evidence_path),
+      "--plan", plan_file.path,
+      "--output", output,
+      "--attestation", attestation
+    )
+    plan_file.unlink
+    expect(status).to be_success, stderr
+    index = JSON.parse(File.read(output))
+    occurrences = index.fetch("documents").flat_map do |document|
+      document.fetch("occurrences").map do |occurrence|
+        [document.fetch("relativePath"), occurrence.fetch("range"), occurrence.fetch("symbol")]
+      end
+    end
+    by_symbol = anchors_by_symbol(@collector)
+
+    catalog.fetch("cases").reject { |row| row.dig("expect", "correlation") }.each do |test_case|
+      request = selected_request(@collector, test_case.fetch("anchor"))
+      row = by_symbol.fetch(request.dig("anchor", "symbol"))
+      next unless row.dig("capture", "status") == "COMPLETE_FOR_RUNS"
+
+      target = row.dig("executions", 0, "target")
+      next unless target
+
+      anchor = request.fetch("anchor")
+      range = anchor.fetch("range").values_at(
+        "start_line",
+        "start_character",
+        "end_line",
+        "end_character"
+      )
+      at_anchor = occurrences.select do |path, occurrence_range, _symbol|
+        next false unless path == anchor.fetch("relative_path")
+
+        occurrence_range =
+          if occurrence_range.length == 3
+            [
+              occurrence_range[0],
+              occurrence_range[1],
+              occurrence_range[0],
+              occurrence_range[2],
+            ]
+          else
+            occurrence_range
+          end
+        start_before =
+          occurrence_range[0] < range[0] ||
+          (occurrence_range[0] == range[0] && occurrence_range[1] <= range[1])
+        end_after =
+          occurrence_range[2] > range[2] ||
+          (occurrence_range[2] == range[2] && occurrence_range[3] >= range[3])
+        start_before && end_after
+      end
+      if target.fetch("source_role") == "NON_PRODUCTION"
+        expect(at_anchor.map(&:last)).not_to include(target.fetch("symbol")),
+          "#{test_case.fetch("id")} published a test replacement as production SCIP"
+      else
+        expect(at_anchor.map(&:last)).to include(target.fetch("symbol")),
+          "#{test_case.fetch("id")} was emitted correctly but FactMine did not join it; " \
+          "target=#{target.fetch("symbol")} anchor=#{anchor} at_anchor=#{at_anchor} " \
+          "same_path=#{occurrences.select { |path, _range, _symbol|
+            path == anchor.fetch("relative_path")
+          }}"
+      end
+      if test_case.dig("expect", "excluded_target_owner")
+        excluded_suffix = test_case.dig("expect", "excluded_target_owner")
+          .gsub("::", "/")
+        expect(at_anchor.map(&:last).none? { |symbol|
+          symbol.include?(excluded_suffix)
+        }).to be(true),
+          "#{test_case.fetch("id")} published a nonproduction replacement at the callsite"
+      end
+      if test_case.dig("expect", "excluded_target_owner_prefix")
+        excluded = test_case.dig("expect", "excluded_target_owner_prefix")
+        expect(at_anchor.map(&:last).none? { |symbol| symbol.include?(excluded) }).to be(true),
+          "#{test_case.fetch("id")} published an anonymous nonproduction replacement at the callsite"
+      end
+      if test_case.dig("expect", "forbidden_target_name")
+        owner = test_case.dig("expect", "target_owner").gsub("::", "/")
+        name = test_case.dig("expect", "forbidden_target_name")
+        suffix = "#{owner}##{name}()."
+        expect(at_anchor.map(&:last).none? { |symbol| symbol.end_with?(suffix) }).to be(true),
+          "#{test_case.fetch("id")} published the same-range reader #{suffix} as a writer target"
+      end
+    end
+    expect(index.dig("_runtimeEvidence", "observedCallSites")).to be_positive
+    expect(index.dig("_runtimeEvidence", "inferredCallSites")).to be_positive
+  end
+end

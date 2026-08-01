@@ -3,11 +3,14 @@
 require "set"
 require_relative "big_o_analyzer"
 require_relative "structural_big_o"
+require_relative "complexity_overrides"
 
 module Espalier
   # Coalescing agent that imports the static skeleton maps and merges secondary
   # metadata from: decomplex (decisions/clones), nil-kill (types), and boobytrap/slopcop (risk/coverage).
   class Aggregator
+    MAX_RECURSIVE_SUMMARY_STATES = 64
+
     def initialize(
       decomplex_data: {},
       nil_kill_data: {},
@@ -147,6 +150,8 @@ module Espalier
           quality[:big_o_variables] = big_o_result[:complexity_variables] unless big_o_result[:complexity_variables].empty?
           quality[:big_o_complete] = big_o_result[:time_complete]
           quality[:big_o_space_complete] = big_o_result[:space_complete]
+          apply_complexity_override!(quality, mod, m)
+          quality[:big_o_status] = classify_big_o_status(quality)
           quality[:big_o_dynamic] = big_o_result[:is_dynamic]
           quality[:complexity_trigger] = big_o_result[:trigger] if big_o_result[:trigger]
           quality[:big_o_warnings] = big_o_result[:warnings] unless big_o_result[:warnings].empty?
@@ -193,18 +198,67 @@ module Espalier
 
     private
 
+    # Targeted escape hatch: consult the manual-override registry ONLY when the
+    # derived bound is incomplete, and apply only when an entry exists. A fully
+    # derived (complete) bound is never overridden. Marks provenance so an
+    # override-sourced bound is distinguishable from a structurally derived one.
+    def apply_complexity_override!(quality, mod, m)
+      return if quality[:big_o_complete]
+
+      # project_modules disambiguates owners as "name@path"; the override
+      # registry keys on the bare owner (package leaf / type name).
+      owner = mod[:name].to_s.split("@", 2).first
+      entry = ComplexityOverrides.lookup(mod[:language], owner, m[:name])
+      return unless entry
+
+      quality[:big_o] = entry["time"]
+      quality[:big_o_complete] = true
+      quality[:big_o_provenance] = :manual_override
+      quality[:big_o_override_note] = entry["note"]
+      return unless entry["space"]
+
+      quality[:big_o_space] = entry["space"]
+      quality[:big_o_space_complete] = true
+    end
+
+    # Distinguishes a fully-resolved bound from one that is only "complete"
+    # parametrically - i.e. still carries an open callback/reflective parameter
+    # that a worst-case substitution would have to close. The parametric tier is
+    # what the interface worst-case pass upgrades to :complete_worst_case.
+    #
+    # A parametric contract opens a parameter on BOTH axes - time O(N*C) and
+    # auxiliary space O(S) / O(N*S) - and the space one outlives the time one,
+    # because callback substitution rewrites only the time expression. Reading
+    # the time bound alone therefore publishes a space bound whose parameter
+    # nothing can bind as if it were closed.
+    #
+    # `S` is unambiguous in a space bound today: space carries no domain-symbol
+    # table of its own, so no size domain is ever rendered as `S` there.
+    def classify_big_o_status(quality)
+      return :incomplete unless quality[:big_o_complete]
+      return :complete_override if quality[:big_o_provenance] == :manual_override
+
+      bound = quality[:big_o].to_s
+      return :parametric if bound.include?("C") || bound.include?("R")
+      return :parametric if quality[:big_o_space].to_s.include?("S")
+
+      :complete
+    end
+
     def internal_edges_for(mod)
       legacy_internal_edges_for(mod)
     end
 
     def legacy_internal_edges_for(mod)
-      method_names = mod[:methods].map { |m| m[:name].to_s }
+      method_names = mod[:methods].map { |m| m[:name].to_s }.tally
       mod[:methods].flat_map do |method|
         caller = method[:name].to_s
+        next [] unless method_names[caller] == 1
+
         Array(method[:delegations]).filter_map do |delegation|
           callee = delegation[:message].to_s
           next unless delegation[:receiver] == "self"
-          next unless method_names.include?(callee)
+          next unless method_names[callee] == 1
           next if caller == callee
 
           {
@@ -288,7 +342,10 @@ module Espalier
       @big_o_nodes_cache = {}
       modules.each do |mod|
         methods = Array(mod[:methods])
-        @module_method_names[mod.object_id] = methods.map { |method| method[:name].to_s }.to_set
+        method_name_counts = methods.map { |method| method[:name].to_s }.tally
+        @module_method_names[mod.object_id] = method_name_counts.filter_map do |name, count|
+          name if count == 1
+        end.to_set
         methods.each_with_index do |method, index|
           start_line = method[:line] || 0
           span = method[:span]
@@ -309,11 +366,7 @@ module Espalier
       end_inclusive ? line <= end_line : line < end_line
     end
 
-    def preliminary_method_complexities(modules)
-      analyzer = Espalier::BigOAnalyzer.new(
-        nil_kill: @nil_kill_evidence,
-        declared_fields: declared_fields_for(modules)
-      )
+    def initial_method_complexities(modules)
       complexities = Hash.new { |h, k| h[k] = {} }
       spaces = Hash.new { |h, k| h[k] = {} }
       time_complete = Hash.new { |h, k| h[k] = {} }
@@ -323,31 +376,22 @@ module Espalier
       assumptions = Hash.new { |h, k| h[k] = {} }
       modules.each do |mod|
         Array(mod[:methods]).each do |method|
-          analyzer.instance_variable_set(:@class_name, mod[:name])
-          analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
-          key = "#{mod[:name]}##{method[:name]}"
-          sig = @nil_kill_data[key] || method[:signature]
-          result = analyzer.analyze_method(
-            key,
-            big_o_nodes_for(mod, method),
-            local_types: local_types_for_signature(sig)
-          )
           method_name = method[:name].to_s
-          complexities[mod[:name]][method_name] = result[:known_time_component]
-          spaces[mod[:name]][method_name] = result[:known_space_component]
-          time_complete[mod[:name]][method_name] = result[:time_complete]
-          space_complete[mod[:name]][method_name] = result[:space_complete]
-          symbolic_time[mod[:name]][method_name] = result[:symbolic_time]
-          bound_qualities[mod[:name]][method_name] = result[:bound_qualities]
-          assumptions[mod[:name]][method_name] = result[:complexity_assumptions]
+          complexities[mod[:name]][method_name] = "O(1)"
+          spaces[mod[:name]][method_name] = "O(1)"
+          time_complete[mod[:name]][method_name] = true
+          space_complete[mod[:name]][method_name] = true
+          symbolic_time[mod[:name]][method_name] = nil
+          bound_qualities[mod[:name]][method_name] = []
+          assumptions[mod[:name]][method_name] = []
           unless method[:id].to_s.empty?
-            complexities[method[:id].to_s] = result[:known_time_component]
-            spaces[method[:id].to_s] = result[:known_space_component]
-            time_complete[method[:id].to_s] = result[:time_complete]
-            space_complete[method[:id].to_s] = result[:space_complete]
-            symbolic_time[method[:id].to_s] = result[:symbolic_time]
-            bound_qualities[method[:id].to_s] = result[:bound_qualities]
-            assumptions[method[:id].to_s] = result[:complexity_assumptions]
+            complexities[method[:id].to_s] = "O(1)"
+            spaces[method[:id].to_s] = "O(1)"
+            time_complete[method[:id].to_s] = true
+            space_complete[method[:id].to_s] = true
+            symbolic_time[method[:id].to_s] = nil
+            bound_qualities[method[:id].to_s] = []
+            assumptions[method[:id].to_s] = []
           end
         end
       end
@@ -356,9 +400,9 @@ module Espalier
 
     def structural_method_complexities(modules)
       @structural_big_o_results = {}
-      return preliminary_method_complexities(modules) if modules.empty?
+      return initial_method_complexities(modules) if modules.empty?
 
-      complexities, spaces, time_complete, space_complete, symbolic_time, bound_qualities, assumptions = preliminary_method_complexities(modules)
+      complexities, spaces, time_complete, space_complete, symbolic_time, bound_qualities, assumptions = initial_method_complexities(modules)
       internal_calls = internal_calls_by_method(modules)
       resolved_calls = resolved_calls_by_site(modules)
       candidate_calls = candidate_calls_by_site(modules)
@@ -387,6 +431,26 @@ module Espalier
       structural_big_o.instance_variable_set(:@method_symbolic_time, symbolic_time)
       structural_big_o.instance_variable_set(:@method_bound_qualities, bound_qualities)
       structural_big_o.instance_variable_set(:@method_assumptions, assumptions)
+      # Index each callback-taking call site to the id of the callable it passes
+      # as its callback argument - an inline lambda (found by span containment)
+      # or a named function reference (resolved by argument spelling) - so a
+      # caller can substitute that callable's cost for the callee's callback C.
+      methods_by_id = {}
+      method_candidates_by_owner_name = Hash.new { |hash, key| hash[key] = [] }
+      lambdas_by_file = Hash.new { |hash, key| hash[key] = [] }
+      modules.each do |mod|
+        Array(mod[:methods]).each do |m|
+          methods_by_id[m[:id]] = m if m[:id]
+          method_candidates_by_owner_name[[m[:raw_owner].to_s, m[:name].to_s]] << m
+          lambdas_by_file[mod[:file]] << m if m[:dispatch_kind].to_s == "lambda" && m[:span]
+        end
+      end
+      methods_by_owner_name = method_candidates_by_owner_name.filter_map do |key, candidates|
+        [key, candidates.first] if candidates.one?
+      end.to_h
+      callback_arg_by_call = callback_arguments_by_call_site(modules, methods_by_id, methods_by_owner_name, lambdas_by_file)
+      @callback_arg_by_call = callback_arg_by_call
+      structural_big_o.instance_variable_set(:@callback_arg_by_call, callback_arg_by_call)
 
       local_analyzer = Espalier::BigOAnalyzer.new(
         nil_kill: @nil_kill_evidence,
@@ -396,9 +460,10 @@ module Espalier
       # Components are ordered callee-first. Acyclic components therefore run
       # exactly once. Within a recursive SCC, only callers of a changed method
       # are re-enqueued; unrelated methods are never rescanned.
-      summary_dependency_components(modules).each do |component|
+      summary_dependency_components(modules, callback_arg_by_call).each do |component|
         entries = component.fetch(:entries)
         by_identity = entries.to_h { |identity, mod, method| [identity, [mod, method]] }
+        recursive_members = component.fetch(:recursive) ? by_identity.keys.to_set : Set.new
         base_nodes = entries.to_h do |identity, mod, method|
           [identity, big_o_nodes_for(mod, method).freeze]
         end
@@ -406,16 +471,22 @@ module Espalier
         queued = queue.to_set
         queue_index = 0
         observed_states = Hash.new { |hash, identity| hash[identity] = Set.new }
+        widened_summaries = Set.new
         while queue_index < queue.length
           graph_identity = queue[queue_index]
           queue_index += 1
           queued.delete(graph_identity)
+          next if widened_summaries.include?(graph_identity)
+
           mod, method = by_identity.fetch(graph_identity)
           local_analyzer.instance_variable_set(:@class_name, mod[:name])
           local_analyzer.instance_variable_set(:@ivar_types, mod[:ivar_types] || {})
           key = "#{mod[:name]}##{method[:name]}"
           sig = @nil_kill_data[key] || method[:signature]
-          nodes = base_nodes.fetch(graph_identity) +
+          nodes = substitute_callback_arguments(
+            base_nodes.fetch(graph_identity), mod, symbolic_time, complexities, time_complete,
+            excluded_callable_ids: recursive_members
+          ) +
             structural_big_o.hints_for(mod[:file], method, mod[:name])
           result = local_analyzer.analyze_method(key, nodes, local_types: local_types_for_signature(sig))
           @structural_big_o_results[graph_identity] = result
@@ -439,6 +510,29 @@ module Espalier
             result[:bound_qualities] != current_bound_qualities ||
             result[:complexity_assumptions] != current_assumptions
           next unless result_changed
+
+          if component.fetch(:recursive) &&
+              observed_states[graph_identity].length >= MAX_RECURSIVE_SUMMARY_STATES
+            result = widen_recursive_summary(result)
+            @structural_big_o_results[graph_identity] = result
+            structural_big_o.apply_summary_delta!(method_identity, mod[:name], method_name, {
+              time: result.fetch(:known_time_component),
+              space: result.fetch(:known_space_component),
+              time_complete: false,
+              space_complete: false,
+              symbolic_time: nil,
+              bound_qualities: result.fetch(:bound_qualities),
+              assumptions: result.fetch(:complexity_assumptions)
+            })
+            widened_summaries << graph_identity
+            component.fetch(:callers).fetch(graph_identity, Set.new).each do |caller|
+              next if queued.include?(caller)
+
+              queue << caller
+              queued << caller
+            end
+            next
+          end
 
           complexity = (time_changed || symbolic_changed) ? result[:known_time_component] : current
           space = space_changed ? result[:known_space_component] : current_space
@@ -472,18 +566,41 @@ module Espalier
       [complexities, spaces, time_complete, space_complete, symbolic_time, bound_qualities, assumptions]
     end
 
-    def summary_dependency_components(modules)
+    def widen_recursive_summary(result)
+      result.merge(
+        lower_bound_complexity: "unknown",
+        space_complexity: "unknown",
+        known_time_component: "O(1)",
+        known_space_component: "O(1)",
+        symbolic_time: nil,
+        complexity_variables: [],
+        time_complete: false,
+        space_complete: false,
+        evidence_gaps: (Array(result[:evidence_gaps]) + ["unresolved_recursive_progress"]).uniq.sort,
+        warnings: (Array(result[:warnings]) +
+          ["Recursive summary did not converge within the finite complexity lattice."]).uniq
+      )
+    end
+
+    def summary_dependency_components(modules, callback_arg_by_call = {})
       entries = {}
-      aliases = {}
+      alias_candidates = Hash.new { |hash, key| hash[key] = Set.new }
       modules.each do |mod|
         Array(mod[:methods]).each do |method|
           fallback = [mod[:name].to_s, method[:name].to_s]
           identity = method[:id].to_s.empty? ? fallback : method[:id].to_s
           entries[identity] = [mod, method]
-          aliases[fallback] = identity
-          aliases[method[:id].to_s] = identity unless method[:id].to_s.empty?
+          alias_candidates[fallback] << identity
+          alias_candidates[method[:id].to_s] << identity unless method[:id].to_s.empty?
         end
       end
+      # A lexical `(owner, short-name)` is usable only when it denotes exactly
+      # one method. Nested functions and overloads routinely share that pair;
+      # choosing the last one creates false dependency cycles and can make the
+      # symbolic fixed point grow without bound. Exact method ids remain unique.
+      aliases = alias_candidates.filter_map do |key, candidates|
+        [key, candidates.first] if candidates.one?
+      end.to_h
 
       graph = entries.each_key.to_h { |identity| [identity, Set.new] }
       entries.each do |source, (mod, method)|
@@ -496,9 +613,19 @@ module Espalier
                      aliases[[mod[:name].to_s, delegation[:message].to_s]]
                    end
           graph[source] << target if target
-          Array(delegation[:candidate_target_ids]).each do |candidate|
-            candidate_target = aliases[candidate.to_s]
-            graph[source] << candidate_target if candidate_target
+          if delegation[:consumer_closed_candidate_set] == true
+            Array(delegation[:candidate_target_ids]).each do |candidate|
+              candidate_target = aliases[candidate.to_s]
+              graph[source] << candidate_target if candidate_target
+            end
+          end
+          # A callable passed at this call site is a real summary dependency:
+          # its cost is substituted for the callee's open C, so it must be
+          # summarized first and must re-enqueue this caller when it changes.
+          span = normalized_call_span(delegation[:span])
+          Array(span && callback_arg_by_call[[mod[:file], span]]).each do |callable|
+            callable_target = aliases[callable.to_s]
+            graph[source] << callable_target if callable_target && callable_target != source
           end
         end
       end
@@ -538,6 +665,8 @@ module Espalier
             [identity, mod, method]
           end,
           callers: callers,
+          recursive: component_members.length > 1 ||
+            component_members.any? { |identity| graph.fetch(identity).include?(identity) },
         }
         reverse[component].sort.each do |caller|
           remaining_dependencies[caller] -= 1
@@ -572,7 +701,9 @@ module Espalier
               delegation[:target_id].to_s
             graph[source] << target if identities[target]
           end
-          Array(method[:delegations]).flat_map { |delegation| Array(delegation[:candidate_target_ids]) }
+          Array(method[:delegations])
+            .select { |delegation| delegation[:consumer_closed_candidate_set] == true }
+            .flat_map { |delegation| Array(delegation[:candidate_target_ids]) }
             .map(&:to_s).each do |target|
               graph[source] << target if identities[target]
             end
@@ -611,8 +742,11 @@ module Espalier
 
     def internal_calls_by_method(modules)
       modules.each_with_object({}) do |mod, owners|
-        method_names = Array(mod[:methods]).map { |method| method[:name].to_s }.to_set
+        method_name_counts = Array(mod[:methods]).map { |method| method[:name].to_s }.tally
+        method_names = method_name_counts.filter_map { |name, count| name if count == 1 }.to_set
         owners[mod[:name].to_s] = Array(mod[:methods]).each_with_object({}) do |method, callers|
+          next unless method_name_counts[method[:name].to_s] == 1
+
           callers[method[:name].to_s] = Array(method[:delegations]).filter_map do |delegation|
             next unless delegation[:receiver].to_s == "self"
 
@@ -653,10 +787,128 @@ module Espalier
       end.compact
     end
 
+    # A call priced parametrically from its compiler symbol carries an open C.
+    # When the callables passed at that site are analyzed, C is not open, so
+    # substitute the costliest of them. Runs per fixpoint iteration, on the
+    # current summaries, rather than on the cached base nodes.
+    def substitute_callback_arguments(
+      nodes, mod, symbolic_time, complexities, time_complete, excluded_callable_ids: Set.new
+    )
+      return nodes if @callback_arg_by_call.nil? || @callback_arg_by_call.empty?
+
+      nodes.map do |node|
+        expression = node[:symbolic_time]
+        next node if expression.nil? ||
+          Espalier::SymbolicComplexity.callback_domain_ids(expression).empty?
+
+        callable_ids = Array(@callback_arg_by_call[[mod[:file], node[:span]]]).reject do |id|
+          excluded_callable_ids.include?(id)
+        end
+        callable = worst_callable(callable_ids, symbolic_time, complexities, time_complete)
+        next node unless callable
+
+        substituted = Espalier::SymbolicComplexity.substitute_callback_cost(
+          expression, callable.fetch(:expression), callable_constant: callable.fetch(:constant)
+        )
+        next node if substituted.equal?(expression)
+
+        node.merge(
+          symbolic_time: substituted,
+          known_time_complexity: Espalier::SymbolicComplexity.render(substituted)&.first ||
+            node[:known_time_complexity]
+        )
+      end
+    end
+
+    def worst_callable(ids, symbolic_time, complexities, time_complete)
+      Espalier::SymbolicComplexity.worst_callable(
+        Array(ids).map do |id|
+          key = id.to_s
+          {
+            expression: symbolic_time[key],
+            constant: complexities[key] == "O(1)" && time_complete[key] != false
+          }
+        end
+      )
+    end
+
+    # Index every call site to the callables passed there, so a caller can
+    # substitute their cost for an open callback C. Two sources of a callable:
+    # a closure literal, which lies inside the call's own span, and a named
+    # function passed positionally into a declared callback parameter.
+    #
+    # The closure rule is deliberately independent of the callee: a stdlib
+    # higher-order call is priced parametrically from its compiler symbol and
+    # has no analyzed body to declare `callback_params`, yet the closure at its
+    # call site is exactly what closes its C.
+    def callback_arguments_by_call_site(modules, methods_by_id, methods_by_owner_name, lambdas_by_file)
+      index = Hash.new { |hash, key| hash[key] = [] }
+      delegations_by_file = Hash.new { |hash, key| hash[key] = [] }
+      modules.each do |mod|
+        Array(mod[:methods]).each do |method|
+          Array(method[:delegations]).each do |delegation|
+            span = normalized_call_span(delegation[:span])
+            next unless span
+
+            delegations_by_file[mod[:file]] << span
+            named_callback_argument(mod, method, delegation, methods_by_id, methods_by_owner_name)
+              &.then { |id| index[[mod[:file], span]] << id }
+          end
+        end
+      end
+      lambdas_by_file.each do |file, lambdas|
+        spans = delegations_by_file[file]
+        lambdas.each do |lambda_method|
+          span = normalized_call_span(lambda_method[:span])
+          # Every call whose span encloses the closure may run it: in
+          # `xs.iter().map(|x| ...).collect()` the parametric cost sits on
+          # `collect`, while the closure is lexically an argument of `map`.
+          # Charging the closure to each enclosing call is the worst-case
+          # reading, and the substitution takes the costliest callable anyway.
+          spans.select { |candidate| span_contains?(candidate, span) }
+               .each { |candidate| index[[file, candidate]] << lambda_method[:id] }
+        end
+      end
+      index.transform_values { |ids| ids.compact.uniq }
+    end
+
+    def named_callback_argument(mod, method, delegation, methods_by_id, methods_by_owner_name)
+      callee = (delegation[:target_id] && methods_by_id[delegation[:target_id]]) ||
+        (delegation[:target_method] &&
+          methods_by_owner_name[[delegation[:target_owner].to_s, delegation[:target_method].to_s]])
+      return nil unless callee
+
+      params = Array(callee[:parameters]).map(&:to_s)
+      Array(callee[:callback_params]).each do |callback_param|
+        position = params.index(callback_param.to_s)
+        next unless position
+
+        argument = Array(delegation[:arguments])[position].to_s.strip
+        function = methods_by_owner_name[[method[:raw_owner].to_s, argument]] ||
+          methods_by_owner_name[[mod[:name].to_s, argument]]
+        return function[:id] if function
+      end
+      nil
+    end
+
+    def span_contains?(outer, inner)
+      return false unless outer && inner
+
+      starts = outer[0] < inner[0] || (outer[0] == inner[0] && outer[1] <= inner[1])
+      ends = outer[2] > inner[2] || (outer[2] == inner[2] && outer[3] >= inner[3])
+      starts && ends
+    end
+
+    def span_extent(span)
+      [span[2] - span[0], span[3] - span[1]]
+    end
+
     def candidate_calls_by_site(modules)
       modules.each_with_object({}) do |mod, index|
         Array(mod[:methods]).each do |method|
           Array(method[:delegations]).each do |delegation|
+            next unless delegation[:consumer_closed_candidate_set] == true
+
             candidates = Array(delegation[:candidate_target_ids]).map(&:to_s).reject(&:empty?).uniq.sort
             next if candidates.empty?
 
@@ -669,7 +921,14 @@ module Espalier
               keys.unshift([method[:id].to_s, delegation[:message].to_s, line])
               keys.unshift([method[:id].to_s, delegation[:message].to_s, span]) if span
             end
-            value = { ids: candidates, reason: delegation[:candidate_reason].to_s }
+            value = {
+              ids: candidates,
+              reason: delegation[:candidate_reason].to_s,
+              qualities: Array(delegation[:complexity_bound_quality]).map(&:to_s),
+              assumptions: Array(delegation[:complexity_assumptions]).map(&:to_s),
+              external_time: delegation[:known_time_complexity],
+              external_space: delegation[:known_space_complexity]
+            }
             keys.each do |key|
               if index.key?(key) && index[key] != value
                 index[key] = nil
@@ -839,6 +1098,8 @@ module Espalier
         index[key] = row if !index[key] || row["power"].to_i > index[key]["power"].to_i
       end
       contexts_by_line = contexts.group_by { |row| [row["message"].to_s, row["line"].to_i] }
+      callback_params = Array(method[:callback_params]).map(&:to_s).to_set
+      iterations = Array(method[:complexity_facts]).flat_map { |fact| Array(fact["iterations"]) }
       nodes = Array(method[:delegations]).map do |delegation|
         message = delegation[:message].to_s
         span = normalized_call_span(delegation[:span])
@@ -846,6 +1107,27 @@ module Espalier
         if !context
           line_rows = contexts_by_line[[message, (delegation[:line] || method[:line] || 0).to_i]]
           context = line_rows.first if line_rows&.one?
+        end
+        # A call to a callback parameter has a cost parametric in that callback
+        # (C), a complete algebraic atom that a loop composes to O(N*C) and a
+        # caller resolves by substituting the passed callable's cost.
+        callback_cost = if callback_params.include?(message) &&
+            !delegation[:target_method] && !delegation[:known_time_complexity]
+          # The callback runs once per iteration of its enclosing loop, so its
+          # cost is that loop's size domain times C. Match the loop by span
+          # containment and reuse its parameter size domain (which a caller can
+          # also substitute), giving O(N*C); no enclosing loop gives O(C).
+          cb_line = (delegation[:line] || method[:line] || 0).to_i
+          loop_fact = iterations.find do |it|
+            bounds = it["span"]
+            bounds && cb_line >= bounds[0].to_i && cb_line <= bounds[2].to_i
+          end
+          mult_id = loop_fact && Array(loop_fact.dig("symbolic_time", "factors")).first&.fetch("domain_id", nil)
+          mult_domains = mult_id ? [{ "id" => mult_id, "name" => Array(loop_fact["parameter_domains"]).first.to_s, "source_kind" => "parameter" }] : []
+          Espalier::SymbolicComplexity.parameterized_cost(
+            id: unknown_cost_id(delegation), name: message, source_kind: "callback_cost",
+            multiplicity_domain: mult_id, domains: mult_domains
+          )
         end
         {
           type: :call,
@@ -858,25 +1140,27 @@ module Espalier
           # The canonical CallRecord is enriched after syntax normalization by
           # SCIP and dependency summaries. Its exact symbol cost must outrank
           # an earlier adapter-level context model for the same source span.
-          known_time_complexity: delegation[:known_time_complexity] || (context && context["known_time_complexity"]),
+          known_time_complexity: (callback_cost && (Espalier::SymbolicComplexity.render(callback_cost)&.first || "O(C)")) ||
+            delegation[:known_time_complexity] || (context && context["known_time_complexity"]),
           known_space_complexity: delegation[:known_space_complexity] || (context && context["known_space_complexity"]),
           complexity_provenance: delegation[:complexity_provenance],
           complexity_bound_quality: delegation[:complexity_bound_quality],
           complexity_candidates: delegation[:complexity_candidates],
           complexity_assumptions: delegation[:complexity_assumptions],
-          evidence_gap: if delegation[:known_time_complexity] || delegation[:known_space_complexity]
+          evidence_gap: if delegation[:known_time_complexity] || delegation[:known_space_complexity] || callback_cost
                           nil
                         else
                           context && context["evidence_gap"]
                         end,
-          symbolic_time: parametric_call_symbolic(delegation, context) ||
+          symbolic_time: callback_cost || parametric_call_symbolic(delegation, context) ||
             (context && symbolic_call_complexity(context)),
           collection_arguments: context && context["power"].to_i.positive? &&
             (Array(context["parameter_arguments"]) & Array(context["collection_parameters"])),
           internal_call: (delegation[:receiver].to_s == "self" &&
             module_method_names.include?(delegation[:message].to_s)) ||
             (delegation[:target_owner] && delegation[:target_method] && context) ||
-            (Array(delegation[:candidate_target_ids]).any? && context)
+            (delegation[:consumer_closed_candidate_set] == true &&
+              Array(delegation[:candidate_target_ids]).any? && context)
         }.compact
       end
 
@@ -938,12 +1222,25 @@ module Espalier
       end
       reflective = quality.include?("reflective")
       Espalier::SymbolicComplexity.parameterized_cost(
-        id: "cost:#{delegation[:call_id]}",
+        id: unknown_cost_id(delegation),
         name: "#{delegation[:receiver]}.#{delegation[:message]}",
         source_kind: reflective ? "reflective_target_cost" : "callback_cost",
         multiplicity_domain: multiplicity_domain,
         domains: context_domains
       )
+    end
+
+
+    # A cost symbol names the *callee's* unknown cost, so every call to the same
+    # callee must share one symbol. Keying it on the call site instead minted a
+    # fresh C per call, producing unusable bounds (observed: 294 distinct symbols
+    # in one function) and making substitution impossible.
+    def unknown_cost_id(delegation)
+      callee = delegation[:target_id].to_s
+      callee = "#{delegation[:target_owner]}##{delegation[:target_method]}" if callee.empty? &&
+        !delegation[:target_method].to_s.empty?
+      callee = "#{delegation[:receiver]}.#{delegation[:message]}" if callee.empty?
+      "cost:#{callee}"
     end
 
     def local_types_for_signature(signature)

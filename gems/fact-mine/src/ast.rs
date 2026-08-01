@@ -216,6 +216,14 @@ pub(crate) fn preprocessor_callable_names(
     adapters::normalization_adapter(language).preprocessor_callable_names(root, source)
 }
 
+pub(crate) fn preprocessor_callable_definitions(
+    root: TreeSitterNode<'_>,
+    source: &str,
+    language: Language,
+) -> Vec<(String, String)> {
+    adapters::normalization_adapter(language).preprocessor_callable_definitions(root, source)
+}
+
 pub fn node(child: &Child) -> Option<&Node> {
     match child {
         Child::Node(node) => Some(node),
@@ -223,12 +231,29 @@ pub fn node(child: &Child) -> Option<&Node> {
     }
 }
 
+pub(crate) fn reconcile_presence_correlation_spans(
+    root: tree_sitter::Node<'_>,
+    source: &str,
+    language: Language,
+    seeds: &mut Vec<crate::syntax::nullable::PresenceCorrelationSeed>,
+) {
+    adapters::normalization_adapter(language)
+        .reconcile_presence_correlation_spans(root, source, seeds);
+}
+
 pub fn slice(node: &Node, _lines: &[String]) -> String {
     normalize_text(&node.text)
 }
 
 pub fn body_stmts(defn_node: &Node) -> Vec<&Node> {
-    let scope_index = if defn_node.r#type == "DEFS" { 2 } else { 1 };
+    // A normalized function wraps its SCOPE at a type-specific child index: a
+    // singleton-method DEFS after its receiver/name, a LAMBDA directly, an
+    // ordinary DEFN after its name.
+    let scope_index = match defn_node.r#type.as_str() {
+        "DEFS" => 2,
+        "LAMBDA" => 0,
+        _ => 1,
+    };
     let Some(scope) = defn_node.children.get(scope_index).and_then(node) else {
         return Vec::new();
     };
@@ -418,6 +443,7 @@ const STATEMENT_BLOCK_PARENT_KINDS: &[&str] = &[
     "finally_clause",
     "do_statement",
     "lambda_expression",
+    "func_literal",
 ];
 const EMPTY_BODY_WRAPPER_KINDS: &[&str] = &["body_statement", "block", "block_body", "statement"];
 const HEREDOC_BODY_WRAPPER_KINDS: &[&str] = &["body_statement", "block_body", "statement", "then"];

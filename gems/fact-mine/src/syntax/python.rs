@@ -77,6 +77,117 @@ const PYTHON_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PythonNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PythonNormalizedBehavior {
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
+        let signature = signature.trim();
+        let (Some(open), Some(close)) = (signature.find('('), signature.rfind(')')) else {
+            return super::normalized_behavior::NormalizedSignature::default();
+        };
+        let return_type = signature[close + 1..]
+            .trim()
+            .strip_prefix("->")
+            .map(|declared| {
+                declared
+                    .trim()
+                    .trim_end_matches(": ...")
+                    .trim_end_matches(':')
+                    .trim()
+                    .to_string()
+            });
+        let params = signature[open + 1..close]
+            .split(',')
+            .filter_map(|entry| {
+                let entry = entry.trim();
+                if entry.is_empty() || matches!(entry, "self" | "cls") {
+                    return None;
+                }
+                let (name, declared) = entry.split_once(':')?;
+                let name = name.trim().trim_end_matches('=');
+                let declared = declared.trim();
+                (!declared.is_empty()).then(|| (name.to_string(), declared.to_string()))
+            })
+            .collect();
+        super::normalized_behavior::NormalizedSignature {
+            return_type,
+            params,
+        }
+    }
+
+    fn source_profile_signature(
+        &self,
+        lines: &[String],
+        function: &super::FunctionDef,
+    ) -> Option<String> {
+        lines
+            .get(function.line.saturating_sub(1))
+            .map(|line| line.trim().to_string())
+            .or_else(|| Some(String::new()))
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "python-typing"
+    }
+
+    fn canonical_symbol_scope(&self) -> bool {
+        true
+    }
+
+    fn canonical_project_namespace(&self, file: &std::path::Path, _namespace: &str) -> String {
+        let mut package = Vec::new();
+        let mut directory = file.parent();
+        while let Some(current) = directory {
+            if !current.join("__init__.py").is_file() {
+                break;
+            }
+            let Some(name) = current.file_name().and_then(|name| name.to_str()) else {
+                break;
+            };
+            package.push(name.to_string());
+            directory = current.parent();
+        }
+        package.reverse();
+        let stem = file
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or_default();
+        if stem != "__init__" && !stem.is_empty() {
+            package.push(stem.to_string());
+        }
+        package.join(".")
+    }
+
+    fn canonical_project_import(
+        &self,
+        file: &std::path::Path,
+        namespace: &str,
+        target: &str,
+    ) -> String {
+        let dots = target
+            .chars()
+            .take_while(|character| *character == '.')
+            .count();
+        if dots == 0 {
+            return target.to_string();
+        }
+        let mut package = namespace.split('.').map(str::to_string).collect::<Vec<_>>();
+        if file.file_stem().and_then(|stem| stem.to_str()) != Some("__init__") {
+            package.pop();
+        }
+        for _ in 1..dots {
+            package.pop();
+        }
+        package.extend(
+            target[dots..]
+                .split('.')
+                .filter(|part| !part.is_empty())
+                .map(str::to_string),
+        );
+        package.join(".")
+    }
+
+    fn resolves_inherited_project_calls(&self) -> bool {
+        true
+    }
+
     fn owner_supertypes(&self, node: &Node) -> Vec<String> {
         let header = node.text.lines().next().unwrap_or(&node.text);
         let Some(open) = header.find('(') else {

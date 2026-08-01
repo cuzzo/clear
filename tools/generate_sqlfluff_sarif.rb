@@ -13,7 +13,7 @@ options = {
   repo: ".",
   out_dir: "tmp/generalized-gems-sarif",
   config: ".sqlfluff",
-  sql_path: "gems/lineage/sql",
+  sql_path: "gems/gigasail/giga-core/sql",
   sqlfluff_bin: "sqlfluff"
 }
 

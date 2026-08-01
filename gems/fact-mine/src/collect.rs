@@ -1,0 +1,791 @@
+//! `nil-kill collect`, without a Ruby process to drive it.
+//!
+//! Every stage below is already a FactMine function; what was left in Ruby was
+//! the order they run in, the environment the traced programs are given, and
+//! the transaction that keeps the canonical artifacts consistent. That is what
+//! this is.
+//!
+//! The traced program still has whatever runtime it has -- collecting Ruby
+//! means running Ruby -- but nothing between the command line and the evidence
+//! needs one.
+
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+pub struct Config {
+    pub root: PathBuf,
+    pub tmp_dir: PathBuf,
+    pub runtime_dir: PathBuf,
+    pub trace_plan: PathBuf,
+    pub targets: Vec<String>,
+    pub collector_extension: PathBuf,
+    pub commands: Vec<Vec<String>>,
+    pub fast: bool,
+    pub continue_on_error: bool,
+    pub shard_jobs: usize,
+}
+
+impl Config {
+    pub fn from_env(root: PathBuf, commands: Vec<Vec<String>>) -> Self {
+        let tmp_dir = std::env::var("NIL_KILL_TMP_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| root.join("tmp").join("nil-kill"));
+        let targets = std::env::var("NIL_KILL_TARGETS")
+            .unwrap_or_else(|_| "src".to_string())
+            .split(':')
+            .map(str::to_string)
+            .collect();
+        Self {
+            runtime_dir: tmp_dir.join("runtime"),
+            trace_plan: tmp_dir.join("trace-plan.json"),
+            collector_extension: collector_extension(),
+            tmp_dir,
+            root,
+            targets,
+            commands,
+            fast: false,
+            continue_on_error: false,
+            shard_jobs: std::thread::available_parallelism().map_or(4, |n| n.get()),
+        }
+    }
+
+    /// Every analyzed source file under the targets.
+    pub fn target_files(&self) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        for target in &self.targets {
+            let path = self.root.join(target);
+            collect_ruby(&path, &mut found);
+        }
+        found.sort();
+        found.dedup();
+        found
+    }
+}
+
+/// The collector object the traced program loads.
+///
+/// It ships beside this binary, not inside the project being collected, so it
+/// is found from where nil-kill is installed rather than from the analyzed
+/// root -- a collect of any repository but nil-kill's own would otherwise look
+/// for it under that repository.
+fn collector_extension() -> PathBuf {
+    const RELATIVE: &str = "gems/nil-kill/ext/nil_kill_trace/nil_kill_trace.so";
+    if let Ok(path) = std::env::var("NIL_KILL_COLLECTOR_EXTENSION") {
+        return PathBuf::from(path);
+    }
+    // target/<profile>/fact-mine-rust -> the workspace holding both gems.
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.ancestors().nth(5).map(|root| root.join(RELATIVE)))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from(RELATIVE))
+}
+
+fn collect_ruby(path: &Path, into: &mut Vec<PathBuf>) {
+    if path.is_file() {
+        if path.extension().is_some_and(|e| e == "rb") {
+            into.push(path.to_path_buf());
+        }
+        return;
+    }
+    for entry in std::fs::read_dir(path).into_iter().flatten().flatten() {
+        collect_ruby(&entry.path(), into);
+    }
+}
+
+fn stage<T>(name: &str, body: impl FnOnce() -> Result<T>) -> Result<T> {
+    if std::env::var("NIL_KILL_STAGE_TIMING").as_deref() != Ok("1") {
+        return body();
+    }
+    let started = std::time::Instant::now();
+    let out = body();
+    eprintln!("stage {name:<26} {:6.2}s", started.elapsed().as_secs_f64());
+    out
+}
+
+/// The one shard per command a workload gets when no test runner is
+/// recognizable. Nothing about such a command says which part of it a source
+/// change affects, so every one of them reruns.
+fn opaque_shards(commands: &[Vec<String>]) -> Vec<Value> {
+    use sha2::{Digest, Sha256};
+    commands
+        .iter()
+        .enumerate()
+        .map(|(at, command)| {
+            let digest = format!("{:x}", Sha256::digest(serde_json::to_string(command).unwrap_or_default().as_bytes()));
+            json!({
+                "id": format!("command-{at}-{}", &digest[..12]),
+                "command": command,
+                "test_path": "",
+            })
+        })
+        .collect()
+}
+
+/// The workload in the shape a manifest stores it: the tests and support files
+/// whose fingerprints decide what reruns, and one shard per test.
+fn workload_value(commands: &[Vec<String>], config: &Config, files: &[PathBuf]) -> Value {
+    use sha2::{Digest, Sha256};
+    let command_digest = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_string(commands).unwrap_or_default().as_bytes())
+    );
+    let fingerprints = |paths: &[String]| {
+        let mut map = Map::new();
+        for path in paths {
+            if let Some(fingerprint) =
+                crate::source_fingerprint::of_file(&config.root.join(path))
+            {
+                map.insert(path.clone(), json!(fingerprint));
+            }
+        }
+        Value::Object(map)
+    };
+    let planned = commands
+        .iter()
+        .find_map(|command| crate::workload_plan::build(files, command, &config.root));
+    match planned {
+        Some(plan) => {
+            let mut shards = Map::new();
+            for shard in &plan.shards {
+                shards.insert(
+                    shard.id.clone(),
+                    json!({"command": shard.command, "test_path": shard.test_path}),
+                );
+            }
+            json!({
+                "mode": plan.mode,
+                "commands": commands,
+                "command_digest": command_digest,
+                "tests": fingerprints(&plan.test_paths),
+                "support_files": fingerprints(&plan.support_paths),
+                "shards": Value::Object(shards),
+            })
+        }
+        None => {
+            let mut shards = Map::new();
+            for shard in opaque_shards(commands) {
+                shards.insert(
+                    shard["id"].as_str().unwrap_or_default().to_string(),
+                    json!({"command": shard["command"], "test_path": ""}),
+                );
+            }
+            json!({
+                "mode": "opaque",
+                "commands": commands,
+                "command_digest": command_digest,
+                "tests": {},
+                "support_files": {},
+                "shards": Value::Object(shards),
+            })
+        }
+    }
+}
+
+/// Every source file a collect must not report as production code.
+fn nonproduction(workload: &Value) -> Vec<String> {
+    let mut paths = ["tests", "support_files"]
+        .iter()
+        .flat_map(|field| {
+            workload[*field].as_object().into_iter().flatten().map(|(key, _)| key.clone())
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+pub fn run(config: &Config) -> Result<()> {
+    if config.commands.is_empty() && !config.fast {
+        bail!("nil-kill collect requires a command: collect [--fast] -- <command...>");
+    }
+    std::fs::create_dir_all(&config.runtime_dir)?;
+    let previous = if config.fast {
+        Some(crate::snapshot::load(&config.runtime_dir)?)
+    } else {
+        None
+    };
+
+    // ---- the plan --------------------------------------------------------
+    stage("trace-plan", || {
+        if std::env::var("NIL_KILL_TRACE_PLAN").as_deref() == Ok("0") {
+            return Ok(());
+        }
+        write_trace_plan(config)
+    })?;
+    let plan: Value = std::fs::read_to_string(&config.trace_plan)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| json!({}));
+    let plan_digest = plan["runtime_evidence"]["plan_digest"].as_str().unwrap_or("").to_string();
+
+    let files = config.target_files();
+    let inventory_path = config.tmp_dir.join("function-inventory.json");
+    stage("function-inventory", || {
+        let mut args = vec![
+            "nil-kill-function-inventory".to_string(),
+            "--output".into(), inventory_path.to_string_lossy().to_string(),
+            "--root".into(), config.root.to_string_lossy().to_string(),
+        ];
+        if config.trace_plan.is_file() {
+            args.push("--plan".into());
+            args.push(config.trace_plan.to_string_lossy().to_string());
+        }
+        for file in &files {
+            args.push("--file".into());
+            args.push(file.to_string_lossy().to_string());
+        }
+        self_call(&args)
+    })?;
+    let inventory: Value = serde_json::from_str(&std::fs::read_to_string(&inventory_path)?)?;
+
+    // ---- what to run -----------------------------------------------------
+    // An incremental collect with no command of its own reruns the workload the
+    // snapshot recorded -- the command it recorded, not the plan: replanning is
+    // what notices a test file that was added or deleted since, and
+    // re-fingerprints the ones that are still there.
+    let commands = match previous.as_ref() {
+        Some(manifest) if config.commands.is_empty() => manifest["workload"]["commands"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|command| {
+                command
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|part| part.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>(),
+        _ => config.commands.clone(),
+    };
+    if commands.is_empty() {
+        bail!("nil-kill collect requires a command: collect [--fast] -- <command...>");
+    }
+    let workload = workload_value(&commands, config, &files);
+    // The environment is asked of the commands the workload will actually run,
+    // not of this invocation's argv -- `--fast` on its own has none, and an
+    // environment that changed shape between two collects would read as a
+    // changed runtime and retrace everything.
+    let workload_commands = workload["shards"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(_, shard)| {
+            shard["command"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|part| part.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let selection = match previous.as_ref() {
+        Some(manifest) => crate::snapshot::select(&crate::snapshot::Increment {
+            manifest,
+            current_hashes: &crate::snapshot::source_hashes(&files, &config.root),
+            current_environment: &crate::snapshot::environment(&config.root, &workload_commands),
+            functions: &inventory,
+            workload: &workload,
+            trace_plan_digest: &plan_digest,
+        }),
+        None => crate::snapshot::full_selection(
+            &files, &config.root, &inventory, &workload, &plan_digest, &workload_commands,
+        ),
+    };
+    if config.fast && !selection["rebuild"].as_bool().unwrap_or(true) {
+        println!(
+            "nil-kill: incremental snapshot is current; \
+             no semantic source/test changes, workload skipped"
+        );
+        return Ok(());
+    }
+
+    let wanted = selection["selected_shards"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|id| id.as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    let shards = wanted
+        .iter()
+        .filter_map(|id| {
+            let shard = workload["shards"].get(id)?;
+            Some(json!({
+                "id": id,
+                "command": shard["command"],
+                "test_path": shard["test_path"],
+            }))
+        })
+        .collect::<Vec<_>>();
+
+    let generation = previous
+        .as_ref()
+        .map_or(0, |manifest| manifest["generation"].as_i64().unwrap_or_default() + 1);
+    let working = config
+        .runtime_dir
+        .join(if config.fast { "increments" } else { "runs" })
+        .join(format!("{generation:06}"));
+    let _ = std::fs::remove_dir_all(&working);
+    std::fs::create_dir_all(&working)?;
+
+    // Tests and their support files are what a collect must not report as
+    // production code. Getting this wrong does not fail a collect -- it
+    // publishes the test suite's own methods as observed production evidence.
+    let roles = working.join("source-roles.json");
+    std::fs::write(
+        &roles,
+        serde_json::to_string(&json!({"nonproduction": nonproduction(&workload)}))?,
+    )?;
+
+    // ---- run them --------------------------------------------------------
+    // No more workers than there is work for them to do; what is left over is
+    // the parallelism each shard's own workload may use.
+    let shard_jobs = config.shard_jobs.max(1).min(shards.len().max(1));
+    let runs = shards
+        .iter()
+        .map(|shard| {
+            let id = shard["id"].as_str().unwrap_or_default().to_string();
+            let dir = working.join(&id);
+            std::fs::create_dir_all(&dir).ok();
+            let run_id = format!("{generation}:{id}:{}", uuid());
+            let mut env: BTreeMap<String, Option<String>> = BTreeMap::new();
+            for (key, value) in std::env::vars() {
+                env.insert(key, Some(value));
+            }
+            env.insert("NIL_KILL_TRACE".into(), Some("1".into()));
+            env.insert("NIL_KILL_RUNTIME_SCIP".into(), Some("1".into()));
+            env.insert("NIL_KILL_ROOT".into(), Some(config.root.to_string_lossy().to_string()));
+            env.insert("NIL_KILL_SOURCE_ROLES".into(), Some(roles.to_string_lossy().to_string()));
+            env.insert("NIL_KILL_RUNTIME_DIR".into(), Some(dir.to_string_lossy().to_string()));
+            env.insert("NIL_KILL_RUN_ID".into(), Some(run_id));
+            env.insert("NIL_KILL_SHARD_ID".into(), Some(id.clone()));
+            // A workload that runs its tests in a different order each time
+            // observes different state and records different values.
+            env.insert(
+                "SEED".into(),
+                Some(std::env::var("NIL_KILL_WORKLOAD_SEED").unwrap_or_else(|_| "0".into())),
+            );
+            // The workload's own parallelism, divided by how many shards run at
+            // once. A workload that picks its own thread count observes
+            // different interleavings and records different values.
+            let inner = (config.shard_jobs.max(1) / shard_jobs.max(1)).max(1).to_string();
+            for key in ["WORKERS", "NK_JOBS", "NIL_KILL_JOBS"] {
+                if std::env::var(key).is_err() {
+                    env.insert(key.into(), Some(inner.clone()));
+                }
+            }
+            let project = config
+                .root
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default();
+            env.entry("NIL_KILL_PROJECT_NAME".into()).or_insert(Some(project));
+            env.entry("NIL_KILL_PROJECT_VERSION".into())
+                .or_insert(Some(head_revision(&config.root)));
+            let rubyopt = format!(
+                "{} -r{}",
+                std::env::var("RUBYOPT").unwrap_or_default(),
+                config.collector_extension.display()
+            );
+            env.insert("RUBYOPT".into(), Some(rubyopt.trim().to_string()));
+            crate::shard_runner::Shard {
+                id,
+                command: shard["command"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|part| part.as_str().map(str::to_string))
+                    .collect(),
+                env,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let failed = crate::shard_runner::run(&crate::shard_runner::Plan {
+        shards: runs,
+        jobs: shard_jobs,
+        continue_on_error: config.continue_on_error,
+        banner: String::new(),
+    })?;
+    if !failed.is_empty() {
+        // The previous evidence stays exactly where it is, and the manifest
+        // says it is now older than the source beside it.
+        if let Some(manifest) = previous.as_ref() {
+            crate::snapshot::mark_stale(
+                &config.runtime_dir,
+                manifest,
+                &format!("required trace shard(s) failed: {}", failed.join(", ")),
+                &selection,
+                &timestamp(),
+            )?;
+        }
+        bail!(
+            "required trace shard(s) failed; canonical evidence was not replaced: {}",
+            failed.join(", ")
+        );
+    }
+
+    let shard_dirs = shards
+        .iter()
+        .map(|shard| working.join(shard["id"].as_str().unwrap_or_default()))
+        .collect::<Vec<_>>();
+
+    // ---- what the collector saw becomes what it means --------------------
+    let root = config.root.to_string_lossy().to_string();
+    let plan_path = config.trace_plan.to_string_lossy().to_string();
+    if !shard_dirs.is_empty() {
+        stage("derive-domains", || {
+            let mut args = vec!["nil-kill-derive-domains".to_string(),
+                "--root".into(), root.clone(),
+                "--source-roles".into(), roles.to_string_lossy().to_string()];
+            for dir in &shard_dirs {
+                for path in raw_documents(dir) {
+                    args.push("--input".into());
+                    args.push(path.to_string_lossy().to_string());
+                }
+            }
+            self_call(&args)
+        })?;
+        stage("collector-export", || {
+            let mut args = vec!["nil-kill-collector-export".to_string(),
+                "--root".into(), root.clone(), "--plan".into(), plan_path.clone(),
+                "--source-roles".into(), roles.to_string_lossy().to_string()];
+            for dir in &shard_dirs {
+                args.push("--runtime-dir".into());
+                args.push(dir.to_string_lossy().to_string());
+            }
+            self_call(&args)
+        })?;
+    }
+
+    // ---- what each shard reached -----------------------------------------
+    // An incremental collect reruns a shard when a function it depended on
+    // changed, so every shard that ran records what it touched.
+    let bookkeeping = config.tmp_dir.join("shard-bookkeeping.json");
+    if !shard_dirs.is_empty() {
+        stage("shard-bookkeeping", || {
+            let mut args = vec!["nil-kill-shard-bookkeeping".to_string(),
+                "--inventory".into(), inventory_path.to_string_lossy().to_string(),
+                "--output".into(), bookkeeping.to_string_lossy().to_string(),
+                "--root".into(), root.clone()];
+            for dir in &shard_dirs {
+                args.push("--shard".into());
+                args.push(dir.to_string_lossy().to_string());
+            }
+            self_call(&args)
+        })?;
+    }
+    let answers: Value = std::fs::read_to_string(&bookkeeping)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| json!({}));
+
+    // Carried forward from the previous snapshot, replaced for the shards that
+    // ran, dropped for the shards that no longer exist.
+    let mut dependencies = previous
+        .as_ref()
+        .map_or_else(|| json!({}), |manifest| manifest["dependencies"].clone());
+    let mut callsites = previous
+        .as_ref()
+        .map_or_else(|| json!({}), |manifest| manifest["callsites"].clone());
+    for shard in &shards {
+        let id = shard["id"].as_str().unwrap_or_default();
+        let answer = &answers[id];
+        dependencies[id] = answer["dependencies"].clone();
+        callsites[id] = answer["callsites"].clone();
+    }
+    for id in selection["deleted_shards"].as_array().into_iter().flatten() {
+        let id = id.as_str().unwrap_or_default();
+        dependencies.as_object_mut().map(|map| map.remove(id));
+        callsites.as_object_mut().map(|map| map.remove(id));
+    }
+
+    if !shard_dirs.is_empty() {
+        stage("trace-documents", || {
+            let mut args = vec!["nil-kill-trace-document".to_string(),
+                "--root".into(), root.clone(), "--plan".into(), plan_path.clone()];
+            for dir in &shard_dirs {
+                args.push("--runtime-dir".into());
+                args.push(dir.to_string_lossy().to_string());
+            }
+            self_call(&args)
+        })?;
+    }
+
+    // ---- join, merge, index ---------------------------------------------
+    let merged = working.join("merged-evidence.v1.json.gz");
+    if !shard_dirs.is_empty() {
+        let traces = shard_dirs
+            .iter()
+            .map(|dir| dir.join("runtime-trace.json.gz"))
+            .collect::<Vec<_>>();
+        stage("join", || {
+            let mut args = vec!["runtime-trace".to_string(),
+                "--root".into(), root.clone(), "--plan".into(), plan_path.clone(),
+                "--merged-output".into(), merged.to_string_lossy().to_string()];
+            for trace in &traces {
+                args.push("--runtime-trace".into());
+                args.push(trace.to_string_lossy().to_string());
+            }
+            self_call(&args)
+        })?;
+    }
+
+    // Every shard the workload currently has, taking this run's evidence where
+    // it ran and the stored evidence where it did not. That is what makes an
+    // incremental collect a complete one.
+    let store = config.runtime_dir.join("shard-evidence");
+    std::fs::create_dir_all(&store)?;
+    let staged = shards
+        .iter()
+        .map(|shard| {
+            let id = shard["id"].as_str().unwrap_or_default().to_string();
+            let path = working.join(&id).join("runtime-evidence.v1.json.gz");
+            (id, path)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let current = strings(&workload["shards"]);
+    let destinations = current
+        .iter()
+        .map(|id| (id.clone(), store.join(format!("{id}.json.gz"))))
+        .collect::<BTreeMap<_, _>>();
+    let effective = current
+        .iter()
+        .filter_map(|id| match staged.get(id) {
+            Some(path) => Some(path.clone()),
+            None => destinations.get(id).filter(|path| path.is_file()).cloned(),
+        })
+        .collect::<Vec<_>>();
+
+    let canonical = config.runtime_dir.join("runtime-evidence.v1.json.gz");
+    let index = config.runtime_dir.join("runtime.scip.json");
+    let attestation = config.runtime_dir.join("runtime-attestation.json.gz");
+    let mut guarded = vec![
+        canonical.clone(),
+        index.clone(),
+        attestation.clone(),
+        config.runtime_dir.join(crate::snapshot::MANIFEST),
+    ];
+    guarded.extend(destinations.values().cloned());
+    for id in selection["deleted_shards"].as_array().into_iter().flatten() {
+        guarded.push(store.join(format!("{}.json.gz", id.as_str().unwrap_or_default())));
+    }
+    let saved = crate::canonical_transaction::save(
+        &guarded,
+        &config.tmp_dir.join("canonical-transaction.d"),
+    )?;
+
+    let finish = || -> Result<()> {
+        stage("evidence-merge", || {
+            // This run's shards are the whole canonical set, so the join
+            // already merged them; otherwise stored evidence mixes in.
+            let only_this_run = effective.len() == staged.len()
+                && staged.values().all(|path| effective.contains(path));
+            if only_this_run && merged.is_file() {
+                std::fs::copy(&merged, &canonical)?;
+                return Ok(());
+            }
+            let mut args = vec!["nil-kill-merge-evidence".to_string(),
+                "--output".into(), canonical.to_string_lossy().to_string(),
+                "--plan".into(), plan_path.clone()];
+            for path in &effective {
+                args.push("--input".into());
+                args.push(path.to_string_lossy().to_string());
+            }
+            self_call(&args)
+        })?;
+        // The overlay re-derives the plan from source to check the snapshot
+        // still matches, and reads the runtime-evidence contract rather than
+        // the private instrumentation controls beside it.
+        let evidence_plan = config.tmp_dir.join("runtime-evidence-contract.json");
+        std::fs::write(&evidence_plan, serde_json::to_string(&plan["runtime_evidence"])?)?;
+        stage("scip-index", || {
+            self_call(&["nil-kill-scip-index".to_string(),
+                "--runtime-dir".into(), working.to_string_lossy().to_string(),
+                "--evidence".into(), canonical.to_string_lossy().to_string(),
+                "--plan".into(), evidence_plan.to_string_lossy().to_string(),
+                "--output".into(), index.to_string_lossy().to_string(),
+                "--attestation".into(), attestation.to_string_lossy().to_string(),
+                "--root".into(), root.clone()])
+        })?;
+
+        // The store is what the next incremental collect reuses, so it moves
+        // inside the transaction with everything else.
+        for (id, path) in &staged {
+            if path.is_file() {
+                std::fs::copy(path, destinations.get(id).context("shard has no destination")?)?;
+            }
+        }
+        for id in selection["deleted_shards"].as_array().into_iter().flatten() {
+            let path = store.join(format!("{}.json.gz", id.as_str().unwrap_or_default()));
+            if path.is_file() {
+                std::fs::remove_file(&path)?;
+            }
+        }
+
+        let written = crate::snapshot::Written {
+            runtime_dir: &config.runtime_dir,
+            root: &config.root,
+            evidence: &canonical,
+            dependencies: dependencies.clone(),
+            callsites: callsites.clone(),
+        };
+        match previous.as_ref() {
+            Some(manifest) => {
+                crate::snapshot::write_incremental(&written, manifest, &selection, &timestamp())?
+            }
+            None => crate::snapshot::write_full(&written, &selection, &timestamp())?,
+        };
+        Ok(())
+    };
+    if let Err(error) = finish() {
+        crate::canonical_transaction::restore(&saved).ok();
+        return Err(error);
+    }
+    if config.fast {
+        println!(
+            "nil-kill: updated compressed canonical snapshot generation {generation}; \
+             {} changed functions, {} changed tests, {} traced shards",
+            selection["changed_functions"].as_array().map_or(0, Vec::len),
+            selection["changed_tests"].as_array().map_or(0, Vec::len),
+            shards.len()
+        );
+    }
+    Ok(())
+}
+
+/// Every key of a JSON object, in order.
+fn strings(value: &Value) -> Vec<String> {
+    value.as_object().into_iter().flatten().map(|(key, _)| key.clone()).collect()
+}
+
+/// When a collect happened, which the manifest records and nothing compares.
+fn timestamp() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let days = seconds / 86_400;
+    let (mut year, mut remaining) = (1970u64, days);
+    loop {
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        let length = if leap { 366 } else { 365 };
+        if remaining < length {
+            break;
+        }
+        remaining -= length;
+        year += 1;
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let lengths = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 0;
+    while remaining >= lengths[month] {
+        remaining -= lengths[month];
+        month += 1;
+    }
+    format!(
+        "{year:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        month + 1,
+        remaining + 1,
+        (seconds % 86_400) / 3600,
+        (seconds % 3600) / 60,
+        seconds % 60
+    )
+}
+
+fn raw_documents(dir: &Path) -> Vec<PathBuf> {
+    let mut found = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name().is_some_and(|name| {
+                let name = name.to_string_lossy();
+                name.starts_with("collector-raw-") && name.ends_with(".json.gz")
+            })
+        })
+        .collect::<Vec<_>>();
+    found.sort();
+    found
+}
+
+/// The commit a collect ran against, which is the workspace package's version.
+fn head_revision(root: &Path) -> String {
+    std::process::Command::new("git")
+        .args(["-C", &root.to_string_lossy(), "rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| "workspace".to_string())
+}
+
+/// A run identity that is unique per shard per collect.
+fn uuid() -> String {
+    use sha2::{Digest, Sha256};
+    let seed = format!(
+        "{:?}{}",
+        std::time::SystemTime::now(),
+        std::process::id()
+    );
+    format!("{:x}", Sha256::digest(seed.as_bytes()))[..32].to_string()
+}
+
+/// A stage, run as its own invocation of this binary. Each is already a
+/// verified subcommand; collect decides the order and the environment.
+fn self_call(args: &[String]) -> Result<()> {
+    let binary = std::env::current_exe().context("cannot locate the fact-mine binary")?;
+    let name = args.first().cloned().unwrap_or_default();
+    let status = std::process::Command::new(&binary)
+        .args(args)
+        .status()
+        .with_context(|| format!("failed to run {name}"))?;
+    if !status.success() {
+        bail!("fact-mine {name} failed");
+    }
+    Ok(())
+}
+
+fn write_trace_plan(config: &Config) -> Result<()> {
+    let files = config.target_files();
+    if files.is_empty() {
+        return Ok(());
+    }
+    let text = |path: &Path| path.to_string_lossy().to_string();
+    let facts = config.tmp_dir.join("static-facts.json");
+    let evidence = config.tmp_dir.join("runtime-evidence-plan.json");
+    let mut profile = vec!["profile".to_string(), "trace-plan".into(),
+                           "--output".into(), text(&facts)];
+    let mut runtime = vec!["runtime-plan".to_string(), "--output".into(), text(&evidence),
+                           "--root".into(), text(&config.root)];
+    for file in &files {
+        profile.push(text(file));
+        runtime.push(text(file));
+    }
+    self_call(&profile)?;
+    self_call(&runtime)?;
+
+    let mut args = vec!["nil-kill-trace-plan".to_string(),
+        "--raw-facts".into(), text(&facts),
+        "--runtime-plan".into(), text(&evidence),
+        "--output".into(), text(&config.trace_plan),
+        "--root".into(), text(&config.root)];
+    let mut sidecar = vec!["nil-kill-collector-plan".to_string(),
+        "--plan".into(), text(&config.trace_plan),
+        "--output".into(), text(&config.tmp_dir.join("collector-plan.tsv")),
+        "--root".into(), text(&config.root)];
+    for target in &config.targets {
+        for list in [&mut args, &mut sidecar] {
+            list.push("--target-dir".into());
+            list.push(text(&config.root.join(target)));
+        }
+    }
+    self_call(&args)?;
+    self_call(&sidecar)
+}

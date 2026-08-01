@@ -20,6 +20,11 @@
     },
     {
       "boundaries": [],
+      "method": "method",
+      "statements": []
+    },
+    {
+      "boundaries": [],
       "method": "OtherFunc",
       "statements": []
     }
@@ -89,9 +94,13 @@
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
       }
     ],
     "control_flow_metrics": [
+      {},
       {},
       {}
     ],
@@ -125,12 +134,24 @@
         "id": "cfg:(top-level)#OtherFunc:exit:1:8:17",
         "kind": "exit",
         "line": 8
+      },
+      {
+        "id": "cfg:Local#method:entry:0:4:8",
+        "kind": "entry",
+        "line": 4
+      },
+      {
+        "id": "cfg:Local#method:exit:1:4:26",
+        "kind": "exit",
+        "line": 4
       }
     ],
     "decisions": [],
     "def_use": [],
     "dispatch_sites": [],
     "dominators": [
+      {},
+      {},
       {},
       {},
       {},
@@ -168,6 +189,8 @@
       {},
       {},
       {},
+      {},
+      {},
       {}
     ],
     "local_complexity_scores": [
@@ -178,6 +201,11 @@
       },
       {
         "id": "(top-level)#OtherFunc",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "Local#method",
         "score": 0.0,
         "signals": {}
       }
@@ -233,9 +261,26 @@
         "name": "OtherFunc",
         "owner": "(top-level)",
         "statements": []
+      },
+      {
+        "boundaries": [],
+        "id": "Local#method",
+        "line": 4,
+        "local_contract_assignments": {},
+        "name": "method",
+        "owner": "Local",
+        "statements": []
       }
     ],
     "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
       {
         "reads": [],
         "writes": []
@@ -320,6 +365,8 @@
       }
     ],
     "reachability": [
+      {},
+      {},
       {},
       {},
       {},

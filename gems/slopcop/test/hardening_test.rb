@@ -453,6 +453,45 @@ class SlopCopHardeningTest < Minitest::Test
     end
   end
 
+  def test_decomplex_legacy_sarif_normalizes_and_compacts_public_output
+    legacy = Decomplex::LegacySarif
+    rule = legacy.rule(
+      id: :dynamic_rule,
+      short_description: "dynamic path",
+      full_description: "",
+      properties: { state: :review, nested: [:symbol] }
+    )
+    duplicate = legacy.rule(id: "dynamic_rule")
+    invalid = legacy.rule(id: nil)
+    result = legacy.result(
+      rule_id: :dynamic_rule,
+      message: "needs review",
+      path: "./lib\\sample.rb",
+      line: 0,
+      start_column: 0,
+      end_line: 2,
+      end_column: 0,
+      properties: { reason: :dynamic },
+      partial_fingerprints: { stable: :fingerprint }
+    )
+
+    document = legacy.document(
+      tool_name: "decomplex",
+      rules: [rule, duplicate, invalid],
+      results: [result],
+      information_uri: "",
+      properties: { source: :test }
+    )
+    driver = document.fetch("runs").first.fetch("tool").fetch("driver")
+    assert_equal ["dynamic_rule"], driver.fetch("rules").map { |row| row.fetch("id") }
+    location = document.fetch("runs").first.fetch("results").first.fetch("locations").first
+    assert_equal "lib/sample.rb", location.dig("physicalLocation", "artifactLocation", "uri")
+    assert_equal 1, location.dig("physicalLocation", "region", "startLine")
+    refute location.dig("physicalLocation", "region").key?("startColumn")
+    assert_equal "review", driver.fetch("rules").first.dig("properties", "state")
+    assert_includes legacy.json(tool_name: "decomplex", rules: [rule], results: []).to_s, '"version"'
+  end
+
   def test_mutation_facts_policy_lookup_and_risk_profiles
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "src"))

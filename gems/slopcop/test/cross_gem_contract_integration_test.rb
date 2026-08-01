@@ -11,7 +11,7 @@ class CrossGemContractIntegrationTest < Minitest::Test
   def setup
     @fact_mine_bin = File.expand_path("../../fact-mine/target/release/fact-mine-rust", __dir__)
     @espalier_bin = File.expand_path("../../espalier/exe/espalier", __dir__)
-    @lineage_bin = File.expand_path("../../lineage/target/release/lineage", __dir__)
+    @lineage_bin = File.expand_path("../../gigasail/target/release/giga", __dir__)
     @slopcop_bin = File.expand_path("../exe/slopcop", __dir__)
 
     # Ensure all binaries exist
@@ -95,6 +95,7 @@ class CrossGemContractIntegrationTest < Minitest::Test
         # Check path normalized relative to repo
         assert_equal ["src/app.rb", "ruby", "nil-kill", "ruby_callback_invocation"], rows[0]
         assert_equal ["src/utils.c", "c", "lsan", "c_lsan_lifetime"], rows[1]
+        db.close
 
         # Run SlopCop findings check
         sarif_out = "slopcop_rel.sarif"
@@ -109,10 +110,12 @@ class CrossGemContractIntegrationTest < Minitest::Test
         run_cmd!([@lineage_bin, "ingest-sarif", "--db", db_path, "--repo=.", "--input", sarif_out, "--source", "slopcop", "--commit", commit_sha, "--replace"])
 
         # Verify ingested findings in Lineage SQLite db
+        db = SQLite3::Database.new(db_path)
         findings_rows = db.execute("SELECT path, rule_id, start_line FROM sarif_findings ORDER BY path")
         assert_equal 2, findings_rows.size
         assert_equal ["src/app.rb", "slopcop-ruby-metaprogramming-uncovered", 2], findings_rows[0]
         assert_equal ["src/utils.c", "slopcop-c-lsan-uncovered", 3], findings_rows[1]
+        db.close
       end
 
       # --- Test Contract Scenario 2: Running with Absolute Inputs and Different Working Directory ---
@@ -146,6 +149,7 @@ class CrossGemContractIntegrationTest < Minitest::Test
           db = SQLite3::Database.new(db_path)
           rows = db.execute("SELECT path, language, required_evidence, hazard_type FROM unit_hazards ORDER BY path")
           assert_equal 2, rows.size
+          db.close
 
           # Run SlopCop pointing to the repo using absolute --repo path
           sarif_out = File.join(external_dir, "slopcop_abs.sarif")
@@ -155,10 +159,12 @@ class CrossGemContractIntegrationTest < Minitest::Test
           # Ingest absolute-repo SARIF into Lineage
           run_cmd!([@lineage_bin, "ingest-sarif", "--db", db_path, "--repo=#{repo_dir}", "--input", sarif_out, "--source", "slopcop", "--commit", commit_sha, "--replace"])
 
+          db = SQLite3::Database.new(db_path)
           findings_rows = db.execute("SELECT path, rule_id, start_line FROM sarif_findings ORDER BY path")
           assert_equal 2, findings_rows.size
           assert_equal ["src/app.rb", "slopcop-ruby-metaprogramming-uncovered", 2], findings_rows[0]
           assert_equal ["src/utils.c", "slopcop-c-lsan-uncovered", 3], findings_rows[1]
+          db.close
         end
       end
     end

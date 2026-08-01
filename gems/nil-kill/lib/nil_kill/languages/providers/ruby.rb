@@ -1,7 +1,10 @@
 # typed: false
 # frozen_string_literal: true
 
+require_relative "../../runtime/environment_claims"
 require_relative "ruby/sorbet"
+require "open3"
+require "tempfile"
 
 module NilKill
   module Languages
@@ -41,6 +44,7 @@ module NilKill
             collection_observed
             hash_shape_observed
             call_edge
+            runtime_call
             coverage
           ]
         end
@@ -55,13 +59,27 @@ module NilKill
             "collections" => true,
             "hash_shapes" => true,
             "call_edges" => true,
-            "line_coverage" => true
+            "line_coverage" => true,
+            "runtime_scip_calls" => true
           )
         end
 
         def notes
-          ["runtime collection uses the existing nil-kill collect command and Ruby source instrumentation"]
+          [
+            "runtime collection uses the existing nil-kill collect command and Ruby source instrumentation",
+            "FactMine overlays runtime values on its normalized CFG/DFG and emits inferred SCIP",
+          ]
         end
+
+
+
+
+
+
+
+
+
+
 
         def return_type_index(root:)
           sorbet.return_type_index(root: root)

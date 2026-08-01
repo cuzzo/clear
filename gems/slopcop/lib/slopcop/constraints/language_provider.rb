@@ -59,9 +59,20 @@ module SlopCop
         evidence.line_covered?(evidence_type, path, line)
       end
 
+      # Directories holding what a program serves rather than what it is.
+      # Excluded for every language rather than repeated in each provider's
+      # list, because a served bundle is not a language-specific concern.
+      # giga-ui's lives here: a hand-written app.js beside a content-hashed,
+      # minified diff viewer whose single 122,875-character line takes
+      # tree-sitter tens of minutes to parse. Three such scans exhausted this
+      # job's 60-minute budget.
+      SERVED_DIRS = %w[assets].freeze
+
       def excluded_path?(path, dirs:, file_suffixes: [])
         parts = path.split("/")
-        return true if parts.any? { |part| dirs.include?(part) || part.start_with?(".") }
+        return true if parts.any? do |part|
+          dirs.include?(part) || SERVED_DIRS.include?(part) || part.start_with?(".")
+        end
 
         file_suffixes.any? { |suffix| path.end_with?(suffix) }
       end

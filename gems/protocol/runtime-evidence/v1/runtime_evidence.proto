@@ -1,0 +1,264 @@
+syntax = "proto3";
+
+package factmine.runtime.v1;
+
+// Canonical source-to-runtime contract shared by FactMine and runtime
+// collectors. Ranges follow SCIP: zero-based, half-open, with an explicit
+// document position encoding. Semantic entities use canonical SCIP symbols.
+
+enum PositionEncoding {
+  POSITION_ENCODING_UNSPECIFIED = 0;
+  UTF8_CODE_UNIT_OFFSET_FROM_LINE_START = 1;
+  UTF16_CODE_UNIT_OFFSET_FROM_LINE_START = 2;
+  UTF32_CODE_UNIT_OFFSET_FROM_LINE_START = 3;
+}
+
+message ToolInfo {
+  string name = 1;
+  string version = 2;
+  repeated string arguments = 3;
+}
+
+message SourceRange {
+  uint32 start_line = 1;
+  uint32 start_character = 2;
+  uint32 end_line = 3;
+  uint32 end_character = 4;
+}
+
+enum AnchorKind {
+  ANCHOR_KIND_UNSPECIFIED = 0;
+  FUNCTION_ENTRY = 1;
+  FUNCTION_RETURN = 2;
+  CALL_SELECTOR = 3;
+  STATE_READ = 4;
+  STATE_WRITE = 5;
+  CALLBACK_ENTRY = 6;
+  COLLECTION_OPERATION = 7;
+  BRANCH_PREDICATE = 8;
+}
+
+enum EvidenceKind {
+  EVIDENCE_KIND_UNSPECIFIED = 0;
+  PARAMETER_VALUE = 1;
+  RETURN_VALUE = 2;
+  RECEIVER_VALUE = 3;
+  CALL_TARGET = 4;
+  RESULT_VALUE = 5;
+  BOOLEAN_RESULT = 6;
+  STATE_VALUE = 7;
+  COLLECTION_VALUE = 8;
+}
+
+message PlannedDocument {
+  string relative_path = 1;
+  string language = 2;
+  PositionEncoding position_encoding = 3;
+  bytes content_sha256 = 4;
+}
+
+message SourceAnchor {
+  // A FactMine-generated document-local SCIP symbol.
+  string symbol = 1;
+  string relative_path = 2;
+  SourceRange range = 3;
+  AnchorKind kind = 4;
+  string enclosing_symbol = 5;
+  bytes semantic_digest = 6;
+  // Informational only. Joining always uses symbol + semantic_digest.
+  string display_name = 7;
+}
+
+message EvidenceRequest {
+  SourceAnchor anchor = 1;
+  repeated EvidenceKind required = 2;
+  SourceAnchor activation_anchor = 3;
+  optional uint32 parameter_ordinal = 4;
+  // The complete source expression whose evaluation attempts this anchor.
+  // FactMine owns this normalized range. Collectors may use it only to emit
+  // an opaque exact-execution marker; it carries no flow or target inference.
+  SourceRange execution_range = 5;
+}
+
+message TracePlan {
+  uint32 protocol_version = 1;
+  ToolInfo producer = 2;
+  string project_root = 3;
+  bytes plan_digest = 4;
+  repeated PlannedDocument documents = 5;
+  repeated EvidenceRequest requests = 6;
+}
+
+enum Authority {
+  AUTHORITY_UNSPECIFIED = 0;
+  MODELED_RUNS = 1;
+}
+
+enum RunStatus {
+  RUN_STATUS_UNSPECIFIED = 0;
+  SUCCEEDED = 1;
+  FAILED = 2;
+}
+
+message EnvironmentClaim {
+  string key = 1;
+  string value = 2;
+}
+
+message Run {
+  string id = 1;
+  RunStatus status = 2;
+  string command_digest = 3;
+  repeated string test_ids = 4;
+}
+
+enum CaptureStatus {
+  CAPTURE_STATUS_UNSPECIFIED = 0;
+  COMPLETE_FOR_RUNS = 1;
+  NOT_EXECUTED = 2;
+  PARTIAL = 3;
+  NOT_INSTRUMENTED = 4;
+  UNSUPPORTED = 5;
+  STALE = 6;
+  FAILED_CAPTURE = 7;
+}
+
+message CaptureSummary {
+  CaptureStatus status = 1;
+  repeated string run_ids = 2;
+  uint64 observed_executions = 3;
+  uint64 dropped_executions = 4;
+  string reason = 5;
+  // Evidence completeness is field-specific. A provider may capture every
+  // receiver and target while being unable to capture a return value. The
+  // aggregate status remains useful for diagnostics, while this closed set
+  // lets consumers soundly use the complete portions of a partial anchor.
+  repeated EvidenceKind complete_kinds = 6;
+}
+
+enum SourceRole {
+  SOURCE_ROLE_UNSPECIFIED = 0;
+  PRODUCTION = 1;
+  NON_PRODUCTION = 2;
+  STANDARD_LIBRARY = 3;
+  DEPENDENCY = 4;
+  RUNTIME = 5;
+  UNKNOWN_SOURCE = 6;
+}
+
+message ValueSet {
+  repeated WeightedValue alternatives = 1;
+  bool truncated = 2;
+}
+
+message WeightedValue {
+  RuntimeValue value = 1;
+  uint64 count = 2;
+}
+
+message SequenceShape {
+  ValueSet elements = 1;
+}
+
+message MappingEntry {
+  RuntimeValue key = 1;
+  RuntimeValue value = 2;
+  uint64 count = 3;
+}
+
+message MappingShape {
+  repeated MappingEntry entries = 1;
+  bool truncated = 2;
+}
+
+message RecordMember {
+  string name = 1;
+  ValueSet values = 2;
+}
+
+message RecordShape {
+  repeated RecordMember members = 1;
+  bool truncated = 2;
+}
+
+message TupleShape {
+  repeated ValueSet elements = 1;
+  bool truncated = 2;
+}
+
+message RuntimeValue {
+  string type_symbol = 1;
+  string singleton_symbol = 2;
+  SourceRole source_role = 3;
+  oneof shape {
+    SequenceShape sequence = 4;
+    MappingShape mapping = 5;
+    RecordShape record = 6;
+    TupleShape tuple = 7;
+  }
+  bool truncated = 8;
+}
+
+message RuntimeDefinition {
+  string symbol = 1;
+  string anchor_symbol = 2;
+  string relative_path = 3;
+  SourceRange range = 4;
+}
+
+message RuntimeTarget {
+  string symbol = 1;
+  RuntimeDefinition definition = 2;
+  SourceRole source_role = 3;
+  string package_manager = 4;
+  string package_name = 5;
+  string package_version = 6;
+}
+
+message Provenance {
+  string run_id = 1;
+  string provider = 2;
+  string provider_version = 3;
+}
+
+message ExecutionBucket {
+  uint64 count = 1;
+  // The value at a non-call storage boundary: parameter, function return, or
+  // state read/write. Call-site receiver/result values retain their distinct
+  // fields so their correlation with the selected target is unambiguous.
+  ValueSet receiver = 2;
+  RuntimeTarget target = 3;
+  ValueSet result = 4;
+  optional bool boolean_result = 5;
+  Provenance provenance = 6;
+  ValueSet value = 7;
+}
+
+message AnchorEvidence {
+  string anchor_symbol = 1;
+  bytes anchor_semantic_digest = 2;
+  CaptureSummary capture = 3;
+  repeated ExecutionBucket executions = 4;
+}
+
+// A provider observation that cannot be assigned to one exact requested
+// source anchor. Candidate membership is observational, not an inference:
+// the consumer must correlate the bucket through its own normalized CFG/DFG
+// or leave every candidate unresolved.
+message CorrelationEvidence {
+  string group_id = 1;
+  repeated string candidate_anchor_symbols = 2;
+  CaptureSummary capture = 3;
+  repeated ExecutionBucket executions = 4;
+}
+
+message RuntimeEvidence {
+  uint32 protocol_version = 1;
+  ToolInfo producer = 2;
+  Authority authority = 3;
+  bytes trace_plan_digest = 4;
+  repeated EnvironmentClaim environment = 5;
+  repeated Run runs = 6;
+  repeated AnchorEvidence anchors = 7;
+  repeated CorrelationEvidence correlations = 8;
+}

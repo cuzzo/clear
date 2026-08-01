@@ -191,6 +191,28 @@
         "conditional": true,
         "control": "conditional",
         "function": "checks",
+        "line": 5,
+        "message": "enabled?",
+        "receiver": "External::Risk",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "checks",
+        "line": 6,
+        "message": "load_config",
+        "receiver": "External::Risk",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [],
+        "block": false,
+        "conditional": true,
+        "control": "conditional",
+        "function": "checks",
         "line": 9,
         "message": "downcase",
         "receiver": "::File.extname(path)",

@@ -65,9 +65,16 @@ SUPPORTED_SOURCE_EXTENSIONS = %w[
   c cc cpp cs cxx go h hh hpp java js jsx kt kts lua m py rb rs swift ts tsx zig
 ].freeze
 
+# Directories holding what a program serves rather than what it is. `assets`
+# covers giga-ui's browser bundle -- a hand-written app.js beside a
+# content-hashed, minified diff viewer -- and the JavaScript SimpleCov and
+# RubyCritic ship inside their HTML reports. The UI's own source is not in one
+# of these: gems/gigasail/ui/src/*.tsx and giga-ui/src/ui/ui.rs are code and
+# stay in scope.
 IGNORED_COMPONENTS = %w[
   .git
   .zig-cache
+  assets
   coverage
   node_modules
   target

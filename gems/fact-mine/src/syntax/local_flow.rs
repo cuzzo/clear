@@ -54,7 +54,7 @@ pub struct Boundary {
 }
 
 const OWNER_TYPES: &[&str] = &["CLASS", "MODULE"];
-const METHOD_TYPES: &[&str] = &["DEFN", "DEFS"];
+const METHOD_TYPES: &[&str] = &["DEFN", "DEFS", "DEF", "LAMBDA"];
 const SKIP_NESTED_TYPES: &[&str] = &["CLASS", "MODULE", "DEFN", "DEFS", "LAMBDA"];
 const LOCAL_READ_TYPES: &[&str] = &["LVAR", "DVAR", "IVAR", "CVAR"];
 const LOCAL_WRITE_TYPES: &[&str] = &["LASGN", "DASGN", "IASGN", "CVASGN"];
@@ -66,7 +66,6 @@ const STATEMENT_CONTAINER_TYPES: &[&str] = &[
     "HASH",
     "STATEMENTS",
 ];
-
 fn empty_node() -> Node {
     Node {
         r#type: "ROOT".to_string(),
@@ -120,6 +119,23 @@ pub(crate) fn local_methods_from_normalized(
         behavior,
     );
     let mut methods = detector.scan(root);
+    // Normalized extraction already establishes every executable declaration
+    // and its lexical owner. Structural traversal above intentionally avoids
+    // treating arbitrary nested definitions as owner members, but declarative
+    // owners (for example a language macro that opens a record body) can
+    // validly contain an extracted method beneath a non-owner node. Reconcile
+    // the traversal with that declaration inventory by exact normalized span.
+    // This is language-neutral: adapters establish the function definition;
+    // local flow only recovers its CFG/DFG summary.
+    for function in functions {
+        if methods.iter().any(|method| method.span == function.span) {
+            continue;
+        }
+        let Some(node) = method_node_for_span(root, function.span) else {
+            continue;
+        };
+        methods.push(detector.method_summary(node, None));
+    }
     sort_method_summaries(&mut methods);
     methods
 }
@@ -155,14 +171,25 @@ pub fn local_contract_assignments(method: &MethodSummary) -> BTreeMap<String, St
     map
 }
 
-fn local_contract_source(name: &str, source: &str) -> Option<String> {
+pub(crate) fn raw_local_assignment_source(name: &str, source: &str) -> Option<String> {
     let pattern = format!(
         r"(?s)\b{}\b\s*(?::=|=)\s*(.+?)\s*;?\s*$",
         regex::escape(name)
     );
     let assignment = Regex::new(&pattern).ok()?;
-    let rhs = assignment.captures(source)?.get(1)?.as_str().trim();
-    (!rhs.contains('?') && !rhs.contains(':')).then(|| rhs.to_string())
+    Some(
+        assignment
+            .captures(source)?
+            .get(1)?
+            .as_str()
+            .trim()
+            .to_string(),
+    )
+}
+
+fn local_contract_source(name: &str, source: &str) -> Option<String> {
+    let rhs = raw_local_assignment_source(name, source)?;
+    (!rhs.contains('?') && !rhs.contains(':')).then_some(rhs)
 }
 
 fn local_contract_conditional_statement(root: &Node, span: Span) -> bool {
@@ -183,6 +210,26 @@ fn node_for_span(node: &Node, span: Span) -> Option<&Node> {
         .iter()
         .filter_map(ast::node)
         .find_map(|child| node_for_span(child, span))
+}
+
+/// Several normalized container nodes intentionally retain the exact source
+/// span of the declaration they wrap. For executable-method recovery, prefer
+/// the method node itself over an enclosing `SCOPE` with the same span.
+fn method_node_for_span(node: &Node, span: Span) -> Option<&Node> {
+    if [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ] == span
+        && METHOD_TYPES.contains(&node.r#type.as_str())
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .filter_map(ast::node)
+        .find_map(|child| method_node_for_span(child, span))
 }
 
 fn contains_contract_condition(node: &Node) -> bool {
@@ -253,11 +300,35 @@ impl<'a> LocalFlow<'a> {
                 for child in node.children.iter().filter_map(ast::node) {
                     self.collect_methods(child, owners, out);
                 }
+            } else {
+                // Even where the language does not treat nested named functions
+                // as local callables, a lambda body is its own function and must
+                // receive complexity facts so a caller can substitute its cost.
+                for child in node.children.iter().filter_map(ast::node) {
+                    self.collect_lambdas(child, out);
+                }
             }
         } else {
             for child in node.children.iter().filter_map(ast::node) {
                 self.collect_methods(child, owners, out);
             }
+        }
+    }
+
+    fn collect_lambdas(&self, node: &Node, out: &mut Vec<MethodSummary>) {
+        if node.r#type == "LAMBDA" {
+            let span = [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ];
+            if !out.iter().any(|method| method.span == span) {
+                out.push(self.method_summary(node, None));
+            }
+        }
+        for child in node.children.iter().filter_map(ast::node) {
+            self.collect_lambdas(child, out);
         }
     }
 
@@ -276,7 +347,8 @@ impl<'a> LocalFlow<'a> {
                 // constructor or initializer. Preserve only declarations the
                 // language adapter positively identifies as owner methods;
                 // ordinary nested/inline declarations stay out of this pass.
-                if (self.behavior.nested_function_is_owner_method(child)
+                if (child.r#type == "LAMBDA"
+                    || self.behavior.nested_function_is_owner_method(child)
                     || (self.behavior.nested_function_is_local_callable(child)
                         && self.methods_by_span.contains_key(&span)))
                     && !out.iter().any(|method| method.span == span)
@@ -454,25 +526,39 @@ impl<'a> LocalFlow<'a> {
         let Some(body) = self.owner_body(owner_node) else {
             return Vec::new();
         };
-        let stmts = if statement_container(body) {
-            body.children
-                .iter()
-                .filter_map(ast::node)
-                .collect::<Vec<_>>()
+        let mut methods = Vec::new();
+        if statement_container(body) {
+            for child in body.children.iter().filter_map(ast::node) {
+                self.collect_owner_method(child, &mut methods);
+            }
         } else {
-            vec![body]
-        };
+            self.collect_owner_method(body, &mut methods);
+        }
+        methods
+    }
 
-        stmts
-            .into_iter()
-            .flat_map(|stmt| {
-                if METHOD_TYPES.contains(&stmt.r#type.as_str()) {
-                    vec![stmt]
-                } else {
-                    Vec::new()
-                }
-            })
-            .collect()
+    fn collect_owner_method<'node>(&self, node: &'node Node, methods: &mut Vec<&'node Node>) {
+        if METHOD_TYPES.contains(&node.r#type.as_str()) {
+            let span = [
+                node.first_lineno,
+                node.first_column,
+                node.last_lineno,
+                node.last_column,
+            ];
+            if self.methods_by_span.contains_key(&span) {
+                methods.push(node);
+            }
+            return;
+        }
+        // A C++ template declaration structurally wraps its inline method.
+        // It is a declaration envelope, unlike an arbitrary call or method
+        // body; descending only through this normalized wrapper avoids
+        // promoting lambdas/local functions into owner methods.
+        if node.r#type == "TEMPLATE_DECLARATION" {
+            for child in node.children.iter().filter_map(ast::node) {
+                self.collect_owner_method(child, methods);
+            }
+        }
     }
 
     fn owner_body<'node>(&self, owner_node: &'node Node) -> Option<&'node Node> {

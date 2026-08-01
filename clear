@@ -1401,7 +1401,11 @@ when 'test'
       merged = ZigCoverageSupport.merge!('examples-benchmarks')
       puts "Merged Zig coverage: #{merged}" if merged
     end
-    exit(failed_names.any? ? 1 : 0)
+    # A detected memory leak is a failure, not a warning: the run prints
+    # "MEMORY LEAKS: N" but must also exit non-zero, or `clear test <dir>`
+    # reports success on a leak and any caller (CI, an agent, a human checking
+    # $?) is silently told the suite is clean.
+    exit((failed_names.any? || leak_tests.any?) ? 1 : 0)
   else
     source = File.expand_path(source)
     gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')

@@ -347,6 +347,471 @@ fn java_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
 }
 
 #[test]
+fn java_enhanced_for_preserves_iterable_calls_in_the_normalized_cfg() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".java").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"class Demo {
+    Iterable<String> items() { return null; }
+    void run() {
+        for (String item : items()) {
+            item.length();
+        }
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Java)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(messages.contains("items"), "calls={messages:?}");
+    assert!(messages.contains("length"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn java_constructor_calls_and_declaration_only_methods_keep_export_proof_honest() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".java").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"interface Sized {
+    int size();
+    default int fallback() { return 0; }
+}
+class Demo {
+    StringBuilder copy(String value) {
+        return new StringBuilder(value);
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Java)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let copy = output
+        .methods
+        .iter()
+        .find(|method| method.name == "copy")
+        .context("copy method")?;
+    assert!(copy.source_export_eligible);
+    let copy_calls = output
+        .calls
+        .iter()
+        .filter(|call| call.source == copy.id)
+        .map(|call| (call.receiver.as_str(), call.message.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        copy_calls
+            .iter()
+            .any(|(receiver, message)| *receiver == "StringBuilder" && *message == "call"),
+        "calls={copy_calls:?}"
+    );
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    assert!(
+        !output
+            .methods
+            .iter()
+            .find(|method| method.name == "size")
+            .context("declaration-only method")?
+            .source_export_eligible
+    );
+    assert!(
+        output
+            .methods
+            .iter()
+            .find(|method| method.name == "fallback")
+            .context("default method")?
+            .source_export_eligible
+    );
+    Ok(())
+}
+
+#[test]
+fn go_switch_initializers_and_interface_declarations_keep_export_proof_honest() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"package demo
+
+type Sized interface {
+    Size() int
+}
+
+func next() int { return 1 }
+
+func classify() int {
+    switch value := next(); value {
+    case 1:
+        return value
+    default:
+        return 0
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let classify = output
+        .methods
+        .iter()
+        .find(|method| method.name == "classify")
+        .context("classify function")?;
+    assert!(classify.source_export_eligible);
+    assert!(output
+        .calls
+        .iter()
+        .any(|call| call.source == classify.id && call.message == "next"));
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    assert!(output
+        .methods
+        .iter()
+        .filter(|method| method.name == "Size")
+        .all(|method| !method.source_export_eligible));
+    Ok(())
+}
+
+#[test]
+fn rust_for_preserves_iterable_calls_in_the_normalized_cfg() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"fn values() -> Vec<String> { loop {} }
+fn run() {
+    for value in values() {
+        value.len();
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(messages.contains("values"), "calls={messages:?}");
+    assert!(messages.contains("len"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_transparent_unary_calls_and_const_generics_keep_runtime_call_coverage_honest() -> Result<()>
+{
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Buffer<const N: usize>;
+
+const fn width() -> usize { 1 }
+fn make() -> Option<&'static usize> { Some(&1) }
+fn callback() -> Option<fn() -> usize> { Some(width) }
+
+fn run() -> usize {
+    let value = *make().unwrap();
+    let invoked = callback().unwrap()();
+    unsafe { make().unwrap(); }
+    let _buffer = Buffer::<{ width() }>;
+    value + invoked
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run function")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(messages.contains("make"), "calls={messages:?}");
+    assert!(messages.contains("unwrap"), "calls={messages:?}");
+    assert!(messages.contains("callback"), "calls={messages:?}");
+    assert!(messages.contains("call"), "calls={messages:?}");
+    assert!(
+        !messages.contains("width"),
+        "compile-time call leaked: {messages:?}"
+    );
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_discard_bindings_preserve_rhs_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"fn helper() {}
+fn run() {
+    let _ = helper();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    assert!(output
+        .calls
+        .iter()
+        .any(|call| call.source == run.id && call.message == "helper"));
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_bindings_preserve_initializer_and_let_else_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"fn helper() -> Option<String> { loop {} }
+fn fallback() {}
+fn run() {
+    let Some(value) = helper() else {
+        fallback();
+        return;
+    };
+    let length: usize = value.len();
+    println!("{length}");
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(messages.contains("helper"), "calls={messages:?}");
+    assert!(messages.contains("fallback"), "calls={messages:?}");
+    assert!(messages.contains("len"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_match_guards_and_local_statics_preserve_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"use std::sync::OnceLock;
+fn guard(value: usize) -> bool { value > 0 }
+fn run(value: usize) {
+    static CACHE: OnceLock<String> = OnceLock::new();
+    match value {
+        current if guard(current) => CACHE.get_or_init(String::new),
+        _ => CACHE.get_or_init(String::new),
+    };
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(messages.contains(&"guard"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_dereferenced_assignment_targets_preserve_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"use std::collections::BTreeMap;
+use std::sync::Mutex;
+fn run(counts: &mut BTreeMap<&str, usize>, slot: &Mutex<usize>) {
+    *counts.entry("key").or_default() += 1;
+    *slot.lock().unwrap() = 2;
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let run = output
+        .methods
+        .iter()
+        .find(|method| method.name == "run")
+        .context("run method")?;
+    let messages = output
+        .calls
+        .iter()
+        .filter(|call| call.source == run.id)
+        .map(|call| call.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(messages.contains(&"entry"), "calls={messages:?}");
+    assert!(messages.contains(&"or_default"), "calls={messages:?}");
+    assert!(messages.contains(&"lock"), "calls={messages:?}");
+    assert!(messages.contains(&"unwrap"), "calls={messages:?}");
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_bare_tail_identifiers_are_local_reads_not_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"fn output() -> usize {
+    let out = 42;
+    out
+}
+fn run(flag: bool) -> usize {
+    let value = if flag { 1 } else { 2 };
+    value
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for function in ["output", "run"] {
+        let method = output
+            .methods
+            .iter()
+            .find(|method| method.name == function)
+            .with_context(|| format!("{function} method"))?;
+        let messages = output
+            .calls
+            .iter()
+            .filter(|call| call.source == method.id)
+            .map(|call| call.message.as_str())
+            .collect::<Vec<_>>();
+        assert!(messages.is_empty(), "{function} calls={messages:?}");
+    }
+    assert_eq!(
+        output
+            .call_resolution_coverage
+            .raw_calls_not_normalized_inside_function,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn rust_impl_method_lambdas_receive_complexity_facts() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Widget;
+impl Widget {
+    fn any_empty(&self, values: &[String]) -> bool {
+        values.iter().any(|value| value.is_empty())
+    }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let lambda = output
+        .methods
+        .iter()
+        .find(|method| method.name.starts_with("<lambda@"))
+        .context("impl-method lambda")?;
+    let fact = output
+        .complexity_facts
+        .iter()
+        .find(|fact| {
+            fact.function == lambda.name && fact.line == lambda.line && fact.path == lambda.path
+        })
+        .context("lambda complexity fact")?;
+    assert!(
+        fact.call_contexts
+            .iter()
+            .any(|context| context.message == "is_empty"),
+        "contexts={:?}",
+        fact.call_contexts
+    );
+    Ok(())
+}
+
+#[test]
 fn csharp_nullable_receiver_operations_follow_direct_null_flow() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_csharp.cs"), Language::CSharp)?;
     let output = profile::extract(&document, Profile::NilKill);
@@ -503,6 +968,291 @@ fn ruby_case_equality_disjunction_refines_the_else_path() -> Result<()> {
 }
 
 #[test]
+fn go_self_calls_resolve_to_sibling_declarations() -> Result<()> {
+    let document = syntax::parse_file(fixture("go_self_calls.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let method_by_owner_name = output
+        .methods
+        .iter()
+        .map(|method| {
+            (
+                (method.owner.as_str(), method.name.as_str()),
+                method.id.as_str(),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    // A method calling a sibling method on its own receiver (`l.insert(...)`
+    // inside a `*List` method) is emitted with receiver "self" and owner "List".
+    // Its target is the same-owner declaration and must resolve.
+    let self_calls = output
+        .calls
+        .iter()
+        .filter(|call| {
+            (call.receiver == "self" || call.receiver == "this")
+                && method_by_owner_name.contains_key(&(call.owner.as_str(), call.message.as_str()))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        self_calls.len() >= 3,
+        "expected the fixture's self-calls (insert/lazyInit/insertValue), got {}",
+        self_calls.len()
+    );
+    let unresolved = self_calls
+        .iter()
+        .filter(|call| call.target.is_none())
+        .map(|call| format!("{}.{}", call.owner, call.message))
+        .collect::<Vec<_>>();
+    assert!(
+        unresolved.is_empty(),
+        "self-calls left unresolved: {unresolved:?}"
+    );
+    for call in &self_calls {
+        let expected = method_by_owner_name[&(call.owner.as_str(), call.message.as_str())];
+        assert_eq!(
+            call.target.as_deref(),
+            Some(expected),
+            "{}.{} resolved to the wrong declaration",
+            call.owner,
+            call.message
+        );
+    }
+
+    // A bare same-package function call (`rawHelper(x)`) must also resolve.
+    let helper_id = output
+        .methods
+        .iter()
+        .find(|method| method.name == "rawHelper")
+        .map(|method| method.id.clone());
+    let raw_call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "rawHelper")
+        .expect("rawCaller's call to rawHelper is present");
+    assert_eq!(
+        raw_call.target, helper_id,
+        "bare same-package function call did not resolve"
+    );
+    Ok(())
+}
+
+#[test]
+fn go_structural_interface_satisfaction_is_computed() -> Result<()> {
+    // `Ints` has Len+Less so it structurally satisfies `Sorter`; `Partial` has
+    // only Len and must not be recorded as an implementer.
+    let document = syntax::parse_file(fixture("go_dispatch_satisfaction.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let implementers = output
+        .dispatch_impls
+        .iter()
+        .filter(|edge| edge.interface == "Sorter")
+        .map(|edge| edge.implementer.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        implementers.contains(&"Ints"),
+        "Ints structurally satisfies Sorter, got {implementers:?}"
+    );
+    assert!(
+        !implementers.contains(&"Partial"),
+        "Partial (only Len) must not satisfy Sorter"
+    );
+    assert!(output
+        .dispatch_impls
+        .iter()
+        .any(|edge| edge.interface == "Sorter" && edge.basis == "structural"));
+    Ok(())
+}
+
+#[test]
+fn go_interface_method_call_is_priced_as_a_callback() -> Result<()> {
+    // A call on an interface-typed receiver (`c.Less` where c is a Comparer)
+    // dispatches to an unknown implementation, so it is priced as a callback of
+    // unknown per-call cost - making the enclosing function complete-parametric
+    // instead of unknown.
+    let document = syntax::parse_file(fixture("go_interface_dispatch.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "Less")
+        .context("c.Less call present")?;
+    assert_eq!(
+        call.known_time_complexity.as_deref(),
+        Some("O(C)"),
+        "interface method call should carry a callback cost"
+    );
+    assert_eq!(
+        call.complexity_bound_quality.as_deref(),
+        Some("upper_bound_parametric_callback_once"),
+        "interface dispatch is a parametric callback bound"
+    );
+    // It must NOT be resolved to a concrete target - there is none.
+    assert!(call.target.is_none(), "interface call has no single target");
+    Ok(())
+}
+
+#[test]
+fn go_named_type_conversion_is_constant_time() -> Result<()> {
+    // `ByteCode(b)` converts to a declared type; it is a constant-time cast, not
+    // an unresolved call. Left unpriced it strands otherwise-O(1) functions
+    // (and everything that calls them) as incomplete.
+    let document = syntax::parse_file(fixture("go_named_type_conversion.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let classify = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "classify")
+        .context("classify complexity facts present")?;
+    let conversion = classify
+        .call_contexts
+        .iter()
+        .find(|context| context.message == "ByteCode")
+        .context("ByteCode conversion recorded")?;
+    assert_eq!(
+        conversion.known_time_complexity.as_deref(),
+        Some("O(1)"),
+        "named-type conversion should be priced O(1)"
+    );
+    assert_eq!(
+        conversion.evidence_gap, None,
+        "a priced conversion carries no evidence gap"
+    );
+    Ok(())
+}
+
+#[test]
+fn go_package_function_called_from_method_resolves() -> Result<()> {
+    // A bare call to a package-level free function from inside a method
+    // (`helper(s.n)` in `State.compute`) is not an implicit self dispatch in
+    // Go, and must resolve to the free function, not stay unattributed.
+    let document = syntax::parse_file(fixture("go_pkg_func_from_method.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let helper = output
+        .methods
+        .iter()
+        .find(|method| method.name == "helper")
+        .context("free function helper present")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "helper")
+        .context("helper() call present")?;
+    assert_eq!(
+        call.target.as_deref(),
+        Some(helper.id.as_str()),
+        "package function called from a method did not resolve"
+    );
+    Ok(())
+}
+
+#[test]
+fn go_method_on_type_named_after_its_file_dispatches_as_instance() -> Result<()> {
+    // The fixture's file stem ("widget") equals its receiver type, which used
+    // to collide with the synthetic file owner and mark every method a
+    // top-level free function - so `w.tally()` could not dispatch.
+    let document = syntax::parse_file(fixture("widget.go"), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let tally = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "widget" && method.name == "tally")
+        .context("widget.tally method present")?;
+    assert_eq!(
+        tally.kind, "instance",
+        "receiver method must dispatch as instance"
+    );
+
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "tally")
+        .context("w.tally() call present")?;
+    assert_eq!(
+        call.target.as_deref(),
+        Some(tally.id.as_str()),
+        "method call on a type named after its file did not resolve"
+    );
+    Ok(())
+}
+
+#[test]
+fn go_embedded_field_promotes_methods_across_packages() -> Result<()> {
+    // `encoder` embeds `pkga.Buffer`; its promoted methods (`WriteString`,
+    // `Len`) are absent from `encoder`'s own method set and must resolve to the
+    // embedded type's declarations through the supertype (embedding) chain.
+    let doc_base = syntax::parse_file(fixture("go_embed_base.go"), Language::Go)?;
+    let doc_user = syntax::parse_file(fixture("go_embed_user.go"), Language::Go)?;
+    let merged = profile::merge(
+        vec![
+            profile::extract(&doc_base, Profile::Espalier),
+            profile::extract(&doc_user, Profile::Espalier),
+        ],
+        Profile::Espalier,
+    );
+
+    for message in ["WriteString", "Len"] {
+        let target_id = merged
+            .methods
+            .iter()
+            .find(|method| method.owner == "Buffer" && method.name == message)
+            .map(|method| method.id.clone());
+        assert!(target_id.is_some(), "Buffer#{message} declaration present");
+        let call = merged
+            .calls
+            .iter()
+            .find(|call| call.message == message)
+            .unwrap_or_else(|| panic!("promoted e.{message} call present"));
+        assert_eq!(
+            call.target, target_id,
+            "promoted embedded method e.{message} did not resolve"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn go_cross_file_receiver_calls_resolve_in_same_namespace() -> Result<()> {
+    // `Builder` is declared in one file and used through a typed receiver in
+    // another. The type is absent from the use-site document's owner set, so
+    // resolution falls to the same-namespace pass, which must reconcile the
+    // receiver against the canonical owner symbol the declaration carries.
+    let doc_type = syntax::parse_file(fixture("go_crossfile_type.go"), Language::Go)?;
+    let doc_use = syntax::parse_file(fixture("go_crossfile_use.go"), Language::Go)?;
+    let merged = profile::merge(
+        vec![
+            profile::extract(&doc_type, Profile::Espalier),
+            profile::extract(&doc_use, Profile::Espalier),
+        ],
+        Profile::Espalier,
+    );
+
+    for message in ["WriteString", "Len"] {
+        let target_id = merged
+            .methods
+            .iter()
+            .find(|method| method.owner == "Builder" && method.name == message)
+            .map(|method| method.id.clone());
+        assert!(target_id.is_some(), "Builder#{message} declaration present");
+        let call = merged
+            .calls
+            .iter()
+            .find(|call| call.message == message && call.receiver == "b")
+            .unwrap_or_else(|| panic!("cross-file b.{message} call present"));
+        assert_eq!(
+            call.target, target_id,
+            "cross-file receiver call b.{message} did not resolve"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn go_map_lookup_exports_presence_without_proving_payload_non_null() -> Result<()> {
     let document = syntax::parse_file(fixture("nullable_presence.go"), Language::Go)?;
     let output = profile::extract(&document, Profile::NilKill);
@@ -529,8 +1279,12 @@ fn go_type_assertions_and_channel_receives_export_presence_without_payload_proof
         .iter()
         .map(|correlation| correlation.semantics.as_str())
         .collect::<Vec<_>>();
+    // Order follows group-id sort (lambda-owned correlations sort first); the
+    // meaningful contract is the multiset plus the per-correlation spans below.
+    let mut semantics_sorted = semantics.clone();
+    semantics_sorted.sort_unstable();
     assert_eq!(
-        semantics,
+        semantics_sorted,
         vec![
             "channel_receive",
             "type_assertion",
@@ -1090,6 +1844,812 @@ int analyze(Data* data, int input) {
 }
 
 #[test]
+fn cpp_using_aliases_reach_declared_collection_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#include <list>
+struct Queue {
+    using Items = std::list<int>;
+    Items items;
+    bool empty() const { return items.empty(); }
+    void transfer(Items& other) {
+        Items local;
+        local.splice(local.end(), other);
+        items.splice(items.end(), other);
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let empty = output
+        .calls
+        .iter()
+        .find(|call| call.function == "empty" && call.message == "empty")
+        .context("missing aliased list empty call")?;
+    assert_eq!(empty.receiver_type.as_deref(), Some("Items"));
+    assert_eq!(empty.known_time_complexity.as_deref(), Some("O(1)"));
+
+    let splice = output
+        .calls
+        .iter()
+        .find(|call| call.function == "transfer" && call.message == "splice")
+        .context("missing aliased list splice call")?;
+    assert_eq!(splice.receiver_type.as_deref(), Some("Items"));
+    assert_eq!(splice.known_time_complexity.as_deref(), Some("O(N)"));
+    let local = output
+        .calls
+        .iter()
+        .find(|call| {
+            call.function == "transfer" && call.receiver == "local" && call.message == "splice"
+        })
+        .context("missing locally declared aliased list call")?;
+    assert_eq!(local.receiver_type.as_deref(), Some("Items"));
+    assert_eq!(local.known_time_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn cpp_ordered_map_and_set_use_conservative_collection_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#include <map>
+#include <set>
+void update(std::map<int, int>& values, std::set<int>& keys) {
+    values.find(1);
+    values.begin();
+    keys.insert(1);
+    keys.empty();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for (message, expected) in [
+        ("find", "O(N)"),
+        ("begin", "O(1)"),
+        ("insert", "O(N)"),
+        ("empty", "O(1)"),
+    ] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "update" && call.message == message)
+            .with_context(|| format!("missing ordered collection call {message}"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some(expected),
+            "{message}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn cpp_proven_file_stream_and_json_receivers_use_reviewed_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"void read(const char * path, nlohmann::json& value) {
+    std::ifstream input;
+    input.exceptions(1);
+    input.open(path);
+    value.at("key");
+    value.get_to(value);
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for (message, expected) in [
+        ("exceptions", "O(1)"),
+        ("open", "O(N)"),
+        ("at", "O(N)"),
+        ("get_to", "O(N)"),
+    ] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "read" && call.message == message)
+            .with_context(|| format!("missing {message}"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some(expected),
+            "{message}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn cpp_arrow_field_projections_preserve_atomic_costs_and_full_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct strong_weak_compact_ptr_storage_base {
+    std::atomic_long strong_count = 1, weak_count = 1;
+};
+struct strong_weak_compact_ptr_storage : strong_weak_compact_ptr_storage_base {
+};
+struct Holder {
+    strong_weak_compact_ptr_storage* ptr_;
+    struct Node;
+    using NodePtr = std::shared_ptr<Node>;
+    struct Node {
+        NodePtr previous;
+    };
+    NodePtr head;
+    void increment() {
+        ptr_->weak_count.fetch_add(1);
+    }
+    void clear() {
+        NodePtr node = head;
+        node->previous.reset();
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let field = output
+        .fields
+        .iter()
+        .find(|field| field.owner == "Holder" && field.name == "ptr_")
+        .context("missing pointer field")?;
+    assert_eq!(
+        field.declared_type.as_deref(),
+        Some("strong_weak_compact_ptr_storage*")
+    );
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "increment" && call.message == "fetch_add")
+        .context("missing atomic fetch_add")?;
+    assert_eq!(call.receiver_type.as_deref(), Some("std::atomic_long"));
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+    let reset = output
+        .calls
+        .iter()
+        .find(|call| call.function == "clear" && call.message == "reset")
+        .context("missing projected shared-pointer reset")?;
+    assert_eq!(reset.receiver_type.as_deref(), Some("NodePtr"));
+    assert_eq!(
+        reset.known_time_complexity.as_deref(),
+        Some("O(R)"),
+        "reset={reset:?}; aliases={:?}",
+        document.type_aliases
+    );
+    assert_eq!(reset.receiver_call_span, None);
+    Ok(())
+}
+
+#[test]
+fn cpp_initializer_calls_do_not_hide_local_receiver_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"std::wstring convert(const std::wstring& input) { return input; }
+void run(const std::wstring& input) {
+    const std::wstring& wide = convert(input);
+    std::string output(4, 0);
+    wide.size();
+    output.resize(2);
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let size = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "size")
+        .context("missing wide.size call")?;
+    assert_eq!(size.receiver_type.as_deref(), Some("const std::wstring&"));
+    assert_eq!(size.known_time_complexity.as_deref(), Some("O(1)"));
+
+    let resize = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "resize")
+        .context("missing output.resize call")?;
+    assert_eq!(resize.receiver_type.as_deref(), Some("std::string"));
+    assert_eq!(resize.known_time_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn cpp_callable_fields_on_parameters_keep_parametric_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"using Hook = void (*)(int);
+struct Item { Hook dispatcher; };
+void run(const Item& item) {
+    item.dispatcher(1);
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let dispatcher = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "dispatcher")
+        .context("missing item.dispatcher call")?;
+
+    assert_eq!(dispatcher.known_time_complexity.as_deref(), Some("O(C)"));
+    assert_eq!(
+        dispatcher.complexity_provenance.as_deref(),
+        Some("parametric_declared_receiver_contract")
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_project_aliases_converge_across_configuration_branches_and_files() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let aliases = directory.path().join("aliases.hpp");
+    let caller = directory.path().join("caller.cpp");
+    fs::write(
+        &aliases,
+        r#"#if USE_WIDE
+typedef std::wstring native_string;
+typedef std::wostringstream native_stream;
+#else
+typedef std::string native_string;
+typedef std::ostringstream native_stream;
+#endif
+"#,
+    )?;
+    fs::write(
+        &caller,
+        "void run(native_string& text, native_stream& stream) { text.size(); text.push_back('x'); stream.str(); }\n",
+    )?;
+    let documents = syntax::parse_files(&[aliases, caller], Language::Cpp)?;
+    let outputs = documents
+        .iter()
+        .map(|document| profile::extract(document, Profile::Espalier))
+        .collect();
+    let output = profile::merge(outputs, Profile::Espalier);
+    let size = output
+        .calls
+        .iter()
+        .find(|call| call.message == "size")
+        .context("missing cross-file aliased string call")?;
+    assert_eq!(
+        size.known_time_complexity.as_deref(),
+        Some("O(1)"),
+        "call={size:#?}; aliases={:#?}",
+        output
+            .type_definitions
+            .iter()
+            .filter(|definition| definition.kind == "type_alias")
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        size.complexity_provenance.as_deref(),
+        Some("merged_project_type_alias_registry")
+    );
+    let push = output
+        .calls
+        .iter()
+        .find(|call| call.message == "push_back")
+        .context("missing cross-file aliased string mutation")?;
+    assert_eq!(push.known_time_complexity.as_deref(), Some("O(N)"));
+    let str_call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "str")
+        .context("missing cross-file aliased stream call")?;
+    assert_eq!(str_call.known_time_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn cpp_merged_aliases_price_scoped_stdlib_constructors() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let alias = directory.path().join("alias.cpp");
+    let caller = directory.path().join("caller.cpp");
+    fs::write(&alias, "namespace util { using Text = std::string; }\n")?;
+    fs::write(
+        &caller,
+        "std::string make_text() { return util::Text(); }\n",
+    )?;
+    let alias = syntax::parse_file(alias, Language::Cpp)?;
+    let caller = syntax::parse_file(caller, Language::Cpp)?;
+    let output = profile::merge(
+        vec![
+            profile::extract(&alias, Profile::Espalier),
+            profile::extract(&caller, Profile::Espalier),
+        ],
+        Profile::Espalier,
+    );
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "make_text" && call.message == "util::Text")
+        .context("missing scoped alias constructor")?;
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(
+        call.complexity_provenance.as_deref(),
+        Some("merged_project_type_alias_registry")
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_inactive_runtime_spelling_emits_modeled_world_evidence() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        "void run(const char* data) { ::write(1, data, 4); }\n",
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let write = output
+        .calls
+        .iter()
+        .find(|call| call.message == "::write")
+        .context("missing qualified runtime call")?;
+    assert_eq!(write.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(
+        write.complexity_bound_quality.as_deref(),
+        Some("upper_bound_modeled_world")
+    );
+    assert_eq!(write.complexity_assumptions.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn cpp_source_macro_definitions_price_unindexed_calls_only_when_converged() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#define IDENTITY(value) value
+#if MODE
+#define MAYBE(value) value
+#else
+#define MAYBE(value) unknown(value)
+#endif
+int bounded() { return IDENTITY(1); }
+int unknown() { return MAYBE(1); }
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let identity = output
+        .calls
+        .iter()
+        .find(|call| call.function == "bounded" && call.message == "IDENTITY")
+        .context("missing bounded macro call")?;
+    assert_eq!(identity.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        identity.complexity_provenance.as_deref(),
+        Some("source_preprocessor_definition")
+    );
+    let maybe = output
+        .calls
+        .iter()
+        .find(|call| call.function == "unknown" && call.message == "MAYBE")
+        .context("missing divergent macro call")?;
+    assert_eq!(maybe.known_time_complexity, None);
+    Ok(())
+}
+
+#[test]
+fn cpp_source_macro_costs_cross_file_shard_boundaries() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let definition = directory.path().join("macros.h");
+    let caller = directory.path().join("caller.cpp");
+    fs::write(&definition, "#define IDENTITY(value) value\n")?;
+    fs::write(&caller, "int bounded() { return IDENTITY(1); }\n")?;
+    let definition = syntax::parse_file(definition, Language::Cpp)?;
+    let caller = syntax::parse_file(caller, Language::Cpp)?;
+    let definition = profile::extract(&definition, Profile::Espalier);
+    assert_eq!(definition.preprocessor_definition_costs.len(), 1);
+    let mut caller = profile::extract(&caller, Profile::Espalier);
+    let call = caller
+        .calls
+        .iter_mut()
+        .find(|call| call.message == "IDENTITY")
+        .context("missing macro-shaped call")?;
+    // SCIP marks macro occurrences with the compiler's `!` symbol. This test
+    // supplies that compiler-owned classification without constructing a
+    // protobuf index; the source shard supplies the independently priced body.
+    call.preprocessor_callable = true;
+    let output = profile::merge(vec![definition, caller], Profile::Espalier);
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "IDENTITY")
+        .context("missing merged macro call")?;
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        call.complexity_provenance.as_deref(),
+        Some("merged_source_preprocessor_definition")
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_closed_overload_return_types_flow_into_chained_calls() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"namespace demo {
+std::string make(int value) { return std::string(); }
+const std::string& make(double value) { static std::string result; return result; } // stable view
+bool run() { return make(1).size() > 0; }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let make = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "make")
+        .context("missing overloaded producer call")?;
+    assert_eq!(make.candidate_targets.len(), 2);
+    let size = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "size")
+        .context("missing chained string call")?;
+    assert_eq!(size.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        size.receiver_type_origin.as_deref(),
+        Some("declared_call_result_candidate_join")
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_trailing_return_types_flow_through_auto_locals() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Box {
+    void work() {}
+};
+auto make_box()
+    -> Box*
+{
+    return nullptr;
+}
+void run() {
+    auto box = make_box();
+    box->work();
+}
+template<typename T>
+auto make_dependent()
+    -> std::shared_ptr<Box<typename T::Value>>
+{
+    return {};
+}
+template<typename T>
+void run_dependent() {
+    auto box = make_dependent();
+    box->work();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let make_box_type = output
+        .type_definitions
+        .iter()
+        .find(|definition| definition.name == "make_box")
+        .context("missing trailing-return type definition")?;
+    assert_eq!(
+        make_box_type.signature.as_deref(),
+        Some("auto make_box() -> Box*")
+    );
+    let work = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "work")
+        .context("missing auto-local receiver call")?;
+    assert!(work.target.is_some());
+    assert_eq!(work.receiver_symbol.as_deref(), Some("Box"));
+    assert_eq!(
+        work.receiver_symbol_origin.as_deref(),
+        Some("declared_call_result")
+    );
+    let dependent_work = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run_dependent" && call.message == "work")
+        .context("missing dependent auto-local receiver call")?;
+    assert_eq!(
+        dependent_work.known_time_complexity.as_deref(),
+        Some("O(R)")
+    );
+    assert_eq!(
+        dependent_work.complexity_provenance.as_deref(),
+        Some("declared_call_result_candidate_join")
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_template_receiver_calls_keep_symbolic_dispatch_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template <typename Policy, typename Formatter, typename Compare>
+struct Runner {
+    using Queue = typename Policy::Queue;
+    using Base = Policy;
+    using Threading = typename Base::Threading;
+    using Hook = void (*)(int);
+    Queue queue;
+    typename Threading::Atomic atomic;
+    Hook hook;
+    template <typename Callback>
+    void run(Policy& policy, Callback callback) {
+        policy.execute();
+        queue.flush();
+        atomic.load();
+        callback();
+        hook(1);
+        Formatter::format(1);
+        Formatter{}.invoke(1);
+        Compare(1, 2);
+    }
+};
+template <typename Other>
+struct Noise {
+    using Base = Other;
+};
+struct Concrete {
+    void execute() {}
+};
+void invoke(Concrete& concrete) {
+    concrete.execute();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for message in [
+        "execute",
+        "flush",
+        "load",
+        "callback",
+        "Formatter::format",
+        "invoke",
+        "Compare",
+    ] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == message)
+            .with_context(|| format!("missing dependent {message} call"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(R)"),
+            "call={call:?}, template_types={:?}",
+            document.method_template_types
+        );
+        assert_eq!(
+            call.complexity_provenance.as_deref(),
+            Some("parametric_declared_receiver_contract")
+        );
+    }
+    let hook = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "hook")
+        .context("missing function-pointer field call")?;
+    assert_eq!(hook.known_time_complexity.as_deref(), Some("O(C)"));
+    let concrete = output
+        .calls
+        .iter()
+        .find(|call| call.function == "invoke" && call.message == "execute")
+        .context("missing concrete execute call")?;
+    assert_ne!(
+        concrete.complexity_provenance.as_deref(),
+        Some("parametric_declared_receiver_contract")
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_braced_initializer_reads_do_not_fabricate_local_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template<typename CallbackListType>
+struct Wrapper {
+    CallbackListType callbackList;
+    template<typename Condition>
+    void append(Condition condition) {
+        auto data = make_data(Data { condition, callbackList });
+        callbackList.append(data);
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let append = output
+        .calls
+        .iter()
+        .find(|call| call.function == "append" && call.message == "append")
+        .context("missing template state receiver call")?;
+    assert_eq!(append.receiver_type.as_deref(), Some("CallbackListType"));
+    assert_eq!(append.known_time_complexity.as_deref(), Some("O(R)"));
+    assert_eq!(
+        append.complexity_provenance.as_deref(),
+        Some("parametric_declared_receiver_contract")
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_inferred_collection_elements_recover_receiver_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Item {
+    void work() {}
+};
+class Interface {
+public:
+    virtual void dispatch() = 0;
+};
+class Outer {
+    class Nested {
+        virtual void nested() = 0;
+    };
+public:
+    void concrete() {}
+};
+struct Store {
+    std::vector<std::shared_ptr<Item>> pointers;
+    std::vector<std::shared_ptr<Interface>> interfaces;
+    std::list<Item> values;
+    void range() {
+        for(const auto & item : pointers) {
+            item->work();
+        }
+    }
+    void index() {
+        auto item = pointers[0];
+        item->work();
+    }
+    void iterator() {
+        auto it = values.begin();
+        it->work();
+    }
+    void abstract_range() {
+        for(const auto & item : interfaces) {
+            item->dispatch();
+        }
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    assert_eq!(
+        document
+            .owner_defs
+            .iter()
+            .find(|owner| owner.name == "Outer")
+            .map(|owner| owner.kind.as_str()),
+        Some("class")
+    );
+    assert_eq!(
+        document
+            .owner_defs
+            .iter()
+            .find(|owner| owner.name.ends_with("Nested"))
+            .map(|owner| owner.kind.as_str()),
+        Some("abstract_class")
+    );
+    let output = profile::extract(&document, Profile::Espalier);
+    for function in ["range", "index", "iterator"] {
+        let work = output
+            .calls
+            .iter()
+            .find(|call| call.function == function && call.message == "work")
+            .with_context(|| format!("missing {function} element call"))?;
+        assert_eq!(work.receiver_type.as_deref(), Some("Item"), "{work:?}");
+        assert_eq!(
+            work.receiver_type_origin.as_deref(),
+            Some("inferred_collection_element")
+        );
+        assert!(work.target.is_some(), "{work:?}");
+    }
+    let dispatch = output
+        .calls
+        .iter()
+        .find(|call| call.function == "abstract_range" && call.message == "dispatch")
+        .context("missing abstract element call")?;
+    assert_eq!(dispatch.receiver_type.as_deref(), Some("Interface"));
+    assert_eq!(dispatch.known_time_complexity.as_deref(), Some("O(C)"));
+    assert_eq!(
+        dispatch.complexity_provenance.as_deref(),
+        Some("parametric_declared_receiver_contract")
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_injected_class_names_resolve_current_template_specialization() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template<typename T, typename Enable = void>
+struct Box;
+template<typename T>
+struct Box<T, typename Gate<T>::type> {
+    void reset() {}
+    Box(Box && other) {
+        other.reset();
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let reset = output
+        .calls
+        .iter()
+        .find(|call| call.function == "Box" && call.message == "reset")
+        .context("missing injected-class receiver call")?;
+    assert_eq!(reset.receiver_type.as_deref(), Some("Box &&"));
+    assert!(reset.target.is_some(), "{reset:?}");
+    assert_eq!(
+        reset.receiver_symbol_origin.as_deref(),
+        Some("current_owner_declaration")
+    );
+    Ok(())
+}
+
+#[test]
+fn c_export_and_calling_convention_macros_preserve_parameters_and_recursion() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".c").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#define API(type) type
+#define PROJECT_CDECL
+typedef struct Node { struct Node *child; } Node;
+API(void) destroy(Node *item) {
+    if (item && item->child) {
+        destroy(item->child);
+    }
+}
+static void * PROJECT_CDECL allocate(unsigned long size) {
+    return 0;
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::C)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| (method.name.as_str(), method.params.as_slice()))
+        .collect::<Vec<_>>();
+    assert!(methods.contains(&("destroy", ["item".to_string()].as_slice())));
+    assert!(methods.contains(&("allocate", ["size".to_string()].as_slice())));
+    let destroy = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "destroy")
+        .context("missing destroy complexity facts")?;
+    assert_eq!(destroy.parameters, vec!["item"]);
+    assert_eq!(destroy.recursion.structural_calls, 1);
+    assert_eq!(destroy.recursion.unknown_progress_calls, 0);
+    Ok(())
+}
+
+#[test]
 fn go_short_declaration_does_not_reuse_outer_non_nil_proof() -> Result<()> {
     let document = syntax::parse_file(fixture("go_shadowing.go"), Language::Go)?;
     assert!(document.redundant_nil_guards.is_empty());
@@ -1142,6 +2702,78 @@ fn exact_native_stdlib_calls_emit_normalized_complexity_facts() -> Result<()> {
             call.known_space_complexity.as_deref(),
             Some(space),
             "{name}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn cpp_qualified_std_algorithm_keeps_predicate_cost_parametric() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template <class Items, class Predicate>
+auto locate(Items & items, Predicate predicate) {
+    return std::find_if(items.begin(), items.end(), predicate);
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "locate" && call.message == "std::find_if")
+        .context("missing std::find_if")?;
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(N*C)"));
+    assert_eq!(
+        call.complexity_bound_quality.as_deref(),
+        Some("upper_bound_parametric_callback_linear")
+    );
+    Ok(())
+}
+
+#[test]
+fn typed_atomics_reflect_and_builder_methods_are_constant_time() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".go").tempfile()?;
+    tmp.write_all(
+        br#"package sample
+
+import (
+	"strings"
+	"sync/atomic"
+	"reflect"
+)
+
+type Counter struct{ n atomic.Uint64 }
+
+func work(c *Counter, b *strings.Builder, v reflect.Value) {
+	c.n.CompareAndSwap(1, 2)
+	c.n.Add(1)
+	b.WriteRune('x')
+	_ = v.NumMethod()
+	_ = v.Cap()
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Go)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let contexts: Vec<_> = output
+        .complexity_facts
+        .iter()
+        .flat_map(|facts| facts.call_contexts.iter())
+        .collect();
+    for message in ["CompareAndSwap", "Add", "WriteRune", "NumMethod", "Cap"] {
+        let call = contexts
+            .iter()
+            .find(|call| call.message == message)
+            .with_context(|| format!("missing {message} complexity fact"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(1)"),
+            "{message} must be modeled as constant-time",
         );
     }
     Ok(())
@@ -1212,6 +2844,776 @@ func (h *holder) len() int {
         .find(|fact| fact.owner == "holder" && fact.function == "len")
         .context("missing holder.len complexity facts")?;
     assert_eq!(holder_len.recursion.calls, 0);
+    Ok(())
+}
+
+#[test]
+fn kotlin_expression_body_functions_extract_complexity_facts() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".kt").tempfile()?;
+    // `fun f() = expr` bodies were dropped as assignment RHS - the function's
+    // whole body (calls, loops) vanished. Both forms must extract facts.
+    tmp.write_all(
+        br#"class Foo {
+    fun blockBody(xs: List<Int>): Int {
+        var s = 0
+        for (x in xs) { s = s + compute(x) }
+        return s
+    }
+    fun exprBody(xs: List<Int>): Int = xs.sumOf { compute(it) }
+    fun compute(x: Int): Int = x * 2
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Kotlin)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for name in ["blockBody", "exprBody", "compute"] {
+        let facts = output
+            .complexity_facts
+            .iter()
+            .find(|facts| facts.function == name)
+            .with_context(|| format!("{name} must produce complexity facts"))?;
+        assert!(
+            !facts.call_contexts.is_empty(),
+            "{name} must extract its body's calls (got none)",
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn paren_less_member_reads_are_constant_time_but_not_in_ruby() -> Result<()> {
+    use std::io::Write;
+
+    // Go: `n.parent` / `n.line` are field reads - O(1), must not block.
+    let mut go = tempfile::Builder::new().suffix(".go").tempfile()?;
+    go.write_all(
+        b"package p\ntype Node struct { line int; parent *Node }\nfunc depth(n *Node) int { return n.parent.line }\n",
+    )?;
+    let go_doc = syntax::parse_file(go.path().to_path_buf(), Language::Go)?;
+    let go_out = profile::extract(&go_doc, Profile::Espalier);
+    let line = go_out
+        .complexity_facts
+        .iter()
+        .flat_map(|f| f.call_contexts.iter())
+        .find(|c| c.message == "line")
+        .context("missing go line read")?;
+    assert_eq!(line.known_time_complexity.as_deref(), Some("O(1)"));
+
+    // Ruby: `obj.foo` (no parens) is a real call - must stay unpriced, not O(1).
+    let mut rb = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    rb.write_all(b"class Foo\n  def run(obj)\n    obj.expensive\n  end\nend\n")?;
+    let rb_doc = syntax::parse_file(rb.path().to_path_buf(), Language::Ruby)?;
+    let rb_out = profile::extract(&rb_doc, Profile::Espalier);
+    if let Some(call) = rb_out
+        .complexity_facts
+        .iter()
+        .flat_map(|f| f.call_contexts.iter())
+        .find(|c| c.message == "expensive")
+    {
+        assert_ne!(
+            call.known_time_complexity.as_deref(),
+            Some("O(1)"),
+            "a Ruby paren-less call must not be assumed constant-time",
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn c_operators_and_subscript_are_constant_time_intrinsics() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".c").tempfile()?;
+    tmp.write_all(
+        br#"int compute(int *a, int n, int k) {
+    int s = a[0] * k + n - (k >> 1);
+    if (s == 0 && n < k) s = -s;
+    return s & 0xff;
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::C)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    // C has no operator overloading: every operator and `[]` is constant-time,
+    // so the function's only cost is O(1) - none of them may block completeness.
+    let contexts: Vec<_> = output
+        .complexity_facts
+        .iter()
+        .flat_map(|facts| facts.call_contexts.iter())
+        .collect();
+    for op in ["*", "+", "-", ">>", "==", "<", "&", "[]"] {
+        if let Some(call) = contexts.iter().find(|call| call.message == op) {
+            assert_eq!(
+                call.known_time_complexity.as_deref(),
+                Some("O(1)"),
+                "operator {op} must be constant-time",
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn cpp_linkage_macros_preserve_owner_template_dispatch_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"#define LIB_HIDDEN
+template <class Formatter, class Converter>
+class LIB_HIDDEN Appender {
+public:
+    void write() {
+        Converter::convert(Formatter::format());
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for message in ["Formatter::format", "Converter::convert"] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "write" && call.message == message)
+            .with_context(|| format!("missing {message}"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(R)"),
+            "{message}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn cpp_dereferenced_and_cast_receivers_keep_proven_types() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct LargeData {
+    const void * getAddress() const { return this; }
+};
+template <typename CallbackList>
+void dispatch(const CallbackList * callableList) {
+    (*callableList)(1);
+}
+const void * address(char * buffer) {
+    return ((const LargeData *)buffer)->getAddress();
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let callback = output
+        .calls
+        .iter()
+        .find(|call| call.function == "dispatch" && call.message == "call")
+        .context("missing dereferenced callback call")?;
+    assert_eq!(
+        callback.receiver_type.as_deref(),
+        Some("const CallbackList *")
+    );
+    assert_eq!(
+        callback.receiver_type_origin.as_deref(),
+        Some("declared_parameter")
+    );
+    assert_eq!(callback.known_time_complexity.as_deref(), Some("O(R)"));
+    let address = output
+        .calls
+        .iter()
+        .find(|call| call.function == "address" && call.message == "getAddress")
+        .context("missing cast receiver call")?;
+    assert_eq!(address.receiver_type.as_deref(), Some("const LargeData *"));
+    assert_eq!(
+        address.receiver_type_origin.as_deref(),
+        Some("explicit_native_cast")
+    );
+    assert!(
+        address.target.is_some(),
+        "cast receiver should resolve LargeData"
+    );
+    Ok(())
+}
+
+#[test]
+fn cpp_dependent_auto_locals_keep_symbolic_dispatch_costs() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template <class F, class P>
+decltype(auto) invoke(P& proxy) {
+    auto dispatcher = proxy.template meta<F>::dispatcher;
+    return dispatcher(proxy);
+}
+template <class Alloc, class T>
+void release(const Alloc& alloc, T * pointer) {
+    auto rebound =
+        typename std::allocator_traits<Alloc>::template rebind_alloc<T>(alloc);
+    rebound.deallocate(pointer, 1);
+}
+template <class T, class Compare>
+class Ordered : private std::list<T> {
+    void order() {
+        auto compare = Compare();
+        this->sort([compare](const T & a, const T & b) {
+            if (a.empty() || b.empty()) return false;
+            return compare(a.get(), b.get());
+        });
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    for (function, message) in [("invoke", "dispatcher"), ("release", "deallocate")] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == function && call.message == message)
+            .with_context(|| format!("missing {function} {message}"))?;
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(R)"),
+            "{function} {message}"
+        );
+    }
+    for call in output.calls.iter().filter(|call| {
+        call.function == "order" && matches!(call.message.as_str(), "empty" | "get" | "compare")
+    }) {
+        assert_eq!(
+            call.known_time_complexity.as_deref(),
+            Some("O(R)"),
+            "{call:?}"
+        );
+    }
+    let sort = output
+        .calls
+        .iter()
+        .find(|call| call.function == "order" && call.message == "sort")
+        .context("missing inherited list sort")?;
+    assert_eq!(sort.receiver_type.as_deref(), Some("std::list<T>"));
+    assert_eq!(
+        sort.receiver_type_origin.as_deref(),
+        Some("declared_supertype")
+    );
+    assert_eq!(sort.known_time_complexity.as_deref(), Some("O(N log N*C)"));
+    Ok(())
+}
+
+#[test]
+fn cpp_function_local_swap_imports_do_not_recurse_into_the_enclosing_method() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Base {
+    int value;
+    void swap(Base & other) {
+        using std::swap;
+        swap(value, other.value);
+    }
+};
+struct Item : Base {
+    friend void swap(Item & first, Item & second) {
+        first.swap(second);
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    let member = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "Base" && method.name == "swap")
+        .context("missing Base swap")?;
+    let friend = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "Item" && method.name == "swap")
+        .context("missing Item friend swap")?;
+    assert_eq!(member.kind, "instance");
+    assert_eq!(friend.kind, "top");
+
+    let imported = output
+        .calls
+        .iter()
+        .find(|call| call.source == member.id && call.message == "swap")
+        .context("missing imported std/ADL swap")?;
+    assert_eq!(imported.lexical_symbol.as_deref(), Some("std::swap"));
+    assert_eq!(
+        imported.lexical_symbol_origin.as_deref(),
+        Some("function_local_import")
+    );
+    assert_eq!(imported.known_time_complexity.as_deref(), Some("O(R)"));
+    assert!(imported.target.is_none());
+    Ok(())
+}
+
+#[test]
+fn cpp_indexed_dependent_map_receivers_keep_the_mapped_project_type() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"template <class Key, class Value, class Policies, bool Enabled>
+struct SelectMap {
+    using Type = std::map<Key, Value>;
+};
+struct CallbackList {
+    void append(int callback) {}
+    void prepend(int callback) {}
+    void insert(int callback, int before) {}
+};
+struct Dispatcher {
+    using CallbackList_ = CallbackList;
+    using Map = typename SelectMap<int, CallbackList_, void, false>::Type;
+    Map listeners;
+    void add(int event, int callback) {
+        listeners[event].append(callback);
+        listeners[event].prepend(callback);
+        listeners[event].insert(callback, 0);
+    }
+};
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+
+    for message in ["append", "prepend", "insert"] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "add" && call.message == message)
+            .with_context(|| format!("missing indexed {message} call"))?;
+        assert_eq!(call.receiver_type.as_deref(), Some("CallbackList"));
+        assert_eq!(call.receiver_type_origin.as_deref(), Some("declared_state"));
+        let target = call
+            .target
+            .as_deref()
+            .with_context(|| format!("missing {message} target"))?;
+        assert!(output.methods.iter().any(|method| {
+            method.id == target && method.owner == "CallbackList" && method.name == message
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn cpp_operators_are_constant_only_for_proven_scalar_operands() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".cpp").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"struct Number {};
+Number operator+(Number left, Number right);
+int scalar(int n, int k) {
+    int sum = n + k;
+    return sum < k ? -sum : sum;
+}
+Number overloaded(Number left, Number right) {
+    return left + right;
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Cpp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let scalar = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "scalar")
+        .context("missing scalar complexity facts")?;
+    for operator in ["+", "<"] {
+        let context = scalar
+            .call_contexts
+            .iter()
+            .find(|context| context.message == operator)
+            .with_context(|| format!("missing scalar {operator} context"))?;
+        assert_eq!(
+            context.known_time_complexity.as_deref(),
+            Some("O(1)"),
+            "primitive {operator} must be constant-time"
+        );
+    }
+
+    let overloaded = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "overloaded")
+        .context("missing overloaded complexity facts")?;
+    let addition = overloaded
+        .call_contexts
+        .iter()
+        .find(|context| context.message == "+")
+        .context("missing overloaded addition context")?;
+    assert_ne!(addition.known_time_complexity.as_deref(), Some("O(1)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_normalization_prices_control_flow_literals_locals_and_record_accessors() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"Node = Struct.new(:kind)
+
+def exercise(values)
+  @memo ||= values
+  cache = {}
+  cache[:items] ||= []
+  rows = []
+  rows.concat(values)
+  smallest = [rows.length, 1].min
+  node = Node.new(:sample)
+  [smallest, node.kind, Dir.pwd]
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.function == "exercise")
+        .collect::<Vec<_>>();
+
+    let logical = calls
+        .iter()
+        .find(|call| call.message == "||")
+        .context("missing normalized ||= control-flow operation")?;
+    assert_eq!(logical.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(logical.known_space_complexity.as_deref(), Some("O(1)"));
+
+    let concat = calls
+        .iter()
+        .find(|call| call.message == "concat")
+        .context("missing local Array#concat")?;
+    assert_eq!(concat.receiver_type.as_deref(), Some("T::Array[T.untyped]"));
+    assert_eq!(concat.known_time_complexity.as_deref(), Some("O(N)"));
+
+    let min = calls
+        .iter()
+        .find(|call| call.message == "min")
+        .context("missing literal Array#min")?;
+    assert_eq!(min.receiver_type.as_deref(), Some("T::Array[T.untyped]"));
+    assert_eq!(min.known_time_complexity.as_deref(), Some("O(N)"));
+
+    let accessor = calls
+        .iter()
+        .find(|call| call.message == "kind")
+        .context("missing Struct reader")?;
+    assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        accessor.complexity_provenance.as_deref(),
+        Some("generated_record_contract")
+    );
+
+    let pwd = calls
+        .iter()
+        .find(|call| call.message == "pwd")
+        .context("missing Dir.pwd")?;
+    assert_eq!(pwd.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(pwd.known_space_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_chained_stdlib_return_types_propagate_to_nested_receivers() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"def owner_name
+  "Outer::Inner".split("::").last.to_s
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.function == "owner_name")
+        .collect::<Vec<_>>();
+
+    let last = calls
+        .iter()
+        .find(|call| call.message == "last")
+        .context("missing nested Array#last")?;
+    assert_eq!(
+        last.receiver_type.as_deref(),
+        Some("T::Array[String]"),
+        "String#split's language-owned return contract must type Array#last"
+    );
+    assert_eq!(last.known_time_complexity.as_deref(), Some("O(1)"));
+
+    let to_s = calls
+        .iter()
+        .find(|call| call.message == "to_s")
+        .context("missing nested #to_s")?;
+    assert_eq!(
+        to_s.receiver_type.as_deref(),
+        Some("T.nilable(String)"),
+        "Array#last's language-owned return contract must type the next receiver"
+    );
+    assert!(to_s.known_time_complexity.is_some());
+    assert!(to_s.known_space_complexity.is_some());
+    Ok(())
+}
+
+#[test]
+fn ruby_default_parameter_receiver_is_not_emitted_as_a_phantom_call() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"def build(evidence, root: evidence["root"])
+  [root, evidence["owners"]]
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.function == "build")
+        .collect::<Vec<_>>();
+
+    assert!(
+        calls.iter().all(|call| call.message != "evidence"),
+        "a parameter used as an index receiver must not become an implicit call"
+    );
+    assert_eq!(
+        calls.iter().filter(|call| call.message == "[]").count(),
+        2,
+        "both actual Hash reads must remain normalized"
+    );
+    Ok(())
+}
+
+#[test]
+fn ruby_regexp_last_match_return_contract_types_index_access() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"def capture
+  Regexp.last_match[1]
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let index = output
+        .calls
+        .iter()
+        .find(|call| call.function == "capture" && call.message == "[]")
+        .context("missing MatchData index access")?;
+
+    assert_eq!(index.receiver_type.as_deref(), Some("T.nilable(MatchData)"));
+    assert_eq!(index.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(index.known_space_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_truthy_loop_carried_record_value_preserves_generated_reader_identity() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"Node = Struct.new(:kind)
+
+def labels(text)
+  current = nil
+  labels = []
+  text.each_line do |line|
+    current = Node.new(:sample) if line.start_with?("node:")
+    labels << current.kind if current && current.kind
+  end
+  labels
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let accessors = output
+        .calls
+        .iter()
+        .filter(|call| call.function == "labels" && call.message == "kind")
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        accessors.len(),
+        2,
+        "both the short-circuit predicate and guarded body reader must be normalized"
+    );
+    for accessor in accessors {
+        assert_eq!(
+            accessor.receiver_symbol.as_deref(),
+            Some("Node"),
+            "the truthiness guard must exclude the initial nil definition while retaining the loop-carried constructor definition"
+        );
+        assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(
+            accessor.complexity_provenance.as_deref(),
+            Some("generated_record_contract")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn ruby_chained_iterators_keep_callback_bindings_in_their_own_cfg_nodes() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"def ordered(rows)
+  rows.map { |row| row }.sort_by { |result| result.kind }
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let callback_rows = output
+        .flow_local_types
+        .iter()
+        .filter(|row| row["function"] == "ordered" && !row["callback_binding_position"].is_null())
+        .collect::<Vec<_>>();
+    let bindings = callback_rows
+        .iter()
+        .map(|row| {
+            (
+                row["node_id"].as_str().unwrap_or_default(),
+                row["name"].as_str().unwrap_or_default(),
+                row["callback_binding_position"].as_u64(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(bindings.len(), 2, "each iterator owns exactly one binding");
+    assert_eq!(
+        bindings
+            .iter()
+            .map(|(_, name, position)| (*name, *position))
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([("result", Some(0)), ("row", Some(0))])
+    );
+    assert_ne!(
+        bindings[0].0, bindings[1].0,
+        "nested iterator bindings must have distinct CFG identities"
+    );
+    assert!(
+        callback_rows.iter().all(|row| {
+            row["reaching_definitions"]
+                .as_array()
+                .is_some_and(Vec::is_empty)
+                && row["definition_call_sources"]
+                    .as_object()
+                    .is_some_and(serde_json::Map::is_empty)
+        }),
+        "each callback parameter must be a fresh definition, not inherit a sibling local's reaching set"
+    );
+    Ok(())
+}
+
+#[test]
+fn ruby_generated_record_contract_accepts_runtime_scip_receiver_identity() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"Node = Struct.new(:kind)
+
+def label(node)
+  node.kind
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let mut output = profile::extract(&document, Profile::Espalier);
+    let index = json!({
+        "metadata": {
+            "toolInfo": {
+                "name": "nil-kill-runtime",
+                "version": "1",
+                "arguments": ["--fact-mine-index-authority=runtime-modeled-world"]
+            },
+            "textDocumentEncoding": 1
+        },
+        "documents": [{
+            "relativePath": tmp.path().file_name().unwrap().to_string_lossy(),
+            "language": "ruby",
+            "occurrences": [{
+                "range": [3, 7, 11],
+                "symbol": "nil-kill-runtime workspace demo 1 Node#kind().",
+                "symbolRoles": 0
+            }]
+        }]
+    });
+    fact_mine_rust::scip::apply_json(&mut output, &index.to_string())?;
+    let accessor = output
+        .calls
+        .iter()
+        .find(|call| call.function == "label" && call.message == "kind")
+        .context("missing generated record reader")?;
+
+    assert_eq!(accessor.receiver_symbol.as_deref(), Some("Node"));
+    assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        accessor.complexity_provenance.as_deref(),
+        Some("generated_record_contract")
+    );
+    Ok(())
+}
+
+#[test]
+fn ruby_generated_record_contract_accepts_portable_scip_nested_owner_identity() -> Result<()> {
+    let tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    fs::write(
+        tmp.path(),
+        r#"module Demo
+  Node = Struct.new(:kind)
+
+  def self.label(node)
+    node.kind
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let mut output = profile::extract(&document, Profile::Espalier);
+    let index = json!({
+        "metadata": {
+            "toolInfo": {
+                "name": "nil-kill-runtime",
+                "version": "1",
+                "arguments": ["--fact-mine-index-authority=runtime-modeled-world"]
+            },
+            "textDocumentEncoding": 1
+        },
+        "documents": [{
+            "relativePath": tmp.path().file_name().unwrap().to_string_lossy(),
+            "language": "ruby",
+            "occurrences": [{
+                "range": [4, 9, 13],
+                "symbol": "nil-kill-runtime workspace demo 1 Demo/Node#kind().",
+                "symbolRoles": 0
+            }]
+        }]
+    });
+    fact_mine_rust::scip::apply_json(&mut output, &index.to_string())?;
+    let accessor = output
+        .calls
+        .iter()
+        .find(|call| call.function == "self.label" && call.message == "kind")
+        .context("missing generated record reader")?;
+
+    assert_eq!(accessor.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(accessor.known_space_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        accessor.complexity_provenance.as_deref(),
+        Some("generated_callable_declaration")
+    );
     Ok(())
 }
 
@@ -1394,6 +3796,49 @@ func (w *wrapper) projected() { w.worker.fn(1) }
         .calls
         .iter()
         .filter(|call| call.message == "fn")
+        .collect::<Vec<_>>();
+
+    assert_eq!(calls.len(), 2, "{calls:#?}");
+    assert!(
+        calls.iter().all(|call| {
+            call.callback_receiver
+                && call.known_time_complexity.as_deref() == Some("O(C)")
+                && call.complexity_bound_quality.as_deref()
+                    == Some("upper_bound_parametric_callback_once")
+        }),
+        "{calls:#?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn csharp_declared_delegate_fields_are_parametric_callbacks() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".cs").tempfile()?;
+    tmp.write_all(
+        br#"class Worker {
+  readonly System.Action<int> _send;
+  readonly System.Func<int, bool> _accept;
+
+  public Worker(System.Action<int> send, System.Func<int, bool> accept) {
+    _send = send;
+    _accept = accept;
+  }
+
+  public bool Run(int value) {
+    _send(value);
+    return _accept(value);
+  }
+}
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::CSharp)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let calls = output
+        .calls
+        .iter()
+        .filter(|call| call.message == "_send" || call.message == "_accept")
         .collect::<Vec<_>>();
 
     assert_eq!(calls.len(), 2, "{calls:#?}");
@@ -1983,7 +4428,19 @@ end
 
     let output = profile::extract(&document, Profile::TracePlan);
 
-    assert_eq!(output.methods.len(), 1);
+    // `call`, the `factory: -> { [] }` lambda, and the two `Data.define`
+    // readers are all first-class methods so their complexity resolves like
+    // any explicitly declared function.
+    let method_names = output
+        .methods
+        .iter()
+        .map(|method| method.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(method_names.contains(&"call"));
+    assert!(method_names.iter().any(|name| name.starts_with("<lambda@")));
+    assert!(method_names.contains(&"name"));
+    assert!(method_names.contains(&"metadata"));
+    assert_eq!(output.methods.len(), 4);
     assert!(output
         .tlet_sites
         .iter()
@@ -1993,10 +4450,14 @@ end
             && record.field == "items"
             && record.declared_type.to_sorbet_string() == "T::Array[String]"
     }));
-    assert!(output.struct_declarations.iter().any(|declaration| {
-        declaration.class == "Worker::Payload"
-            && declaration.fields == vec!["name".to_string(), "metadata".to_string()]
-    }));
+    assert!(
+        output.struct_declarations.iter().any(|declaration| {
+            declaration.class == "Worker::Payload"
+                && declaration.fields == vec!["name".to_string(), "metadata".to_string()]
+        }),
+        "unexpected declarations: {:?}",
+        output.struct_declarations
+    );
     assert!(output.struct_declarations.iter().any(|declaration| {
         declaration.class == "MutableState"
             && declaration.fields == vec!["items".to_string(), "name".to_string()]
@@ -2010,7 +4471,7 @@ end
 
     let merged = profile::merge(vec![output], Profile::TracePlan);
     assert_eq!(merged.tlet_sites.len(), 1);
-    assert_eq!(merged.methods.len(), 1);
+    assert_eq!(merged.methods.len(), 4);
     Ok(())
 }
 
@@ -2428,7 +4889,13 @@ fn assert_oracle_paths_are_relative(value: &Value, oracle_path: &std::path::Path
     match value {
         Value::Object(map) => {
             for (key, child) in map {
-                if matches!(key.as_str(), "path" | "file" | "id" | "key") {
+                if key == "path"
+                    || key == "file"
+                    || key == "key"
+                    || key == "symbol"
+                    || key == "symbol_owner"
+                    || key.ends_with("id")
+                {
                     if let Value::String(identity) = child {
                         for component in identity
                             .split('\0')
@@ -2577,5 +5044,385 @@ class Greeter {
     let merged = profile::merge(vec![output_rb, output_py, output_ts], Profile::NilKill);
     assert!(merged.methods.len() > 1);
 
+    Ok(())
+}
+
+#[test]
+fn rust_enum_constructors_and_transmute_are_constant_time() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rs").tempfile()?;
+    tmp.write_all(
+        b"fn wrap(x: i32) -> Option<i32> { Some(x) }\nfn ok() -> Result<i32, ()> { Ok(1) }\nfn bad() -> Result<i32, ()> { Err(()) }\nfn nope() -> Option<i32> { None }\n",
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Rust)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let contexts: Vec<_> = output
+        .complexity_facts
+        .iter()
+        .flat_map(|facts| facts.call_contexts.iter())
+        .collect();
+    for message in ["Some", "Ok", "Err", "None"] {
+        if let Some(call) = contexts.iter().find(|call| call.message == message) {
+            assert_eq!(
+                call.known_time_complexity.as_deref(),
+                Some("O(1)"),
+                "enum constructor {message} must be O(1)",
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn injected_state_parameter_dispatch_is_a_parametric_callback() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+class Pipeline
+  def initialize(runner:, items:)
+    @runner = runner
+    @items = items
+  end
+
+  def execute(command)
+    @runner.run!(command)
+  end
+
+  def scan(index)
+    @items.length
+    @items[index]
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "run!")
+        .context("injected runner call present")?;
+
+    assert!(
+        call.state_receiver,
+        "the ivar read must retain state identity"
+    );
+    assert!(
+        call.callback_receiver,
+        "constructor injection proves a callback boundary"
+    );
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(C)"));
+    assert_eq!(call.known_space_complexity.as_deref(), Some("O(S)"));
+    assert_eq!(
+        call.complexity_bound_quality.as_deref(),
+        Some("upper_bound_parametric_callback_once")
+    );
+    for message in ["length", "[]"] {
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.function == "scan" && call.message == message)
+            .with_context(|| format!("injected collection-shaped {message} call present"))?;
+        assert!(
+            call.callback_receiver,
+            "an injected object is not proven to have native collection costs merely because it responds to {message}"
+        );
+        assert_eq!(call.known_time_complexity.as_deref(), Some("O(C)"));
+        assert_eq!(call.known_space_complexity.as_deref(), Some("O(S)"));
+        assert_eq!(
+            call.complexity_bound_quality.as_deref(),
+            Some("upper_bound_parametric_callback_once")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn ruby_hash_default_block_is_deferred_not_an_unbounded_loop() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def group(rows)
+  index = Hash.new { |hash, key| hash[key] = [] }
+  fallback = {}
+  fallback.fetch(:missing) { [] }
+  rows.each { |row| index[row] << row }
+  index
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let facts = output
+        .complexity_facts
+        .iter()
+        .find(|facts| facts.function == "group")
+        .context("group complexity facts present")?;
+
+    assert!(
+        facts
+            .iterations
+            .iter()
+            .all(|iteration| iteration.message.as_deref() != Some("new")),
+        "Hash.new stores its fallback block and must not create an unknown loop"
+    );
+    assert!(facts
+        .iterations
+        .iter()
+        .all(|iteration| iteration.cardinality_relation != "unknown"));
+    Ok(())
+}
+
+#[test]
+fn runtime_scip_hash_fetch_identity_proves_its_block_runs_at_most_once() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def lookup(table, key)
+  table.fetch(key) { key.to_s }
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let mut output = profile::extract(&document, Profile::Espalier);
+    let facts = output
+        .complexity_facts
+        .iter()
+        .find(|facts| facts.function == "lookup")
+        .context("lookup complexity facts present")?;
+    assert!(
+        facts.iterations.iter().any(|iteration| {
+            iteration.message.as_deref() == Some("fetch")
+                && iteration.cardinality_relation == "unknown"
+        }),
+        "without receiver identity, fetch must remain conservative"
+    );
+
+    let index = json!({
+        "metadata": {
+            "toolInfo": {
+                "name": "nil-kill-runtime",
+                "version": "1",
+                "arguments": ["--fact-mine-index-authority=runtime-modeled-world"]
+            },
+            "textDocumentEncoding": 1
+        },
+        "documents": [{
+            "relativePath": tmp.path().file_name().unwrap().to_string_lossy(),
+            "language": "ruby",
+            "occurrences": [{
+                "range": [2, 8, 13],
+                "symbol": "nil-kill-runtime ruby ruby 3.2.3 Hash#fetch().",
+                "symbolRoles": 0
+            }]
+        }]
+    });
+    fact_mine_rust::scip::apply_json(&mut output, &index.to_string())?;
+
+    let facts = output
+        .complexity_facts
+        .iter()
+        .find(|facts| facts.function == "lookup")
+        .context("lookup complexity facts remain present")?;
+    assert!(
+        facts
+            .iterations
+            .iter()
+            .all(|iteration| iteration.message.as_deref() != Some("fetch")),
+        "exact Hash#fetch identity must remove the false unbounded iteration"
+    );
+    let nested = facts
+        .call_contexts
+        .iter()
+        .find(|context| context.message == "to_s")
+        .context("fetch fallback call context present")?;
+    assert_eq!(nested.execution_multiplicity, "O(1)");
+    assert!(nested
+        .symbolic_execution
+        .as_ref()
+        .is_some_and(|symbolic| symbolic.complete));
+    Ok(())
+}
+
+#[test]
+fn ruby_class_method_recursion_keeps_its_unique_local_target() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+module Types
+  def self.unwrap(value)
+    value.is_a?(Array) ? value.map { |item| unwrap(item) } : value
+  end
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let method = output
+        .methods
+        .iter()
+        .find(|method| method.dispatch_name == "unwrap")
+        .context("unwrap method present")?;
+    let recursive = output
+        .calls
+        .iter()
+        .find(|call| call.source == method.id && call.message == "unwrap")
+        .context("recursive unwrap call present")?;
+
+    assert_eq!(recursive.target.as_deref(), Some(method.id.as_str()));
+    assert_eq!(recursive.kind, "internal_call");
+    Ok(())
+}
+
+#[test]
+fn ruby_option_parser_calls_use_reviewed_stdlib_costs() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def parse_options
+  parser = OptionParser.new
+  parser.banner = "Usage"
+  parser.parse!
+  parser.to_s
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let parse = output
+        .calls
+        .iter()
+        .find(|call| call.message == "parse!")
+        .context("OptionParser#parse! call present")?;
+    let render = output
+        .calls
+        .iter()
+        .find(|call| call.message == "to_s")
+        .context("OptionParser#to_s call present")?;
+    let banner = output
+        .calls
+        .iter()
+        .find(|call| call.message == "banner=")
+        .context("OptionParser#banner= call present")?;
+
+    assert_eq!(banner.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(banner.known_space_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(parse.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(parse.known_space_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(render.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(render.known_space_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_string_capitalize_uses_reviewed_stdlib_cost() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def title
+  "sample".capitalize
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let capitalize = output
+        .calls
+        .iter()
+        .find(|call| call.message == "capitalize")
+        .context("String#capitalize call present")?;
+
+    assert_eq!(capitalize.known_time_complexity.as_deref(), Some("O(N)"));
+    assert_eq!(capitalize.known_space_complexity.as_deref(), Some("O(N)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_env_uses_its_hashlike_receiver_contract_without_trace_coverage() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+def setting
+  ENV.fetch("SETTING", "default")
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let fetch = output
+        .calls
+        .iter()
+        .find(|call| call.receiver == "ENV" && call.message == "fetch")
+        .context("ENV.fetch call present")?;
+
+    assert_eq!(fetch.receiver_type.as_deref(), Some("Hash"));
+    assert_eq!(fetch.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(fetch.known_space_complexity.as_deref(), Some("O(1)"));
+    Ok(())
+}
+
+#[test]
+fn ruby_module_function_dispatch_matches_runtime_scip_class_symbols() -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = tempfile::Builder::new().suffix(".rb").tempfile()?;
+    tmp.write_all(
+        br#"
+module Toolkit
+  module_function
+
+  def render(value)
+    value.to_s
+  end
+
+  public
+
+  def helper
+    :ok
+  end
+end
+
+def report(value)
+  Toolkit.render(value)
+end
+"#,
+    )?;
+    let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Ruby)?;
+    let output = profile::extract(&document, Profile::Espalier);
+    let render = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "Toolkit" && method.dispatch_name == "render")
+        .context("module function present")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.message == "render")
+        .context("module function call present")?;
+    let helper = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "Toolkit" && method.dispatch_name == "helper")
+        .context("ordinary instance method present")?;
+
+    assert_eq!(render.kind, "class");
+    assert_eq!(helper.kind, "instance");
+    assert_eq!(call.target.as_deref(), Some(render.id.as_str()));
+    assert_eq!(call.kind, "resolved_call");
     Ok(())
 }

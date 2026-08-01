@@ -54,9 +54,9 @@ flags:
       - zig/
     carryforward: false
     joined: false
-  lineage-rust:
+  gigasail-rust:
     paths:
-      - gems/lineage/
+      - gems/gigasail/
     carryforward: false
     joined: false
   go:

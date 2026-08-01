@@ -55,7 +55,10 @@ impl AstNormalizationAdapter for JavaAstAdapter {
     }
 
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
-        matches!(node.kind(), "method_invocation")
+        matches!(
+            node.kind(),
+            "method_invocation" | "object_creation_expression"
+        )
     }
 
     fn call_block_argument<'tree>(
@@ -80,8 +83,38 @@ impl AstNormalizationAdapter for JavaAstAdapter {
             .find(|argument| argument.kind() == "lambda_expression")
     }
 
+    fn supplementary_call_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        if node.kind() != "object_creation_expression" {
+            return Vec::new();
+        }
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "class_body")
+            .map(named_children)
+            .unwrap_or_default()
+    }
+
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         matches!(kind, "enhanced_for_statement").then_some("FOR")
+    }
+
+    fn loop_condition_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        // In `for (T item : source.items())`, tree-sitter puts the binding
+        // before the iterable. The generic first-child fallback therefore
+        // discarded every call in the iterable expression. Preserve `value`
+        // as the normalized loop condition so its calls and cardinality enter
+        // the CFG/DFG.
+        (node.kind() == "enhanced_for_statement")
+            .then(|| node.child_by_field_name("value"))
+            .flatten()
     }
 
     fn case_arm_body_nodes<'tree>(

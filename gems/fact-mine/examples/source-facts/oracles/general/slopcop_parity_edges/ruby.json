@@ -1003,7 +1003,25 @@
         "kind": "entry"
       },
       {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
+      },
+      {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
       }
     ],
     "control_flow_metrics": [
@@ -1093,8 +1111,23 @@
         "line": 17
       },
       {
-        "id": "cfg:SourceFactSlopcopParityEdges#scan:stmt:1:12:4",
+        "id": "cfg:SourceFactSlopcopParityEdges#scan:loop:0.then.0:13:6",
+        "kind": "loop",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#scan:stmt:0.else.0:15:6",
         "kind": "statement",
+        "line": 15
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#scan:stmt:0.then.0.loop.0:13:35",
+        "kind": "statement",
+        "line": 13
+      },
+      {
+        "id": "cfg:SourceFactSlopcopParityEdges#scan:stmt:1:12:4",
+        "kind": "branch",
         "line": 12
       }
     ],
@@ -1123,6 +1156,9 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
       {}
     ],
     "dispatch_sites": [],
@@ -1143,9 +1179,15 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
       {}
     ],
     "flow_types": [
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -1192,6 +1234,9 @@
       }
     ],
     "liveness": [
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -1501,7 +1546,9 @@
         ]
       },
       {
-        "reads": [],
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#report:local:x"
+        ],
         "writes": []
       },
       {
@@ -1543,11 +1590,30 @@
       },
       {
         "reads": [
-          "place:SourceFactSlopcopParityEdges#scan:local:path",
           "place:SourceFactSlopcopParityEdges#scan:local:paths"
         ],
         "writes": [
           "place:SourceFactSlopcopParityEdges#scan:local:path"
+        ]
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#scan:local:path"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactSlopcopParityEdges#scan:local:path",
+          "place:SourceFactSlopcopParityEdges#scan:local:paths"
+        ],
+        "writes": [
+          "place:SourceFactSlopcopParityEdges#scan:local:path",
+          "place:SourceFactSlopcopParityEdges#scan:local:paths"
         ]
       }
     ],
@@ -1795,9 +1861,15 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
       {}
     ],
     "reaching_definitions": [
+      {},
+      {},
+      {},
       {},
       {},
       {},

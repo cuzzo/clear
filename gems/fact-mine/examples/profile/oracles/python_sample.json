@@ -85,12 +85,12 @@
   "fields": [
     {
       "declared_type": "int",
-      "id": "state:41638fe5d66c2aa3",
+      "id": "state:f001f40fc32da24e",
       "language": "python",
       "line": 5,
       "name": "@port",
       "owner": "Database",
-      "owner_id": "owner:1a8faee6057d3971",
+      "owner_id": "owner:b8064726d03619ce",
       "path": "examples/profile/python_sample.py",
       "source": "syntax",
       "span": [
@@ -103,12 +103,12 @@
     },
     {
       "declared_type": null,
-      "id": "state:04ff731a0d59825a",
+      "id": "state:708fb7824917db17",
       "language": "python",
       "line": 9,
       "name": "@_db",
       "owner": "Greeter",
-      "owner_id": "owner:d2af1adb22a6d402",
+      "owner_id": "owner:a8957e23a055d851",
       "path": "examples/profile/python_sample.py",
       "source": "syntax",
       "span": [
@@ -122,7 +122,10 @@
   ],
   "flow_local_types": [
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/python_sample.py",
       "function": "__init__",
       "line": 9,
@@ -150,12 +153,15 @@
       ]
     },
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/python_sample.py",
       "function": "hello",
       "line": 12,
       "name": "name",
-      "node_id": "cfg:Greeter#hello:stmt:1:12:8",
+      "node_id": "cfg:Greeter#hello:return:0:12:8",
       "owner": "Greeter",
       "place_id": "place:Greeter#hello:local:name",
       "reaching_definitions": [
@@ -182,7 +188,8 @@
   "methods": [
     {
       "dispatch_name": "__init__",
-      "id": "fn:887fdfc886d5b516",
+      "generated_declaration": false,
+      "id": "fn:36d86df03e91b9f5",
       "key": [
         "Database",
         "__init__",
@@ -195,7 +202,7 @@
       "name": "__init__",
       "normalized_source": "def __init__(self): self.port: int = 5432",
       "owner": "Database",
-      "owner_id": "owner:1a8faee6057d3971",
+      "owner_id": "owner:b8064726d03619ce",
       "params": [
         "self"
       ],
@@ -206,6 +213,7 @@
         "signature": "def __init__(self):",
         "type_system": "python-typing"
       },
+      "source_export_eligible": true,
       "span": [
         4,
         4,
@@ -217,7 +225,8 @@
     },
     {
       "dispatch_name": "__init__",
-      "id": "fn:8254a2e8c05c9d0b",
+      "generated_declaration": false,
+      "id": "fn:da9413a4cfff38ee",
       "key": [
         "Greeter",
         "__init__",
@@ -230,7 +239,7 @@
       "name": "__init__",
       "normalized_source": "def __init__(self, db: Database): self._db = db",
       "owner": "Greeter",
-      "owner_id": "owner:d2af1adb22a6d402",
+      "owner_id": "owner:a8957e23a055d851",
       "params": [
         "self",
         "db"
@@ -242,6 +251,7 @@
         "signature": "def __init__(self, db: Database):",
         "type_system": "python-typing"
       },
+      "source_export_eligible": true,
       "span": [
         8,
         4,
@@ -253,7 +263,8 @@
     },
     {
       "dispatch_name": "hello",
-      "id": "fn:66deac84d584cdb7",
+      "generated_declaration": false,
+      "id": "fn:d8362c17d1674f24",
       "key": [
         "Greeter",
         "hello",
@@ -266,7 +277,7 @@
       "name": "hello",
       "normalized_source": "def hello(self, name: str) -> str: return f\"Hello {name}\"",
       "owner": "Greeter",
-      "owner_id": "owner:d2af1adb22a6d402",
+      "owner_id": "owner:a8957e23a055d851",
       "params": [
         "self",
         "name"
@@ -278,6 +289,7 @@
         "signature": "def hello(self, name: str) -> str:",
         "type_system": "python-typing"
       },
+      "source_export_eligible": true,
       "span": [
         11,
         4,
@@ -293,7 +305,7 @@
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:1a8faee6057d3971",
+      "id": "owner:b8064726d03619ce",
       "kind": "class",
       "language": "python",
       "line": 3,
@@ -309,7 +321,7 @@
     },
     {
       "confidence": "high",
-      "id": "owner:d2af1adb22a6d402",
+      "id": "owner:a8957e23a055d851",
       "kind": "class",
       "language": "python",
       "line": 7,
@@ -336,8 +348,8 @@
       "confidence": "high",
       "field": "@port",
       "function": "__init__",
-      "function_id": "fn:887fdfc886d5b516",
-      "id": "edge:dc2b379a57c32afa",
+      "function_id": "fn:36d86df03e91b9f5",
+      "id": "edge:a32086b5b46ec814",
       "kind": "writes",
       "line": 5,
       "owner": "Database",
@@ -349,15 +361,15 @@
         5,
         29
       ],
-      "state_id": "state:41638fe5d66c2aa3"
+      "state_id": "state:f001f40fc32da24e"
     },
     {
       "conditional": false,
       "confidence": "high",
       "field": "@_db",
       "function": "__init__",
-      "function_id": "fn:8254a2e8c05c9d0b",
-      "id": "edge:833205b939f16c46",
+      "function_id": "fn:da9413a4cfff38ee",
+      "id": "edge:a487e75c5dac1bcc",
       "kind": "writes",
       "line": 9,
       "owner": "Greeter",
@@ -369,7 +381,7 @@
         9,
         21
       ],
-      "state_id": "state:04ff731a0d59825a"
+      "state_id": "state:708fb7824917db17"
     }
   ],
   "state_param_origin_records": [

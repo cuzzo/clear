@@ -13,7 +13,7 @@ module NilKill
       def each_event
         event_files.each do |file|
           diagnostics = Hash.new(0)
-          File.foreach(file).with_index(1) do |line, line_no|
+          JsonIO.foreach(file).with_index(1) do |line, line_no|
             next if line.strip.empty?
 
             event = JSON.parse(line)
@@ -35,7 +35,8 @@ module NilKill
       def event_files
         @paths.flat_map do |path|
           if File.directory?(path)
-            Dir.glob(File.join(path, "**", "*.jsonl"))
+            Dir.glob(File.join(path, "**", "*.jsonl")) +
+              Dir.glob(File.join(path, "**", "*.jsonl.gz"))
           else
             path
           end

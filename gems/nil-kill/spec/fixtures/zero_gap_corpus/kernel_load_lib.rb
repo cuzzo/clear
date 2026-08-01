@@ -4,9 +4,9 @@
 require "sorbet-runtime"
 
 # Reached via Kernel#load. `opts` is a real positional T.untyped slot
-# (a sampled NoEvidence candidate -> must get a record). The splat /
-# kwsplat / block slots are untraceable-by-design (arg_untraced) and
-# must NEVER land in the two forbidden columns.
+# (a sampled NoEvidence candidate -> must get a record). The splat,
+# kwsplat, and block locals are ordinary runtime bindings and must be
+# captured without an evidence gap.
 class KernelLoad
   extend T::Sig
 

@@ -87,8 +87,9 @@ Initial providers:
 - `ruby`: existing static/runtime evidence path; runtime collection remains the
   legacy `nil-kill collect` flow.
 - `python`: Tree-sitter static policy plus the `sitecustomize`/`sys.settrace`
-  tracer; `collect-python` is now a compatibility wrapper around
-  `collect-runtime --language python`.
+  tracer. Both `collect-python` and `collect-runtime` are gone: the Python
+  tracer wrote events in a shape nothing has read since the Ruby collector
+  became a C extension, and no other language ever had a tracer at all.
 - `zig`: Tree-sitter static policy only; the provider explicitly reports that
   runtime tracing is unsupported.
 

@@ -5,7 +5,6 @@ require_relative "../lib/nil_kill/native/command"
 require_relative "../lib/nil_kill/native/co_update"
 require_relative "../lib/nil_kill/native/flay_similarity"
 require_relative "../lib/nil_kill/native/predicate_aliases"
-require_relative "../lib/nil_kill/runtime_trace"
 
 RSpec.describe "NilKill coverage hardening" do
   def capture_io
@@ -32,8 +31,6 @@ RSpec.describe "NilKill coverage hardening" do
     it "dispatches supported subcommands to their command objects" do
       cases = [
         ["static", NilKill::Commands::StaticCommand],
-        ["collect-runtime", NilKill::Commands::CollectRuntimeCommand],
-        ["collect-python", NilKill::Commands::CollectPythonCommand],
         ["normalize", NilKill::Commands::NormalizeCommand],
         ["analyze", NilKill::Commands::AnalyzeCommand],
         ["trace-spec", NilKill::Commands::TraceSpecCommand],
@@ -71,37 +68,11 @@ RSpec.describe "NilKill coverage hardening" do
     it "prints help for help and exits on unknown commands" do
       out, = capture_io { described_class.new(["help"]).run }
       expect(out).to include("bundle exec tools/nil-kill collect")
+      expect(out).to include("NIL_KILL_COLLECT_COVERAGE=0")
 
       expect do
         capture_io { described_class.new(["unknown"]).run }
       end.to raise_error(SystemExit) { |error| expect(error.status).to eq(2) }
-    end
-
-    it "parses command files, command strings, globs, templates, and trailing commands" do
-      Dir.mktmpdir do |dir|
-        command_file = File.join(dir, "commands.txt")
-        File.write(command_file, "# ignored\nruby -e 'puts 1'\n\nbundle exec rspec\n")
-        a = File.join(dir, "a.rb")
-        b = File.join(dir, "b.rb")
-        File.write(a, "")
-        File.write(b, "")
-
-        cli = described_class.new([
-          "collect",
-          "--commands", command_file,
-          "--cmd", "ruby -w",
-          "--glob", File.join(dir, "*.rb"),
-          "--template", "ruby {file}",
-          "--", "bundle", "exec", "ruby", "script.rb",
-        ])
-
-        commands = cli.send(:collect_commands)
-        expect(commands).to include(["ruby", "-e", "puts 1"])
-        expect(commands).to include(["bundle", "exec", "rspec"])
-        expect(commands).to include(["ruby", "-w"])
-        expect(commands).to include(["ruby", a], ["ruby", b])
-        expect(commands).to include(["bundle", "exec", "ruby", "script.rb"])
-      end
     end
 
     it "writes and compares collect metadata by content, not mtime alone" do
@@ -140,7 +111,9 @@ RSpec.describe "NilKill coverage hardening" do
       expect { cli.send(:guard_fresh_runtime!) }.not_to raise_error
 
       cli = described_class.new([])
+      allow(Dir).to receive(:glob).and_call_original
       allow(Dir).to receive(:glob).with(File.join(NilKill::RUNTIME_DIR, "*.jsonl")).and_return([])
+      allow(Dir).to receive(:glob).with(File.join(NilKill::RUNTIME_DIR, "*.jsonl.gz")).and_return([])
       expect { capture_io { cli.send(:guard_fresh_runtime!) } }.to raise_error(SystemExit)
 
       Dir.mktmpdir do |dir|
@@ -165,35 +138,6 @@ RSpec.describe "NilKill coverage hardening" do
         expect(described_class.new([]).send(:mtime_stale?, old_runtime)).to be(true)
         expect(described_class.new([]).send(:mtime_stale?, new_runtime)).to be(false)
       end
-    end
-
-    it "runs collect with instrumentation, trace-plan setup, worker env, and cleanup" do
-      cli = described_class.new(["collect", "--continue-on-error", "--", "ruby", "-e", "0"])
-      allow(cli).to receive(:collect_commands).and_return([["ruby", "-e", "0"], ["ruby", "-e", "1"]])
-      allow(cli).to receive(:write_collect_meta!)
-      allow(cli).to receive(:acquire_inplace_lock!)
-      allow(cli).to receive(:install_inplace_restore_traps!)
-      allow(cli).to receive(:assert_collect_coverage_produced!)
-      allow(NilKill::TracePlan).to receive(:write)
-      allow(NilKill).to receive(:target_files).and_return(["src/app.rb"])
-      allow(NilKill).to receive(:write_inplace_sentinel!)
-      allow(NilKill).to receive(:restore_inplace_snapshot!)
-      instrumenter = instance_double(NilKill::SourceInstrumenter, run_in_place: true)
-      expect(NilKill::SourceInstrumenter).to receive(:new).and_return(instrumenter)
-      seen_env = []
-      allow(cli).to receive(:system) do |env, *cmd|
-        seen_env << env
-        expect(cmd).to eq(["ruby", "-e", seen_env.size == 1 ? "0" : "1"])
-        seen_env.size == 1
-      end
-
-      capture_io { cli.run }
-
-      expect(NilKill::TracePlan).to have_received(:write)
-      expect(NilKill).to have_received(:restore_inplace_snapshot!)
-      expect(seen_env.first).to include("NIL_KILL_TRACE" => "1")
-      expect(seen_env.first["RUBYOPT"]).to include("runtime_trace.rb")
-      expect(seen_env.first["NIL_KILL_TRACE_METHODS"]).to eq("0")
     end
 
     it "surfaces focused hash-record actions and doctor dependency probes" do
@@ -229,85 +173,8 @@ RSpec.describe "NilKill coverage hardening" do
       end
     end
 
-    it "covers doctor dispatch, stale guards, collect failure exits, and evidence assertions" do
-      doctor = instance_double(NilKill::Doctor, run: true)
-      expect(NilKill::Doctor).to receive(:new).and_return(doctor)
-      described_class.new(["doctor"]).run
-
-      cli = described_class.new([])
-      expect(cli.send(:explicit_evidence_path?, ["--evidence=tmp/evidence.json"])).to be(true)
-      expect(cli.send(:explicit_evidence_path?, ["--flag"])).to be(false)
-
-      allow(Open3).to receive(:capture2e).and_raise(Errno::ENOENT)
-      expect(cli.send(:git_capture, "status")).to be_nil
-
-      allow(cli).to receive(:collect_meta_path).and_return("/missing/meta.json")
-      expect(cli.send(:targets_changed_since_collect)).to eq(:unknown)
-
-      runtime_file = File.join(Dir.tmpdir, "nil-kill-runtime-guard.jsonl")
-      File.write(runtime_file, "{}")
-      stale_cli = described_class.new([])
-      allow(Dir).to receive(:glob).and_call_original
-      allow(Dir).to receive(:glob).with(File.join(NilKill::RUNTIME_DIR, "*.jsonl")).and_return([runtime_file])
-      allow(stale_cli).to receive(:targets_changed_since_collect).and_return(["oldsha12345", "newsha67890", Array.new(10) { |i| "src/f#{i}.rb" }])
-      expect { capture_io { stale_cli.send(:guard_fresh_runtime!) } }.to raise_error(SystemExit)
-
-      evidence_cli = described_class.new([])
-      stub_const("NilKill::TMP_DIR", Dir.mktmpdir("nil-kill-missing-evidence", NilKill::ROOT))
-      expect { capture_io { evidence_cli.send(:guard_fresh_evidence!) } }.to raise_error(SystemExit)
-
-      failing_collect = described_class.new(["collect", "--no-instrument-source", "--", "ruby", "-e", "exit 1"])
-      allow(failing_collect).to receive(:collect_commands).and_return([["ruby", "-e", "exit 1"]])
-      allow(failing_collect).to receive(:write_collect_meta!)
-      allow(failing_collect).to receive(:system).and_return(false)
-      allow(failing_collect).to receive(:assert_collect_coverage_produced!)
-      allow(NilKill::TracePlan).to receive(:write)
-      expect { capture_io { failing_collect.send(:collect) } }.to raise_error(SystemExit)
-
-      lock_cli = described_class.new([])
-      fake_file = instance_double(File, flock: false)
-      allow(File).to receive(:open).and_return(fake_file)
-      expect { capture_io { lock_cli.send(:acquire_inplace_lock!) } }.to raise_error(SystemExit)
-
-      assert_cli = described_class.new([])
-      allow(Dir).to receive(:glob).with(File.join(NilKill::RUNTIME_DIR, "coverage-*.jsonl")).and_return([runtime_file])
-      allow(Dir).to receive(:glob).with(File.join(NilKill::RUNTIME_DIR, "methods-*.jsonl")).and_return([])
-      expect { capture_io { assert_cli.send(:assert_collect_coverage_produced!) } }.to raise_error(SystemExit)
-    ensure
-      FileUtils.rm_f(runtime_file) if defined?(runtime_file)
-    end
   end
 
-  describe NilKill::Commands::CollectRuntimeCommand do
-    it "parses options and delegates to the requested language provider" do
-      provider = instance_double(NilKill::Languages::Provider)
-      expect(NilKill::Languages).to receive(:provider_for).with("python").and_return(provider)
-      expect(provider).to receive(:collect_runtime).with(
-        argv: ["--", "pytest"],
-        root: File.expand_path("."),
-        output: File.expand_path("tmp/runtime", NilKill::ROOT),
-        targets: ["app", "lib"],
-        append: true
-      )
-
-      described_class.new([
-        "--language=python",
-        "--output", "tmp/runtime",
-        "--target", "app",
-        "--target=lib",
-        "--append-runtime",
-        "--", "pytest",
-      ]).run
-    end
-
-    it "turns unsupported runtime tracers into a user-facing abort" do
-      provider = instance_double(NilKill::Languages::Provider)
-      allow(NilKill::Languages).to receive(:provider_for).and_return(provider)
-      allow(provider).to receive(:collect_runtime).and_raise(NilKill::Languages::UnsupportedRuntimeTracer, "no tracer")
-
-      expect { capture_io { described_class.new(["--language", "go", "--", "go", "test"]).run } }.to raise_error(SystemExit)
-    end
-  end
 
   describe NilKill::Commands::AnalyzeCommand do
     it "requires normalized v2 evidence and writes analyzed actions" do
@@ -331,14 +198,6 @@ RSpec.describe "NilKill coverage hardening" do
     end
   end
 
-  describe NilKill::Commands::CollectPythonCommand do
-    it "is a python-specific wrapper around collect-runtime" do
-      runner = instance_double(NilKill::Commands::CollectRuntimeCommand, run: true)
-      expect(NilKill::Commands::CollectRuntimeCommand).to receive(:new).with(["--language", "python", "--", "pytest"]).and_return(runner)
-
-      described_class.new(["--", "pytest"]).run
-    end
-  end
 
   describe NilKill::Commands::TraceSpecCommand do
     it "publishes the runtime event schema and current language capabilities" do
@@ -349,44 +208,6 @@ RSpec.describe "NilKill coverage hardening" do
     end
   end
 
-  describe NilKill::Languages::Providers::Python do
-    it "builds a Python tracing environment and honors append mode" do
-      provider = described_class.new
-
-      Dir.mktmpdir do |dir|
-        output = File.join(dir, "trace")
-        FileUtils.mkdir_p(output)
-        stale = File.join(output, "old.jsonl")
-        File.write(stale, "old")
-
-        expect(provider).to receive(:system) do |env, *cmd, chdir:|
-          expect(env).to include(
-            "NIL_KILL_PY_TRACE" => "1",
-            "NIL_KILL_PY_TRACE_OUT" => output,
-            "NIL_KILL_TRACE_ROOT" => dir,
-          )
-          expect(env["NIL_KILL_TARGETS"].split(File::PATH_SEPARATOR)).to eq([File.join(dir, "src")])
-          expect(env["PYTHONPATH"]).to include("gems/nil-kill/lib")
-          expect(cmd).to eq(["python", "-m", "pytest"])
-          expect(chdir).to eq(dir)
-          true
-        end
-
-        out, = capture_io do
-          provider.collect_runtime(
-            argv: ["--", "python", "-m", "pytest"],
-            root: dir,
-            output: output,
-            targets: ["src"],
-            append: false
-          )
-        end
-
-        expect(File).not_to exist(stale)
-        expect(out).to include("wrote Python trace events")
-      end
-    end
-  end
 
   describe NilKill::HashShapeOps do
     it "deep-copies, merges, stringifies, and preserves poisoned shapes" do
@@ -690,364 +511,81 @@ RSpec.describe "NilKill coverage hardening" do
     end
   end
 
-  describe NilKillRuntimeTrace do
-    def reset_runtime_trace_state!
-      FileUtils.rm_f(described_class::TRACE_PLAN_PATH)
-      {
-        methods: {},
-        tlets: {},
-        structs: {},
-        ivar_runtime: {},
-        tuples: {},
-        collections: {},
-        method_edges: {},
-        objects: {},
-        object_tokens: {},
-        frames: Hash.new { |h, k| h[k] = [] },
-        shape_lookup: {},
-        path_cache: {},
-        target_cache: {},
-        site_ctx: {},
-        cshape: {},
-        ctsk: {},
-        cls_name: {},
-        method_metadata: {},
-        planned_methods_by_class: nil,
-        sampled_tstruct_fields: {},
-        tlet_site_decisions: {},
-        targeted_tracepoints: [],
-        targeted_tracepoint_keys: Set.new,
-        trace_plan_loaded: false,
-        trace_plan: nil,
-        coverage_line_map: nil,
-        pending_mut: nil,
-        coalesce: true,
-        coverage_owned: false,
-      }.each do |name, value|
-        described_class.instance_variable_set(:"@#{name}", value)
-      end
-    end
+  describe "the native collector" do
+    COLLECTOR_TARGETS = [File.expand_path("src", NilKill::ROOT)].freeze
 
-    FakeTracePoint = Struct.new(
-      :path,
-      :lineno,
-      :defined_class,
-      :method_id,
-      :parameters,
-      :return_value,
-      :raised_exception,
-      :trace_binding,
-      keyword_init: true
-    ) do
-      def binding
-        trace_binding
-      end
-    end
-
-    def binding_for_forced_args(args)
-      binding
-    end
-
-    before do
-      reset_runtime_trace_state!
-    end
-
-    it "filters trace plans and respects sampling gates" do
-      target = described_class::TARGETS.first
-      file = File.join(target, "trace_plan_unit.rb")
-      plan = {
-        "target_dirs" => described_class::TARGETS,
-        "methods" => {
-          ["Worker", "skip", "instance", file, 10].join("\0") => { "sample" => false, "frame" => false },
-          ["Worker", "perform", "instance", file, 20].join("\0") => {
-            "sample" => true,
-            "frame" => true,
-            "return" => false,
-            "params" => { "payload" => true, "ignored" => false },
-          },
-        },
-        "tracepoint_methods" => {
-          ["Worker", "targeted", "class", file, 30].join("\0") => {
-            "sample" => true,
-            "frame" => false,
-            "return" => true,
-            "params" => { "arg" => true },
-          },
-        },
-        "tlets" => { [file, 40].join("\0") => true },
-        "struct_fields" => {
-          ["User", "name"].join("\0") => true,
-          ["User", "resolved"].join("\0") => false,
-          ["GenericParts", "generic_args_raw"].join("\0") => true,
-          ["TypeShape::GenericParts", "generic_args_raw"].join("\0") => false,
-        },
-      }
-      FileUtils.mkdir_p(File.dirname(described_class::TRACE_PLAN_PATH))
-      File.write(described_class::TRACE_PLAN_PATH, JSON.dump(plan))
-
-      expect(described_class.trace_plan).to eq(plan)
-      expect(described_class.method_plan("Worker", "perform", "instance", file, 20)).to include("return" => false)
-      expect(described_class.sample_param?(plan["methods"].values.last, "payload")).to be(true)
-      expect(described_class.sample_param?(plan["methods"].values.last, "ignored")).to be(false)
-      expect(described_class.sample_return?(plan["methods"].values.last)).to be(false)
-      expect(described_class.sample_tlet?(file, 40)).to be(true)
-      expect(described_class.sample_struct_field?("Models::User", "name")).to be(true)
-      expect(described_class.sample_struct_field?("Models::User", "missing")).to be(true)
-      expect(described_class.sample_state_field?("Models::User", "name")).to be(true)
-      expect(described_class.sample_state_field?("Models::User", "resolved")).to be(false)
-      expect(described_class.sample_state_field?("Models::User", "unknown")).to be(true)
-      expect(described_class.sample_struct_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)
-      expect(described_class.sample_state_field?("TypeShape::GenericParts", "generic_args_raw")).to be(false)
-
-      planned = described_class.planned_methods_by_class
-      expect(planned["Worker"].map { |entry| entry[:method_id] }).to eq(["targeted"])
-    end
-
-    it "normalizes paths, target membership, class names, and collection shapes" do
-      target_file = File.join(described_class::TARGETS.first, "shape_unit.rb")
-      outside = File.join(Dir.tmpdir, "outside.rb")
-
-      expect(described_class.abs_path(target_file)).to eq(File.expand_path(target_file, described_class::ROOT))
-      expect(described_class.target_path?(target_file)).to be(true)
-      expect(described_class.target_path?(outside)).to be(false)
-      expect(described_class.class_name(nil)).to eq("NilClass")
-      expect(described_class.class_name("x")).to eq("String")
-
-      array_shape = described_class.container_shape([1, 2, 3])
-      expect(array_shape.first).to eq(:array)
-      expect(array_shape[1].to_a).to eq(["Integer"])
-      expect(array_shape).to be_frozen
-
-      hash_shape = described_class.container_shape({ "id" => 1 })
-      expect(hash_shape.first).to eq(:hash)
-      expect(hash_shape[1][0].to_a).to eq(["String"])
-      expect(hash_shape[1][1].to_a).to eq(["Integer"])
-
-      nested_key = described_class.collection_type_shape_key([{ "id" => 1 }])
-      expect(described_class.shape_payload(nested_key)).to include("kind" => "array")
-      expect(described_class.container_shape("scalar")).to be_nil
-    end
-
-    it "records source-wrapper calls, returns, raises, ivars, structs, and tuples" do
-      target_file = File.join(described_class::TARGETS.first, "record_unit.rb")
-      FileUtils.mkdir_p(File.dirname(target_file))
-      File.write(target_file, "# trace target\n")
-
-      described_class.record_source_method_call("Worker", "perform", "instance", target_file, 12, {
-        "payload" => ["a", "b"],
-        "meta" => { "id" => 1 },
-      })
-      returned = described_class.record_source_method_return("Worker", "perform", "instance", target_file, 12, ["ok", 1])
-      expect(returned).to eq(["ok", 1])
-
-      key = ["Worker", "perform", "instance", File.expand_path(target_file, described_class::ROOT), 12]
-      bucket = described_class.methods.fetch(key)
-      expect(bucket[:calls]).to eq(1)
-      expect(bucket[:ok_calls]).to eq(1)
-      expect(bucket[:params_by_name]["payload"].to_a).to eq(["Array"])
-      expect(bucket[:return_elem].to_a).to contain_exactly("Integer", "String")
-
-      described_class.record_source_method_call("Worker", "explode", "instance", target_file, 30, {})
-      described_class.record_source_method_raise("Worker", "explode", "instance", target_file, 30, RuntimeError.new("boom"))
-      error_key = ["Worker", "explode", "instance", File.expand_path(target_file, described_class::ROOT), 30]
-      expect(described_class.methods.fetch(error_key)[:raised].to_a).to eq(["RuntimeError"])
-
-      receiver = Class.new
-      stub_const("TraceReceiver", receiver)
-      described_class.record_ivar_assignment(receiver.new, "@items", [1, 2], target_file, 44)
-      expect(described_class.instance_variable_get(:@ivar_runtime).keys.first).to eq(["TraceReceiver", "@items"])
-
-      struct_class = Class.new
-      struct_class.instance_variable_set(:@__nil_kill_struct_path, target_file)
-      struct_class.instance_variable_set(:@__nil_kill_struct_line, 50)
-      described_class.record_struct_field(struct_class, "TraceStruct", "values", [1, 2, 3])
-      struct_key = ["TraceStruct", "values", File.expand_path(target_file, described_class::ROOT), 50]
-      expect(described_class.structs.fetch(struct_key)[:array_calls]).to eq(1)
-      expect(described_class.tuples).not_to be_empty
-    ensure
-      FileUtils.rm_f(target_file)
-    end
-
-    it "reuses collection shapes when registering sampled boundary owners" do
-      target_file = File.join(described_class::TARGETS.first, "shape_reuse_unit.rb")
-      FileUtils.mkdir_p(File.dirname(target_file))
-      File.write(target_file, "# trace target\n")
-      nested = [{ "id" => [1, 2, 3] }]
-
-      allow(described_class).to receive(:container_shape).and_call_original
-      described_class.record_source_method_call("Worker", "consume", "instance", target_file, 18, { "items" => nested })
-
-      expect(described_class).to have_received(:container_shape).with(nested).once
-    ensure
-      FileUtils.rm_f(target_file)
-    end
-
-    it "records forced tracepoint calls, returns, raises, and method edges" do
-      target_file = File.join(described_class::TARGETS.first, "forced_trace_unit.rb")
-      FileUtils.mkdir_p(File.dirname(target_file))
-      File.write(target_file, "# trace target\n")
-      entry = {
-        owner: "TraceTarget",
-        kind: "instance",
-        method_id: "forced",
-        path: target_file,
-        line: 8,
-        params: { "items" => true, "meta" => true },
-        sample: true,
-        frame: true,
-        return: true,
-      }
-
-      call_tp = FakeTracePoint.new(
-        path: target_file,
-        lineno: 8,
-        defined_class: Class.new,
-        method_id: :forced,
-        parameters: [[:req, :items], [:req, :meta]],
-        trace_binding: binding_for_forced_args([["a", "b"], { "id" => 1 }])
-      )
-      described_class.record_call(call_tp, forced_entry: entry)
-
-      return_tp = FakeTracePoint.new(path: target_file, lineno: 8, method_id: :forced, return_value: { "ok" => [1, 2] })
-      described_class.record_return(return_tp, forced_entry: entry)
-
-      key = ["TraceTarget", "forced", "instance", File.expand_path(target_file, described_class::ROOT), 8]
-      bucket = described_class.methods.fetch(key)
-      expect(bucket[:calls]).to eq(1)
-      expect(bucket[:ok_calls]).to eq(1)
-      expect(bucket[:param_elem]["items"].to_a).to eq(["String"])
-      expect(bucket[:return_kv][0].to_a).to eq(["String"])
-      expect(bucket[:return_kv_shapes][1].to_a.map { |shape| described_class.shape_payload(shape)["kind"] }).to include("array")
-
-      described_class.record_call(call_tp, forced_entry: entry)
-      raise_tp = FakeTracePoint.new(path: target_file, lineno: 8, method_id: :forced, raised_exception: ArgumentError.new("bad"))
-      described_class.record_raise(raise_tp, forced_entry: entry)
-      expect(bucket[:raised_calls]).to eq(1)
-      expect(bucket[:raised].to_a).to eq(["ArgumentError"])
-
-      stack = described_class.frames[Thread.current.object_id]
-      caller_frame = { method_key: ["Caller", "outer", "instance", target_file, 2], edge_key: nil }
-      callee_frame = { method_key: key, edge_key: nil }
-      stack << caller_frame
-      described_class.record_method_edge_entry(callee_frame, stack)
-      described_class.record_method_edge_outcome(callee_frame, :ok)
-      expect(described_class.method_edges.values.first[:ok_calls]).to eq(1)
-    ensure
-      FileUtils.rm_f(target_file)
-    end
+    before { NilKillTraceNative.reset }
 
     it "records collection mutations through Array, Hash, and Set hooks without losing owners" do
-      target_file = File.join(described_class::TARGETS.first, "collection_hook_unit.rb")
+      target_file = File.join(COLLECTOR_TARGETS.first, "collection_hook_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "# trace target\n")
-      described_class.install_collection_hook
+      NilKillTraceNative.install_collection_hook
 
-      array_bucket = described_class.method_bucket(["TraceTarget", "with_items", "instance", target_file, 10])
       array = []
-      described_class.register_collection_owner(array, owner_kind: "method_param", name: "items", path: target_file, line: 10, bucket: array_bucket)
+      NilKillTraceNative.register_collection_owner(array, owner_kind: "method_param", name: "items", path: target_file, line: 10)
       eval("array.push('a'); array.append('b'); array.unshift(:sym); array[1] = 7; array.concat(['c'], ['d'])", binding, target_file, 20)
 
-      hash_bucket = described_class.method_bucket(["TraceTarget", "with_hash", "instance", target_file, 12])
       hash = {}
-      described_class.register_collection_owner(hash, owner_kind: "method_param", name: "meta", path: target_file, line: 12, bucket: hash_bucket)
+      NilKillTraceNative.register_collection_owner(hash, owner_kind: "method_param", name: "meta", path: target_file, line: 12)
       eval("hash['id'] = 1; hash.store(:name, 'Ada'); hash.merge!({'age' => 42}, active: true); hash.update({'score' => 10})", binding, target_file, 30)
 
-      set_bucket = described_class.method_bucket(["TraceTarget", "with_set", "instance", target_file, 14])
       set = Set.new
-      described_class.register_collection_owner(set, owner_kind: "method_param", name: "tags", path: target_file, line: 14, bucket: set_bucket)
+      NilKillTraceNative.register_collection_owner(set, owner_kind: "method_param", name: "tags", path: target_file, line: 14)
       eval("set.add('one'); set << 'two'; set.merge(['three'])", binding, target_file, 40)
 
-      described_class.flush_pending_mutations!
-
-      array_key = ["method_param", "items", File.expand_path(target_file, described_class::ROOT), 10, "array"]
-      hash_key = ["method_param", "meta", File.expand_path(target_file, described_class::ROOT), 12, "hash"]
-      set_key = ["method_param", "tags", File.expand_path(target_file, described_class::ROOT), 14, "set"]
-      expect(described_class.collections.fetch(array_key)[:elem_classes].to_a).to include("String", "Integer", "Symbol")
-      expect(described_class.collections.fetch(hash_key)[:key_classes].to_a).to include("String", "Symbol")
-      expect(described_class.collections.fetch(set_key)[:elem_classes].to_a).to include("String")
-
-      described_class.instance_variable_set(:@coalesce, false)
-      described_class.record_collection_mutation(array, elem: "direct")
-      expect(described_class.collections.fetch(array_key)[:elem_classes].to_a).to include("String")
-
       frozen_array = [1, 2].freeze
-      described_class.register_collection_owner(frozen_array, owner_kind: "method_return", name: "frozen_items", path: target_file, line: 16, bucket: array_bucket)
-      frozen_key = ["method_return", "frozen_items", File.expand_path(target_file, described_class::ROOT), 16, "array"]
-      expect(described_class.collections.fetch(frozen_key)[:elem_classes].to_a).to eq(["Integer"])
+      NilKillTraceNative.register_collection_owner(frozen_array, owner_kind: "method_return", name: "frozen_items", path: target_file, line: 16)
+
+      absolute = File.expand_path(target_file, NilKill::ROOT)
+      seen = NilKillTraceNative.collection_observations.to_h do |row|
+        [[row.fetch(:name), row.fetch(:kind)], row]
+      end
+      expect(seen.fetch(["items", "array"]).fetch(:elem_classes)).to include("String", "Integer", "Symbol")
+      expect(seen.fetch(["meta", "hash"]).fetch(:key_classes)).to include("String", "Symbol")
+      expect(seen.fetch(["tags", "set"]).fetch(:elem_classes)).to include("String")
+      expect(seen.fetch(["items", "array"]).fetch(:path)).to eq(absolute)
+      # A frozen collection cannot be mutated again, so it is recorded once at
+      # the moment it is owned and never tracked.
+      expect(seen.fetch(["frozen_items", "array"]).fetch(:elem_classes)).to eq(["Integer"])
+      expect(NilKillTraceNative.tracks_collection?(frozen_array)).to be(false)
     ensure
       FileUtils.rm_f(target_file)
     end
 
-    it "records T.let, OpenStruct, Struct, and Data field hooks at target callsites" do
-      target_file = File.join(described_class::TARGETS.first, "hook_unit.rb")
+    it "samples Struct fields through the native reader when the app overrides #[]" do
+      target_file = File.join(COLLECTOR_TARGETS.first, "struct_reader_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "# trace target\n")
-      plan = {
-        "target_dirs" => described_class::TARGETS,
-        "tlets" => { [target_file, 7].join("\0") => true },
-        "struct_fields" => %w[
-          OpenStruct.name OpenStruct.age AnonymousStruct.name
-          AnonymousStruct.tags AnonymousData.name AnonymousData.meta
-        ].to_h { |slot| [slot.split(".").join("\0"), true] },
-      }
-      allow(described_class).to receive(:trace_plan).and_return(plan)
-
-      untyped = Object.new
-      untyped.define_singleton_method(:to_s) { "T.untyped" }
-      t_module = Module.new do
-        def self.let(value, _type, **_kw)
-          value
+      dataset_class = Struct.new(:path, :files, keyword_init: true) do
+        def [](file)
+          files.fetch(File.expand_path(file))
         end
       end
-      t_module.define_singleton_method(:untyped) { untyped }
-      stub_const("T", t_module)
-      described_class.install_tlet_hook
-      allow(described_class).to receive(:src_line).and_call_original
-      eval("T.let('known', String)", binding, target_file, 6)
-      eval("T.let('known-again', String)", binding, target_file, 6)
-      expect(described_class.tlets).to be_empty
+      dataset_class.instance_variable_set(:@__nil_kill_struct_path, target_file)
+      dataset_class.instance_variable_set(:@__nil_kill_struct_line, 10)
 
-      eval("T.let('name', T.untyped)", binding, target_file, 7)
-      expect(described_class.tlets.values.first[:classes].to_a).to eq(["String"])
-      expect(described_class).to have_received(:src_line).twice
+      NilKillTraceNative.attach_record(dataset_class)
 
-      described_class.install_open_struct_hook
-      eval("OpenStruct.new(name: 'Ada').tap { |obj| obj[:age] = 42 }", binding, target_file, 12)
-      expect(described_class.structs.keys.map { |key| key[1] }).to include("name", "age")
-
-      struct_class = Struct.new(:name, :tags)
-      struct_class.instance_variable_set(:@__nil_kill_struct_path, target_file)
-      struct_class.instance_variable_set(:@__nil_kill_struct_line, 20)
-      described_class.attach_struct(struct_class)
-      instance = struct_class.new("Ada", ["ruby"])
-      instance.tags = ["coverage"]
-      instance[:name] = "Grace"
-      expect(described_class.structs.keys.map { |key| key[0] }).to include("AnonymousStruct")
-
-      if defined?(Data)
-        data_class = Data.define(:name, :meta)
-        data_class.instance_variable_set(:@__nil_kill_struct_path, target_file)
-        data_class.instance_variable_set(:@__nil_kill_struct_line, 30)
-        described_class.attach_data(data_class)
-        data_class.new("Ada", { "id" => 1 })
-        expect(described_class.structs.keys.map { |key| key[0] }).to include("AnonymousData")
-      end
+      expect do
+        dataset_class.new(path: "/tmp/coverage.json", files: {})
+      end.not_to raise_error
     ensure
       FileUtils.rm_f(target_file)
     end
 
     it "computes unresolved T::Struct fields once per class" do
-      target_file = File.join(described_class::TARGETS.first, "tstruct_plan_unit.rb")
+      target_file = File.join(COLLECTOR_TARGETS.first, "tstruct_plan_unit.rb")
       FileUtils.mkdir_p(File.dirname(target_file))
       File.write(target_file, "# trace target\n")
       plan = {
-        "target_dirs" => described_class::TARGETS,
+        "target_dirs" => COLLECTOR_TARGETS,
         "struct_fields" => {
           ["AnonymousTStruct", "known"].join("\0") => false,
           ["AnonymousTStruct", "raw"].join("\0") => true,
         },
       }
-      allow(described_class).to receive(:trace_plan).and_return(plan)
+      NilKillTraceNative.configure_struct_fields(plan.fetch("struct_fields"))
 
       props_calls = 0
       klass = Class.new do
@@ -1065,46 +603,19 @@ RSpec.describe "NilKill coverage hardening" do
       klass.instance_variable_set(:@__nil_kill_struct_path, target_file)
       klass.instance_variable_set(:@__nil_kill_struct_line, 10)
 
-      2.times do
-        described_class.record_tstruct_instance(klass.new(known: "typed", raw: "observed"))
-      end
+      NilKillTraceNative.attach_tstruct(klass)
+      2.times { klass.new(known: "typed", raw: "observed") }
 
+      observed = NilKillTraceNative.struct_observations
+        .select { |row| row.fetch(:path) == File.expand_path(target_file, NilKill::ROOT) }
       expect(props_calls).to eq(1)
-      expect(described_class.structs.keys.map { |key| key[1] }).to eq(["raw"])
-      expect(described_class.structs.values.first[:calls]).to eq(2)
+      # `known` is resolved in the plan, so only `raw` is worth observing.
+      expect(observed.map { |row| row.fetch(:field) }).to eq(["raw"])
+      expect(observed.first.fetch(:calls)).to eq(2)
     ensure
       FileUtils.rm_f(target_file)
     end
 
-    it "handles invalid trace plans, set shapes, source locations, and coverage line maps" do
-      target_file = File.join(described_class::TARGETS.first, "line_map_unit.rb")
-      FileUtils.mkdir_p(File.dirname(target_file))
-      File.write(target_file, "# trace target\n")
-      FileUtils.mkdir_p(File.dirname(described_class::TRACE_PLAN_PATH))
-      File.write(described_class::TRACE_PLAN_PATH, "{")
-      expect(described_class.trace_plan).to be_nil
-
-      set_key = described_class.collection_type_shape_key(Set["a", "b"])
-      expect(described_class.shape_payload(set_key)).to include("kind" => "set")
-      expect(described_class.collection_kind(Set.new)).to eq("set")
-      expect(described_class.collection_key_for("set", owner_kind: "field", name: "tags", path: target_file, line: 4)).to include("set")
-
-      klass = Class.new do
-        def initialize; end
-      end
-      stub_const("LineMapRuntimeOwner", klass)
-      expect(described_class.source_location_for_class(klass)).to be_an(Array)
-      expect(described_class.method_owner(klass)).to include("instance")
-      expect(described_class.method_owner(nil)).to be_nil
-
-      FileUtils.mkdir_p(described_class::OUT_DIR)
-      rel = Pathname.new(File.expand_path(target_file, described_class::ROOT)).relative_path_from(Pathname.new(described_class::ROOT)).to_s
-      File.write(File.join(described_class::OUT_DIR, ".nk-linemap.json"), JSON.dump(rel => { "10" => 3, 10 => 3 }))
-      described_class.instance_variable_set(:@coverage_line_map, nil)
-      expect(described_class.src_line(target_file, 10)).to eq(3)
-    ensure
-      FileUtils.rm_f(target_file)
-    end
   end
 
   describe NilKill::Runtime::Normalizer do

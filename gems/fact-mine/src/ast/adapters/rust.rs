@@ -1,12 +1,61 @@
-use super::super::named_children;
+use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
 use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) struct RustAstAdapter;
 
 impl AstNormalizationAdapter for RustAstAdapter {
+    fn nonruntime_call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        let mut ancestor = node.parent();
+        while let Some(parent) = ancestor {
+            if matches!(
+                parent.kind(),
+                "type_arguments" | "type_parameters" | "const_item" | "macro_definition"
+            ) {
+                return true;
+            }
+            ancestor = parent.parent();
+        }
+        false
+    }
+
+    fn transparent_expression(
+        &self,
+        node: TreeSitterNode<'_>,
+        source: &str,
+        named_child_count: usize,
+    ) -> bool {
+        let source = node_text(node, source).trim_start();
+        (node.kind() == "unsafe_block" && named_child_count == 1)
+            || (node.kind() == "unary_expression"
+                && named_child_count == 1
+                && (source.starts_with('*') || source.starts_with('&')))
+    }
+
+    fn variable_declarator_node(&self, node: TreeSitterNode<'_>) -> bool {
+        matches!(node.kind(), "let_declaration" | "static_item")
+    }
+
+    fn variable_declarator_alternative<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "let_declaration")
+            .then(|| node.child_by_field_name("alternative"))
+            .flatten()
+    }
+
     fn class_like_owner_kind(&self, kind: &str) -> bool {
         kind == "impl_item"
+    }
+
+    fn case_arm_guard<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "match_arm")
+            .then(|| {
+                node.child_by_field_name("pattern")
+                    .and_then(|pattern| pattern.child_by_field_name("condition"))
+            })
+            .flatten()
     }
 
     fn class_like_owner_name<'tree>(
@@ -29,11 +78,78 @@ impl AstNormalizationAdapter for RustAstAdapter {
         node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
-        node.child_by_field_name("body").or(Some(node))
+        node.child_by_field_name("body").or_else(|| {
+            named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "declaration_list")
+        })
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
-        matches!(kind, "for_expression").then_some("FOR")
+        match kind {
+            "for_expression" => Some("FOR"),
+            "while_expression" | "loop_expression" => Some("WHILE"),
+            _ => None,
+        }
+    }
+
+    fn loop_condition_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        // A Rust `for binding in iterable` stores the binding before `value`.
+        // Selecting the generic first named child drops calls and size domains
+        // from the iterable expression.
+        (node.kind() == "for_expression")
+            .then(|| node.child_by_field_name("value"))
+            .flatten()
+    }
+
+    fn loop_binding_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "for_expression")
+            .then(|| node.child_by_field_name("pattern"))
+            .flatten()
+    }
+
+    fn scoped_call_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, String)> {
+        if node.kind() != "scoped_identifier" {
+            return None;
+        }
+        // `Cell::new` -> receiver `Cell` (the `path` field), method `new` (the
+        // `name` field). `std::mem::replace` -> receiver `std::mem`, method
+        // `replace`. Only the terminal segment becomes the message.
+        let path = node.child_by_field_name("path")?;
+        let name = node.child_by_field_name("name")?;
+        Some((path, node_text(name, source).to_string()))
+    }
+
+    /// A Rust closure `|x| ...` is a lambda, so it is normalized (and later
+    /// extracted) as a first-class function. Its own Big-O is what a caller
+    /// substitutes for the callee's parametric callback cost.
+    fn lambda_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "closure_expression").then_some(node)
+    }
+
+    fn type_argument_callee<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() != "generic_function" {
+            return None;
+        }
+        node.child_by_field_name("function")
     }
 
     fn hash_literal_target<'tree>(
@@ -73,5 +189,15 @@ mod tests {
             .class_like_owner_body(impl_node, "impl Widget { }")
             .unwrap();
         assert_eq!(body_node.kind(), "declaration_list");
+
+        // Error recovery can still classify an incomplete `impl` as an
+        // impl_item without producing a declaration_list. Returning the
+        // owner node as its own body makes normalization recurse forever.
+        let incomplete_tree = parser.parse("impl Widget", None).unwrap();
+        let incomplete_impl = incomplete_tree.root_node().child(0).unwrap();
+        assert_eq!(incomplete_impl.kind(), "impl_item");
+        assert!(adapter
+            .class_like_owner_body(incomplete_impl, "impl Widget")
+            .is_none());
     }
 }

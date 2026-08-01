@@ -24,13 +24,16 @@ use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 
 use super::normalized_behavior::{
     configured_collection_operation, configured_external_latency_bound,
-    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
-    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
-    configured_stdlib_call_identity, eliminable_guard_from_call, matching_paren_index,
-    method_parameter_type_key, BlockCallSemantics, CardinalityCallSemantics,
-    CollectionAllocationSemantics, NormalizedCallComplexity, NormalizedCallParts,
-    NormalizedCallProjection, NormalizedCollectionOperation, NormalizedLanguageBehavior,
-    NormalizedNilGuardFact, NormalizedSemanticEffect, NormalizedVisibilityEvent, SyntaxMetadata,
+    configured_external_latency_parametric_cost, configured_intrinsic_call_complexity,
+    configured_semantic_symbol_call_complexity, configured_semantic_symbol_kind,
+    configured_semantic_symbol_parametric_cost, configured_stdlib_call_identity,
+    eliminable_guard_from_call, matching_paren_index, method_parameter_type_key,
+    BlockCallSemantics, CardinalityCallSemantics, CollectionAllocationSemantics,
+    NormalizedCallComplexity, NormalizedCallParts, NormalizedCallProjection,
+    NormalizedCollectionOperation, NormalizedGeneratedAccessor, NormalizedLanguageBehavior,
+    NormalizedNilGuardFact, NormalizedRuntimeCapabilityGuard, NormalizedRuntimeSemanticTarget,
+    NormalizedRuntimeTruthinessGuard, NormalizedSemanticEffect, NormalizedVisibilityEvent,
+    RuntimeCallResultProjection, RuntimeValueProjection, SyntaxMetadata,
 };
 use super::{CallSite, ExternalCallComplexity, FunctionDef, StateDeclaration};
 use crate::ast::{self, Node, Span};
@@ -38,15 +41,127 @@ use crate::type_inference::TypeExpr;
 use std::collections::{BTreeMap, BTreeSet};
 
 fn scip_ruby_descriptor(symbol: &str) -> Option<&str> {
-    let rest = symbol.strip_prefix("scip-ruby gem ")?;
-    let mut fields = rest.splitn(3, ' ');
-    fields.next()?; // gem name
-    fields.next()?; // gem version
-    fields.next()
+    if let Some(rest) = symbol.strip_prefix("scip-ruby gem ") {
+        let mut fields = rest.splitn(3, ' ');
+        fields.next()?; // gem name
+        fields.next()?; // gem version
+        return fields.next();
+    }
+
+    runtime_ruby_core_descriptor(symbol)
+}
+
+// NilKill uses this identity only for code that Ruby itself owns: native core
+// methods and standard-library source that does not belong to a loaded gem or
+// workspace.  Unlike scip-ruby's project-scoped package identity, it is a
+// provenance guarantee, so an as-yet-unmodelled descriptor is still a stdlib
+// cost gap rather than a missing declaration in the consumer project.
+fn runtime_ruby_core_descriptor(symbol: &str) -> Option<&str> {
+    let rest = symbol.strip_prefix("nil-kill-runtime ")?;
+    let mut fields = rest.splitn(4, ' ');
+    let manager = fields.next()?;
+    let package = fields.next()?;
+    fields.next()?; // runtime version
+    let descriptor = fields.next()?;
+    // Runtime core frames are deliberately distinct from project and gem
+    // frames. Only the former may consume the Ruby stdlib registry.
+    // Ruby's standard library is partly distributed as default gems. NilKill
+    // retains the component package (for example `stringio`) while the trusted
+    // `ruby` manager distinguishes it from an identically named third-party
+    // Rubygem.
+    (manager == "ruby" && !package.is_empty()).then_some(descriptor)
+}
+
+fn runtime_ruby_dependency_descriptor(symbol: &str) -> Option<&str> {
+    let rest = symbol.strip_prefix("nil-kill-runtime ")?;
+    let mut fields = rest.splitn(4, ' ');
+    let manager = fields.next()?;
+    fields.next()?; // package
+    fields.next()?; // runtime version
+    let descriptor = fields.next()?;
+    (manager != "ruby").then_some(descriptor)
+}
+
+fn runtime_descriptor_name(value: &str) -> String {
+    if value.chars().enumerate().all(|(index, character)| {
+        character == '_'
+            || character.is_ascii_alphanumeric()
+            || (index > 0 && matches!(character, '!' | '?' | '='))
+    }) && value
+        .chars()
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+    {
+        value.to_string()
+    } else {
+        format!("`{}`", value.replace('`', "``"))
+    }
+}
+
+fn runtime_descriptor_owner(value: &str) -> String {
+    value
+        .split("::")
+        .filter(|part| !part.is_empty())
+        .map(runtime_descriptor_name)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn runtime_value_identity_from_symbol(symbol: &str, suffix: char) -> Option<String> {
+    let (_package, _version, descriptor) =
+        super::normalized_behavior::scip_global_parts(symbol, "nil-kill-runtime", "ruby")?;
+    let descriptor = descriptor.strip_suffix(suffix)?;
+    if descriptor.is_empty() {
+        return None;
+    }
+    Some(
+        descriptor
+            .split('/')
+            .map(|part| {
+                part.strip_prefix('`')
+                    .and_then(|part| part.strip_suffix('`'))
+                    .unwrap_or(part)
+                    .replace("``", "`")
+            })
+            .collect::<Vec<_>>()
+            .join("::"),
+    )
+}
+
+fn ruby_module_function_mode(node: &Node, lines: &[String]) -> bool {
+    if node.first_lineno == 0 {
+        return false;
+    }
+    let declaration_index = node.first_lineno.saturating_sub(1);
+    let declaration_indent = lines
+        .get(declaration_index)
+        .map(|line| line.len().saturating_sub(line.trim_start().len()))
+        .unwrap_or(node.first_column);
+
+    for line in lines.iter().take(declaration_index).rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        if indent < declaration_indent {
+            break;
+        }
+        if indent != declaration_indent {
+            continue;
+        }
+        if trimmed == "module_function" {
+            return true;
+        }
+        if matches!(trimmed, "public" | "private" | "protected") {
+            return false;
+        }
+    }
+    false
 }
 
 fn ruby_descriptor_owner(descriptor: &str) -> Option<String> {
-    let owner = descriptor.split_once('#')?.0.trim_matches('`');
+    let owner = ruby_descriptor_parts(descriptor)?.0.trim_matches('`');
     let owner = owner
         .strip_prefix("<Class:")
         .and_then(|owner| owner.strip_suffix('>'))
@@ -62,25 +177,206 @@ fn ruby_descriptor_owner(descriptor: &str) -> Option<String> {
     }
 }
 
+fn ruby_descriptor_parts(descriptor: &str) -> Option<(&str, &str)> {
+    let callable = descriptor.strip_suffix("().")?;
+    let separator = callable.rfind(['#', '.'])?;
+    Some((&callable[..separator], &callable[separator + 1..]))
+}
+
+/// NilKill gives generated Ruby records without an analyzed declaration a
+/// structural owner. Anonymous records use `AnonymousStruct(file,line)`;
+/// named records outside the source corpus use
+/// `GeneratedStruct(Nominal/Owner;file,line)`. That is raw runtime identity,
+/// not a cost claim: this adapter validates the exact requested member before
+/// applying Ruby's generated-record contract. Named records inside the corpus
+/// continue to join against FactMine's parsed source declarations.
+fn ruby_generated_record_operation(
+    descriptor: &str,
+    message: &str,
+) -> Option<NormalizedCallComplexity> {
+    let (owner, member) = ruby_descriptor_parts(descriptor)?;
+    let owner = owner.trim_matches('`');
+    let (family, payload) = [
+        ("AnonymousStruct(", "Struct"),
+        ("AnonymousData(", "Data"),
+        ("GeneratedStruct(", "Struct"),
+        ("GeneratedData(", "Data"),
+    ]
+    .iter()
+    .find_map(|(prefix, family)| {
+        owner
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(')'))
+            .map(|payload| (*family, payload))
+    })?;
+    let field_payload = if owner.starts_with("Generated") {
+        let (nominal_owner, fields) = payload.split_once(';')?;
+        if nominal_owner.is_empty()
+            || nominal_owner.split('/').any(|component| {
+                component.is_empty()
+                    || !component
+                        .chars()
+                        .all(|character| character == '_' || character.is_ascii_alphanumeric())
+                    || component
+                        .chars()
+                        .next()
+                        .is_some_and(|character| character.is_ascii_digit())
+            })
+        {
+            return None;
+        }
+        fields
+    } else {
+        payload
+    };
+    let fields = field_payload
+        .split(',')
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    if fields.is_empty()
+        || fields.iter().any(|field| {
+            !field
+                .chars()
+                .all(|character| character == '_' || character.is_ascii_alphanumeric())
+                || field
+                    .chars()
+                    .next()
+                    .is_some_and(|character| character.is_ascii_digit())
+        })
+    {
+        return None;
+    }
+    let member = member.trim_matches('`');
+    if member != message
+        || (member != "new"
+            && !fields.iter().any(|field| {
+                *field == member
+                    || (family == "Struct"
+                        && member
+                            .strip_suffix('=')
+                            .is_some_and(|setter| setter == *field))
+            }))
+    {
+        return None;
+    }
+    Some(NormalizedCallComplexity {
+        time: "O(1)",
+        space: "O(1)",
+    })
+}
+
 fn ruby_stdlib_descriptor(descriptor: &str, message: &str) -> bool {
-    ruby_descriptor_owner(descriptor)
-        .is_some_and(|owner| configured_stdlib_call_identity("ruby", Some(&owner), None, message))
+    ruby_descriptor_owner(descriptor).is_some_and(|owner| {
+        let namespace_owner = owner.replace('/', "::");
+        let plain = format!("{owner}#{message}().");
+        let quoted = format!("{owner}#`{message}`().");
+        RubyNormalizedBehavior
+            .call_complexity(&TypeExpr::Primitive(namespace_owner.clone()), message)
+            .is_some()
+            || configured_stdlib_call_identity("ruby", Some(&namespace_owner), None, message)
+            || configured_external_latency_bound("ruby", &namespace_owner, message).is_some()
+            || configured_external_latency_parametric_cost("ruby", &namespace_owner, message)
+                .is_some()
+            || configured_semantic_symbol_parametric_cost("ruby", &plain).is_some()
+            || configured_semantic_symbol_parametric_cost("ruby", &quoted).is_some()
+            || ruby_stdlib_fallback_owners(&owner).iter().any(|fallback| {
+                let descriptor = format!("{fallback}#{message}().");
+                let quoted = format!("{fallback}#`{message}`().");
+                RubyNormalizedBehavior
+                    .call_complexity(&TypeExpr::Primitive((*fallback).to_string()), message)
+                    .is_some()
+                    || configured_semantic_symbol_parametric_cost("ruby", &descriptor).is_some()
+                    || configured_semantic_symbol_parametric_cost("ruby", &quoted).is_some()
+            })
+    })
+}
+
+fn ruby_stdlib_fallback_owners(owner: &str) -> &'static [&'static str] {
+    match owner {
+        "Array" | "Hash" | "Set" | "Enumerator" | "Range" => &["Enumerable", "Kernel"],
+        "Integer" | "Float" | "Numeric" => &["Numeric", "Kernel"],
+        _ => &["Kernel"],
+    }
+}
+
+fn ruby_family_parametric_cost(owner: &str, message: &str) -> Option<String> {
+    ruby_stdlib_fallback_owners(owner)
+        .iter()
+        .find_map(|fallback| {
+            let plain = format!("{fallback}#{message}().");
+            let quoted = format!("{fallback}#`{message}`().");
+            configured_semantic_symbol_parametric_cost("ruby", &plain)
+                .or_else(|| configured_semantic_symbol_parametric_cost("ruby", &quoted))
+        })
 }
 
 pub(crate) fn external_symbol_call_complexity(
     symbol: &str,
     message: &str,
 ) -> Option<ExternalCallComplexity> {
+    if let Some(complexity) = runtime_ruby_dependency_descriptor(symbol)
+        .or_else(|| runtime_ruby_core_descriptor(symbol))
+        .and_then(|descriptor| ruby_generated_record_operation(descriptor, message))
+    {
+        return Some(ExternalCallComplexity {
+            time: complexity.time,
+            space: complexity.space,
+            provenance: "ruby_generated_record_runtime_contract",
+            bound_quality: "upper_bound_normalized_runtime_record_contract",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
+
+    // Runtime SCIP retains exact gem/package identity. A reviewed dependency
+    // contract may therefore be keyed by the exact callable descriptor without
+    // allowing an arbitrary gem method to consume the native Ruby registry.
+    if let Some(descriptor) = runtime_ruby_dependency_descriptor(symbol) {
+        if let Some(complexity) = configured_semantic_symbol_call_complexity("ruby", descriptor) {
+            return Some(ExternalCallComplexity {
+                time: complexity.time,
+                space: complexity.space,
+                provenance: "ruby_reviewed_dependency_registry",
+                bound_quality: "upper_bound_exact_target",
+                candidates: Vec::new(),
+                assumption: None,
+            });
+        }
+    }
+
     let descriptor = scip_ruby_descriptor(symbol)?;
+    let owner = ruby_descriptor_owner(descriptor)?;
+    // An exact reviewed semantic-symbol contract is already the strongest
+    // available identity. It must not depend on also registering the owner in
+    // the family-level fallback table (default-gem module functions such as
+    // JSON.parse are the common counterexample).
+    if let Some(complexity) = configured_semantic_symbol_call_complexity("ruby", descriptor) {
+        return Some(ExternalCallComplexity {
+            time: complexity.time,
+            space: complexity.space,
+            provenance: "ruby_stdlib_registry",
+            bound_quality: "upper_bound_exact_target",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
     if !ruby_stdlib_descriptor(descriptor, message)
         || configured_semantic_symbol_parametric_cost("ruby", descriptor).is_some()
+        || ruby_family_parametric_cost(&owner, message).is_some()
     {
         return None;
     }
-    let owner = ruby_descriptor_owner(descriptor)?;
     let behavior = RubyNormalizedBehavior;
     let complexity = configured_semantic_symbol_call_complexity("ruby", descriptor)
         .or_else(|| behavior.call_complexity(&TypeExpr::Primitive(owner.clone()), message))
+        .or_else(|| {
+            ruby_stdlib_fallback_owners(&owner)
+                .iter()
+                .find_map(|fallback| {
+                    behavior.call_complexity(&TypeExpr::Primitive((*fallback).to_string()), message)
+                })
+        })
         .or_else(|| behavior.intrinsic_call_complexity(Some(&owner), message));
     if let Some(complexity) = complexity {
         return Some(ExternalCallComplexity {
@@ -90,6 +386,19 @@ pub(crate) fn external_symbol_call_complexity(
             bound_quality: "upper_bound_exact_target",
             candidates: Vec::new(),
             assumption: None,
+        });
+    }
+    if let Some(kind) = configured_external_latency_parametric_cost("ruby", &owner, message) {
+        let (time, space) = super::parametric_call_complexity(&kind)?;
+        return Some(ExternalCallComplexity {
+            time,
+            space,
+            provenance: "ruby_external_effect_parametric_registry",
+            bound_quality: "upper_bound_external_latency_excluded_parametric",
+            candidates: Vec::new(),
+            assumption: Some(format!(
+                "computational Big-O only; filesystem, process, stream, or terminal latency is excluded; `{kind}` remains symbolic"
+            )),
         });
     }
     let complexity = configured_external_latency_bound("ruby", &owner, message)?;
@@ -108,26 +417,44 @@ pub(crate) fn external_symbol_call_complexity(
 
 pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMetadata {
     let Some(descriptor) = scip_ruby_descriptor(symbol) else {
+        let runtime_manager = symbol
+            .strip_prefix("nil-kill-runtime ")
+            .and_then(|rest| rest.split_whitespace().next());
+        let (scope, missing_cost_kind) = if runtime_manager == Some("workspace") {
+            (
+                "project_declaration",
+                "project_declaration_body_or_generated_member_missing",
+            )
+        } else if symbol.contains(" Proc#call().")
+            || symbol.contains(" Method#call().")
+            || symbol.contains(" UnboundMethod#call().")
+        {
+            ("dynamic", "callback_or_function_value_origin_unknown")
+        } else {
+            ("dependency", "dependency_cost_model_missing")
+        };
         return super::ExternalSymbolMetadata {
-            scope: "dynamic",
-            missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
+            scope,
+            missing_cost_kind: missing_cost_kind.to_string(),
             parametric_cost: None,
         };
     };
-    let message = descriptor
-        .rsplit_once('#')
+    let message = ruby_descriptor_parts(descriptor)
         .map(|(_, member)| member)
         .unwrap_or_default()
         .trim_matches('`')
-        .split('(')
-        .next()
-        .unwrap_or_default();
-    if ruby_stdlib_descriptor(descriptor, message) {
+        .to_string();
+    if runtime_ruby_core_descriptor(symbol).is_some()
+        || ruby_stdlib_descriptor(descriptor, &message)
+    {
+        let owner = ruby_descriptor_owner(descriptor).unwrap_or_default();
         super::ExternalSymbolMetadata {
             scope: "stdlib",
             missing_cost_kind: configured_semantic_symbol_kind("ruby", descriptor)
                 .unwrap_or_else(|| "stdlib_cost_model_missing".to_string()),
-            parametric_cost: configured_semantic_symbol_parametric_cost("ruby", descriptor),
+            parametric_cost: configured_semantic_symbol_parametric_cost("ruby", descriptor)
+                .or_else(|| ruby_family_parametric_cost(&owner, &message))
+                .or_else(|| configured_external_latency_parametric_cost("ruby", &owner, &message)),
         }
     } else {
         super::ExternalSymbolMetadata {
@@ -371,41 +698,391 @@ const RUBY_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
 
 // CFG-SPECIFIC START: Ruby control-flow vocabulary.
 const RUBY_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
-    iterator_messages: &[
-        "all",
-        "any",
-        "collect",
-        "detect",
-        "downto",
-        "each",
-        "each_cons",
-        "each_entry",
-        "each_key",
-        "each_pair",
-        "each_slice",
-        "each_value",
-        "filter_map",
-        "find",
-        "find_all",
-        "flat_map",
-        "inject",
-        "loop",
-        "map",
-        "none",
-        "reduce",
-        "reject",
-        "select",
-        "step",
-        "times",
-        "upto",
-    ],
+    // CFG and complexity projection must agree on which blocks can execute
+    // once per collection element. A second hand-maintained subset silently
+    // modeled methods such as each_line/each_with_object/sort_by as one-shot
+    // callbacks and broke loop-carried reaching definitions.
+    iterator_messages: RUBY_ITERATION_METHODS,
     ignored_callback_body_sources: &["do end", "{}"],
 };
 // CFG-SPECIFIC END
 
+fn ruby_generated_reader_names(source: &str) -> BTreeSet<String> {
+    let source = source.trim();
+    for declaration in ["attr_reader", "attr_accessor", "const", "prop"] {
+        let Some(rest) = source.strip_prefix(declaration) else {
+            continue;
+        };
+        if rest
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_alphanumeric() || character == '_')
+        {
+            continue;
+        }
+        let rest = rest
+            .trim()
+            .strip_prefix('(')
+            .unwrap_or(rest.trim())
+            .trim_end_matches(')')
+            .trim();
+        let mut names = BTreeSet::new();
+        for argument in split_top_level_params_local(rest) {
+            let name = argument
+                .trim()
+                .trim_start_matches(':')
+                .trim_matches(['\'', '"'])
+                .to_string();
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|character| character.is_alphanumeric() || character == '_')
+            {
+                continue;
+            }
+            names.insert(name.clone());
+            if declaration == "attr_accessor" {
+                names.insert(format!("{name}="));
+            }
+            if matches!(declaration, "const" | "prop") {
+                break;
+            }
+        }
+        return names;
+    }
+    BTreeSet::new()
+}
+
+fn ruby_generated_record_accessor_names(source: &str) -> BTreeSet<String> {
+    let source = source.trim();
+    let declaration = ["Struct.new(", "Data.define("]
+        .iter()
+        .find_map(|prefix| source.strip_prefix(prefix).map(|rest| (*prefix, rest)));
+    let Some((prefix, rest)) = declaration else {
+        return BTreeSet::new();
+    };
+    let Some(arguments) = rest.strip_suffix(')') else {
+        return BTreeSet::new();
+    };
+    let mutable = prefix == "Struct.new(";
+    split_top_level_params_local(arguments).into_iter().fold(
+        BTreeSet::new(),
+        |mut names, argument| {
+            let name = argument
+                .trim()
+                .trim_start_matches(':')
+                .trim_matches(['\'', '"']);
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .all(|character| character.is_alphanumeric() || character == '_')
+            {
+                names.insert(name.to_string());
+                if mutable {
+                    names.insert(format!("{name}="));
+                }
+            }
+            names
+        },
+    )
+}
+
+fn ruby_identifier_in(source: &str, identifier: &str) -> bool {
+    source.match_indices(identifier).any(|(start, _)| {
+        let before = source[..start].chars().next_back();
+        let after = source[start + identifier.len()..].chars().next();
+        let identifier_character =
+            |character: char| character.is_alphanumeric() || character == '_';
+        before.is_none_or(|character| !identifier_character(character))
+            && after.is_none_or(|character| !identifier_character(character))
+    })
+}
+
+fn ruby_strict_capture_guard(line: &str, roots: &BTreeSet<String>) -> bool {
+    let Some((condition, pattern)) = line.split_once("=~") else {
+        return false;
+    };
+    if !roots.iter().any(|root| ruby_identifier_in(condition, root)) {
+        return false;
+    }
+    let pattern = pattern.trim();
+    let anchored_start = pattern.starts_with("/^") || pattern.starts_with(r"/\A");
+    let anchored_end = pattern.contains("$/") || pattern.contains(r"\z/");
+    let Some(capture) = pattern.find("(.+)") else {
+        return false;
+    };
+    if !anchored_start || !anchored_end {
+        return false;
+    }
+    let prefix = pattern[..capture]
+        .trim_start_matches('/')
+        .trim_start_matches('^')
+        .trim_start_matches(r"\A");
+    let suffix = pattern[capture + 4..]
+        .trim_end_matches('/')
+        .trim_end_matches('$')
+        .trim_end_matches(r"\z");
+    // Requiring a wrapper on both sides proves the capture is a proper
+    // substring, rather than merely no larger than the original string.
+    !prefix.is_empty() && !suffix.is_empty()
+}
+
+fn ruby_assignment(line: &str) -> Option<(&str, &str)> {
+    let (left, right) = line.trim().split_once('=')?;
+    if right.starts_with(['=', '>', '~']) || left.ends_with(['!', '<', '>', '=']) {
+        return None;
+    }
+    let left = left.trim();
+    (!left.is_empty()
+        && left
+            .chars()
+            .all(|character| character.is_alphanumeric() || character == '_'))
+    .then_some((left, right.trim()))
+}
+
+fn ruby_strict_capture_recursion(
+    method: &Node,
+    call: &Node,
+    parameters: &BTreeSet<String>,
+) -> bool {
+    let line_count = call
+        .first_lineno
+        .saturating_sub(method.first_lineno)
+        .saturating_add(1);
+    let prior = method.text.lines().take(line_count).collect::<Vec<_>>();
+    let mut nonexpanding_roots = parameters.clone();
+    for line in &prior {
+        let Some((name, value)) = ruby_assignment(line) else {
+            continue;
+        };
+        let Some(root) = nonexpanding_roots
+            .iter()
+            .find(|root| value.starts_with(root.as_str()))
+        else {
+            continue;
+        };
+        let suffix = &value[root.len()..];
+        if !suffix.is_empty()
+            && suffix
+                .split('.')
+                .filter(|part| !part.is_empty())
+                .all(|operation| matches!(operation, "to_s" | "strip" | "lstrip" | "rstrip"))
+        {
+            nonexpanding_roots.insert(name.to_string());
+        }
+    }
+    let capture_guards = prior
+        .iter()
+        .filter(|line| line.contains("=~") && line.contains("(.+)"))
+        .collect::<Vec<_>>();
+    if capture_guards.is_empty()
+        || capture_guards
+            .iter()
+            .any(|line| !ruby_strict_capture_guard(line, &nonexpanding_roots))
+    {
+        return false;
+    }
+
+    let direct_capture =
+        |source: &str| source.contains("$1") || source.contains("Regexp.last_match(1)");
+    if direct_capture(&call.text) {
+        return true;
+    }
+
+    let mut smaller_values = BTreeSet::new();
+    let mut substring_collections = BTreeSet::new();
+    for line in prior {
+        let Some((name, value)) = ruby_assignment(line) else {
+            continue;
+        };
+        if direct_capture(value) {
+            if value.contains(".split") {
+                substring_collections.insert(name.to_string());
+            } else {
+                smaller_values.insert(name.to_string());
+            }
+            continue;
+        }
+        let collection_source = substring_collections
+            .iter()
+            .find(|candidate| ruby_identifier_in(value, candidate));
+        if collection_source.is_some() {
+            if [".reject", ".select", ".filter", ".compact"]
+                .iter()
+                .any(|operation| value.contains(operation))
+            {
+                substring_collections.insert(name.to_string());
+            } else if [".first", ".last", "["]
+                .iter()
+                .any(|operation| value.contains(operation))
+            {
+                smaller_values.insert(name.to_string());
+            }
+        }
+    }
+
+    smaller_values
+        .iter()
+        .any(|name| ruby_identifier_in(&call.text, name))
+        || substring_collections.iter().any(|name| {
+            [".first", ".last", "["]
+                .iter()
+                .any(|projection| call.text.contains(&format!("{name}{projection}")))
+        })
+}
+
 pub(crate) struct RubyNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
+    fn complexity_uses_invariant_flow_types(&self) -> bool {
+        true
+    }
+
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
+        let signature = signature.trim();
+        if !signature.starts_with("sig") {
+            return super::normalized_behavior::NormalizedSignature::default();
+        }
+        let return_type = signature_component(signature, ".returns(")
+            .or_else(|| signature_component(signature, "returns("));
+        let params = signature_component(signature, ".params(")
+            .or_else(|| signature_component(signature, "params("))
+            .map(|params| {
+                split_top_level_params_local(&params)
+                    .into_iter()
+                    .filter_map(|entry| {
+                        let (name, declared) = entry.split_once(':')?;
+                        Some((name.trim().to_string(), declared.trim().to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        super::normalized_behavior::NormalizedSignature {
+            return_type,
+            params,
+        }
+    }
+
+    fn source_profile_signature(&self, lines: &[String], function: &FunctionDef) -> Option<String> {
+        let mut cursor = function.line.saturating_sub(2);
+        if cursor >= lines.len() {
+            return Some(String::new());
+        }
+        while cursor > 0 && lines[cursor].trim().is_empty() {
+            cursor = cursor.saturating_sub(1);
+        }
+        let mut start = cursor;
+        loop {
+            let text = lines[start].trim();
+            if text.starts_with("sig ") {
+                return Some(
+                    lines[start..=cursor]
+                        .iter()
+                        .map(|line| line.trim())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
+            }
+            if text.starts_with("def ")
+                || text.starts_with("class ")
+                || text.starts_with("module ")
+                || start == 0
+            {
+                return Some(String::new());
+            }
+            start -= 1;
+        }
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "sorbet"
+    }
+
+    fn profile_signature_is_annotation(&self, signature: &str) -> bool {
+        signature.starts_with("sig ")
+    }
+
+    fn native_profile_literal_type(&self, value: &str) -> Option<String> {
+        if value.starts_with(':') || value.starts_with("%s") {
+            Some("Symbol".to_string())
+        } else if value.starts_with("%q") || value.starts_with("%Q") {
+            Some("String".to_string())
+        } else if value.starts_with("%i")
+            || value.starts_with("%I")
+            || value.starts_with("%w")
+            || value.starts_with("%W")
+        {
+            Some(self.untyped_array_type())
+        } else {
+            None
+        }
+    }
+
+    fn local_assignment_type_hint(&self, value: &str) -> Option<String> {
+        let value = value.trim();
+        if value.starts_with('[') || value.starts_with("%w") || value.starts_with("%W") {
+            return Some(self.untyped_array_type());
+        }
+        if value.starts_with('{') {
+            return Some(self.untyped_hash_type());
+        }
+        if value.starts_with('"') || value.starts_with('\'') {
+            return Some("String".to_string());
+        }
+        if value.parse::<i64>().is_ok() {
+            return Some("Integer".to_string());
+        }
+        if value.parse::<f64>().is_ok() {
+            return Some("Float".to_string());
+        }
+        let constructor = value.split_once(".new").map(|(owner, _)| owner.trim())?;
+        (!constructor.is_empty()
+            && constructor
+                .split("::")
+                .all(|segment| segment.chars().next().is_some_and(char::is_uppercase)))
+        .then(|| constructor.to_string())
+    }
+
+    // In Ruby `obj.foo` (no parens) is a real method call, not a field read, so
+    // it must not be assumed constant-time.
+    fn complexity_member_read_complexity(
+        &self,
+        _node: &Node,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        None
+    }
+
+    fn explicit_receiver_type(&self, receiver: &str) -> Option<String> {
+        let receiver = receiver.trim();
+        if receiver == "ENV" {
+            return Some("Hash".to_string());
+        }
+        if ruby_word_array_literal(receiver) {
+            return Some("T::Array[String]".to_string());
+        }
+        if receiver.starts_with('[') {
+            return Some("T::Array[T.untyped]".to_string());
+        }
+        if receiver.starts_with('{') {
+            return Some("T::Hash[T.untyped, T.untyped]".to_string());
+        }
+        if (receiver.starts_with('"') && receiver.ends_with('"'))
+            || (receiver.starts_with('\'') && receiver.ends_with('\''))
+        {
+            return Some("String".to_string());
+        }
+        if receiver.parse::<i64>().is_ok() {
+            return Some("Integer".to_string());
+        }
+        if receiver.parse::<f64>().is_ok() {
+            return Some("Float".to_string());
+        }
+        None
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
@@ -416,6 +1093,75 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
 
     fn external_symbol_metadata(&self, symbol: &str) -> super::ExternalSymbolMetadata {
         external_symbol_metadata(symbol)
+    }
+
+    fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
+        scip_ruby_descriptor(symbol)
+            .or_else(|| runtime_ruby_dependency_descriptor(symbol))
+            .and_then(ruby_descriptor_parts)
+            .map(|(owner, _)| owner.trim_matches('`').replace('/', "::"))
+    }
+
+    fn generated_callable_complexity(
+        &self,
+        source: &str,
+        name: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        let generated_reader = ruby_generated_reader_names(source).contains(name)
+            || ruby_generated_record_accessor_names(source).contains(name);
+        generated_reader.then_some(NormalizedCallComplexity {
+            time: "O(1)",
+            space: "O(1)",
+        })
+    }
+
+    fn recursive_call_argument_progress(
+        &self,
+        method: &Node,
+        call: &Node,
+        parameters: &BTreeSet<String>,
+    ) -> Option<&'static str> {
+        ruby_strict_capture_recursion(method, call, parameters).then_some("structural")
+    }
+
+    fn scip_occurrence_matches_call(&self, symbol: &str, source_text: &str, message: &str) -> bool {
+        if source_text == message || source_text == format!("{message}=") {
+            return true;
+        }
+        if message
+            .strip_suffix('=')
+            .is_some_and(|setter| source_text == setter)
+        {
+            // Ruby's writer syntax has no `=` in the selector token, and a
+            // runtime producer can legitimately report both the generated
+            // reader and writer at that range. The symbol, rather than the
+            // shared source token, must disambiguate the callable identity.
+            return scip_ruby_descriptor(symbol)
+                .or_else(|| runtime_ruby_dependency_descriptor(symbol))
+                .and_then(ruby_descriptor_parts)
+                .is_some_and(|(_, member)| member.trim_matches('`') == message);
+        }
+        if !matches!(message, "[]" | "[]=") {
+            return false;
+        }
+        // An index occurrence for Ruby's bracket selector commonly spans the
+        // opening bracket. The normalized call already distinguishes reader
+        // from writer; the token is sufficient even when a project/runtime
+        // symbol intentionally uses an opaque stable declaration ID.
+        if source_text == "[" {
+            return true;
+        }
+        scip_ruby_descriptor(symbol)
+            .or_else(|| runtime_ruby_dependency_descriptor(symbol))
+            .and_then(ruby_descriptor_parts)
+            .map(|(_, member)| {
+                member
+                    .trim_matches('`')
+                    .split('(')
+                    .next()
+                    .unwrap_or_default()
+            })
+            == Some(message)
     }
 
     fn owner_supertypes(&self, node: &Node) -> Vec<String> {
@@ -453,8 +1199,25 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         .to_string()
     }
 
+    fn function_dispatch_kind_from_source(
+        &self,
+        name: &str,
+        node: &Node,
+        owner: &str,
+        lines: &[String],
+    ) -> String {
+        if !name.starts_with("self.") && ruby_module_function_mode(node, lines) {
+            "class".to_string()
+        } else {
+            self.function_dispatch_kind(name, owner)
+        }
+    }
+
     fn receiver_is_type_reference(&self, receiver: &str) -> bool {
         let receiver = receiver.strip_prefix("::").unwrap_or(receiver);
+        if receiver == "ENV" {
+            return false;
+        }
         !receiver.is_empty()
             && receiver.split("::").all(|segment| {
                 segment
@@ -467,7 +1230,225 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             })
     }
 
-    fn constructor_dispatch_name(&self, receiver: &str, message: &str) -> Option<String> {
+    fn relative_type_receiver_candidates(&self, receiver: &str, owner: &str) -> Vec<String> {
+        let receiver = receiver.trim().trim_start_matches("::");
+        if receiver.is_empty() || !self.receiver_is_type_reference(receiver) {
+            return Vec::new();
+        }
+
+        let mut candidates = Vec::new();
+        let scopes = owner
+            .split("::")
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        for length in (0..=scopes.len()).rev() {
+            let candidate = if length == 0 {
+                receiver.to_string()
+            } else {
+                format!("{}::{receiver}", scopes[..length].join("::"))
+            };
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+        candidates
+    }
+
+    fn runtime_capability_guard(
+        &self,
+        condition: &Node,
+    ) -> Option<NormalizedRuntimeCapabilityGuard> {
+        if !matches!(condition.r#type.as_str(), "CALL" | "QCALL") {
+            return None;
+        }
+        let receiver = condition.children.first().and_then(ast::node)?;
+        let message = match condition.children.get(1)? {
+            ast::Child::String(value) | ast::Child::Symbol(value) => value,
+            _ => return None,
+        };
+        if message != "respond_to?" {
+            return None;
+        }
+        let arguments = condition.children.get(2).and_then(ast::node)?;
+        let argument = arguments.children.iter().find_map(ast::node)?;
+        let member = ast::normalize_text(&argument.text)
+            .trim()
+            .trim_start_matches(':')
+            .trim_matches(['\'', '"'])
+            .to_string();
+        let subject = ast::normalize_text(&receiver.text).trim().to_string();
+        (!subject.is_empty() && !member.is_empty())
+            .then_some(NormalizedRuntimeCapabilityGuard { subject, member })
+    }
+
+    fn runtime_truthiness_guard(
+        &self,
+        condition: &Node,
+    ) -> Option<NormalizedRuntimeTruthinessGuard> {
+        // FactMine subsequently requires a matching CFG local place and
+        // reaching definition, so a bare method spelling cannot gain a
+        // refinement from this syntactic recognition alone. That lets this
+        // adapter accept Ripper's normalized local-reference node without
+        // teaching shared CFG code Ruby's node vocabulary.
+        let subject = ast::normalize_text(&condition.text).trim().to_string();
+        (!subject.is_empty()
+            && subject
+                .chars()
+                .all(|character| character == '_' || character.is_ascii_alphanumeric()))
+        .then_some(NormalizedRuntimeTruthinessGuard { subject })
+    }
+
+    fn node_call_projections(&self, node: &Node) -> Vec<NormalizedCallProjection> {
+        // Ripper represents `receiver << value` as OPCALL rather than CALL.
+        // It is nevertheless ordinary Ruby dispatch (Array, Set, String, or a
+        // user implementation), so it needs the same runtime-evidence request
+        // and cost join as an explicitly spelled method call.
+        if node.r#type != "OPCALL" {
+            return Vec::new();
+        }
+        let Some(receiver) = node.children.first().and_then(ast::node) else {
+            return Vec::new();
+        };
+        let Some(message) = node.children.get(1).and_then(|child| match child {
+            ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.as_str()),
+            _ => None,
+        }) else {
+            return Vec::new();
+        };
+        if message != "<<" {
+            return Vec::new();
+        }
+        let full_span = [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ];
+        let arguments = node
+            .children
+            .get(2)
+            .and_then(ast::node)
+            .map(|arguments| {
+                arguments
+                    .children
+                    .iter()
+                    .filter_map(ast::node)
+                    .map(|argument| ast::normalize_text(&argument.text).trim().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        vec![NormalizedCallProjection {
+            receiver: ast::normalize_text(&receiver.text).trim().to_string(),
+            message: message.to_string(),
+            arguments,
+            access_span: self.call_access_span(node, None, full_span),
+            span: full_span,
+        }]
+    }
+
+    fn call_access_span(&self, node: &Node, computed_span: Option<Span>, full_span: Span) -> Span {
+        // Ruby normalizes an explicit receiver call as
+        // `CALL(receiver, message, arguments)`, but a bare function call as
+        // `FCALL(message, arguments)` (and a no-argument bare call as
+        // `VCALL(message)`).  The selector is therefore not at one fixed
+        // child position.  Returning the source span of the selector keeps
+        // runtime SCIP occurrences distinct from their nested argument calls.
+        let message_child = match node.r#type.as_str() {
+            "CALL" | "QCALL" | "OPCALL" => node.children.get(1),
+            "FCALL" | "VCALL" => node.children.first(),
+            "ATTRASGN" => node.children.get(1),
+            _ => None,
+        };
+        let message = match message_child {
+            Some(ast::Child::String(value) | ast::Child::Symbol(value)) => value.as_str(),
+            _ => return computed_span.unwrap_or(full_span),
+        };
+        let source_selector = if matches!(node.r#type.as_str(), "CALL" | "QCALL") && message == "[]"
+        {
+            "["
+        } else if node.r#type == "ATTRASGN" && message == "[]=" {
+            "["
+        } else if node.r#type == "ATTRASGN" {
+            message.strip_suffix('=').unwrap_or(message)
+        } else {
+            message
+        };
+        let search_start = match node.r#type.as_str() {
+            "CALL" | "QCALL" | "OPCALL" | "ATTRASGN" => node
+                .children
+                .first()
+                .and_then(|child| match child {
+                    ast::Child::Node(receiver) => Some(receiver.as_ref()),
+                    _ => None,
+                })
+                .and_then(|receiver| {
+                    node.text
+                        .find(&receiver.text)
+                        .map(|offset| offset + receiver.text.len())
+                })
+                .unwrap_or(0),
+            _ => 0,
+        };
+        let Some(offset) = node.text[search_start..]
+            .find(source_selector)
+            .map(|offset| search_start + offset)
+        else {
+            return computed_span.unwrap_or(full_span);
+        };
+        let prefix = &node.text[..offset];
+        let line_offset = prefix.bytes().filter(|byte| *byte == b'\n').count();
+        let column = prefix
+            .rsplit_once('\n')
+            .map(|(_, line)| line.len())
+            .unwrap_or_else(|| full_span[1] + prefix.len());
+        let line = full_span[0] + line_offset;
+        [line, column, line, column + source_selector.len()]
+    }
+
+    fn value_preserving_call_result_operands<'a>(&self, node: &'a Node) -> Option<Vec<&'a Node>> {
+        if matches!(node.r#type.as_str(), "OR" | "AND") {
+            return Some(
+                node.children
+                    .iter()
+                    .filter_map(ast::node)
+                    .collect::<Vec<_>>(),
+            )
+            .filter(|operands| operands.len() >= 2);
+        }
+        if matches!(node.r#type.as_str(), "IF" | "UNLESS") {
+            let operands = node
+                .children
+                .iter()
+                .skip(1)
+                .filter_map(ast::node)
+                .filter_map(ruby_branch_result)
+                .collect::<Vec<_>>();
+            return (operands.len() == 2).then_some(operands);
+        }
+        None
+    }
+
+    fn nullable_call_result_contract(&self, node: &Node) -> Option<&'static str> {
+        let ("CALL" | "QCALL", Some(receiver), Some(message)) = (
+            node.r#type.as_str(),
+            node.children.first().and_then(ast::node),
+            node.children.get(1).and_then(|child| match child {
+                ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.as_str()),
+                _ => None,
+            }),
+        ) else {
+            return None;
+        };
+        (message == "new" && self.receiver_is_type_reference(receiver.text.trim()))
+            .then_some("non_null_declared_type")
+    }
+
+    fn constructor_dispatch_name(
+        &self,
+        receiver: &str,
+        message: &str,
+        _owner: &str,
+    ) -> Option<String> {
         (message == "new" && self.receiver_is_type_reference(receiver))
             .then(|| "initialize".to_string())
     }
@@ -507,10 +1488,11 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     // CFG-SPECIFIC END
 
     // TYPE-INFERENCE-SPECIFIC: Ruby's normalized LIST/ARRAY vocabulary is
-    // also used for call arguments. Only bracket-delimited nodes represent
-    // source array literals and are eligible for tuple-shape facts.
+    // also used for call arguments. Only bracket-delimited nodes and Ruby's
+    // word-array literals represent source array literals and are eligible
+    // for tuple-shape facts.
     fn array_literal_node(&self, node: &Node) -> bool {
-        node.text.trim_start().starts_with('[')
+        ruby_array_literal(node.text.trim_start())
     }
 
     fn collection_allocation_semantics(&self, message: &str) -> CollectionAllocationSemantics {
@@ -548,10 +1530,59 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             BlockCallSemantics::Iteration
         } else if RUBY_ONCE_BLOCK_METHODS.contains(&message) {
             BlockCallSemantics::Once
-        } else if ["lambda", "proc"].contains(&message) {
+        } else if ["lambda", "proc", "on"].contains(&message) {
             BlockCallSemantics::Deferred
         } else {
             BlockCallSemantics::Unknown
+        }
+    }
+
+    fn block_call_semantics_with_receiver(
+        &self,
+        receiver: Option<&str>,
+        receiver_type: Option<&TypeExpr>,
+        message: &str,
+    ) -> BlockCallSemantics {
+        match (receiver.map(str::trim), message) {
+            // Hash defaults are stored for later missing-key lookups; the
+            // constructor does not execute the block.
+            (Some("Hash"), "new") => BlockCallSemantics::Deferred,
+            // Core Hash/environment fallback blocks execute at most once.
+            (Some("Hash" | "ENV"), "fetch") => BlockCallSemantics::Once,
+            // OptionParser evaluates its configuration DSL once while
+            // constructing the parser.
+            (Some("OptionParser"), "new") => BlockCallSemantics::Once,
+            // Resource-scope callbacks receive one opened resource or run
+            // once under a temporary process-wide directory. They are not
+            // collection iterations, regardless of the size of the path or
+            // command arguments.
+            (Some("Dir"), "chdir") | (Some("IO"), "popen") => BlockCallSemantics::Once,
+            _ if message == "fetch" && matches!(receiver_type, Some(TypeExpr::Hash { .. })) => {
+                BlockCallSemantics::Once
+            }
+            _ => self.block_call_semantics(message),
+        }
+    }
+
+    fn semantic_symbol_block_call_semantics(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> BlockCallSemantics {
+        let Some(descriptor) = scip_ruby_descriptor(symbol) else {
+            return BlockCallSemantics::Unknown;
+        };
+        let Some(owner) = ruby_descriptor_owner(descriptor) else {
+            return BlockCallSemantics::Unknown;
+        };
+        match (owner.as_str(), message) {
+            ("Array", "bsearch" | "bsearch_index") => {
+                BlockCallSemantics::LogarithmicIteration
+            }
+            ("Hash" | "ENV", "fetch") => BlockCallSemantics::Once,
+            ("Hash", "new") => BlockCallSemantics::Deferred,
+            ("Dir", "chdir") | ("IO", "popen") => BlockCallSemantics::Once,
+            _ => BlockCallSemantics::Unknown,
         }
     }
 
@@ -633,6 +1664,17 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         message == "new"
     }
 
+    fn suppress_call_site(&self, _node: &Node, call: &NormalizedCallProjection) -> bool {
+        // These are Ruby lexical pseudo-constants. Ripper represents them as
+        // VCALL nodes, but evaluating them performs no method dispatch; if we
+        // retained them as `self.__FILE__()` calls they would manufacture a
+        // semantic-identity gap in every enclosing function.
+        matches!(
+            call.message.as_str(),
+            "__FILE__" | "__LINE__" | "__ENCODING__"
+        )
+    }
+
     fn collection_parameter_type(&self, type_name: &str) -> bool {
         ["Array", "Hash", "Set", "Enumerable"]
             .iter()
@@ -644,7 +1686,19 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         receiver_type: &TypeExpr,
         message: &str,
     ) -> Option<NormalizedCollectionOperation> {
-        configured_collection_operation("ruby", receiver_type, message)
+        configured_collection_operation("ruby", receiver_type, message).or_else(|| {
+            let TypeExpr::Primitive(name) = receiver_type.strip_nilable() else {
+                return None;
+            };
+            let canonical = match name.as_str() {
+                "array" => "Array",
+                "hash" => "Hash",
+                "set" => "Set",
+                "string" => "String",
+                _ => return None,
+            };
+            configured_collection_operation("ruby", &TypeExpr::parse(canonical, "ruby"), message)
+        })
     }
 
     fn intrinsic_call_complexity(
@@ -652,6 +1706,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         receiver: Option<&str>,
         message: &str,
     ) -> Option<NormalizedCallComplexity> {
+        if matches!(message, "||" | "&&") {
+            return Some(NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            });
+        }
         let sorbet_type_operation = receiver == Some("T")
             && [
                 "any",
@@ -679,6 +1739,11 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 
     fn literal_receiver_type(&self, node: &Node) -> Option<TypeExpr> {
+        if ruby_word_array_literal(node.text.trim_start()) {
+            return Some(TypeExpr::Array(Box::new(TypeExpr::Primitive(
+                "String".to_string(),
+            ))));
+        }
         match node.r#type.as_str() {
             "ARRAY" | "LIST" | "ZLIST" => Some(TypeExpr::Array(Box::new(TypeExpr::Untyped))),
             "HASH" => Some(TypeExpr::Hash {
@@ -694,7 +1759,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         &self,
         node: &Node,
         owner: &str,
-        _in_method: bool,
+        in_method: bool,
     ) -> Option<StateDeclaration> {
         if node.r#type != "IASGN" {
             return None;
@@ -704,26 +1769,35 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             _ => None,
         })?;
         let value = node.children.get(1).and_then(ast::node)?;
-        if !matches!(value.r#type.as_str(), "CALL" | "QCALL") {
-            return None;
-        }
-        let receiver = value.children.first().and_then(ast::node)?;
-        let message = value.children.get(1).and_then(|child| match child {
-            ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.as_str()),
-            _ => None,
-        })?;
-        if receiver.text != "T" || message != "let" {
-            return None;
-        }
-        let arguments = value.children.get(2).and_then(ast::node)?;
-        let declared_type = arguments
-            .children
-            .iter()
-            .filter_map(ast::node)
-            .nth(1)?
-            .text
-            .trim()
-            .to_string();
+        let declared_type = if matches!(value.r#type.as_str(), "CALL" | "QCALL") {
+            let receiver = value.children.first().and_then(ast::node)?;
+            let message = value.children.get(1).and_then(|child| match child {
+                ast::Child::String(value) | ast::Child::Symbol(value) => Some(value.as_str()),
+                _ => None,
+            })?;
+            if receiver.text != "T" || message != "let" {
+                return None;
+            }
+            let arguments = value.children.get(2).and_then(ast::node)?;
+            arguments
+                .children
+                .iter()
+                .filter_map(ast::node)
+                .nth(1)?
+                .text
+                .trim()
+                .to_string()
+        } else {
+            // A class/module-body ivar literal is a declaration just as much
+            // as a typed `T.let`: Ruby executes it once while defining the
+            // owner, before any method can observe the field. Do not infer
+            // from ordinary method assignments, where a later write can
+            // legitimately change the field's type.
+            if in_method {
+                return None;
+            }
+            self.literal_receiver_type(value)?.to_sorbet_string()
+        };
         if declared_type.is_empty() || declared_type == "T.untyped" {
             return None;
         }
@@ -854,6 +1928,7 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             type_alias_lines: metadata.type_alias_lines,
             method_param_types: metadata.method_param_types,
             method_local_types: BTreeMap::new(),
+            method_template_types: BTreeMap::new(),
         }
     }
 
@@ -974,6 +2049,12 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     fn known_return_type(&self, name: &str) -> Option<String> {
         match name {
             "puts" | "print" | "warn" => Some("NilClass".to_string()),
+            // Kernel#Array can invoke a user conversion hook, so its *cost*
+            // remains parametric. Ruby nevertheless guarantees that a
+            // successful conversion returns an Array, which is sufficient for
+            // FactMine's generic direct-call-result join to type a following
+            // receiver without reconstructing Ruby flow in a tracer.
+            "Array" => Some("T::Array[T.untyped]".to_string()),
             "to_s" | "to_str" | "inspect" => Some("String".to_string()),
             "to_i" | "size" | "length" | "count" | "hash" => Some("Integer".to_string()),
             "to_f" => Some("Float".to_string()),
@@ -1084,6 +2165,9 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         if message == "class" {
             return Some("Class".to_string());
         }
+        if r == "Regexp" && message == "last_match" {
+            return Some("T.nilable(MatchData)".to_string());
+        }
         if r == "String" {
             if message == "upcase"
                 || message == "downcase"
@@ -1107,6 +2191,21 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         None
     }
 
+    fn static_argument_dependent_return_type(
+        &self,
+        message: &str,
+        arguments: &[String],
+    ) -> Option<String> {
+        if !matches!(message, "each_with_object" | "inject" | "reduce") {
+            return None;
+        }
+        let mut argument = arguments.first()?.trim();
+        while argument.starts_with('(') && argument.ends_with(')') {
+            argument = argument[1..argument.len() - 1].trim();
+        }
+        self.local_assignment_type_hint(argument)
+    }
+
     fn propagated_collection_return_type(
         &self,
         message: &str,
@@ -1127,13 +2226,10 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             let inner = &r[9..r.len() - 1];
             return Some(wrap_nilable(inner));
         }
-        if message == "map"
-            || message == "select"
-            || message == "reject"
-            || message == "filter"
-            || message == "sort"
-            || message == "split"
-        {
+        if message == "select" || message == "reject" || message == "filter" || message == "sort" {
+            return receiver_type.map(str::to_string);
+        }
+        if message == "map" || message == "split" {
             return Some("T::Array[T.untyped]".to_string());
         }
         if message == "compact" && r.starts_with("T::Array[") && r.ends_with(']') {
@@ -1169,6 +2265,232 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         None
     }
 
+    fn runtime_value_domain_type(
+        &self,
+        owners: &[String],
+        elements: &[String],
+        keys: &[String],
+        values: &[String],
+    ) -> Option<String> {
+        let owner = (owners.len() == 1).then(|| owners[0].as_str())?;
+        match owner {
+            "Array" if elements.len() == 1 => Some(self.format_array_type(&elements[0])),
+            "Hash" if keys.len() == 1 && values.len() == 1 => {
+                Some(self.format_hash_type(&keys[0], &values[0]))
+            }
+            "Set" if elements.len() == 1 => Some(self.format_set_type(&elements[0])),
+            _ => Some(owner.to_string()),
+        }
+    }
+
+    fn runtime_value_type_from_symbol(&self, symbol: &str) -> Option<String> {
+        runtime_value_identity_from_symbol(symbol, '#')
+    }
+
+    fn runtime_value_singleton_from_symbol(&self, symbol: &str) -> Option<String> {
+        runtime_value_identity_from_symbol(symbol, '.')
+    }
+
+    fn runtime_dispatch_owner_matches(&self, owner: &str, receiver_type: &str) -> bool {
+        match owner.rsplit("::").next().unwrap_or(owner) {
+            "Enumerable" => matches!(
+                receiver_type.rsplit("::").next().unwrap_or(receiver_type),
+                "Array" | "Hash" | "Set" | "Range" | "Enumerator"
+            ),
+            "Kernel" => !matches!(
+                receiver_type.rsplit("::").next().unwrap_or(receiver_type),
+                "BasicObject" | "Class" | "Module"
+            ),
+            _ => false,
+        }
+    }
+
+    fn runtime_value_semantic_target(
+        &self,
+        receiver_type: &str,
+        receiver_singleton: Option<&str>,
+        message: &str,
+        environment: &BTreeMap<String, String>,
+    ) -> Option<NormalizedRuntimeSemanticTarget> {
+        let version = environment
+            .get("runtime.version")
+            .map(String::as_str)
+            .unwrap_or("workspace");
+        let build = |owner: &str, kind: &str, receiver_type: &str| {
+            let separator = if kind == "class" { "." } else { "#" };
+            let symbol = format!(
+                "nil-kill-runtime ruby ruby {} {}{}{}().",
+                version,
+                runtime_descriptor_owner(owner),
+                separator,
+                runtime_descriptor_name(message)
+            );
+            let metadata = external_symbol_metadata(&symbol);
+            (external_symbol_call_complexity(&symbol, message).is_some()
+                || metadata.parametric_cost.is_some())
+            .then_some(NormalizedRuntimeSemanticTarget {
+                symbol,
+                owner: owner.to_string(),
+                kind: kind.to_string(),
+                receiver_type: receiver_type.to_string(),
+            })
+        };
+
+        if let Some(singleton) = receiver_singleton {
+            return build(singleton, "class", receiver_type);
+        }
+        build(receiver_type, "instance", receiver_type)
+            // Bare Ruby calls dispatch through Kernel when the concrete owner
+            // has no reviewed stdlib contract. Project declarations have
+            // already been selected before this modeled target is requested.
+            .or_else(|| build("Kernel", "instance", receiver_type))
+    }
+
+    fn runtime_nil_type_name(&self) -> Option<&'static str> {
+        Some("NilClass")
+    }
+
+    fn runtime_array_type_name(&self) -> Option<&'static str> {
+        Some("Array")
+    }
+
+    fn runtime_hash_type_name(&self) -> Option<&'static str> {
+        Some("Hash")
+    }
+
+    fn runtime_set_type_name(&self) -> Option<&'static str> {
+        Some("Set")
+    }
+
+    fn runtime_collection_callback_projections(
+        &self,
+        receiver_type: Option<&str>,
+        message: &str,
+        parameter_count: usize,
+    ) -> Vec<RuntimeValueProjection> {
+        let hash = receiver_type.is_some_and(|value| {
+            value == "Hash" || value.starts_with("T::Hash[") || value.starts_with("Hash[")
+        });
+        if hash && matches!(message, "each" | "each_pair" | "map") {
+            return if parameter_count > 1 {
+                vec![RuntimeValueProjection::Key, RuntimeValueProjection::Value]
+            } else {
+                vec![RuntimeValueProjection::Entry {
+                    collection_type: "Array",
+                }]
+            };
+        }
+        if hash && message == "each_key" {
+            return vec![RuntimeValueProjection::Key];
+        }
+        if hash && message == "each_value" {
+            return vec![RuntimeValueProjection::Value];
+        }
+        if message == "each_with_index" {
+            return vec![
+                RuntimeValueProjection::Element,
+                RuntimeValueProjection::Index {
+                    type_name: "Integer",
+                },
+            ];
+        }
+        (parameter_count > 0)
+            .then_some(vec![RuntimeValueProjection::Element])
+            .unwrap_or_default()
+    }
+
+    fn callback_argument_parameter_type(
+        &self,
+        receiver: &str,
+        receiver_type: Option<&str>,
+        message: &str,
+        position: usize,
+        parameter_count: usize,
+        arguments: &[String],
+    ) -> Option<String> {
+        let hash_constructor = message == "new"
+            && position == 0
+            && (receiver == "Hash"
+                || receiver_type.is_some_and(|receiver| {
+                    receiver == "Hash"
+                        || receiver.starts_with("T::Hash[")
+                        || receiver.starts_with("Hash[")
+                }));
+        if hash_constructor {
+            return Some(self.untyped_hash_type());
+        }
+        let argument = match message {
+            "each_with_object" if position + 1 == parameter_count => arguments.first(),
+            "inject" | "reduce" if position == 0 => arguments.first(),
+            _ => None,
+        }?;
+        let mut argument = argument.trim();
+        while argument.starts_with('(') && argument.ends_with(')') {
+            argument = argument[1..argument.len() - 1].trim();
+        }
+        self.local_assignment_type_hint(argument)
+    }
+
+    fn runtime_call_result_projection(
+        &self,
+        receiver_type: Option<&str>,
+        message: &str,
+        arguments: &[String],
+    ) -> Option<RuntimeCallResultProjection> {
+        let receiver = receiver_type.unwrap_or_default();
+        let hash =
+            receiver == "Hash" || receiver.starts_with("T::Hash[") || receiver.starts_with("Hash[");
+        let sequence = receiver == "Array"
+            || receiver == "Set"
+            || receiver == "Range"
+            || receiver.starts_with("T::Array[")
+            || receiver.starts_with("Array[")
+            || receiver.starts_with("T::Set[")
+            || receiver.starts_with("Set[");
+        if hash && matches!(message, "[]" | "fetch") {
+            return Some(RuntimeCallResultProjection::Value);
+        }
+        if sequence && matches!(message, "[]" | "fetch") {
+            // A range index returns a collection. Preserve uncertainty rather
+            // than treating source argument text in the shared overlay.
+            return (!arguments.iter().any(|argument| argument.contains("..")))
+                .then_some(RuntimeCallResultProjection::Element);
+        }
+        if sequence
+            && matches!(message, "first" | "last" | "pop" | "shift" | "sample")
+            && arguments.is_empty()
+        {
+            return Some(RuntimeCallResultProjection::Element);
+        }
+        if hash && message == "keys" {
+            return Some(RuntimeCallResultProjection::Keys {
+                collection_type: "Array",
+            });
+        }
+        if hash && message == "values" {
+            return Some(RuntimeCallResultProjection::Values {
+                collection_type: "Array",
+            });
+        }
+        if matches!(
+            message,
+            "select"
+                | "reject"
+                | "filter"
+                | "compact"
+                | "uniq"
+                | "sort"
+                | "sort_by"
+                | "reverse"
+                | "take"
+                | "drop"
+                | "merge"
+        ) {
+            return Some(RuntimeCallResultProjection::Receiver);
+        }
+        None
+    }
+
     fn is_noreturn_method(&self, message: &str) -> bool {
         message == "raise"
             || message == "fail"
@@ -1190,29 +2512,16 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
         field != Some("[]")
     }
 
-    fn preserve_constant_receiver_call(&self, call: &NormalizedCallProjection) -> bool {
-        let base = call
-            .receiver
-            .trim_start_matches("::")
-            .split("::")
-            .next()
-            .unwrap_or("");
-        (call.receiver == "ENV")
-            || RUBY_EFFECT_LEXICON
-                .context_pairs
-                .iter()
-                .any(|(name, mids)| *name == base && mids.contains(&call.message.as_str()))
-            || RUBY_EFFECT_LEXICON.io_consts.contains(&base)
-            || RUBY_EFFECT_LEXICON
-                .io_pairs
-                .iter()
-                .any(|(name, mids)| *name == base && mids.contains(&call.message.as_str()))
-            || RUBY_EFFECT_LEXICON
-                .io_receiver_prefixes
-                .iter()
-                .any(|prefix| call.receiver.starts_with(prefix))
-            || (call.receiver == "T" && call.message == "type_alias")
-            || RUBY_CORE_CONSTS.contains(&base)
+    fn attribute_assignment_dispatches(&self) -> bool {
+        true
+    }
+
+    fn preserve_constant_receiver_call(&self, _call: &NormalizedCallProjection) -> bool {
+        // Ruby has no field/property read syntax after `.`: `Owner.member`
+        // always dispatches a method, including a zero-argument call without
+        // parentheses. Provenance or cost may remain unknown, but dropping the
+        // call would manufacture a false completeness claim.
+        true
     }
 
     fn branch_state_ref(
@@ -1257,6 +2566,51 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             ("attr_writer", false, true),
             ("attr_accessor", true, true),
         ]
+    }
+
+    fn generated_accessor_declarations(&self, call: &CallSite) -> Vec<NormalizedGeneratedAccessor> {
+        if !matches!(
+            call.receiver.as_str(),
+            "Struct" | "::Struct" | "Data" | "::Data"
+        ) || !matches!(call.message.as_str(), "new" | "define")
+        {
+            return Vec::new();
+        }
+        let constructor = if call.message == "new" {
+            "Struct.new"
+        } else {
+            "Data.define"
+        };
+        let mutable = matches!(call.receiver.as_str(), "Struct" | "::Struct");
+        call.arguments
+            .iter()
+            .flat_map(|argument| {
+                let name = argument
+                    .trim()
+                    .trim_start_matches(':')
+                    .trim_matches(['\'', '"']);
+                let valid = !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|character| character.is_alphanumeric() || character == '_');
+                if !valid {
+                    return Vec::new();
+                }
+                let mut accessors = vec![NormalizedGeneratedAccessor {
+                    name: name.to_string(),
+                    params: Vec::new(),
+                    declaration_source: format!("{constructor}(:{name})"),
+                }];
+                if mutable {
+                    accessors.push(NormalizedGeneratedAccessor {
+                        name: format!("{name}="),
+                        params: vec!["value".to_string()],
+                        declaration_source: format!("{constructor}(:{name})"),
+                    });
+                }
+                accessors
+            })
+            .collect()
     }
 
     fn visibility_events_from_calls(
@@ -1419,6 +2773,49 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
     }
 }
 
+fn ruby_branch_result(node: &Node) -> Option<&Node> {
+    if matches!(node.r#type.as_str(), "BLOCK" | "BEGIN" | "EXPRESSION_LIST") {
+        return node
+            .children
+            .iter()
+            .filter_map(ast::node)
+            .next_back()
+            .and_then(ruby_branch_result);
+    }
+    Some(node)
+}
+
+/// Ruby has two syntactically distinct array-literal families.  Tree-sitter's
+/// normalized node kind for `%w[...]` is not stable across parser versions, so
+/// the Ruby adapter owns this source-syntax check instead of making shared
+/// inference depend on a Ruby node kind.
+fn ruby_array_literal(text: &str) -> bool {
+    text.starts_with('[') || ruby_word_array_literal(text)
+}
+
+fn ruby_word_array_literal(text: &str) -> bool {
+    text.starts_with("%w[") || text.starts_with("%W[")
+}
+
+fn signature_component(signature: &str, marker: &str) -> Option<String> {
+    let start = signature.find(marker)?;
+    let inner = &signature[start + marker.len()..];
+    let mut depth = 1u32;
+    for (index, character) in inner.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(inner[..index].trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 static RUBY_BEHAVIOR: RubyNormalizedBehavior = RubyNormalizedBehavior;
 
 pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
@@ -1488,8 +2885,14 @@ fn immutable_struct_reader_sets(
 ) -> BTreeMap<String, BTreeSet<String>> {
     let mut readers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut class_stack = Vec::new();
-    let method_ranges: Vec<(usize, usize)> =
-        functions.iter().map(|f| (f.span[0], f.span[2])).collect();
+    // Exclude lambdas: a `factory: -> { [] }` default on a `prop`/`const` line
+    // is an inline expression, not a method body, and must not mask the
+    // struct-field line from this line-based reader.
+    let method_ranges: Vec<(usize, usize)> = functions
+        .iter()
+        .filter(|f| f.dispatch_kind != "lambda")
+        .map(|f| (f.span[0], f.span[2]))
+        .collect();
     for (idx, line) in source.lines().enumerate() {
         let line_num = idx + 1;
         if method_ranges
@@ -1545,8 +2948,14 @@ fn immutable_struct_reader_types(
 ) -> BTreeMap<String, BTreeMap<String, String>> {
     let mut reader_types: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     let mut class_stack = Vec::new();
-    let method_ranges: Vec<(usize, usize)> =
-        functions.iter().map(|f| (f.span[0], f.span[2])).collect();
+    // Exclude lambdas: a `factory: -> { [] }` default on a `prop`/`const` line
+    // is an inline expression, not a method body, and must not mask the
+    // struct-field line from this line-based reader.
+    let method_ranges: Vec<(usize, usize)> = functions
+        .iter()
+        .filter(|f| f.dispatch_kind != "lambda")
+        .map(|f| (f.span[0], f.span[2]))
+        .collect();
     for (idx, line) in source.lines().enumerate() {
         let line_num = idx + 1;
         if method_ranges
@@ -1884,9 +3293,167 @@ mod tests {
     use super::*;
     use crate::syntax::normalized_behavior::NormalizedLanguageBehavior;
 
+    fn normalized_test_node(kind: &str, children: Vec<ast::Child>) -> Node {
+        Node {
+            r#type: kind.to_string(),
+            children,
+            first_lineno: 1,
+            first_column: 0,
+            last_lineno: 1,
+            last_column: 1,
+            text: kind.to_string(),
+        }
+    }
+
+    #[test]
+    fn conditional_expression_results_are_the_two_branch_values() {
+        let behavior = RubyNormalizedBehavior;
+        let condition = normalized_test_node("LVAR", vec![]);
+        let positive = normalized_test_node("CALL", vec![]);
+        let ignored = normalized_test_node("LIT", vec![]);
+        let negative = normalized_test_node(
+            "BEGIN",
+            vec![
+                ast::Child::Node(Box::new(ignored)),
+                ast::Child::Node(Box::new(normalized_test_node("CALL", vec![]))),
+            ],
+        );
+        let conditional = normalized_test_node(
+            "IF",
+            vec![
+                ast::Child::Node(Box::new(condition)),
+                ast::Child::Node(Box::new(positive)),
+                ast::Child::Node(Box::new(negative)),
+            ],
+        );
+
+        let operands = behavior
+            .value_preserving_call_result_operands(&conditional)
+            .expect("Ruby IF expressions preserve one branch result");
+        assert_eq!(
+            operands
+                .iter()
+                .map(|operand| operand.r#type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["CALL", "CALL"]
+        );
+    }
+
+    #[test]
+    fn attribute_assignment_runtime_anchors_name_the_source_selector() {
+        let behavior = RubyNormalizedBehavior;
+        let index_write = Node {
+            r#type: "ATTRASGN".to_string(),
+            children: vec![
+                ast::Child::Nil,
+                ast::Child::Symbol("[]=".to_string()),
+                ast::Child::Nil,
+            ],
+            first_lineno: 7,
+            first_column: 6,
+            last_lineno: 7,
+            last_column: 23,
+            text: "values[0] = value".to_string(),
+        };
+        assert_eq!(
+            behavior.call_access_span(&index_write, None, [7, 6, 7, 23]),
+            [7, 12, 7, 13]
+        );
+
+        let writer = Node {
+            r#type: "ATTRASGN".to_string(),
+            children: vec![
+                ast::Child::Nil,
+                ast::Child::Symbol("payload=".to_string()),
+                ast::Child::Nil,
+            ],
+            first_lineno: 9,
+            first_column: 4,
+            last_lineno: 9,
+            last_column: 31,
+            text: "record.payload = replacement".to_string(),
+        };
+        assert_eq!(
+            behavior.call_access_span(&writer, None, [9, 4, 9, 31]),
+            [9, 11, 9, 18]
+        );
+        let repeated_writer = Node {
+            r#type: "ATTRASGN".to_string(),
+            children: vec![
+                ast::Child::Node(Box::new(Node {
+                    r#type: "VAR_REF".to_string(),
+                    children: vec![],
+                    first_lineno: 10,
+                    first_column: 4,
+                    last_lineno: 10,
+                    last_column: 10,
+                    text: "target".to_string(),
+                })),
+                ast::Child::Symbol("format=".to_string()),
+                ast::Child::Nil,
+            ],
+            first_lineno: 10,
+            first_column: 4,
+            last_lineno: 10,
+            last_column: 48,
+            text: "target.format = target.format == source.format".to_string(),
+        };
+        assert_eq!(
+            behavior.call_access_span(&repeated_writer, None, [10, 4, 10, 48]),
+            [10, 11, 10, 17]
+        );
+    }
+
+    #[test]
+    fn chained_index_runtime_anchor_names_the_bracket_after_its_receiver() {
+        let behavior = RubyNormalizedBehavior;
+        let receiver = Node {
+            r#type: "FCALL".to_string(),
+            children: vec![ast::Child::Symbol("Array".to_string()), ast::Child::Nil],
+            first_lineno: 12,
+            first_column: 6,
+            last_lineno: 12,
+            last_column: 17,
+            text: "Array(value)".to_string(),
+        };
+        let index = Node {
+            r#type: "CALL".to_string(),
+            children: vec![
+                ast::Child::Node(Box::new(receiver)),
+                ast::Child::Symbol("[]".to_string()),
+                ast::Child::Nil,
+            ],
+            first_lineno: 12,
+            first_column: 6,
+            last_lineno: 12,
+            last_column: 24,
+            text: "Array(value)[index]".to_string(),
+        };
+        assert_eq!(
+            behavior.call_access_span(&index, None, [12, 6, 12, 24]),
+            [12, 18, 12, 19]
+        );
+    }
+
     #[test]
     fn ruby_behavior_edge_cases() {
         let behavior = RubyNormalizedBehavior;
+
+        assert!(behavior.scip_occurrence_matches_call(
+            "nil-kill-runtime workspace slopcop workspace SlopCop/CoverageData/Dataset#`[]`().",
+            "[",
+            "[]"
+        ));
+        assert!(behavior.scip_occurrence_matches_call(
+            "nil-kill-runtime workspace project abc Generated#`payload=`().",
+            "payload",
+            "payload="
+        ));
+        assert!(!behavior.scip_occurrence_matches_call(
+            "nil-kill-runtime workspace project abc Generated#payload().",
+            "payload",
+            "payload="
+        ));
 
         assert_eq!(
             behavior.collection_allocation_semantics("map"),
@@ -2030,6 +3597,26 @@ mod tests {
             behavior.block_call_semantics("proc"),
             BlockCallSemantics::Deferred
         );
+        assert_eq!(
+            behavior.block_call_semantics("on"),
+            BlockCallSemantics::Deferred
+        );
+        assert_eq!(
+            behavior.block_call_semantics("new"),
+            BlockCallSemantics::Unknown
+        );
+        assert_eq!(
+            behavior.block_call_semantics("fetch"),
+            BlockCallSemantics::Unknown
+        );
+        assert_eq!(
+            behavior.block_call_semantics_with_receiver(Some("Hash"), None, "new"),
+            BlockCallSemantics::Deferred
+        );
+        assert_eq!(
+            behavior.block_call_semantics_with_receiver(Some("ENV"), None, "fetch"),
+            BlockCallSemantics::Once
+        );
         let array = TypeExpr::Array(Box::new(TypeExpr::Primitive("String".into())));
         let hash = TypeExpr::Hash {
             key: Box::new(TypeExpr::Primitive("String".into())),
@@ -2043,6 +3630,18 @@ mod tests {
                 "Array##{message}"
             );
         }
+        assert_eq!(
+            behavior
+                .call_complexity(&TypeExpr::Primitive("array".into()), "concat")
+                .map(|cost| cost.time),
+            Some("O(N)")
+        );
+        assert_eq!(
+            behavior
+                .call_complexity(&TypeExpr::Primitive("Float".into()), "+")
+                .map(|cost| cost.time),
+            Some("O(1)")
+        );
         for message in ["[]", "each_value", "keys", "sort"] {
             assert!(
                 behavior.call_complexity(&hash, message).is_some(),
@@ -2261,6 +3860,7 @@ mod tests {
             visibility: None,
             params: Vec::new(),
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: String::new(),
         };
         let reader_sets = immutable_struct_reader_sets("class Parent; end", &[mock_fn]);
@@ -2277,6 +3877,36 @@ mod tests {
                 text: text.to_string(),
             }
         }
+
+        // A literal class-body ivar is a stable state declaration. Before
+        // this regression test it was discarded unless wrapped in `T.let`,
+        // leaving `@cache[key]` without a Hash receiver identity.
+        let cache_initializer = Node {
+            r#type: "IASGN".to_string(),
+            children: vec![
+                Child::String("@cache".to_string()),
+                Child::Node(Box::new(node("HASH", "{}"))),
+            ],
+            first_lineno: 12,
+            first_column: 0,
+            last_lineno: 12,
+            last_column: 11,
+            text: "@cache = {}".to_string(),
+        };
+        let cache_declaration = behavior
+            .state_declaration_from_node(&cache_initializer, "Demo", false)
+            .expect("class-body literal ivar declaration");
+        assert_eq!(cache_declaration.field, "@cache");
+        assert_eq!(
+            cache_declaration.r#type.as_deref(),
+            Some("T::Hash[T.untyped, T.untyped]")
+        );
+        assert!(
+            behavior
+                .state_declaration_from_node(&cache_initializer, "Demo", true)
+                .is_none(),
+            "a method assignment is not a sound field type declaration"
+        );
 
         // static_return_type string chars and lines
         assert_eq!(
@@ -2674,6 +4304,7 @@ mod tests {
             visibility: None,
             params: Vec::new(),
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: String::new(),
         };
 
@@ -2697,6 +4328,8 @@ mod tests {
     #[test]
     fn scip_ruby_symbols_use_proven_core_identity() {
         let length = "scip-ruby gem clear-compiler workspace Array#length().";
+        let runtime_length = "nil-kill-runtime ruby ruby 3.2.3 Array#length().";
+        let runtime_index = "nil-kill-runtime ruby ruby 3.2.3 Hash#`[]`().";
         let file = "scip-ruby gem clear-compiler workspace `<Class:File>`#join().";
         let generated = "scip-ruby gem clear-compiler workspace AST#BinaryOp#left().";
 
@@ -2705,14 +4338,169 @@ mod tests {
             Some("O(1)")
         );
         assert_eq!(
+            external_symbol_call_complexity(runtime_length, "length")
+                .map(|complexity| complexity.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(runtime_index, "[]").map(|complexity| complexity.time),
+            Some("O(1)")
+        );
+        for symbol in [
+            "nil-kill-runtime ruby ruby 3.2.3 Array#`[]`().",
+            "nil-kill-runtime ruby ruby 3.2.3 Hash#`[]`().",
+            "nil-kill-runtime ruby ruby 3.2.3 Hash.`[]`().",
+            "nil-kill-runtime ruby ruby 3.2.3 MatchData#`[]`().",
+            "nil-kill-runtime ruby ruby 3.2.3 String#`[]`().",
+        ] {
+            assert!(
+                external_symbol_call_complexity(symbol, "[]").is_some(),
+                "missing runtime core cost for {symbol}"
+            );
+        }
+        for symbol in [
+            "nil-kill-runtime ruby ruby 3.2.3 Integer#to_i().",
+            "nil-kill-runtime ruby ruby 3.2.3 NilClass#to_i().",
+            "nil-kill-runtime ruby ruby 3.2.3 String#to_i().",
+            "nil-kill-runtime ruby ruby 3.2.3 Float#to_f().",
+            "nil-kill-runtime ruby ruby 3.2.3 Integer#to_f().",
+            "nil-kill-runtime ruby ruby 3.2.3 NilClass#to_f().",
+        ] {
+            assert!(
+                external_symbol_call_complexity(
+                    symbol,
+                    ruby_descriptor_parts(scip_ruby_descriptor(symbol).unwrap())
+                        .unwrap()
+                        .1,
+                )
+                .is_some(),
+                "missing runtime conversion cost for {symbol}"
+            );
+        }
+        assert_eq!(
+            external_symbol_call_complexity(
+                "nil-kill-runtime ruby ruby 3.2.3 Zlib/GzipReader#read().",
+                "read",
+            )
+            .map(|cost| cost.time),
+            Some("O(N)")
+        );
+        for (symbol, message) in [
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Digest/Class#new().",
+                "new",
+            ),
+            ("nil-kill-runtime ruby ruby 3.2.3 Float#round().", "round"),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 String#upcase().",
+                "upcase",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Open3.capture2e().",
+                "capture2e",
+            ),
+        ] {
+            assert!(
+                external_symbol_call_complexity(symbol, message).is_some(),
+                "missing runtime stdlib cost for {symbol}"
+            );
+        }
+        assert_eq!(
+            external_symbol_metadata("nil-kill-runtime ruby ruby 3.2.3 Method#call().")
+                .parametric_cost
+                .as_deref(),
+            Some("callback_once")
+        );
+        assert_eq!(
+            external_symbol_metadata("nil-kill-runtime ruby ruby 3.2.3 Enumerator#with_index().")
+                .parametric_cost
+                .as_deref(),
+            Some("callback_linear")
+        );
+        assert_eq!(
             external_symbol_call_complexity(file, "join").map(|complexity| complexity.time),
             Some("O(N)")
         );
         assert_eq!(external_symbol_metadata(length).scope, "stdlib");
+        assert_eq!(external_symbol_metadata(runtime_length).scope, "stdlib");
+        let unmodelled_runtime_core =
+            external_symbol_metadata("nil-kill-runtime ruby ruby 3.2.3 Math.exp().");
+        assert_eq!(unmodelled_runtime_core.scope, "stdlib");
+        assert_eq!(
+            unmodelled_runtime_core.missing_cost_kind,
+            "stdlib_cost_model_missing"
+        );
         assert_eq!(
             external_symbol_metadata(generated).scope,
             "project_declaration"
         );
+        let dependency =
+            external_symbol_metadata("nil-kill-runtime rubygems json 2.19.5 JSON.parse().");
+        assert_eq!(dependency.scope, "dependency");
+        assert_eq!(
+            dependency.missing_cost_kind,
+            "dependency_cost_model_missing"
+        );
+        for (symbol, message) in [
+            (
+                "nil-kill-runtime rubygems json 2.19.5 JSON.parse().",
+                "parse",
+            ),
+            ("nil-kill-runtime ruby json 2.19.5 JSON.parse().", "parse"),
+            (
+                "nil-kill-runtime rubygems json 2.19.5 JSON.generate().",
+                "generate",
+            ),
+            (
+                "nil-kill-runtime ruby json 2.19.5 JSON.pretty_generate().",
+                "pretty_generate",
+            ),
+            (
+                "nil-kill-runtime rubygems psych 5.4.0 Psych.safe_load().",
+                "safe_load",
+            ),
+        ] {
+            let cost = external_symbol_call_complexity(symbol, message)
+                .unwrap_or_else(|| panic!("missing reviewed dependency cost for {symbol}"));
+            assert_eq!(cost.time, "O(N)");
+            assert_eq!(cost.space, "O(N)");
+        }
+    }
+
+    #[test]
+    fn generated_reader_contracts_match_exact_declared_names() {
+        let behavior = RubyNormalizedBehavior;
+        for (source, name) in [
+            ("attr_reader :value, :other", "value"),
+            ("attr_accessor(:value, :other)", "value="),
+            ("const :value, String", "value"),
+            ("prop :value, String", "value"),
+            ("Struct.new(:value, :other)", "value"),
+            ("Struct.new(:value, :other)", "value="),
+            ("Data.define(:value, :other)", "other"),
+        ] {
+            assert!(
+                behavior
+                    .generated_callable_complexity(source, name)
+                    .is_some(),
+                "{source} should generate {name}"
+            );
+        }
+        for (source, name) in [
+            ("attr_reader :other_value", "value"),
+            ("attr_reader :value", "value="),
+            ("const :other_value, String", "value"),
+            ("property :value", "value"),
+            ("Struct.new(:other_value)", "value"),
+            ("Data.define(:value)", "value="),
+        ] {
+            assert!(
+                behavior
+                    .generated_callable_complexity(source, name)
+                    .is_none(),
+                "{source} must not generate {name}"
+            );
+        }
     }
 
     #[test]
@@ -2722,5 +4510,176 @@ mod tests {
 
         assert_eq!(metadata.parametric_cost.as_deref(), Some("callback_linear"));
         assert!(external_symbol_call_complexity(each, "each").is_none());
+
+        let comparable =
+            external_symbol_metadata("nil-kill-runtime ruby ruby 3.2.3 Comparable#between?().");
+        assert_eq!(comparable.scope, "stdlib");
+        assert_eq!(
+            comparable.parametric_cost.as_deref(),
+            Some("reflective_once")
+        );
+    }
+
+    #[test]
+    fn cruby_runtime_effect_and_callback_contracts_cover_the_native_surface() {
+        // NilKill emits core frames under its runtime identity.  These calls
+        // must use the same reviewed contracts as SCIP-Ruby core symbols;
+        // otherwise the ExternalLatency section is dead data for Ruby.
+        let read =
+            external_symbol_call_complexity("nil-kill-runtime ruby ruby 3.2.3 IO#read().", "read")
+                .expect("IO.read should use the external-latency contract");
+        assert_eq!((read.time, read.space), ("O(N+C)", "O(N+S)"));
+        assert_eq!(
+            read.bound_quality,
+            "upper_bound_external_latency_excluded_parametric"
+        );
+        let stringio_read = external_symbol_call_complexity(
+            "nil-kill-runtime ruby stringio 3.2.0 StringIO#read().",
+            "read",
+        )
+        .expect("StringIO#read must converge with a runtime IO#read candidate");
+        assert_eq!(
+            (stringio_read.time, stringio_read.space),
+            (read.time, read.space)
+        );
+
+        for (symbol, message) in [
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 File.realpath().",
+                "realpath",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 File.executable?().",
+                "executable?",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 File.absolute_path?().",
+                "absolute_path?",
+            ),
+            ("nil-kill-runtime ruby ruby 3.2.3 Dir.`[]`().", "[]"),
+            ("nil-kill-runtime ruby ruby 3.2.3 Dir.chdir().", "chdir"),
+        ] {
+            let cost = external_symbol_call_complexity(symbol, message)
+                .unwrap_or_else(|| panic!("missing external contract for {symbol}"));
+            assert_eq!(
+                cost.bound_quality,
+                "upper_bound_external_latency_excluded_parametric"
+            );
+        }
+
+        for (symbol, message, expected) in [
+            (
+                "nil-kill-runtime ruby bundler 2.7.2 Kernel#gem().",
+                "gem",
+                ("O(N)", "O(1)"),
+            ),
+            (
+                "nil-kill-runtime ruby psych 5.4.0 Psych.load_file().",
+                "load_file",
+                ("O(N)", "O(N)"),
+            ),
+        ] {
+            let cost = external_symbol_call_complexity(symbol, message)
+                .unwrap_or_else(|| panic!("missing external contract for {symbol}"));
+            assert_eq!((cost.time, cost.space), expected);
+            assert_eq!(cost.bound_quality, "upper_bound_external_latency_excluded");
+        }
+
+        for (symbol, kind) in [
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Exception#message().",
+                "callback_once",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Enumerable#each_slice().",
+                "callback_linear",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Kernel#require().",
+                "loader_once",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Math.exp().",
+                "callback_once",
+            ),
+            (
+                "nil-kill-runtime ruby ruby 3.2.3 Regexp.escape().",
+                "coercive_linear_materialize",
+            ),
+        ] {
+            assert_eq!(
+                external_symbol_metadata(symbol).parametric_cost.as_deref(),
+                Some(kind),
+                "missing parametric contract for {symbol}"
+            );
+        }
+
+        let match_p = external_symbol_call_complexity(
+            "nil-kill-runtime ruby ruby 3.2.3 Regexp#`match?`().",
+            "match?",
+        )
+        .expect("Regexp#match? should carry the regex-engine worst-case bound");
+        assert_eq!((match_p.time, match_p.space), ("O(2^N)", "O(N)"));
+    }
+
+    #[test]
+    fn struct_class_generation_has_a_reviewed_linear_fallback() {
+        let cost = external_symbol_call_complexity(
+            "nil-kill-runtime ruby ruby 3.2.3 Struct.new().",
+            "new",
+        )
+        .expect("Struct.new must price its generated member surface");
+
+        assert_eq!((cost.time, cost.space), ("O(N)", "O(N)"));
+        assert_eq!(cost.bound_quality, "upper_bound_exact_target");
+    }
+
+    #[test]
+    fn anonymous_runtime_record_contract_is_exact_and_closed() {
+        for (descriptor, message) in [
+            ("`AnonymousStruct(file,line)`#file().", "file"),
+            ("`AnonymousStruct(file,line)`#`line=`().", "line="),
+            ("`AnonymousStruct(file,line)`.new().", "new"),
+            ("`AnonymousData(file,line)`#line().", "line"),
+            ("`AnonymousData(file,line)`.new().", "new"),
+            (
+                "`GeneratedStruct(WaitLoopCoverage/Loop;tag,file,line)`#file().",
+                "file",
+            ),
+            (
+                "`GeneratedStruct(WaitLoopCoverage/Loop;tag,file,line)`#`line=`().",
+                "line=",
+            ),
+            (
+                "`GeneratedData(Dependency/Record;file,line)`#line().",
+                "line",
+            ),
+        ] {
+            let symbol = format!("nil-kill-runtime workspace demo 1 {descriptor}");
+            let cost = external_symbol_call_complexity(&symbol, message)
+                .unwrap_or_else(|| panic!("missing structural record cost for {symbol}"));
+            assert_eq!((cost.time, cost.space), ("O(1)", "O(1)"));
+            assert_eq!(cost.provenance, "ruby_generated_record_runtime_contract");
+        }
+
+        for (descriptor, message) in [
+            ("`AnonymousStruct(file,line)`#missing().", "missing"),
+            ("`AnonymousData(file,line)`#`line=`().", "line="),
+            ("`AnonymousStruct(file,bad-field)`#file().", "file"),
+            ("`AnonymousStruct()`#file().", "file"),
+            ("`AnonymousRecord(file)`#file().", "file"),
+            (
+                "`GeneratedStruct(WaitLoopCoverage/Loop;tag,file)`#missing().",
+                "missing",
+            ),
+            ("`GeneratedStruct(WaitLoopCoverage/Loop)`#file().", "file"),
+            ("`GeneratedStruct(;file,line)`#file().", "file"),
+        ] {
+            let symbol = format!("nil-kill-runtime workspace demo 1 {descriptor}");
+            assert!(
+                external_symbol_call_complexity(&symbol, message).is_none(),
+                "malformed or undeclared record operation must stay open: {symbol}"
+            );
+        }
     }
 }

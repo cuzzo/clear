@@ -20,7 +20,7 @@ module Espalier
     end
 
     def build
-      slots = slot_records
+      by_path, by_owner = index_slots(slot_records)
       aliases.filter_map do |definition|
         target = alias_target(definition)
         profile = type_profile_for_definition(definition)
@@ -29,11 +29,46 @@ module Espalier
         alias_name = qualified_alias_name(definition)
         next if alias_name.empty?
 
-        matches = slots.filter_map { |slot| alias_slot_match(slot, definition, alias_name, target, profile) }
+        matches = candidate_slots(definition, by_path, by_owner)
+          .filter_map { |slot| alias_slot_match(slot, definition, alias_name, target, profile) }
         next if matches.size < @minimum_slots
 
         recommendation(definition, alias_name, target, matches)
       end.sort_by { |row| [-row["slot_count"].to_i, row["alias"].to_s, row.dig("definition", "path").to_s] }
+    end
+
+    # A slot can only match an alias in the same language whose scope covers it:
+    # the same file, or the alias owner / a nesting ancestor of it (see
+    # `alias_scope_matches_slot?`). Bucketing slots by `[language, path]` and by
+    # `[language, owner-and-every-ancestor]` lets each alias examine only that
+    # union instead of every slot, turning the O(aliases x slots) scan into a
+    # scoped lookup. The result set is identical - `alias_slot_match` still runs
+    # its full guards on the candidates.
+    def index_slots(slots)
+      by_path = Hash.new { |hash, key| hash[key] = [] }
+      by_owner = Hash.new { |hash, key| hash[key] = [] }
+      slots.each do |slot|
+        language = slot["language"].to_s
+        by_path[[language, slot["path"].to_s]] << slot
+        ancestor = slot["owner"].to_s
+        until ancestor.empty?
+          by_owner[[language, ancestor]] << slot
+          separator = ancestor.rindex("::")
+          break unless separator
+
+          ancestor = ancestor[0...separator]
+        end
+      end
+      [by_path, by_owner]
+    end
+
+    def candidate_slots(definition, by_path, by_owner)
+      language = definition["language"].to_s
+      path_slots = by_path[[language, definition["path"].to_s]]
+      owner = definition["owner"].to_s
+      return path_slots if owner.empty?
+
+      (by_owner[[language, owner]] + path_slots).uniq(&:object_id)
     end
 
     private

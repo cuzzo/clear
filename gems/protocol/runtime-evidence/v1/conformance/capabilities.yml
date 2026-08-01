@@ -1,0 +1,1502 @@
+version: 1
+wire_matrix:
+  anchor_kinds:
+    - FUNCTION_ENTRY
+    - FUNCTION_RETURN
+    - CALL_SELECTOR
+    - STATE_READ
+    - STATE_WRITE
+    - CALLBACK_ENTRY
+    - COLLECTION_OPERATION
+    - BRANCH_PREDICATE
+  planner_anchor_kinds:
+    - FUNCTION_ENTRY
+    - FUNCTION_RETURN
+    - CALL_SELECTOR
+    - STATE_WRITE
+    - COLLECTION_OPERATION
+    - BRANCH_PREDICATE
+  reserved_anchor_kinds:
+    STATE_READ: FactMine currently propagates state from observed writes and does not request read capture.
+    CALLBACK_ENTRY: FactMine currently derives callback parameter flow from collection/call evidence and does not request callback-entry capture.
+  evidence_kinds:
+    - PARAMETER_VALUE
+    - RETURN_VALUE
+    - RECEIVER_VALUE
+    - CALL_TARGET
+    - RESULT_VALUE
+    - BOOLEAN_RESULT
+    - STATE_VALUE
+    - COLLECTION_VALUE
+  capture_statuses:
+    - COMPLETE_FOR_RUNS
+    - NOT_EXECUTED
+    - PARTIAL
+    - NOT_INSTRUMENTED
+    - UNSUPPORTED
+    - STALE
+    - FAILED_CAPTURE
+  source_roles:
+    - PRODUCTION
+    - NON_PRODUCTION
+    - STANDARD_LIBRARY
+    - DEPENDENCY
+    - RUNTIME
+    - UNKNOWN_SOURCE
+  value_shapes: [sequence, mapping, record, tuple]
+  negative_controls:
+    - unknown-field
+    - unknown-anchor
+    - duplicate-anchor
+    - stale-plan-digest
+    - stale-anchor-digest
+    - incomplete-kind-without-field
+    - complete-with-dropped-execution
+    - complete-with-truncated-value
+    - unknown-run-provenance
+    - noncanonical-path
+    - noncanonical-symbol
+    - missing-call-execution-range
+    - execution-range-excludes-selector
+    - incompatible-anchor-evidence
+  request_contracts:
+    FUNCTION_ENTRY: [PARAMETER_VALUE]
+    FUNCTION_RETURN: [RETURN_VALUE]
+    CALL_SELECTOR: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+    STATE_READ: [STATE_VALUE]
+    STATE_WRITE: [STATE_VALUE]
+    CALLBACK_ENTRY: [PARAMETER_VALUE]
+    COLLECTION_OPERATION: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+    BRANCH_PREDICATE: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, BOOLEAN_RESULT]
+
+fixture:
+  language: ruby
+  source: ruby/capabilities.rb
+  driver: ruby/driver.rb
+  support:
+    - ruby/dependency/generated_record.rb
+    - ruby/test/test_dispatcher.rb
+
+# Calls in this table are intentionally absent from the runtime trace plan:
+# FactMine has already bound them to an analyzed declaration. The oracle must
+# prove both the exact static target and the absence of a redundant request.
+static_closures:
+  - id: direct_local_module_function
+    capabilities: [ruby-call, module-method, module-function, project-call, statically-indexed-target]
+    anchor: { method: local_module_function, selector: classify, occurrence: 1 }
+    expect:
+      target_owner: RuntimeEvidenceConformance::LocalModuleFunctions
+      target_name: classify
+
+  - id: nested_local_module_function
+    capabilities: [ruby-call, module-method, module-function, project-call, statically-indexed-target, nested-argument, nested-call]
+    anchor: { method: nested_local_module_function, selector: classify, occurrence: 1 }
+    expect:
+      target_owner: RuntimeEvidenceConformance::LocalModuleFunctions
+      target_name: classify
+
+# Each entry names a semantic capability, not a bug or application.
+# `anchor` is resolved against FactMine's plan; collectors only receive the
+# resulting opaque request.
+cases:
+  - id: exact_ruby_call
+    capabilities: [exact-anchor, ruby-call, receiver, target, result]
+    anchor: { method: exact_call, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      source_role: PRODUCTION
+
+  - id: nil_return_call
+    capabilities: [exact-anchor, nil-value]
+    anchor: { method: nil_return, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: exact_same_line_call_first
+    capabilities: [ambiguous-anchor, same-line, exact-execution-range]
+    anchor: { method: ambiguous_calls, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: exact_same_line_call_second
+    capabilities: [ambiguous-anchor, same-line, exact-execution-range]
+    anchor: { method: ambiguous_calls, selector: normalize, occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: nested_receiver
+    capabilities: [nested-receiver, chained-call, result-flow]
+    anchor: { method: nested_receiver, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+
+  - id: multiline_receiver
+    capabilities: [multiline-call, nested-receiver, chained-call, exact-execution-range]
+    anchor: { method: multiline_receiver, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: nested_argument
+    capabilities: [nested-argument, result-flow, exact-execution-range]
+    anchor: { method: nested_argument, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: assignment_result_flow
+    capabilities: [assignment, result, cfg, dfg]
+    anchor: { method: assignment_flow, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: RuntimeEvidenceConformance::Value
+      factmine_infers:
+        - { method: assignment_flow, selector: normalize, target_owner: RuntimeEvidenceConformance::Value }
+
+  - id: destructuring_result_flow
+    capabilities: [destructuring, result, cfg, dfg]
+    anchor: { method: destructuring_flow, selector: values_at, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: Array
+
+  - id: short_circuit_assignment
+    capabilities: [short-circuit-assignment, result, cfg, dfg]
+    anchor: { method: short_circuit_flow, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: RuntimeEvidenceConformance::Value
+
+  - id: short_circuit_call_execution
+    capabilities: [short-circuit-call, exact-execution-range, skipped-execution]
+    anchor: { method: short_circuit_guard, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      observed_executions: 1
+
+  - id: safe_navigation_execution
+    capabilities: [safe-navigation, skipped-execution, exact-execution-range]
+    anchor: { method: safe_navigation, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      observed_executions: 1
+
+  - id: native_c_call
+    capabilities: [native-call, receiver, target, result]
+    anchor: { method: native_call, selector: upcase, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: String
+      target_owner: String
+      target_name: upcase
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_array_push
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation]
+    anchor: { method: instrumented_array_writes, selector: push, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: push
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_array_alias_append
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, alias-method]
+    anchor: { method: instrumented_array_writes, selector: append, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: append
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_array_operator_append
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, alias-method, operator-method]
+    anchor: { method: instrumented_array_writes, selector: <<, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: <<
+      source_role: STANDARD_LIBRARY
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: instrumented_array_unshift
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation]
+    anchor: { method: instrumented_array_writes, selector: unshift, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: unshift
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_array_index_write
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, operator-method]
+    anchor: { method: instrumented_array_writes, selector: "[]=", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: "[]="
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_array_concat
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation]
+    anchor: { method: instrumented_array_writes, selector: concat, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: concat
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_hash_index_write
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, operator-method]
+    anchor: { method: instrumented_hash_writes, selector: "[]=", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]="
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_hash_store
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation]
+    anchor: { method: instrumented_hash_writes, selector: store, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: store
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_hash_merge
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, callback]
+    anchor: { method: instrumented_hash_writes, selector: merge!, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: merge!
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_hash_update
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, alias-method, callback]
+    anchor: { method: instrumented_hash_writes, selector: update, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: update
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_set_add
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, set]
+    anchor: { method: instrumented_set_writes, selector: add, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Set
+      target_owner: Set
+      target_name: add
+      source_role: STANDARD_LIBRARY
+
+  - id: instrumented_set_alias_append
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, set, alias-method, operator-method]
+    anchor: { method: instrumented_set_writes, selector: <<, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Set
+      target_owner: Set
+      target_name: <<
+      source_role: STANDARD_LIBRARY
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: native_string_append
+    capabilities: [native-call, collection-mutation, string-builder, operator-method]
+    anchor: { method: append_string, selector: <<, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: String
+      target_owner: String
+      target_name: <<
+      source_role: STANDARD_LIBRARY
+      call_time: O(N)
+      call_space: O(N)
+
+  - id: nested_local_module_function_argument
+    capabilities: [native-call, nested-argument, nested-call]
+    anchor: { method: nested_local_module_function, selector: strip, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: String
+      target_owner: String
+      target_name: strip
+      source_role: STANDARD_LIBRARY
+      call_time: O(N)
+      call_space: O(N)
+
+  - id: native_array_binary_search
+    capabilities: [native-call, callback, block-parameter, binary-search, logarithmic-iteration, callback-multiplicity]
+    anchor: { method: binary_search, selector: bsearch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: bsearch
+      source_role: STANDARD_LIBRARY
+      call_time: O(log N)
+      call_space: O(1)
+      iteration_multiplicity: O(log N)
+
+  - id: native_array_binary_search_index
+    capabilities: [native-call, callback, block-parameter, binary-search, logarithmic-iteration, callback-multiplicity]
+    anchor: { method: binary_search_index, selector: bsearch_index, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: bsearch_index
+      source_role: STANDARD_LIBRARY
+      call_time: O(log N)
+      call_space: O(1)
+      iteration_multiplicity: O(log N)
+
+  - id: native_option_parser_setter
+    capabilities: [native-call, setter-method, operator-method, runtime-symbol-escaping]
+    anchor: { method: option_parser_banner, selector: banner=, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: OptionParser
+      target_owner: OptionParser
+      target_name: banner=
+      source_role: STANDARD_LIBRARY
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: instrumented_set_merge
+    capabilities: [native-call, transparent-wrapper, collector-instrumentation, collection-mutation, set]
+    anchor: { method: instrumented_set_writes, selector: merge, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Set
+      target_owner: Set
+      target_name: merge
+      source_role: STANDARD_LIBRARY
+
+  - id: kernel_array_conversion_before_index
+    capabilities: [native-call, nested-receiver, chained-call, chained-index, kernel-conversion, exact-execution-range]
+    anchor: { method: converted_index, selector: Array, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      target_owner: Kernel
+      target_name: Array
+      source_role: STANDARD_LIBRARY
+
+  - id: index_after_kernel_array_conversion
+    capabilities: [native-call, nested-receiver, chained-call, chained-index, operator-method, exact-execution-range]
+    anchor: { method: converted_index, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: transparent_sorbet_tlet
+    capabilities: [ruby-call, transparent-wrapper, collector-instrumentation, sorbet, result]
+    anchor: { method: sorbet_typed_passthrough, selector: let, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: T
+      target_name: let
+      source_role: DEPENDENCY
+
+  - id: typed_generated_constructor
+    capabilities: [generated-constructor, generated-accessor, transparent-wrapper, sorbet, typed-record]
+    anchor: { method: typed_generated_constructor, selector: new, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: RuntimeEvidenceConformance::TypedGenerated
+      target_name: new
+      target_kind: class
+      source_role: PRODUCTION
+
+  - id: typed_generated_accessor
+    capabilities: [generated-accessor, transparent-wrapper, sorbet, typed-record]
+    anchor: { method: typed_generated_accessor, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TypedGenerated
+      target_owner: RuntimeEvidenceConformance::TypedGenerated
+      target_name: payload
+      source_role: PRODUCTION
+
+  - id: transparent_open_struct_index_write
+    capabilities: [generated-accessor, transparent-wrapper, collector-instrumentation, open-struct, generated-setter]
+    anchor: { method: open_struct_index_write, selector: "[]=", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: OpenStruct
+      target_owner: OpenStruct
+      target_name: "[]="
+      source_role: STANDARD_LIBRARY
+
+  - id: generated_struct_accessor
+    capabilities: [generated-accessor, transparent-wrapper, native-call]
+    anchor: { method: generated_accessor, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Generated
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: payload
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: excluded_source_generated_struct_accessor
+    capabilities: [generated-accessor, named-generated-class, excluded-source, structural-runtime-identity, transparent-wrapper]
+    anchor: { method: excluded_generated_accessor, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::DependencyGenerated
+      target_owner: GeneratedStruct(RuntimeEvidenceConformance/DependencyGenerated;payload,count)
+      target_name: payload
+      source_role: PRODUCTION
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: generated_struct_constructor
+    capabilities: [generated-constructor, transparent-wrapper, native-call]
+    anchor: { method: generated_constructor, selector: new, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: new
+      target_kind: class
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: generated_struct_accessor_result_flow
+    capabilities: [generated-accessor, chained-call, result-flow, transparent-wrapper]
+    anchor: { method: generated_accessor_chain, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Generated
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: payload
+      call_time: O(1)
+      call_space: O(1)
+      factmine_infers:
+        - { method: generated_accessor_chain, selector: normalize, target_owner: RuntimeEvidenceConformance::Value }
+
+  - id: generated_struct_accessor_setter
+    capabilities: [generated-accessor, generated-setter, same-range-reader-writer, transparent-wrapper]
+    anchor: { method: generated_accessor_write, selector: payload=, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Generated
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: payload=
+      forbidden_target_name: payload
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: repeated_generated_struct_accessor_setter
+    capabilities: [generated-accessor, generated-setter, repeated-selector, same-range-reader-writer, transparent-wrapper]
+    anchor: { method: repeated_generated_accessor_write, selector: payload=, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Generated
+      target_owner: RuntimeEvidenceConformance::Generated
+      target_name: payload=
+      forbidden_target_name: payload
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: generated_struct_override
+    capabilities: [generated-record, source-override, nontransparent-method]
+    anchor: { method: generated_override, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::GeneratedOverride
+      target_owner: RuntimeEvidenceConformance::GeneratedOverride
+      target_name: payload
+
+  - id: local_generated_struct_kind
+    capabilities: [generated-accessor, anonymous-generated-class, local-constructor, transparent-wrapper]
+    anchor: { method: local_generated_accessors, selector: kind, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(kind,decision_line,decision_span)
+      target_owner: AnonymousStruct(kind,decision_line,decision_span)
+      target_name: kind
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: local_generated_struct_decision_line
+    capabilities: [generated-accessor, anonymous-generated-class, local-constructor, same-line, transparent-wrapper]
+    anchor: { method: local_generated_accessors, selector: decision_line, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(kind,decision_line,decision_span)
+      target_owner: AnonymousStruct(kind,decision_line,decision_span)
+      target_name: decision_line
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: local_generated_struct_decision_span
+    capabilities: [generated-accessor, anonymous-generated-class, local-constructor, same-line, transparent-wrapper]
+    anchor: { method: local_generated_accessors, selector: decision_span, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(kind,decision_line,decision_span)
+      target_owner: AnonymousStruct(kind,decision_line,decision_span)
+      target_name: decision_span
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: local_generated_struct_constructor
+    capabilities: [generated-constructor, anonymous-generated-class, local-constructor, transparent-wrapper]
+    anchor: { method: local_generated_constructor, selector: new, occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Class
+      target_owner: AnonymousStruct(payload,count)
+      target_name: new
+      target_kind: class
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: local_generated_struct_writer
+    capabilities: [generated-accessor, generated-setter, same-range-reader-writer, anonymous-generated-class, local-constructor, transparent-wrapper]
+    anchor: { method: local_generated_writer, selector: payload=, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(payload)
+      target_owner: AnonymousStruct(payload)
+      target_name: payload=
+      forbidden_target_name: payload
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: local_generated_struct_reader_after_write
+    capabilities: [generated-accessor, anonymous-generated-class, assignment, cfg, dfg, transparent-wrapper]
+    anchor: { method: local_generated_writer, selector: payload, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: AnonymousStruct(payload)
+      target_owner: AnonymousStruct(payload)
+      target_name: payload
+      call_time: O(1)
+      call_space: O(1)
+
+  - id: nested_test_generated_outer_reader
+    capabilities: [generated-accessor, nested-receiver, nonproduction-provenance, transparent-wrapper]
+    anchor: { method: nested_generated_accessors, selector: arm, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestArmCoverage
+      target_owner: RuntimeEvidenceConformance::TestArmCoverage
+      target_name: arm
+      source_role: NON_PRODUCTION
+
+  - id: nested_test_generated_inner_reader
+    capabilities: [generated-accessor, nested-receiver, nonproduction-provenance, transparent-wrapper]
+    anchor: { method: nested_generated_accessors, selector: span, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestArm
+      target_owner: RuntimeEvidenceConformance::TestArm
+      target_name: span
+      source_role: NON_PRODUCTION
+
+  - id: test_generated_result_outer_reader
+    capabilities: [generated-accessor, chained-result, nonproduction-provenance, resumed-production-frame]
+    anchor: { method: generated_result_accessor, selector: arm, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestArmCoverage
+      target_owner: RuntimeEvidenceConformance::TestArmCoverage
+      target_name: arm
+      source_role: NON_PRODUCTION
+
+  - id: test_generated_result_inner_reader
+    capabilities: [generated-accessor, chained-result, nested-receiver, nonproduction-provenance]
+    anchor: { method: generated_result_accessor, selector: span, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestArm
+      target_owner: RuntimeEvidenceConformance::TestArm
+      target_name: span
+      source_role: NON_PRODUCTION
+
+  - id: callback_and_yield
+    capabilities: [callback, yield, block-parameter, attached-block-range]
+    anchor: { method: callback_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callback_outer
+    capabilities: [callback, nested-attached-blocks, exact-execution-range]
+    anchor: { method: nested_callback_flow, selector: select, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: select
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callback_inner
+    capabilities: [callback, nested-attached-blocks, exact-execution-range]
+    anchor: { method: nested_callback_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      source_role: STANDARD_LIBRARY
+
+  - id: callback_local
+    capabilities: [callback, block-parameter, block-local, multiline-call]
+    anchor: { method: callback_local_flow, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      observed_executions: 2
+
+  - id: dynamic_dispatch
+    capabilities: [dynamic-dispatch, production-target]
+    anchor: { method: dynamic_dispatch, selector: dispatch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::ProductionDispatcher
+      target_owner: RuntimeEvidenceConformance::ProductionDispatcher
+      source_role: PRODUCTION
+
+  - id: alternative_dynamic_targets
+    capabilities: [dynamic-dispatch, alternative-receivers, alternative-targets, alternative-results, correlated-execution-buckets, repeated-execution]
+    anchor: { method: alternative_target, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_types:
+        - RuntimeEvidenceConformance::Value
+        - RuntimeEvidenceConformance::AlternateValue
+      target_owners:
+        - RuntimeEvidenceConformance::Value
+        - RuntimeEvidenceConformance::AlternateValue
+      result_types:
+        - String
+        - Array
+      target_name: normalize
+      observed_executions: 2
+
+  - id: container_shape
+    capabilities: [result, container-shape, mapping, sequence]
+    anchor: { method: container_shape, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: Array
+      result_element_type: RuntimeEvidenceConformance::Value
+
+  - id: mapping_result_shape
+    capabilities: [result, container-shape, mapping]
+    anchor: { method: mapping_shape, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: Hash
+      result_shape: mapping
+
+  - id: record_result_shape
+    capabilities: [result, container-shape, record]
+    anchor: { method: record_shape, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      result_type: RuntimeEvidenceConformance::Generated
+      result_shape: record
+
+  - id: boolean_predicate
+    capabilities: [boolean-result, branch-predicate]
+    anchor: { method: predicate, selector: respond_to?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, BOOLEAN_RESULT]
+      receiver_type: RuntimeEvidenceConformance::Value
+      boolean_result: true
+
+  - id: false_boolean_predicate
+    capabilities: [boolean-result, false-value, branch-predicate]
+    anchor: { method: false_predicate, selector: respond_to?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, BOOLEAN_RESULT]
+      receiver_type: RuntimeEvidenceConformance::Value
+      boolean_result: false
+
+  - id: repeated_exact_call
+    capabilities: [repeated-execution, execution-count, exact-anchor]
+    anchor: { method: repeated_call, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      observed_executions: 3
+
+  - id: subprocess_result
+    capabilities: [subprocess, result-object, native-call]
+    anchor: { method: subprocess_result, selector: success?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Process::Status
+      target_owner: Process::Status
+      target_name: success?
+
+  - id: mixed_production_and_test_replacement
+    capabilities: [test-replacement, mixed-provenance, transparent-wrapper]
+    anchor: { method: mixed_provenance_status, selector: success?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Process::Status
+      target_owner: Process::Status
+      target_name: success?
+      source_role: STANDARD_LIBRARY
+      excluded_target_owner: RuntimeEvidenceConformance::TestStatus
+
+  - id: mixed_generated_accessor_replacement
+    capabilities: [test-replacement, mixed-provenance, generated-accessor, transparent-wrapper]
+    anchor: { method: mixed_generated_accessor, selector: decision_line, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::GeneratedStatus
+      target_owner: RuntimeEvidenceConformance::GeneratedStatus
+      target_name: decision_line
+      source_role: PRODUCTION
+      excluded_target_owner: RuntimeEvidenceConformance::TestGeneratedStatus
+
+  - id: result_call_after_replaced_producer
+    capabilities: [test-replacement, mixed-provenance, resumed-production-frame, result-object]
+    anchor: { method: status_after_capture, selector: success?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Process::Status
+      target_owner: Process::Status
+      target_name: success?
+      source_role: STANDARD_LIBRARY
+      excluded_target_owner: RuntimeEvidenceConformance::TestStatus
+
+  - id: direct_subprocess_result_with_anonymous_replacement
+    capabilities: [subprocess, result-object, test-replacement, anonymous-generated-class, resumed-production-frame]
+    anchor: { method: direct_capture_status, selector: success?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_types: [Process::Status, AnonymousStruct(ok)]
+      target_owners: [Process::Status, AnonymousStruct(ok)]
+      target_name: success?
+      observed_executions: 2
+
+  - id: direct_subprocess_provider_replacement
+    capabilities: [subprocess, module-method, test-replacement, result, transparent-wrapper]
+    anchor: { method: direct_capture_status, selector: capture3, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Module
+      target_name: capture3
+      result_type: Array
+      observed_executions: 2
+
+  - id: exception_target
+    capabilities: [exception, non-returning-call, partial-result]
+    anchor: { method: exception_flow, selector: fail!, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Raiser
+      target_owner: RuntimeEvidenceConformance::Raiser
+
+  - id: exception_missing_result
+    capabilities: [exception, non-returning-call, partial-result, per-kind-completeness]
+    anchor: { method: exception_result_flow, selector: fail!, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      allowed_status: PARTIAL
+      complete_kinds: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Raiser
+      target_owner: RuntimeEvidenceConformance::Raiser
+      target_name: fail!
+
+  - id: uncaught_exception_target
+    capabilities: [exception, non-returning-call, failed-return]
+    anchor: { method: uncaught_exception_flow, selector: fail!, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Raiser
+      target_owner: RuntimeEvidenceConformance::Raiser
+
+  - id: internally_rescued_project_result
+    capabilities: [exception, internally-rescued-exception, ruby-call, project-call, result-flow]
+    anchor: { method: internally_rescued_result, selector: recover, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: RuntimeEvidenceConformance::InternalRescuer
+      target_owner: RuntimeEvidenceConformance::InternalRescuer
+      target_name: recover
+      result_type: RuntimeEvidenceConformance::Value
+      source_role: PRODUCTION
+
+  - id: native_exception_missing_result
+    capabilities: [exception, native-call, non-returning-call, partial-result, per-kind-completeness]
+    anchor: { method: rescued_native_exception_then_result, selector: fetch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      allowed_status: PARTIAL
+      complete_kinds: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: fetch
+      source_role: STANDARD_LIBRARY
+
+  - id: native_result_after_rescued_exception
+    capabilities: [exception, native-call, native-yield, callback, result-flow, result-stack-recovery]
+    anchor: { method: rescued_native_exception_then_result, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      source_role: STANDARD_LIBRARY
+
+  - id: nonlocal_callback_exit_result
+    capabilities: [native-call, native-yield, callback, nonlocal-exit, result-flow]
+    anchor: { method: nonlocal_callback_exit_then_result, selector: each, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: each
+      result_type: Symbol
+      source_role: STANDARD_LIBRARY
+
+  - id: native_result_after_nonlocal_callback_exit
+    capabilities: [native-call, native-yield, callback, nonlocal-exit, result-flow, result-stack-recovery]
+    anchor: { method: nonlocal_callback_exit_then_result, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      source_role: STANDARD_LIBRARY
+
+  - id: nonproduction_target
+    capabilities: [dynamic-dispatch, test-replacement, nonproduction-provenance]
+    anchor: { method: replaced_dispatch, selector: dispatch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::TestDispatcher
+      target_owner: RuntimeEvidenceConformance::TestDispatcher
+      source_role: NON_PRODUCTION
+
+  - id: anonymous_nonproduction_target
+    capabilities: [test-replacement, anonymous-class, nonproduction-provenance, runtime-identity]
+    anchor: { method: anonymous_replaced_dispatch, selector: dispatch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      target_name: dispatch
+      source_role: NON_PRODUCTION
+
+  - id: mixed_production_and_anonymous_replacement
+    capabilities: [test-replacement, anonymous-class, mixed-provenance, runtime-identity, alternative-targets]
+    anchor: { method: mixed_anonymous_dispatch, selector: dispatch, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::ProductionDispatcher
+      target_owner: RuntimeEvidenceConformance::ProductionDispatcher
+      target_name: dispatch
+      source_role: PRODUCTION
+      excluded_target_owner_prefix: AnonymousClass(
+
+  - id: state_value_dispatch
+    capabilities: [state-read, state-write, state-value, cfg, dfg]
+    anchor: { method: state_flow, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      source_role: PRODUCTION
+
+  - id: state_receiver_dispatch
+    capabilities: [state-read, state-write, state-value, receiver-from-state, cfg, dfg]
+    anchor: { method: state_receiver_flow, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+      source_role: PRODUCTION
+
+  - id: chained_result_dispatch
+    capabilities: [chained-call, nested-receiver, result-flow, callback-origin]
+    anchor: { method: chained_result_flow, selector: normalize, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeEvidenceConformance::Value
+      target_owner: RuntimeEvidenceConformance::Value
+      target_name: normalize
+
+  - id: rescued_exception_value
+    capabilities: [exception, rescue-binding, native-call]
+    anchor: { method: exception_value_flow, selector: message, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: RuntimeError
+      target_owner: Exception
+      target_name: message
+      source_role: STANDARD_LIBRARY
+
+  - id: dependency_target
+    capabilities: [dependency-provenance, third-party-target]
+    anchor: { method: dependency_call, selector: diff, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Module
+      target_owner: Diff::LCS
+      target_name: diff
+      source_role: DEPENDENCY
+
+  - id: native_dependency_class_target
+    capabilities: [dependency-provenance, third-party-target, native-call, native-extension, class-method, variable-receiver]
+    anchor: { method: native_dependency_class_call, selector: languages, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Module
+      target_owner: TreeSitter
+      target_name: languages
+      target_kind: class
+      source_role: DEPENDENCY
+
+  - id: native_dependency_constant_target
+    capabilities: [dependency-provenance, third-party-target, native-call, native-extension, class-method, constant-receiver, zero-argument-call]
+    anchor: { method: native_dependency_constant_call, selector: languages, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Module
+      target_owner: TreeSitter
+      target_name: languages
+      target_kind: class
+      source_role: DEPENDENCY
+
+  - id: interpolation_outer_index
+    capabilities: [string-interpolation, selected-production-caller, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: interpolation_with_index_calls, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: interpolation_first_nested_index
+    capabilities: [string-interpolation, selected-production-caller, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: interpolation_with_index_calls, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: interpolation_second_nested_index
+    capabilities: [string-interpolation, selected-production-caller, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: interpolation_with_index_calls, selector: "[]", occurrence: 3 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: interpolation_outer_append
+    capabilities: [string-interpolation, selected-production-caller, nested-call, same-line, exact-execution-range, operator-method, collection-mutation]
+    anchor: { method: interpolation_with_index_calls, selector: "<<", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: "<<"
+      source_role: STANDARD_LIBRARY
+
+  - id: modifier_target_index
+    capabilities: [modifier-condition, short-circuit-call, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: modifier_with_repeated_index_calls, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: modifier_argument_index
+    capabilities: [modifier-condition, short-circuit-call, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: modifier_with_repeated_index_calls, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: modifier_guard_index
+    capabilities: [modifier-condition, short-circuit-call, nested-call, same-line, exact-execution-range, repeated-selector, index-read]
+    anchor: { method: modifier_with_repeated_index_calls, selector: "[]", occurrence: 3 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: modifier_nested_concat
+    capabilities: [modifier-condition, short-circuit-call, nested-call, same-line, exact-execution-range, collection-mutation]
+    anchor: { method: modifier_with_repeated_index_calls, selector: concat, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: concat
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_collection_index
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, index-read, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_outer_index
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, string-interpolation, nested-call, same-line, repeated-selector, index-read, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_first_interpolated_index
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, string-interpolation, nested-call, same-line, repeated-selector, index-read, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "[]", occurrence: 3 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_second_interpolated_index
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, string-interpolation, nested-call, same-line, repeated-selector, index-read, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "[]", occurrence: 4 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_callbacks_interpolated_append
+    capabilities: [nested-attached-blocks, callback-origin, block-parameter, string-interpolation, nested-call, same-line, collection-mutation, exact-execution-range]
+    anchor: { method: nested_callbacks_with_interpolation, selector: "<<", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: "<<"
+      source_role: STANDARD_LIBRARY
+
+  - id: native_yield_default_index
+    capabilities: [native-call, native-yield, callback, selected-callback-source, resumed-expression, same-line, repeated-selector, exact-execution-range]
+    anchor: { method: native_yield_then_same_line_sibling, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: native_yield_resumed_sibling_index
+    capabilities: [native-call, native-yield, callback, selected-callback-source, resumed-expression, same-line, repeated-selector, exact-execution-range]
+    anchor: { method: native_yield_then_same_line_sibling, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      source_role: STANDARD_LIBRARY
+
+  - id: ordinary_constructor_result
+    capabilities: [constructor, native-call, ruby-callback, result-flow, result]
+    anchor: { method: constructor_result_flow, selector: new, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Class
+      result_type: RuntimeEvidenceConformance::Value
+
+  - id: yielding_iterator_result
+    capabilities: [native-call, native-yield, callback, result-flow, container-shape, result, collection-value]
+    anchor: { method: yielding_native_result_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      result_element_type: String
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_index_receiver_source
+    capabilities: [nested-receiver, result-flow, native-call, index-read, exact-execution-range]
+    anchor: { method: nested_index_receiver_flow, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      result_type: Set
+      source_role: STANDARD_LIBRARY
+
+  - id: nested_index_receiver_consumer
+    capabilities: [nested-receiver, result-flow, native-call, predicate, exact-execution-range]
+    anchor: { method: nested_index_receiver_flow, selector: include?, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Set
+      target_owner: Set
+      target_name: include?
+      source_role: STANDARD_LIBRARY
+
+  - id: ternary_yielding_result
+    capabilities: [ternary, native-call, native-yield, callback, result-flow, container-shape]
+    anchor: { method: ternary_callback_result_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      source_role: STANDARD_LIBRARY
+
+  - id: ternary_fallback_index
+    capabilities: [ternary, alternative-branch, native-call, result-flow, index-read]
+    anchor: { method: ternary_callback_result_flow, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      result_type: Array
+      source_role: STANDARD_LIBRARY
+
+  - id: short_circuit_first_index
+    capabilities: [short-circuit, repeated-selector, native-call, predicate, constant-receiver, environment, exact-execution-range]
+    anchor: { method: repeated_short_circuit_env, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+
+  - id: short_circuit_second_index
+    capabilities: [short-circuit, repeated-selector, native-call, predicate, constant-receiver, environment, exact-execution-range]
+    anchor: { method: repeated_short_circuit_env, selector: "[]", occurrence: 2 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+
+  - id: splat_parameter_body
+    capabilities: [function-entry, splat-parameter, native-call]
+    anchor: { method: splat_boundary, selector: length, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: length
+      source_role: STANDARD_LIBRARY
+
+  - id: keyword_splat_parameter_body
+    capabilities: [function-entry, keyword-splat-parameter, native-call]
+    anchor: { method: keyword_splat_boundary, selector: keys, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: keys
+      source_role: STANDARD_LIBRARY
+
+  - id: complete_parameter_kind_matrix
+    capabilities: [function-entry, required-parameter, optional-parameter, splat-parameter, keyword-parameter, optional-keyword-parameter, keyword-splat-parameter, block-parameter]
+    anchor: { method: all_parameter_kinds, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      source_role: STANDARD_LIBRARY
+
+  - id: selected_project_nested_result
+    capabilities: [ruby-call, project-call, selected-callee, nested-callback, result-flow]
+    anchor: { method: nested_project_result_flow, selector: load, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: RuntimeEvidenceConformance::NestedLoader
+      target_owner: RuntimeEvidenceConformance::NestedLoader
+      target_name: load
+      result_type: Array
+      source_role: PRODUCTION
+
+  - id: standard_library_ruby_result
+    capabilities: [ruby-call, standard-library, module-method, result-flow]
+    anchor: { method: stdlib_json_result_flow, selector: parse, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Module
+      target_owner: JSON
+      target_name: parse
+      result_type: Hash
+
+  - id: constructor_with_callback_result
+    capabilities: [constructor, native-call, callback, chained-call, result-flow]
+    anchor: { method: constructor_callback_result_flow, selector: new, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Class
+      result_type: RuntimeEvidenceConformance::Value
+
+  - id: iterator_with_nested_project_callback_result
+    capabilities: [native-call, native-yield, callback, project-call, result-flow, collection-value]
+    anchor: { method: iterator_nested_project_result_flow, selector: map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Array
+      target_name: map
+      result_type: Array
+      result_element_type: Hash
+      source_role: STANDARD_LIBRARY
+
+  - id: callback_generated_outer_accessor_result
+    capabilities: [native-call, native-yield, callback, generated-accessor, nested-receiver, result-flow]
+    anchor: { method: callback_generated_accessor_result, selector: arm, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: RuntimeEvidenceConformance::ProductionArmCoverage
+      result_type: RuntimeEvidenceConformance::ProductionArm
+
+  - id: callback_each_with_object_result
+    capabilities: [native-call, native-yield, callback, generated-accessor, result-flow, collection-value]
+    anchor: { method: callback_generated_accessor_result, selector: each_with_object, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Enumerable
+      target_name: each_with_object
+      result_type: Hash
+      source_role: STANDARD_LIBRARY
+
+  - id: callback_hash_index_result
+    capabilities: [native-call, native-yield, callback, index-read, result-flow]
+    anchor: { method: callback_index_result, selector: "[]", occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE]
+      receiver_type: Hash
+      target_owner: Hash
+      target_name: "[]"
+      result_type: RuntimeEvidenceConformance::Value
+      source_role: STANDARD_LIBRARY
+
+  - id: callback_filter_map_result
+    capabilities: [native-call, native-yield, callback, index-read, result-flow, collection-value]
+    anchor: { method: callback_index_result, selector: filter_map, occurrence: 1 }
+    expect:
+      required: [RECEIVER_VALUE, CALL_TARGET, RESULT_VALUE, COLLECTION_VALUE]
+      receiver_type: Array
+      target_owner: Enumerable
+      target_name: filter_map
+      result_type: Array
+      result_element_type: RuntimeEvidenceConformance::Value
+      source_role: STANDARD_LIBRARY
+
+boundary_cases:
+  - id: parameter_value
+    capabilities: [function-entry, parameter-value]
+    method: exact_call
+    display_name: value
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: return_value
+    capabilities: [function-return, return-value]
+    method: exact_call
+    display_name: return
+    anchor_kind: FUNCTION_RETURN
+    evidence_kind: RETURN_VALUE
+    expected_type: String
+
+  - id: nil_return_value
+    capabilities: [function-return, return-value, nil-value]
+    method: nil_return
+    display_name: return
+    anchor_kind: FUNCTION_RETURN
+    evidence_kind: RETURN_VALUE
+    expected_type: NilClass
+
+  - id: rescued_function_return_value
+    capabilities: [function-return, return-value, internally-rescued-exception]
+    method: exception_flow
+    display_name: return
+    anchor_kind: FUNCTION_RETURN
+    evidence_kind: RETURN_VALUE
+    expected_type: Symbol
+
+  - id: state_write_value
+    capabilities: [state-write, state-value]
+    method: state_flow
+    display_name: state
+    anchor_kind: STATE_WRITE
+    evidence_kind: STATE_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: splat_parameter_value
+    capabilities: [function-entry, parameter-value, splat-parameter]
+    method: splat_boundary
+    display_name: args
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Array
+
+  - id: keyword_splat_parameter_value
+    capabilities: [function-entry, parameter-value, keyword-splat-parameter]
+    method: keyword_splat_boundary
+    display_name: kwargs
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Hash
+
+  - id: required_parameter_kind
+    capabilities: [function-entry, parameter-value, required-parameter]
+    method: all_parameter_kinds
+    display_name: required
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: optional_parameter_kind
+    capabilities: [function-entry, parameter-value, optional-parameter]
+    method: all_parameter_kinds
+    display_name: optional
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: rest_parameter_kind
+    capabilities: [function-entry, parameter-value, splat-parameter]
+    method: all_parameter_kinds
+    display_name: rest
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Array
+
+  - id: required_keyword_parameter_kind
+    capabilities: [function-entry, parameter-value, keyword-parameter]
+    method: all_parameter_kinds
+    display_name: keyword
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: optional_keyword_parameter_kind
+    capabilities: [function-entry, parameter-value, optional-keyword-parameter]
+    method: all_parameter_kinds
+    display_name: optional_keyword
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: RuntimeEvidenceConformance::Value
+
+  - id: keyword_rest_parameter_kind
+    capabilities: [function-entry, parameter-value, keyword-splat-parameter]
+    method: all_parameter_kinds
+    display_name: keyword_rest
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Hash
+
+  - id: block_parameter_kind
+    capabilities: [function-entry, parameter-value, block-parameter]
+    method: all_parameter_kinds
+    display_name: callback
+    anchor_kind: FUNCTION_ENTRY
+    evidence_kind: PARAMETER_VALUE
+    expected_type: Proc
+
+  - id: uncaught_function_return
+    capabilities: [function-return, exception, non-returning-call, failed-return]
+    method: uncaught_exception_flow
+    display_name: return
+    anchor_kind: FUNCTION_RETURN
+    evidence_kind: RETURN_VALUE
+    allowed_status: NOT_EXECUTED
+
+merge_cases:
+  - id: repeated_runs_are_additive
+    capabilities: [repeated-run, sharded-run, merge]
+    expected_runs: [run-a, run-b]
+    expected_count: 2
+
+  - id: changed_shard_replaces_owned_evidence
+    capabilities: [incremental, replacement, stale-source]
+    expected_runs: [run-new]
+    forbidden_runs: [run-old]
+
+  - id: production_and_replacement_shards_remain_complete
+    capabilities: [sharded-run, test-replacement, mixed-provenance, per-run-completeness]
+    expected_runs: [production-run, replacement-run]
+    expected_source_roles: [STANDARD_LIBRARY, NON_PRODUCTION]
+
+  - id: production_and_anonymous_replacement_shards_remain_complete
+    capabilities: [sharded-run, test-replacement, anonymous-class, mixed-provenance, per-run-completeness]
+    expected_runs: [anonymous-production-run, anonymous-replacement-run]
+    expected_source_roles: [PRODUCTION, NON_PRODUCTION]

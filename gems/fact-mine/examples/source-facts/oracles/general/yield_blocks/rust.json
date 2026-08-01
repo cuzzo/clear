@@ -35,6 +35,11 @@
           "writes": []
         }
       ]
+    },
+    {
+      "boundaries": [],
+      "method": "<lambda@7:24>",
+      "statements": []
     }
   ],
   "path_condition": {
@@ -156,9 +161,6 @@
     "comparisons": [],
     "control_flow_edges": [
       {
-        "kind": "entry"
-      },
-      {
         "kind": "fallthrough"
       },
       {
@@ -168,14 +170,31 @@
         "kind": "fallthrough"
       },
       {
+        "kind": "entry"
+      },
+      {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "callback_return"
       }
     ],
     "control_flow_metrics": [
       {},
+      {},
       {}
     ],
     "control_flow_nodes": [
+      {
+        "id": "cfg:(top-level)#<lambda@7:24>:entry:0:7:24",
+        "kind": "entry",
+        "line": 7
+      },
+      {
+        "id": "cfg:(top-level)#<lambda@7:24>:exit:1:7:30",
+        "kind": "exit",
+        "line": 7
+      },
       {
         "id": "cfg:(top-level)#method_three:entry:0:1:0",
         "kind": "entry",
@@ -208,12 +227,14 @@
       },
       {
         "id": "cfg:(top-level)#method_with_empty_block:stmt:2:7:4",
-        "kind": "statement",
+        "kind": "callback",
         "line": 7
       }
     ],
     "decisions": [],
-    "def_use": [],
+    "def_use": [
+      {}
+    ],
     "dispatch_sites": [],
     "dominators": [
       {},
@@ -222,9 +243,13 @@
       {},
       {},
       {},
+      {},
+      {},
       {}
     ],
-    "flow_types": [],
+    "flow_types": [
+      {}
+    ],
     "functions": [
       {
         "line": 1,
@@ -241,6 +266,13 @@
         "owner": "rust",
         "params": [],
         "visibility": "private"
+      },
+      {
+        "line": 7,
+        "name": "<lambda@7:24>",
+        "owner": "rust",
+        "params": [],
+        "visibility": "private"
       }
     ],
     "liveness": [
@@ -250,9 +282,16 @@
       {},
       {},
       {},
+      {},
+      {},
       {}
     ],
     "local_complexity_scores": [
+      {
+        "id": "(top-level)#<lambda@7:24>",
+        "score": 0.0,
+        "signals": {}
+      },
       {
         "id": "(top-level)#method_three",
         "score": 0.0,
@@ -265,6 +304,15 @@
       }
     ],
     "local_methods": [
+      {
+        "boundaries": [],
+        "id": "(top-level)#<lambda@7:24>",
+        "line": 7,
+        "local_contract_assignments": {},
+        "name": "<lambda@7:24>",
+        "owner": "(top-level)",
+        "statements": []
+      },
       {
         "boundaries": [],
         "id": "(top-level)#method_three",
@@ -345,6 +393,14 @@
     "node_effects": [
       {
         "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
         "writes": [
           "place:(top-level)#method_three:local:f"
         ]
@@ -372,7 +428,9 @@
         ]
       },
       {
-        "reads": [],
+        "reads": [
+          "place:(top-level)#method_with_empty_block:local:arr"
+        ],
         "writes": []
       }
     ],
@@ -396,6 +454,12 @@
         "calls": [],
         "line": 5,
         "name": "method_with_empty_block",
+        "owner": "rust"
+      },
+      {
+        "calls": [],
+        "line": 7,
+        "name": "<lambda@7:24>",
         "owner": "rust"
       },
       {
@@ -432,6 +496,13 @@
         "owner": "rust",
         "reads": [],
         "writes": []
+      },
+      {
+        "line": 7,
+        "name": "<lambda@7:24>",
+        "owner": "rust",
+        "reads": [],
+        "writes": []
       }
     ],
     "reachability": [
@@ -441,9 +512,13 @@
       {},
       {},
       {},
+      {},
+      {},
       {}
     ],
-    "reaching_definitions": [],
+    "reaching_definitions": [
+      {}
+    ],
     "redundant_nil_guards": [],
     "semantic_effects": [],
     "state_declarations": [],

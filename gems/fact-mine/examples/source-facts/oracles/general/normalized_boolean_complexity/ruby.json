@@ -259,6 +259,15 @@
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
       }
     ],
     "control_flow_metrics": [
@@ -276,8 +285,13 @@
         "line": 8
       },
       {
-        "id": "cfg:SourceFactNormalizedBooleanComplexity#eligible?:stmt:1:5:4",
+        "id": "cfg:SourceFactNormalizedBooleanComplexity#eligible?:stmt:0.then.0:6:6",
         "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactNormalizedBooleanComplexity#eligible?:stmt:1:5:4",
+        "kind": "branch",
         "line": 5
       }
     ],
@@ -301,15 +315,18 @@
     ],
     "def_use": [
       {},
+      {},
       {}
     ],
     "dispatch_sites": [],
     "dominators": [
       {},
       {},
+      {},
       {}
     ],
     "flow_types": [
+      {},
       {},
       {}
     ],
@@ -326,6 +343,7 @@
       }
     ],
     "liveness": [
+      {},
       {},
       {},
       {}
@@ -390,10 +408,19 @@
       },
       {
         "reads": [
+          "place:SourceFactNormalizedBooleanComplexity#eligible?:local:cart"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
           "place:SourceFactNormalizedBooleanComplexity#eligible?:local:cart",
           "place:SourceFactNormalizedBooleanComplexity#eligible?:local:user"
         ],
-        "writes": []
+        "writes": [
+          "place:SourceFactNormalizedBooleanComplexity#eligible?:local:cart",
+          "place:SourceFactNormalizedBooleanComplexity#eligible?:local:user"
+        ]
       }
     ],
     "owners": [
@@ -483,9 +510,11 @@
     "reachability": [
       {},
       {},
+      {},
       {}
     ],
     "reaching_definitions": [
+      {},
       {},
       {}
     ],

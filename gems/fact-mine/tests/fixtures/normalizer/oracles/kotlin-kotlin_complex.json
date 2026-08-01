@@ -31,13 +31,86 @@
                         "Node": {
                           "children": [
                             {
-                              "Symbol": "mixed"
+                              "Symbol": "Billing"
                             },
                             {
                               "Node": {
                                 "children": [
                                   "Nil",
                                   "Nil",
+                                  "Nil"
+                                ],
+                                "first_column": 0,
+                                "first_lineno": 1,
+                                "last_column": 1,
+                                "last_lineno": 22,
+                                "text": "class Billing {\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}",
+                                "type": "SCOPE"
+                              }
+                            }
+                          ],
+                          "first_column": 6,
+                          "first_lineno": 1,
+                          "last_column": 1,
+                          "last_lineno": 22,
+                          "text": "Billing {\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}",
+                          "type": "DEFN"
+                        }
+                      },
+                      {
+                        "Node": {
+                          "children": [
+                            {
+                              "Symbol": "mixed"
+                            },
+                            {
+                              "Node": {
+                                "children": [
+                                  "Nil",
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Symbol": "price"
+                                              },
+                                              "Nil"
+                                            ],
+                                            "first_column": 14,
+                                            "first_lineno": 2,
+                                            "last_column": 24,
+                                            "last_lineno": 2,
+                                            "text": "price: Int",
+                                            "type": "LASGN"
+                                          }
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Symbol": "tax"
+                                              },
+                                              "Nil"
+                                            ],
+                                            "first_column": 26,
+                                            "first_lineno": 2,
+                                            "last_column": 34,
+                                            "last_lineno": 2,
+                                            "text": "tax: Int",
+                                            "type": "LASGN"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 4,
+                                      "first_lineno": 2,
+                                      "last_column": 5,
+                                      "last_lineno": 11,
+                                      "text": "fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }",
+                                      "type": "ARGS"
+                                    }
+                                  },
                                   {
                                     "Node": {
                                       "children": [
@@ -700,20 +773,20 @@
                         }
                       }
                     ],
-                    "first_column": 14,
+                    "first_column": 0,
                     "first_lineno": 1,
                     "last_column": 1,
                     "last_lineno": 22,
-                    "text": "{\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}",
+                    "text": "class Billing {\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}",
                     "type": "BLOCK"
                   }
                 }
               ],
-              "first_column": 14,
+              "first_column": 0,
               "first_lineno": 1,
               "last_column": 1,
               "last_lineno": 22,
-              "text": "{\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}",
+              "text": "class Billing {\n    fun mixed(price: Int, tax: Int): Int {\n        val result = try {\n            price + tax\n        } catch (e: Exception) {\n            0\n        } finally {\n            println(\"Done\")\n        }\n        return result\n    }\n    \n    fun loops() {\n        for (i in 0..10) {\n            if (i % 2 == 0) continue\n        }\n        var x = 0\n        while (x < 10) {\n            x++\n        }\n    }\n}",
               "type": "SCOPE"
             }
           }

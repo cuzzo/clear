@@ -43,6 +43,10 @@ const C_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
 };
 
 const C_NIL_PREDICATES: &[&str] = &["isNull", "is_null"];
+const C_PRIMITIVE_OPERATORS: &[&str] = &[
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "~",
+    "&&", "||", "!",
+];
 const C_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const C_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
 
@@ -52,13 +56,23 @@ fn scip_clang_parts(symbol: &str) -> Option<(&str, &str)> {
 }
 
 pub(crate) fn external_symbol_metadata(symbol: &str) -> ExternalSymbolMetadata {
-    let Some((package, _descriptor)) = scip_clang_parts(symbol) else {
+    let Some((package, descriptor)) = scip_clang_parts(symbol) else {
         return ExternalSymbolMetadata {
             scope: "dynamic",
             missing_cost_kind: "callback_or_function_value_origin_unknown".to_string(),
             parametric_cost: None,
         };
     };
+    // At a compiler-proven call site, a field descriptor denotes invocation
+    // through a function-pointer member. The pointed-to implementation is
+    // open, but the invocation count is exactly once.
+    if descriptor.contains('#') && descriptor.ends_with('.') {
+        return ExternalSymbolMetadata {
+            scope: "external",
+            missing_cost_kind: "callback_cost_missing".to_string(),
+            parametric_cost: Some("callback_once".to_string()),
+        };
+    }
     // Clang's SCIP symbols intentionally do not claim that an un-packaged C
     // global came from libc rather than a project header. Preserve that
     // uncertainty instead of turning a familiar spelling into fake proof.
@@ -78,6 +92,52 @@ pub(crate) fn external_symbol_owner(symbol: &str) -> Option<String> {
     scip_descriptor_owner(descriptor)
 }
 
+pub(crate) fn external_symbol_call_complexity(
+    symbol: &str,
+    message: &str,
+) -> Option<super::ExternalCallComplexity> {
+    let (package, descriptor) = scip_clang_parts(symbol)?;
+    if package != "." || descriptor.contains('#') || descriptor.starts_with('`') {
+        return None;
+    }
+    let indexed_name = descriptor.split('(').next()?.trim_matches('`');
+    if indexed_name != message {
+        return None;
+    }
+    if matches!(
+        message,
+        "__builtin_assume"
+            | "__builtin_choose_expr"
+            | "__builtin_constant_p"
+            | "__builtin_dynamic_object_size"
+            | "__builtin_expect"
+            | "__builtin_object_size"
+            | "__builtin_offsetof"
+            | "__builtin_types_compatible_p"
+            | "__builtin_unreachable"
+    ) {
+        return Some(super::ExternalCallComplexity {
+            time: "O(1)",
+            space: "O(1)",
+            provenance: "compiler_intrinsic_exact_contract",
+            bound_quality: "upper_bound_exact_target",
+            candidates: vec![symbol.to_string()],
+            assumption: None,
+        });
+    }
+    let complexity = configured_intrinsic_call_complexity("c", None, message)?;
+    Some(super::ExternalCallComplexity {
+        time: complexity.time,
+        space: complexity.space,
+        provenance: "compiler_symbol_c_runtime_registry",
+        bound_quality: "upper_bound_modeled_world",
+        candidates: vec![symbol.to_string()],
+        assumption: Some(format!(
+            "unpackaged external C declaration `{message}` follows the reviewed ISO/POSIX runtime contract"
+        )),
+    })
+}
+
 // CFG-SPECIFIC START: C control-flow vocabulary.
 const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
     iterator_messages: &[],
@@ -88,6 +148,67 @@ const C_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct CNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CNormalizedBehavior {
+    fn constant_condition_truth(&self, node: &Node) -> Option<bool> {
+        match node.text.trim().trim_matches(['(', ')']).trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        }
+    }
+
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    // C-family indexers render a local as `Type name` - the type leads.
+    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+        let text = text.trim().trim_end_matches(';').trim();
+        let (declared, _name) = text.rsplit_once(char::is_whitespace)?;
+        let declared = declared.trim();
+        (!declared.is_empty() && !declared.contains('=')).then(|| declared.to_string())
+    }
+
+    // C declares `Ret name(T a)`, not `name(a: T) -> Ret`.
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
+        let signature = unwrap_return_type_macro(signature);
+        super::normalized_behavior::parse_prefix_return_declarator(&signature)
+    }
+
+    fn parameter_list_source(&self, source: &str) -> String {
+        let header = source.split('{').next().unwrap_or(source);
+        let mut groups = Vec::new();
+        let mut start = None;
+        let mut depth = 0usize;
+        for (index, ch) in header.char_indices() {
+            match ch {
+                '(' => {
+                    if depth == 0 {
+                        start = Some(index);
+                    }
+                    depth += 1;
+                }
+                ')' if depth > 0 => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(open) = start.take() {
+                            groups.push(header[open + 1..index].to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        groups.pop().unwrap_or_default()
+    }
+
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         if node.r#type == "VCALL" {
             return local_call_subject(node).map(|subject| NormalizedNullableOperation {
@@ -139,6 +260,25 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         external_symbol_metadata(symbol)
     }
 
+    fn external_symbol_call_complexity(
+        &self,
+        symbol: &str,
+        message: &str,
+    ) -> Option<super::ExternalCallComplexity> {
+        external_symbol_call_complexity(symbol, message)
+    }
+
+    fn preprocessor_definition_call_complexity(
+        &self,
+        definition: &str,
+    ) -> Option<super::ExternalCallComplexity> {
+        preprocessor_definition_call_complexity(definition)
+    }
+
+    fn preprocessor_definition_location(&self, symbol: &str) -> Option<(String, usize)> {
+        preprocessor_definition_location(symbol)
+    }
+
     fn external_symbol_owner(&self, symbol: &str) -> Option<String> {
         external_symbol_owner(symbol)
     }
@@ -165,6 +305,18 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
         receiver: Option<&str>,
         message: &str,
     ) -> Option<NormalizedCallComplexity> {
+        // C has no operator overloading: arithmetic, comparison, bitwise,
+        // shift, logical and unary operators - plus array subscript `[]`
+        // (pointer arithmetic) - are constant-time. Unary forms carry a
+        // trailing `@` (e.g. `-@`). Without this they are recorded as
+        // unresolved call targets, wrongly marking O(1) functions incomplete.
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if operator == "[]" || C_PRIMITIVE_OPERATORS.contains(&operator) {
+            return Some(NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            });
+        }
         // The generic call extractor represents a bare C function as a
         // synthetic `self` receiver. C has no instance dispatch here, so
         // translate only that parser sentinel back to a free intrinsic.
@@ -209,7 +361,8 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
-        node.r#type != "VCALL" && parts.arguments.is_empty() && !node.text.contains('(')
+        parts.arguments.is_empty()
+            && c_member_selector_is_invoked(&node.text, &parts.message) == Some(false)
     }
 
     fn owner_name_span(&self, _name: &str, node: &Node, default_span: Span) -> Option<Span> {
@@ -420,6 +573,204 @@ impl NormalizedLanguageBehavior for CNormalizedBehavior {
     }
 }
 
+pub(crate) fn preprocessor_definition_call_complexity(
+    definition: &str,
+) -> Option<super::ExternalCallComplexity> {
+    let definition = definition.replace("\\\r\n", " ").replace("\\\n", " ");
+    let directive = definition.trim_start().strip_prefix('#')?.trim_start();
+    let tail = directive.strip_prefix("define")?;
+    if tail
+        .chars()
+        .next()
+        .is_some_and(|character| !character.is_whitespace())
+    {
+        return None;
+    }
+    let tail = tail.trim_start();
+    let name_end = tail
+        .find(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+        .unwrap_or(tail.len());
+    if name_end == 0 {
+        return None;
+    }
+    let after_name = &tail[name_end..];
+    let body = if after_name.starts_with('(') {
+        let close = matching_delimiter(after_name, '(', ')')?;
+        after_name.get(close + 1..)?.trim()
+    } else {
+        after_name.trim()
+    };
+    if body.is_empty() || body.contains('#') {
+        return None;
+    }
+
+    let loop_count = identifier_tokens(body)
+        .filter(|token| matches!(*token, "for" | "while" | "do"))
+        .count();
+    if loop_count > 1 {
+        return None;
+    }
+    let calls = call_like_identifiers(body)
+        .filter(|name| {
+            !matches!(
+                *name,
+                "sizeof" | "_Alignof" | "for" | "while" | "if" | "switch"
+            )
+        })
+        .collect::<Vec<_>>();
+    let configured = calls
+        .iter()
+        .filter_map(|name| configured_intrinsic_call_complexity("c", None, name))
+        .collect::<Vec<_>>();
+    let parametric = configured.len() != calls.len();
+    let call_time = if parametric {
+        "O(C)"
+    } else {
+        configured
+            .iter()
+            .map(|complexity| complexity.time)
+            .max_by_key(|complexity| macro_complexity_rank(complexity))
+            .unwrap_or("O(1)")
+    };
+    let time = if loop_count == 1 {
+        match call_time {
+            "O(1)" => "O(N)",
+            "O(log N)" => "O(N log N)",
+            "O(N)" => "O(N^2)",
+            "O(N log N)" => "O(N^2 log N)",
+            "O(C)" => "O(N*C)",
+            _ => return None,
+        }
+    } else {
+        call_time
+    };
+    let space = if parametric {
+        "O(C)"
+    } else {
+        configured
+            .iter()
+            .map(|complexity| complexity.space)
+            .max_by_key(|complexity| macro_complexity_rank(complexity))
+            .unwrap_or("O(1)")
+    };
+
+    Some(super::ExternalCallComplexity {
+        time,
+        space,
+        provenance: "compiler_indexed_macro_body",
+        bound_quality: if parametric {
+            if loop_count == 1 {
+                "upper_bound_parametric_callback_linear"
+            } else {
+                "upper_bound_parametric_callback_once"
+            }
+        } else {
+            "upper_bound_compiler_indexed_macro_body"
+        },
+        candidates: calls.into_iter().map(str::to_string).collect(),
+        assumption: None,
+    })
+}
+
+pub(crate) fn preprocessor_definition_location(symbol: &str) -> Option<(String, usize)> {
+    let (_package, descriptor) = scip_clang_parts(symbol)?;
+    let location = descriptor.strip_prefix('`')?.strip_suffix("`!")?;
+    let mut parts = location.rsplitn(3, ':');
+    let _column = parts.next()?.parse::<usize>().ok()?;
+    let line = parts.next()?.parse::<usize>().ok()?;
+    let path = parts.next()?.to_string();
+    (!path.is_empty() && line > 0).then_some((path, line))
+}
+
+fn unwrap_return_type_macro(signature: &str) -> String {
+    let signature = signature.trim();
+    let Some(open) = signature.find('(') else {
+        return signature.to_string();
+    };
+    let macro_name = signature[..open].trim();
+    if macro_name.is_empty()
+        || !macro_name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_uppercase() || ch.is_ascii_digit())
+    {
+        return signature.to_string();
+    }
+    let Some(close) = matching_delimiter(&signature[open..], '(', ')') else {
+        return signature.to_string();
+    };
+    let close = open + close;
+    let wrapped = signature[open + 1..close].trim();
+    let suffix = signature[close + 1..].trim_start();
+    if wrapped.is_empty() || !suffix.contains('(') {
+        return signature.to_string();
+    }
+    format!("{wrapped} {suffix}")
+}
+
+fn macro_complexity_rank(complexity: &str) -> usize {
+    match complexity {
+        "O(1)" => 0,
+        "O(log N)" => 1,
+        "O(N)" => 2,
+        "O(N log N)" => 3,
+        "O(N^2)" => 4,
+        "O(N^2 log N)" => 5,
+        _ => usize::MAX,
+    }
+}
+
+fn matching_delimiter(source: &str, open: char, close: char) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, ch) in source.char_indices() {
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
+fn identifier_tokens(source: &str) -> impl Iterator<Item = &str> {
+    source
+        .split(|ch: char| !(ch == '_' || ch.is_ascii_alphanumeric()))
+        .filter(|token| {
+            token
+                .chars()
+                .next()
+                .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+        })
+}
+
+fn call_like_identifiers(source: &str) -> impl Iterator<Item = &str> {
+    identifier_tokens(source).filter(|identifier| {
+        source.match_indices(identifier).any(|(index, _)| {
+            source[index + identifier.len()..]
+                .trim_start()
+                .starts_with('(')
+        })
+    })
+}
+
+fn c_member_selector_is_invoked(source: &str, message: &str) -> Option<bool> {
+    let selector = message.trim();
+    if selector.is_empty() {
+        return None;
+    }
+    ["->", "."]
+        .into_iter()
+        .filter_map(|separator| {
+            source
+                .rfind(&format!("{separator}{selector}"))
+                .map(|offset| offset + separator.len() + selector.len())
+        })
+        .max()
+        .map(|offset| source[offset..].trim_start().starts_with('('))
+}
+
 fn local_call_subject(node: &Node) -> Option<String> {
     match node.children.first()? {
         Child::Symbol(subject) | Child::String(subject) => {
@@ -613,6 +964,74 @@ mod tests {
             CNormalizedBehavior.parameter_type_from_signature("Widget * _Nullable value"),
             Some("Widget * _Nullable".to_string())
         );
+        assert_eq!(
+            CNormalizedBehavior
+                .parameter_list_source("CJSON_PUBLIC(void) cJSON_Delete(cJSON *item) { body(); }"),
+            "cJSON *item"
+        );
+        let signature =
+            CNormalizedBehavior.parse_signature("CJSON_PUBLIC(void) cJSON_Delete(cJSON *item)");
+        assert_eq!(signature.return_type.as_deref(), Some("void"));
+        assert_eq!(
+            signature.params,
+            vec![("item".to_string(), "cJSON".to_string())]
+        );
+    }
+
+    #[test]
+    fn compiler_indexed_macro_bodies_are_priced_only_when_bounded() {
+        let constant = preprocessor_definition_call_complexity(
+            "#  define buffer_at_offset(buffer) ((buffer)->content + (buffer)->offset)",
+        )
+        .unwrap();
+        assert_eq!((constant.time, constant.space), ("O(1)", "O(1)"));
+
+        let traversal = preprocessor_definition_call_complexity(
+            "#define EACH(item, list) for (item = (list)->head; item; item = item->next)",
+        )
+        .unwrap();
+        assert_eq!((traversal.time, traversal.space), ("O(N)", "O(1)"));
+        let cjson_traversal = preprocessor_definition_call_complexity(
+            "#define cJSON_ArrayForEach(element, array) for(element = (array != NULL) ? (array)->child : NULL; element != NULL; element = element->next)",
+        )
+        .unwrap();
+        assert_eq!(
+            (cjson_traversal.time, cjson_traversal.space),
+            ("O(N)", "O(1)")
+        );
+        assert_eq!(
+            CNormalizedBehavior.preprocessor_definition_location("cxx . . $ `cJSON.h:296:9`!"),
+            Some(("cJSON.h".to_string(), 296))
+        );
+
+        let callback =
+            preprocessor_definition_call_complexity("#define INVOKE(callback) callback()").unwrap();
+        assert_eq!((callback.time, callback.space), ("O(C)", "O(C)"));
+        let copy = preprocessor_definition_call_complexity(
+            "#define COPY(target, source, size) memcpy(target, source, size)",
+        )
+        .unwrap();
+        assert_eq!((copy.time, copy.space), ("O(N)", "O(1)"));
+
+        let callback = external_symbol_metadata("cxx . . $ internal_hooks#allocate.");
+        assert_eq!(callback.parametric_cost.as_deref(), Some("callback_once"));
+        let strlen =
+            external_symbol_call_complexity("cxx . . $ strlen(751346f8406fd082).", "strlen")
+                .unwrap();
+        assert_eq!((strlen.time, strlen.space), ("O(N)", "O(1)"));
+        assert_eq!(strlen.bound_quality, "upper_bound_modeled_world");
+        let offsetof = external_symbol_call_complexity(
+            "cxx . . $ __builtin_offsetof(751346f8406fd082).",
+            "__builtin_offsetof",
+        )
+        .unwrap();
+        assert_eq!((offsetof.time, offsetof.space), ("O(1)", "O(1)"));
+        assert_eq!(offsetof.bound_quality, "upper_bound_exact_target");
+        assert!(external_symbol_call_complexity(
+            "cxx . . $ project_strlen(751346f8406fd082).",
+            "strlen"
+        )
+        .is_none());
     }
 
     #[test]
@@ -692,6 +1111,22 @@ mod tests {
             &NormalizedCallParts {
                 receiver: "x".to_string(),
                 message: "y".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
+        assert!(b.property_read_call(
+            &node("VCALL", "(*execute_data).This.u2.num_args"),
+            &NormalizedCallParts {
+                receiver: "execute_data".to_string(),
+                message: "This".to_string(),
+                arguments: Vec::new(),
+            }
+        ));
+        assert!(!b.property_read_call(
+            &node("CALL", "callbacks.run()"),
+            &NormalizedCallParts {
+                receiver: "callbacks".to_string(),
+                message: "run".to_string(),
                 arguments: Vec::new(),
             }
         ));

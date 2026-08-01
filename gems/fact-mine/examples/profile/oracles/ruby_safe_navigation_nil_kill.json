@@ -40,6 +40,7 @@
     "raw_parser_call_sites": 15,
     "semantically_accounted_call_percent": 0.0,
     "semantically_accounted_call_sites": 0,
+    "source_export_eligible_methods_overlapping_raw_call_loss": 0,
     "total_call_sites": 0,
     "unresolved_call_percent": 0.0,
     "unresolved_call_sites": 0,
@@ -49,10 +50,14 @@
   "calls": [
     {
       "argument_count": 1,
+      "arguments": [
+        "T::Sig"
+      ],
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:7b0515a548c9d614",
+      "id": "edge:552a5e6389b12181",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 2,
@@ -62,7 +67,13 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:91d9d9a6eeda5c2a",
+      "selector_span": [
+        2,
+        2,
+        2,
+        8
+      ],
+      "source": "fn:8b060578990b3bc3",
       "span": [
         2,
         2,
@@ -75,8 +86,15 @@
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
+      "execution_span": [
+        4,
+        2,
+        10,
+        5
+      ],
       "function": "(top-level)",
-      "id": "edge:a34b224c826a5d90",
+      "id": "edge:387473d4b6dd9291",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 4,
@@ -86,7 +104,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:91d9d9a6eeda5c2a",
+      "source": "fn:8b060578990b3bc3",
       "span": [
         4,
         2,
@@ -97,12 +115,16 @@
     },
     {
       "argument_count": 1,
+      "arguments": [
+        "UnionMatchArmPlan"
+      ],
       "complexity_bound_quality": "upper_bound_declared_receiver",
       "complexity_provenance": "language_stdlib_registry",
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:2b7bf67bcdb65d15",
+      "id": "edge:dc8eaf947944fe2a",
       "kind": "external_call",
       "known_space_complexity": "O(1)",
       "known_time_complexity": "O(1)",
@@ -113,7 +135,13 @@
       "receiver": "T::Array",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
-      "source": "fn:91d9d9a6eeda5c2a",
+      "selector_span": [
+        8,
+        20,
+        8,
+        21
+      ],
+      "source": "fn:8b060578990b3bc3",
       "span": [
         8,
         12,
@@ -124,10 +152,16 @@
     },
     {
       "argument_count": 3,
+      "arguments": [
+        "node: AST::MatchStatement",
+        "facts: MatchLoweringFacts",
+        "arms: T::Array[UnionMatchArmPlan]"
+      ],
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:ba0cae20ce7a2a65",
+      "id": "edge:291694a00f03581e",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 5,
@@ -137,7 +171,13 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:91d9d9a6eeda5c2a",
+      "selector_span": [
+        5,
+        4,
+        5,
+        10
+      ],
+      "source": "fn:8b060578990b3bc3",
       "span": [
         5,
         4,
@@ -147,11 +187,49 @@
       "unresolved_reason": "target_not_defined_in_document"
     },
     {
-      "argument_count": 1,
+      "argument_count": 0,
+      "complexity_bound_quality": "upper_bound_declared_receiver",
+      "complexity_provenance": "language_stdlib_registry",
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:837e80a42529c213",
+      "id": "edge:7de05ee0cf649dba",
+      "kind": "external_call",
+      "known_space_complexity": "O(1)",
+      "known_time_complexity": "O(1)",
+      "line": 9,
+      "message": "untyped",
+      "owner": "MIRLoweringControlFlow",
+      "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+      "receiver": "T",
+      "receiver_binding_kind": "type",
+      "receiver_kind": "type",
+      "selector_span": [
+        9,
+        16,
+        9,
+        23
+      ],
+      "source": "fn:8b060578990b3bc3",
+      "span": [
+        9,
+        13,
+        9,
+        24
+      ],
+      "unresolved_reason": "receiver_requires_corpus_resolution"
+    },
+    {
+      "argument_count": 1,
+      "arguments": [
+        "T.untyped"
+      ],
+      "conditional": true,
+      "confidence": "partial",
+      "consumer_closed_candidate_set": false,
+      "function": "(top-level)",
+      "id": "edge:3cc531b658f90ac0",
       "kind": "external_call",
       "line": 5,
       "message": "returns",
@@ -166,7 +244,13 @@
         5
       ],
       "receiver_kind": "value",
-      "source": "fn:91d9d9a6eeda5c2a",
+      "selector_span": [
+        9,
+        6,
+        9,
+        13
+      ],
+      "source": "fn:8b060578990b3bc3",
       "span": [
         5,
         4,
@@ -177,12 +261,17 @@
     },
     {
       "argument_count": 2,
+      "arguments": [
+        "self",
+        "MIRLowering"
+      ],
       "complexity_bound_quality": "upper_bound_declared_receiver",
       "complexity_provenance": "language_stdlib_registry",
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "union_match_default_body",
-      "id": "edge:9a03cada03345b35",
+      "id": "edge:e748fb38ed2f23b2",
       "kind": "external_call",
       "known_space_complexity": "O(1)",
       "known_time_complexity": "O(1)",
@@ -193,7 +282,13 @@
       "receiver": "T",
       "receiver_binding_kind": "type",
       "receiver_kind": "type",
-      "source": "fn:870869be8ea36bbd",
+      "selector_span": [
+        12,
+        6,
+        12,
+        10
+      ],
+      "source": "fn:f40acd31cc807dfc",
       "span": [
         12,
         4,
@@ -206,8 +301,9 @@
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "union_match_default_body",
-      "id": "edge:2702383c132ca9cf",
+      "id": "edge:827f22624742a690",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 13,
@@ -217,7 +313,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:870869be8ea36bbd",
+      "source": "fn:f40acd31cc807dfc",
       "span": [
         13,
         13,
@@ -230,8 +326,9 @@
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "union_match_default_body",
-      "id": "edge:c542973fb5c36ec0",
+      "id": "edge:18bdc4cbce5b460f",
       "kind": "external_call",
       "line": 13,
       "message": "expr_type_sym",
@@ -243,7 +340,13 @@
       "receiver_symbol_origin": "unqualified_declared_type",
       "receiver_type": "MatchLoweringFacts",
       "receiver_type_origin": "declared_parameter",
-      "source": "fn:870869be8ea36bbd",
+      "selector_span": [
+        13,
+        33,
+        13,
+        46
+      ],
+      "source": "fn:f40acd31cc807dfc",
       "span": [
         13,
         27,
@@ -254,10 +357,14 @@
     },
     {
       "argument_count": 1,
+      "arguments": [
+        "facts.expr_type_sym"
+      ],
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "union_match_default_body",
-      "id": "edge:f10062392d8cf010",
+      "id": "edge:d389a4a401509509",
       "kind": "external_call",
       "line": 13,
       "message": "[]",
@@ -272,7 +379,13 @@
         26
       ],
       "receiver_kind": "value",
-      "source": "fn:870869be8ea36bbd",
+      "selector_span": [
+        13,
+        26,
+        13,
+        27
+      ],
+      "source": "fn:f40acd31cc807dfc",
       "span": [
         13,
         13,
@@ -285,8 +398,9 @@
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "union_match_default_body",
-      "id": "edge:7a889eb841551e81",
+      "id": "edge:421c7527244699dc",
       "kind": "external_call",
       "line": 14,
       "message": "variants",
@@ -303,7 +417,13 @@
         ]
       ],
       "receiver_kind": "value",
-      "source": "fn:870869be8ea36bbd",
+      "selector_span": [
+        14,
+        27,
+        14,
+        35
+      ],
+      "source": "fn:f40acd31cc807dfc",
       "span": [
         14,
         19,
@@ -316,8 +436,9 @@
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "union_match_default_body",
-      "id": "edge:92a99b420fbd802c",
+      "id": "edge:9535de7cd16c47d1",
       "kind": "external_call",
       "line": 14,
       "message": "keys",
@@ -332,7 +453,13 @@
         35
       ],
       "receiver_kind": "value",
-      "source": "fn:870869be8ea36bbd",
+      "selector_span": [
+        14,
+        37,
+        14,
+        41
+      ],
+      "source": "fn:f40acd31cc807dfc",
       "span": [
         14,
         19,
@@ -343,10 +470,14 @@
     },
     {
       "argument_count": 1,
+      "arguments": [
+        "&:to_s"
+      ],
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "union_match_default_body",
-      "id": "edge:e83d21a88a399e54",
+      "id": "edge:118ae32d050545df",
       "kind": "external_call",
       "line": 14,
       "message": "map",
@@ -361,7 +492,13 @@
         41
       ],
       "receiver_kind": "value",
-      "source": "fn:870869be8ea36bbd",
+      "selector_span": [
+        14,
+        43,
+        14,
+        46
+      ],
+      "source": "fn:f40acd31cc807dfc",
       "span": [
         14,
         19,
@@ -372,11 +509,16 @@
     },
     {
       "argument_count": 0,
+      "complexity_bound_quality": "upper_bound_declared_receiver",
+      "complexity_provenance": "language_stdlib_registry",
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "union_match_default_body",
-      "id": "edge:ecfa5ba2b8e83bf9",
+      "id": "edge:9d051e0e28a89598",
       "kind": "external_call",
+      "known_space_complexity": "O(N)",
+      "known_time_complexity": "O(N log N)",
       "line": 14,
       "message": "sort",
       "owner": "MIRLoweringControlFlow",
@@ -390,7 +532,15 @@
         54
       ],
       "receiver_kind": "value",
-      "source": "fn:870869be8ea36bbd",
+      "receiver_type": "T::Array[T.untyped]",
+      "receiver_type_origin": "static_call_result_contract",
+      "selector_span": [
+        14,
+        56,
+        14,
+        60
+      ],
+      "source": "fn:f40acd31cc807dfc",
       "span": [
         14,
         19,
@@ -403,8 +553,15 @@
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
+      "execution_span": [
+        18,
+        2,
+        18,
+        54
+      ],
       "function": "(top-level)",
-      "id": "edge:2c02c8959c8d4c86",
+      "id": "edge:fc57a4693722e9bf",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 18,
@@ -414,7 +571,7 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:91d9d9a6eeda5c2a",
+      "source": "fn:8b060578990b3bc3",
       "span": [
         18,
         2,
@@ -425,10 +582,14 @@
     },
     {
       "argument_count": 1,
+      "arguments": [
+        "required: String"
+      ],
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:73862c6f05bad739",
+      "id": "edge:113bbe2725b47440",
       "implicit_receiver": true,
       "kind": "unresolved_call",
       "line": 18,
@@ -438,7 +599,13 @@
       "receiver": "self",
       "receiver_binding_kind": "implicit",
       "receiver_kind": "value",
-      "source": "fn:91d9d9a6eeda5c2a",
+      "selector_span": [
+        18,
+        8,
+        18,
+        14
+      ],
+      "source": "fn:8b060578990b3bc3",
       "span": [
         18,
         8,
@@ -449,10 +616,14 @@
     },
     {
       "argument_count": 1,
+      "arguments": [
+        "T::Boolean"
+      ],
       "conditional": true,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "(top-level)",
-      "id": "edge:3358eff9e35eb10a",
+      "id": "edge:b8e729c0258e5f6d",
       "kind": "external_call",
       "line": 18,
       "message": "returns",
@@ -467,7 +638,13 @@
         32
       ],
       "receiver_kind": "value",
-      "source": "fn:91d9d9a6eeda5c2a",
+      "selector_span": [
+        18,
+        33,
+        18,
+        40
+      ],
+      "source": "fn:8b060578990b3bc3",
       "span": [
         18,
         8,
@@ -480,8 +657,9 @@
       "argument_count": 0,
       "conditional": false,
       "confidence": "partial",
+      "consumer_closed_candidate_set": false,
       "function": "missing?",
-      "id": "edge:e3223b4a641db6a6",
+      "id": "edge:f79f8a43eba75b22",
       "kind": "external_call",
       "line": 20,
       "message": "nil?",
@@ -493,7 +671,13 @@
       "receiver_symbol_origin": "unqualified_declared_type",
       "receiver_type": "String",
       "receiver_type_origin": "declared_parameter",
-      "source": "fn:4c6945d1a79599a2",
+      "selector_span": [
+        20,
+        13,
+        20,
+        17
+      ],
+      "source": "fn:4c68f8ecd3cbf937",
       "span": [
         20,
         4,
@@ -526,7 +710,87 @@
   ],
   "complexity_facts": [
     {
-      "allocations": [],
+      "allocations": [
+        {
+          "bound_classification": "output",
+          "cardinality_relation": "output_size",
+          "domain_expression": [
+            "schema"
+          ],
+          "kind": "keys",
+          "line": 14,
+          "parameter_domains": [],
+          "span": [
+            14,
+            19,
+            14,
+            41
+          ],
+          "symbolic_size": {
+            "complete": true,
+            "factors": [
+              {
+                "domain_id": "allocation:examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
+                "exponent": 1
+              }
+            ],
+            "logarithmic": false
+          }
+        },
+        {
+          "bound_classification": "output",
+          "cardinality_relation": "output_size",
+          "domain_expression": [
+            "schema"
+          ],
+          "kind": "map",
+          "line": 14,
+          "parameter_domains": [],
+          "span": [
+            14,
+            19,
+            14,
+            54
+          ],
+          "symbolic_size": {
+            "complete": true,
+            "factors": [
+              {
+                "domain_id": "allocation:examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
+                "exponent": 1
+              }
+            ],
+            "logarithmic": false
+          }
+        },
+        {
+          "bound_classification": "output",
+          "cardinality_relation": "output_size",
+          "domain_expression": [
+            "schema"
+          ],
+          "kind": "sort",
+          "line": 14,
+          "parameter_domains": [],
+          "receiver_is_call": true,
+          "span": [
+            14,
+            19,
+            14,
+            60
+          ],
+          "symbolic_size": {
+            "complete": true,
+            "factors": [
+              {
+                "domain_id": "allocation:examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
+                "exponent": 1
+              }
+            ],
+            "logarithmic": false
+          }
+        }
+      ],
       "block_invocations": [],
       "call_contexts": [
         {
@@ -634,6 +898,100 @@
             "factors": [],
             "logarithmic": false
           }
+        },
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [],
+          "evidence_gap": "unresolved_receiver_type",
+          "execution_multiplicity": "O(1)",
+          "line": 14,
+          "message": "sort",
+          "parameter_arguments": [],
+          "power": 0,
+          "receiver_size_domains": [],
+          "span": [
+            14,
+            19,
+            14,
+            60
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
+        },
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [
+            []
+          ],
+          "evidence_gap": "unresolved_receiver_type",
+          "execution_multiplicity": "O(1)",
+          "line": 14,
+          "message": "map",
+          "parameter_arguments": [],
+          "power": 0,
+          "receiver_size_domains": [],
+          "span": [
+            14,
+            19,
+            14,
+            54
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
+        },
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [],
+          "evidence_gap": "unresolved_receiver_type",
+          "execution_multiplicity": "O(1)",
+          "line": 14,
+          "message": "keys",
+          "parameter_arguments": [],
+          "power": 0,
+          "receiver_size_domains": [],
+          "span": [
+            14,
+            19,
+            14,
+            41
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
+        },
+        {
+          "argument_cardinality_relation": "same",
+          "argument_progress": "unknown",
+          "argument_size_domains": [],
+          "evidence_gap": "unresolved_receiver_type",
+          "execution_multiplicity": "O(1)",
+          "line": 14,
+          "message": "variants",
+          "parameter_arguments": [],
+          "power": 0,
+          "receiver_size_domains": [],
+          "span": [
+            14,
+            19,
+            14,
+            35
+          ],
+          "symbolic_execution": {
+            "complete": true,
+            "factors": [],
+            "logarithmic": false
+          }
         }
       ],
       "collection_parameters": [
@@ -655,10 +1013,23 @@
         "halving_calls": 0,
         "loop_contained_shrinking_calls": 0,
         "shrinking_calls": 0,
+        "structural_calls": 0,
         "unknown_progress_calls": 0,
         "visited_guarded_calls": 0
       },
       "size_domains": [
+        {
+          "id": "allocation:examples/profile/ruby_safe_navigation_nil_kill.rb:14:19",
+          "name": "materialized schema",
+          "path": "examples/profile/ruby_safe_navigation_nil_kill.rb",
+          "source_kind": "output",
+          "span": [
+            14,
+            19,
+            14,
+            60
+          ]
+        },
         {
           "id": "param:MIRLoweringControlFlow#union_match_default_body:arms",
           "name": "arms",
@@ -753,6 +1124,7 @@
         "halving_calls": 0,
         "loop_contained_shrinking_calls": 0,
         "shrinking_calls": 0,
+        "structural_calls": 0,
         "unknown_progress_calls": 0,
         "visited_guarded_calls": 0
       },
@@ -917,7 +1289,10 @@
   "fields": [],
   "flow_local_types": [
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "missing?",
       "line": 20,
@@ -945,7 +1320,10 @@
       ]
     },
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 13,
@@ -973,7 +1351,19 @@
       ]
     },
     {
+      "callback_binding_position": null,
       "complete": false,
+      "definition_call_sources": {
+        "cfg:MIRLoweringControlFlow#union_match_default_body:stmt:2:13:4": [
+          [
+            13,
+            13,
+            13,
+            47
+          ]
+        ]
+      },
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 14,
@@ -994,7 +1384,10 @@
       "types": []
     },
     {
+      "callback_binding_position": null,
       "complete": false,
+      "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/ruby_safe_navigation_nil_kill.rb",
       "function": "union_match_default_body",
       "line": 15,
@@ -1095,7 +1488,8 @@
         "rescues": 2
       },
       "dispatch_name": "union_match_default_body",
-      "id": "fn:870869be8ea36bbd",
+      "generated_declaration": false,
+      "id": "fn:f40acd31cc807dfc",
       "key": [
         "MIRLoweringControlFlow",
         "union_match_default_body",
@@ -1108,7 +1502,7 @@
       "name": "union_match_default_body",
       "normalized_source": "def union_match_default_body(node, facts, arms) T.bind(self, MIRLowering) rescue nil schema = union_schemas[facts.expr_type_sym] all_variants = schema&.variants&.keys&.map(&:to_s)&.sort || [] all_variants end",
       "owner": "MIRLoweringControlFlow",
-      "owner_id": "owner:1764295d8fbc4733",
+      "owner_id": "owner:9f30e8c74316e548",
       "params": [
         "node",
         "facts",
@@ -1123,6 +1517,7 @@
         "source": "annotation",
         "type_system": "sorbet"
       },
+      "source_export_eligible": true,
       "span": [
         11,
         2,
@@ -1133,7 +1528,8 @@
     },
     {
       "dispatch_name": "missing?",
-      "id": "fn:4c6945d1a79599a2",
+      "generated_declaration": false,
+      "id": "fn:4c68f8ecd3cbf937",
       "key": [
         "MIRLoweringControlFlow",
         "missing?",
@@ -1146,7 +1542,7 @@
       "name": "missing?",
       "normalized_source": "def missing?(required) required.nil? end",
       "owner": "MIRLoweringControlFlow",
-      "owner_id": "owner:1764295d8fbc4733",
+      "owner_id": "owner:9f30e8c74316e548",
       "params": [
         "required"
       ],
@@ -1159,6 +1555,7 @@
         "source": "annotation",
         "type_system": "sorbet"
       },
+      "source_export_eligible": true,
       "span": [
         19,
         2,
@@ -1215,7 +1612,7 @@
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:1764295d8fbc4733",
+      "id": "owner:9f30e8c74316e548",
       "kind": "module",
       "language": "ruby",
       "line": 1,

@@ -96,6 +96,20 @@
       },
       {
         "arguments": [
+          "item.name",
+          "true"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "helper_result",
+        "line": 20,
+        "message": "[]=",
+        "receiver": "out",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
           "items"
         ],
         "block": false,
@@ -144,6 +158,19 @@
         "line": 6,
         "message": "result",
         "receiver": "Custom::Sarif",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "{}"
+        ],
+        "block": true,
+        "conditional": false,
+        "control": "always",
+        "function": "helper_result",
+        "line": 19,
+        "message": "each_with_object",
+        "receiver": "decorate(items)",
         "safe_navigation": false
       },
       {
@@ -206,17 +233,6 @@
         "block": true,
         "conditional": false,
         "control": "always",
-        "function": "helper_result",
-        "line": 19,
-        "message": "each_with_object",
-        "receiver": "decorate(items)",
-        "safe_navigation": false
-      },
-      {
-        "arguments": [],
-        "block": true,
-        "conditional": false,
-        "control": "always",
         "function": "provider_paths",
         "line": 15,
         "message": "flat_map",
@@ -248,19 +264,6 @@
         "mass": 3,
         "method_name": "helper_result",
         "node_name": "call"
-      },
-      {
-        "child_fingerprints": [
-          "call(id call<decorate>(id argument_list(id)))"
-        ],
-        "child_masses": [
-          4
-        ],
-        "fingerprint": "block(call(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool))))",
-        "line": 19,
-        "mass": 15,
-        "method_name": "helper_result",
-        "node_name": "block"
       },
       {
         "child_fingerprints": [
@@ -310,11 +313,24 @@
         "child_masses": [
           3
         ],
-        "fingerprint": "call(id call<decorate>(id argument_list(id)))",
+        "fingerprint": "call<each_with_object>(id call<decorate>(id argument_list(id)))",
         "line": 19,
         "mass": 4,
         "method_name": "helper_result",
         "node_name": "call"
+      },
+      {
+        "child_fingerprints": [
+          "call<each_with_object>(id call<decorate>(id argument_list(id)))"
+        ],
+        "child_masses": [
+          4
+        ],
+        "fingerprint": "block(call<each_with_object>(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool))))",
+        "line": 19,
+        "mass": 15,
+        "method_name": "helper_result",
+        "node_name": "block"
       },
       {
         "child_fingerprints": [
@@ -569,7 +585,7 @@
           "method(id body(block(call(id call<first>(id id argument_list(id))) body(parameters(id) call<result>(id colon2(id id) argument_list(hash(lit call(id id))))))))",
           "method(id body(parameters(id) call<new>(id id argument_list(id))))",
           "method(id body(block(call(id id) body(parameters(id) call(id id)))))",
-          "method(id body(parameters(id) block(call(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool))))))",
+          "method(id body(parameters(id) block(call<each_with_object>(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool))))))",
           "method(id body(parameters(id) body_statement(call<file?>(id colon2(id id) argument_list(id)) call(id id))))"
         ],
         "child_masses": [
@@ -579,7 +595,7 @@
           19,
           12
         ],
-        "fingerprint": "body_statement(method(id body(block(call(id call<first>(id id argument_list(id))) body(parameters(id) call<result>(id colon2(id id) argument_list(hash(lit call(id id)))))))) method(id body(parameters(id) call<new>(id id argument_list(id)))) method(id body(block(call(id id) body(parameters(id) call(id id))))) method(id body(parameters(id) block(call(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool)))))) method(id body(parameters(id) body_statement(call<file?>(id colon2(id id) argument_list(id)) call(id id)))))",
+        "fingerprint": "body_statement(method(id body(block(call(id call<first>(id id argument_list(id))) body(parameters(id) call<result>(id colon2(id id) argument_list(hash(lit call(id id)))))))) method(id body(parameters(id) call<new>(id id argument_list(id)))) method(id body(block(call(id id) body(parameters(id) call(id id))))) method(id body(parameters(id) block(call<each_with_object>(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool)))))) method(id body(parameters(id) body_statement(call<file?>(id colon2(id id) argument_list(id)) call(id id)))))",
         "line": 4,
         "mass": 69,
         "method_name": "(top-level)",
@@ -606,7 +622,7 @@
       {
         "child_fingerprints": [],
         "child_masses": [],
-        "fingerprint": "method(id body(parameters(id) block(call(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool))))))",
+        "fingerprint": "method(id body(parameters(id) block(call<each_with_object>(id call<decorate>(id argument_list(id))) body(parameters(id id) assignment<[]=>(lit id argument_list(call(id id) bool))))))",
         "line": 18,
         "mass": 19,
         "method_name": "helper_result",
@@ -652,19 +668,37 @@
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
       },
       {
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
       },
       {
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
       }
     ],
     "control_flow_metrics": [
@@ -721,8 +755,13 @@
         "line": 22
       },
       {
-        "id": "cfg:SourceFactStateReadChainsAndConstants#helper_result:stmt:1:19:4",
+        "id": "cfg:SourceFactStateReadChainsAndConstants#helper_result:stmt:0.loop.0:20:6",
         "kind": "statement",
+        "line": 20
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#helper_result:stmt:1:19:4",
+        "kind": "loop",
         "line": 19
       },
       {
@@ -736,8 +775,13 @@
         "line": 16
       },
       {
-        "id": "cfg:SourceFactStateReadChainsAndConstants#provider_paths:stmt:1:15:4",
+        "id": "cfg:SourceFactStateReadChainsAndConstants#provider_paths:stmt:0.loop.0:15:45",
         "kind": "statement",
+        "line": 15
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#provider_paths:stmt:1:15:4",
+        "kind": "loop",
         "line": 15
       },
       {
@@ -751,8 +795,13 @@
         "line": 8
       },
       {
-        "id": "cfg:SourceFactStateReadChainsAndConstants#results:stmt:1:5:4",
+        "id": "cfg:SourceFactStateReadChainsAndConstants#results:stmt:0.loop.0:6:6",
         "kind": "statement",
+        "line": 6
+      },
+      {
+        "id": "cfg:SourceFactStateReadChainsAndConstants#results:stmt:1:5:4",
+        "kind": "loop",
         "line": 5
       }
     ],
@@ -760,10 +809,17 @@
     "def_use": [
       {},
       {},
+      {},
+      {},
+      {},
+      {},
       {}
     ],
     "dispatch_sites": [],
     "dominators": [
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -836,6 +892,9 @@
       }
     ],
     "liveness": [
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -1090,8 +1149,13 @@
       {
         "reads": [
           "place:SourceFactStateReadChainsAndConstants#helper_result:local:item",
-          "place:SourceFactStateReadChainsAndConstants#helper_result:local:items",
           "place:SourceFactStateReadChainsAndConstants#helper_result:local:out"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReadChainsAndConstants#helper_result:local:items"
         ],
         "writes": [
           "place:SourceFactStateReadChainsAndConstants#helper_result:local:item",
@@ -1110,6 +1174,10 @@
         "reads": [
           "place:SourceFactStateReadChainsAndConstants#provider_paths:local:provider"
         ],
+        "writes": []
+      },
+      {
+        "reads": [],
         "writes": [
           "place:SourceFactStateReadChainsAndConstants#provider_paths:local:provider"
         ]
@@ -1124,9 +1192,14 @@
       },
       {
         "reads": [
-          "place:SourceFactStateReadChainsAndConstants#results:instance_field:@ranked",
-          "place:SourceFactStateReadChainsAndConstants#results:instance_field:@top",
           "place:SourceFactStateReadChainsAndConstants#results:local:row"
+        ],
+        "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactStateReadChainsAndConstants#results:instance_field:@ranked",
+          "place:SourceFactStateReadChainsAndConstants#results:instance_field:@top"
         ],
         "writes": [
           "place:SourceFactStateReadChainsAndConstants#results:local:row"
@@ -1293,6 +1366,9 @@
       }
     ],
     "reachability": [
+      {},
+      {},
+      {},
       {},
       {},
       {},

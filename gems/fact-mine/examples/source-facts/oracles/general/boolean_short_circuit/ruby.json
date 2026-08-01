@@ -123,6 +123,18 @@
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "short_circuit"
       }
     ],
     "control_flow_metrics": [
@@ -140,8 +152,13 @@
         "line": 5
       },
       {
-        "id": "cfg:(top-level)#method_seven:stmt:1:2:2",
+        "id": "cfg:(top-level)#method_seven:stmt:0.then.0:3:4",
         "kind": "statement",
+        "line": 3
+      },
+      {
+        "id": "cfg:(top-level)#method_seven:stmt:1:2:2",
+        "kind": "branch",
         "line": 2
       }
     ],
@@ -172,6 +189,7 @@
     "dominators": [
       {},
       {},
+      {},
       {}
     ],
     "flow_types": [
@@ -193,6 +211,7 @@
       }
     ],
     "liveness": [
+      {},
       {},
       {},
       {}
@@ -266,12 +285,20 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:(top-level)#method_seven:local:x",
           "place:(top-level)#method_seven:local:y",
           "place:(top-level)#method_seven:local:z"
         ],
-        "writes": []
+        "writes": [
+          "place:(top-level)#method_seven:local:x",
+          "place:(top-level)#method_seven:local:y",
+          "place:(top-level)#method_seven:local:z"
+        ]
       }
     ],
     "owners": [],
@@ -338,6 +365,7 @@
       }
     ],
     "reachability": [
+      {},
       {},
       {},
       {}

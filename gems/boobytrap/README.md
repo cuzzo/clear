@@ -10,7 +10,7 @@ Nil-kill, lint violations, etc. help explain what *might* be wrong when
 you get there.
 
 > [!NOTE]
-> Boobytrap uses [Lineage](../lineage/README.md) to track changes to
+> Boobytrap uses [Lineage](../gigasail/README.md) to track changes to
 > lines across files over time, and to avoid penalizing non-semantic
 > changes like whitespace or comments.
 
@@ -222,7 +222,7 @@ the heuristic is reliable here.
   control-flow pressure.
 - [SlopCop](../slopcop/README.md): categorizes uncovered branches and
   ranks the true test gaps.
-- [Lineage](../lineage/README.md): renders history and verification
+- [Lineage](../gigasail/README.md): renders history and verification
   evidence next to source.
 - [Nil-kill](../nil-kill/README.md): traces nil and type pressure back
   to its source.

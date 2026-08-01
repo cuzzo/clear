@@ -132,6 +132,15 @@ pub struct IncrementalMetrics {
     pub peak_resident_bytes: Option<u64>,
 }
 
+/// Producer identity copied from SCIP metadata. Bundled external facts can
+/// require an exact indexer build when the symbol scheme itself does not carry
+/// a dependency or toolchain version.
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SemanticIndex {
+    pub tool: String,
+    pub version: String,
+}
+
 /// The enriched output matching what Ruby's EspalierProfile::Builder.build returns.
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct ProfileOutput {
@@ -147,7 +156,18 @@ pub struct ProfileOutput {
     #[serde(default, skip_serializing_if = "InputCoverage::is_empty")]
     pub input_coverage: InputCoverage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub semantic_indexes: Vec<SemanticIndex>,
+    /// Opaque compatibility claims supplied by the build/index environment.
+    ///
+    /// The shared external-summary join compares these exactly. Language-owned
+    /// manifests decide how runtime digests, targets, sysroots, and ABI choices
+    /// are represented; shared analysis never interprets their keys.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub semantic_environment: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owners: Vec<OwnerRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dispatch_impls: Vec<DispatchImpl>,
     pub methods: Vec<MethodRecord>,
     pub fields: Vec<FieldRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -177,6 +197,11 @@ pub struct ProfileOutput {
     /// after all files have been merged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<CallRecord>,
+    /// Function-like preprocessor definitions retained across file shards.
+    /// An absent cost means the language adapter could not bound that body;
+    /// project propagation requires every same-name definition to converge.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preprocessor_definition_costs: Vec<PreprocessorDefinitionCost>,
     /// Denominator-aware coverage of exact project call targets. This is a
     /// pure reduction over the final merged call records; it never resolves or
     /// reconstructs a target itself.
@@ -187,6 +212,25 @@ pub struct ProfileOutput {
     pub state_accesses: Vec<StateAccessRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub complexity_facts: Vec<syntax::complexity_facts::MethodComplexityFacts>,
+    /// Minimal, generic data-demand plan for runtime value collection. It is
+    /// emitted by TracePlan so tracers can avoid collecting values FactMine's
+    /// CFG/DFG will never consume.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_call_sites: Vec<RuntimeValueCaptureSite>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_result_call_sites: Vec<RuntimeValueCaptureSite>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_collection_receiver_sites: Vec<RuntimeValueCaptureSite>,
+    /// Branch-local runtime capability predicates emitted from normalized
+    /// syntax.  A tracer reports only the predicate's observed Boolean result;
+    /// the generic runtime overlay applies the branch and CFG/DFG relation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_capability_guards: Vec<RuntimeCapabilityGuard>,
+    /// Branch-local proof that a simple value condition has reached its
+    /// truthy path. Adapters recognize native syntax; the runtime overlay
+    /// joins it only through exact CFG reaching definitions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_truthiness_guards: Vec<RuntimeTruthinessGuard>,
     // NilKill-only fields
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flow_local_types: Vec<serde_json::Value>,
@@ -248,6 +292,18 @@ pub struct ProfileOutput {
     pub imports: Vec<serde_json::Value>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PreprocessorDefinitionCost {
+    pub id: String,
+    pub language: String,
+    pub name: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct InputCoverage {
     pub selected_files: usize,
@@ -273,6 +329,48 @@ pub struct ParseRecovery {
     pub spans: Vec<[usize; 4]>,
 }
 
+/// A language-neutral source range for which a runtime tracer needs a value
+/// domain. FactMine owns the semantic demand; a tracer merely matches this
+/// anchor to execution and serializes a generic runtime observation.
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct RuntimeValueCaptureSite {
+    pub path: String,
+    pub span: [usize; 4],
+    /// Smallest normalized executable region whose first line event is
+    /// guaranteed to precede this capture. Runtime providers may use it to
+    /// activate expensive event sources only while this expression executes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation_span: Option<[usize; 4]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+}
+
+/// A normalized predicate whose true and false branches respectively prove
+/// that `subject` does or does not support `member`. The predicate call ID is
+/// the semantic anchor used to join a tracer's Boolean observation; no
+/// runtime provider needs to encode source-language control flow.
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct RuntimeCapabilityGuard {
+    pub source: String,
+    pub subject: String,
+    pub member: String,
+    pub condition_call_id: String,
+    pub condition_span: [usize; 4],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_available_span: Option<[usize; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_unavailable_span: Option<[usize; 4]>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct RuntimeTruthinessGuard {
+    pub source: String,
+    pub subject: String,
+    pub condition_span: [usize; 4],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truthy_span: Option<[usize; 4]>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OwnerRecord {
     pub id: String,
@@ -287,6 +385,81 @@ pub struct OwnerRecord {
     pub symbol: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supertypes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requirements: Vec<String>,
+}
+
+/// A concrete type that can stand in for an abstract-dispatch type at runtime.
+/// Espalier resolves an interface method's cost to the worst-case over these.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DispatchImpl {
+    pub interface: String,
+    pub implementer: String,
+    pub language: String,
+    /// "structural" (method-set superset) or "nominal" (declared conformance).
+    pub basis: String,
+}
+
+/// For every abstract-dispatch type, find the concrete types that satisfy it -
+/// structurally (method set superset, e.g. Go) or nominally (declared
+/// conformance via supertypes, e.g. Java/Rust). This is the whole-program
+/// satisfaction relation that drives worst-case interface costing.
+fn compute_dispatch_impls(owners: &[OwnerRecord], methods: &[MethodRecord]) -> Vec<DispatchImpl> {
+    // An interface carries no method bodies, so its method-set is empty and it
+    // never becomes a spurious structural implementer of another interface.
+    let mut methodset: BTreeMap<(&str, &str), BTreeSet<&str>> = BTreeMap::new();
+    for method in methods {
+        methodset
+            .entry((method.language.as_str(), method.owner.as_str()))
+            .or_default()
+            .insert(method.dispatch_name.as_str());
+    }
+    let mut edges = Vec::new();
+    for iface in owners {
+        let required = iface
+            .requirements
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        for concrete in owners {
+            if concrete.language != iface.language || concrete.name == iface.name {
+                continue;
+            }
+            // Structural: the concrete method-set is a superset of what the
+            // interface requires (Go, TypeScript).
+            let structural = !required.is_empty()
+                && methodset
+                    .get(&(concrete.language.as_str(), concrete.name.as_str()))
+                    .is_some_and(|set| required.iter().all(|method| set.contains(method)));
+            // Nominal: the concrete declares conformance (Java/Rust/Swift/... via
+            // `implements` / `impl` / `: P`, canonicalized into supertypes).
+            let nominal = concrete.supertypes.iter().any(|supertype| {
+                supertype == &iface.name
+                    || supertype.rsplit(['.', ':']).next() == Some(iface.name.as_str())
+            });
+            if structural || nominal {
+                edges.push(DispatchImpl {
+                    interface: iface.name.clone(),
+                    implementer: concrete.name.clone(),
+                    language: iface.language.clone(),
+                    basis: if structural { "structural" } else { "nominal" }.to_string(),
+                });
+            }
+        }
+    }
+    // A type declared across several files (or matching structurally and
+    // nominally) yields duplicate edges; keep one per (interface, implementer).
+    edges.sort_by(|a, b| {
+        (&a.language, &a.interface, &a.implementer).cmp(&(
+            &b.language,
+            &b.interface,
+            &b.implementer,
+        ))
+    });
+    edges.dedup_by(|a, b| {
+        a.language == b.language && a.interface == b.interface && a.implementer == b.implementer
+    });
+    edges
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -319,6 +492,10 @@ pub struct CallRecord {
     pub candidate_targets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub candidate_reason: Option<String>,
+    /// True only when compiler/language semantics prove that downstream
+    /// consumers cannot add another implementation to this candidate set.
+    #[serde(default)]
+    pub consumer_closed_candidate_set: bool,
     pub kind: String,
     pub owner: String,
     pub function: String,
@@ -340,10 +517,25 @@ pub struct CallRecord {
     /// Exact normalized span of a direct call used as this call's receiver.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receiver_call_span: Option<[usize; 4]>,
+    /// Exact callable selector span, retained independently from the full
+    /// invocation span when a callback body makes that invocation multiline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_span: Option<[usize; 4]>,
+    /// Complete executable expression range supplied to runtime collectors.
+    /// For calls with attached callbacks this includes the callback body while
+    /// `span` remains the semantic call span used by CFG/DFG analysis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_span: Option<[usize; 4]>,
     /// Exact producer call spans for every reaching definition of a local
     /// receiver. Empty means at least one definition was not a direct call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub receiver_definition_call_spans: Vec<[usize; 4]>,
+    /// Shared normalized CFG/DFG projection applied to every reaching
+    /// call-result definition. This is populated for destructured bindings
+    /// such as `left, right = values()` only when every reaching definition
+    /// selects the same sequence position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_definition_sequence_projection: Option<usize>,
     /// Adapter-proven canonical receiver type for cross-file resolution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receiver_symbol: Option<String>,
@@ -393,6 +585,11 @@ pub struct CallRecord {
     pub complexity_assumptions: Vec<String>,
     pub message: String,
     pub argument_count: usize,
+    /// Argument spellings at the call site, so a caller can link a callback
+    /// argument (a named function reference) to its definition and substitute
+    /// its cost for the callee's callback C.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arguments: Vec<String>,
     pub path: String,
     pub line: usize,
     pub span: [usize; 4],
@@ -410,6 +607,12 @@ pub struct CallRecord {
     /// cases where the retained evidence cannot distinguish them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub empty_domain_cause: Option<String>,
+    /// True when a runtime-evidence event matched this normalized source call.
+    /// This is diagnostic provenance only: it neither closes a candidate set
+    /// nor licenses a cost model.  It lets coverage reports distinguish a
+    /// missing runtime path from a failed semantic join.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub runtime_evidence_observed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
@@ -457,6 +660,11 @@ pub struct CallResolutionCoverage {
     /// are retained separately so a source-scope policy is not misreported as
     /// a function extractor defect.
     pub raw_calls_not_normalized_inside_function: usize,
+    /// Export-eligible methods that still overlap an unmatched parser call.
+    /// Extraction must revoke eligibility for every such method; a non-zero
+    /// value is a soundness bug, not a diagnostic sampling condition.
+    #[serde(default)]
+    pub source_export_eligible_methods_overlapping_raw_call_loss: usize,
     /// Raw parser calls outside every extracted executable function.
     pub raw_calls_not_normalized_outside_function: usize,
     /// Grammar-node kinds for the raw-call subset with no normalized call at
@@ -598,6 +806,20 @@ pub struct MethodRecord {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub complexity_signals: BTreeMap<String, usize>,
     pub params: Vec<String>,
+    /// Parameter names invoked as callbacks in the body. Such a function has a
+    /// cost parametric in that callback (C); a caller can substitute the passed
+    /// callable's cost.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub callback_params: Vec<String>,
+    /// True only when this declaration has an executable source body and every
+    /// parser call inside that body reached normalized call evidence.
+    #[serde(default)]
+    pub source_export_eligible: bool,
+    /// A callable manufactured by a source declaration macro. It participates
+    /// in target and cost resolution but is not an independently authored
+    /// production function for coverage denominators.
+    #[serde(default)]
+    pub generated_declaration: bool,
     /// Exact source covered by the parser's function span. Consumers that need
     /// function bodies must use this projection rather than re-parsing files.
     pub raw_source: String,
@@ -746,6 +968,7 @@ pub struct ArrayShape {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StructDeclaration {
+    pub language: String,
     pub path: String,
     pub class: String,
     pub fields: Vec<String>,
@@ -839,7 +1062,16 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
         .collect::<Vec<_>>();
 
     let owners = extract_owners(document, &language, &path);
-    let methods = extract_methods(&lines, document, &language, &path);
+    let mut methods = extract_methods(&lines, document, &language, &path);
+    for recovery in &document.parse_recovery_spans {
+        for method in methods.iter_mut().filter(|method| {
+            method
+                .span
+                .is_some_and(|method_span| spans_overlap(method_span, *recovery))
+        }) {
+            method.source_export_eligible = false;
+        }
+    }
     let fields = extract_fields(document, &language, &path);
     let (state_types, mut state_type_records) = extract_state_types(document, &language, &path);
     let (state_protocols, state_protocol_records) =
@@ -853,15 +1085,21 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
     if trace_plan {
         let mut struct_declarations = extract_struct_declarations(document, &language, &path);
         let mut tlet_sites = Vec::new();
-        if let Ok((root, _)) = crate::ast::parse(std::path::Path::new(&path)) {
+        let mut runtime_capability_guards = Vec::new();
+        let mut runtime_truthiness_guards = Vec::new();
+        if let Ok((root, _)) =
+            crate::ast::parse_with_language(std::path::Path::new(&path), document.language)
+        {
             let behavior = crate::syntax::normalized_behavior::behavior(document.language);
             collect_struct_declarations(
                 &root,
+                &language,
                 &path,
                 &mut Vec::new(),
                 &mut struct_declarations,
                 behavior,
             );
+            merge_struct_declarations(&mut struct_declarations);
             crate::type_inference::collect_tlet_sites(&root, &path, &mut tlet_sites);
             // The field inventory keeps one representative write per state
             // slot, which may be an earlier untyped setter. Preserve the
@@ -875,6 +1113,12 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
                 &mut Vec::new(),
                 &mut ivar_tlet_types,
             );
+            // Capability syntax is adapter-owned, but the branch relation and
+            // later runtime join belong to FactMine. Retain only the opaque
+            // predicate anchors in the trace plan.
+            let calls = extract_calls(document, &language, &path);
+            runtime_capability_guards = extract_runtime_capability_guards(&root, behavior, &calls);
+            runtime_truthiness_guards = extract_runtime_truthiness_guards(&root, behavior, &calls);
             state_type_records.extend(ivar_tlet_types.into_iter().map(
                 |((owner, field), declared_type)| {
                     let field = field.trim_start_matches('@').to_string();
@@ -892,6 +1136,24 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
                 },
             ));
         }
+        // Runtime value collection is demand-driven. These are the only two
+        // cases where the generic overlay consumes a container shape or a
+        // call result; all other runtime calls need just their receiver type.
+        let calls = extract_calls(document, &language, &path);
+        let flow_local_types = extract_flow_local_types(document);
+        let state_accesses = extract_state_accesses(document, &language, &path);
+        let (mut runtime_result_call_sites, runtime_collection_receiver_sites) =
+            extract_runtime_value_capture_sites(document, &flow_local_types, &calls);
+        runtime_result_call_sites.extend(runtime_capability_guards.iter().map(|guard| {
+            RuntimeValueCaptureSite {
+                path: path.clone(),
+                span: guard.condition_span,
+                activation_span: runtime_activation_span(document, guard.condition_span),
+                selector: None,
+            }
+        }));
+        runtime_result_call_sites.sort();
+        runtime_result_call_sites.dedup();
         return LocalFactShard::new(
             profile,
             ProfileOutput {
@@ -903,7 +1165,14 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
                 signatures,
                 type_definitions,
                 declaration_type_pressures,
+                calls,
+                state_accesses,
                 tlet_sites,
+                runtime_call_sites: Vec::new(),
+                runtime_result_call_sites,
+                runtime_collection_receiver_sites,
+                runtime_capability_guards,
+                runtime_truthiness_guards,
                 ..ProfileOutput::default()
             },
         );
@@ -912,7 +1181,7 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
     let mut hash_shapes = extract_hash_shapes(&lines, &language, &path);
     let mut array_shapes = extract_array_shapes(&lines, &language, &path);
 
-    let root_node = crate::ast::parse(std::path::Path::new(&path))
+    let root_node = crate::ast::parse_with_language(std::path::Path::new(&path), document.language)
         .ok()
         .map(|(r, _)| r);
     if let Some(ref root) = root_node {
@@ -921,23 +1190,32 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
     }
 
     let mut struct_declarations = extract_struct_declarations(document, &language, &path);
-    let behavior = crate::syntax::normalized_behavior::behavior(
-        crate::syntax::Language::parse(document.language.as_str())
-            .unwrap_or(crate::syntax::Language::Ruby),
-    );
+    let behavior = crate::syntax::normalized_behavior::behavior(document.language);
     if let Some(ref root) = root_node {
         collect_struct_declarations(
             root,
+            &language,
             &path,
             &mut Vec::new(),
             &mut struct_declarations,
             behavior,
         );
     }
+    merge_struct_declarations(&mut struct_declarations);
     let state_type_edges = extract_state_type_edges(document, &language, &path);
+    let preprocessor_definition_costs =
+        extract_preprocessor_definition_costs(document, &language, &path, behavior);
     let calls = extract_calls(document, &language, &path);
     let state_accesses = extract_state_accesses(document, &language, &path);
     let complexity_facts = syntax::complexity_facts::facts(document);
+    let runtime_capability_guards = root_node
+        .as_ref()
+        .map(|root| extract_runtime_capability_guards(root, behavior, &calls))
+        .unwrap_or_default();
+    let runtime_truthiness_guards = root_node
+        .as_ref()
+        .map(|root| extract_runtime_truthiness_guards(root, behavior, &calls))
+        .unwrap_or_default();
 
     let mut tlet_sites = Vec::new();
     let mut dead_nil_checks = Vec::new();
@@ -1225,10 +1503,40 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
                 .any(|function| span_contains(function.span, *span)),
         })
         .collect();
+    for gap in &raw_calls_not_normalized {
+        if let Some(method) = methods
+            .iter_mut()
+            .filter(|method| method.span.is_some_and(|span| span_contains(span, *gap)))
+            .min_by_key(|method| {
+                let span = method.span.unwrap_or([0, 0, usize::MAX, usize::MAX]);
+                (span[2].saturating_sub(span[0]), span[3].abs_diff(span[1]))
+            })
+        {
+            method.source_export_eligible = false;
+        }
+    }
+    let source_export_eligible_methods_overlapping_raw_call_loss = raw_calls_not_normalized
+        .iter()
+        .filter_map(|gap| {
+            methods
+                .iter()
+                .filter(|method| {
+                    method
+                        .span
+                        .is_some_and(|method_span| span_contains(method_span, *gap))
+                })
+                .min_by_key(|method| {
+                    let span = method.span.unwrap_or([0, 0, usize::MAX, usize::MAX]);
+                    (span[2].saturating_sub(span[0]), span[3].abs_diff(span[1]))
+                })
+        })
+        .filter(|method| method.source_export_eligible)
+        .count();
     let call_resolution_coverage = CallResolutionCoverage {
         raw_parser_call_sites: raw_call_spans.len(),
         raw_calls_not_normalized: raw_calls_not_normalized.len(),
         raw_calls_not_normalized_inside_function,
+        source_export_eligible_methods_overlapping_raw_call_loss,
         raw_calls_not_normalized_outside_function: raw_calls_not_normalized.len()
             - raw_calls_not_normalized_inside_function,
         raw_calls_not_normalized_by_kind,
@@ -1243,7 +1551,10 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             artifact_scope: None,
             incremental_metrics: None,
             input_coverage: InputCoverage::default(),
+            semantic_indexes: Vec::new(),
+            semantic_environment: BTreeMap::new(),
             owners,
+            dispatch_impls: Vec::new(),
             methods,
             fields,
             struct_declarations,
@@ -1261,9 +1572,15 @@ pub fn extract_local(document: &Document, profile: Profile) -> LocalFactShard {
             state_type_edges,
             call_graph_edges: Vec::new(),
             calls,
+            preprocessor_definition_costs,
             call_resolution_coverage,
             state_accesses,
             complexity_facts,
+            runtime_call_sites: Vec::new(),
+            runtime_result_call_sites: Vec::new(),
+            runtime_collection_receiver_sites: Vec::new(),
+            runtime_capability_guards,
+            runtime_truthiness_guards,
             flow_local_types,
             type_dependencies,
             collection_index_lookups,
@@ -1343,8 +1660,24 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
         &output.type_definitions,
         &mut output.calls,
     );
+    apply_generated_record_costs(
+        &output.struct_declarations,
+        &output.methods,
+        &mut output.calls,
+    );
+    reapply_generated_callable_costs(&mut output);
+    apply_merged_preprocessor_definition_costs(
+        &output.preprocessor_definition_costs,
+        &output.methods,
+        &mut output.calls,
+    );
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
+    apply_injected_state_callback_costs(&output.state_param_origin_records, &mut output.calls);
+    if profile == Profile::TracePlan {
+        output.runtime_call_sites = runtime_call_capture_sites(&output.calls, Some(document));
+    }
     output.call_graph_edges = extract_call_graph_edges(&output.calls);
+    output.dispatch_impls = compute_dispatch_impls(&output.owners, &output.methods);
     output
 }
 
@@ -1352,6 +1685,10 @@ pub fn extract(document: &Document, profile: Profile) -> ProfileOutput {
 pub fn merge(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut output = merge_local(outputs, profile);
     finalize_project_output(&mut output);
+    if profile == Profile::TracePlan {
+        refresh_runtime_call_sites(&mut output);
+    }
+    output.dispatch_impls = compute_dispatch_impls(&output.owners, &output.methods);
     output
 }
 
@@ -1376,8 +1713,14 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut array_shapes = Vec::new();
     let mut state_type_edges = Vec::new();
     let mut calls = Vec::new();
+    let mut preprocessor_definition_costs = Vec::new();
     let mut state_accesses = Vec::new();
     let mut complexity_facts = Vec::new();
+    let mut runtime_call_sites = Vec::new();
+    let mut runtime_result_call_sites = Vec::new();
+    let mut runtime_collection_receiver_sites = Vec::new();
+    let mut runtime_capability_guards = Vec::new();
+    let mut runtime_truthiness_guards = Vec::new();
     let mut flow_local_types = Vec::new();
     let mut type_dependencies = Vec::new();
     let mut collection_index_lookups = Vec::new();
@@ -1409,6 +1752,7 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     let mut raw_parser_call_sites = 0usize;
     let mut raw_calls_not_normalized = 0usize;
     let mut raw_calls_not_normalized_inside_function = 0usize;
+    let mut source_export_eligible_methods_overlapping_raw_call_loss = 0usize;
     let mut raw_calls_not_normalized_outside_function = 0usize;
     let mut raw_calls_not_normalized_by_kind = BTreeMap::new();
     let mut raw_call_normalization_gap_samples = Vec::new();
@@ -1422,6 +1766,9 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         raw_calls_not_normalized_inside_function += output
             .call_resolution_coverage
             .raw_calls_not_normalized_inside_function;
+        source_export_eligible_methods_overlapping_raw_call_loss += output
+            .call_resolution_coverage
+            .source_export_eligible_methods_overlapping_raw_call_loss;
         raw_calls_not_normalized_outside_function += output
             .call_resolution_coverage
             .raw_calls_not_normalized_outside_function;
@@ -1463,8 +1810,16 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         array_shapes.extend(output.array_shapes);
         state_type_edges.extend(output.state_type_edges);
         calls.extend(output.calls);
+        preprocessor_definition_costs.extend(output.preprocessor_definition_costs);
         state_accesses.extend(output.state_accesses);
         complexity_facts.extend(output.complexity_facts);
+        if trace_plan {
+            runtime_call_sites.extend(output.runtime_call_sites);
+            runtime_result_call_sites.extend(output.runtime_result_call_sites);
+            runtime_collection_receiver_sites.extend(output.runtime_collection_receiver_sites);
+        }
+        runtime_capability_guards.extend(output.runtime_capability_guards);
+        runtime_truthiness_guards.extend(output.runtime_truthiness_guards);
         if nil_kill || trace_plan {
             tlet_sites.extend(output.tlet_sites);
         }
@@ -1512,7 +1867,10 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         artifact_scope: None,
         incremental_metrics: None,
         input_coverage: InputCoverage::default(),
+        semantic_indexes: Vec::new(),
+        semantic_environment: BTreeMap::new(),
         owners,
+        dispatch_impls: Vec::new(),
         methods,
         fields,
         struct_declarations,
@@ -1530,10 +1888,12 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         state_type_edges,
         call_graph_edges: Vec::new(),
         calls,
+        preprocessor_definition_costs,
         call_resolution_coverage: CallResolutionCoverage {
             raw_parser_call_sites,
             raw_calls_not_normalized,
             raw_calls_not_normalized_inside_function,
+            source_export_eligible_methods_overlapping_raw_call_loss,
             raw_calls_not_normalized_outside_function,
             raw_calls_not_normalized_by_kind,
             raw_call_normalization_gap_samples,
@@ -1542,6 +1902,11 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
         },
         state_accesses,
         complexity_facts,
+        runtime_call_sites,
+        runtime_result_call_sites,
+        runtime_collection_receiver_sites,
+        runtime_capability_guards,
+        runtime_truthiness_guards,
         flow_local_types,
         type_dependencies,
         collection_index_lookups,
@@ -1573,6 +1938,62 @@ fn merge_local(outputs: Vec<ProfileOutput>, profile: Profile) -> ProfileOutput {
     }
 }
 
+fn apply_merged_preprocessor_definition_costs(
+    definitions: &[PreprocessorDefinitionCost],
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+) {
+    let source_languages = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut grouped = BTreeMap::<(&str, &str), Vec<&PreprocessorDefinitionCost>>::new();
+    for definition in definitions {
+        grouped
+            .entry((&definition.language, &definition.name))
+            .or_default()
+            .push(definition);
+    }
+    let converged = grouped
+        .into_iter()
+        .filter_map(|(key, definitions)| {
+            let first = definitions.first()?;
+            let time = first.time.as_deref()?;
+            let space = first.space.as_deref()?;
+            definitions
+                .iter()
+                .all(|definition| {
+                    definition.time.as_deref() == Some(time)
+                        && definition.space.as_deref() == Some(space)
+                })
+                .then(|| (key, (time.to_string(), space.to_string())))
+        })
+        .collect::<BTreeMap<_, _>>();
+    for call in calls.iter_mut().filter(|call| {
+        call.preprocessor_callable
+            && call.known_time_complexity.is_none()
+            && call.known_space_complexity.is_none()
+    }) {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some((time, space)) = converged.get(&(language, call.message.as_str())) else {
+            continue;
+        };
+        call.known_time_complexity = Some(time.clone());
+        call.known_space_complexity = Some(space.clone());
+        call.complexity_provenance = Some("merged_source_preprocessor_definition".to_string());
+        call.complexity_bound_quality =
+            Some("upper_bound_merged_source_preprocessor_definition".to_string());
+        call.complexity_candidates = vec![call.message.clone()];
+        call.complexity_assumptions = vec![format!(
+            "all analyzed source definitions of `{}` converge on this bounded cost",
+            call.message
+        )];
+        call.complexity_missing_kind = None;
+    }
+}
+
 fn finalize_project_output(output: &mut ProfileOutput) {
     resolve_project_calls(
         &output.owners,
@@ -1580,7 +2001,19 @@ fn finalize_project_output(output: &mut ProfileOutput) {
         &output.type_definitions,
         &mut output.calls,
     );
+    apply_generated_record_costs(
+        &output.struct_declarations,
+        &output.methods,
+        &mut output.calls,
+    );
+    reapply_generated_callable_costs(output);
+    apply_merged_preprocessor_definition_costs(
+        &output.preprocessor_definition_costs,
+        &output.methods,
+        &mut output.calls,
+    );
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
+    apply_injected_state_callback_costs(&output.state_param_origin_records, &mut output.calls);
     output.call_graph_edges = extract_call_graph_edges(&output.calls);
     output.owners.sort_by(|a, b| a.id.cmp(&b.id));
     output.owners.dedup_by(|a, b| a.id == b.id);
@@ -1592,6 +2025,12 @@ fn finalize_project_output(output: &mut ProfileOutput) {
     });
     output.calls.sort_by(|a, b| a.id.cmp(&b.id));
     output.calls.dedup_by(|a, b| a.id == b.id);
+    output
+        .preprocessor_definition_costs
+        .sort_by(|a, b| a.id.cmp(&b.id));
+    output
+        .preprocessor_definition_costs
+        .dedup_by(|a, b| a.id == b.id);
     annotate_call_resolution_proofs(&output.owners, &output.methods, &mut output.calls);
     let raw_coverage = std::mem::take(&mut output.call_resolution_coverage);
     let mut coverage = summarize_call_resolution(&output.owners, &output.methods, &output.calls);
@@ -1599,6 +2038,8 @@ fn finalize_project_output(output: &mut ProfileOutput) {
     coverage.raw_calls_not_normalized = raw_coverage.raw_calls_not_normalized;
     coverage.raw_calls_not_normalized_inside_function =
         raw_coverage.raw_calls_not_normalized_inside_function;
+    coverage.source_export_eligible_methods_overlapping_raw_call_loss =
+        raw_coverage.source_export_eligible_methods_overlapping_raw_call_loss;
     coverage.raw_calls_not_normalized_outside_function =
         raw_coverage.raw_calls_not_normalized_outside_function;
     coverage.raw_calls_not_normalized_by_kind = raw_coverage.raw_calls_not_normalized_by_kind;
@@ -1610,7 +2051,7 @@ fn finalize_project_output(output: &mut ProfileOutput) {
             .then_with(|| left.kind.cmp(&right.kind))
     });
     samples.dedup();
-    samples.truncate(64);
+    samples.truncate(1024);
     coverage.raw_call_normalization_gap_samples = samples;
     coverage.normalized_calls_without_raw_span = raw_coverage.normalized_calls_without_raw_span;
     output.call_resolution_coverage = coverage;
@@ -1724,6 +2165,352 @@ fn apply_merged_declared_callback_costs(
 
 pub(crate) fn reapply_declared_callback_costs(output: &mut ProfileOutput) {
     apply_merged_declared_callback_costs(&output.fields, &output.methods, &mut output.calls);
+    apply_injected_state_callback_costs(&output.state_param_origin_records, &mut output.calls);
+}
+
+/// A state slot assigned from a constructor/method parameter is an injected
+/// dispatch boundary. Its implementation can vary outside the analyzed
+/// project, but one source call still invokes it at most once. Preserve that
+/// uncertainty as a parametric callback cost instead of requiring the test
+/// double or deployment implementation to be part of the current corpus.
+fn apply_injected_state_callback_costs(
+    origins: &[StateParamOriginRecord],
+    calls: &mut [CallRecord],
+) {
+    let injected = origins
+        .iter()
+        .map(|origin| (origin.owner.as_str(), origin.field.trim_start_matches('@')))
+        .collect::<BTreeSet<_>>();
+    let (time, space) = crate::syntax::parametric_call_complexity("callback_once")
+        .expect("callback_once is a built-in parametric cost");
+
+    for call in calls.iter_mut().filter(|call| {
+        call.state_receiver
+            && (call.known_time_complexity.is_none() || call.known_space_complexity.is_none())
+    }) {
+        let receiver = call
+            .receiver
+            .strip_prefix("self.")
+            .or_else(|| call.receiver.strip_prefix("this."))
+            .unwrap_or(&call.receiver)
+            .trim_start_matches('@')
+            .split('.')
+            .next()
+            .unwrap_or_default();
+        if !injected.contains(&(call.owner.as_str(), receiver)) {
+            continue;
+        }
+
+        call.callback_receiver = true;
+        call.known_time_complexity = Some(time.to_string());
+        call.known_space_complexity = Some(space.to_string());
+        call.complexity_provenance = Some("parametric_injected_state_contract".to_string());
+        call.complexity_bound_quality = Some("upper_bound_parametric_callback_once".to_string());
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
+}
+
+/// Price operations proven by a language adapter's normalized declarative
+/// record contract. This is deliberately language-neutral: adapters decide
+/// which constructs are records, their fields, and which class operations are
+/// constant; the shared join only matches those emitted facts.
+fn apply_generated_record_costs(
+    declarations: &[StructDeclaration],
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+) {
+    let source_languages = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+
+    for call in calls.iter_mut().filter(|call| {
+        call.known_time_complexity.is_none() || call.known_space_complexity.is_none()
+    }) {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let semantic_receiver = call.semantic_symbol.as_deref().and_then(|symbol| {
+            crate::syntax::normalized_behavior::behavior_for_name(language)?
+                .external_symbol_owner(symbol)
+        });
+        let receiver = call
+            .receiver_type
+            .as_deref()
+            .or(call.receiver_symbol.as_deref())
+            .or(semantic_receiver.as_deref())
+            .unwrap_or(call.receiver.as_str());
+        let matching_contracts = declarations
+            .iter()
+            .filter(|declaration| declaration.language == language)
+            .filter(|declaration| owner_name_matches(&declaration.class, receiver))
+            .filter(|declaration| {
+                declaration
+                    .fields
+                    .iter()
+                    .any(|field| field == &call.message)
+                    || (call.receiver_kind == "type"
+                        && declaration
+                            .constant_operations
+                            .iter()
+                            .any(|operation| operation == &call.message))
+            })
+            .map(|declaration| declaration.class.as_str())
+            .collect::<BTreeSet<_>>();
+        if matching_contracts.len() != 1 {
+            continue;
+        }
+
+        call.known_time_complexity = Some("O(1)".to_string());
+        call.known_space_complexity = Some("O(1)".to_string());
+        call.complexity_provenance = Some("generated_record_contract".to_string());
+        call.complexity_bound_quality =
+            Some("upper_bound_normalized_declaration_contract".to_string());
+        call.complexity_candidates = matching_contracts
+            .iter()
+            .map(|contract| (*contract).to_string())
+            .collect();
+        if call.receiver_symbol.is_none() {
+            call.receiver_symbol = matching_contracts
+                .iter()
+                .next()
+                .map(|contract| (*contract).to_string());
+            call.receiver_symbol_origin = call
+                .receiver_symbol
+                .as_ref()
+                .map(|_| "semantic_generated_record_contract".to_string());
+        }
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
+}
+
+pub(crate) fn reapply_generated_record_costs(output: &mut ProfileOutput) {
+    apply_generated_record_costs(
+        &output.struct_declarations,
+        &output.methods,
+        &mut output.calls,
+    );
+}
+
+pub(crate) fn reapply_generated_callable_costs(output: &mut ProfileOutput) {
+    let methods_by_id = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    // A resolver may already have proved the exact project target before a
+    // runtime/compiler symbol is available. Generated declarations are
+    // complete language-owned contracts, so preserve that stronger exact
+    // proof rather than requiring a second external-symbol-shaped join.
+    for call in output.calls.iter_mut().filter(|call| call.target.is_some()) {
+        let Some(method) = call
+            .target
+            .as_deref()
+            .and_then(|target| methods_by_id.get(target).copied())
+        else {
+            continue;
+        };
+        if !method.generated_declaration {
+            continue;
+        }
+        let Some(complexity) =
+            crate::syntax::normalized_behavior::behavior_for_name(&method.language).and_then(
+                |behavior| behavior.generated_callable_complexity(&method.raw_source, &method.name),
+            )
+        else {
+            continue;
+        };
+        call.known_time_complexity = Some(complexity.time.to_string());
+        call.known_space_complexity = Some(complexity.space.to_string());
+        call.complexity_provenance = Some("generated_callable_declaration".to_string());
+        call.complexity_bound_quality =
+            Some("upper_bound_normalized_declaration_contract".to_string());
+        call.complexity_candidates = vec![method.id.clone()];
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
+
+    let source_languages = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    for call in output.calls.iter_mut().filter(|call| {
+        call.target.is_none()
+            && call.semantic_symbol.is_some()
+            && (call.known_time_complexity.is_none() || call.known_space_complexity.is_none())
+    }) {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language) else {
+            continue;
+        };
+        let Some(owner) = call
+            .semantic_symbol
+            .as_deref()
+            .and_then(|symbol| behavior.external_symbol_owner(symbol))
+        else {
+            continue;
+        };
+        let candidates = output
+            .methods
+            .iter()
+            .filter(|method| method.language == language)
+            .filter(|method| {
+                method.owner == owner || method.symbol_owner.as_deref() == Some(owner.as_str())
+            })
+            .filter(|method| method.dispatch_name == call.message)
+            .filter_map(|method| {
+                behavior
+                    .generated_callable_complexity(&method.raw_source, &method.name)
+                    .map(|complexity| (method, complexity))
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() != 1 {
+            continue;
+        }
+        let (method, complexity) = candidates[0];
+        call.target = Some(method.id.clone());
+        call.kind = "resolved_call".to_string();
+        call.target_provenance = Some("semantic_generated_declaration".to_string());
+        call.external_symbol_scope = None;
+        call.known_time_complexity = Some(complexity.time.to_string());
+        call.known_space_complexity = Some(complexity.space.to_string());
+        call.complexity_provenance = Some("generated_callable_declaration".to_string());
+        call.complexity_bound_quality =
+            Some("upper_bound_normalized_declaration_contract".to_string());
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
+}
+
+/// Runtime evidence can close an otherwise unknown receiver to exact project
+/// declarations without furnishing compiler symbols. Keep the runtime-world
+/// boundary intact for ordinary bodies, but a language-owned generated
+/// declaration (reader/property/accessor) is already a complete normalized
+/// contract. Join a closed set only when *every* project alternative carries
+/// the same generated contract; no language-specific identity parsing occurs
+/// here.
+pub(crate) fn reapply_runtime_generated_candidate_costs(output: &mut ProfileOutput) {
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    for call in output.calls.iter_mut().filter(|call| {
+        call.target.is_none()
+            && call.consumer_closed_candidate_set
+            && !call.candidate_targets.is_empty()
+            && matches!(
+                call.candidate_reason.as_deref(),
+                Some("runtime_modeled_observed_candidate_set")
+                    | Some("runtime_modeled_mixed_candidate_set")
+            )
+    }) {
+        let candidate_methods = call
+            .candidate_targets
+            .iter()
+            .filter_map(|id| methods.get(id.as_str()).copied())
+            .collect::<Vec<_>>();
+        if candidate_methods.len() != call.candidate_targets.len() {
+            continue;
+        }
+        let complexities = candidate_methods
+            .iter()
+            .filter_map(|method| {
+                crate::syntax::normalized_behavior::behavior_for_name(&method.language)
+                    .and_then(|behavior| {
+                        behavior.generated_callable_complexity(&method.raw_source, &method.name)
+                    })
+                    .map(|complexity| (complexity.time.to_string(), complexity.space.to_string()))
+            })
+            .collect::<Vec<_>>();
+        if complexities.len() != candidate_methods.len() {
+            continue;
+        }
+        let Some((time, space)) = complexities.first().cloned() else {
+            continue;
+        };
+        if complexities
+            .iter()
+            .any(|complexity| complexity != &(time.clone(), space.clone()))
+        {
+            continue;
+        }
+
+        let mixed = call.candidate_reason.as_deref() == Some("runtime_modeled_mixed_candidate_set");
+        if mixed {
+            // The external side has already supplied a conservative upper
+            // bound. Generated accessor contracts are O(1), so retaining that
+            // existing bound is conservative for the full closed union.
+            if time != "O(1)"
+                || space != "O(1)"
+                || call.known_time_complexity.is_none()
+                || call.known_space_complexity.is_none()
+            {
+                continue;
+            }
+            call.complexity_provenance = Some(
+                "runtime_scip_modeled:mixed_project_external_candidate_max+generated_accessor"
+                    .to_string(),
+            );
+            call.complexity_bound_quality = Some("upper_bound_closed_candidate_max".to_string());
+        } else {
+            call.known_time_complexity = Some(time);
+            call.known_space_complexity = Some(space);
+            call.complexity_provenance =
+                Some("generated_callable_declaration_candidate_max".to_string());
+            call.complexity_bound_quality = Some("upper_bound_closed_candidate_max".to_string());
+        }
+        // A closed mixed set retains an external alternative even if its
+        // project-owned side happens to contain one generated declaration.
+        // Its max-bound is sound, but naming that declaration as the exact
+        // target would falsely erase the observed external member of the
+        // domain.
+        if !mixed && candidate_methods.len() == 1 {
+            let method = candidate_methods[0];
+            call.target = Some(method.id.clone());
+            call.kind = "resolved_call".to_string();
+            call.target_provenance = Some("runtime_unique_generated_declaration".to_string());
+            call.external_symbol_scope = None;
+            call.candidate_targets.clear();
+            call.candidate_reason = None;
+        }
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
+}
+
+pub(crate) fn reapply_direct_call_result_costs(output: &mut ProfileOutput) {
+    let mut by_dispatch: BTreeMap<(&str, &str, &str), Vec<&MethodRecord>> = BTreeMap::new();
+    for method in &output.methods {
+        let Some(owner) = method.symbol_owner.as_deref() else {
+            continue;
+        };
+        by_dispatch
+            .entry((owner, method.dispatch_name.as_str(), method.kind.as_str()))
+            .or_default()
+            .push(method);
+    }
+    resolve_direct_call_result_calls(
+        &output.methods,
+        &output.type_definitions,
+        &mut output.calls,
+        &by_dispatch,
+    );
 }
 
 /// Immutable lookup tables shared by proof annotation and coverage. The
@@ -2328,7 +3115,12 @@ fn inherited_target_ids(
     if call.constructor_target.is_some() {
         return BTreeSet::new();
     }
-    let start = if let Some(symbol) = call.receiver_symbol.as_deref() {
+    let behavior = crate::syntax::normalized_behavior::behavior_for_name(&source.language);
+    let start = if behavior
+        .is_some_and(|behavior| behavior.inherited_lookup_uses_source_owner(call.implicit_receiver))
+    {
+        Some(source.owner.clone())
+    } else if let Some(symbol) = call.receiver_symbol.as_deref() {
         Some(symbol.to_string())
     } else if let Some(receiver_type) = call.receiver_type.as_deref() {
         declared_dispatch_owner_name_from_type(receiver_type, source.language.as_str())
@@ -2430,6 +3222,10 @@ fn span_contains(outer: [usize; 4], inner: [usize; 4]) -> bool {
     (outer[0], outer[1]) <= (inner[0], inner[1]) && (inner[2], inner[3]) <= (outer[2], outer[3])
 }
 
+fn spans_overlap(left: [usize; 4], right: [usize; 4]) -> bool {
+    (left[0], left[1]) <= (right[2], right[3]) && (right[0], right[1]) <= (left[2], left[3])
+}
+
 /// Match calls only through an origin recorded during normalization. A
 /// normalized call can deliberately retain a callable-access span
 /// (`receiver.member`) rather than its parser invocation (`receiver.member()`).
@@ -2500,6 +3296,8 @@ fn resolve_project_calls(
     type_definitions: &[TypeDefinition],
     calls: &mut [CallRecord],
 ) {
+    apply_merged_alias_costs(methods, type_definitions, calls);
+    apply_static_direct_call_result_contracts(methods, calls);
     let source_languages = methods
         .iter()
         .map(|method| (method.id.as_str(), method.language.as_str()))
@@ -2520,6 +3318,28 @@ fn resolve_project_calls(
             .or_default()
             .push(method);
     }
+    // Some adapters can prove a fallback reconciliation key when declaration
+    // and call namespaces use different external coordinates. Bind only a
+    // unique key; collisions remain unresolved.
+    let mut by_reconciliation_key = BTreeMap::<(String, String, String), Vec<&MethodRecord>>::new();
+    for method in methods {
+        let Some(behavior) =
+            crate::syntax::normalized_behavior::behavior_for_name(&method.language)
+        else {
+            continue;
+        };
+        let Some(symbol) = method.lexical_symbol.as_deref() else {
+            continue;
+        };
+        let Some((scope, name)) = behavior.project_function_reconciliation_key(symbol) else {
+            continue;
+        };
+        by_reconciliation_key
+            .entry((method.language.clone(), scope, name))
+            .or_default()
+            .push(method);
+    }
+    resolve_relative_scoped_calls(calls, &by_lexical, &source_languages);
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
         let Some(symbol) = call.lexical_symbol.as_deref() else {
             continue;
@@ -2545,8 +3365,45 @@ fn resolve_project_calls(
         call.unresolved_reason = None;
     }
 
+    // Reconcile calls whose exact lexical coordinate did not match.
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        if matches!(
+            call.lexical_symbol_origin.as_deref(),
+            Some("explicit_import" | "function_local_import")
+        ) {
+            continue;
+        }
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language) else {
+            continue;
+        };
+        let Some(symbol) = call.lexical_symbol.as_deref() else {
+            continue;
+        };
+        let Some((scope, name)) = behavior.project_function_reconciliation_key(symbol) else {
+            continue;
+        };
+        let candidates = by_reconciliation_key
+            .get(&(language.to_string(), scope, name))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if let Some(candidate) = unique_call_candidate(candidates, call, Some(language)) {
+            call.target = Some(candidate.id.clone());
+            call.kind = if call.owner == candidate.owner {
+                "internal_call".to_string()
+            } else {
+                "resolved_call".to_string()
+            };
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+        }
+    }
+
     resolve_same_namespace_static_calls(methods, calls);
     resolve_same_namespace_declared_receiver_calls(methods, calls, &by_dispatch);
+    resolve_relative_type_receiver_calls(methods, calls, &source_languages);
 
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
         let Some(owner) = call.receiver_symbol.as_deref() else {
@@ -2582,13 +3439,483 @@ fn resolve_project_calls(
     }
 
     resolve_inherited_calls(owners, methods, calls);
+    resolve_fallback_lexical_calls(owners, methods, calls, &by_lexical, &source_languages);
 
+    annotate_project_candidate_sets(owners, methods, calls, &by_lexical, &by_dispatch);
     resolve_direct_call_result_calls(methods, type_definitions, calls, &by_dispatch);
     for call in calls.iter_mut().filter(|call| call.target.is_some()) {
         call.candidate_targets.clear();
         call.candidate_reason = None;
     }
-    annotate_project_candidate_sets(owners, methods, calls, &by_lexical, &by_dispatch);
+}
+
+/// Reuse an adapter's language-guaranteed return contract for a direct call
+/// that is immediately consumed as another call's receiver. This is the
+/// static counterpart to runtime result evidence: the shared join correlates
+/// normalized spans and CFG/DFG producer sets, while each adapter alone owns
+/// which native calls have a guaranteed return type. It never guesses a
+/// project method's return type or attempts to interpret source text.
+fn apply_static_direct_call_result_contracts(methods: &[MethodRecord], calls: &mut [CallRecord]) {
+    let source_languages = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+
+    loop {
+        let static_returns = calls
+            .iter()
+            .filter_map(|call| {
+                let language = source_languages.get(call.source.as_str()).copied()?;
+                let behavior = crate::syntax::normalized_behavior::behavior_for_name(language)?;
+                let receiver_type = call.receiver_type.as_deref();
+                let return_type = call
+                    .constructor_target
+                    .as_ref()
+                    .and_then(|_| {
+                        call.receiver_symbol
+                            .clone()
+                            .or_else(|| call.receiver_type.clone())
+                            .or_else(|| {
+                                (call.receiver_kind == "type").then(|| call.receiver.clone())
+                            })
+                    })
+                    .or_else(|| {
+                        behavior
+                            .static_argument_dependent_return_type(&call.message, &call.arguments)
+                    })
+                    .or_else(|| {
+                        call.implicit_receiver
+                            .then(|| behavior.known_return_type(&call.message))
+                            .flatten()
+                    })
+                    .or_else(|| behavior.static_return_type(&call.message, receiver_type))
+                    .or_else(|| {
+                        behavior.propagated_collection_return_type(&call.message, receiver_type)
+                    })?;
+                Some((
+                    (call.source.as_str(), call.path.as_str(), call.span),
+                    return_type,
+                ))
+            })
+            .fold(
+                BTreeMap::<(&str, &str, [usize; 4]), BTreeSet<String>>::new(),
+                |mut rows, (key, return_type)| {
+                    rows.entry(key).or_default().insert(return_type);
+                    rows
+                },
+            );
+        let mut updates = Vec::new();
+        for (index, call) in calls.iter().enumerate().filter(|(_, call)| {
+            (call.receiver_type.is_none() || !call.receiver_definition_call_spans.is_empty())
+                && (call.known_time_complexity.is_none() || call.known_space_complexity.is_none())
+        }) {
+            let receiver_spans = call
+                .receiver_call_span
+                .into_iter()
+                .chain(call.receiver_definition_call_spans.iter().copied())
+                .collect::<BTreeSet<_>>();
+            if receiver_spans.is_empty() {
+                continue;
+            }
+            let return_types = receiver_spans
+                .iter()
+                .map(|span| static_returns.get(&(call.source.as_str(), call.path.as_str(), *span)))
+                .collect::<Option<Vec<_>>>();
+            let Some(return_types) = return_types else {
+                continue;
+            };
+            let distinct = return_types
+                .into_iter()
+                .filter(|types| types.len() == 1)
+                .flat_map(|types| types.iter().cloned())
+                .collect::<BTreeSet<_>>();
+            if distinct.len() != 1 {
+                continue;
+            }
+            let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+                continue;
+            };
+            let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language)
+            else {
+                continue;
+            };
+            let mut receiver_type = distinct.into_iter().next().expect("one static return type");
+            if call.receiver_definition_sequence_projection.is_some() {
+                let Some(projected) =
+                    projected_sequence_result_type(behavior, &receiver_type, language)
+                else {
+                    continue;
+                };
+                receiver_type = projected;
+            }
+            let normalized = TypeExpr::parse(&receiver_type, language);
+            let complexity = behavior.call_complexity(&normalized, &call.message);
+            let parametric = complexity
+                .is_none()
+                .then(|| {
+                    behavior
+                        .parametric_call_cost(&normalized, &call.message)
+                        .and_then(|kind| crate::syntax::parametric_call_complexity(&kind))
+                })
+                .flatten();
+            if call.receiver_type.as_deref() == Some(receiver_type.as_str())
+                && complexity.is_none()
+                && parametric.is_none()
+            {
+                continue;
+            }
+            updates.push((index, receiver_type, complexity, parametric));
+        }
+        if updates.is_empty() {
+            break;
+        }
+        for (index, receiver_type, complexity, parametric) in updates {
+            let call = &mut calls[index];
+            call.receiver_type = Some(receiver_type);
+            call.receiver_type_origin = Some("static_call_result_contract".to_string());
+            if let Some(complexity) = complexity {
+                call.known_time_complexity = Some(complexity.time.to_string());
+                call.known_space_complexity = Some(complexity.space.to_string());
+                call.complexity_provenance = Some("static_call_result_contract".to_string());
+                call.complexity_bound_quality =
+                    Some("upper_bound_language_return_contract".to_string());
+                call.complexity_missing_kind = None;
+                call.unresolved_reason = None;
+                call.resolution_missing_proof = None;
+                call.empty_domain_cause = None;
+            } else if let Some((time, space)) = parametric {
+                call.callback_receiver = true;
+                call.known_time_complexity = Some(time.to_string());
+                call.known_space_complexity = Some(space.to_string());
+                call.complexity_provenance = Some("static_call_result_contract".to_string());
+                call.complexity_bound_quality =
+                    Some("upper_bound_language_return_contract".to_string());
+                call.complexity_missing_kind = None;
+                call.unresolved_reason = None;
+                call.resolution_missing_proof = None;
+                call.empty_domain_cause = None;
+            }
+        }
+    }
+}
+
+/// Join adapter-owned lexical type/module receiver candidates against exact
+/// project declarations. The language adapter supplies the candidate order;
+/// this shared resolver never invents a namespace and accepts a target only
+/// when the resulting declaration set is unique.
+fn resolve_relative_type_receiver_calls(
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+    source_languages: &BTreeMap<&str, &str>,
+) {
+    let mut by_owner_dispatch = BTreeMap::<(&str, &str, &str), Vec<&MethodRecord>>::new();
+    for method in methods {
+        by_owner_dispatch
+            .entry((
+                method.owner.as_str(),
+                method.dispatch_name.as_str(),
+                method.kind.as_str(),
+            ))
+            .or_default()
+            .push(method);
+    }
+    for call in calls.iter_mut().filter(|call| {
+        call.target.is_none()
+            && call.receiver_kind == "type"
+            && call.receiver_symbol.is_none()
+            && !call.receiver.is_empty()
+    }) {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language) else {
+            continue;
+        };
+        let dispatch = if call.constructor_target.is_some() {
+            "instance"
+        } else {
+            "class"
+        };
+        let message = call
+            .constructor_target
+            .as_deref()
+            .unwrap_or(call.message.as_str());
+        let mut resolved = None;
+        for owner in behavior.relative_type_receiver_candidates(&call.receiver, &call.owner) {
+            let candidates = by_owner_dispatch
+                .get(&(owner.as_str(), message, dispatch))
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|method| method.language == language)
+                .collect::<Vec<_>>();
+            if !candidates.is_empty() {
+                resolved = Some((owner, candidates));
+                break;
+            }
+        }
+        let Some((owner, candidates)) = resolved else {
+            continue;
+        };
+        call.receiver_symbol = Some(owner);
+        call.receiver_symbol_origin = Some("adapter_relative_type_receiver_lookup".to_string());
+        if let Some(candidate) = unique_call_candidate(&candidates, call, Some(language)) {
+            call.target = Some(candidate.id.clone());
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+        } else {
+            call.candidate_targets = candidates
+                .iter()
+                .map(|candidate| candidate.id.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            call.candidate_reason = Some("relative_type_receiver_candidate_set".to_string());
+            call.unresolved_reason =
+                Some("closed_project_candidate_set_requires_summary".to_string());
+            call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+        }
+    }
+}
+
+/// Continue adapter-owned unqualified lookup only after member and inheritance
+/// resolution failed. The shared resolver binds an exact declaration or keeps
+/// a closed candidate set; adapters supply only ordered lexical identities.
+fn resolve_fallback_lexical_calls(
+    owners: &[OwnerRecord],
+    methods: &[MethodRecord],
+    calls: &mut [CallRecord],
+    by_lexical: &BTreeMap<&str, Vec<&MethodRecord>>,
+    source_languages: &BTreeMap<&str, &str>,
+) {
+    let sources = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        if matches!(
+            call.lexical_symbol_origin.as_deref(),
+            Some("explicit_import" | "function_local_import")
+        ) {
+            continue;
+        }
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language) else {
+            continue;
+        };
+        let Some(source) = sources.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        // An ambiguous inherited member still hides namespace functions.
+        if !conservative_inherited_target_ids(owners, methods, call, source).is_empty() {
+            continue;
+        }
+        let namespace = call.symbol_namespace.as_deref().unwrap_or_default();
+        let mut resolved = None;
+        for symbol in
+            behavior.fallback_lexical_candidates(&call.message, namespace, call.implicit_receiver)
+        {
+            let candidates = by_lexical
+                .get(symbol.as_str())
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|method| method.language == language)
+                .collect::<Vec<_>>();
+            if !candidates.is_empty() {
+                resolved = Some((symbol, candidates));
+                break;
+            }
+        }
+        let Some((symbol, candidates)) = resolved else {
+            continue;
+        };
+        call.lexical_symbol = Some(symbol);
+        call.lexical_symbol_origin = Some("adapter_fallback_lexical_lookup".to_string());
+        if let Some(candidate) = unique_call_candidate(&candidates, call, Some(language)) {
+            call.target = Some(candidate.id.clone());
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+        } else {
+            call.candidate_targets = candidates
+                .iter()
+                .map(|candidate| candidate.id.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            call.candidate_reason = Some("fallback_lexical_candidate_set".to_string());
+            call.unresolved_reason =
+                Some("closed_project_candidate_set_requires_summary".to_string());
+            call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+        }
+    }
+}
+
+fn apply_merged_alias_costs(
+    methods: &[MethodRecord],
+    type_definitions: &[TypeDefinition],
+    calls: &mut [CallRecord],
+) {
+    let source_languages = methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let aliases = type_definitions
+        .iter()
+        .filter(|definition| definition.kind == "type_alias")
+        .filter_map(|definition| {
+            Some((
+                (definition.language.as_str(), definition.name.as_str()),
+                definition.target.as_deref()?,
+            ))
+        })
+        .fold(
+            BTreeMap::<(&str, &str), BTreeSet<&str>>::new(),
+            |mut aliases, (name, target)| {
+                aliases.entry(name).or_default().insert(target);
+                aliases
+            },
+        );
+    for call in calls
+        .iter_mut()
+        .filter(|call| call.known_time_complexity.is_none())
+    {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language) else {
+            continue;
+        };
+        let Some((alias_name, constructor_alias)) = behavior.merged_alias_call_name(
+            &call.message,
+            call.receiver_type.as_deref(),
+            call.implicit_receiver,
+            call.target.is_none(),
+        ) else {
+            continue;
+        };
+        let Some(targets) = aliases.get(&(language, alias_name.as_str())) else {
+            continue;
+        };
+        let normalized = targets
+            .iter()
+            .map(|target| TypeExpr::parse(target, language))
+            .collect::<BTreeSet<_>>();
+        if normalized.len() != 1 {
+            continue;
+        }
+        let receiver = normalized.into_iter().next().expect("one alias target");
+        let constructor_target = constructor_alias
+            .then(|| targets.iter().next().copied())
+            .flatten();
+        let known = constructor_target
+            .and_then(|target| behavior.intrinsic_call_complexity(None, target))
+            .or_else(|| behavior.call_complexity(&receiver, &call.message));
+        let parametric = known
+            .is_none()
+            .then(|| behavior.parametric_call_cost(&receiver, &call.message))
+            .flatten();
+        let parametric_complexity = parametric
+            .as_deref()
+            .and_then(crate::syntax::parametric_call_complexity);
+        let Some(time) = known
+            .map(|cost| cost.time)
+            .or_else(|| parametric_complexity.map(|cost| cost.0))
+        else {
+            continue;
+        };
+        let space = known
+            .map(|cost| cost.space)
+            .or_else(|| parametric_complexity.map(|cost| cost.1))
+            .expect("time and space contracts are paired");
+        call.known_time_complexity = Some(time.to_string());
+        call.known_space_complexity = Some(space.to_string());
+        call.complexity_provenance = Some(if known.is_some() {
+            "merged_project_type_alias_registry".to_string()
+        } else {
+            "parametric_merged_project_type_alias_contract".to_string()
+        });
+        call.complexity_bound_quality = Some(
+            known
+                .map(|_| "upper_bound_declared_receiver".to_string())
+                .or_else(|| {
+                    parametric
+                        .as_ref()
+                        .map(|kind| format!("upper_bound_parametric_{kind}"))
+                })
+                .expect("known or parametric cost"),
+        );
+        call.complexity_missing_kind = None;
+        call.unresolved_reason = None;
+        call.resolution_missing_proof = None;
+        call.empty_domain_cause = None;
+    }
+}
+
+/// Resolve adapter-provided relative qualified identities. The first scope
+/// containing project declarations wins; multiple declarations remain a
+/// closed candidate set for the complexity aggregator.
+fn resolve_relative_scoped_calls(
+    calls: &mut [CallRecord],
+    by_lexical: &BTreeMap<&str, Vec<&MethodRecord>>,
+    source_languages: &BTreeMap<&str, &str>,
+) {
+    for call in calls.iter_mut().filter(|call| call.target.is_none()) {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language) else {
+            continue;
+        };
+        let Some(symbol) = call.lexical_symbol.as_deref() else {
+            continue;
+        };
+        let namespace = call.symbol_namespace.as_deref().unwrap_or_default();
+        let Some((resolved_symbol, candidates)) = behavior
+            .relative_lexical_candidates(symbol, namespace)
+            .into_iter()
+            .find_map(|candidate| {
+                let declarations = by_lexical
+                    .get(candidate.as_str())
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|method| method.language == language)
+                    .collect::<Vec<_>>();
+                (!declarations.is_empty()).then_some((candidate, declarations))
+            })
+        else {
+            continue;
+        };
+        call.lexical_symbol = Some(resolved_symbol);
+        call.lexical_symbol_origin = Some("adapter_relative_lexical_lookup".to_string());
+        if let Some(candidate) = unique_call_candidate(&candidates, call, Some(language)) {
+            call.target = Some(candidate.id.clone());
+            call.kind = if call.owner == candidate.owner {
+                "internal_call".to_string()
+            } else {
+                "resolved_call".to_string()
+            };
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+        } else {
+            call.candidate_targets = candidates
+                .iter()
+                .map(|candidate| candidate.id.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            call.candidate_reason = Some("relative_lexical_candidate_set".to_string());
+            call.unresolved_reason =
+                Some("closed_project_candidate_set_requires_summary".to_string());
+            call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+        }
+    }
 }
 
 /// Bind an unqualified declared receiver type only when the merged project
@@ -2625,17 +3952,21 @@ fn resolve_same_namespace_declared_receiver_calls(
         if nominal.contains(['.', ':']) {
             continue;
         }
-        let expected_dot = format!("{namespace}.{nominal}");
-        let expected_scope = format!("{namespace}::{nominal}");
-        let candidates = [expected_dot.as_str(), expected_scope.as_str()]
+        // Declarations carry the canonical owner symbol built by
+        // `canonical_symbol_owner`, which normalizes the namespace separator to
+        // ".". Build the same form here so a cross-file receiver in the same
+        // namespace matches its type's methods (a raw "::ns" would never hit).
+        let canonical_namespace = namespace.replace("::", ".");
+        let expected = if canonical_namespace.is_empty() {
+            nominal.clone()
+        } else {
+            format!("{canonical_namespace}.{nominal}")
+        };
+        let candidates = by_dispatch
+            .get(&(expected.as_str(), call.message.as_str(), "instance"))
             .into_iter()
-            .flat_map(|owner| {
-                by_dispatch
-                    .get(&(owner, call.message.as_str(), "instance"))
-                    .into_iter()
-                    .flatten()
-                    .copied()
-            })
+            .flatten()
+            .copied()
             .filter(|method| method.language == source.language)
             .collect::<Vec<_>>();
         let Some(candidate) =
@@ -2670,6 +4001,11 @@ fn annotate_project_candidate_sets(
         let Some(source) = sources.get(call.source.as_str()).copied() else {
             continue;
         };
+        let Some(behavior) =
+            crate::syntax::normalized_behavior::behavior_for_name(&source.language)
+        else {
+            continue;
+        };
         let mut reason = None;
         let mut candidates = BTreeSet::new();
         if let Some(symbol) = call.lexical_symbol.as_deref() {
@@ -2680,7 +4016,10 @@ fn annotate_project_candidate_sets(
                     .flatten()
                     .filter(|method| method.language == source.language)
                     .filter(|method| {
-                        source.language != "java" || method.params.len() == call.argument_count
+                        behavior.project_call_candidate_compatible(
+                            call.argument_count,
+                            method.params.len(),
+                        )
                     })
                     .map(|method| method.id.clone()),
             );
@@ -2693,6 +4032,11 @@ fn annotate_project_candidate_sets(
                     .then_some(source.symbol_owner.as_deref())
                     .flatten()
             }) {
+                let excludes_self = call.constructor_target.is_some()
+                    && crate::syntax::Language::parse(&source.language).is_ok_and(|language| {
+                        crate::syntax::normalized_behavior::behavior(language)
+                            .constructor_delegation_excludes_self()
+                    });
                 let dispatch = if call.implicit_receiver {
                     source.kind.as_str()
                 } else if call.receiver_kind == "type" {
@@ -2706,8 +4050,12 @@ fn annotate_project_candidate_sets(
                         .into_iter()
                         .flatten()
                         .filter(|method| method.language == source.language)
+                        .filter(|method| !excludes_self || method.id != call.source)
                         .filter(|method| {
-                            source.language != "java" || method.params.len() == call.argument_count
+                            behavior.project_call_candidate_compatible(
+                                call.argument_count,
+                                method.params.len(),
+                            )
                         })
                         .map(|method| method.id.clone()),
                 );
@@ -2730,19 +4078,34 @@ fn unique_call_candidate<'a>(
     call: &CallRecord,
     source_language: Option<&str>,
 ) -> Option<&'a MethodRecord> {
-    if candidates.len() == 1 {
-        return Some(candidates[0]);
-    }
-    if source_language != Some("java") {
-        return None;
-    }
-    let arity = call.argument_count;
-    let matches = candidates
+    let excludes_self = call.constructor_target.is_some()
+        && source_language
+            .and_then(|language| crate::syntax::Language::parse(language).ok())
+            .is_some_and(|language| {
+                crate::syntax::normalized_behavior::behavior(language)
+                    .constructor_delegation_excludes_self()
+            });
+    let candidates = candidates
         .iter()
         .copied()
-        .filter(|candidate| candidate.params.len() == arity)
+        .filter(|candidate| !excludes_self || candidate.id != call.source)
         .collect::<Vec<_>>();
-    (matches.len() == 1).then(|| matches[0])
+    if candidates.len() == 1 {
+        return candidates.first().copied();
+    }
+    let behavior =
+        source_language.and_then(crate::syntax::normalized_behavior::behavior_for_name)?;
+    let compatible = candidates
+        .iter()
+        .copied()
+        .filter(|candidate| {
+            behavior.project_call_candidate_compatible(call.argument_count, candidate.params.len())
+        })
+        .collect::<Vec<_>>();
+    if compatible.len() == candidates.len() {
+        return None;
+    }
+    (compatible.len() == 1).then(|| compatible[0])
 }
 
 fn resolve_inherited_calls(
@@ -2761,13 +4124,8 @@ fn resolve_inherited_calls(
                 return None;
             }
             let source = sources.get(call.source.as_str()).copied()?;
-            // These adapters expose nominal inheritance or language-defined
-            // method promotion. Other languages keep the normalized edge facts
-            // for measurement until their dispatch rules have exact oracles.
-            if !matches!(
-                source.language.as_str(),
-                "java" | "csharp" | "python" | "go"
-            ) {
+            let behavior = crate::syntax::normalized_behavior::behavior_for_name(&source.language)?;
+            if !behavior.resolves_inherited_project_calls() {
                 return None;
             }
             let targets = conservative_inherited_target_ids(owners, methods, call, source);
@@ -2797,7 +4155,13 @@ fn conservative_inherited_target_ids(
     if call.constructor_target.is_some() {
         return BTreeSet::new();
     }
-    let start = if let Some(symbol) = call.receiver_symbol.as_deref() {
+    let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(&source.language)
+    else {
+        return BTreeSet::new();
+    };
+    let start = if behavior.inherited_lookup_uses_source_owner(call.implicit_receiver) {
+        Some(source.owner.clone())
+    } else if let Some(symbol) = call.receiver_symbol.as_deref() {
         Some(symbol.to_string())
     } else if let Some(receiver_type) = call.receiver_type.as_deref() {
         declared_dispatch_owner_name_from_type(receiver_type, source.language.as_str())
@@ -2823,8 +4187,67 @@ fn conservative_inherited_target_ids(
         if exact.len() == 1 {
             return exact.into_iter().next();
         }
-        if exact.len() > 1 || identity.contains(['.', ':']) {
+        if exact.len() > 1 {
             return None;
+        }
+        let by_name = owners
+            .iter()
+            .filter(|owner| owner.language == source.language && owner.name == identity)
+            .collect::<Vec<_>>();
+        if by_name.len() == 1 {
+            return by_name.into_iter().next();
+        }
+        if by_name.len() > 1 {
+            return None;
+        }
+        let normalized = owners
+            .iter()
+            .filter(|owner| owner.language == source.language)
+            .filter(|owner| {
+                behavior.inherited_owner_identity_matches(
+                    identity,
+                    &owner.name,
+                    owner.symbol.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if behavior.inherited_identity_prefers_specialization(identity) {
+            let specializations = normalized
+                .iter()
+                .copied()
+                .filter(|owner| owner.name != identity && owner.name.contains(['<', '[']))
+                .collect::<Vec<_>>();
+            if specializations.len() == 1 {
+                return specializations.into_iter().next();
+            }
+            if specializations.len() > 1 {
+                return None;
+            }
+        }
+        if normalized.len() == 1 {
+            return normalized.into_iter().next();
+        }
+        if normalized.len() > 1 {
+            return None;
+        }
+        if identity.contains(['.', ':']) {
+            // A package-qualified supertype (e.g. a Go embed `bytes.Buffer`)
+            // carries only the import-leaf `package.Type`, while the declaring
+            // owner's canonical symbol prefixes the namespace directory. Match
+            // the identity as that symbol's trailing `.package.Type` suffix,
+            // binding only a unique owner.
+            let suffix = format!(".{}", identity.replace("::", "."));
+            let qualified = owners
+                .iter()
+                .filter(|owner| owner.language == source.language)
+                .filter(|owner| {
+                    owner
+                        .symbol
+                        .as_deref()
+                        .is_some_and(|symbol| symbol.ends_with(&suffix))
+                })
+                .collect::<Vec<_>>();
+            return (qualified.len() == 1).then(|| qualified.into_iter().next().unwrap());
         }
         if let Some(namespace) =
             context
@@ -2852,11 +4275,7 @@ fn conservative_inherited_target_ids(
                 return None;
             }
         }
-        let by_name = owners
-            .iter()
-            .filter(|owner| owner.language == source.language && owner.name == identity)
-            .collect::<Vec<_>>();
-        (by_name.len() == 1).then(|| by_name[0])
+        None
     };
 
     let Some(start_owner) = resolve_owner(&start, None) else {
@@ -2899,7 +4318,7 @@ fn conservative_inherited_target_ids(
             })
             .filter(|method| method.dispatch_name == call.message && method.kind == dispatch)
             .filter(|method| {
-                source.language != "java" || method.params.len() == call.argument_count
+                behavior.project_call_candidate_compatible(call.argument_count, method.params.len())
             })
             .map(|method| method.id.clone())
             .collect::<BTreeSet<_>>();
@@ -2923,45 +4342,36 @@ fn resolve_same_namespace_static_calls(methods: &[MethodRecord], calls: &mut [Ca
         .iter()
         .map(|method| (method.id.as_str(), method.language.as_str()))
         .collect::<BTreeMap<_, _>>();
-    let mut candidates = BTreeMap::<(String, String, String), Vec<&MethodRecord>>::new();
-    for method in methods
-        .iter()
-        .filter(|method| method.language == "java" && method.kind == "class")
-    {
-        let Some(symbol_owner) = method.symbol_owner.as_deref() else {
-            continue;
-        };
-        let Some((namespace, owner)) = symbol_owner.rsplit_once('.') else {
-            continue;
-        };
-        candidates
-            .entry((
-                namespace.to_string(),
-                owner.to_string(),
-                method.dispatch_name.clone(),
-            ))
-            .or_default()
-            .push(method);
-    }
     for call in calls.iter_mut().filter(|call| call.target.is_none()) {
-        if source_languages.get(call.source.as_str()).copied() != Some("java")
-            || call.receiver_binding_kind != "unbound"
-            || call.receiver.contains(['.', ':', '(', ')', '[', ']'])
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Some(behavior) = crate::syntax::normalized_behavior::behavior_for_name(language) else {
+            continue;
+        };
+        if call.receiver_binding_kind != "unbound"
+            || !behavior.unbound_receiver_may_name_project_type(&call.receiver)
         {
             continue;
         }
         let Some(namespace) = call.symbol_namespace.as_deref() else {
             continue;
         };
-        let matches = candidates
-            .get(&(
-                namespace.to_string(),
-                call.receiver.clone(),
-                call.message.clone(),
-            ))
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let Some(candidate) = unique_call_candidate(matches, call, Some("java")) else {
+        let matches = methods
+            .iter()
+            .filter(|method| method.language == language && method.kind == "class")
+            .filter(|method| method.dispatch_name == call.message)
+            .filter(|method| {
+                method.symbol_owner.as_deref().is_some_and(|symbol_owner| {
+                    symbol_owner
+                        .rsplit_once('.')
+                        .is_some_and(|(owner_namespace, owner)| {
+                            owner_namespace == namespace && owner == call.receiver
+                        })
+                })
+            })
+            .collect::<Vec<_>>();
+        let Some(candidate) = unique_call_candidate(&matches, call, Some(language)) else {
             continue;
         };
         call.target = Some(candidate.id.clone());
@@ -3020,17 +4430,24 @@ fn resolve_direct_call_result_calls(
         let inner_targets = calls
             .iter()
             .filter_map(|call| {
-                Some((
+                let targets = call
+                    .target
+                    .as_deref()
+                    .into_iter()
+                    .chain(call.candidate_targets.iter().map(String::as_str))
+                    .collect::<BTreeSet<_>>();
+                (!targets.is_empty()).then_some((
                     (call.source.as_str(), call.path.as_str(), call.span),
-                    call.target.as_deref()?,
+                    targets,
                 ))
             })
             .collect::<BTreeMap<_, _>>();
         let mut resolved = Vec::new();
+        let mut costed = Vec::new();
         for (index, call) in calls
             .iter()
             .enumerate()
-            .filter(|(_, call)| call.target.is_none())
+            .filter(|(_, call)| call.target.is_none() && call.known_time_complexity.is_none())
         {
             let receiver_spans = call
                 .receiver_call_span
@@ -3040,27 +4457,90 @@ fn resolve_direct_call_result_calls(
             if receiver_spans.is_empty() {
                 continue;
             }
-            let producer_facts = receiver_spans
-                .iter()
-                .filter_map(|receiver_span| {
-                    let inner_target = inner_targets.get(&(
-                        call.source.as_str(),
-                        call.path.as_str(),
-                        *receiver_span,
-                    ))?;
-                    let inner_method = methods_by_id.get(inner_target).copied()?;
-                    let return_fact = return_facts.get(&(
+            let mut producer_facts = Vec::new();
+            let mut producer_set_complete = true;
+            for receiver_span in &receiver_spans {
+                let Some(candidate_targets) =
+                    inner_targets.get(&(call.source.as_str(), call.path.as_str(), *receiver_span))
+                else {
+                    producer_set_complete = false;
+                    break;
+                };
+                for inner_target in candidate_targets {
+                    let Some(inner_method) = methods_by_id.get(inner_target).copied() else {
+                        producer_set_complete = false;
+                        break;
+                    };
+                    let Some(return_fact) = return_facts.get(&(
                         inner_method.language.as_str(),
                         inner_method.path.as_str(),
                         inner_method.owner.as_str(),
                         inner_method.name.as_str(),
                         inner_method.line,
-                    ))?;
-                    Some((inner_method, *return_fact))
-                })
-                .collect::<Vec<_>>();
-            if producer_facts.len() != receiver_spans.len() {
+                    )) else {
+                        producer_set_complete = false;
+                        break;
+                    };
+                    producer_facts.push((inner_method, *return_fact));
+                }
+                if !producer_set_complete {
+                    break;
+                }
+            }
+            if !producer_set_complete || producer_facts.is_empty() {
                 continue;
+            }
+            let return_types = producer_facts
+                .iter()
+                .filter_map(|(_, fact)| fact.return_type.clone())
+                .collect::<BTreeSet<_>>();
+            if return_types.len() == 1
+                && producer_facts
+                    .iter()
+                    .all(|(_, fact)| fact.return_type.is_some())
+            {
+                let receiver_type = return_types.into_iter().next().expect("one return type");
+                let Some(source) = methods_by_id.get(call.source.as_str()).copied() else {
+                    continue;
+                };
+                let Ok(language) = crate::syntax::Language::parse(&source.language) else {
+                    continue;
+                };
+                let behavior = crate::syntax::normalized_behavior::behavior(language);
+                if let Some(complexity) = behavior.call_complexity(&receiver_type, &call.message) {
+                    costed.push((index, receiver_type, complexity));
+                    continue;
+                }
+                let parametric_costs = producer_facts
+                    .iter()
+                    .filter_map(|(method, fact)| {
+                        let behavior = crate::syntax::normalized_behavior::behavior_for_name(
+                            &method.language,
+                        )?;
+                        behavior.call_result_parametric_cost(fact.return_type.as_ref()?)
+                    })
+                    .collect::<Vec<_>>();
+                let unique_parametric_costs =
+                    parametric_costs.iter().cloned().collect::<BTreeSet<_>>();
+                if parametric_costs.len() == producer_facts.len()
+                    && unique_parametric_costs.len() == 1
+                {
+                    let kind = unique_parametric_costs
+                        .into_iter()
+                        .next()
+                        .expect("one parametric result cost");
+                    if let Some((time, space)) = crate::syntax::parametric_call_complexity(&kind) {
+                        costed.push((
+                            index,
+                            receiver_type,
+                            crate::syntax::normalized_behavior::NormalizedCallComplexity {
+                                time,
+                                space,
+                            },
+                        ));
+                        continue;
+                    }
+                }
             }
             let symbols = producer_facts
                 .iter()
@@ -3110,8 +4590,21 @@ fn resolve_direct_call_result_calls(
                 resolved.push((index, candidate.id.clone(), receiver_symbol));
             }
         }
-        if resolved.is_empty() {
+        if resolved.is_empty() && costed.is_empty() {
             break;
+        }
+        for (index, receiver_type, complexity) in costed {
+            let call = &mut calls[index];
+            call.receiver_type = Some(receiver_type.to_string());
+            call.receiver_type_origin = Some("declared_call_result_candidate_join".to_string());
+            call.known_time_complexity = Some(complexity.time.to_string());
+            call.known_space_complexity = Some(complexity.space.to_string());
+            call.complexity_provenance = Some("declared_call_result_candidate_join".to_string());
+            call.complexity_bound_quality = Some("upper_bound_closed_return_type_join".to_string());
+            call.complexity_missing_kind = None;
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            call.empty_domain_cause = None;
         }
         for (index, target, receiver_symbol) in resolved {
             let call = &mut calls[index];
@@ -3151,10 +4644,24 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
             )
         })
         .collect::<BTreeMap<_, _>>();
-    document
+    let effects = document
+        .node_effects
+        .iter()
+        .map(|effect| (effect.node_id.as_str(), effect))
+        .collect::<BTreeMap<_, _>>();
+    let callback_bindings = document.callback_bindings.iter().fold(
+        BTreeMap::<(&str, &str), Vec<_>>::new(),
+        |mut rows, binding| {
+            rows.entry((binding.node_id.as_str(), binding.place_id.as_str()))
+                .or_default()
+                .push(binding);
+            rows
+        },
+    );
+    let mut rows = document
         .flow_types
         .iter()
-        .filter_map(|fact| {
+        .flat_map(|fact| {
             let place = places.get(fact.place_id.as_str())?;
             let node = nodes.get(fact.node_id.as_str())?;
             let resolved_types = fact
@@ -3162,26 +4669,528 @@ fn extract_flow_local_types(document: &Document) -> Vec<serde_json::Value> {
                 .iter()
                 .filter_map(|hint| TypeExpr::from_flow_hint(hint, document.language.as_str()))
                 .collect::<BTreeSet<_>>();
-            Some(json!({
-                "file": document.file,
-                "function": fact.function,
-                "owner": fact.owner,
-                "name": place.name,
-                "place_id": fact.place_id,
-                "node_id": fact.node_id,
-                "line": node.line,
-                "span": node.span,
-                "types": fact.types,
-                "resolved_types": resolved_types,
-                "complete": fact.complete,
-                "reaching_definitions": definitions
-                    .get(&(fact.node_id.as_str(), fact.place_id.as_str()))
-                    .cloned()
-                    .cloned()
-                    .unwrap_or_default(),
+            let reaching = definitions
+                .get(&(fact.node_id.as_str(), fact.place_id.as_str()))
+                .cloned()
+                .cloned()
+                .unwrap_or_default();
+            let definition_call_sources = reaching
+                .iter()
+                .filter_map(|definition| {
+                    let effect = effects.get(definition.as_str())?;
+                    effect
+                        .write_call_source_sets
+                        .get(&fact.place_id)
+                        .cloned()
+                        .or_else(|| {
+                            effect
+                                .write_call_sources
+                                .get(&fact.place_id)
+                                .copied()
+                                .map(|span| vec![span])
+                        })
+                        .map(|spans| (definition.clone(), spans))
+                })
+                .collect::<BTreeMap<_, _>>();
+            let definition_sequence_projections = reaching
+                .iter()
+                .filter_map(|definition| {
+                    let effect = effects.get(definition.as_str())?;
+                    effect
+                        .write_sequence_projections
+                        .get(&fact.place_id)
+                        .copied()
+                        .map(|position| (definition.clone(), position))
+                })
+                .collect::<BTreeMap<_, _>>();
+            let bindings = callback_bindings
+                .get(&(fact.node_id.as_str(), fact.place_id.as_str()))
+                .cloned()
+                .unwrap_or_default();
+            let rows = if bindings.is_empty() {
+                vec![(fact.node_id.clone(), node.span, None)]
+            } else {
+                bindings
+                    .into_iter()
+                    .map(|binding| {
+                        (
+                            format!(
+                                "{}:callback-binding:{}:{}:{}:{}",
+                                binding.node_id,
+                                binding.span[0],
+                                binding.span[1],
+                                binding.position,
+                                place.name
+                            ),
+                            binding.span,
+                            Some(binding.position),
+                        )
+                    })
+                    .collect()
+            };
+            Some(rows.into_iter().map(move |(node_id, span, position)| {
+                let callback_definition = position.is_some();
+                json!({
+                    "file": document.file,
+                    "function": fact.function,
+                    "owner": fact.owner,
+                    "name": place.name,
+                    "place_id": fact.place_id,
+                    "node_id": node_id,
+                    "line": span[0],
+                    "span": span,
+                    "types": fact.types,
+                    "resolved_types": resolved_types,
+                    "complete": fact.complete,
+                    // A callback parameter is a fresh definition for its
+                    // normalized callback region. Reusing the enclosing CFG
+                    // node's reaching set leaks an earlier same-named local
+                    // or a sibling callback binding into this scope.
+                    "reaching_definitions": if callback_definition {
+                        Vec::<String>::new()
+                    } else {
+                        reaching.clone()
+                    },
+                    "definition_call_sources": if callback_definition {
+                        BTreeMap::<String, Vec<[usize; 4]>>::new()
+                    } else {
+                        definition_call_sources.clone()
+                    },
+                    "definition_sequence_projections": if callback_definition {
+                        BTreeMap::<String, usize>::new()
+                    } else {
+                        definition_sequence_projections.clone()
+                    },
+                    "callback_binding_position": position,
+                })
             }))
         })
+        .flatten()
+        .collect::<Vec<_>>();
+    let existing = document
+        .flow_types
+        .iter()
+        .map(|flow| (flow.node_id.clone(), flow.place_id.clone()))
+        .collect::<BTreeSet<_>>();
+    for binding in &document.callback_bindings {
+        if existing.contains(&(binding.node_id.clone(), binding.place_id.clone())) {
+            continue;
+        }
+        let Some(place) = places.get(binding.place_id.as_str()) else {
+            continue;
+        };
+        if !nodes.contains_key(binding.node_id.as_str()) {
+            continue;
+        }
+        rows.push(json!({
+            "file": document.file,
+            "function": binding.function,
+            "owner": binding.owner,
+            "name": place.name,
+            "place_id": binding.place_id,
+            "node_id": format!(
+                "{}:callback-binding:{}:{}:{}:{}",
+                binding.node_id,
+                binding.span[0],
+                binding.span[1],
+                binding.position,
+                place.name
+            ),
+            "line": binding.span[0],
+            "span": binding.span,
+            "types": [],
+            "resolved_types": [],
+            "complete": false,
+            "reaching_definitions": [],
+            "definition_call_sources": {},
+            "definition_sequence_projections": {},
+            "callback_binding_position": binding.position,
+        }));
+    }
+    rows
+}
+
+/// Reduce normalized CFG/DFG facts to the opaque source anchors a runtime
+/// collector needs. This deliberately carries no source-language expression
+/// or flow rule: the collector only records a value when this plan says that
+/// FactMine will consume it.
+fn extract_runtime_value_capture_sites(
+    document: &Document,
+    flow_local_types: &[serde_json::Value],
+    calls: &[CallRecord],
+) -> (Vec<RuntimeValueCaptureSite>, Vec<RuntimeValueCaptureSite>) {
+    let mut result_spans = BTreeSet::new();
+    for row in flow_local_types {
+        for span in row
+            .get("definition_call_sources")
+            .and_then(serde_json::Value::as_object)
+            .into_iter()
+            .flat_map(|sources| sources.values())
+            .flat_map(|value| {
+                serde_json::from_value::<Vec<[usize; 4]>>(value.clone())
+                    .ok()
+                    .or_else(|| {
+                        serde_json::from_value::<[usize; 4]>(value.clone())
+                            .ok()
+                            .map(|span| vec![span])
+                    })
+                    .unwrap_or_default()
+            })
+        {
+            result_spans.insert(span);
+        }
+    }
+    // A callback or other compound expression may normalize to one CFG node
+    // even though it contains `value = call(); consume(value)`. Reaching
+    // definitions describe the state on entry to that node, so the ordinary
+    // cross-node reduction above cannot see this intra-node producer. The
+    // normalized effect already records both the exact producer span and the
+    // fact that the written place is read in the same node; retain that
+    // demand without teaching the runtime collector source-flow semantics.
+    for effect in &document.node_effects {
+        for read in &effect.reads {
+            if let Some(span) = effect.write_call_sources.get(read) {
+                result_spans.insert(*span);
+            }
+            if let Some(spans) = effect.write_call_source_sets.get(read) {
+                result_spans.extend(spans.iter().copied());
+            }
+        }
+    }
+    // Direct chained calls have no named local definition, but the normalized
+    // receiver projection proves that their result is immediately consumed.
+    // Named receivers are already covered by the CFG/DFG definition sources
+    // above; duplicating every receiver-definition projection here would make
+    // the runtime plan pay for the same evidence twice.
+    for call in calls {
+        if let Some(span) = call.receiver_call_span {
+            result_spans.insert(span);
+        }
+    }
+
+    let result_sites = result_spans
+        .into_iter()
+        .flat_map(|span| runtime_value_capture_sites_for_span(document, calls, span))
+        .collect();
+    let receiver_sites = document
+        .call_sites
+        .iter()
+        .filter(|call| call.block)
+        .flat_map(|call| runtime_value_capture_sites_for_span(document, calls, call.span))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    (result_sites, receiver_sites)
+}
+
+fn runtime_value_capture_sites_for_span(
+    document: &Document,
+    calls: &[CallRecord],
+    span: [usize; 4],
+) -> Vec<RuntimeValueCaptureSite> {
+    let selectors = calls
+        .iter()
+        .filter(|call| call.path == document.file && call.span == span)
+        .map(|call| call.message.clone())
+        .collect::<BTreeSet<_>>();
+    let selectors = if selectors.is_empty() {
+        vec![None]
+    } else {
+        selectors.into_iter().map(Some).collect()
+    };
+    selectors
+        .into_iter()
+        .map(|selector| RuntimeValueCaptureSite {
+            path: document.file.clone(),
+            span,
+            activation_span: runtime_activation_span(document, span),
+            selector,
+        })
         .collect()
+}
+
+/// Runtime target observation is only useful when static resolution left the
+/// normalized call without an exact target, semantic identity, or intrinsic
+/// cost. Keeping that filter in FactMine prevents a tracer from paying a
+/// per-call synchronization cost for facts the static profile has already
+/// proven.
+fn runtime_call_capture_sites(
+    calls: &[CallRecord],
+    document: Option<&Document>,
+) -> Vec<RuntimeValueCaptureSite> {
+    calls
+        .iter()
+        .filter(|call| {
+            call.target.is_none()
+                && call.semantic_symbol.is_none()
+                && call.known_time_complexity.is_none()
+                && call.known_space_complexity.is_none()
+        })
+        .map(|call| RuntimeValueCaptureSite {
+            path: call.path.clone(),
+            span: call.span,
+            activation_span: document
+                .and_then(|document| runtime_activation_span(document, call.span)),
+            selector: Some(call.message.clone()),
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Recompute runtime target demands after SCIP, semantic environments, and
+/// complexity summaries have enriched the final call set. A trace plan built
+/// from pre-enrichment calls would ask collectors to observe identities and
+/// values that the static pipeline has already proven.
+pub fn refresh_runtime_call_sites(output: &mut ProfileOutput) {
+    let activation_spans = output
+        .runtime_call_sites
+        .iter()
+        .map(|site| {
+            (
+                (site.path.clone(), site.span, site.selector.clone()),
+                site.activation_span,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    output.runtime_call_sites = runtime_call_capture_sites(&output.calls, None);
+    for site in &mut output.runtime_call_sites {
+        site.activation_span = activation_spans
+            .get(&(site.path.clone(), site.span, site.selector.clone()))
+            .copied()
+            .flatten();
+    }
+}
+
+fn runtime_activation_span(document: &Document, capture: [usize; 4]) -> Option<[usize; 4]> {
+    let statements = document
+        .local_methods
+        .iter()
+        .flat_map(|method| &method.statements)
+        .filter(|statement| span_contains(statement.span, capture))
+        .collect::<Vec<_>>();
+    let mut preceding = Vec::new();
+    for method in &document.local_methods {
+        collect_preceding_enclosing_spans(&method.node, capture, &mut preceding);
+    }
+    if let Some(span) = preceding.into_iter().min_by_key(|span| {
+        (
+            span[2].saturating_sub(span[0]),
+            span[3].saturating_sub(span[1]),
+        )
+    }) {
+        return Some(span);
+    }
+
+    if let Some(statement) = statements
+        .iter()
+        .filter(|statement| statement.span[0] < capture[0])
+        .min_by_key(|statement| {
+            (
+                statement.span[2].saturating_sub(statement.span[0]),
+                statement.span[3].saturating_sub(statement.span[1]),
+            )
+        })
+    {
+        return Some(statement.span);
+    }
+    // When a normalized statement starts on the capture line, a provider can
+    // activate there; method/scope ancestors must not shift the generic
+    // execution region to an unrelated earlier line.
+    if !statements.is_empty() {
+        return Some(capture);
+    }
+
+    document
+        .control_flow_nodes
+        .iter()
+        .filter(|node| !matches!(node.kind.as_str(), "entry" | "exit"))
+        .filter(|node| span_contains(node.span, capture))
+        .min_by_key(|node| {
+            (
+                node.span[2].saturating_sub(node.span[0]),
+                node.span[3].saturating_sub(node.span[1]),
+            )
+        })
+        .map(|node| node.span)
+}
+
+fn collect_preceding_enclosing_spans(
+    node: &crate::ast::Node,
+    capture: [usize; 4],
+    spans: &mut Vec<[usize; 4]>,
+) {
+    let node_span = [
+        node.first_lineno,
+        node.first_column,
+        node.last_lineno,
+        node.last_column,
+    ];
+    if !span_contains(node_span, capture) {
+        return;
+    }
+    if node_span[0] < capture[0]
+        && !matches!(
+            node.r#type.as_str(),
+            "SCOPE" | "BLOCK" | "DEFN" | "DEFS" | "CLASS" | "MODULE"
+        )
+    {
+        spans.push(node_span);
+    }
+    for child in node.children.iter().filter_map(crate::ast::node) {
+        collect_preceding_enclosing_spans(child, capture, spans);
+    }
+}
+
+/// Convert adapter-recognized capability predicates into opaque, stable
+/// profile facts. This walker deliberately knows only the normalized `IF` /
+/// `UNLESS` child layout; native predicate spelling remains behind the
+/// `NormalizedLanguageBehavior` boundary.
+fn extract_runtime_capability_guards(
+    root: &crate::ast::Node,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    calls: &[CallRecord],
+) -> Vec<RuntimeCapabilityGuard> {
+    fn normalized_span(node: &crate::ast::Node) -> [usize; 4] {
+        [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ]
+    }
+
+    fn visit(
+        node: &crate::ast::Node,
+        behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+        calls: &[CallRecord],
+        guards: &mut BTreeSet<RuntimeCapabilityGuard>,
+    ) {
+        if matches!(node.r#type.as_str(), "IF" | "UNLESS") {
+            if let Some(condition) = node.children.first().and_then(crate::ast::node) {
+                if let Some(capability) = behavior.runtime_capability_guard(condition) {
+                    let condition_span = normalized_span(condition);
+                    let true_span = node
+                        .children
+                        .get(1)
+                        .and_then(crate::ast::node)
+                        .map(normalized_span);
+                    let false_span = node
+                        .children
+                        .get(2)
+                        .and_then(crate::ast::node)
+                        .map(normalized_span);
+                    let (member_available_span, member_unavailable_span) =
+                        if node.r#type == "UNLESS" {
+                            (false_span, true_span)
+                        } else {
+                            (true_span, false_span)
+                        };
+                    for condition_call in calls.iter().filter(|call| {
+                        call.span == condition_span && call.receiver == capability.subject
+                    }) {
+                        guards.insert(RuntimeCapabilityGuard {
+                            source: condition_call.source.clone(),
+                            subject: capability.subject.clone(),
+                            member: capability.member.clone(),
+                            condition_call_id: condition_call.id.clone(),
+                            condition_span,
+                            member_available_span,
+                            member_unavailable_span,
+                        });
+                    }
+                }
+            }
+        }
+        for child in node.children.iter().filter_map(crate::ast::node) {
+            visit(child, behavior, calls, guards);
+        }
+    }
+
+    let mut guards = BTreeSet::new();
+    visit(root, behavior, calls, &mut guards);
+    guards.into_iter().collect()
+}
+
+/// Extract adapter-recognized bare-value branch conditions into an opaque,
+/// language-neutral CFG fact. The adapter decides which source condition has
+/// native truthiness semantics; this shared pass associates it only with the
+/// exact enclosing method and selected truthy branch span.
+fn extract_runtime_truthiness_guards(
+    root: &crate::ast::Node,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    calls: &[CallRecord],
+) -> Vec<RuntimeTruthinessGuard> {
+    fn normalized_span(node: &crate::ast::Node) -> [usize; 4] {
+        [
+            node.first_lineno,
+            node.first_column,
+            node.last_lineno,
+            node.last_column,
+        ]
+    }
+
+    fn visit(
+        node: &crate::ast::Node,
+        behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+        calls: &[CallRecord],
+        guards: &mut BTreeSet<RuntimeTruthinessGuard>,
+    ) {
+        if matches!(node.r#type.as_str(), "IF" | "UNLESS") {
+            if let Some(condition) = node.children.first().and_then(crate::ast::node) {
+                let mut truthy_subjects = Vec::new();
+                collect_truthy_subjects(condition, behavior, &mut truthy_subjects);
+                for truthiness in truthy_subjects {
+                    let body_span = node
+                        .children
+                        .get(if node.r#type == "UNLESS" { 2 } else { 1 })
+                        .and_then(crate::ast::node)
+                        .map(normalized_span);
+                    let node_span = normalized_span(node);
+                    let sources = calls
+                        .iter()
+                        .filter(|call| span_contains(node_span, call.span))
+                        .map(|call| call.source.clone())
+                        .collect::<BTreeSet<_>>();
+                    for source in sources {
+                        guards.insert(RuntimeTruthinessGuard {
+                            source,
+                            subject: truthiness.subject.clone(),
+                            condition_span: normalized_span(condition),
+                            truthy_span: body_span,
+                        });
+                    }
+                }
+            }
+        }
+        for child in node.children.iter().filter_map(crate::ast::node) {
+            visit(child, behavior, calls, guards);
+        }
+    }
+
+    fn collect_truthy_subjects(
+        condition: &crate::ast::Node,
+        behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+        subjects: &mut Vec<crate::syntax::normalized_behavior::NormalizedRuntimeTruthinessGuard>,
+    ) {
+        if let Some(subject) = behavior.runtime_truthiness_guard(condition) {
+            subjects.push(subject);
+            return;
+        }
+        // A true normalized conjunction proves every operand truthy. An OR,
+        // negation, comparison, or arbitrary call does not. This is a generic
+        // Boolean fact over normalized AST roles; adapters still decide which
+        // leaf spellings carry native truthiness semantics.
+        if condition.r#type == "AND" {
+            for child in condition.children.iter().filter_map(crate::ast::node) {
+                collect_truthy_subjects(child, behavior, subjects);
+            }
+        }
+    }
+
+    let mut guards = BTreeSet::new();
+    visit(root, behavior, calls, &mut guards);
+    guards.into_iter().collect()
 }
 
 fn extract_type_dependencies(
@@ -3582,79 +5591,6 @@ fn header_before_body_brace(header: &str) -> &str {
     header
 }
 
-fn is_param_untraceable(sig_text: &str, param: &str) -> bool {
-    let bytes = sig_text.as_bytes();
-    let p_bytes = param.as_bytes();
-    if p_bytes.is_empty() {
-        return false;
-    }
-    let mut pos = 0;
-    while let Some(idx) = sig_text[pos..].find(param) {
-        let abs_idx = pos + idx;
-        pos = abs_idx + param.len();
-
-        if abs_idx + param.len() < bytes.len() {
-            let next_char = bytes[abs_idx + param.len()] as char;
-            if next_char.is_alphanumeric() || next_char == '_' {
-                continue;
-            }
-        }
-
-        if abs_idx > 0 {
-            let prev1 = bytes[abs_idx - 1] as char;
-            if prev1 == '*' {
-                if abs_idx > 1 && bytes[abs_idx - 2] as char == '*' {
-                    if abs_idx > 2 {
-                        let prev3 = bytes[abs_idx - 3] as char;
-                        if !prev3.is_alphanumeric() && prev3 != '_' {
-                            return true;
-                        }
-                    } else {
-                        return true;
-                    }
-                } else {
-                    if abs_idx > 1 {
-                        let prev2 = bytes[abs_idx - 2] as char;
-                        if !prev2.is_alphanumeric() && prev2 != '_' {
-                            return true;
-                        }
-                    } else {
-                        return true;
-                    }
-                }
-            } else if prev1 == '&' {
-                if abs_idx > 1 {
-                    let prev2 = bytes[abs_idx - 2] as char;
-                    if !prev2.is_alphanumeric() && prev2 != '_' {
-                        return true;
-                    }
-                } else {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-fn extract_untraceable_params(
-    lines: &[String],
-    fn_def: &syntax::FunctionDef,
-    language: &str,
-) -> Vec<String> {
-    if language != "ruby" {
-        return Vec::new();
-    }
-    let sig_text = get_def_header(lines, fn_def.line);
-    let mut untraceable = Vec::new();
-    for param in &fn_def.params {
-        if is_param_untraceable(&sig_text, param) {
-            untraceable.push(param.clone());
-        }
-    }
-    untraceable
-}
-
 fn extract_methods(
     lines: &[String],
     document: &Document,
@@ -3681,6 +5617,14 @@ fn extract_methods(
             let complexity = document
                 .local_complexity_scores
                 .get(&format!("{}#{}", owner, name));
+            let template_types = document
+                .method_template_types
+                .get(&format!(
+                    "{}\0{}\0{}",
+                    fn_def.owner, fn_def.name, fn_def.line
+                ))
+                .cloned()
+                .unwrap_or_default();
 
             // dispatch_kind "top" means owner is only the file-stem
             // fallback, not a real enclosing type - resolving it by name
@@ -3726,9 +5670,16 @@ fn extract_methods(
                     .map(|row| row.signals.clone())
                     .unwrap_or_default(),
                 params: fn_def.params.clone(),
+                callback_params: fn_def.callback_params.clone(),
+                source_export_eligible: fn_def.source_export_eligible
+                    && behavior.source_body_implicit_work_is_modeled(&raw_source, &template_types),
+                generated_declaration: fn_def.body.kind == "SYNTHETIC_ACCESSOR",
                 raw_source,
                 normalized_source,
-                untraceable_params: extract_untraceable_params(lines, fn_def, language),
+                untraceable_params: behavior.untraceable_profile_parameters(
+                    &get_def_header(lines, fn_def.line),
+                    &fn_def.params,
+                ),
                 source,
             }
         })
@@ -3736,6 +5687,10 @@ fn extract_methods(
 }
 
 fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerRecord> {
+    let behavior = syntax::Language::parse(language)
+        .ok()
+        .map(crate::syntax::normalized_behavior::behavior);
+    let source = std::fs::read_to_string(path).unwrap_or_default();
     let mut owners = document
         .owner_defs
         .iter()
@@ -3753,10 +5708,17 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
                 .supertypes
                 .iter()
                 .map(|supertype| {
-                    canonical_declared_type(document, supertype)
-                        .unwrap_or_else(|| supertype.clone())
+                    if behavior
+                        .is_some_and(|behavior| behavior.preserve_supertype_identity(supertype))
+                    {
+                        supertype.clone()
+                    } else {
+                        canonical_declared_type(document, supertype)
+                            .unwrap_or_else(|| supertype.clone())
+                    }
                 })
                 .collect(),
+            requirements: owner.requirements.clone(),
         })
         .collect::<Vec<_>>();
 
@@ -3770,7 +5732,9 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
         owners.push(OwnerRecord {
             id: owner_id(language, path, &function.owner, None),
             name: function.owner.clone(),
-            kind: "owner".to_string(),
+            kind: behavior
+                .and_then(|behavior| behavior.fallback_owner_kind(&function.owner, &source))
+                .unwrap_or_else(|| "owner".to_string()),
             language: language.to_string(),
             path: path.to_string(),
             line: function.line,
@@ -3778,6 +5742,7 @@ fn extract_owners(document: &Document, language: &str, path: &str) -> Vec<OwnerR
             confidence: "partial".to_string(),
             symbol: canonical_symbol_owner(document, &function.owner, Some(function.span)),
             supertypes: Vec::new(),
+            requirements: Vec::new(),
         });
     }
     owners
@@ -3869,81 +5834,33 @@ fn method_signature(lines: &[String], fn_def: &syntax::FunctionDef, language: &s
     if !sig.is_empty() {
         return sig;
     }
+    let behavior = crate::syntax::normalized_behavior::behavior_for_name(language);
+    if let Some(header) =
+        behavior.and_then(|behavior| behavior.complete_declaration_header(lines, fn_def.line))
+    {
+        return header_before_body_brace(&header)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
+    if behavior.is_some_and(|behavior| behavior.uses_source_declaration_header()) {
+        return header_before_body_brace(&get_def_header(lines, fn_def.line))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
 
-    match language {
-        "ruby" => {
-            let sig = ruby_signature_before_line(lines, fn_def.line);
-            if sig.starts_with("sig ") {
-                return sig;
-            }
-            String::new()
-        }
-        "python" | "typescript" | "javascript" => source_signature_for(lines, fn_def),
-        // Typed adapters may keep FunctionDef.signature as display text
-        // (`name (arg)`), which loses return annotations required by CFG/DFG.
-        // Their declaration header is the source of truth for static facts.
-        "c" | "cpp" | "csharp" | "go" | "java" | "kotlin" | "php" | "rust" | "swift" | "zig" => {
-            header_before_body_brace(&get_def_header(lines, fn_def.line))
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-        }
-        _ => {
-            let params = fn_def.params.join(", ");
-            if params.is_empty() {
-                fn_def.name.clone()
-            } else {
-                format!("{} ({})", fn_def.name, params)
-            }
-        }
+    if let Some(signature) =
+        behavior.and_then(|behavior| behavior.source_profile_signature(lines, fn_def))
+    {
+        return signature;
     }
-}
-
-/// Ruby: scan backwards from the def line to find a `sig { ... }` block.
-fn ruby_signature_before_line(lines: &[String], line: usize) -> String {
-    let mut idx = line.saturating_sub(2);
-    if idx >= lines.len() {
-        return String::new();
+    let params = fn_def.params.join(", ");
+    if params.is_empty() {
+        fn_def.name.clone()
+    } else {
+        format!("{} ({})", fn_def.name, params)
     }
-    // Skip blank lines going backward
-    while idx > 0 && lines[idx].trim().is_empty() {
-        idx = idx.saturating_sub(1);
-    }
-    if lines[idx].trim().starts_with("sig ") {
-        return lines[idx].trim().to_string();
-    }
-    let mut start = idx;
-    loop {
-        if start == 0 {
-            break;
-        }
-        let text = lines[start].trim();
-        if text.starts_with("sig ") {
-            // Join lines from start to idx
-            let joined: String = lines[start..=idx]
-                .iter()
-                .map(|l| l.trim())
-                .collect::<Vec<_>>()
-                .join(" ");
-            // Normalize whitespace
-            let normalized: String = joined.split_whitespace().collect::<Vec<_>>().join(" ");
-            return normalized;
-        }
-        if text.starts_with("def ") || text.starts_with("class ") || text.starts_with("module ") {
-            return String::new();
-        }
-        start = start.saturating_sub(1);
-    }
-    String::new()
-}
-
-/// Python/TypeScript: the raw def line IS the signature.
-fn source_signature_for(lines: &[String], fn_def: &syntax::FunctionDef) -> String {
-    let idx = fn_def.line.saturating_sub(1);
-    if idx >= lines.len() {
-        return String::new();
-    }
-    lines[idx].trim().to_string()
 }
 
 fn method_source(signature: &str, language: &str) -> serde_json::Value {
@@ -3951,7 +5868,8 @@ fn method_source(signature: &str, language: &str) -> serde_json::Value {
         return serde_json::Value::Object(Default::default());
     }
     let mut source = serde_json::Map::new();
-    if language == "ruby" && signature.starts_with("sig ") {
+    let behavior = crate::syntax::normalized_behavior::behavior_for_name(language);
+    if behavior.is_some_and(|behavior| behavior.profile_signature_is_annotation(signature)) {
         source.insert(
             "sig".to_string(),
             serde_json::Value::String(signature.to_string()),
@@ -3962,7 +5880,12 @@ fn method_source(signature: &str, language: &str) -> serde_json::Value {
         );
         source.insert(
             "type_system".to_string(),
-            serde_json::Value::String("sorbet".to_string()),
+            serde_json::Value::String(
+                behavior
+                    .map(|behavior| behavior.profile_type_system())
+                    .unwrap_or("native")
+                    .to_string(),
+            ),
         );
         source.insert(
             "source".to_string(),
@@ -3975,26 +5898,21 @@ fn method_source(signature: &str, language: &str) -> serde_json::Value {
         );
         source.insert(
             "type_system".to_string(),
-            serde_json::Value::String(language_type_system(language).to_string()),
+            serde_json::Value::String(
+                behavior
+                    .map(|behavior| behavior.profile_type_system())
+                    .unwrap_or("native")
+                    .to_string(),
+            ),
         );
     }
     serde_json::Value::Object(source)
 }
 
-fn language_type_system(language: &str) -> &str {
-    match language {
-        "ruby" => "sorbet",
-        "python" => "python-typing",
-        "typescript" => "typescript",
-        "javascript" => "typescript",
-        "go" => "go-types",
-        "rust" => "rust-types",
-        "java" => "java-types",
-        "kotlin" => "kotlin-types",
-        "swift" => "swift-types",
-        "csharp" => "csharp-types",
-        _ => "native",
-    }
+fn profile_type_system(language: &str) -> &'static str {
+    crate::syntax::normalized_behavior::behavior_for_name(language)
+        .map(|behavior| behavior.profile_type_system())
+        .unwrap_or("native")
 }
 
 // ---------------------------------------------------------------------------
@@ -4038,11 +5956,9 @@ fn extract_fields(document: &Document, language: &str, path: &str) -> Vec<FieldR
     }
 
     // Add state_writes not already covered by declarations
-    let is_static = matches!(
-        language,
-        "rust" | "go" | "zig" | "c" | "cpp" | "csharp" | "java" | "swift" | "kotlin"
-    );
-    let valid_owners: BTreeSet<String> = if is_static {
+    let requires_declared_owner = crate::syntax::normalized_behavior::behavior_for_name(language)
+        .is_some_and(|behavior| behavior.state_writes_require_declared_owner());
+    let valid_owners: BTreeSet<String> = if requires_declared_owner {
         document.owner_defs.iter().map(|o| o.name.clone()).collect()
     } else {
         document
@@ -4362,7 +6278,7 @@ fn extract_type_definitions(
         if clean_name.starts_with("self.") {
             clean_name = clean_name.strip_prefix("self.").unwrap().to_string();
         }
-        let ts = language_type_system(language);
+        let ts = profile_type_system(language);
         out.push(TypeDefinition {
             id: [
                 language,
@@ -4394,7 +6310,7 @@ fn extract_type_definitions(
 
     // Type aliases from Document type_aliases map
     for (name, target) in &document.type_aliases {
-        let ts = language_type_system(language);
+        let ts = profile_type_system(language);
         let (owner, short_name) = AliasResolver::resolve(name);
         let line = document.type_alias_lines.get(name).copied().unwrap_or(0);
         out.push(TypeDefinition {
@@ -4432,7 +6348,7 @@ fn extract_type_definitions(
             Some(t) if !t.is_empty() => t.clone(),
             _ => continue,
         };
-        let ts = language_type_system(language);
+        let ts = profile_type_system(language);
         out.push(TypeDefinition {
             id: [
                 language,
@@ -4478,7 +6394,7 @@ fn extract_type_definitions(
                 .map(|fd| fd.line)
                 .unwrap_or(0)
         });
-        let ts = language_type_system(language);
+        let ts = profile_type_system(language);
         let params: Vec<serde_json::Value> = param_types
             .iter()
             .map(|(pname, ptype)| {
@@ -4666,13 +6582,18 @@ struct SignatureParser;
 
 impl SignatureParser {
     fn parse(sig: &str, language: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-        match language {
-            "ruby" => parse_sorbet_signature(sig),
-            "python" => parse_python_signature(sig),
-            "typescript" | "javascript" => parse_typescript_signature(sig),
-            "c" | "cpp" | "csharp" | "java" => parse_c_family_signature(sig),
-            _ => parse_generic_signature(sig),
-        }
+        let signature = crate::syntax::normalized_behavior::behavior_for_name(language)
+            .map(|behavior| behavior.parse_signature(sig))
+            .unwrap_or_default();
+        let params = signature
+            .params
+            .into_iter()
+            .filter(|(name, declared)| !name.is_empty() && !declared.is_empty())
+            .map(|(name, declared)| {
+                BTreeMap::from([("name".to_string(), name), ("type".to_string(), declared)])
+            })
+            .collect();
+        (signature.return_type, params)
     }
 }
 
@@ -4686,61 +6607,6 @@ impl AliasResolver {
             (String::new(), name.to_string())
         }
     }
-}
-
-/// Sorbet sig: sig { params(name: Type).returns(ReturnType) }
-fn parse_sorbet_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let sig = sig.trim();
-    if !sig.starts_with("sig") {
-        return (None, Vec::new());
-    }
-
-    let return_type = sorbet_extract(sig, ".returns(").or_else(|| sorbet_extract(sig, "returns("));
-    let params = sorbet_extract_params(sig);
-    (return_type, params)
-}
-
-fn sorbet_extract(sig: &str, marker: &str) -> Option<String> {
-    let start = sig.find(marker)?;
-    let inner = &sig[start + marker.len()..];
-    let mut depth = 1u32;
-    let mut end = 0usize;
-    for (i, c) in inner.char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = i;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    if end > 0 {
-        Some(inner[..end].trim().to_string())
-    } else {
-        None
-    }
-}
-
-fn sorbet_extract_params(sig: &str) -> Vec<BTreeMap<String, String>> {
-    let params_str =
-        match sorbet_extract(sig, ".params(").or_else(|| sorbet_extract(sig, "params(")) {
-            Some(p) => p,
-            None => return Vec::new(),
-        };
-    let mut out = Vec::new();
-    for entry in split_top_level_params(&params_str) {
-        if let Some((name, type_part)) = entry.split_once(':') {
-            let mut map = BTreeMap::new();
-            map.insert("name".to_string(), name.trim().to_string());
-            map.insert("type".to_string(), type_part.trim().to_string());
-            out.push(map);
-        }
-    }
-    out
 }
 
 pub(crate) fn split_top_level_params(params: &str) -> Vec<String> {
@@ -4765,232 +6631,13 @@ pub(crate) fn split_top_level_params(params: &str) -> Vec<String> {
     out
 }
 
-fn parse_python_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let sig = sig.trim();
-    let paren_open = match sig.find('(') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let paren_close = match sig.rfind(')') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let params_str = &sig[paren_open + 1..paren_close];
-    let return_type = sig[paren_close + 1..].trim().strip_prefix("->").map(|s| {
-        let mut cleaned = s.trim();
-        if cleaned.ends_with(": ...") {
-            cleaned = cleaned[..cleaned.len() - 5].trim();
-        }
-        if cleaned.ends_with(':') {
-            cleaned = cleaned[..cleaned.len() - 1].trim();
-        }
-        cleaned.to_string()
-    });
-
-    let params: Vec<BTreeMap<String, String>> = params_str
-        .split(',')
-        .filter_map(|entry| {
-            let entry = entry.trim();
-            if entry.is_empty() || entry == "self" || entry == "cls" {
-                return None;
-            }
-            let (name, type_part) = if let Some((name, rest)) = entry.split_once(':') {
-                let name = name.trim().trim_end_matches('=');
-                (name.to_string(), rest.trim().to_string())
-            } else {
-                return None;
-            };
-            if type_part.is_empty() {
-                return None;
-            }
-            let mut map = BTreeMap::new();
-            map.insert("name".to_string(), name);
-            map.insert("type".to_string(), type_part);
-            Some(map)
-        })
-        .collect();
-
-    (return_type, params)
-}
-
-fn parse_typescript_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let sig = sig.trim();
-    let paren_open = match sig.find('(') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let paren_close = match sig.rfind(')') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let params_str = &sig[paren_open + 1..paren_close];
-    let return_type = sig[paren_close + 1..].trim().strip_prefix(':').map(|s| {
-        s.trim()
-            .trim_end_matches(';')
-            .trim_end_matches('{')
-            .trim()
-            .to_string()
-    });
-
-    let params: Vec<BTreeMap<String, String>> = params_str
-        .split(',')
-        .filter_map(|entry| {
-            let entry = entry.trim();
-            if entry.is_empty() {
-                return None;
-            }
-            let entry = entry.trim_start_matches("...");
-            let (name, type_part) = if let Some((name, rest)) = entry.split_once(':') {
-                let name = name.trim().trim_end_matches('?');
-                (name.to_string(), rest.trim().to_string())
-            } else {
-                return None;
-            };
-            if type_part.is_empty() {
-                return None;
-            }
-            let mut map = BTreeMap::new();
-            map.insert("name".to_string(), name);
-            map.insert("type".to_string(), type_part);
-            Some(map)
-        })
-        .collect();
-
-    (return_type, params)
-}
-
-fn parse_generic_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let sig = sig.trim();
-    let paren_open = match sig.find('(') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let paren_close = match sig.rfind(')') {
-        Some(p) => p,
-        None => return (None, Vec::new()),
-    };
-    let params_str = &sig[paren_open + 1..paren_close];
-    let after_paren = sig[paren_close + 1..].trim();
-
-    let mut return_type = None;
-    if let Some(ret) = after_paren.strip_prefix("->") {
-        return_type = Some(
-            ret.trim()
-                .trim_end_matches('{')
-                .trim_end_matches(';')
-                .trim()
-                .to_string(),
-        );
-    } else if let Some(ret) = after_paren.strip_prefix(':') {
-        return_type = Some(
-            ret.trim()
-                .trim_end_matches('{')
-                .trim_end_matches(';')
-                .trim()
-                .to_string(),
-        );
-    } else if !after_paren.is_empty() && after_paren != "{" && after_paren != ";" {
-        return_type = Some(
-            after_paren
-                .trim()
-                .trim_end_matches('{')
-                .trim_end_matches(';')
-                .trim()
-                .to_string(),
-        );
-    }
-
-    let params: Vec<BTreeMap<String, String>> = params_str
-        .split(',')
-        .filter_map(|entry| {
-            let entry = entry.trim();
-            if entry.is_empty() || entry == "self" || entry == "this" {
-                return None;
-            }
-            let mut name = String::new();
-            let mut ty = String::new();
-            if let Some((n, t)) = entry.split_once(':') {
-                name = n.trim().to_string();
-                ty = t.trim().to_string();
-            } else {
-                let parts: Vec<&str> = entry.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    // Go style "name Type" or Java style "Type name"
-                    // If the first looks like a standard type or has uppercase, it's Java style, but simpler to check the last word
-                    let last = parts.last().unwrap();
-                    if last.chars().next().unwrap_or(' ').is_ascii_lowercase() {
-                        // Java/C: "Type name"
-                        name = last.to_string();
-                        ty = parts[0..parts.len() - 1].join(" ");
-                    } else {
-                        // Go: "name Type"
-                        name = parts[0].to_string();
-                        ty = parts[1..].join(" ");
-                    }
-                }
-            }
-            if !name.is_empty() && !ty.is_empty() {
-                let mut map = BTreeMap::new();
-                map.insert("name".to_string(), name);
-                map.insert("type".to_string(), ty);
-                Some(map)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    (return_type, params)
-}
-
-fn parse_c_family_signature(sig: &str) -> (Option<String>, Vec<BTreeMap<String, String>>) {
-    let (mut return_type, params) = parse_generic_signature(sig);
-    if return_type.is_some() {
-        return (return_type, params);
-    }
-
-    let Some(paren_open) = sig.find('(') else {
-        return (None, params);
-    };
-    let prefix = sig[..paren_open].trim();
-    let mut words = prefix.split_whitespace().collect::<Vec<_>>();
-    let _method_name = words.pop();
-    while words.first().is_some_and(|word| {
-        matches!(
-            *word,
-            "public"
-                | "private"
-                | "protected"
-                | "internal"
-                | "static"
-                | "virtual"
-                | "override"
-                | "abstract"
-                | "sealed"
-                | "partial"
-                | "async"
-                | "extern"
-                | "unsafe"
-                | "readonly"
-                | "inline"
-                | "const"
-        )
-    }) {
-        words.remove(0);
-    }
-    if !words.is_empty() {
-        return_type = Some(words.join(" "));
-    }
-    (return_type, params)
-}
-
 // ---------------------------------------------------------------------------
 // Struct declarations
 // ---------------------------------------------------------------------------
 
 fn extract_struct_declarations(
     document: &Document,
-    _language: &str,
+    language: &str,
     path: &str,
 ) -> Vec<StructDeclaration> {
     // `immutable_struct_readers` intentionally contains only Sorbet `const`
@@ -5024,6 +6671,7 @@ fn extract_struct_declarations(
                 .into_iter()
                 .collect();
             StructDeclaration {
+                language: language.to_string(),
                 path: path.to_string(),
                 class: class_name,
                 fields,
@@ -5033,6 +6681,97 @@ fn extract_struct_declarations(
             }
         })
         .collect()
+}
+
+fn merge_struct_declarations(declarations: &mut Vec<StructDeclaration>) {
+    let mut groups = BTreeMap::<(String, String, String), Vec<StructDeclaration>>::new();
+    for declaration in std::mem::take(declarations) {
+        groups
+            .entry((
+                declaration.language.clone(),
+                declaration.path.clone(),
+                owner_type_name(&declaration.class).to_string(),
+            ))
+            .or_default()
+            .push(declaration);
+    }
+
+    for (_, group) in groups {
+        let distinct_classes = group
+            .iter()
+            .map(|declaration| declaration.class.as_str())
+            .collect::<BTreeSet<_>>();
+        let longest = distinct_classes
+            .iter()
+            .map(|class| class.len())
+            .max()
+            .unwrap_or_default();
+        let canonical = distinct_classes
+            .iter()
+            .filter(|class| class.len() == longest)
+            .copied()
+            .collect::<Vec<_>>();
+        if canonical.len() != 1 {
+            declarations.extend(group);
+            continue;
+        }
+
+        let mut merged = group
+            .iter()
+            .find(|declaration| declaration.class == canonical[0])
+            .cloned()
+            .expect("canonical record declaration belongs to its group");
+        let mut fields = merged.fields.clone();
+        let mut seen_fields = fields.iter().cloned().collect::<BTreeSet<_>>();
+        let mut operations = merged.constant_operations.clone();
+        let mut seen_operations = operations.iter().cloned().collect::<BTreeSet<_>>();
+        let mut field_types = BTreeMap::new();
+        let mut conflicting_fields = BTreeSet::new();
+        let mut lines = Vec::new();
+        for declaration in group {
+            for field in declaration.fields {
+                if seen_fields.insert(field.clone()) {
+                    fields.push(field);
+                }
+            }
+            for operation in declaration.constant_operations {
+                if seen_operations.insert(operation.clone()) {
+                    operations.push(operation);
+                }
+            }
+            for (field, declared_type) in declaration.field_types {
+                if conflicting_fields.contains(&field) {
+                    continue;
+                }
+                match field_types.get(&field) {
+                    Some(existing) if existing != &declared_type => {
+                        // Conflicting complete declarations are not safe to
+                        // collapse into one record contract.
+                        field_types.remove(&field);
+                        conflicting_fields.insert(field);
+                    }
+                    None => {
+                        field_types.insert(field, declared_type);
+                    }
+                    _ => {}
+                }
+            }
+            if declaration.line > 0 {
+                lines.push(declaration.line);
+            }
+        }
+        merged.fields = fields;
+        merged.constant_operations = operations;
+        merged.field_types = field_types;
+        merged.line = lines.into_iter().min().unwrap_or_default();
+        declarations.push(merged);
+    }
+    declarations.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.class.cmp(&right.class))
+            .then_with(|| left.line.cmp(&right.line))
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -5421,6 +7160,7 @@ fn collect_hash_shapes_from_ast(
 
 fn collect_struct_declarations(
     node: &crate::ast::Node,
+    language: &str,
     path: &str,
     namespace: &mut Vec<String>,
     struct_declarations: &mut Vec<StructDeclaration>,
@@ -5439,6 +7179,7 @@ fn collect_struct_declarations(
             .unwrap_or(&owner.name)
             .to_string();
         struct_declarations.push(StructDeclaration {
+            language: language.to_string(),
             path: path.to_string(),
             class: owner.name.clone(),
             fields,
@@ -5448,7 +7189,14 @@ fn collect_struct_declarations(
         });
         namespace.push(simple_name);
         for child in child_nodes(node) {
-            collect_struct_declarations(child, path, namespace, struct_declarations, behavior);
+            collect_struct_declarations(
+                child,
+                language,
+                path,
+                namespace,
+                struct_declarations,
+                behavior,
+            );
         }
         namespace.pop();
     } else {
@@ -5459,7 +7207,14 @@ fn collect_struct_declarations(
             pushed = true;
         }
         for child in child_nodes(node) {
-            collect_struct_declarations(child, path, namespace, struct_declarations, behavior);
+            collect_struct_declarations(
+                child,
+                language,
+                path,
+                namespace,
+                struct_declarations,
+                behavior,
+            );
         }
         if pushed {
             namespace.pop();
@@ -5474,86 +7229,48 @@ fn count_lines(_lines: &[String], _start_line: usize, code: &str) -> usize {
 
 fn infer_literal_type(value: &str, language: &str) -> String {
     let value = value.trim();
-    let lang = language.to_lowercase();
+    let behavior = crate::syntax::normalized_behavior::behavior_for_name(language);
     if value.is_empty() {
-        return if lang == "javascript" || lang == "typescript" {
-            "any".to_string()
-        } else if lang == "python" {
-            "Any".to_string()
-        } else {
-            "T.untyped".to_string()
-        };
+        return behavior
+            .map(|behavior| behavior.untyped_type())
+            .unwrap_or_else(|| "T.untyped".to_string());
+    }
+    if let Some(native) = behavior.and_then(|behavior| behavior.native_profile_literal_type(value))
+    {
+        return native;
     }
     if value.starts_with('"') || value.starts_with('\'') {
         return "String".to_string();
     }
-    if value.starts_with(':') {
-        return "Symbol".to_string();
-    }
     if value == "true" || value == "false" {
-        return if lang == "javascript" || lang == "typescript" {
-            "boolean".to_string()
-        } else {
-            "T::Boolean".to_string()
-        };
+        return "T::Boolean".to_string();
     }
     if value == "nil" || value == "null" || value == "None" {
-        return if lang == "javascript" || lang == "typescript" {
-            "null".to_string()
-        } else {
-            "NilClass".to_string()
-        };
+        return "NilClass".to_string();
     }
     if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
-        return if lang == "javascript" || lang == "typescript" || lang == "lua" {
-            "number".to_string()
-        } else if value.parse::<i64>().is_ok() {
+        return if value.parse::<i64>().is_ok() {
             "Integer".to_string()
         } else {
             "Float".to_string()
         };
     }
-    if value.starts_with('[')
-        || value.starts_with("%i")
-        || value.starts_with("%I")
-        || value.starts_with("%w")
-        || value.starts_with("%W")
-    {
-        return match lang.as_str() {
-            "python" => "List[Any]".to_string(),
-            "typescript" | "javascript" => "any[]".to_string(),
-            "go" => "[]any".to_string(),
-            "rust" => "Vec<Value>".to_string(),
-            "java" | "kotlin" => "List<Object>".to_string(),
-            _ => "T::Array[T.untyped]".to_string(),
-        };
+    if value.starts_with('[') {
+        return behavior
+            .map(|behavior| behavior.untyped_array_type())
+            .unwrap_or_else(|| "T::Array[T.untyped]".to_string());
     }
     if value.starts_with('{') {
-        return match lang.as_str() {
-            "python" => "Dict[Any, Any]".to_string(),
-            "typescript" | "javascript" => "Record<any, any>".to_string(),
-            "go" => "map[string]any".to_string(),
-            "rust" => "HashMap<String, Value>".to_string(),
-            "java" | "kotlin" => "Map<String, Object>".to_string(),
-            _ => "T::Hash[T.untyped, T.untyped]".to_string(),
-        };
-    }
-    if value.starts_with("%q") || value.starts_with("%Q") {
-        return "String".to_string();
-    }
-    if value.starts_with("%s") {
-        return "Symbol".to_string();
+        return behavior
+            .map(|behavior| behavior.untyped_hash_type())
+            .unwrap_or_else(|| "T::Hash[T.untyped, T.untyped]".to_string());
     }
     if value.chars().next().is_some_and(|c| c.is_uppercase()) {
         return value.to_string();
     }
-    if lang == "javascript" || lang == "typescript" {
-        "any".to_string()
-    } else if lang == "python" {
-        "Any".to_string()
-    } else {
-        "T.untyped".to_string()
-    }
+    behavior
+        .map(|behavior| behavior.untyped_type())
+        .unwrap_or_else(|| "T.untyped".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -5654,24 +7371,6 @@ fn declaration_namespace(document: &Document, span: [usize; 4]) -> Option<&str> 
         })
 }
 
-fn cpp_symbol_without_template_arguments(name: &str) -> String {
-    let mut output = String::with_capacity(name.len());
-    let mut depth = 0usize;
-    for character in name.chars() {
-        match character {
-            '<' => depth += 1,
-            '>' if depth > 0 => depth -= 1,
-            _ if depth == 0 => output.push(character),
-            _ => {}
-        }
-    }
-    if depth == 0 {
-        output
-    } else {
-        name.to_string()
-    }
-}
-
 fn canonical_symbol_owner(
     document: &Document,
     owner: &str,
@@ -5770,7 +7469,18 @@ fn canonical_declared_type_origin(document: &Document, name: &str) -> Option<Str
 }
 
 fn declared_dispatch_owner_name(document: &Document, name: &str) -> Option<String> {
-    let mut name = name.strip_prefix("declared:").unwrap_or(name).trim();
+    let base = name.strip_prefix("declared:").unwrap_or(name).trim();
+    // Pointer/reference sigils (Go `*T`/`&T`, C/C++ `T*`, Rust `&T`/`&mut T`)
+    // do not change which type owns a method, so strip them before resolving
+    // the dispatch owner. A pointer-typed value (e.g. a constructor result like
+    // `*os.File`) must resolve the same owner as the base type. No-op for
+    // languages without pointer spelling.
+    let mut name = base
+        .trim_start_matches(['*', '&'])
+        .trim_start_matches("mut ")
+        .trim_start_matches(['*', '&'])
+        .trim_end_matches(['*', '&'])
+        .trim();
     let mut visited = BTreeSet::new();
     while let Some(target) = document.type_aliases.get(name) {
         if !visited.insert(name.to_string()) {
@@ -5815,6 +7525,46 @@ fn declared_receiver_type(
                 .and_then(|locals| locals.get(receiver))
         })
         .cloned()
+}
+
+fn declared_type_is_template_dependent(
+    document: &Document,
+    definition: Option<&syntax::FunctionDef>,
+    declared_type: &str,
+) -> bool {
+    let Some(definition) = definition else {
+        return false;
+    };
+    let key = format!(
+        "{}\0{}\0{}",
+        definition.owner, definition.name, definition.line
+    );
+    let Some(parameters) = document.method_template_types.get(&key) else {
+        return false;
+    };
+    let mut pending = declared_type
+        .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut visited = BTreeSet::new();
+    while let Some(token) = pending.pop() {
+        if parameters.contains(&token) {
+            return true;
+        }
+        if !visited.insert(token.clone()) {
+            continue;
+        }
+        if let Some(target) = document.type_aliases.get(&token) {
+            pending.extend(
+                target
+                    .split(|character: char| character != '_' && !character.is_ascii_alphanumeric())
+                    .filter(|token| !token.is_empty())
+                    .map(str::to_string),
+            );
+        }
+    }
+    false
 }
 
 fn declared_state_receiver_type(
@@ -5877,13 +7627,33 @@ fn flow_receiver_type(
     let exact = (types.len() == 1)
         .then(|| types.into_iter().next())
         .flatten();
-    if exact.is_some() || document.language.as_str() != "java" {
+    if exact.is_some() {
         return exact;
     }
 
-    // Java locals retain their declared type across assignments. CFG flow
-    // may be incomplete at a branch node even though the declaration fact is
-    // present on the same normalized place.
+    let behavior = crate::syntax::normalized_behavior::behavior(document.language);
+    // Some adapters can prove that their local flow facts are invariant for a
+    // binding even when the normalized call node does not retain the receiver
+    // as an AST child. Only accept the fallback when every complete fact for
+    // the binding agrees, so a reassignment or branch disagreement remains
+    // unresolved.
+    if behavior.complexity_uses_invariant_flow_types() {
+        let invariant = document
+            .flow_types
+            .iter()
+            .filter(|fact| fact.complete && place_ids.contains(fact.place_id.as_str()))
+            .flat_map(|fact| fact.types.iter())
+            .map(|name| name.strip_prefix("declared:").unwrap_or(name).trim())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>();
+        if invariant.len() == 1 {
+            return invariant.into_iter().next();
+        }
+    }
+
+    // Adapters may prove that a declaration remains authoritative even when
+    // the exact CFG join at this call site is incomplete.
     let declared = document
         .flow_types
         .iter()
@@ -5891,7 +7661,7 @@ fn flow_receiver_type(
         .flat_map(|fact| fact.types.iter())
         .filter_map(|name| name.strip_prefix("declared:"))
         .map(str::trim)
-        .filter(|name| valid_java_declared_local_type(name))
+        .filter(|name| behavior.declared_flow_type_fallback(name))
         .map(str::to_string)
         .collect::<BTreeSet<_>>();
     (declared.len() == 1)
@@ -5899,23 +7669,198 @@ fn flow_receiver_type(
         .flatten()
 }
 
-fn valid_java_declared_local_type(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .next()
-            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
-        && !name.contains(['=', '(', ')', ';', '\n'])
-        && !name.contains("//")
-        && !name.contains("&&")
+/// Resolve the type of a `base.field` (or `base.field[i]`) receiver expression:
+/// resolve the base's type, then look up `field` in that type's declared field
+/// table. Language-neutral - reads `state_declarations`, which every adapter
+/// populates for struct/class fields. Composes with the other receiver
+/// resolvers and recurses for nested access (`outer.inner.field`). This is what
+/// lets `h.field.method()` resolve even though `h.field` is not a call the
+/// direct-call-result linker can see.
+fn field_access_receiver_type(
+    document: &Document,
+    definition: Option<&syntax::FunctionDef>,
+    function: &str,
+    owner: &str,
+    receiver: &str,
+    call_span: [usize; 4],
+    language: &str,
+) -> Option<String> {
+    let dot = receiver.rfind('.').map(|index| (index, 1usize));
+    let arrow = receiver.rfind("->").map(|index| (index, 2usize));
+    let (separator, width) = match (dot, arrow) {
+        (Some(dot), Some(arrow)) => {
+            if dot.0 > arrow.0 {
+                dot
+            } else {
+                arrow
+            }
+        }
+        (Some(dot), None) => dot,
+        (None, Some(arrow)) => arrow,
+        (None, None) => return None,
+    };
+    let base = &receiver[..separator];
+    let field_expr = &receiver[separator + width..];
+    let base = base.trim();
+    let field_expr = field_expr.trim();
+    // Strip a trailing index (`fs[0]`) and remember we must return the element
+    // type of the field rather than the field type itself.
+    let (field, indexed) = match field_expr.find('[') {
+        Some(bracket) => (field_expr[..bracket].trim(), true),
+        None => (field_expr, false),
+    };
+    if base.is_empty()
+        || field.is_empty()
+        || base.contains(['(', ')', '['])
+        || field.contains(['(', ')'])
+    {
+        return None;
+    }
+    let base_type = declared_receiver_type(document, definition, base)
+        .or_else(|| flow_receiver_type(document, function, base, call_span))
+        .or_else(|| declared_state_receiver_type(document, owner, base))
+        .or_else(|| {
+            field_access_receiver_type(
+                document, definition, function, owner, base, call_span, language,
+            )
+        })?;
+    let normalized_base_type = normalized_declared_alias(document, &base_type);
+    let behavior = crate::syntax::normalized_behavior::behavior(document.language);
+    let member_owner_type = definition
+        .and_then(|definition| {
+            behavior.pointer_member_receiver_type(
+                &definition.body.text,
+                base,
+                field,
+                &normalized_base_type,
+            )
+        })
+        .unwrap_or(normalized_base_type);
+    let base_owner = declared_dispatch_owner_name_from_type(&member_owner_type, language)?;
+    let field_types =
+        inherited_field_types(document, &base_owner, field, language, &mut BTreeSet::new());
+    let field_type = (field_types.len() == 1)
+        .then(|| field_types.into_iter().next())
+        .flatten()?;
+    if indexed {
+        collection_element_type(&field_type, language)
+    } else {
+        Some(field_type)
+    }
 }
 
-fn reaching_call_result_spans(
+fn inherited_field_types(
+    document: &Document,
+    owner: &str,
+    field: &str,
+    language: &str,
+    visited: &mut BTreeSet<String>,
+) -> BTreeSet<String> {
+    let owner_name = owner_type_name(owner).to_string();
+    if !visited.insert(owner_name.clone()) {
+        return BTreeSet::new();
+    }
+    let direct = document
+        .state_declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.field == field && owner_name_matches(&declaration.owner, &owner_name)
+        })
+        .filter_map(|declaration| declaration.r#type.clone())
+        .collect::<BTreeSet<_>>();
+    if !direct.is_empty() {
+        return direct;
+    }
+    document
+        .owner_defs
+        .iter()
+        .filter(|definition| owner_name_matches(&definition.name, &owner_name))
+        .flat_map(|definition| definition.supertypes.iter())
+        .flat_map(|supertype| {
+            let supertype = declared_dispatch_owner_name_from_type(supertype, language)
+                .unwrap_or_else(|| owner_type_name(supertype).to_string());
+            inherited_field_types(document, &supertype, field, language, visited)
+        })
+        .collect()
+}
+
+/// The element type of an indexed collection field (`[]T`, `List<T>`, `[T]`,
+/// `Vec<T>`), via the language-aware type parser. Returns None for non-arrays.
+fn collection_element_type(type_name: &str, language: &str) -> Option<String> {
+    match TypeExpr::parse(type_name, language) {
+        TypeExpr::Array(inner) | TypeExpr::Set(inner) => match *inner {
+            TypeExpr::Primitive(name) => Some(name),
+            _ => None,
+        },
+        TypeExpr::Hash { value, .. } => match *value {
+            TypeExpr::Primitive(name) => Some(name),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn projected_sequence_result_type(
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    type_name: &str,
+    language: &str,
+) -> Option<String> {
+    collection_element_type(type_name, language)
+        .or_else(|| behavior.indexed_collection_result_type(type_name))
+}
+
+fn indexed_receiver_type(
+    document: &Document,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    declared_type: String,
+    language: &str,
+) -> Option<String> {
+    let normalized = normalized_declared_alias(document, &declared_type);
+    let result = collection_element_type(&normalized, language)
+        .or_else(|| behavior.indexed_collection_result_type(&normalized))?;
+    Some(normalized_declared_alias(document, &result))
+}
+
+fn inferred_collection_element_receiver_type(
+    document: &Document,
+    definition: Option<&syntax::FunctionDef>,
+    function: &str,
+    owner: &str,
+    receiver: &str,
+    message: &str,
+    call_span: [usize; 4],
+    language: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) -> Option<String> {
+    let definition = definition?;
+    let collection = behavior.collection_element_binding(&definition.body.text, receiver)?;
+    let collection_type = declared_receiver_type(document, Some(definition), &collection)
+        .or_else(|| flow_receiver_type(document, function, &collection, call_span))
+        .or_else(|| declared_state_receiver_type(document, owner, &collection))
+        .or_else(|| {
+            field_access_receiver_type(
+                document,
+                Some(definition),
+                function,
+                owner,
+                &collection,
+                call_span,
+                language,
+            )
+        })?;
+    let normalized_collection = normalized_declared_alias(document, &collection_type);
+    let element_type = collection_element_type(&normalized_collection, language)?;
+    behavior
+        .pointer_member_receiver_type(&definition.body.text, receiver, message, &element_type)
+        .or(Some(element_type))
+}
+
+fn reaching_call_results(
     document: &Document,
     function: &str,
     receiver: &str,
     call_span: [usize; 4],
-) -> Vec<[usize; 4]> {
+) -> (Vec<[usize; 4]>, Option<usize>) {
     let place_ids = document
         .places
         .iter()
@@ -5923,7 +7868,7 @@ fn reaching_call_result_spans(
         .map(|place| place.id.as_str())
         .collect::<BTreeSet<_>>();
     if place_ids.is_empty() {
-        return Vec::new();
+        return (Vec::new(), None);
     }
 
     let mut candidates = document
@@ -5965,20 +7910,61 @@ fn reaching_call_result_spans(
             if reaching.definitions.is_empty() {
                 continue;
             }
-            let mut spans = BTreeSet::new();
-            let complete = reaching.definitions.iter().all(|definition| {
-                document
-                    .node_effects
-                    .iter()
-                    .find(|definition_effect| definition_effect.node_id == *definition)
-                    .and_then(|definition_effect| {
-                        definition_effect.write_call_sources.get(*place_id)
-                    })
-                    .map(|span| spans.insert(*span))
-                    .is_some()
+            let non_null_at_read = document.nullable_states.iter().any(|state| {
+                state.node_id == node.id
+                    && state.place_id == **place_id
+                    && state.complete
+                    && state.state == "definitely_non_null"
             });
+            let mut spans = BTreeSet::new();
+            let mut projections = BTreeSet::new();
+            let mut projected_definitions = 0usize;
+            let mut considered_definitions = 0usize;
+            let complete = reaching
+                .definitions
+                .iter()
+                .filter(|definition| {
+                    !non_null_at_read
+                        || !document.node_effects.iter().any(|effect| {
+                            effect.node_id == **definition
+                                && effect
+                                    .write_value_hints
+                                    .get(*place_id)
+                                    .is_some_and(|value| value == "nil" || value == "null")
+                        })
+                })
+                .all(|definition| {
+                    considered_definitions += 1;
+                    document
+                        .node_effects
+                        .iter()
+                        .find(|definition_effect| definition_effect.node_id == *definition)
+                        .and_then(|definition_effect| {
+                            if let Some(position) = definition_effect
+                                .write_sequence_projections
+                                .get(*place_id)
+                                .copied()
+                            {
+                                projected_definitions += 1;
+                                projections.insert(position);
+                            }
+                            definition_effect.write_call_sources.get(*place_id)
+                        })
+                        .map(|span| spans.insert(*span))
+                        .is_some()
+                });
             if complete && !spans.is_empty() {
-                proven_sets.insert(spans.into_iter().collect::<Vec<_>>());
+                let projection = if projected_definitions == 0 {
+                    Some(None)
+                } else if projected_definitions == considered_definitions && projections.len() == 1
+                {
+                    Some(projections.into_iter().next())
+                } else {
+                    None
+                };
+                if let Some(projection) = projection {
+                    proven_sets.insert((spans.into_iter().collect::<Vec<_>>(), projection));
+                }
             }
         }
         if !proven_sets.is_empty() {
@@ -6038,12 +8024,31 @@ fn source_function<'a>(
 }
 
 fn owner_type_name(value: &str) -> &str {
-    let value = value.trim().trim_start_matches('*');
-    let value = value.split(['[', '<']).next().unwrap_or(value);
-    value
-        .rsplit([':', '.'])
-        .find(|part| !part.is_empty())
-        .unwrap_or(value)
+    let value = value
+        .trim()
+        .strip_prefix("const ")
+        .unwrap_or(value.trim())
+        .trim_start_matches('*')
+        .trim_end_matches(|character: char| {
+            character.is_whitespace() || matches!(character, '&' | '*')
+        });
+    let mut generic_depth = 0usize;
+    let mut leaf_start = 0usize;
+    for (index, character) in value.char_indices() {
+        match character {
+            '<' => generic_depth += 1,
+            '>' => generic_depth = generic_depth.saturating_sub(1),
+            // SCIP symbol owners use `/` between nested declarations, while
+            // source adapters commonly retain the language spelling (`::`,
+            // `.`, or `:`).  Owner comparison is shared identity plumbing,
+            // so normalize the portable SCIP separator here instead of
+            // teaching individual language adapters about one another.
+            ':' | '.' | '/' if generic_depth == 0 => leaf_start = index + character.len_utf8(),
+            _ => {}
+        }
+    }
+    let leaf = value[leaf_start..].trim();
+    leaf.split(['[', '<']).next().unwrap_or(leaf).trim()
 }
 
 fn owner_name_matches(left: &str, right: &str) -> bool {
@@ -6052,10 +8057,33 @@ fn owner_name_matches(left: &str, right: &str) -> bool {
 
 /// Follow declared state projections to the selected field. The language
 /// adapter proves whether the final native declared type is callable.
+/// A method call on a receiver whose static type is an abstract dispatch type
+/// (interface / trait / protocol / abstract class) has no single body: it is a
+/// callback whose per-call cost is set by the eventual implementation. Price it
+/// as `callback_once` so the enclosing function's bound is parametric in that
+/// cost, exactly like an injected function value.
+fn abstract_dispatch_callback_cost(
+    document: &Document,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    receiver_type: &str,
+) -> Option<String> {
+    let nominal = declared_dispatch_owner_name_from_type(receiver_type, document.language.as_str())
+        .unwrap_or_else(|| receiver_type.to_string());
+    document
+        .owner_defs
+        .iter()
+        .any(|owner| {
+            owner_name_matches(&owner.name, &nominal)
+                && behavior.type_kind_is_abstract_dispatch(&owner.kind)
+        })
+        .then(|| "callback_once".to_string())
+}
+
 fn declared_field_callback_cost(
     document: &Document,
     behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
     call: &syntax::CallSite,
+    definition: Option<&syntax::FunctionDef>,
 ) -> Option<String> {
     let mut owner = call.owner.clone();
     let receiver_fields = call
@@ -6065,10 +8093,20 @@ fn declared_field_callback_cost(
         .filter(|part| !part.is_empty())
         .skip_while(|part| matches!(*part, "self" | "this"))
         .collect::<Vec<_>>();
-    for field in receiver_fields {
+    let mut start = 0;
+    if let Some(first) = receiver_fields.first() {
+        if let Some(declared) = declared_receiver_type(document, definition, first) {
+            // `item.callback()` selects a callable field on the parameter/local
+            // type. The first segment is a binding, not a field of the current
+            // method owner; begin projection from its declared type.
+            owner = declared;
+            start = 1;
+        }
+    }
+    for field in &receiver_fields[start..] {
         let declaration = document.state_declarations.iter().find(|declaration| {
             owner_name_matches(&declaration.owner, &owner)
-                && declaration.field.trim_start_matches('@') == field
+                && declaration.field.trim_start_matches('@') == *field
         })?;
         owner = declaration.r#type.clone()?;
     }
@@ -6090,6 +8128,54 @@ fn declared_field_callback_cost(
         .flatten()
 }
 
+fn source_preprocessor_call_complexity(
+    document: &Document,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+    message: &str,
+) -> Option<crate::syntax::ExternalCallComplexity> {
+    let definitions = document
+        .symbol_scope
+        .preprocessor_definitions
+        .get(message)?;
+    let costs = definitions
+        .iter()
+        .filter_map(|definition| behavior.preprocessor_definition_call_complexity(definition))
+        .collect::<Vec<_>>();
+    (costs.len() == definitions.len()
+        && costs.first().is_some()
+        && costs
+            .windows(2)
+            .all(|pair| pair[0].time == pair[1].time && pair[0].space == pair[1].space))
+    .then(|| costs.into_iter().next())
+    .flatten()
+}
+
+fn extract_preprocessor_definition_costs(
+    document: &Document,
+    language: &str,
+    path: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) -> Vec<PreprocessorDefinitionCost> {
+    document
+        .symbol_scope
+        .preprocessor_definitions
+        .iter()
+        .flat_map(|(name, definitions)| {
+            definitions.iter().map(move |definition| {
+                let cost = behavior.preprocessor_definition_call_complexity(definition);
+                PreprocessorDefinitionCost {
+                    id: stable_id("preprocessor", &[language, path, name, definition]),
+                    language: language.to_string(),
+                    name: name.clone(),
+                    path: path.to_string(),
+                    time: cost.as_ref().map(|cost| cost.time.to_string()),
+                    space: cost.as_ref().map(|cost| cost.space.to_string()),
+                }
+            })
+        })
+        .collect()
+}
+
 fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRecord> {
     let behavior = crate::syntax::normalized_behavior::behavior(document.language);
     let receiver_call_spans = document
@@ -6097,7 +8183,17 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
         .iter()
         .map(|projection| (projection.outer_span, projection.receiver_call_span))
         .collect::<BTreeMap<_, _>>();
-    document
+    let selector_spans = document
+        .call_selector_projections
+        .iter()
+        .map(|projection| (projection.call_span, projection.selector_span))
+        .collect::<BTreeMap<_, _>>();
+    let execution_spans = document
+        .call_execution_projections
+        .iter()
+        .map(|projection| (projection.call_span, projection.execution_span))
+        .collect::<BTreeMap<_, _>>();
+    let mut calls = document
         .call_sites
         .iter()
         .map(|call| {
@@ -6111,6 +8207,9 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             );
             let source_definition =
                 source_function(document, &call.owner, &call.function, call.line);
+            let function_local_lexical_symbol = source_definition.and_then(|definition| {
+                behavior.function_local_lexical_call_symbol(definition, &call.message)
+            });
             let implicit =
                 call.receiver.is_empty() || call.receiver == "self" || call.receiver == "this";
             // A type receiver is a normalized fact only when the language
@@ -6129,34 +8228,154 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .owner_defs
                     .iter()
                     .any(|owner| owner.name == call.receiver);
-            let declared_receiver_type = (!receiver_is_type)
-                .then(|| declared_receiver_type(document, source_definition, &call.receiver))
+            let receiver_local_binding = behavior
+                .indexed_receiver_collection_binding(&call.receiver)
+                .or_else(|| behavior.receiver_local_binding(&call.receiver))
+                .unwrap_or_else(|| call.receiver.clone());
+            let indexed_receiver = behavior
+                .indexed_receiver_collection_binding(&call.receiver)
+                .is_some();
+            let explicit_receiver_type = (!receiver_is_type)
+                .then(|| behavior.explicit_receiver_type(&call.receiver))
                 .flatten();
-            let flow_receiver_type = (!receiver_is_type && declared_receiver_type.is_none())
-                .then(|| flow_receiver_type(document, &call.function, &call.receiver, call.span))
-                .flatten();
+            let declared_receiver_type = (!receiver_is_type && explicit_receiver_type.is_none())
+                .then(|| {
+                    declared_receiver_type(document, source_definition, &receiver_local_binding)
+                })
+                .flatten()
+                .and_then(|declared_type| {
+                    if indexed_receiver {
+                        indexed_receiver_type(document, behavior, declared_type, language)
+                    } else {
+                        Some(declared_type)
+                    }
+                });
+            let flow_receiver_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
+                && declared_receiver_type.is_none())
+            .then(|| {
+                flow_receiver_type(document, &call.function, &receiver_local_binding, call.span)
+            })
+            .flatten()
+            .and_then(|flow_type| {
+                if indexed_receiver {
+                    indexed_receiver_type(document, behavior, flow_type, language)
+                } else {
+                    Some(flow_type)
+                }
+            });
             let state_receiver_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
                 && declared_receiver_type.is_none()
                 && flow_receiver_type.is_none())
-            .then(|| declared_state_receiver_type(document, &call.owner, &call.receiver))
+            .then(|| declared_state_receiver_type(document, &call.owner, &receiver_local_binding))
+            .flatten()
+            .and_then(|state_type| {
+                if indexed_receiver {
+                    indexed_receiver_type(document, behavior, state_type, language)
+                } else {
+                    Some(state_type)
+                }
+            });
+            let field_access_receiver_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
+                && declared_receiver_type.is_none()
+                && flow_receiver_type.is_none()
+                && state_receiver_type.is_none())
+            .then(|| {
+                field_access_receiver_type(
+                    document,
+                    source_definition,
+                    &call.function,
+                    &call.owner,
+                    &receiver_local_binding,
+                    call.span,
+                    language,
+                )
+            })
             .flatten();
-            let receiver_type_origin = if declared_receiver_type.is_some() {
+            let inferred_collection_element_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
+                && declared_receiver_type.is_none()
+                && flow_receiver_type.is_none()
+                && state_receiver_type.is_none()
+                && field_access_receiver_type.is_none())
+            .then(|| {
+                inferred_collection_element_receiver_type(
+                    document,
+                    source_definition,
+                    &call.function,
+                    &call.owner,
+                    &receiver_local_binding,
+                    &call.message,
+                    call.span,
+                    language,
+                    behavior,
+                )
+            })
+            .flatten();
+            let inherited_receiver_type = (!receiver_is_type
+                && explicit_receiver_type.is_none()
+                && declared_receiver_type.is_none()
+                && flow_receiver_type.is_none()
+                && state_receiver_type.is_none()
+                && field_access_receiver_type.is_none()
+                && inferred_collection_element_type.is_none()
+                && implicit)
+                .then(|| {
+                    document
+                        .owner_defs
+                        .iter()
+                        .find(|owner| owner.name == call.owner)
+                        .and_then(|owner| {
+                            behavior.inherited_call_receiver_type(&owner.supertypes, &call.message)
+                        })
+                })
+                .flatten();
+            let receiver_type_origin = if explicit_receiver_type.is_some() {
+                Some("explicit_native_cast".to_string())
+            } else if declared_receiver_type.is_some() {
                 Some("declared_parameter".to_string())
             } else if flow_receiver_type.is_some() {
                 Some("flow".to_string())
             } else if state_receiver_type.is_some() {
                 Some("declared_state".to_string())
+            } else if field_access_receiver_type.is_some() {
+                Some("field_access".to_string())
+            } else if inferred_collection_element_type.is_some() {
+                Some("inferred_collection_element".to_string())
+            } else if inherited_receiver_type.is_some() {
+                Some("declared_supertype".to_string())
             } else {
                 None
             };
             let receiver_has_flow_type = flow_receiver_type.is_some();
-            let instance_receiver_type = declared_receiver_type
+            let instance_receiver_type = explicit_receiver_type
+                .or(declared_receiver_type)
                 .or(flow_receiver_type)
-                .or(state_receiver_type);
+                .or(state_receiver_type)
+                .or(field_access_receiver_type)
+                .or(inferred_collection_element_type)
+                .or(inherited_receiver_type);
             let known_complexity = instance_receiver_type
                 .as_deref()
                 .map(|type_name| TypeExpr::parse(type_name, language))
                 .and_then(|receiver_type| behavior.call_complexity(&receiver_type, &call.message))
+                .or_else(|| {
+                    instance_receiver_type.as_deref().and_then(|type_name| {
+                        let normalized = normalized_declared_alias(document, type_name);
+                        (normalized.trim() != type_name.trim())
+                            .then(|| TypeExpr::parse(&normalized, language))
+                            .and_then(|receiver_type| {
+                                behavior.call_complexity(&receiver_type, &call.message)
+                            })
+                    })
+                })
+                .or_else(|| {
+                    function_local_lexical_symbol
+                        .as_deref()
+                        .and_then(|symbol| behavior.intrinsic_call_complexity(None, symbol))
+                })
                 .or_else(|| {
                     if implicit {
                         // Bare calls may be language intrinsics (`len`) or
@@ -6177,6 +8396,24 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                             &call.message,
                         )
                     }
+                })
+                .or_else(|| {
+                    if call.message != "base" {
+                        return None;
+                    }
+                    let supertypes = document
+                        .owner_defs
+                        .iter()
+                        .filter(|owner| owner.name == call.owner)
+                        .flat_map(|owner| owner.supertypes.iter())
+                        .collect::<BTreeSet<_>>();
+                    (supertypes.len() == 1)
+                        .then(|| {
+                            behavior.super_constructor_call_complexity(
+                                supertypes.into_iter().next().expect("one supertype"),
+                            )
+                        })
+                        .flatten()
                 });
             let parametric_cost = known_complexity
                 .is_none()
@@ -6187,18 +8424,156 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         .and_then(|receiver_type| {
                             behavior.parametric_call_cost(&receiver_type, &call.message)
                         })
-                        .or_else(|| declared_field_callback_cost(document, behavior, call))
+                        .or_else(|| {
+                            instance_receiver_type.as_deref().and_then(|type_name| {
+                                let normalized = normalized_declared_alias(document, type_name);
+                                (normalized.trim() != type_name.trim())
+                                    .then(|| TypeExpr::parse(&normalized, language))
+                                    .and_then(|receiver_type| {
+                                        behavior.parametric_call_cost(&receiver_type, &call.message)
+                                    })
+                            })
+                        })
+                        .or_else(|| {
+                            function_local_lexical_symbol.as_deref().and_then(|symbol| {
+                                behavior.intrinsic_parametric_call_cost(None, symbol)
+                            })
+                        })
+                        .or_else(|| {
+                            if implicit {
+                                behavior
+                                    .intrinsic_parametric_call_cost(None, &call.message)
+                                    .or_else(|| {
+                                        behavior.intrinsic_parametric_call_cost(
+                                            (!call.receiver.is_empty())
+                                                .then_some(call.receiver.as_str()),
+                                            &call.message,
+                                        )
+                                    })
+                            } else {
+                                behavior.intrinsic_parametric_call_cost(
+                                    (!call.receiver.is_empty()).then_some(call.receiver.as_str()),
+                                    &call.message,
+                                )
+                            }
+                        })
+                        .or_else(|| {
+                            declared_field_callback_cost(
+                                document,
+                                behavior,
+                                call,
+                                source_definition,
+                            )
+                        })
+                        .or_else(|| {
+                            instance_receiver_type.as_deref().and_then(|receiver_type| {
+                                abstract_dispatch_callback_cost(document, behavior, receiver_type)
+                            })
+                        })
+                        .or_else(|| {
+                            instance_receiver_type
+                                .as_deref()
+                                .filter(|receiver_type| {
+                                    declared_type_is_template_dependent(
+                                        document,
+                                        source_definition,
+                                        receiver_type,
+                                    )
+                                })
+                                .map(|_| "reflective_once".to_string())
+                        })
+                        .or_else(|| {
+                            (implicit && !call.message.is_empty())
+                                .then(|| {
+                                    self::declared_receiver_type(
+                                        document,
+                                        source_definition,
+                                        &call.message,
+                                    )
+                                })
+                                .flatten()
+                                .filter(|declared_type| {
+                                    declared_type_is_template_dependent(
+                                        document,
+                                        source_definition,
+                                        declared_type,
+                                    )
+                                })
+                                .map(|_| "reflective_once".to_string())
+                        })
+                        .or_else(|| {
+                            (implicit && !call.message.is_empty())
+                                .then(|| behavior.template_dependent_call_type(&call.message))
+                                .flatten()
+                                .filter(|template_type| {
+                                    declared_type_is_template_dependent(
+                                        document,
+                                        source_definition,
+                                        template_type,
+                                    )
+                                })
+                                .map(|_| "reflective_once".to_string())
+                        })
+                        .or_else(|| {
+                            (!implicit
+                                && instance_receiver_type.is_none()
+                                && !call.receiver.is_empty())
+                            .then(|| behavior.template_dependent_call_type(&call.receiver))
+                            .flatten()
+                            .filter(|template_type| {
+                                declared_type_is_template_dependent(
+                                    document,
+                                    source_definition,
+                                    template_type,
+                                )
+                            })
+                            .map(|_| "reflective_once".to_string())
+                        })
                 })
                 .flatten();
             let parametric_complexity = parametric_cost
                 .as_deref()
                 .and_then(crate::syntax::parametric_call_complexity);
+            let modeled_runtime =
+                (known_complexity.is_none() && parametric_complexity.is_none() && implicit)
+                    .then(|| behavior.modeled_runtime_call_complexity(&call.message))
+                    .flatten();
+            let source_preprocessor = (known_complexity.is_none()
+                && parametric_complexity.is_none()
+                && modeled_runtime.is_none()
+                && implicit)
+                .then(|| source_preprocessor_call_complexity(document, behavior, &call.message))
+                .flatten();
+            // A self/this call dispatches on the enclosing definition's owner:
+            // that owner IS the receiver type. There is no receiver variable to
+            // type, so resolve the owner to the same canonical symbol the
+            // sibling declarations carry, letting the dispatch index bind the
+            // call to its target. Exclude calls already modeled as a language
+            // intrinsic (a bare Go `len` shares no dispatch with a same-named
+            // method - Go has no implicit method dispatch).
+            let self_receiver_symbol = (matches!(call.receiver.as_str(), "self" | "this")
+                && static_receiver_symbol.is_none()
+                && instance_receiver_type.is_none()
+                && known_complexity.is_none()
+                && parametric_complexity.is_none()
+                && modeled_runtime.is_none()
+                && source_preprocessor.is_none())
+            .then(|| canonical_receiver_symbol(document, &call.owner))
+            .flatten();
             let instance_receiver_owner = instance_receiver_type
                 .as_deref()
                 .and_then(|type_name| exact_document_owner(document, type_name));
-            let instance_receiver_symbol = instance_receiver_type
-                .as_deref()
-                .and_then(|type_name| canonical_declared_type(document, type_name));
+            let receiver_denotes_current_owner =
+                instance_receiver_type.as_deref().is_some_and(|type_name| {
+                    behavior.receiver_denotes_current_owner(type_name, &call.owner)
+                });
+            let instance_receiver_symbol =
+                instance_receiver_type.as_deref().and_then(|type_name| {
+                    receiver_denotes_current_owner
+                        .then(|| canonical_receiver_symbol(document, &call.owner))
+                        .flatten()
+                        .or_else(|| canonical_declared_type(document, type_name))
+                });
             let receiver_symbol_origin = if static_receiver_symbol.is_some() {
                 canonical_receiver_symbol_origin(document, &call.receiver).or_else(|| {
                     adapter_receiver_is_type
@@ -6206,11 +8581,17 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         .flatten()
                 })
             } else {
-                instance_receiver_type
-                    .as_deref()
-                    .and_then(|type_name| canonical_declared_type_origin(document, type_name))
+                receiver_denotes_current_owner
+                    .then(|| "current_owner_declaration".to_string())
+                    .or_else(|| {
+                        instance_receiver_type.as_deref().and_then(|type_name| {
+                            canonical_declared_type_origin(document, type_name)
+                        })
+                    })
             };
-            let receiver_symbol = static_receiver_symbol.or(instance_receiver_symbol.clone());
+            let receiver_symbol = static_receiver_symbol
+                .or(instance_receiver_symbol.clone())
+                .or_else(|| self_receiver_symbol.clone());
             let source_dispatch = source_definition
                 .map(|definition| definition.dispatch_kind.as_str())
                 .filter(|kind| !kind.is_empty());
@@ -6234,18 +8615,32 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .get(&call.receiver)
                     .map(|namespace| format!("{namespace}::{}", call.message))
             };
-            let lexical_symbol_origin = imported_lexical_symbol
+            // A bare call is a package free-function reference when the caller
+            // is itself top-level, or in any language without implicit method
+            // dispatch (Go): there a bare `helper(x)` is never `self.helper`, so
+            // even inside a method it names a package function.
+            let bare_names_package_function = source_dispatch == Some("top")
+                || (implicit && !behavior.supports_implicit_owner_dispatch());
+            let lexical_symbol_origin = function_local_lexical_symbol
                 .as_ref()
-                .map(|_| "explicit_import".to_string())
+                .map(|_| "function_local_import".to_string())
                 .or_else(|| {
-                    (implicit && document.symbol_scope.canonical && source_dispatch == Some("top"))
+                    imported_lexical_symbol
+                        .as_ref()
+                        .map(|_| "explicit_import".to_string())
+                })
+                .or_else(|| {
+                    (implicit && document.symbol_scope.canonical && bare_names_package_function)
                         .then(|| "project_namespace".to_string())
                 });
             let target_candidates = document
                 .function_defs
                 .iter()
                 .filter(|definition| {
-                    if definition.name != call.message {
+                    if behavior.function_dispatch_name(&definition.name) != call.message {
+                        return false;
+                    }
+                    if function_local_lexical_symbol.is_some() {
                         return false;
                     }
                     let dispatch = definition.dispatch_kind.as_str();
@@ -6275,23 +8670,21 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             let target_def = (target_candidates.len() == 1).then(|| target_candidates[0]);
             let target = target_def.map(|row| function_id(language, path, row));
             let resolved = target.is_some();
-            let state_receiver = document.state_declarations.iter().any(|row| {
-                row.owner == call.owner
-                    && (call.receiver == row.field
-                        || call.receiver.trim_start_matches('@')
-                            == row.field.trim_start_matches('@')
-                        || call.receiver.strip_prefix("self.")
-                            == Some(row.field.trim_start_matches('@'))
-                        || call.receiver.strip_prefix("this.")
-                            == Some(row.field.trim_start_matches('@')))
-            });
             let receiver_is_parameter = source_definition.is_some_and(|definition| {
                 definition
                     .params
                     .iter()
-                    .any(|parameter| parameter == &call.receiver)
+                    .any(|parameter| parameter == &receiver_local_binding)
             });
             let receiver_is_local = receiver_has_flow_type;
+            // Normalized call receivers may have lost a language-specific
+            // state sigil (`@runner` becomes `runner`). Use the shared state
+            // read/write facts as well as declarations, while allowing a
+            // parameter or typed local with the same spelling to shadow the
+            // field.
+            let state_receiver = !receiver_is_parameter
+                && !receiver_is_local
+                && receiver_state_field(&call.receiver, document).is_some();
             let receiver_binding_kind = if implicit {
                 "implicit"
             } else if receiver_is_type {
@@ -6347,6 +8740,12 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
             } else {
                 Some("receiver_requires_corpus_resolution".to_string())
             };
+            let (receiver_definition_call_spans, receiver_definition_sequence_projection) =
+                if receiver_is_type {
+                    (Vec::new(), None)
+                } else {
+                    reaching_call_results(document, &call.function, &call.receiver, call.span)
+                };
             CallRecord {
                 id: stable_id(
                     "edge",
@@ -6360,6 +8759,7 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 target_provenance: None,
                 candidate_targets: Vec::new(),
                 candidate_reason: None,
+                consumer_closed_candidate_set: false,
                 kind: kind.to_string(),
                 owner: call.owner.clone(),
                 function: call.function.clone(),
@@ -6371,37 +8771,38 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .canonical
                     .then(|| source_namespace.map(str::to_string))
                     .flatten(),
-                lexical_symbol: imported_lexical_symbol.or_else(|| {
-                    (implicit && document.symbol_scope.canonical)
-                        .then(|| {
-                            if language == "cpp" {
-                                let symbol = cpp_symbol_without_template_arguments(&call.message);
-                                if symbol.contains("::") {
-                                    Some(symbol)
-                                } else if source_dispatch == Some("top") {
-                                    source_namespace
-                                        .map(|namespace| format!("{namespace}::{symbol}"))
-                                } else {
-                                    None
-                                }
-                            } else if source_dispatch == Some("top") {
-                                source_namespace
-                                    .map(|namespace| format!("{namespace}::{}", call.message))
-                            } else {
-                                None
-                            }
-                        })
-                        .flatten()
-                }),
+                lexical_symbol: function_local_lexical_symbol
+                    .or(imported_lexical_symbol)
+                    .or_else(|| {
+                        (implicit && document.symbol_scope.canonical)
+                            .then(|| {
+                                behavior
+                                    .explicit_lexical_call_symbol(
+                                        &call.message,
+                                        source_namespace,
+                                        source_dispatch == Some("top"),
+                                    )
+                                    .or_else(|| {
+                                        if bare_names_package_function {
+                                            source_namespace.map(|namespace| {
+                                                format!("{namespace}::{}", call.message)
+                                            })
+                                        } else {
+                                            None
+                                        }
+                                    })
+                            })
+                            .flatten()
+                    }),
                 lexical_symbol_origin,
                 receiver_call_span: receiver_call_spans.get(&call.span).copied(),
-                receiver_definition_call_spans: if receiver_is_type {
-                    Vec::new()
-                } else {
-                    reaching_call_result_spans(document, &call.function, &call.receiver, call.span)
-                },
+                selector_span: selector_spans.get(&call.span).copied(),
+                execution_span: execution_spans.get(&call.span).copied(),
+                receiver_definition_call_spans,
+                receiver_definition_sequence_projection,
                 receiver_symbol,
-                receiver_type: instance_receiver_type,
+                receiver_type: instance_receiver_type
+                    .or_else(|| self_receiver_symbol.as_ref().map(|_| call.owner.clone())),
                 receiver_type_origin,
                 receiver_symbol_origin,
                 implicit_receiver: implicit,
@@ -6412,19 +8813,44 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                     .preprocessor_callables
                     .contains(call.message.as_str()),
                 dispatch_boundary,
-                constructor_target: behavior
-                    .constructor_dispatch_name(&call.receiver, &call.message),
+                constructor_target: behavior.constructor_dispatch_name(
+                    &call.receiver,
+                    &call.message,
+                    &call.owner,
+                ),
                 known_time_complexity: known_complexity
                     .map(|cost| cost.time.to_string())
-                    .or_else(|| parametric_complexity.map(|cost| cost.0.to_string())),
+                    .or_else(|| parametric_complexity.map(|cost| cost.0.to_string()))
+                    .or_else(|| modeled_runtime.as_ref().map(|cost| cost.time.to_string()))
+                    .or_else(|| {
+                        source_preprocessor
+                            .as_ref()
+                            .map(|cost| cost.time.to_string())
+                    }),
                 known_space_complexity: known_complexity
                     .map(|cost| cost.space.to_string())
-                    .or_else(|| parametric_complexity.map(|cost| cost.1.to_string())),
+                    .or_else(|| parametric_complexity.map(|cost| cost.1.to_string()))
+                    .or_else(|| modeled_runtime.as_ref().map(|cost| cost.space.to_string()))
+                    .or_else(|| {
+                        source_preprocessor
+                            .as_ref()
+                            .map(|cost| cost.space.to_string())
+                    }),
                 complexity_provenance: known_complexity
                     .map(|_| "language_stdlib_registry".to_string())
                     .or_else(|| {
                         parametric_complexity
                             .map(|_| "parametric_declared_receiver_contract".to_string())
+                    })
+                    .or_else(|| {
+                        modeled_runtime
+                            .as_ref()
+                            .map(|cost| cost.provenance.to_string())
+                    })
+                    .or_else(|| {
+                        source_preprocessor
+                            .as_ref()
+                            .map(|_| "source_preprocessor_definition".to_string())
                     }),
                 complexity_bound_quality: known_complexity
                     .map(|_| "upper_bound_declared_receiver".to_string())
@@ -6432,11 +8858,42 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                         parametric_cost
                             .as_ref()
                             .map(|kind| format!("upper_bound_parametric_{kind}"))
+                    })
+                    .or_else(|| {
+                        modeled_runtime
+                            .as_ref()
+                            .map(|cost| cost.bound_quality.to_string())
+                    })
+                    .or_else(|| {
+                        source_preprocessor
+                            .as_ref()
+                            .map(|_| "upper_bound_source_preprocessor_definition".to_string())
                     }),
-                complexity_candidates: Vec::new(),
-                complexity_assumptions: Vec::new(),
+                complexity_candidates: modeled_runtime
+                    .as_ref()
+                    .map(|cost| cost.candidates.clone())
+                    .or_else(|| {
+                        source_preprocessor
+                            .as_ref()
+                            .map(|_| vec![call.message.clone()])
+                    })
+                    .unwrap_or_default(),
+                complexity_assumptions: modeled_runtime
+                    .as_ref()
+                    .and_then(|cost| cost.assumption.clone())
+                    .or_else(|| {
+                        source_preprocessor.as_ref().map(|_| {
+                            format!(
+                                "all source definitions of `{}` converge on this bounded cost",
+                                call.message
+                            )
+                        })
+                    })
+                    .into_iter()
+                    .collect(),
                 message: call.message.clone(),
                 argument_count: call.arguments.len(),
+                arguments: call.arguments.clone(),
                 path: path.to_string(),
                 line: call.line,
                 span: call.span,
@@ -6445,9 +8902,379 @@ fn extract_calls(document: &Document, language: &str, path: &str) -> Vec<CallRec
                 unresolved_reason,
                 resolution_missing_proof: None,
                 empty_domain_cause: None,
+                runtime_evidence_observed: false,
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    remove_binding_receiver_pseudo_calls(&mut calls);
+    propagate_direct_call_result_receiver_types(&mut calls, language, behavior);
+    propagate_callback_argument_parameter_types(&mut calls, document, language, behavior);
+    propagate_collection_callback_parameter_types(&mut calls, document, language, behavior);
+    calls
+}
+
+fn remove_binding_receiver_pseudo_calls(calls: &mut Vec<CallRecord>) {
+    let binding_receivers = calls
+        .iter()
+        .filter(|call| {
+            matches!(
+                call.receiver_binding_kind.as_str(),
+                "parameter" | "local" | "state"
+            )
+        })
+        .filter_map(|call| {
+            Some((
+                call.source.clone(),
+                call.path.clone(),
+                call.receiver_call_span?,
+                call.receiver.clone(),
+            ))
+        })
+        .collect::<BTreeSet<_>>();
+    if binding_receivers.is_empty() {
+        return;
+    }
+
+    let pseudo_ids = calls
+        .iter()
+        .filter(|call| call.implicit_receiver && call.argument_count == 0)
+        .filter(|call| {
+            binding_receivers.contains(&(
+                call.source.clone(),
+                call.path.clone(),
+                call.span,
+                call.message.clone(),
+            ))
+        })
+        .map(|call| call.id.clone())
+        .collect::<BTreeSet<_>>();
+    if pseudo_ids.is_empty() {
+        return;
+    }
+
+    for call in calls.iter_mut() {
+        if call.receiver_call_span.is_some_and(|span| {
+            binding_receivers.contains(&(
+                call.source.clone(),
+                call.path.clone(),
+                span,
+                call.receiver.clone(),
+            ))
+        }) {
+            call.receiver_call_span = None;
+        }
+    }
+    calls.retain(|call| !pseudo_ids.contains(&call.id));
+}
+
+fn propagate_direct_call_result_receiver_types(
+    calls: &mut [CallRecord],
+    language: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) {
+    loop {
+        let producers = calls
+            .iter()
+            .filter_map(|call| {
+                let producer_receiver_type = call
+                    .receiver_type
+                    .as_deref()
+                    .or(call.receiver_symbol.as_deref())
+                    .or_else(|| {
+                        (call.receiver_kind == "type" && !call.receiver.is_empty())
+                            .then_some(call.receiver.as_str())
+                    });
+                let result_type = behavior
+                    .static_argument_dependent_return_type(&call.message, &call.arguments)
+                    .or_else(|| behavior.static_return_type(&call.message, producer_receiver_type))
+                    .or_else(|| {
+                        behavior.propagated_collection_return_type(
+                            &call.message,
+                            producer_receiver_type,
+                        )
+                    })?;
+                Some((
+                    (call.source.clone(), call.path.clone(), call.span),
+                    result_type,
+                ))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut changed = false;
+        for call in calls.iter_mut().filter(|call| call.receiver_type.is_none()) {
+            let receiver_spans = call
+                .receiver_call_span
+                .into_iter()
+                .chain(call.receiver_definition_call_spans.iter().copied())
+                .collect::<BTreeSet<_>>();
+            if receiver_spans.is_empty() {
+                continue;
+            }
+            let Some(result_types) = receiver_spans
+                .iter()
+                .map(|span| {
+                    producers
+                        .get(&(call.source.clone(), call.path.clone(), *span))
+                        .cloned()
+                })
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            let result_types = result_types.into_iter().collect::<BTreeSet<_>>();
+            if result_types.len() != 1 {
+                continue;
+            }
+            let mut receiver_type = result_types
+                .into_iter()
+                .next()
+                .expect("one static producer result type");
+            if call.receiver_definition_sequence_projection.is_some() {
+                let Some(projected) =
+                    projected_sequence_result_type(behavior, &receiver_type, language)
+                else {
+                    continue;
+                };
+                receiver_type = projected;
+            }
+            let parsed = TypeExpr::parse(&receiver_type, language);
+            let known = behavior.call_complexity(&parsed, &call.message);
+            let parametric = known
+                .is_none()
+                .then(|| behavior.parametric_call_cost(&parsed, &call.message))
+                .flatten();
+            let parametric_complexity = parametric
+                .as_deref()
+                .and_then(crate::syntax::parametric_call_complexity);
+            call.receiver_type = Some(receiver_type);
+            call.receiver_type_origin = Some("static_call_result_contract".to_string());
+            call.known_time_complexity = known
+                .map(|cost| cost.time.to_string())
+                .or_else(|| parametric_complexity.map(|cost| cost.0.to_string()));
+            call.known_space_complexity = known
+                .map(|cost| cost.space.to_string())
+                .or_else(|| parametric_complexity.map(|cost| cost.1.to_string()));
+            call.complexity_provenance = known
+                .map(|_| "language_stdlib_registry".to_string())
+                .or_else(|| {
+                    parametric_complexity
+                        .map(|_| "parametric_declared_receiver_contract".to_string())
+                });
+            call.complexity_bound_quality = known
+                .map(|_| "upper_bound_declared_receiver".to_string())
+                .or_else(|| {
+                    parametric
+                        .as_ref()
+                        .map(|kind| format!("upper_bound_parametric_{kind}"))
+                });
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+fn propagate_callback_argument_parameter_types(
+    calls: &mut [CallRecord],
+    document: &Document,
+    language: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) {
+    let block_calls = document
+        .call_sites
+        .iter()
+        .filter(|site| site.block)
+        .collect::<Vec<_>>();
+    let nodes = document
+        .control_flow_nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let places = document
+        .places
+        .iter()
+        .map(|place| (place.id.as_str(), place))
+        .collect::<BTreeMap<_, _>>();
+    let parameter_counts = document.callback_bindings.iter().fold(
+        BTreeMap::<(&str, [usize; 4]), usize>::new(),
+        |mut counts, binding| {
+            counts
+                .entry((binding.node_id.as_str(), binding.span))
+                .and_modify(|count| *count = (*count).max(binding.position + 1))
+                .or_insert(binding.position + 1);
+            counts
+        },
+    );
+    let mut proven = Vec::new();
+    for binding in &document.callback_bindings {
+        let Some(node) = nodes.get(binding.node_id.as_str()) else {
+            continue;
+        };
+        let Some(place) = places.get(binding.place_id.as_str()) else {
+            continue;
+        };
+        let candidates = block_calls
+            .iter()
+            .filter(|site| site.function == binding.function)
+            .filter(|site| span_contains(node.span, site.span))
+            .filter(|site| site.span[0] == node.span[0])
+            .collect::<Vec<_>>();
+        if candidates.len() != 1 {
+            continue;
+        }
+        let site = candidates[0];
+        let outer_calls = calls
+            .iter()
+            .filter(|call| {
+                call.function == site.function
+                    && call.message == site.message
+                    && call.span == site.span
+            })
+            .collect::<Vec<_>>();
+        if outer_calls.len() != 1 {
+            continue;
+        }
+        let outer = outer_calls[0];
+        let parameter_count = parameter_counts
+            .get(&(binding.node_id.as_str(), binding.span))
+            .copied()
+            .unwrap_or(0);
+        let Some(receiver_type) = behavior.callback_argument_parameter_type(
+            &outer.receiver,
+            outer.receiver_type.as_deref(),
+            &outer.message,
+            binding.position,
+            parameter_count,
+            &outer.arguments,
+        ) else {
+            continue;
+        };
+        proven.push((
+            binding.function.as_str(),
+            binding.span,
+            place.name.as_str(),
+            receiver_type,
+        ));
+    }
+
+    for call in calls.iter_mut().filter(|call| call.receiver_type.is_none()) {
+        let receiver_types = proven
+            .iter()
+            .filter(|(function, span, name, _)| {
+                *function == call.function
+                    && *name == call.receiver
+                    && span_contains(*span, call.span)
+            })
+            .map(|(_, _, _, receiver_type)| receiver_type.as_str())
+            .collect::<BTreeSet<_>>();
+        if receiver_types.len() != 1 {
+            continue;
+        }
+        let receiver_type = receiver_types
+            .into_iter()
+            .next()
+            .expect("one callback argument type");
+        let parsed = TypeExpr::parse(receiver_type, language);
+        let known = behavior.call_complexity(&parsed, &call.message);
+        let parametric = known
+            .is_none()
+            .then(|| behavior.parametric_call_cost(&parsed, &call.message))
+            .flatten();
+        let parametric_complexity = parametric
+            .as_deref()
+            .and_then(crate::syntax::parametric_call_complexity);
+        call.receiver_type = Some(receiver_type.to_string());
+        call.receiver_type_origin = Some("callback_argument".to_string());
+        call.known_time_complexity = known
+            .map(|cost| cost.time.to_string())
+            .or_else(|| parametric_complexity.map(|cost| cost.0.to_string()));
+        call.known_space_complexity = known
+            .map(|cost| cost.space.to_string())
+            .or_else(|| parametric_complexity.map(|cost| cost.1.to_string()));
+        call.complexity_provenance = known
+            .map(|_| "language_stdlib_registry".to_string())
+            .or_else(|| {
+                parametric_complexity.map(|_| "parametric_declared_receiver_contract".to_string())
+            });
+        call.complexity_bound_quality = known
+            .map(|_| "upper_bound_declared_receiver".to_string())
+            .or_else(|| {
+                parametric
+                    .as_ref()
+                    .map(|kind| format!("upper_bound_parametric_{kind}"))
+            });
+    }
+}
+
+fn propagate_collection_callback_parameter_types(
+    calls: &mut [CallRecord],
+    document: &Document,
+    language: &str,
+    behavior: &dyn crate::syntax::normalized_behavior::NormalizedLanguageBehavior,
+) {
+    let contextual_types = calls
+        .iter()
+        .filter(|call| call.receiver_type.is_none())
+        .filter_map(|call| {
+            let definition = document.function_defs.iter().find(|definition| {
+                definition.name == call.function
+                    && definition
+                        .params
+                        .iter()
+                        .any(|parameter| parameter == &call.receiver)
+                    && span_contains(definition.span, call.span)
+            })?;
+            let element_types = calls
+                .iter()
+                .filter(|outer| outer.source != call.source)
+                .filter(|outer| span_contains(outer.span, definition.span))
+                .filter(|outer| behavior.collection_callback_parameter(&outer.message))
+                .filter_map(|outer| {
+                    collection_element_type(outer.receiver_type.as_deref()?, language)
+                })
+                .collect::<BTreeSet<_>>();
+            (element_types.len() == 1).then(|| {
+                (
+                    call.id.clone(),
+                    element_types.into_iter().next().expect("one element type"),
+                )
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+    for call in calls.iter_mut() {
+        let Some(receiver_type) = contextual_types.get(&call.id) else {
+            continue;
+        };
+        let parsed = TypeExpr::parse(receiver_type, language);
+        let known = behavior.call_complexity(&parsed, &call.message);
+        let parametric = known
+            .is_none()
+            .then(|| behavior.parametric_call_cost(&parsed, &call.message))
+            .flatten();
+        let parametric_complexity = parametric
+            .as_deref()
+            .and_then(crate::syntax::parametric_call_complexity);
+        call.receiver_type = Some(receiver_type.clone());
+        call.receiver_type_origin = Some("collection_callback_parameter".to_string());
+        call.known_time_complexity = known
+            .map(|cost| cost.time.to_string())
+            .or_else(|| parametric_complexity.map(|cost| cost.0.to_string()));
+        call.known_space_complexity = known
+            .map(|cost| cost.space.to_string())
+            .or_else(|| parametric_complexity.map(|cost| cost.1.to_string()));
+        call.complexity_provenance = known
+            .map(|_| "language_stdlib_registry".to_string())
+            .or_else(|| {
+                parametric_complexity.map(|_| "parametric_declared_receiver_contract".to_string())
+            });
+        call.complexity_bound_quality = known
+            .map(|_| "upper_bound_declared_receiver".to_string())
+            .or_else(|| {
+                parametric
+                    .as_ref()
+                    .map(|kind| format!("upper_bound_parametric_{kind}"))
+            });
+    }
 }
 
 fn extract_state_accesses(
@@ -6584,6 +9411,7 @@ pub(crate) mod tests {
                 visibility: Some("public".to_string()),
                 params: vec!["name".to_string()],
                 callback_params: Vec::new(),
+                source_export_eligible: true,
                 signature: "def hello(name)".to_string(),
             }],
             owner_defs: vec![syntax::OwnerDef {
@@ -6592,11 +9420,14 @@ pub(crate) mod tests {
                 kind: "class".to_string(),
                 reopenable: false,
                 supertypes: Vec::new(),
+                requirements: Vec::new(),
                 line: 1,
                 span: [1, 0, 1, 16],
             }],
             normalization_call_origins: Vec::new(),
             call_raw_origin_projections: Vec::new(),
+            call_selector_projections: Vec::new(),
+            call_execution_projections: Vec::new(),
             state_declarations: vec![syntax::StateDeclaration {
                 field: "@name".to_string(),
                 owner: "Greeter".to_string(),
@@ -6642,6 +9473,7 @@ pub(crate) mod tests {
             def_use: vec![],
             liveness: vec![],
             flow_types: vec![],
+            callback_bindings: vec![],
             protocol_method_effects: vec![],
             protocol_call_paths: vec![],
             clone_candidates: vec![],
@@ -6657,6 +9489,7 @@ pub(crate) mod tests {
             type_alias_lines: Default::default(),
             method_param_types: Default::default(),
             method_local_types: Default::default(),
+            method_template_types: Default::default(),
             hazard_sites: vec![],
             imports: vec![],
         }
@@ -6676,6 +9509,34 @@ pub(crate) mod tests {
             receiver_state_field("this.name", &document),
             Some("name".to_string())
         );
+    }
+
+    #[test]
+    fn cpp_owner_name_matching_ignores_template_spacing() {
+        assert!(owner_name_matches(
+            "ScopedRemover &&",
+            "ScopedRemover < DispatcherType, Enable >"
+        ));
+        assert!(owner_name_matches(
+            "Node",
+            "CallbackListBase< ReturnType (Args...), PoliciesType >::Node"
+        ));
+        assert!(!owner_name_matches(
+            "CallbackListBase",
+            "CallbackListBase< ReturnType (Args...), PoliciesType >::Node"
+        ));
+    }
+
+    #[test]
+    fn owner_name_matching_accepts_portable_scip_nested_owner_separator() {
+        assert!(owner_name_matches(
+            "SlopCop::CoverageData::Dataset",
+            "SlopCop/CoverageData/Dataset"
+        ));
+        assert!(!owner_name_matches(
+            "SlopCop::CoverageData::Dataset",
+            "SlopCop/CoverageData/FileCoverage"
+        ));
     }
 
     #[test]
@@ -6736,6 +9597,407 @@ pub(crate) mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn raw_call_loss_revokes_only_the_innermost_source_export_body() {
+        let mut document = test_document();
+        let mut outer = document.function_defs[0].clone();
+        outer.name = "outer".to_string();
+        outer.span = [1, 0, 3, 0];
+        document.function_defs.push(outer);
+        document.raw_call_sites = vec![crate::ast::RawCallSite {
+            span: [1, 2, 1, 8],
+            kind: "call_expression".to_string(),
+        }];
+
+        let output = extract(&document, Profile::Espalier);
+        assert_eq!(output.methods.len(), 2);
+        assert!(
+            !output
+                .methods
+                .iter()
+                .find(|method| method.name == "hello")
+                .unwrap()
+                .source_export_eligible
+        );
+        assert!(
+            output
+                .methods
+                .iter()
+                .find(|method| method.name == "outer")
+                .unwrap()
+                .source_export_eligible
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            1
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .source_export_eligible_methods_overlapping_raw_call_loss,
+            0
+        );
+    }
+
+    #[test]
+    fn parser_recovery_revokes_every_overlapping_source_export_body() {
+        let mut document = test_document();
+        document.parse_recovered = true;
+        document.parse_recovery_spans = vec![[1, 1, 1, 5]];
+
+        let output = extract(&document, Profile::Espalier);
+        assert_eq!(output.methods.len(), 1);
+        assert!(!output.methods[0].source_export_eligible);
+    }
+
+    #[test]
+    fn trace_plan_exports_only_cfg_dfg_value_capture_demands() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class RuntimePlanFixture
+  def run(rows)
+    ignored = ["items"].fetch(0)
+    selected = rows.resolve_items
+    selected.map { |row| row.to_s }
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let documents = syntax::parse_files(&[file.path().to_path_buf()], Language::Ruby)
+            .expect("parse Ruby source");
+
+        let output = extract(&documents[0], Profile::TracePlan);
+
+        assert!(
+            output.runtime_call_sites.iter().any(|site| {
+                site.span[0] == 4
+                    && site.activation_span.map(|span| span[0]) == Some(4)
+                    && site.selector.as_deref() == Some("resolve_items")
+            }),
+            "a single-line unresolved call must activate on its own line"
+        );
+        assert!(
+            output
+                .runtime_call_sites
+                .iter()
+                .all(|site| site.span[0] != 3),
+            "a statically costed call must not request runtime target observation"
+        );
+        assert!(
+            output.runtime_result_call_sites.iter().any(|site| {
+                site.span[0] == 4 && site.selector.as_deref() == Some("resolve_items")
+            }),
+            "a call that defines a later receiver must request its result"
+        );
+        assert!(
+            output
+                .runtime_collection_receiver_sites
+                .iter()
+                .any(|site| site.span[0] == 5 && site.selector.as_deref() == Some("map")),
+            "a collection callback must retain its receiver element domain"
+        );
+    }
+
+    #[test]
+    fn trace_plan_retains_intra_callback_call_result_demands() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class RuntimePlanFixture
+  def run(rows)
+    rows.filter_map do |row|
+      fact = row[:fact]
+      fact.normalize
+      fact
+    end
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+
+        let output = extract(&document, Profile::TracePlan);
+
+        assert!(
+            output.runtime_result_call_sites.iter().any(|site| {
+                site.span[0] == 4 && site.selector.as_deref() == Some("[]")
+            }),
+            "a call result written and consumed inside one normalized callback node must be requested"
+        );
+    }
+
+    #[test]
+    fn trace_plan_drops_runtime_target_demands_after_static_enrichment() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class RuntimePlanFixture
+  def run(provider)
+    provider.resolve_items
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let mut output = extract(&document, Profile::TracePlan);
+        assert_eq!(output.runtime_call_sites.len(), 1);
+
+        let call = output
+            .calls
+            .iter_mut()
+            .find(|call| call.message == "resolve_items")
+            .expect("call");
+        call.known_time_complexity = Some("O(1)".to_string());
+        call.known_space_complexity = Some("O(1)".to_string());
+        refresh_runtime_call_sites(&mut output);
+
+        assert!(output.runtime_call_sites.is_empty());
+    }
+
+    #[test]
+    fn trace_plan_activates_runtime_events_at_the_enclosing_multiline_statement() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class RuntimePlanFixture
+  def run(provider)
+    {
+      items: provider.resolve_items
+    }
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document =
+            syntax::parse_file(file.path().to_path_buf(), Language::Ruby).expect("parse");
+        let output = extract(&document, Profile::TracePlan);
+        let site = output
+            .runtime_call_sites
+            .iter()
+            .find(|site| site.selector.as_deref() == Some("resolve_items"))
+            .expect("runtime call site");
+
+        assert_eq!(site.span[0], 4);
+        assert_eq!(site.activation_span.expect("activation span")[0], 3);
+    }
+
+    #[test]
+    fn generated_record_reader_targets_have_constant_cost_without_runtime_evidence() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"Index = Struct.new(:facts, keyword_init: true)
+class Index
+  def file_default(key)
+    facts[key]
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+
+        let mut output = extract(&document, Profile::Espalier);
+        let reader_id = output
+            .methods
+            .iter()
+            .find(|method| method.name == "facts" && method.generated_declaration)
+            .expect("synthetic reader declaration")
+            .id
+            .clone();
+        let reader = output
+            .calls
+            .iter_mut()
+            .find(|call| call.function == "file_default" && call.message == "facts")
+            .expect("generated reader call");
+        reader.target = Some(reader_id);
+        reader.kind = "resolved_call".to_string();
+        reader.known_time_complexity = None;
+        reader.known_space_complexity = None;
+
+        reapply_generated_callable_costs(&mut output);
+
+        let reader = output
+            .calls
+            .iter()
+            .find(|call| call.function == "file_default" && call.message == "facts")
+            .expect("generated reader call");
+        assert_eq!(reader.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(reader.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(
+            reader.complexity_provenance.as_deref(),
+            Some("generated_callable_declaration")
+        );
+    }
+
+    #[test]
+    fn generated_mutable_record_writers_have_constant_cost_but_data_has_no_writer() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"MutableRow = Struct.new(:value)
+ImmutableRow = Data.define(:value)
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+        let output = extract(&document, Profile::Espalier);
+
+        let writer = output
+            .methods
+            .iter()
+            .find(|method| method.name == "value=")
+            .unwrap_or_else(|| {
+                panic!(
+                    "synthetic Struct writer declaration; generated={:?}",
+                    output
+                        .methods
+                        .iter()
+                        .filter(|method| method.generated_declaration)
+                        .map(|method| (&method.owner, &method.name))
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert!(writer.owner.ends_with("::MutableRow"));
+        assert!(writer.generated_declaration);
+        assert_eq!(writer.params, vec!["value"]);
+        assert!(!output
+            .methods
+            .iter()
+            .any(|method| method.owner.ends_with("::ImmutableRow") && method.name == "value="));
+    }
+
+    #[test]
+    fn generated_record_constructor_contract_does_not_price_instance_index_methods() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"Widget = Struct.new(:value)
+class Widget
+  def [](key)
+    key.to_s
+  end
+end
+
+class Caller
+  def run(widget)
+    widget[:key]
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+
+        let mut output = extract(&document, Profile::Espalier);
+        let index = output
+            .calls
+            .iter_mut()
+            .find(|call| call.function == "run" && call.message == "[]")
+            .expect("instance index call");
+        index.receiver_type = Some("Widget".to_string());
+        index.known_time_complexity = None;
+        index.known_space_complexity = None;
+
+        reapply_generated_record_costs(&mut output);
+
+        let index = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run" && call.message == "[]")
+            .expect("instance index call");
+        assert!(index.known_time_complexity.is_none());
+        assert!(index.known_space_complexity.is_none());
+    }
+
+    #[test]
+    fn static_receiver_contracts_close_literal_and_direct_call_chains() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"class Sample
+  def word_member?
+    %w[while until for].include?("while")
+  end
+
+  def converted_empty?(value)
+    Array(value).empty?
+  end
+
+  def rendered_empty?(value)
+    value.to_s.empty?
+  end
+
+  def source_file
+    File.expand_path(__FILE__)
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+
+        let output = extract(&document, Profile::Espalier);
+        let word = output
+            .calls
+            .iter()
+            .find(|call| call.function == "word_member?" && call.message == "include?")
+            .expect("word-array membership call");
+        assert_eq!(word.known_time_complexity.as_deref(), Some("O(N)"));
+        assert_eq!(word.known_space_complexity.as_deref(), Some("O(1)"));
+        assert!(
+            !output.calls.iter().any(|call| call.message == "__FILE__"),
+            "Ruby's lexical __FILE__ pseudo-constant must not be normalized as self.__FILE__()"
+        );
+
+        for (function, receiver_type) in [
+            ("converted_empty?", "T::Array[T.untyped]"),
+            ("rendered_empty?", "String"),
+        ] {
+            let call = output
+                .calls
+                .iter()
+                .find(|call| call.function == function && call.message == "empty?")
+                .unwrap_or_else(|| panic!("{function} chained empty? call"));
+            assert_eq!(call.receiver_type.as_deref(), Some(receiver_type));
+            assert_eq!(
+                call.receiver_type_origin.as_deref(),
+                Some("static_call_result_contract")
+            );
+            assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+            assert_eq!(call.known_space_complexity.as_deref(), Some("O(1)"));
+        }
     }
 
     #[test]
@@ -6802,6 +10064,145 @@ pub(crate) mod tests {
 
         assert!(unmatched_raw.is_empty());
         assert_eq!(unmatched_normalized, vec![[1, 0, 1, 6]]);
+    }
+
+    #[test]
+    fn ruby_block_calls_retain_exact_raw_call_origins() {
+        let mut file = tempfile::Builder::new()
+            .suffix(".rb")
+            .tempfile()
+            .expect("temporary Ruby source");
+        file.write_all(
+            br#"module BlockCallFixture
+  module_function
+  def run(rows, file_coverage, branch_arms)
+    branch_arm_coverage(file_coverage, branch_arms).each_with_object(Hash.new(0)) do |row, out|
+      next if row.covered
+
+      out[row.arm.line] += 1
+    end
+    rows.filter_map do |row|
+      row.to_s if row
+    end
+    rows.map { |row| row.to_s }
+    index = rows.each_with_object(
+      {}
+    ) do |row, out|
+      out[row] = true
+    end
+    index[rows.size] = false
+    buffer = []
+    buffer[rows.size] = true
+    defaults = Hash.new { |hash, key| hash[key] = [] }
+    defaults
+    rows.value = rows.size
+  end
+end
+"#,
+        )
+        .expect("write Ruby source");
+        let document = syntax::parse_file(file.path().to_path_buf(), Language::Ruby)
+            .expect("parse Ruby source");
+
+        let output = extract(&document, Profile::Espalier);
+        assert_eq!(
+            output.call_resolution_coverage.raw_calls_not_normalized,
+            0,
+            "{:?}",
+            output
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples
+        );
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            0,
+            "{:?}",
+            output
+                .call_resolution_coverage
+                .raw_call_normalization_gap_samples
+        );
+        assert!(
+            output.calls.iter().any(|call| call.message == "value="),
+            "attribute writers are executable Ruby calls"
+        );
+        assert!(
+            output
+                .calls
+                .iter()
+                .any(|call| call.receiver == "Hash" && call.message == "new"),
+            "constructor calls nested in block-call arguments must be retained"
+        );
+        assert_eq!(
+            output
+                .calls
+                .iter()
+                .filter(|call| call.message == "each_with_object")
+                .map(|call| call.arguments.len())
+                .collect::<Vec<_>>(),
+            vec![1, 1],
+            "wrapped block-call arguments must be structurally retained without duplication"
+        );
+        let accumulator_writes = output
+            .calls
+            .iter()
+            .filter(|call| call.receiver == "out" && call.message == "[]=")
+            .collect::<Vec<_>>();
+        assert_eq!(accumulator_writes.len(), 1);
+        assert!(accumulator_writes.iter().all(|call| {
+            call.receiver_type
+                .as_deref()
+                .is_some_and(|receiver| receiver.contains("Hash"))
+                && call.receiver_type_origin.as_deref() == Some("callback_argument")
+                && call.known_time_complexity.as_deref() == Some("O(1)")
+                && call.known_space_complexity.as_deref() == Some("O(1)")
+        }));
+        let accumulator_result_write = output
+            .calls
+            .iter()
+            .find(|call| call.receiver == "index" && call.message == "[]=")
+            .expect("writer on an argument-dependent call result");
+        assert_eq!(
+            accumulator_result_write.receiver_type.as_deref(),
+            Some("T::Hash[T.untyped, T.untyped]")
+        );
+        assert_eq!(
+            accumulator_result_write.receiver_type_origin.as_deref(),
+            Some("static_call_result_contract")
+        );
+        assert_eq!(
+            accumulator_result_write.known_time_complexity.as_deref(),
+            Some("O(1)")
+        );
+        let array_write = output
+            .calls
+            .iter()
+            .find(|call| call.receiver == "buffer" && call.message == "[]=")
+            .expect("array writer");
+        assert_eq!(
+            array_write.receiver_type.as_deref(),
+            Some("T::Array[T.untyped]")
+        );
+        assert_eq!(array_write.known_time_complexity.as_deref(), Some("O(N)"));
+        assert_eq!(array_write.known_space_complexity.as_deref(), Some("O(N)"));
+        let default_hash_write = output
+            .calls
+            .iter()
+            .find(|call| call.receiver == "hash" && call.message == "[]=")
+            .expect("Hash default callback writer");
+        assert_eq!(
+            default_hash_write.receiver_type.as_deref(),
+            Some("T::Hash[T.untyped, T.untyped]")
+        );
+        assert_eq!(
+            default_hash_write.receiver_type_origin.as_deref(),
+            Some("callback_argument")
+        );
+        assert_eq!(
+            default_hash_write.known_time_complexity.as_deref(),
+            Some("O(1)")
+        );
     }
 
     #[test]
@@ -6891,6 +10292,7 @@ end
             visibility: Some("public".to_string()),
             params: Vec::new(),
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "def helper".to_string(),
         });
         let output = extract(&doc, Profile::Espalier);
@@ -6947,7 +10349,7 @@ end
 
     pub(crate) fn test_python_signature_parsing_impl() {
         let sig = "def my_func(a: int, b: str = 'hello') -> str:";
-        let (return_type, params) = parse_python_signature(sig);
+        let (return_type, params) = SignatureParser::parse(sig, "python");
         assert_eq!(return_type, Some("str".to_string()));
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].get("name").unwrap(), "a");
@@ -6955,20 +10357,20 @@ end
         assert_eq!(params[1].get("name").unwrap(), "b");
         assert_eq!(params[1].get("type").unwrap(), "str = 'hello'");
 
-        let (r, p) = parse_python_signature("def no_paren");
+        let (r, p) = SignatureParser::parse("def no_paren", "python");
         assert!(r.is_none());
         assert!(p.is_empty());
 
-        let (r, _p) = parse_python_signature("def my_func(a: int");
+        let (r, _p) = SignatureParser::parse("def my_func(a: int", "python");
         assert!(r.is_none());
 
-        let (_r, p) = parse_python_signature("def my_func(self, cls, , a, b: ) -> str:");
+        let (_r, p) = SignatureParser::parse("def my_func(self, cls, , a, b: ) -> str:", "python");
         assert_eq!(p.len(), 0);
     }
 
     pub(crate) fn test_typescript_signature_parsing_impl() {
         let sig = "(a: number, b?: string, ...c: any[]): void;";
-        let (return_type, params) = parse_typescript_signature(sig);
+        let (return_type, params) = SignatureParser::parse(sig, "typescript");
         assert_eq!(return_type, Some("void".to_string()));
         assert_eq!(params.len(), 3);
         assert_eq!(params[0].get("name").unwrap(), "a");
@@ -6978,14 +10380,14 @@ end
         assert_eq!(params[2].get("name").unwrap(), "c");
         assert_eq!(params[2].get("type").unwrap(), "any[]");
 
-        let (r, p) = parse_typescript_signature("no_paren");
+        let (r, p) = SignatureParser::parse("no_paren", "typescript");
         assert!(r.is_none());
         assert!(p.is_empty());
 
-        let (r, _p) = parse_typescript_signature("(a: number");
+        let (r, _p) = SignatureParser::parse("(a: number", "typescript");
         assert!(r.is_none());
 
-        let (_r, p) = parse_typescript_signature("( , a, b: ): void");
+        let (_r, p) = SignatureParser::parse("( , a, b: ): void", "typescript");
         assert_eq!(p.len(), 0);
     }
 
@@ -7061,6 +10463,7 @@ def py_fn(a: int) -> str:
             visibility: Some("public".to_string()),
             params: vec!["x".to_string()],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "".to_string(),
         });
 
@@ -7083,6 +10486,7 @@ def py_fn(a: int) -> str:
             visibility: Some("public".to_string()),
             params: vec!["x".to_string()],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "sig { .params(x: Integer).returns(String) }".to_string(),
         });
 
@@ -7105,6 +10509,7 @@ def py_fn(a: int) -> str:
             visibility: Some("public".to_string()),
             params: vec![],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "def top_level_fn".to_string(),
         });
 
@@ -7243,6 +10648,7 @@ def py_fn(a: int) -> str:
             kind: "class".to_string(),
             reopenable: false,
             supertypes: Vec::new(),
+            requirements: Vec::new(),
             line: 1,
             span: [1, 0, 1, 15],
         });
@@ -7482,28 +10888,30 @@ def py_fn(a: int) -> str:
             visibility: None,
             params: vec!["a".to_string()],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "".to_string(),
         });
         extract(&doc_py, Profile::Espalier);
     }
 
     pub(crate) fn test_sorbet_signature_parsing_impl() {
-        let (r, _p) = parse_sorbet_signature("def foo");
+        let (r, _p) = SignatureParser::parse("def foo", "ruby");
         assert!(r.is_none());
 
-        let (r, p) = parse_sorbet_signature("sig { .params(x: Integer).returns(String) }");
+        let (r, p) = SignatureParser::parse("sig { .params(x: Integer).returns(String) }", "ruby");
         assert_eq!(r, Some("String".to_string()));
         assert_eq!(p.len(), 1);
         assert_eq!(p[0].get("name").unwrap(), "x");
         assert_eq!(p[0].get("type").unwrap(), "Integer");
 
-        let (r, p) = parse_sorbet_signature(
+        let (r, p) = SignatureParser::parse(
             "sig { .params(x: T::Array[Integer], y: T::Hash[Symbol, String]).returns(String) }",
+            "ruby",
         );
         assert_eq!(r, Some("String".to_string()));
         assert_eq!(p.len(), 2);
 
-        let (r, _p) = parse_sorbet_signature("sig { .params(x: Integer");
+        let (r, _p) = SignatureParser::parse("sig { .params(x: Integer", "ruby");
         assert!(r.is_none());
     }
 
@@ -7532,17 +10940,17 @@ def py_fn(a: int) -> str:
     }
 
     pub(crate) fn test_language_type_system_impl() {
-        assert_eq!(language_type_system("ruby"), "sorbet");
-        assert_eq!(language_type_system("python"), "python-typing");
-        assert_eq!(language_type_system("typescript"), "typescript");
-        assert_eq!(language_type_system("javascript"), "typescript");
-        assert_eq!(language_type_system("go"), "go-types");
-        assert_eq!(language_type_system("rust"), "rust-types");
-        assert_eq!(language_type_system("java"), "java-types");
-        assert_eq!(language_type_system("kotlin"), "kotlin-types");
-        assert_eq!(language_type_system("swift"), "swift-types");
-        assert_eq!(language_type_system("csharp"), "csharp-types");
-        assert_eq!(language_type_system("unknown"), "native");
+        assert_eq!(profile_type_system("ruby"), "sorbet");
+        assert_eq!(profile_type_system("python"), "python-typing");
+        assert_eq!(profile_type_system("typescript"), "typescript");
+        assert_eq!(profile_type_system("javascript"), "typescript");
+        assert_eq!(profile_type_system("go"), "go-types");
+        assert_eq!(profile_type_system("rust"), "rust-types");
+        assert_eq!(profile_type_system("java"), "java-types");
+        assert_eq!(profile_type_system("kotlin"), "kotlin-types");
+        assert_eq!(profile_type_system("swift"), "swift-types");
+        assert_eq!(profile_type_system("csharp"), "csharp-types");
+        assert_eq!(profile_type_system("unknown"), "native");
     }
 
     pub(crate) fn test_profile_extra_coverage_impl() {
@@ -7557,7 +10965,7 @@ def py_fn(a: int) -> str:
         assert_eq!(s_name, "SimpleName");
 
         // 3. sorbet_extract nested parentheses
-        let (res_type, params) = parse_sorbet_signature("sig { .returns(Nested(Type)) }");
+        let (res_type, params) = SignatureParser::parse("sig { .returns(Nested(Type)) }", "ruby");
         assert_eq!(res_type, Some("Nested(Type)".to_string()));
         assert!(params.is_empty());
 
@@ -7581,6 +10989,7 @@ def py_fn(a: int) -> str:
             visibility: None,
             params: vec!["a".to_string(), "b".to_string()],
             callback_params: Vec::new(),
+            source_export_eligible: true,
             signature: "".to_string(),
         };
         let sig = method_signature(&lines, &fn_def, "unknown");
@@ -7816,12 +11225,14 @@ def py_fn(a: int) -> str:
             target_provenance: None,
             candidate_targets: Vec::new(),
             candidate_reason: None,
+            consumer_closed_candidate_set: false,
             kind: "internal_call".into(),
             owner: "Demo".into(),
             function: "a".into(),
             receiver: "self".into(),
             message: "b".into(),
             argument_count: 0,
+            arguments: Vec::new(),
             path: "demo.rb".into(),
             line: 2,
             receiver_kind: "value".into(),
@@ -7830,7 +11241,10 @@ def py_fn(a: int) -> str:
             lexical_symbol: None,
             lexical_symbol_origin: None,
             receiver_call_span: None,
+            selector_span: None,
+            execution_span: None,
             receiver_definition_call_spans: Vec::new(),
+            receiver_definition_sequence_projection: None,
             receiver_symbol: None,
             receiver_type: None,
             receiver_type_origin: None,
@@ -7853,6 +11267,7 @@ def py_fn(a: int) -> str:
             unresolved_reason: None,
             resolution_missing_proof: None,
             empty_domain_cause: None,
+            runtime_evidence_observed: false,
         });
         output.state_accesses.push(StateAccessRecord {
             id: "edge:state".into(),
@@ -8374,6 +11789,13 @@ impl<'a> StateParamVisitor<'a> {
 }
 
 fn normalize_string(s: &str, root: &std::path::Path) -> String {
+    // A prose blocker reads "unknown return expression ARGS at <path>:13", so
+    // the root can sit anywhere in the string rather than at its start. Strip
+    // it wherever it appears before the structural passes below.
+    let root_prefix = format!("{}/", root.to_string_lossy());
+    if s.contains(&root_prefix) {
+        return normalize_string(&s.replace(&root_prefix, ""), root);
+    }
     if s.contains('\x00') {
         let parts: Vec<String> = s
             .split('\x00')
@@ -8406,20 +11828,19 @@ fn normalize_string(s: &str, root: &std::path::Path) -> String {
 }
 
 pub fn normalize_paths(v: &mut serde_json::Value, root: &std::path::Path) {
+    // Any string carrying the checkout root is machine-specific, whatever
+    // holds it. Allow-listing keys meant identities kept working while
+    // `domain_id`, `symbol_owner`, and bare strings inside `requirements` and
+    // `blockers` arrays carried one developer's home directory into the
+    // committed oracles -- portable everywhere except the machine that had to
+    // run them.
     match v {
+        serde_json::Value::String(s) => {
+            *v = serde_json::Value::String(normalize_string(s, root));
+        }
         serde_json::Value::Object(map) => {
-            for (key, val) in map.iter_mut() {
-                // Stable identities can embed paths in a compound key (for
-                // example hidden-enum local keys use NUL-separated fields).
-                // Normalize those exactly as IDs so profile oracles remain
-                // portable across checkouts.
-                if key == "path" || key == "file" || key == "id" || key == "key" {
-                    if let serde_json::Value::String(s) = val {
-                        *val = serde_json::Value::String(normalize_string(s, root));
-                    }
-                } else {
-                    normalize_paths(val, root);
-                }
+            for (_key, val) in map.iter_mut() {
+                normalize_paths(val, root);
             }
         }
         serde_json::Value::Array(arr) => {

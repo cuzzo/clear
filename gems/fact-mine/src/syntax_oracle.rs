@@ -1,3 +1,4 @@
+use crate::parallel;
 use crate::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -8,15 +9,41 @@ pub const FORMAT: &str = "decomplex.syntax-facts.v1";
 pub const CFG_SCHEMA: &str = "fact-mine.cfg.v1";
 
 pub fn project_files(files: &[PathBuf], language: Language) -> Result<Value> {
+    project_selected_files(files, language, None)
+}
+
+/// `fields`, when given, keeps only those top-level document keys.
+///
+/// A full projection of this repository is ~1.08 GB of JSON, and a consumer
+/// like the architecture reports reads five keys of it - 8% - discarding the
+/// dataflow bulk (`clone_candidates` alone is a third). Emitting all of it
+/// costs serialization here and a matching `JSON.parse` in the caller, which
+/// together were most of that stage's runtime. Selection happens after the
+/// document is built, so the facts are identical to a full projection's;
+/// only what crosses the pipe shrinks.
+pub fn project_selected_files(
+    files: &[PathBuf],
+    language: Language,
+    fields: Option<&BTreeSet<String>>,
+) -> Result<Value> {
     let documents = syntax::parse_files(files, language)?;
     let metadata = SyntaxFactMetadata::from_documents(&documents);
+    // Projection, not parsing, is the bulk of the work here: it derives the
+    // per-function dataflow (liveness, dominators, reaching definitions,
+    // def-use, path conditions). Parsing was already parallel, so leaving this
+    // serial capped a whole-corpus run at ~1.5 cores no matter how many were
+    // available. `map_ordered` keeps document order, so output stays byte-identical.
+    let projected = parallel::map_ordered(&documents, |document| {
+        let mut value = project_document_with_metadata(document, &metadata);
+        if let (Some(fields), Some(object)) = (fields, value.as_object_mut()) {
+            object.retain(|key, _| fields.contains(key));
+        }
+        Ok(value)
+    })?;
     Ok(json!({
         "format": FORMAT,
         "cfg_schema": CFG_SCHEMA,
-        "documents": documents
-            .iter()
-            .map(|document| project_document_with_metadata(document, &metadata))
-            .collect::<Vec<_>>(),
+        "documents": projected,
     }))
 }
 
@@ -487,7 +514,9 @@ mod tests {
             call_sites: Vec::new(),
             normalization_call_origins: Vec::new(),
             call_raw_origin_projections: Vec::new(),
+            call_selector_projections: Vec::new(),
             call_receiver_projections: Vec::new(),
+            call_execution_projections: Vec::new(),
             state_declarations: Vec::new(),
             state_reads: Vec::new(),
             state_writes: Vec::new(),
@@ -513,6 +542,7 @@ mod tests {
             def_use: Vec::new(),
             liveness: Vec::new(),
             flow_types: Vec::new(),
+            callback_bindings: Vec::new(),
             protocol_method_effects: Vec::new(),
             protocol_call_paths: Vec::new(),
             clone_candidates: Vec::new(),
@@ -528,6 +558,7 @@ mod tests {
             type_alias_lines: BTreeMap::new(),
             method_param_types: BTreeMap::new(),
             method_local_types: BTreeMap::new(),
+            method_template_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
             hazard_sites: Vec::new(),
             imports: Vec::new(),
@@ -551,7 +582,9 @@ mod tests {
             call_sites: Vec::new(),
             normalization_call_origins: Vec::new(),
             call_raw_origin_projections: Vec::new(),
+            call_selector_projections: Vec::new(),
             call_receiver_projections: Vec::new(),
+            call_execution_projections: Vec::new(),
             state_declarations: Vec::new(),
             state_reads: Vec::new(),
             state_writes: Vec::new(),
@@ -577,6 +610,7 @@ mod tests {
             def_use: Vec::new(),
             liveness: Vec::new(),
             flow_types: Vec::new(),
+            callback_bindings: Vec::new(),
             protocol_method_effects: Vec::new(),
             protocol_call_paths: Vec::new(),
             clone_candidates: Vec::new(),
@@ -615,6 +649,7 @@ mod tests {
             .into_iter()
             .collect(),
             method_local_types: BTreeMap::new(),
+            method_template_types: BTreeMap::new(),
             state_param_origins: Vec::new(),
             hazard_sites: Vec::new(),
             imports: Vec::new(),

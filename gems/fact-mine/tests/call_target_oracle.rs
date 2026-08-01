@@ -135,6 +135,28 @@ fn cpp_scoped_free_call_resolves_by_exact_namespace_identity() -> Result<()> {
 }
 
 #[test]
+fn cpp_unqualified_call_in_class_falls_back_to_enclosing_namespace() -> Result<()> {
+    let output = extract_source(
+        "namespace demo {\nint helper(int value) { return value; }\nclass Runner { int run() { return helper(1); } };\n}\n",
+        ".cpp",
+        Language::Cpp,
+    )?;
+    let target = output
+        .methods
+        .iter()
+        .find(|method| method.name == "helper")
+        .context("missing namespace helper")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "helper")
+        .context("missing unqualified helper call")?;
+    assert_eq!(call.lexical_symbol.as_deref(), Some("demo::helper"));
+    assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
+    Ok(())
+}
+
+#[test]
 fn cpp_scoped_free_call_never_joins_a_same_name_wrong_namespace() -> Result<()> {
     let output = extract_source(
         "namespace other { int helper(int value) { return value; } }\nint run() { return demo::helper(1); }\n",
@@ -148,6 +170,99 @@ fn cpp_scoped_free_call_never_joins_a_same_name_wrong_namespace() -> Result<()> 
         .context("missing C++ scoped helper call")?;
     assert_eq!(call.lexical_symbol.as_deref(), Some("demo::helper"));
     assert_eq!(call.target, None);
+    Ok(())
+}
+
+#[test]
+fn cpp_relative_scoped_call_searches_enclosing_namespaces_across_files() -> Result<()> {
+    let output = extract_project(
+        &[
+            (
+                "util.cpp",
+                "namespace plog { namespace util { int work(int value) { return value; } } }\n",
+            ),
+            (
+                "caller.cpp",
+                "namespace plog { namespace detail { int run() { return util::work(1); } } }\n",
+            ),
+        ],
+        Language::Cpp,
+    )?;
+    let target = output
+        .methods
+        .iter()
+        .find(|method| method.lexical_symbol.as_deref() == Some("plog::util::work"))
+        .context("missing nested C++ namespace target")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "util::work")
+        .context("missing relative scoped call")?;
+    assert_eq!(call.lexical_symbol.as_deref(), Some("plog::util::work"));
+    assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
+    assert_eq!(
+        call.lexical_symbol_origin.as_deref(),
+        Some("adapter_relative_lexical_lookup")
+    );
+    Ok(())
+}
+
+#[test]
+fn ruby_relative_module_receiver_resolves_across_nested_files() -> Result<()> {
+    let output = extract_project(
+        &[
+            (
+                "helper.rb",
+                r#"module App
+  module Constraints
+    module FactHelper
+      module_function
+
+      def render(value)
+        value
+      end
+    end
+  end
+end
+"#,
+            ),
+            (
+                "provider.rb",
+                r#"module App
+  module Constraints
+    module Provider
+      module_function
+
+      def run(value)
+        FactHelper.render(value)
+      end
+    end
+  end
+end
+"#,
+            ),
+        ],
+        Language::Ruby,
+    )?;
+    let target = output
+        .methods
+        .iter()
+        .find(|method| method.owner == "App::Constraints::FactHelper" && method.name == "render")
+        .context("missing nested Ruby module function")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "render")
+        .context("missing nested Ruby module receiver call")?;
+    assert_eq!(
+        call.receiver_symbol.as_deref(),
+        Some("App::Constraints::FactHelper")
+    );
+    assert_eq!(
+        call.receiver_symbol_origin.as_deref(),
+        Some("adapter_relative_type_receiver_lookup")
+    );
+    assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
     Ok(())
 }
 
@@ -1146,9 +1261,15 @@ fn c_function_like_macros_are_not_reported_as_missing_declarations() -> Result<(
         .find(|call| call.message == "project_value")
         .context("missing macro invocation")?;
     assert!(call.preprocessor_callable);
+    assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+    assert_eq!(
+        call.complexity_provenance.as_deref(),
+        Some("source_preprocessor_definition")
+    );
     assert_eq!(
         call.empty_domain_cause.as_deref(),
-        Some("macro_or_preprocessor_surface")
+        None,
+        "a bounded source definition is modeled, not a missing declaration"
     );
     Ok(())
 }
@@ -1329,6 +1450,44 @@ fn conservative_inherited_dispatch_resolves_exact_native_declarations() -> Resul
 }
 
 #[test]
+fn cpp_template_specialization_resolves_implicit_inherited_calls() -> Result<()> {
+    let output = extract_source(
+        "template <class T, class U> class Base;\n\
+         template <class T> class Base<T, void(T)> {\n\
+         public: struct Nested { void work() {} }; void work() {}\n\
+         };\n\
+         template <class T> class Child;\n\
+         template <class T> class Child<T> : public Base<T, void(T)> {\n\
+         public: void run() { work(); }\n\
+         };\n",
+        ".cpp",
+        Language::Cpp,
+    )?;
+    let target = output
+        .methods
+        .iter()
+        .find(|method| {
+            method.owner.starts_with("Base")
+                && !method.owner.contains("::Nested")
+                && method.name == "work"
+        })
+        .context("missing C++ Base::work")?;
+    let call = output
+        .calls
+        .iter()
+        .find(|call| call.function == "run" && call.message == "work")
+        .context("missing inherited C++ work call")?;
+
+    assert!(output
+        .owners
+        .iter()
+        .find(|owner| owner.name.starts_with("Child<"))
+        .is_some_and(|owner| owner.supertypes.iter().any(|name| name.contains('<'))));
+    assert_eq!(call.target.as_deref(), Some(target.id.as_str()));
+    Ok(())
+}
+
+#[test]
 fn language_adapters_extract_only_native_direct_supertype_clauses() -> Result<()> {
     for (source, suffix, language, owner_name, expected) in [
         (
@@ -1404,5 +1563,189 @@ fn csharp_namespace_is_retained_as_canonical_owner_identity() -> Result<()> {
     )?;
     let target = method(&output, "Target", "Work")?;
     assert_eq!(target.symbol_owner.as_deref(), Some("Demo.Core.Target"));
+    Ok(())
+}
+
+/// A `base.field` receiver whose base type resolves must inherit the declared
+/// field type, so `b.f.work()` resolves to the field type's method. This is a
+/// language-neutral path (reads the declared field table), verified across the
+/// statically-typed adapters that populate it.
+#[test]
+fn field_access_receiver_inherits_declared_field_type() -> Result<()> {
+    let cases: &[(&str, &str, Language)] = &[
+        (
+            "go",
+            "package demo\ntype Foo struct{}\nfunc (f Foo) Work() int { return 1 }\ntype Box struct { f Foo }\nfunc Field(b Box) int { return b.f.Work() }\n",
+            Language::Go,
+        ),
+        (
+            "rust",
+            "struct Foo;\nimpl Foo { fn work(&self) -> i32 { 1 } }\nstruct Box { f: Foo }\nfn field(b: &Box) -> i32 { b.f.work() }\n",
+            Language::Rust,
+        ),
+        (
+            "java",
+            "class Foo { int work() { return 1; } }\nclass Box { Foo f; }\nclass M { int field(Box b) { return b.f.work(); } }\n",
+            Language::Java,
+        ),
+        (
+            "swift",
+            "struct Foo { func work() -> Int { return 1 } }\nstruct Box {\n    let f: Foo\n}\nfunc field(_ b: Box) -> Int { return b.f.work() }\n",
+            Language::Swift,
+        ),
+    ];
+    for (label, source, language) in cases {
+        let suffix = format!(".{label}");
+        let output = extract_source(source, &suffix, *language)?;
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.message.eq_ignore_ascii_case("work"))
+            .with_context(|| format!("{label}: missing work call"))?;
+        assert!(
+            call.target.is_some(),
+            "{label}: b.f.work() must resolve a target (got receiver_type {:?})",
+            call.receiver_type
+        );
+        assert_eq!(
+            call.receiver_type_origin.as_deref(),
+            Some("field_access"),
+            "{label}: receiver type must come from the field-access resolver",
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn explicit_type_arguments_do_not_replace_the_call_message() -> Result<()> {
+    let cases: &[(&str, &str, Language, &str, &str)] = &[
+        (
+            "rust-method",
+            "fn parse_num(text: &str) -> i64 { text.parse::<i64>().unwrap_or(0) }\n",
+            Language::Rust,
+            "text",
+            "parse",
+        ),
+        (
+            "rust-chained",
+            "fn names(rows: &[String]) -> Vec<String> { rows.iter().cloned().collect::<Vec<_>>() }\n",
+            Language::Rust,
+            "rows.iter().cloned()",
+            "collect",
+        ),
+        (
+            "rust-free-function",
+            "fn ident<T>(x: T) -> T { x }\nfn run() -> i32 { ident::<i32>(1) }\n",
+            Language::Rust,
+            "self",
+            "ident",
+        ),
+    ];
+    for (label, source, language, receiver, message) in cases {
+        let output = extract_source(source, ".rs", *language)?;
+        assert!(
+            output
+                .calls
+                .iter()
+                .any(|call| call.message == *message && call.receiver == *receiver),
+            "{label}: expected `{receiver}.{message}` call, got {:?}",
+            output
+                .calls
+                .iter()
+                .map(|call| (call.receiver.clone(), call.message.clone()))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !output
+                .calls
+                .iter()
+                .any(|call| call.message.starts_with('<')),
+            "{label}: type arguments must not be extracted as a call message, got {:?}",
+            output
+                .calls
+                .iter()
+                .map(|call| (call.receiver.clone(), call.message.clone()))
+                .collect::<Vec<_>>()
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn synthetic_lambda_names_survive_qualified_name_handling() -> Result<()> {
+    // `<lambda@2:24>` carries a row:column span, not a namespace. The shared
+    // qualified-name split reported such a method as `24>`.
+    let source = "package demo\nfunc helper(v int) int { return v }\nfunc run() { _ = func(x int) int { return helper(x) } }\n";
+    let mut file = tempfile::Builder::new().suffix(".go").tempfile()?;
+    file.write_all(source.as_bytes())?;
+    let document = syntax::parse_file(file.path().to_path_buf(), Language::Go)?;
+    let names = document
+        .protocol_call_paths
+        .iter()
+        .map(|path| path.name.clone())
+        .chain(
+            document
+                .protocol_method_effects
+                .iter()
+                .map(|effect| effect.name.clone()),
+        )
+        .collect::<Vec<_>>();
+    assert!(
+        names
+            .iter()
+            .any(|name| name.starts_with("<lambda@") && name.ends_with('>')),
+        "expected an intact synthetic lambda name, got {names:?}"
+    );
+    assert!(
+        !names
+            .iter()
+            .any(|name| name.ends_with('>') && !name.starts_with('<')),
+        "a lambda name was split on its span separator, got {names:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn closures_are_extracted_as_first_class_functions() -> Result<()> {
+    // A callback's cost can only be substituted for a callee's parametric C if
+    // the callable itself was analyzed as a function.
+    let cases: &[(&str, &str, &str, Language)] = &[
+        (
+            "rust",
+            "fn run(xs: &[i32]) -> Vec<i32> { xs.iter().map(|x| helper(*x)).collect() }\nfn helper(v: i32) -> i32 { v }\n",
+            ".rs",
+            Language::Rust,
+        ),
+        (
+            "go",
+            "package demo\nfunc helper(v int) int { return v }\nfunc run(xs []int) { _ = func(x int) int { return helper(x) } }\n",
+            ".go",
+            Language::Go,
+        ),
+    ];
+    for (label, source, suffix, language) in cases {
+        let output = extract_source(source, suffix, *language)?;
+        let lambda = output
+            .methods
+            .iter()
+            .find(|method| method.name.starts_with("<lambda@"))
+            .with_context(|| {
+                format!(
+                    "{label}: no lambda function extracted, got {:?}",
+                    output
+                        .methods
+                        .iter()
+                        .map(|m| m.name.as_str())
+                        .collect::<Vec<_>>()
+                )
+            })?;
+        assert!(
+            output
+                .calls
+                .iter()
+                .any(|call| call.source == lambda.id && call.message == "helper"),
+            "{label}: the closure body's call must attribute to the closure, not its enclosing function"
+        );
+    }
     Ok(())
 }

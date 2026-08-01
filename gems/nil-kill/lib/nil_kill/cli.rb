@@ -8,17 +8,15 @@ module NilKill
     end
 
     def run
-      # Self-heal first: if a prior `collect` crashed mid-instrumentation
-      # src/ is still wrapped. Restore pristine bytes BEFORE any guard or
-      # subcommand reads src (a stale wrapped tree poisons everything).
+      # A collect from before source rewriting was removed may have crashed and
+      # left src/ wrapped. Restoring is cheap and unconditional, and a tree that
+      # was never wrapped is untouched.
       NilKill.ensure_src_restored!
       command = @argv.shift
       case command
       when "collect" then collect
       when "infer" then guard_fresh_runtime!; Infer.new(@argv).run
       when "static" then Commands::StaticCommand.new(@argv).run
-      when "collect-runtime" then Commands::CollectRuntimeCommand.new(@argv).run
-      when "collect-python" then Commands::CollectPythonCommand.new(@argv).run
       when "normalize" then Commands::NormalizeCommand.new(@argv).run
       when "analyze" then Commands::AnalyzeCommand.new(@argv).run
       when "trace-spec" then Commands::TraceSpecCommand.new(@argv).run
@@ -102,7 +100,7 @@ module NilKill
     # with an mtime fallback when git/metadata is unavailable.
     def guard_fresh_runtime!
       return if @argv.delete(STALE_OVERRIDE)
-      runtime = Dir.glob(File.join(RUNTIME_DIR, "*.jsonl"))
+      runtime = Runtime::JsonIO.matching(RUNTIME_DIR, "*.jsonl")
       if runtime.empty?
         abort "nil-kill: NO runtime evidence in #{RUNTIME_DIR}. Inference would be 100% static -- partial and useless.\nCollect FULL evidence first:\n  #{COLLECT_HINT}\n(knowing override: nil-kill infer #{STALE_OVERRIDE})"
       end
@@ -149,157 +147,41 @@ module NilKill
       end
     end
 
+    # Stage timing, off unless asked for. A collect is a pipeline and the only
+    # useful question about it is which stage owns the time.
+    def stage(name)
+      return yield unless ENV["NIL_KILL_STAGE_TIMING"] == "1"
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      result = yield
+      warn format("stage %-26s %6.2fs", name, Process.clock_gettime(Process::CLOCK_MONOTONIC) - started)
+      result
+    end
+
+    # A collect runs no Ruby but the program it is tracing. Everything it
+    # decides -- the plan, the shards, what an increment must rerun, the
+    # transaction around the canonical artifacts -- is FactMine's, so this is
+    # the whole of it: hand the argument list over.
     def collect
-      append = @argv.delete("--append-runtime")
-      instrument_source = !@argv.delete("--no-instrument-source")
-      instrument_source = true if @argv.delete("--instrument-source")
-      commands = collect_commands
-      abort "usage: bundle exec tools/nil-kill collect [--commands FILE] [--continue-on-error] -- <command...>" if commands.empty?
-      FileUtils.rm_rf(RUNTIME_DIR) unless append
-      FileUtils.mkdir_p(RUNTIME_DIR)
-      write_collect_meta!
-      trace_plan_enabled = ENV["NIL_KILL_TRACE_PLAN"] != "0"
-      TracePlan.write if trace_plan_enabled
-      snapshot_dir = File.join(RUNTIME_DIR, "src-snapshot")
-      if instrument_source
-        acquire_inplace_lock!
-        # Sentinel + traps BEFORE the first byte of src is overwritten,
-        # with the full candidate list -> a crash mid-wrap is healed.
-        NilKill.write_inplace_sentinel!(snapshot_dir, NilKill.target_files.map { |f| NilKill.rel(f) })
-        install_inplace_restore_traps!
-        SourceInstrumenter.new.run_in_place(snapshot_dir)
+      binary = NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY
+      unless File.executable?(binary)
+        abort "nil-kill: #{binary} is not built; run 'cargo build --release' in gems/fact-mine"
       end
-      require "etc"
-      jobs = ENV["NK_JOBS"] || ENV["NIL_KILL_JOBS"] || Etc.nprocessors.to_s rescue "4"
-      tracer = File.expand_path("runtime_trace.rb", __dir__)
-      rubyopt = (ENV["RUBYOPT"].to_s.split + ["-r#{tracer}"]).join(" ")
-      env = ENV.to_h.merge(
-        "NIL_KILL_TRACE" => "1",
-        "RUBYOPT" => rubyopt,
-        "WORKERS" => ENV["WORKERS"] || jobs,
-        "NK_JOBS" => ENV["NK_JOBS"] || jobs,
-        "NIL_KILL_JOBS" => ENV["NIL_KILL_JOBS"] || jobs
-      )
-      # Source-wrap path: targeted TracePoints off by default (the
-      # injected recorder is authoritative). No NIL_KILL_INSTRUMENTED_ROOT
-      # any more -- the wrapped file IS the real src path.
-      env["NIL_KILL_TRACE_METHODS"] ||= "0" if instrument_source && trace_plan_enabled
-      continue = @argv.delete("--continue-on-error")
-      begin
-        commands.each_with_index do |cmd, i|
-          puts "[#{i + 1}/#{commands.size}] NIL_KILL_TRACE=1 RUBYOPT=#{rubyopt.shellescape} #{cmd.shelljoin}"
-          ok = system(env, *cmd)
-          next if ok || continue
-          exit($?&.exitstatus || 1)
-        end
-      ensure
-        NilKill.restore_inplace_snapshot! if instrument_source
-      end
-      assert_collect_coverage_produced! if instrument_source
-    end
 
-    # A second concurrent `collect` would race in-place writes against
-    # this one and corrupt src/. flock auto-releases on process exit.
-    def acquire_inplace_lock!
-      FileUtils.mkdir_p(RUNTIME_DIR)
-      @collect_lock = File.open(File.join(RUNTIME_DIR, ".nk-collect.lock"), File::RDWR | File::CREAT, 0o644)
-      return if @collect_lock.flock(File::LOCK_EX | File::LOCK_NB)
-      abort "nil-kill: another `collect` is already running (in-place src instrumentation is exclusive). " \
-        "Wait for it to finish or kill it; src/ will self-heal on the next nil-kill run."
-    end
-
-    # Restore pristine src on INT/TERM/HUP too (the ensure covers normal
-    # exit and `exit`/raises; signals would otherwise leave src wrapped
-    # until the next run's ensure_src_restored!). `prev` is block-local
-    # per iteration, so the three traps don't clobber each other.
-    def install_inplace_restore_traps!
-      %w[INT TERM HUP].each do |sig|
-        Signal.trap(sig) do
-          NilKill.restore_inplace_snapshot!
-          exit(false)
-        end
-      end
-    end
-
-    # A traced collect that produced ZERO Ruby Coverage means Coverage
-    # failed to start in the workload; the dead-vs-missed split (unseen
-    # vs collect_ran_untraced) then cannot be computed and would silently
-    # degrade to "never_run". Make that a hard, loud failure instead.
-    def assert_collect_coverage_produced!
-      cov = Dir.glob(File.join(RUNTIME_DIR, "coverage-*.jsonl"))
-      meth = Dir.glob(File.join(RUNTIME_DIR, "methods-*.jsonl"))
-      cov_bytes = cov.sum { |f| File.size(f) }
-      meth_bytes = meth.sum { |f| File.size(f) }
-      if cov_bytes.zero? || meth_bytes.zero?
-        abort "nil-kill: the traced collect produced NO usable evidence " \
-          "(coverage=#{cov_bytes}B, method observations=#{meth_bytes}B in " \
-          "#{NilKill.rel(RUNTIME_DIR)}). Empty .jsonl files exist but hold nothing -- " \
-          "Coverage failed to start, or an exception escaped instrumented src during " \
-          "require and aborted the run before any method returned. The dead-vs-missed " \
-          "split cannot be computed. Fix the workload/tracer; do not infer on this collect."
-      end
-      by_pid = Hash.new { |h, k| h[k] = {} }
-      cov.each { |f| (p = f[/-(\d+)\.jsonl\z/, 1]) && by_pid[p][:cov] = File.size(f) }
-      meth.each { |f| (p = f[/-(\d+)\.jsonl\z/, 1]) && by_pid[p][:meth] = File.size(f) }
-      ran = by_pid.values.select { |v| v[:cov].to_i.positive? }
-      aborted = ran.count { |v| v[:meth].to_i.zero? }
-      return unless aborted.positive? && aborted > ran.size - aborted
-      abort "nil-kill: #{aborted}/#{ran.size} traced processes produced src coverage " \
-        "but ZERO method observations -- a systemic instrumentation abort (an " \
-        "exception escaping instrumented src during require zeroed those processes' " \
-        "evidence). Aggregate .jsonl is non-empty only because other stages traced " \
-        "normally; inference would use partial, misleading evidence. Fix the " \
-        "workload/tracer; do not infer on this collect."
-    end
-
-    def collect_commands
-      commands = []
-      while (idx = @argv.index("--commands"))
-        file = @argv[idx + 1] || abort("--commands requires a file")
-        @argv.slice!(idx, 2)
-        commands.concat(read_command_file(file))
-      end
-      while (idx = @argv.index("--cmd"))
-        command = @argv[idx + 1] || abort("--cmd requires a command string")
-        @argv.slice!(idx, 2)
-        commands << Shellwords.split(command)
-      end
-      while (idx = @argv.index("--glob"))
-        pattern = @argv[idx + 1] || abort("--glob requires a pattern")
-        template_idx = @argv.index("--template") || abort("--glob requires --template")
-        template = @argv[template_idx + 1] || abort("--template requires a command template")
-        [idx, template_idx].sort.reverse_each { |remove_idx| @argv.slice!(remove_idx, 2) }
-        Dir.glob(pattern).sort.each do |file|
-          commands << Shellwords.split(template.gsub("{file}", file))
-        end
-      end
-      sep = @argv.index("--")
-      commands << @argv[(sep + 1)..] if sep
-      commands
-    end
-
-    def read_command_file(path)
-      File.readlines(path, chomp: true).filter_map do |line|
-        stripped = line.strip
-        next if stripped.empty? || stripped.start_with?("#")
-        Shellwords.split(stripped)
-      end
+      exec(binary, "nil-kill-collect", "--root", ROOT, *@argv)
     end
 
     def help
       puts <<~TEXT
         Usage:
           bundle exec tools/nil-kill collect -- <command...>
+          bundle exec tools/nil-kill collect --fast -- <command...>
           bundle exec tools/nil-kill collect --commands runtime-commands.txt
           bundle exec tools/nil-kill collect --cmd "bundle exec rspec" --cmd "./clear test transpile-tests"
           bundle exec tools/nil-kill collect --glob "lib/**/*.rb" --template "ruby {file}"
           bundle exec tools/nil-kill collect --append-runtime --commands more-runtime-commands.txt
-          bundle exec tools/nil-kill collect --instrument-source -- <command...>
-          bundle exec tools/nil-kill collect --no-instrument-source -- <command...>
           bundle exec tools/nil-kill infer [--no-sorbet]
           bundle exec tools/nil-kill static [--root DIR] [--language ruby|python|typescript|rust|zig] [--vcs git] [--source-role production|test|benchmark|example|generated|vendored|vcs_metadata|all] [--output static.json] [targets...]
-          bundle exec tools/nil-kill collect-runtime --language python [--target src] [--output traces/] -- <python test command...>
-          bundle exec tools/nil-kill collect-python [--root DIR] [--target src] [--output traces/] -- <python test command...>
           bundle exec tools/nil-kill normalize [--root DIR] --static static.json [--traces traces/] [--output evidence.json]
           bundle exec tools/nil-kill analyze [--evidence evidence.json] [--output evidence.json]
           bundle exec tools/nil-kill trace-spec
@@ -330,6 +212,8 @@ module NilKill
           NIL_KILL_ELEMENT_SAMPLE=20          container elements sampled by runtime tracing
           NIL_KILL_TRACE_PLAN=0               disable trace-plan pruning during collect
           NIL_KILL_TRACE_METHODS=0            disable TracePoint method collection
+          NIL_KILL_RUNTIME_SCIP_NATIVE=0      Ruby-call-only SCIP evidence for rapid feedback
+          NIL_KILL_COLLECT_COVERAGE=0         disable Ruby line coverage for SCIP-only rapid feedback
           NIL_KILL_SLOT_TYPE_OVERRIDES=file   opt-in JSON field/ivar type override rules
       TEXT
     end

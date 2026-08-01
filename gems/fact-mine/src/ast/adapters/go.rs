@@ -1,10 +1,20 @@
 use super::super::{named_children, node_text};
 use super::base::AstNormalizationAdapter;
+use crate::syntax::nullable::PresenceCorrelationSeed;
 use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) struct GoAstAdapter;
 
 impl AstNormalizationAdapter for GoAstAdapter {
+    fn reconcile_presence_correlation_spans(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+        seeds: &mut Vec<PresenceCorrelationSeed>,
+    ) {
+        crate::syntax::go::attach_raw_presence_correlation_spans(root, source, seeds);
+    }
+
     fn symbol_scope(
         &self,
         root: TreeSitterNode<'_>,
@@ -46,6 +56,17 @@ impl AstNormalizationAdapter for GoAstAdapter {
         (package, imports)
     }
 
+    /// A Go function literal `func(...) ... { ... }` is a lambda, so it is
+    /// normalized (and later extracted) as a first-class function whose Big-O is
+    /// computed with the same pipeline as a named function.
+    fn lambda_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "func_literal").then_some(node)
+    }
+
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
         go_statement_without_inner_call(node)
     }
@@ -56,6 +77,16 @@ impl AstNormalizationAdapter for GoAstAdapter {
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
         (node.kind() == "if_statement")
+            .then(|| node.child_by_field_name("initializer"))
+            .flatten()
+    }
+
+    fn case_initializer<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "expression_switch_statement")
             .then(|| node.child_by_field_name("initializer"))
             .flatten()
     }

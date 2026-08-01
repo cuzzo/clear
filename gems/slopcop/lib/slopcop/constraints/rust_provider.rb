@@ -13,7 +13,7 @@ module SlopCop
       # (gems/fact-mine/src/syntax/rust_hazards.scm), the same source of
       # truth Lineage's own hazard ingestion uses - not reimplemented here
       # as a second, independent regex/needle classifier that can drift
-      # from it (see gems/lineage/src/db/hazard.rs's fixed
+      # from it (see gems/gigasail/giga-core/src/db/hazard.rs's fixed
       # "unsafe_block" contains "lock" misclassification for exactly the
       # kind of drift two implementations of "detect this hazard" invite).
       SYSTEMS_HAZARD_CATEGORIES = [

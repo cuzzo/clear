@@ -16,7 +16,7 @@
   },
   "recursive_suffix_rescan.rb": {
     "walk": "O(N^2)",
-    "scan_remaining": "O(N)"
+    "scan_remaining": "O(N + C + C2)"
   },
   "recursive_suffix_rescan.py": {
     "walk": "O(N^2)",

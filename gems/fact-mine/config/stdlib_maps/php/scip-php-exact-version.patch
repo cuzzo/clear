@@ -1,0 +1,8 @@
+diff --git a/bin/scip-php b/bin/scip-php
+--- a/bin/scip-php
++++ b/bin/scip-php
+@@ -36,3 +36,3 @@
+ $projectRoot = \getcwd();
+-$version = '0.0.1';
++$version = '0.0.1+71a5b117';
+ $args = \array_splice($argv, 1);

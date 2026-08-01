@@ -30,6 +30,26 @@ class BigOGapImpactTest < Minitest::Test
     assert_includes report[:roots].first[:categories], "normalized_cost_fact_missing"
   end
 
+  def test_reports_project_candidate_summary_as_project_not_external
+    results = {
+      "root" => result(unknowns: ["callee"], gaps: [])
+    }
+    calls = [
+      {
+        source: "root",
+        target: nil,
+        semantic_symbol: "runtime project symbol",
+        external_symbol_scope: "project"
+      }
+    ]
+
+    report = Espalier::BigOGapImpact.analyze(results: results, calls: calls)
+    categories = report[:roots].first[:categories]
+
+    assert_includes categories, "project_candidate_summary_missing"
+    refute_includes categories, "external_symbol_cost_missing"
+  end
+
   def test_reports_untraced_incomplete_function_without_inventing_a_root
     report = Espalier::BigOGapImpact.analyze(
       results: { "gap" => result },

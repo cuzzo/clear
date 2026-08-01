@@ -11,7 +11,7 @@ The second responsibility now belongs to `gems/auto-type`.
 
 Nil-kill owns:
 
-- `collect`, `infer`, `static`, `collect-runtime`, `normalize`, `analyze`, `report`
+- `collect`, `infer`, `static`, `normalize`, `analyze`, `report`
 - action generation in `evidence.json`
 - pressure reports for nilability, type ambiguity, fallibility, hidden enums, and downstream architecture consumers
 

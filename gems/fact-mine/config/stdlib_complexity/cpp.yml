@@ -10,18 +10,44 @@ Array:
   find: linear_scan
   begin: constant
   end: constant
-  sort: sort
+  # Node transfer is constant for whole-list/single-element overloads and
+  # linear for a range from another list. Use the conservative common bound.
+  splice: linear_scan
+  emplace_back: constant
+  clear: linear_scan
+  erase: linear_scan
+  insert: linear_materialize
+  resize: linear_materialize
+  reserve: linear_materialize
+  swap: constant
 Hash:
   at: constant
   find: linear_scan
   contains: linear_scan
   size: constant
   empty: constant
+  begin: constant
+  end: constant
+  clear: linear_scan
+  erase: linear_scan
+  insert: linear_scan
+  emplace: linear_scan
+  lower_bound: linear_scan
+  upper_bound: linear_scan
+  swap: constant
 Set:
   find: linear_scan
   contains: linear_scan
   size: constant
   empty: constant
+  begin: constant
+  end: constant
+  clear: linear_scan
+  erase: linear_scan
+  insert: linear_scan
+  lower_bound: linear_scan
+  upper_bound: linear_scan
+  swap: constant
 String:
   c_str: constant
   compare: linear_scan
@@ -33,17 +59,81 @@ String:
   find: linear_scan
   starts_with: linear_scan
   substr: linear_materialize
+  assign: linear_materialize
+  append: linear_materialize
+  clear: linear_scan
+  resize: linear_materialize
+  reserve: linear_materialize
+  push_back: linear_materialize
+  pop_back: constant
+  insert: linear_materialize
+  erase: linear_scan
+  replace: linear_materialize
+  swap: constant
+  operator+=: linear_materialize
+StringStream:
+  str: linear_materialize
+  eof: constant
+OutputStream:
+  eof: constant
+FileStream:
+  # CPU work is bounded by the path length; filesystem latency is excluded
+  # from the structural Big-O contract.
+  open: linear_scan
+  close: constant
+  is_open: constant
+  exceptions: constant
+  eof: constant
+Json:
+  # nlohmann::json object representation is configurable. Linear bounds are
+  # conservative across ordered objects, arrays, parsing, and conversion.
+  at: linear_scan
+  get: linear_materialize
+  get_to: linear_materialize
+  contains: linear_scan
+  find: linear_scan
+  dump: linear_materialize
+  parse: linear_materialize
+StdAtomic:
+  load: constant
+  store: constant
+  exchange: constant
+  compare_exchange_weak: constant
+  compare_exchange_strong: constant
+  fetch_add: constant
+  fetch_sub: constant
+  fetch_and: constant
+  fetch_or: constant
+  fetch_xor: constant
 Namespace:
   std: declaration
 Intrinsic:
-  # These free functions are modeled only after a SCIP symbol proves `std`
-  # ownership. Their standard semantics do not execute user callbacks.
+  # These selector-only spellings are consumed after a SCIP symbol proves
+  # `std` ownership. Their standard semantics do not execute user callbacks.
   std.move: constant
+  'std::move': constant
   std.forward: constant
   std.addressof: constant
   std.get: constant
   std.as_const: constant
   std.launder: constant
+  # Qualified-id calls preserve their full `std::` spelling before SCIP
+  # enrichment. `std` is a reserved namespace, so this source identity remains
+  # sufficient in compiler-inactive preprocessor branches that have no
+  # occurrence in the selected SCIP configuration.
+  'std::string': linear_materialize
+  'std::wstring': linear_materialize
+  'std::strlen': linear_scan
+  'std::wcslen': linear_scan
+  'std::strchr': linear_scan
+  'std::strrchr': linear_scan
+  'std::wcsrchr': linear_scan
+  'std::strcmp': linear_scan
+  'std::wcscmp': linear_scan
+  'std::operator<<': linear_scan
+  'std::setfill': constant
+  'std::setw': constant
+  'std::setprecision': constant
   assert: declaration
   malloc: declaration
   calloc: declaration
@@ -51,8 +141,140 @@ Intrinsic:
   free: declaration
   puts: declaration
   strlen: linear_scan
+IntrinsicParametricCall:
+  # Standard algorithms invoke a caller-supplied predicate once per visited
+  # element. Their qualified `std::` identity is source-proven even when clang
+  # omits a dependent-template occurrence.
+  'std::find_if': callback_linear
+  # `using std::swap; swap(a, b)` is the standard ADL customization pattern.
+  # It performs one selected swap/move operation whose cost is type-dependent.
+  'std::swap': reflective_once
+SemanticSymbol:
+  # Exact scip-clang descriptors whose overload discriminator has been
+  # reviewed. These cover operations which cannot be classified from a
+  # nominal receiver alone.
+  'std/__cxx11/basic_ostringstream#str(d33e1a6fd36255f7).': linear_materialize
+  'std/setfill(ade351e831a1374a).': constant
+  'std/setw(f06ce2e9220601fb).': constant
+  'std/string#': linear_materialize
+  'std/getline(30074676001a27e3).': linear_materialize
+  'std/isprint(a1851578aea3f541).': constant
+  'std/toupper(a1851578aea3f541).': constant
+  'std/static_pointer_cast(d1ff2bba4f627176).': constant
+  'std/weak_ptr#lock(a1b13de252cffcea).': constant
+  'std/__weak_ptr#expired(3482b152b9333168).': constant
+  'std/atomic_flag#clear(455a4f0c5c7bd751).': constant
+  'std/atomic_flag#test_and_set(2adbe26b81e7d7f).': constant
+  'std/has_single_bit(ee8962c63b365797).': constant
+  'std/optional#has_value(3482b152b9333168).': constant
+  'std/unique_ptr#get(ea7391e9eeeaf20e).': constant
+  'std/unique_ptr#release(aad4c3669c5e940c).': constant
+SemanticSymbolParametricCost:
+  # These operations execute a user-defined constructor, destructor, move, or
+  # element operation. Preserve that work symbolically rather than pricing it
+  # as a scalar library call.
+  'std/swap(c75b8fd57d7c2e06).': reflective_once
+  'std/make_shared(ffca0f3977536948).': reflective_once
+  'std/__shared_ptr#reset(ced63f7c635d850d).': reflective_once
+  'std/construct_at(984c90861d021fca).': reflective_once
+  'std/destroy_at(ebd0a1552f8ce24f).': reflective_once
+  'std/optional#emplace(8cc437dbb5d7266f).': reflective_once
+  'std/ranges/uninitialized_copy.': callback_linear
+  'std/uninitialized_copy_n(31908fd9f87493f7).': callback_linear
+ParametricCall:
+  # A dependent template access may not receive a clang occurrence. The
+  # declared smart-pointer type still proves destruction of at most one
+  # user-defined pointee.
+  'shared_ptr.reset': reflective_once
+  'unique_ptr.reset': reflective_once
+  'Array.sort': callback_sort
+ModeledRuntime:
+  # Exact source spellings seen only in compiler-inactive platform branches.
+  # Calls receive an explicit modeled-world assumption; these entries never
+  # replace an available SCIP identity or a project declaration.
+  assert: constant
+  va_start: constant
+  va_copy: constant
+  va_end: constant
+  malloc: linear_materialize
+  free: linear_scan
+  vsnprintf: linear_scan
+  vsnprintf_s: linear_scan
+  vsnwprintf_s: linear_scan
+  _vsnwprintf_s: linear_scan
+  _vsnwprintf: linear_scan
+  _vscprintf: linear_scan
+  _vscwprintf: linear_scan
+  '::strlen': linear_scan
+  '::wcslen': linear_scan
+  '::strchr': linear_scan
+  '::localtime': constant
+  '::localtime_r': constant
+  '::localtime_s': constant
+  '::gmtime': constant
+  '::gmtime_r': constant
+  '::gmtime_s': constant
+  '::ftime': constant
+  '::gettimeofday': constant
+  '::syscall': constant
+  '::iconv_open': constant
+  '::iconv': linear_scan
+  '::iconv_close': constant
+  '::open': linear_scan
+  '::_wsopen': linear_scan
+  '::_wsopen_s': linear_scan
+  '::lseek': constant
+  '::_lseeki64': constant
+  _lseek: constant
+  '::close': constant
+  '::_close': constant
+  '::write': linear_scan
+  '::_write': linear_scan
+  '::rename': linear_scan
+  '::unlink': linear_scan
+  '::_wunlink': linear_scan
+  '::isatty': constant
+  MultiByteToWideChar: linear_materialize
+  WideCharToMultiByte: linear_materialize
+  GetCurrentThreadId: constant
+  pthread_threadid_np: constant
+  rtems_task_self: constant
+  xTaskGetCurrentTaskHandle: constant
+  GetStdHandle: constant
+  GetConsoleScreenBufferInfo: constant
+  SetConsoleTextAttribute: constant
+  InitializeCriticalSection: constant
+  DeleteCriticalSection: constant
+  EnterCriticalSection: constant
+  LeaveCriticalSection: constant
+  '::pthread_mutex_init': constant
+  '::pthread_mutex_destroy': constant
+  '::pthread_mutex_lock': constant
+  '::pthread_mutex_unlock': constant
+  xSemaphoreCreateBinary: constant
+  xSemaphoreGive: constant
+  xSemaphoreTake: constant
+  vSemaphoreDelete: constant
+  rtems_semaphore_create: constant
+  rtems_semaphore_delete: constant
+  rtems_semaphore_obtain: constant
+  rtems_semaphore_release: constant
+  MoveFileW: linear_scan
+  WriteConsoleW: linear_scan
+  OutputDebugStringW: linear_scan
+  RegisterEventSourceW: linear_scan
+  DeregisterEventSource: constant
+  RegCreateKeyExW: linear_scan
+  RegOpenKeyExW: linear_scan
+  RegSetValueExW: linear_scan
+  RegCloseKey: constant
+  RegDeleteKeyW: linear_scan
+  ReportEventW: linear_scan
+  __android_log_print: linear_scan
 NonCallPrefix:
   "static_cast<": declaration
   "reinterpret_cast<": declaration
   "const_cast<": declaration
   "dynamic_cast<": declaration
+NonCallConstruct:
+  defined: declaration

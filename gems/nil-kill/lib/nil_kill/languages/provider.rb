@@ -3,7 +3,6 @@
 
 module NilKill
   module Languages
-    class UnsupportedRuntimeTracer < StandardError; end
 
     class Provider
       def language
@@ -71,6 +70,7 @@ module NilKill
           "hash_shapes" => false,
           "call_edges" => false,
           "line_coverage" => false,
+          "runtime_scip_calls" => false,
         }
       end
 
@@ -97,9 +97,15 @@ module NilKill
         }
       end
 
-      def collect_runtime(argv:, root:, output:, targets:, append: false)
-        raise UnsupportedRuntimeTracer, "#{display_name} does not have a Nil-Kill runtime tracer provider"
-      end
+
+
+
+
+
+
+
+
+
 
       def return_type_index(root:)
         nil

@@ -204,7 +204,7 @@ The scan is executed in the `generalized-gems-sarif` job within [.github/workflo
           ./tools/generate_sql_cov_sarif.rb \
             --repo=. \
             --out-dir=tmp/generalized-gems-sarif \
-            --setup=gems/lineage/sql/storage/init_schema.sql \
+            --setup=gems/gigasail/giga-core/sql/storage/init_schema.sql \
             --sql-cov-bin=./gems/sql-cov/target/release/sql-cov
 
       - name: Upload SQL-cov SARIF

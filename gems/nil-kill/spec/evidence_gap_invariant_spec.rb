@@ -16,7 +16,7 @@ RSpec.describe "evidence-gap invariant" do
   before(:context) do
     @positive_dir = Dir.mktmpdir("nk-inv", NilKill::ROOT)
     Dir.glob(File.join(corpus, "*_lib.rb")).each { |f| FileUtils.cp(f, @positive_dir) }
-    @positive_corpus = full_collect(@positive_dir, File.read(File.join(corpus, "workload.rb")), instrument: true)
+    @positive_corpus = full_collect(@positive_dir, File.read(File.join(corpus, "workload.rb")))
   end
 
   after(:context) do
@@ -65,16 +65,16 @@ RSpec.describe "evidence-gap invariant" do
     expect(header).not_to include("never run")
   end
 
-  it "NEGATIVE CONTROL: an uninstrumented collect makes infer/report RAISE (not silently zero)" do
-    # Coverage marked bodies executed but the source-wrap recorder never
-    # fired -> ran-without-a-record == collect_ran_untraced. The hard
-    # guard fires inside Infer's own report generation, so the WHOLE
-    # pipeline raises loudly -- a recording bypass cannot be silent. If
-    # this didn't raise, the guarantee would be toothless.
+  it "NEGATIVE CONTROL: a collect with no observer makes infer/report RAISE (not silently zero)" do
+    # Coverage marked bodies executed but the collector never ran ->
+    # ran-without-a-record == collect_ran_untraced. The hard guard fires inside
+    # Infer's own report generation, so the WHOLE pipeline raises loudly -- a
+    # recording bypass cannot be silent. If this didn't raise, the guarantee
+    # would be toothless.
     expect do
       Dir.mktmpdir("nk-inv-neg", NilKill::ROOT) do |dir|
         Dir.glob(File.join(corpus, "*_lib.rb")).each { |f| FileUtils.cp(f, dir) }
-        full_collect(dir, File.read(File.join(corpus, "workload.rb")), instrument: false)
+        full_collect(dir, File.read(File.join(corpus, "workload.rb")), collector: false)
       end
     end.to raise_error(/collect_ran_untraced .* tracer\/trace-plan regression/)
   end

@@ -1447,10 +1447,28 @@
         "kind": "fallthrough"
       },
       {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
         "kind": "entry"
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
       },
       {
         "kind": "entry"
@@ -1474,6 +1492,12 @@
         "kind": "fallthrough"
       },
       {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
         "kind": "entry"
       },
       {
@@ -1493,6 +1517,12 @@
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
       },
       {
         "kind": "entry"
@@ -1632,8 +1662,18 @@
         "line": 49
       },
       {
-        "id": "cfg:SourceFactProtocolsNilClone#guard_both_terminate:stmt:1:44:4",
+        "id": "cfg:SourceFactProtocolsNilClone#guard_both_terminate:stmt:0.else.0:47:6",
         "kind": "statement",
+        "line": 47
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_both_terminate:stmt:0.then.0:45:6",
+        "kind": "statement",
+        "line": 45
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_both_terminate:stmt:1:44:4",
+        "kind": "branch",
         "line": 44
       },
       {
@@ -1647,8 +1687,18 @@
         "line": 57
       },
       {
-        "id": "cfg:SourceFactProtocolsNilClone#guard_else_terminate:stmt:1:52:4",
+        "id": "cfg:SourceFactProtocolsNilClone#guard_else_terminate:stmt:0.else.0:55:6",
         "kind": "statement",
+        "line": 55
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_else_terminate:stmt:0.then.0:53:6",
+        "kind": "statement",
+        "line": 53
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_else_terminate:stmt:1:52:4",
+        "kind": "branch",
         "line": 52
       },
       {
@@ -1687,8 +1737,13 @@
         "line": 34
       },
       {
-        "id": "cfg:SourceFactProtocolsNilClone#guard_ne_nil:stmt:1:31:4",
+        "id": "cfg:SourceFactProtocolsNilClone#guard_ne_nil:stmt:0.then.0:32:6",
         "kind": "statement",
+        "line": 32
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_ne_nil:stmt:1:31:4",
+        "kind": "branch",
         "line": 31
       },
       {
@@ -1727,8 +1782,13 @@
         "line": 63
       },
       {
-        "id": "cfg:SourceFactProtocolsNilClone#guard_safe_nav_cond:stmt:1:60:4",
+        "id": "cfg:SourceFactProtocolsNilClone#guard_safe_nav_cond:stmt:0.then.0:61:6",
         "kind": "statement",
+        "line": 61
+      },
+      {
+        "id": "cfg:SourceFactProtocolsNilClone#guard_safe_nav_cond:stmt:1:60:4",
+        "kind": "branch",
         "line": 60
       },
       {
@@ -1774,6 +1834,9 @@
     ],
     "decisions": [],
     "def_use": [
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -1836,9 +1899,18 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {}
     ],
     "flow_types": [
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -1964,6 +2036,12 @@
       }
     ],
     "liveness": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -2717,10 +2795,20 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:SourceFactProtocolsNilClone#guard_both_terminate:local:value"
         ],
-        "writes": []
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_both_terminate:local:value"
+        ]
       },
       {
         "reads": [],
@@ -2733,10 +2821,22 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:SourceFactProtocolsNilClone#guard_else_terminate:local:value"
         ],
         "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_else_terminate:local:value"
+        ],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_else_terminate:local:value"
+        ]
       },
       {
         "reads": [],
@@ -2781,6 +2881,14 @@
         "writes": []
       },
       {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_ne_nil:local:value"
+        ],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_ne_nil:local:value"
+        ]
+      },
+      {
         "reads": [],
         "writes": [
           "place:SourceFactProtocolsNilClone#guard_negated:local:value"
@@ -2821,6 +2929,14 @@
           "place:SourceFactProtocolsNilClone#guard_safe_nav_cond:local:value"
         ],
         "writes": []
+      },
+      {
+        "reads": [
+          "place:SourceFactProtocolsNilClone#guard_safe_nav_cond:local:value"
+        ],
+        "writes": [
+          "place:SourceFactProtocolsNilClone#guard_safe_nav_cond:local:value"
+        ]
       },
       {
         "reads": [],
@@ -3343,9 +3459,18 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
       {}
     ],
     "reaching_definitions": [
+      {},
+      {},
+      {},
       {},
       {},
       {},

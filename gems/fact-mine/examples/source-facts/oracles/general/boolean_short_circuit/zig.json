@@ -136,6 +136,18 @@
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "branch_false"
+      },
+      {
+        "kind": "branch_true"
+      },
+      {
+        "kind": "short_circuit"
+      },
+      {
+        "kind": "short_circuit"
       }
     ],
     "control_flow_metrics": [
@@ -153,8 +165,13 @@
         "line": 5
       },
       {
-        "id": "cfg:bool#method_seven:stmt:1:2:4",
+        "id": "cfg:bool#method_seven:stmt:0.then.0:2:22",
         "kind": "statement",
+        "line": 2
+      },
+      {
+        "id": "cfg:bool#method_seven:stmt:1:2:4",
+        "kind": "branch",
         "line": 2
       }
     ],
@@ -185,6 +202,7 @@
     "dominators": [
       {},
       {},
+      {},
       {}
     ],
     "flow_types": [
@@ -206,6 +224,7 @@
       }
     ],
     "liveness": [
+      {},
       {},
       {},
       {}
@@ -279,6 +298,10 @@
         "writes": []
       },
       {
+        "reads": [],
+        "writes": []
+      },
+      {
         "reads": [
           "place:bool#method_seven:local:x",
           "place:bool#method_seven:local:y",
@@ -344,6 +367,7 @@
       }
     ],
     "reachability": [
+      {},
       {},
       {},
       {}

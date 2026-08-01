@@ -1,7 +1,7 @@
 // Minimal, in-repo fixtures for Espalier-consumed architecture extraction
 // (owner/function/state facts) across languages, replacing the need to
 // clone large external OSS repos to validate this specific concern. See
-// gems/lineage/docs/agents/lang-support-quality.md for the original
+// gems/gigasail/docs/agents/lang-support-quality.md for the original
 // large-repo validation pass this narrows down to reproducible unit-level
 // fixtures.
 //
@@ -342,6 +342,27 @@ fn csharp_field_with_braceless_initializer_keeps_its_own_name() {
     );
 }
 
+#[test]
+fn csharp_generic_field_type_keeps_nested_commas() {
+    let document = parse_source(
+        ".cs",
+        Language::CSharp,
+        "class LogEvent {\n\
+         readonly Dictionary<string, LogEventPropertyValue> _properties;\n\
+         }\n",
+    );
+
+    let declaration = document
+        .state_declarations
+        .iter()
+        .find(|state| state.field == "_properties")
+        .expect("expected _properties state declaration");
+    assert_eq!(
+        declaration.r#type.as_deref(),
+        Some("readonly Dictionary<string, LogEventPropertyValue>")
+    );
+}
+
 // Real bug, found auditing rich/rich/color.py: Python's state-declaration
 // heuristic required a `:` type annotation unconditionally, so a plain,
 // unannotated class-body assignment produced zero state declarations -
@@ -450,6 +471,53 @@ fn cpp_struct_with_methods_is_recognized_as_an_owner() {
         "expected Vec3.increment, got {:?}",
         document.function_defs
     );
+    assert!(
+        document
+            .local_methods
+            .iter()
+            .any(|method| method.name == "increment" && method.owner == "Vec3"),
+        "expected normalized CFG/DFG method Vec3.increment, got {:?}",
+        document.local_methods
+    );
+}
+
+#[test]
+fn cpp_template_specialization_methods_reach_cfg_and_complexity_facts() {
+    let document = parse_source(
+        ".hpp",
+        Language::Cpp,
+        "template <typename T>\n\
+         class Queue;\n\
+         template <typename Event, typename... Args>\n\
+         class Queue<Event(Args...)> {\n\
+         private:\n\
+         template <std::size_t... Indexes>\n\
+         void dispatch(Event & event, Args &... args) {\n\
+         this->directDispatch(event, std::get<Indexes>(args)...);\n\
+         }\n\
+         };\n",
+    );
+
+    let method = document
+        .local_methods
+        .iter()
+        .find(|method| method.name == "dispatch")
+        .expect("expected a normalized local-flow method for the partial specialization");
+    assert_eq!(method.owner, "Queue<Event(Args...)>");
+
+    let output = profile::extract(&document, Profile::Espalier);
+    let fact = output
+        .complexity_facts
+        .iter()
+        .find(|fact| fact.function == "dispatch")
+        .expect("expected complexity facts for the partial-specialization method");
+    assert!(
+        fact.call_contexts
+            .iter()
+            .any(|context| context.message == "directDispatch"),
+        "expected the inherited call to retain its containment context, got {:?}",
+        fact.call_contexts
+    );
 }
 
 // Real bug, found auditing plog's Logger.h: a linkage/visibility macro
@@ -500,6 +568,14 @@ fn cpp_linkage_macro_before_class_name_does_not_swallow_the_class_body() {
             .any(|f| f.name == "addAppender" && f.owner == "Logger"),
         "expected Logger.addAppender to survive the macro-corrupted parse, got {:?}",
         document.function_defs
+    );
+    assert!(
+        document
+            .local_methods
+            .iter()
+            .any(|method| method.name == "addAppender" && method.owner == "Logger"),
+        "expected Logger.addAppender to reach the normalized CFG/DFG, got {:?}",
+        document.local_methods
     );
 }
 

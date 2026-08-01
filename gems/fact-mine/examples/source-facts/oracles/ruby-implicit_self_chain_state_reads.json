@@ -653,7 +653,13 @@
         "kind": "entry"
       },
       {
-        "kind": "fallthrough"
+        "kind": "loop_backedge"
+      },
+      {
+        "kind": "loop_body"
+      },
+      {
+        "kind": "loop_exit"
       },
       {
         "kind": "entry"
@@ -741,8 +747,13 @@
         "line": 15
       },
       {
-        "id": "cfg:SourceFactImplicitSelfChainStateReads#owner_nodes:stmt:1:14:4",
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#owner_nodes:stmt:0.loop.0:14:26",
         "kind": "statement",
+        "line": 14
+      },
+      {
+        "id": "cfg:SourceFactImplicitSelfChainStateReads#owner_nodes:stmt:1:14:4",
+        "kind": "loop",
         "line": 14
       },
       {
@@ -767,10 +778,12 @@
       {},
       {},
       {},
+      {},
       {}
     ],
     "dispatch_sites": [],
     "dominators": [
+      {},
       {},
       {},
       {},
@@ -843,6 +856,7 @@
       }
     ],
     "liveness": [
+      {},
       {},
       {},
       {},
@@ -1126,6 +1140,10 @@
         "reads": [
           "place:SourceFactImplicitSelfChainStateReads#owner_nodes:local:node"
         ],
+        "writes": []
+      },
+      {
+        "reads": [],
         "writes": [
           "place:SourceFactImplicitSelfChainStateReads#owner_nodes:local:node"
         ]
@@ -1328,6 +1346,7 @@
       }
     ],
     "reachability": [
+      {},
       {},
       {},
       {},

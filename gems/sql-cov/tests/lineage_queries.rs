@@ -3,7 +3,7 @@ use sql_cov::{analyze_sql, cover_sqlite, execute_sqlite_setup, DialectName};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const OWNER_INVENTORY: &str = include_str!("../../lineage/sql/architecture/owner_inventory.sql");
+const OWNER_INVENTORY: &str = include_str!("../../gigasail/giga-core/sql/architecture/owner_inventory.sql");
 const SETUP: &str = include_str!("fixtures/lineage_architecture.sql");
 
 fn sql_files(root: &Path) -> Vec<PathBuf> {
@@ -22,8 +22,13 @@ fn sql_files(root: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn all_extracted_lineage_runtime_queries_parse_with_sql_cov() {
-    let lineage_sql = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lineage/sql");
-    let files = [lineage_sql.join("storage"), lineage_sql.join("ui/runtime")]
+    // The gem split in two: storage SQL stayed with giga-core, the UI's runtime
+    // queries went to giga-ui.
+    let gems = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let files = [
+        gems.join("gigasail/giga-core/sql/storage"),
+        gems.join("gigasail/giga-ui/sql/ui/runtime"),
+    ]
         .into_iter()
         .flat_map(|root| sql_files(&root))
         .collect::<Vec<_>>();
@@ -57,7 +62,7 @@ async fn measures_real_lineage_owner_inventory_where_clause() {
     execute_sqlite_setup(&pool, SETUP).await.unwrap();
     let schema = sql_cov::schema::SchemaCatalog::load_sqlite(&pool).await.unwrap();
     let analysis = analyze_sql(
-        "gems/lineage/sql/architecture/owner_inventory.sql",
+        "gems/gigasail/giga-core/sql/architecture/owner_inventory.sql",
         OWNER_INVENTORY,
         DialectName::Sqlite,
         Some(&schema),
@@ -92,60 +97,56 @@ fn all_migrated_lineage_architecture_queries_parse() {
     let queries = [
         (
             "delete_snapshot",
-            include_str!("../../lineage/sql/architecture/delete_snapshot.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/delete_snapshot.sql"),
         ),
         (
             "insert_artifact",
-            include_str!("../../lineage/sql/architecture/insert_artifact.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_artifact.sql"),
         ),
         (
             "insert_node",
-            include_str!("../../lineage/sql/architecture/insert_node.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_node.sql"),
         ),
         (
             "insert_edge",
-            include_str!("../../lineage/sql/architecture/insert_edge.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_edge.sql"),
         ),
         (
             "insert_edge_span",
-            include_str!("../../lineage/sql/architecture/insert_edge_span.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_edge_span.sql"),
         ),
         (
             "insert_pressure",
-            include_str!("../../lineage/sql/architecture/insert_pressure.sql"),
-        ),
-        (
-            "reconcile",
-            include_str!("../../lineage/sql/architecture/reconcile_logical_unit.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_pressure.sql"),
         ),
         (
             "search",
-            include_str!("../../lineage/sql/architecture/search.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/search.sql"),
         ),
         (
             "latest",
-            include_str!("../../lineage/sql/architecture/latest_artifact.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/latest_artifact.sql"),
         ),
         (
             "health",
-            include_str!("../../lineage/sql/architecture/artifact_health.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/artifact_health.sql"),
         ),
         (
             "load_node",
-            include_str!("../../lineage/sql/architecture/load_node.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/load_node.sql"),
         ),
         ("owner_inventory", OWNER_INVENTORY),
         (
             "load_edges",
-            include_str!("../../lineage/sql/architecture/load_edges.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/load_edges.sql"),
         ),
         (
             "ui_symbols",
-            include_str!("../../lineage/sql/ui/architecture_symbols_for_path.sql"),
+            include_str!("../../gigasail/giga-ui/sql/ui/architecture_symbols_for_path.sql"),
         ),
         (
             "ui_owner",
-            include_str!("../../lineage/sql/ui/architecture_owner_by_name.sql"),
+            include_str!("../../gigasail/giga-ui/sql/ui/architecture_owner_by_name.sql"),
         ),
     ];
     for (name, sql) in queries {
@@ -156,27 +157,27 @@ fn all_migrated_lineage_architecture_queries_parse() {
 
 #[tokio::test]
 async fn every_migrated_lineage_sql_file_executes_as_statement_coverage() {
-    let queries: [(&str, &str, &[&str]); 15] = [
+    let queries: [(&str, &str, &[&str]); 14] = [
         (
             "artifact_health",
-            include_str!("../../lineage/sql/architecture/artifact_health.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/artifact_health.sql"),
             &["int:1"],
         ),
         (
             "delete_snapshot",
-            include_str!("../../lineage/sql/architecture/delete_snapshot.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/delete_snapshot.sql"),
             &["text:espalier", "text:missing"],
         ),
         (
             "insert_artifact",
-            include_str!("../../lineage/sql/architecture/insert_artifact.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_artifact.sql"),
             &[
                 "text:new", "text:1", "int:1", "text:new", "text:.", "int:1", "text:now", "text:{}",
             ],
         ),
         (
             "insert_edge",
-            include_str!("../../lineage/sql/architecture/insert_edge.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_edge.sql"),
             &[
                 "int:1",
                 "text:edge:new",
@@ -191,7 +192,7 @@ async fn every_migrated_lineage_sql_file_executes_as_statement_coverage() {
         ),
         (
             "insert_edge_span",
-            include_str!("../../lineage/sql/architecture/insert_edge_span.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_edge_span.sql"),
             &[
                 "int:1",
                 "text:edge:new",
@@ -204,7 +205,7 @@ async fn every_migrated_lineage_sql_file_executes_as_statement_coverage() {
         ),
         (
             "insert_node",
-            include_str!("../../lineage/sql/architecture/insert_node.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_node.sql"),
             &[
                 "int:1",
                 "text:fn:new",
@@ -225,7 +226,7 @@ async fn every_migrated_lineage_sql_file_executes_as_statement_coverage() {
         ),
         (
             "insert_pressure",
-            include_str!("../../lineage/sql/architecture/insert_pressure.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/insert_pressure.sql"),
             &[
                 "int:1",
                 "text:fn:new",
@@ -240,17 +241,17 @@ async fn every_migrated_lineage_sql_file_executes_as_statement_coverage() {
         ),
         (
             "latest_artifact",
-            include_str!("../../lineage/sql/architecture/latest_artifact.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/latest_artifact.sql"),
             &[],
         ),
         (
             "load_edges",
-            include_str!("../../lineage/sql/architecture/load_edges.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/load_edges.sql"),
             &["int:1", "text:fn:match"],
         ),
         (
             "load_node",
-            include_str!("../../lineage/sql/architecture/load_node.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/load_node.sql"),
             &["int:1", "text:fn:match"],
         ),
         (
@@ -259,30 +260,18 @@ async fn every_migrated_lineage_sql_file_executes_as_statement_coverage() {
             &["int:1", "text:owner:1"],
         ),
         (
-            "reconcile",
-            include_str!("../../lineage/sql/architecture/reconcile_logical_unit.sql"),
-            &[
-                "text:demo.rb",
-                "text:match",
-                "text:%match",
-                "text:function",
-                "text:method",
-                "int:2",
-            ],
-        ),
-        (
             "search",
-            include_str!("../../lineage/sql/architecture/search.sql"),
+            include_str!("../../gigasail/giga-core/sql/architecture/search.sql"),
             &["int:1", "text:%match%", "null:text"],
         ),
         (
             "ui_symbols",
-            include_str!("../../lineage/sql/ui/architecture_symbols_for_path.sql"),
+            include_str!("../../gigasail/giga-ui/sql/ui/architecture_symbols_for_path.sql"),
             &["text:demo.rb"],
         ),
         (
             "ui_owner",
-            include_str!("../../lineage/sql/ui/architecture_owner_by_name.sql"),
+            include_str!("../../gigasail/giga-ui/sql/ui/architecture_owner_by_name.sql"),
             &["text:demo.rb", "text:Demo", "text:%Demo"],
         ),
     ];

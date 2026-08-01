@@ -142,6 +142,14 @@ jobs:
         run: |
           cargo build --release --manifest-path gems/fact-mine/Cargo.toml
           cargo build --release --manifest-path gems/nil-kill/Cargo.toml
+      # The collector IS this extension -- a collect loads it and no nil-kill
+      # Ruby at all -- so without it every spec that runs one fails to require
+      # it, and the specs guarded on its presence quietly test nothing.
+      - name: Build the collector extension
+        run: |
+          cd gems/nil-kill/ext/nil_kill_trace
+          ruby extconf.rb
+          make
       - run: bundle exec rspec gems/nil-kill/spec
         env:
           FACT_MINE_RUST_BINARY: ./gems/fact-mine/target/release/fact-mine-rust
@@ -170,16 +178,16 @@ jobs:
       - name: Install Jest oracle fixture runtime
         run: npm install --no-save --no-package-lock jest@30.0.5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build Lineage release binary
+      - name: Build Gigasail release binary
         # The ingestion round-trip test below skips silently (not fails)
         # when this binary is absent, so without this step CI could report
         # green while that contract was never actually exercised.
-        run: cargo build --release --manifest-path gems/lineage/Cargo.toml
+        run: cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
       - name: Verify runner adapters, dynamic planning, and canonical checkpoints
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/test_miser_test.rb
       - name: Verify PR step summary tallies
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/step_summary_test.rb
-      - name: Verify Lineage corpus ingestion round-trip
+      - name: Verify Gigasail corpus ingestion round-trip
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/lineage_ingest_integration_test.rb
       - name: Verify Test Miser evidence analyzers and product formats
         run: |
@@ -229,7 +237,7 @@ jobs:
 
   ruby-gems-coverage:
     name: Ruby gems coverage
-    needs: changes
+    needs: [changes, sarif-rust-binaries]
     if: ${{ needs.changes.outputs.run_gems == 'true' }}
     runs-on: ubuntu-latest
     env:
@@ -250,18 +258,27 @@ jobs:
       - name: Install Tree-sitter grammars
         run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build Rust binaries
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
+      - name: Place the shared Rust binaries where the tests look for them
         # gems/slopcop/test/cross_gem_contract_integration_test.rb and
         # gems/espalier/test/architecture_tools_test.rb both exercise the
-        # Lineage binary; building it here is required, not optional - the
+        # gigasail binary; having it here is required, not optional - the
         # SlopCop test hard-flunks without it (this job would otherwise be
         # broken), and the Espalier one silently skips without it (so its
         # contract would go untested with no visible failure).
+        #
+        # They are built once by `sarif-rust-binaries` and copied to the
+        # target/release paths the tests resolve, rather than four crates
+        # being compiled again on this runner.
         run: |
-          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
-          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
-          cargo build --release --manifest-path gems/decomplex/Cargo.toml
-          cargo build --release --manifest-path gems/lineage/Cargo.toml
+          chmod +x tmp/sarif-binaries/*
+          install -Dm755 tmp/sarif-binaries/fact-mine-rust gems/fact-mine/target/release/fact-mine-rust
+          install -Dm755 tmp/sarif-binaries/nil-kill-infer-rust gems/nil-kill/target/release/nil-kill-infer-rust
+          install -Dm755 tmp/sarif-binaries/decomplex-rust gems/decomplex/target/release/decomplex-rust
+          install -Dm755 tmp/sarif-binaries/giga gems/gigasail/target/release/giga
       - name: Run Ruby gem tests with SimpleCov
         run: bundle exec ruby tools/run_ruby_gem_coverage.rb
         env:
@@ -356,8 +373,8 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  lineage-rust-coverage:
-    name: Lineage Rust coverage
+  gigasail-rust-coverage:
+    name: Gigasail Rust coverage
     needs: changes
     if: ${{ needs.changes.outputs.run_gems == 'true' }}
     runs-on: ubuntu-latest
@@ -365,24 +382,24 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Run cargo llvm-cov for Lineage
+      - name: Run cargo llvm-cov for Gigasail
         run: |
-          mkdir -p tmp/lineage-rust-coverage
+          mkdir -p tmp/gigasail-rust-coverage
           cargo llvm-cov \
-            --manifest-path gems/lineage/Cargo.toml \
+            --manifest-path gems/gigasail/Cargo.toml --workspace --all-targets \
             --all-features \
             --cobertura \
-            --output-path ${{ github.workspace }}/tmp/lineage-rust-coverage/cobertura.xml
+            --output-path ${{ github.workspace }}/tmp/gigasail-rust-coverage/cobertura.xml
       - uses: actions/upload-artifact@v4
         with:
-          name: lineage-rust-coverage
-          path: tmp/lineage-rust-coverage/cobertura.xml
+          name: gigasail-rust-coverage
+          path: tmp/gigasail-rust-coverage/cobertura.xml
           retention-days: 7
       - uses: codecov/codecov-action@v5
         with:
-          files: ./tmp/lineage-rust-coverage/cobertura.xml
+          files: ./tmp/gigasail-rust-coverage/cobertura.xml
           disable_search: true
-          flags: lineage-rust
+          flags: gigasail-rust
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -439,7 +456,7 @@ jobs:
 
   fact-mine-rust-coverage:
     name: FactMine Rust coverage
-    needs: changes
+    needs: [changes, sarif-rust-binaries]
     if: ${{ needs.changes.outputs.run_gems == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -461,19 +478,25 @@ jobs:
         run: npm install --legacy-peer-deps
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: actions/download-artifact@v4
+        with:
+          name: sarif-rust-binaries
+          path: tmp/sarif-binaries
       - name: Run cargo llvm-cov for FactMine
         run: |
           mkdir -p tmp/fact-mine-rust-coverage
           cargo llvm-cov clean --manifest-path gems/fact-mine/Cargo.toml
           cargo llvm-cov --no-report --manifest-path gems/fact-mine/Cargo.toml --all-features
-          cargo build --release --manifest-path gems/fact-mine/Cargo.toml
-          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
-          cargo build --release --manifest-path gems/decomplex/Cargo.toml
-          cargo build --release --manifest-path gems/lineage/Cargo.toml
-          # The release FactMine binary is built once above. The focused Ruby
-          # consumer suite reuses that same executable; LLVM coverage comes
-          # from FactMine's instrumented Rust test run rather than rebuilding
-          # a second binary for every cross-gem invocation.
+          # Only the instrumented build happens here -- it has to, coverage
+          # comes from it. The release binaries the consumer suite calls are
+          # the ones `sarif-rust-binaries` already built, placed where the
+          # tests look: several resolve target/release directly rather than
+          # reading the environment.
+          chmod +x tmp/sarif-binaries/*
+          install -Dm755 tmp/sarif-binaries/fact-mine-rust gems/fact-mine/target/release/fact-mine-rust
+          install -Dm755 tmp/sarif-binaries/nil-kill-infer-rust gems/nil-kill/target/release/nil-kill-infer-rust
+          install -Dm755 tmp/sarif-binaries/decomplex-rust gems/decomplex/target/release/decomplex-rust
+          install -Dm755 tmp/sarif-binaries/giga gems/gigasail/target/release/giga
           FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/release/fact-mine-rust \
           NIL_KILL_INFER_RUST_BINARY=${{ github.workspace }}/gems/nil-kill/target/release/nil-kill-infer-rust \
           DECOMPLEX_RUST_BINARY=${{ github.workspace }}/gems/decomplex/target/release/decomplex-rust \
@@ -800,6 +823,12 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
+      # The corpus is traced by the collector, which is the C extension.
+      - name: Build the collector extension
+        run: |
+          cd gems/nil-kill/ext/nil_kill_trace
+          ruby extconf.rb
+          make
       - run: NIL_KILL_JOBS="$(nproc)" tools/clear-nil-kill-transpile-corpus.sh
         env:
           NO_COLOR: "1"
@@ -1526,7 +1555,7 @@ jobs:
     # any sanitizer constraint blocking.
     name: SlopCop constraint coverage SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 75
     needs:
       - changes
       - zig-special-coverage
@@ -1579,7 +1608,7 @@ jobs:
               args+=(--coverage="nil-kill:${path}")
             done < <(find tmp/ruby-coverage-unit \( -name 'cobertura.xml' -o -name 'coverage.xml' \) -type f | sort)
           fi
-          timeout 20m env FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
+          timeout 60m env FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1601,23 +1630,32 @@ jobs:
           retention-days: 7
 
   architecture-sarif:
-    # Architecture findings on changed files: dependency cycles
-    # (espalier/tools/cycle_report.rb), cross-module private reach-through
-    # (espalier/tools/reach_through_report.rb), and cross-module change
-    # coupling (lineage/tools/change_coupling.rb). All three are advisory
-    # (warning/note level); they annotate PRs and feed the Lineage ledger via
-    # SARIF, they do not block merges.
+    # Cross-module change coupling (gigasail/tools/change_coupling.rb),
+    # advisory (warning/note level): it annotates PRs and feeds the Lineage
+    # ledger via SARIF, it does not block merges.
+    #
+    # cycle_report.rb and reach_through_report.rb are deliberately NOT run
+    # here. Both are WIP experiments (beb2fe8cf, "WIP anti-pattern experiment
+    # tools") and both cost a whole-corpus FactMine projection - together they
+    # were the entire runtime of this job.
+    #
+    # reach_through additionally cannot model package-scoped languages: it
+    # derives owners per file, so two files in one Go package read as a
+    # cross-module private call, which is what its 81 self-quarantined
+    # "suspect" findings are.
+    #
+    # cycle_report is the sounder of the two - its four findings here are real
+    # cycles, not artifacts - but it is off pending a measurement of whether
+    # those findings are worth acting on. If they are, it belongs inside
+    # Espalier as a library check next to privacy_analyzer.rb, not as a tool
+    # shelling out to a whole-corpus projection. The tools and their tests stay
+    # in the tree meanwhile.
     name: Architecture SARIF
     runs-on: ubuntu-latest
-    # FactMine performs whole-corpus structural analysis. Keep one bounded
-    # job-level deadline, rather than killing its Ruby parent mid-subprocess
-    # and leaving Open3 reader threads to report a misleading stream-closed
-    # error.
-    timeout-minutes: 45
+    timeout-minutes: 15
     needs:
       - changes
-      - sarif-rust-binaries
-    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') && needs.sarif-rust-binaries.result == 'success' }}
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') }}
     permissions:
       contents: read
       security-events: write
@@ -1629,33 +1667,13 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: sarif-rust-binaries
-          path: tmp/sarif-binaries
       - name: Generate architecture SARIFs
         run: |
-          chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           mkdir -p tmp
-          export FACT_MINE_RUST_BINARY=$PWD/tmp/sarif-binaries/fact-mine-rust
           base="origin/${{ github.event.pull_request.base.ref }}"
-          ruby gems/espalier/tools/cycle_report.rb . \
-            --base="$base" --sarif=tmp/arch-cycles.sarif
-          ruby gems/espalier/tools/reach_through_report.rb . \
-            --base="$base" --sarif=tmp/arch-reach-through.sarif
-          ruby gems/lineage/tools/change_coupling.rb . 8 \
+          ruby gems/gigasail/tools/change_coupling.rb . 8 \
             --base="$base" --sarif=tmp/arch-change-coupling.sarif
-      - name: Upload cycles SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/arch-cycles.sarif
-          category: architecture-cycles
-      - name: Upload reach-through SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/arch-reach-through.sarif
-          category: architecture-reach-through
       - name: Upload change-coupling SARIF
         uses: github/codeql-action/upload-sarif@v4
         with:
@@ -1676,21 +1694,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') }}
+    # Not restricted to same-repo pull requests any more: the coverage jobs
+    # consume these binaries too, and they run on pushes. The SARIF jobs keep
+    # their own restriction, which is about where a SARIF upload may come from
+    # rather than about compiling anything.
+    if: ${{ needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true' }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # Every release binary the run consumes is built here, once, and
+      # downloaded by the jobs that need one. Three jobs used to build the same
+      # crates from scratch on three fresh runners.
       - name: Build release binaries once
         run: |
           cargo build --release --manifest-path gems/fact-mine/Cargo.toml
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
           cargo build --release --manifest-path gems/sql-cov/Cargo.toml
+          cargo build --release --manifest-path gems/nil-kill/Cargo.toml
+          cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
           mkdir -p tmp/sarif-binaries
           install -m 755 gems/fact-mine/target/release/fact-mine-rust tmp/sarif-binaries/fact-mine-rust
           install -m 755 gems/decomplex/target/release/decomplex-rust tmp/sarif-binaries/decomplex-rust
           install -m 755 gems/sql-cov/target/release/sql-cov tmp/sarif-binaries/sql-cov
+          install -m 755 gems/nil-kill/target/release/nil-kill-infer-rust tmp/sarif-binaries/nil-kill-infer-rust
+          install -m 755 gems/gigasail/target/release/giga tmp/sarif-binaries/giga
       - uses: actions/upload-artifact@v4
         with:
           name: sarif-rust-binaries
@@ -1701,7 +1730,7 @@ jobs:
   decomplex-sarif:
     name: Decomplex SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     needs: [changes, sarif-rust-binaries]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
@@ -1723,7 +1752,7 @@ jobs:
         run: |
           chmod +x tmp/sarif-binaries/decomplex-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          timeout 15m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 40m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1744,7 +1773,7 @@ jobs:
   boobytrap-sarif:
     name: Boobytrap SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 75
     needs:
       - changes
       - ruby-gems-coverage
@@ -1756,7 +1785,7 @@ jobs:
       - bc-lower-coverage-shard
       - zig-coverage
       - zig-mutants-coverage
-      - lineage-rust-coverage
+      - gigasail-rust-coverage
     if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     permissions:
       contents: read
@@ -1785,12 +1814,12 @@ jobs:
         with:
           pattern: zig-coverage-*
           path: tmp/sarif-coverage
-      - name: Download Lineage Rust coverage artifact
-        if: ${{ needs['lineage-rust-coverage'].result == 'success' }}
+      - name: Download Gigasail Rust coverage artifact
+        if: ${{ needs['gigasail-rust-coverage'].result == 'success' }}
         uses: actions/download-artifact@v4
         with:
-          name: lineage-rust-coverage
-          path: tmp/sarif-coverage/lineage-rust-coverage
+          name: gigasail-rust-coverage
+          path: tmp/sarif-coverage/gigasail-rust-coverage
       - name: Generate Boobytrap report
         run: |
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
@@ -1804,7 +1833,7 @@ jobs:
               ! -path '*zig-coverage-vopr-*' \
               | sort
           )
-          timeout 20m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 60m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1826,7 +1855,7 @@ jobs:
   slopcop-sarif:
     name: SlopCop SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 75
     needs:
       - changes
       - ruby-gems-coverage
@@ -1838,7 +1867,7 @@ jobs:
       - bc-lower-coverage-shard
       - zig-coverage
       - zig-mutants-coverage
-      - lineage-rust-coverage
+      - gigasail-rust-coverage
     if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true' || needs.changes.outputs.run_zig == 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     permissions:
       contents: read
@@ -1867,12 +1896,12 @@ jobs:
         with:
           pattern: zig-coverage-*
           path: tmp/sarif-coverage
-      - name: Download Lineage Rust coverage artifact
-        if: ${{ needs['lineage-rust-coverage'].result == 'success' }}
+      - name: Download Gigasail Rust coverage artifact
+        if: ${{ needs['gigasail-rust-coverage'].result == 'success' }}
         uses: actions/download-artifact@v4
         with:
-          name: lineage-rust-coverage
-          path: tmp/sarif-coverage/lineage-rust-coverage
+          name: gigasail-rust-coverage
+          path: tmp/sarif-coverage/gigasail-rust-coverage
       - name: Generate SlopCop report
         run: |
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
@@ -1886,7 +1915,7 @@ jobs:
               ! -path '*zig-coverage-vopr-*' \
               | sort
           )
-          timeout 20m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 60m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1908,7 +1937,7 @@ jobs:
   espalier-sarif:
     name: Espalier SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     needs: [changes, sarif-rust-binaries]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
@@ -1937,7 +1966,7 @@ jobs:
         run: |
           chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          timeout 15m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 40m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1957,7 +1986,7 @@ jobs:
   nil-kill-sarif:
     name: Nil-Kill SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     needs: [changes, sarif-rust-binaries]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.sarif-rust-binaries.result == 'success' }}
     permissions:
@@ -1990,7 +2019,7 @@ jobs:
         run: |
           chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
-          timeout 15m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 40m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -2032,7 +2061,7 @@ jobs:
           timeout 10m ./tools/generate_sql_cov_sarif.rb \
             --repo=. \
             --out-dir=tmp/sql-cov-sarif \
-            --setup=gems/lineage/sql/storage/init_schema.sql \
+            --setup=gems/gigasail/giga-core/sql/storage/init_schema.sql \
             --sql-cov-bin=tmp/sarif-binaries/sql-cov
       - uses: github/codeql-action/upload-sarif@v4
         with:
@@ -2068,7 +2097,7 @@ jobs:
             --repo=. \
             --out-dir=tmp/sqlfluff-sarif \
             --config=.sqlfluff \
-            --sql-path=gems/lineage/sql
+            --sql-path=gems/gigasail/giga-core/sql
       - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tmp/sqlfluff-sarif/sqlfluff.sarif

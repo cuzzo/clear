@@ -109,6 +109,20 @@
     "calls": [
       {
         "arguments": [
+          ":path",
+          "path"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "build",
+        "line": 11,
+        "message": "[]=",
+        "receiver": "config",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
           "key"
         ],
         "block": false,

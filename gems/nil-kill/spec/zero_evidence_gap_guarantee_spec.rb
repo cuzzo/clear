@@ -15,9 +15,7 @@ require_relative "spec_helper"
 RSpec.describe "zero-gap end-to-end guarantee", :zero_gap_guarantee do
   corpus = File.join(__dir__, "fixtures", "zero_gap_corpus")
 
-  # Class#method for every sampled (T.untyped-slot) method the workload
-  # calls. arg-only-untraceable slots (handle's *rest/**kw/&blk) still
-  # produce a `handle` record via its real `opts` slot.
+  # Class#method for every sampled (T.untyped-slot) method the workload calls.
   EXPECTED = [
     %w[PlainReq transform], %w[RelReq calc], %w[KernelLoad handle],
     %w[AutoLib one_line], %w[AbsReq walk], %w[AbsReq run],
@@ -85,8 +83,19 @@ RSpec.describe "zero-gap end-to-end guarantee", :zero_gap_guarantee do
     expect(gaps.keys - NilKill::Report::EVIDENCE_GAP_REASONS.keys).to eq([])
   end
 
-  it "block/splat/kwsplat slots are arg_untraced, never a forbidden state" do
-    expect(gaps["arg_untraced"].map { |g| g["text"] }).to include(a_string_matching(/`(rest|kw|blk)`/))
+  it "captures block/splat/kwsplat bindings without an evidence gap" do
+    handle = @r[:methods].find do |method|
+      method["class"] == "KernelLoad" && method["method"] == "handle"
+    end
+    expect(handle).to include(
+      "params_by_name" => a_hash_including(
+        "rest" => include("Array"),
+        "kw" => include("Hash"),
+        "blk" => include("Proc")
+      )
+    )
+    expect(gaps.fetch("arg_untraced", []).map { |gap| gap["text"] })
+      .not_to include(a_string_matching(/`(rest|kw|blk)`/))
     expect(gaps.fetch("collect_ran_untraced", [])).to eq([])
     expect(gaps.fetch("never_run", [])).to eq([])
   end

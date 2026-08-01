@@ -2,7 +2,9 @@
 set -u
 
 status=0
-tracer="gems/nil-kill/lib/nil_kill/runtime_trace.rb"
+# The collector is the extension: a traced program loads it and no
+# nil-kill Ruby at all.
+tracer="gems/nil-kill/ext/nil_kill_trace/nil_kill_trace.so"
 jobs="${NIL_KILL_JOBS:-${NK_JOBS:-$(nproc 2>/dev/null || echo 1)}}"
 
 should_skip_live_data_file() {
@@ -47,7 +49,7 @@ run_transpiler_with_timeout() {
   local timeout_seconds="${NIL_KILL_REQUIRE_CLEAR_TIMEOUT:-300}"
 
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${timeout_seconds}s" bash -c 'NIL_KILL_NOOP_SORBET="${NIL_KILL_NOOP_SORBET:-1}" RUBYOPT="${RUBYOPT:+$RUBYOPT }-rbundler/setup -r./gems/nil-kill/lib/nil_kill/runtime_trace.rb" ruby compiler/ruby/backends/transpiler.rb "$1"' _ "$file"
+    timeout "${timeout_seconds}s" bash -c 'NIL_KILL_NOOP_SORBET="${NIL_KILL_NOOP_SORBET:-1}" RUBYOPT="${RUBYOPT:+$RUBYOPT }-rbundler/setup -r./gems/nil-kill/ext/nil_kill_trace/nil_kill_trace.so" ruby compiler/ruby/backends/transpiler.rb "$1"' _ "$file"
   else
     run_transpiler "$file"
   fi

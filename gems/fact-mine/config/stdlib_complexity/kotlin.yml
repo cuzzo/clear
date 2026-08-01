@@ -45,19 +45,29 @@ SemanticSymbol:
   'kotlin/IntArray#`<init>`().': linear_materialize
   'kotlin/Double#toInt().': constant
   'kotlin/Int#toDouble().': constant
+  'kotlin/checkNotNull(+1).': constant
   'kotlin/collections/emptyList().': constant
   'kotlin/collections/emptyMap().': constant
+  'kotlin/collections/contentHashCode().': linear_scan
+  'kotlin/collections/contentToString(+3).': linear_materialize
+  'kotlin/collections/getOrNull(+9).': linear_scan
+  'kotlin/collections/getValue().': linear_scan
   'kotlin/collections/listOf().': constant
   'kotlin/collections/listOf(+1).': linear_materialize
   'kotlin/collections/mapOf(+2).': linear_materialize
+  'kotlin/collections/mutableListOf().': constant
   'kotlin/collections/copyOf(+11).': linear_materialize
   'kotlin/collections/single(+19).': linear_scan
   'kotlin/collections/sum(+8).': linear_scan
   'kotlin/collections/toCharArray(+1).': linear_materialize
   'kotlin/collections/toDoubleArray(+1).': linear_materialize
+  'kotlin/collections/toList(+10).': linear_materialize
+  'kotlin/collections/toMutableList(+10).': linear_materialize
   'kotlin/collections/toSet(+9).': linear_materialize
   'kotlin/collections/toTypedArray().': linear_materialize
   'kotlin/isNaN().': constant
+  'kotlin/require(+1).': constant
+  'kotlin/requireNotNull(+1).': constant
   'kotlin/math/ceil().': constant
   'kotlin/math/floor().': constant
   'kotlin/math/log10().': constant
@@ -76,7 +86,12 @@ SemanticSymbol:
   'kotlin/text/toIntOrNull().': linear_scan
   'kotlin/text/toLong().': linear_scan
   'kotlin/text/trim(+5).': linear_materialize
+  'kotlin/text/trimMargin().': linear_materialize
   'kotlin/text/uppercase(+2).': linear_materialize
+  'kotlin/collections/MutableList#add().': linear_materialize
+  'kotlin/collections/MutableList#addAll().': linear_materialize
+  'kotlin/collections/addAll(+2).': linear_materialize
+  'kotlin/collections/MutableList#isEmpty().': constant
 
 # Higher-order contracts retain the callback cost as a parameter. They are
 # upper bounds, not constant-cost stand-ins for the lambda body.
@@ -91,6 +106,8 @@ SemanticSymbolParametricCost:
   'kotlin/collections/associateBy(+19).': callback_linear
   'kotlin/collections/associate(+9).': callback_linear
   'kotlin/collections/associateWith(+9).': callback_linear
+  'kotlin/collections/count(+1).': callback_linear
+  'kotlin/collections/filter(+9).': callback_linear
   'kotlin/collections/filter(+10).': callback_linear
   'kotlin/collections/flatMap(+10).': callback_linear
   'kotlin/collections/fold(+9).': callback_linear
@@ -102,8 +119,11 @@ SemanticSymbolParametricCost:
   'kotlin/collections/joinToString(+9).': callback_linear
   'kotlin/collections/map(+6).': callback_linear
   'kotlin/collections/map(+9).': callback_linear
+  'kotlin/collections/map().': callback_linear
   'kotlin/collections/maxOf(+29).': callback_linear
+  'kotlin/collections/sortedBy(+9).': callback_sort
   'kotlin/collections/sumOf(+24).': callback_linear
   'kotlin/collections/sumOf(+27).': callback_linear
+  'kotlin/collections/sumOf(+66).': callback_linear
   'kotlin/repeat().': callback_linear
   'kotlin/text/buildString().': callback_once

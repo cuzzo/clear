@@ -58,6 +58,19 @@
     "calls": [
       {
         "arguments": [
+          "1"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_six",
+        "line": 3,
+        "message": "status=",
+        "receiver": "self.cache[index]",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
           "index"
         ],
         "block": false,
@@ -80,6 +93,19 @@
         "line": 2,
         "message": "[]",
         "receiver": "obj",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "obj[key]"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "method_six",
+        "line": 2,
+        "message": "status=",
+        "receiver": "self.cache",
         "safe_navigation": false
       },
       {
@@ -563,7 +589,9 @@
         "name": "method_six",
         "owner": "ruby",
         "reads": [
-          "cache"
+          "cache",
+          "self.cache.status=",
+          "self.cache[index].status="
         ],
         "writes": [
           "cache",
@@ -613,6 +641,18 @@
         "function": "method_six",
         "line": 4,
         "receiver": "self"
+      },
+      {
+        "field": "status=",
+        "function": "method_six",
+        "line": 2,
+        "receiver": "self.cache"
+      },
+      {
+        "field": "status=",
+        "function": "method_six",
+        "line": 3,
+        "receiver": "self.cache[index]"
       }
     ],
     "state_writes": [

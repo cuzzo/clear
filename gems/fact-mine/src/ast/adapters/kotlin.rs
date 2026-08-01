@@ -5,6 +5,45 @@ use tree_sitter::Node as TreeSitterNode;
 pub(crate) struct KotlinAstAdapter;
 
 impl AstNormalizationAdapter for KotlinAstAdapter {
+    fn normalize_default_parameters(&self) -> bool {
+        true
+    }
+
+    fn function_parameter_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        let parameters = named_children(node).into_iter().find(|child| {
+            matches!(
+                child.kind(),
+                "function_value_parameters" | "class_parameters"
+            )
+        })?;
+        Some(
+            named_children(parameters)
+                .into_iter()
+                .filter(|child| matches!(child.kind(), "parameter" | "class_parameter"))
+                .collect(),
+        )
+    }
+
+    fn named_field<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        name: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if name == "value" && matches!(node.kind(), "parameter" | "class_parameter") {
+            return named_children(node).into_iter().rev().find(|child| {
+                !matches!(
+                    child.kind(),
+                    "identifier" | "modifiers" | "type" | "user_type"
+                )
+            });
+        }
+        node.child_by_field_name(name)
+    }
+
     fn hash_literal_target<'tree>(
         &self,
         _node: TreeSitterNode<'tree>,
@@ -17,6 +56,17 @@ impl AstNormalizationAdapter for KotlinAstAdapter {
         matches!(kind, "for_statement").then_some("FOR")
     }
 
+    // `fun f() = expr`: the expression is the function body, wrapped in a
+    // `function_body` node whose leading `=` is expression-body syntax, not an
+    // assignment. Without this the generic `assignment_rhs` check (prev sibling
+    // is `=`) skips the expression, dropping the whole body - so expression-body
+    // functions produced no calls, loops, or complexity facts at all.
+    fn single_assignment_block_child(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
+        node.parent()
+            .map(|parent| parent.kind() == "function_body")
+            .unwrap_or(false)
+    }
+
     fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
         matches!(node.kind(), "call_expression")
     }
@@ -27,8 +77,42 @@ impl AstNormalizationAdapter for KotlinAstAdapter {
         _function: Option<TreeSitterNode<'tree>>,
         _source: &str,
     ) -> Option<Vec<TreeSitterNode<'tree>>> {
-        let args = descendant(node, &["value_arguments"])?;
-        Some(named_children(args))
+        let mut args = Vec::new();
+        for child in named_children(node).into_iter().skip(1) {
+            match child.kind() {
+                "value_arguments" => args.extend(named_children(child)),
+                "annotated_lambda" | "lambda_literal" => args.push(child),
+                _ => {}
+            }
+        }
+        Some(args)
+    }
+
+    fn lambda_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        match node.kind() {
+            "lambda_literal" => Some(node),
+            "annotated_lambda" => named_children(node)
+                .into_iter()
+                .find(|child| child.kind() == "lambda_literal"),
+            _ => None,
+        }
+    }
+
+    fn lambda_body_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        (node.kind() == "lambda_literal").then(|| {
+            named_children(node)
+                .into_iter()
+                .filter(|child| child.kind() != "lambda_parameters")
+                .collect()
+        })
     }
 
     fn case_arm_pattern_nodes<'tree>(
@@ -85,5 +169,157 @@ impl AstNormalizationAdapter for KotlinAstAdapter {
                     .any(|token| token == "var" || token == "val")
             })
             .collect()
+    }
+
+    fn class_constructor_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        if node.kind() != "class_declaration"
+            || !node
+                .children(&mut node.walk())
+                .any(|child| !child.is_named() && node_text(child, source) == "class")
+        {
+            return None;
+        }
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "primary_constructor")
+            .or(Some(node))
+    }
+
+    fn class_constructor_body_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        let mut body = named_children(node)
+            .into_iter()
+            .filter(|child| {
+                matches!(
+                    child.kind(),
+                    "primary_constructor" | "delegation_specifiers"
+                )
+            })
+            .collect::<Vec<_>>();
+        if let Some(class_body) = named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "class_body")
+        {
+            body.extend(named_children(class_body).into_iter().filter(|child| {
+                matches!(
+                    child.kind(),
+                    "property_declaration" | "anonymous_initializer"
+                )
+            }));
+        }
+        body
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::profile::{self, Profile};
+    use crate::syntax::{self, Language};
+    use anyhow::{Context, Result};
+    use std::collections::BTreeSet;
+    use std::fs;
+
+    #[test]
+    fn trailing_lambdas_preserve_all_nested_calls() -> Result<()> {
+        let tmp = tempfile::Builder::new().suffix(".kt").tempfile()?;
+        fs::write(
+            tmp.path(),
+            r#"fun render(values: List<String>) = buildString {
+  append("[")
+  values.forEach { value ->
+    append(value.trim())
+  }
+  append("]")
+}
+"#,
+        )?;
+        let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Kotlin)?;
+        let output = profile::extract(&document, Profile::Espalier);
+        output
+            .methods
+            .iter()
+            .find(|method| method.name == "render")
+            .context("render method")?;
+        let messages = output
+            .calls
+            .iter()
+            .map(|call| call.message.as_str())
+            .collect::<BTreeSet<_>>();
+        for expected in ["buildString", "append", "forEach", "trim"] {
+            assert!(messages.contains(expected), "calls={messages:?}");
+        }
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn primary_constructor_is_a_project_function_with_initializer_work() -> Result<()> {
+        let tmp = tempfile::Builder::new().suffix(".kt").tempfile()?;
+        fs::write(
+            tmp.path(),
+            r#"open class Parent(value: String)
+fun defaultValue() = "default"
+fun delegatedValue() = "parent"
+fun propertyValue() = "property"
+fun initialize() {}
+
+class Widget(val value: String = defaultValue()) : Parent(delegatedValue()) {
+  val property = propertyValue()
+  init {
+    initialize()
+  }
+  fun work() {}
+}
+
+interface Contract
+"#,
+        )?;
+        let document = syntax::parse_file(tmp.path().to_path_buf(), Language::Kotlin)?;
+        let output = profile::extract(&document, Profile::Espalier);
+        let constructor = output
+            .methods
+            .iter()
+            .find(|method| method.owner == "Widget" && method.name == "Widget")
+            .context("Widget primary constructor")?;
+        assert!(
+            !output
+                .methods
+                .iter()
+                .any(|method| method.owner == "Contract" && method.name == "Contract"),
+            "interfaces must not gain constructors"
+        );
+        let messages = output
+            .calls
+            .iter()
+            .filter(|call| call.source == constructor.id)
+            .map(|call| call.message.as_str())
+            .collect::<BTreeSet<_>>();
+        for expected in [
+            "defaultValue",
+            "delegatedValue",
+            "propertyValue",
+            "initialize",
+        ] {
+            assert!(messages.contains(expected), "calls={messages:?}");
+        }
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            0
+        );
+        Ok(())
     }
 }

@@ -64,6 +64,25 @@ bundle exec gems/espalier/exe/espalier \
   --output=/tmp/espalier-report.md
 ```
 
+Generate a source-proven standard-library complexity bundle from one manifest:
+
+```bash
+bundle exec ruby gems/espalier/exe/espalier stdlib-map \
+  --manifest gems/fact-mine/config/stdlib_maps/go-1.22.2.yml
+```
+
+The manifest owns source revision verification, source selection, and the
+language indexer's build recipe. The shared pipeline owns profiling, generic
+soundness checks, exact-symbol export, producer/consumer validation, and atomic
+publication. A new SCIP stdlib should normally require only a manifest; parser
+or runtime semantics belong in that language's FactMine module.
+
+FactMine discovers generated bundles automatically at build time. See
+`gems/fact-mine/config/stdlib_maps/support.yml` for the compatibility status of
+every maintained SCIP language. An entry remains blocked when the indexer
+cannot provide executable bodies or a source/consumer version identity; the
+pipeline does not substitute a manual override for either failure.
+
 ## Outputs
 
 Espalier can output a compact architecture manifest for tools and LLMs,
@@ -133,7 +152,8 @@ combining structural facts with sibling-gem evidence:
 - `--risk FILE`: Boobytrap/SlopCop churn, coverage, and risk evidence.
 - `--manifest FILE`: a previously generated Espalier YAML manifest.
 - `--fact-mine FILE`: a previously generated `fact-mine.json` static facts file (also honors `ENV["FACT_MINE_FACTS_FILE"]` environment variable to bypass fact extraction runs).
-- `--scip-index FILE`: import compiler-proven call identity from a `.scip` file or `scip print --json` export; repeat for multiple build roots. Binary indexes require `scip` on `PATH` (or `SCIP_BINARY`).
+- `--scip-index FILE`: import compiler-proven call identity directly from a binary `.scip` file or from a protobuf-JSON export; repeat for multiple build roots. Binary decoding is built in and does not require the `scip` CLI at analysis time.
+- `--complexity-summary FILE`: apply a reviewed Espalier complexity summary keyed by exact compiler symbols; JSON and reproducible `.json.gz` files are supported and the option may be repeated. Contradictory summaries fail before either one is applied.
 
 Nil-kill evidence is the most important external input today because it
 helps Espalier distinguish broad untyped surfaces from intentional typed
@@ -143,7 +163,7 @@ interfaces.
 
 Espalier's Big-O bounds are static. Feed a runtime profile through Lineage
 to rank them by what actually runs hot: convert profiler output with
-`gems/lineage/tools/pprof_to_hotness.rb`, ingest with `lineage
+`gems/gigasail/tools/pprof_to_hotness.rb`, ingest with `lineage
 ingest-hotness`, and the Expensive Operations view sorts by Big-O first,
 then measured share; critical functions get a flame icon in the file view.
 Profile representative workloads, not unit tests, and build perf-profiled

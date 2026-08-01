@@ -17,6 +17,16 @@
           "writes": []
         }
       ]
+    },
+    {
+      "boundaries": [],
+      "method": "singleton_method",
+      "statements": []
+    },
+    {
+      "boundaries": [],
+      "method": "self_singleton_method",
+      "statements": []
     }
   ],
   "path_condition": {
@@ -93,9 +103,17 @@
       },
       {
         "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
+      },
+      {
+        "kind": "fallthrough"
       }
     ],
     "control_flow_metrics": [
+      {},
+      {},
       {}
     ],
     "control_flow_nodes": [
@@ -118,12 +136,36 @@
         "id": "cfg:(top-level)#method_five:stmt:2:6:2",
         "kind": "statement",
         "line": 6
+      },
+      {
+        "id": "cfg:(top-level)#self_singleton_method:entry:0:7:4",
+        "kind": "entry",
+        "line": 7
+      },
+      {
+        "id": "cfg:(top-level)#self_singleton_method:exit:1:8:7",
+        "kind": "exit",
+        "line": 8
+      },
+      {
+        "id": "cfg:(top-level)#singleton_method:entry:0:3:4",
+        "kind": "entry",
+        "line": 3
+      },
+      {
+        "id": "cfg:(top-level)#singleton_method:exit:1:4:7",
+        "kind": "exit",
+        "line": 4
       }
     ],
     "decisions": [],
     "def_use": [],
     "dispatch_sites": [],
     "dominators": [
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},
@@ -157,11 +199,25 @@
       {},
       {},
       {},
+      {},
+      {},
+      {},
+      {},
       {}
     ],
     "local_complexity_scores": [
       {
         "id": "(top-level)#method_five",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "(top-level)#self_singleton_method",
+        "score": 0.0,
+        "signals": {}
+      },
+      {
+        "id": "(top-level)#singleton_method",
         "score": 0.0,
         "signals": {}
       }
@@ -208,9 +264,43 @@
             "writes": []
           }
         ]
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#self_singleton_method",
+        "line": 7,
+        "local_contract_assignments": {},
+        "name": "self_singleton_method",
+        "owner": "(top-level)",
+        "statements": []
+      },
+      {
+        "boundaries": [],
+        "id": "(top-level)#singleton_method",
+        "line": 3,
+        "local_contract_assignments": {},
+        "name": "singleton_method",
+        "owner": "(top-level)",
+        "statements": []
       }
     ],
     "node_effects": [
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
       {
         "reads": [],
         "writes": []
@@ -289,6 +379,10 @@
       }
     ],
     "reachability": [
+      {},
+      {},
+      {},
+      {},
       {},
       {},
       {},

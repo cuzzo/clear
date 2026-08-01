@@ -10,10 +10,16 @@ require "set"
 module CorpusCommon
   module_function
 
+  # `assets` holds what a program serves rather than what it is: giga-ui's
+  # browser bundle is a hand-written app.js beside a content-hashed, minified
+  # diff viewer, and SimpleCov/RubyCritic ship JavaScript inside their HTML
+  # reports. A minified bundle is one 122k-character line, which tree-sitter
+  # takes tens of minutes to parse - it was the whole cost of the architecture
+  # SARIF job. The UI's own source is not under assets/ and stays in scope.
   EXCLUDE_DIRS = %w[
     test tests spec specs testing vendor node_modules examples example bench
     benchmark benchmarks dist build target third_party docs doc fixtures
-    __pycache__ scripts tools ci .git generated samples sample demo
+    __pycache__ scripts tools ci .git generated samples sample demo assets
     zig-out .zig-cache coverage tmp transpile-tests zig-mutants
   ].to_set.freeze
 
@@ -74,12 +80,20 @@ module CorpusCommon
     merged || {}
   end
 
+  # The only document keys these reports read. A full projection of this
+  # repository is ~1.08 GB of JSON and this is 8% of it; the rest is dataflow
+  # (clone_candidates alone is a third) that gets serialized here and parsed
+  # back in Ruby only to be dropped. Ask for what we use.
+  SYNTAX_FACT_FIELDS = %w[file language imports functions calls].freeze
+
   # syntax-facts requires an explicit --language; batch files per language.
   def run_syntax_facts(repo, files)
     documents = []
     files.group_by { |f| EXT_LANGUAGE[File.extname(f)] }.each do |language, batch|
       next unless language
-      chunk = run_fact_mine("syntax-facts", repo, batch, extra_args: ["--language", language])
+      chunk = run_fact_mine("syntax-facts", repo, batch,
+                            extra_args: ["--language", language,
+                                         "--fields=#{SYNTAX_FACT_FIELDS.join(",")}"])
       documents.concat(chunk["documents"] || [])
     end
     { "documents" => documents }

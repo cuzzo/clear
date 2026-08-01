@@ -1,9 +1,9 @@
 require "tmpdir"
 
-require_relative "../../gems/lineage/tools/mutant-converters/support" unless defined?(MutationTesting)
-require_relative "../../gems/lineage/tools/mutant-converters/ruby_mutant" unless defined?(RubySpecMutants)
-require_relative "../../gems/lineage/tools/mutant-converters/semantic_mutant" unless defined?(SemanticMutants)
-load File.expand_path("../../gems/lineage/tools/mutant-converters/zig-mutants", __dir__) unless defined?(Lineage::MutantConverters::ZigMutants)
+require_relative "../../gems/gigasail/tools/mutant-converters/support" unless defined?(MutationTesting)
+require_relative "../../gems/gigasail/tools/mutant-converters/ruby_mutant" unless defined?(RubySpecMutants)
+require_relative "../../gems/gigasail/tools/mutant-converters/semantic_mutant" unless defined?(SemanticMutants)
+load File.expand_path("../../gems/gigasail/tools/mutant-converters/zig-mutants", __dir__) unless defined?(Lineage::MutantConverters::ZigMutants)
 
 RSpec.describe MutationTesting do
   describe ".parse_mutant_summary" do

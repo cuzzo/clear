@@ -5,7 +5,8 @@ use super::{
 use crate::ast::{Child, Node, Span};
 use crate::syntax::cfg::ControlFlowProfile;
 use crate::type_inference::TypeExpr;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Default)]
@@ -16,6 +17,7 @@ pub(crate) struct SyntaxMetadata {
     pub(crate) type_alias_lines: BTreeMap<String, usize>,
     pub(crate) method_param_types: BTreeMap<String, BTreeMap<String, String>>,
     pub(crate) method_local_types: BTreeMap<String, BTreeMap<String, String>>,
+    pub(crate) method_template_types: BTreeMap<String, std::collections::BTreeSet<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -32,6 +34,14 @@ pub(crate) struct NormalizedCallProjection {
     pub(crate) arguments: Vec<String>,
     pub(crate) access_span: Span,
     pub(crate) span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedRuntimeSemanticTarget {
+    pub(crate) symbol: String,
+    pub(crate) owner: String,
+    pub(crate) kind: String,
+    pub(crate) receiver_type: String,
 }
 
 #[derive(Clone, Debug)]
@@ -69,10 +79,40 @@ pub(crate) struct NormalizedVisibilityEvent {
     pub(crate) target_names: Vec<String>,
 }
 
+/// A language-owned declaration macro that creates a fixed-cost accessor.
+/// The shared pass handles visibility, source export, and call-target joining;
+/// adapters merely recognize their native declaration syntax and provide the
+/// declaration witness consumed by `generated_callable_complexity`.
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedGeneratedAccessor {
+    pub(crate) name: String,
+    pub(crate) params: Vec<String>,
+    pub(crate) declaration_source: String,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct NormalizedNilGuardFact {
     pub(crate) local: String,
     pub(crate) non_nil_when_true: bool,
+}
+
+/// A language-owned predicate that proves whether a receiver supports one
+/// selector on either outgoing branch.  The shared profile and runtime overlay
+/// own CFG placement, evidence joining, and domain filtering; adapters only
+/// recognize their native predicate syntax.
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedRuntimeCapabilityGuard {
+    pub(crate) subject: String,
+    pub(crate) member: String,
+}
+
+/// A language-owned recognition of a bare value used as a branch condition.
+/// The adapter owns the source spelling and truthiness semantics; FactMine
+/// applies the resulting branch-local runtime-domain refinement through CFG
+/// reaching definitions.
+#[derive(Clone, Debug)]
+pub(crate) struct NormalizedRuntimeTruthinessGuard {
+    pub(crate) subject: String,
 }
 
 /// A language-owned interpretation of one already-normalized nullable
@@ -95,6 +135,7 @@ pub(crate) struct NormalizedPresenceCorrelation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BlockCallSemantics {
     Iteration,
+    LogarithmicIteration,
     Once,
     Deferred,
     Unknown,
@@ -187,6 +228,24 @@ pub(crate) enum NormalizedCollectionOperation {
     Exponential,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeValueProjection {
+    Element,
+    Key,
+    Value,
+    Entry { collection_type: &'static str },
+    Index { type_name: &'static str },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeCallResultProjection {
+    Receiver,
+    Element,
+    Value,
+    Keys { collection_type: &'static str },
+    Values { collection_type: &'static str },
+}
+
 impl NormalizedCollectionOperation {
     pub(crate) fn complexity(self) -> NormalizedCallComplexity {
         match self {
@@ -227,6 +286,161 @@ impl NormalizedCollectionOperation {
 }
 
 type StdlibOperationMap = BTreeMap<String, BTreeMap<String, String>>;
+
+/// A declaration signature reduced to language-neutral facts: the declared
+/// return type and the declared parameter types, in order. Produced by each
+/// adapter's `parse_signature` from that language's own signature grammar, so
+/// every downstream consumer sees one shape regardless of source language.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct NormalizedSignature {
+    pub return_type: Option<String>,
+    /// (parameter name, declared type). Either may be empty when the language's
+    /// signature omits it (e.g. a C-family declarator with unnamed parameters).
+    pub params: Vec<(String, String)>,
+}
+
+impl NormalizedSignature {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.return_type.is_none() && self.params.is_empty()
+    }
+}
+
+/// Default signature grammar: `name(a: T, b: U) -> Ret` or `... : Ret`, which
+/// covers Rust/Go/Swift/Kotlin/TypeScript-shaped declarations. Adapters whose
+/// grammar differs override `parse_signature`.
+pub(crate) fn parse_arrow_or_colon_signature(signature: &str) -> NormalizedSignature {
+    let signature = signature.trim();
+    let (Some(open), Some(close)) = (signature.find('('), signature.rfind(')')) else {
+        return NormalizedSignature::default();
+    };
+    if close < open {
+        return NormalizedSignature::default();
+    }
+    let tail = signature[close + 1..].trim();
+    let return_type = tail
+        .strip_prefix("->")
+        .or_else(|| tail.strip_prefix(':'))
+        .map(|rest| rest.trim().trim_end_matches(['{', ';']).trim().to_string())
+        .filter(|value| !value.is_empty());
+    let params = split_top_level_commas(&signature[open + 1..close])
+        .into_iter()
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() {
+                return None;
+            }
+            match part.split_once(':') {
+                Some((name, declared)) => {
+                    Some((name.trim().to_string(), declared.trim().to_string()))
+                }
+                // `func f(a int)` style: trailing token is the type.
+                None => part
+                    .rsplit_once(char::is_whitespace)
+                    .map(|(name, declared)| (name.trim().to_string(), declared.trim().to_string())),
+            }
+        })
+        .collect();
+    NormalizedSignature {
+        return_type,
+        params,
+    }
+}
+
+/// Prefix-return declarator grammar: `[modifiers] Ret name(T a, U b)`, where
+/// the return type precedes the name and each parameter is `Type name`.
+/// Adapters opt into this reusable grammar primitive explicitly.
+pub(crate) fn parse_prefix_return_declarator(signature: &str) -> NormalizedSignature {
+    let signature = signature.trim();
+    let Some(open) = signature.find('(') else {
+        return NormalizedSignature::default();
+    };
+    let mut depth = 0usize;
+    let mut close = None;
+    for (offset, character) in signature[open..].char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    close = Some(open + offset);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(close) = close else {
+        return NormalizedSignature::default();
+    };
+    // Everything before the name is the return type; the name is the last token
+    // before `(`. Modifiers (`public`, `static`, …) are dropped with it.
+    let head = signature[..open].trim();
+    let leading_return_type = head
+        .rsplit_once(char::is_whitespace)
+        .map(|(before, _name)| before.trim())
+        .and_then(|before| {
+            before.rsplit_once(char::is_whitespace).map_or(
+                (!before.is_empty()).then_some(before),
+                |(_modifiers, last)| (!last.is_empty()).then_some(last),
+            )
+        })
+        .map(str::to_string)
+        .filter(|value| !value.is_empty() && value != "return");
+    let trailing_return_type = signature[close + 1..]
+        .split_once("->")
+        .map(|(_, declared)| declared.trim().trim_end_matches(['{', ';']).trim())
+        .filter(|declared| !declared.is_empty())
+        .map(str::to_string);
+    let return_type = trailing_return_type.or(leading_return_type);
+    let params = split_top_level_commas(&signature[open + 1..close])
+        .into_iter()
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() || part == "void" {
+                return None;
+            }
+            // `Type name` — the trailing token is the parameter name.
+            part.rsplit_once(char::is_whitespace)
+                .map(|(declared, name)| {
+                    (
+                        name.trim().trim_start_matches('*').to_string(),
+                        declared.trim().to_string(),
+                    )
+                })
+                .or_else(|| Some((String::new(), part.to_string())))
+        })
+        .collect();
+    NormalizedSignature {
+        return_type,
+        params,
+    }
+}
+
+/// Split on commas that are not nested inside brackets or angle brackets, so a
+/// generic parameter type (`Map<K, V>`) stays one parameter.
+pub(crate) fn split_top_level_commas(source: &str) -> Vec<String> {
+    let mut depth = 0i32;
+    let mut angle = 0i32;
+    let mut start = 0usize;
+    let mut previous = b' ';
+    let mut parts = Vec::new();
+    for (index, byte) in source.bytes().enumerate() {
+        match byte {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b'<' => angle += 1,
+            b'>' if previous != b'-' && angle > 0 => angle -= 1,
+            b',' if depth == 0 && angle == 0 => {
+                parts.push(source[start..index].to_string());
+                start = index + 1;
+            }
+            _ => {}
+        }
+        previous = byte;
+    }
+    parts.push(source[start..].to_string());
+    parts
+}
 
 const RUBY_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/ruby.yml");
 const PYTHON_STDLIB_OPERATIONS: &str = include_str!("../../config/stdlib_complexity/python.yml");
@@ -299,6 +513,24 @@ fn stdlib_operations(language: &str) -> Option<&'static StdlibOperationMap> {
     }
 }
 
+fn configured_nominal_names(name: &str) -> Vec<String> {
+    let unqualified = |value: &str| {
+        value
+            .rsplit([':', '.'])
+            .find(|part| !part.is_empty())
+            .unwrap_or(value)
+            .to_string()
+    };
+    let mut names = vec![name.to_string(), unqualified(name)];
+    if let Some(base) = name.split('<').next().map(str::trim) {
+        if base != name {
+            names.push(base.to_string());
+            names.push(unqualified(base));
+        }
+    }
+    names
+}
+
 /// Whether a declared receiver spelling is owned by the reviewed standard-
 /// library registry for this language. This deliberately proves identity only;
 /// the absence of a method model remains distinct from an unknown receiver.
@@ -308,13 +540,7 @@ pub(crate) fn configured_stdlib_type(language: &str, receiver_type: &TypeExpr) -
         TypeExpr::Array(_) => vec!["Array".to_string()],
         TypeExpr::Hash { .. } => vec!["Hash".to_string()],
         TypeExpr::Set(_) => vec!["Set".to_string()],
-        TypeExpr::Primitive(name) => {
-            let unqualified = name
-                .rsplit([':', '.'])
-                .find(|part| !part.is_empty())
-                .unwrap_or(name);
-            vec![name.clone(), unqualified.to_string()]
-        }
+        TypeExpr::Primitive(name) => configured_nominal_names(name),
         _ => return false,
     };
     stdlib_operations(language)
@@ -550,6 +776,20 @@ pub(crate) fn configured_intrinsic_call_complexity(
         .map(NormalizedCollectionOperation::complexity)
 }
 
+pub(crate) fn configured_intrinsic_parametric_call_cost(
+    language: &str,
+    receiver: Option<&str>,
+    message: &str,
+) -> Option<String> {
+    let operations = stdlib_operations(language)?;
+    let intrinsics = operations.get("IntrinsicParametricCall")?;
+    let key = receiver
+        .filter(|receiver| !receiver.trim().is_empty())
+        .map(|receiver| format!("{}.{}", receiver.trim(), message))
+        .unwrap_or_else(|| message.to_string());
+    intrinsics.get(&key).cloned()
+}
+
 /// Resolve an opaque compiler symbol discriminator when the registry has been
 /// reviewed against that exact semantic scheme. This is preferable to
 /// guessing an overload from argument text, and deliberately has no fallback
@@ -594,16 +834,17 @@ pub(crate) fn configured_parametric_call_cost(
     receiver_type: &TypeExpr,
     message: &str,
 ) -> Option<String> {
-    let TypeExpr::Primitive(name) = receiver_type.strip_nilable() else {
-        return None;
+    let receiver = receiver_type.strip_nilable();
+    let names = match &receiver {
+        TypeExpr::Array(_) => vec!["Array".to_string()],
+        TypeExpr::Hash { .. } => vec!["Hash".to_string()],
+        TypeExpr::Set(_) => vec!["Set".to_string()],
+        TypeExpr::Primitive(name) => configured_nominal_names(name),
+        _ => return None,
     };
-    let unqualified = name
-        .rsplit([':', '.'])
-        .find(|part| !part.is_empty())
-        .unwrap_or(&name);
     let operations = stdlib_operations(language)?;
     let contracts = operations.get("ParametricCall")?;
-    let result = [name.as_str(), unqualified]
+    let result = names
         .into_iter()
         .find_map(|owner| contracts.get(&format!("{owner}.{message}")).cloned());
     result
@@ -702,6 +943,38 @@ pub(crate) fn configured_external_latency_bound(
         .map(NormalizedCollectionOperation::complexity)
 }
 
+/// Resolve a parameterized external-effect contract.  This is the companion
+/// to `ExternalLatency`: the bytes/path work is bounded while device latency
+/// remains excluded, but a dynamic-language API may first invoke a coercion
+/// hook such as Ruby's `to_path`.  Keeping the parameter here preserves both
+/// facts without putting a Ruby special case in the shared SCIP importer.
+pub(crate) fn configured_external_latency_parametric_cost(
+    language: &str,
+    owner: &str,
+    message: &str,
+) -> Option<String> {
+    let operations = stdlib_operations(language)?;
+    operations
+        .get("ExternalLatencyParametric")?
+        .get(&format!("{}.{}", owner.trim(), message))
+        .cloned()
+}
+
+/// Computational model for a reviewed runtime spelling when the selected
+/// compiler configuration has no SCIP occurrence (typically an inactive
+/// preprocessor branch). The adapter must expose the modeled-world assumption
+/// on the emitted call; this helper supplies only the operation algebra.
+pub(crate) fn configured_modeled_runtime_bound(
+    language: &str,
+    message: &str,
+) -> Option<NormalizedCallComplexity> {
+    stdlib_operations(language)?
+        .get("ModeledRuntime")?
+        .get(message.trim())
+        .and_then(|value| operation_from_config(value))
+        .map(NormalizedCollectionOperation::complexity)
+}
+
 /// Resolve a language-owned collection spelling through Fact-Mine's YAML
 /// configuration. Adapters provide the language identity and normalize native
 /// declaration grammar; Espalier never loads or interprets a language-specific
@@ -752,6 +1025,293 @@ pub(crate) fn native_pointer_nullability_contract(type_name: &str) -> Option<&'s
 }
 
 pub(crate) trait NormalizedLanguageBehavior: Sync {
+    /// Resolve a compile-time condition literal using native truthiness rules.
+    /// The shared extractor uses this only to omit a syntactically present but
+    /// provably unreachable branch; unknown expressions retain both arms.
+    fn constant_condition_truth(&self, _node: &Node) -> Option<bool> {
+        None
+    }
+
+    /// Whether language-owned implicit runtime work in an otherwise executable
+    /// body is fully represented by the normalized calls and complexity facts.
+    ///
+    /// The shared exporter cannot infer constructor, assignment, destruction,
+    /// or other implicit semantics from source spelling. Adapters must fail
+    /// closed when their runtime can perform unmodeled work whose cost depends
+    /// on a generic type.
+    fn source_body_implicit_work_is_modeled(
+        &self,
+        _source: &str,
+        _template_types: &BTreeSet<String>,
+    ) -> bool {
+        true
+    }
+
+    /// Whether declarations in this language carry a canonical namespace that
+    /// can safely participate in corpus-wide lexical resolution.
+    fn canonical_symbol_scope(&self) -> bool {
+        false
+    }
+
+    /// Project a parser-owned namespace into its corpus identity. Adapters may
+    /// incorporate the source path when the native package/module identity
+    /// requires it.
+    fn canonical_project_namespace(&self, _file: &Path, namespace: &str) -> String {
+        namespace.to_string()
+    }
+
+    /// Project one parser-owned import target into the same corpus identity as
+    /// a declaration namespace.
+    fn canonical_project_import(&self, _file: &Path, _namespace: &str, target: &str) -> String {
+        target.to_string()
+    }
+
+    /// A language-owned fallback key for reconciling a declaration lexical
+    /// symbol with a call lexical symbol when their canonical namespaces use
+    /// different external coordinates. The shared resolver binds only a
+    /// unique `(scope, callable)` key.
+    fn project_function_reconciliation_key(&self, _symbol: &str) -> Option<(String, String)> {
+        None
+    }
+
+    /// Alternative lexical symbols searched before the exact call symbol.
+    /// This models native relative qualified-name lookup without teaching the
+    /// shared project resolver a namespace grammar.
+    fn relative_lexical_candidates(&self, _symbol: &str, _namespace: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Candidate declaration owners for an explicit type/module receiver whose
+    /// source language permits lexical constant lookup. The adapter owns the
+    /// namespace syntax and lookup order; the shared resolver only joins an
+    /// exact, unique project declaration.
+    fn relative_type_receiver_candidates(&self, _receiver: &str, _owner: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Interpret a native capability predicate (for example Ruby
+    /// `value.respond_to?(:member)`) on an already-normalized condition node.
+    /// Returning `None` keeps both runtime alternatives intact.
+    fn runtime_capability_guard(
+        &self,
+        _condition: &Node,
+    ) -> Option<NormalizedRuntimeCapabilityGuard> {
+        None
+    }
+
+    fn runtime_truthiness_guard(
+        &self,
+        _condition: &Node,
+    ) -> Option<NormalizedRuntimeTruthinessGuard> {
+        None
+    }
+
+    /// Lexical symbols searched after implicit owner and inheritance lookup
+    /// failed. This models languages where unqualified lookup continues into
+    /// enclosing lexical scopes.
+    fn fallback_lexical_candidates(
+        &self,
+        _message: &str,
+        _namespace: &str,
+        _implicit_receiver: bool,
+    ) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Whether the project resolver may traverse normalized supertype edges.
+    fn resolves_inherited_project_calls(&self) -> bool {
+        false
+    }
+
+    /// Some native specialization models attach the authoritative inheritance
+    /// clause to the source declaration rather than its compiler-erased owner.
+    fn inherited_lookup_uses_source_owner(&self, _implicit_receiver: bool) -> bool {
+        false
+    }
+
+    /// Match an inherited owner identity after exact symbol/name lookup fails.
+    /// The adapter owns any template, package, or descriptor normalization.
+    fn inherited_owner_identity_matches(
+        &self,
+        _identity: &str,
+        _owner_name: &str,
+        _owner_symbol: Option<&str>,
+    ) -> bool {
+        false
+    }
+
+    /// Whether a specialized declaration should win over its unspecialized
+    /// sibling when an inherited identity explicitly carries specialization.
+    fn inherited_identity_prefers_specialization(&self, _identity: &str) -> bool {
+        false
+    }
+
+    /// Select a declared library supertype as the static receiver for an
+    /// inherited call. Adapters opt in only when native lookup and the
+    /// reviewed stdlib registry prove the operation on one exact base type.
+    fn inherited_call_receiver_type(
+        &self,
+        _supertypes: &[String],
+        _message: &str,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Whether overload compatibility can be proven from argument count alone.
+    /// The conservative default accepts all declarations and therefore leaves
+    /// a multi-candidate set unresolved.
+    fn project_call_candidate_compatible(
+        &self,
+        _argument_count: usize,
+        _parameter_count: usize,
+    ) -> bool {
+        true
+    }
+
+    /// Whether an unbound receiver token may name a type declared in the
+    /// current canonical namespace.
+    fn unbound_receiver_may_name_project_type(&self, _receiver: &str) -> bool {
+        false
+    }
+
+    /// Whether a declared flow type remains authoritative when the exact CFG
+    /// join at a call site has no single type.
+    fn declared_flow_type_fallback(&self, _declared_type: &str) -> bool {
+        false
+    }
+
+    /// Whether complete invariant CFG types should augment declared parameter
+    /// types during local complexity analysis.
+    fn complexity_uses_invariant_flow_types(&self) -> bool {
+        false
+    }
+
+    /// Whether adapter-extracted method-local declarations should augment
+    /// parameter types during local complexity analysis.
+    fn complexity_uses_syntax_local_types(&self) -> bool {
+        false
+    }
+
+    /// Preserve a native supertype spelling instead of replacing it with an
+    /// index-erased canonical declaration identity.
+    fn preserve_supertype_identity(&self, _supertype: &str) -> bool {
+        false
+    }
+
+    /// Collect a declaration header whose native grammar extends beyond the
+    /// balanced parameter list. Returning `None` uses the shared ordinary
+    /// declaration collector.
+    fn complete_declaration_header(
+        &self,
+        _lines: &[String],
+        _start_line_1indexed: usize,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Whether an empty normalized function signature should be recovered from
+    /// the ordinary balanced source declaration header.
+    fn uses_source_declaration_header(&self) -> bool {
+        false
+    }
+
+    /// Recover an empty profile signature from native source context.
+    fn source_profile_signature(
+        &self,
+        _lines: &[String],
+        _function: &FunctionDef,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Parameters whose native declaration shape cannot be traced safely by
+    /// the profile's ordinary value-flow contract.
+    fn untraceable_profile_parameters(
+        &self,
+        _signature: &str,
+        _parameters: &[String],
+    ) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Stable public name of the native type system represented by profile
+    /// signatures.
+    fn profile_type_system(&self) -> &'static str {
+        "native"
+    }
+
+    /// Whether this signature is a standalone type annotation rather than the
+    /// function declaration itself.
+    fn profile_signature_is_annotation(&self, _signature: &str) -> bool {
+        false
+    }
+
+    /// Whether undeclared state writes must be constrained to an explicitly
+    /// declared owner in this language.
+    fn state_writes_require_declared_owner(&self) -> bool {
+        false
+    }
+
+    /// Classify native literal spellings whose normalized type differs from
+    /// the shared string/boolean/number/collection fallback.
+    fn native_profile_literal_type(&self, _value: &str) -> Option<String> {
+        None
+    }
+
+    /// Prove the type written by one normalized, unconditional local
+    /// assignment. The shared CFG owns reaching-definition propagation while
+    /// adapters own source literal and constructor grammar.
+    fn local_assignment_type_hint(&self, _value: &str) -> Option<String> {
+        None
+    }
+
+    /// A parametric cost implied by a declared call-result type. The shared
+    /// resolver owns propagation; adapters own dependent-type grammar.
+    fn call_result_parametric_cost(&self, _type_expr: &TypeExpr) -> Option<String> {
+        None
+    }
+
+    /// Prefer the current declaration's canonical owner for a receiver type
+    /// that denotes its native specialization/injected owner.
+    fn receiver_denotes_current_owner(&self, _receiver_type: &str, _owner: &str) -> bool {
+        false
+    }
+
+    /// Normalize a native qualified call spelling before constructing a
+    /// project lexical symbol. Returning `None` keeps ordinary package lookup.
+    fn explicit_lexical_call_symbol(
+        &self,
+        _message: &str,
+        _namespace: Option<&str>,
+        _top_level: bool,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Resolve a call through a lexical import declared inside its enclosing
+    /// function. The adapter owns the source-language import grammar; the
+    /// shared profile only consumes the resulting canonical callee identity.
+    fn function_local_lexical_call_symbol(
+        &self,
+        _function: &FunctionDef,
+        _message: &str,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Recover the alias named by a call so merged project type aliases can be
+    /// priced through the ordinary normalized call-cost interface. The boolean
+    /// marks a constructor-shaped alias call.
+    fn merged_alias_call_name(
+        &self,
+        _message: &str,
+        _receiver_type: Option<&str>,
+        _implicit_receiver: bool,
+        _target_missing: bool,
+    ) -> Option<(String, bool)> {
+        None
+    }
+
     fn nullable_operation(&self, _node: &Node) -> Option<NormalizedNullableOperation> {
         None
     }
@@ -774,6 +1334,14 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Return operands of a native short-circuit expression whose value is
+    /// exactly one of those operands. The generic CFG records the resulting
+    /// producer set and joins it through reaching definitions; adapters own
+    /// whether their source operator has that value-preserving meaning.
+    fn value_preserving_call_result_operands<'a>(&self, _node: &'a Node) -> Option<Vec<&'a Node>> {
+        None
+    }
+
     /// A reviewed declaration-level nullability contract. This stays at the
     /// language boundary: the CFG sees the resulting contract but never has
     /// to interpret native annotation spellings.
@@ -787,6 +1355,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Price an operator only when the language adapter recognizes both the
+    /// operator and a compiler/DFG-proven scalar operand type.
+    fn scalar_operator_complexity(
+        &self,
+        _message: &str,
+        _operand_type: Option<&TypeExpr>,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
     /// Interpret a compiler symbol only at the owning language boundary. The
     /// shared SCIP importer asks through this normalized interface and never
     /// contains a language-specific symbol grammar.
@@ -795,6 +1373,32 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         _symbol: &str,
         _message: &str,
     ) -> Option<super::ExternalCallComplexity> {
+        None
+    }
+
+    /// Price a reviewed source spelling when no compiler occurrence exists in
+    /// the selected preprocessor configuration. Implementations must return a
+    /// modeled-world quality and an explicit assumption.
+    fn modeled_runtime_call_complexity(
+        &self,
+        _message: &str,
+    ) -> Option<super::ExternalCallComplexity> {
+        None
+    }
+
+    /// Price a compiler-indexed preprocessor definition. Adapters must reject
+    /// bodies with calls or control flow they cannot bound; the shared SCIP
+    /// importer supplies exact source text but does not interpret it.
+    fn preprocessor_definition_call_complexity(
+        &self,
+        _definition: &str,
+    ) -> Option<super::ExternalCallComplexity> {
+        None
+    }
+
+    /// Recover an indexer-encoded macro definition location. Only adapters
+    /// whose compiler symbol grammar carries such a location implement this.
+    fn preprocessor_definition_location(&self, _symbol: &str) -> Option<(String, usize)> {
         None
     }
 
@@ -813,11 +1417,45 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Price a source declaration that the language runtime turns into a
+    /// generated callable (for example an attribute reader). The adapter owns
+    /// the syntax decision; the shared project join owns identity and
+    /// uniqueness.
+    fn generated_callable_complexity(
+        &self,
+        _source: &str,
+        _name: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
+    /// Prove progress for a recursive call whose argument transformation is
+    /// expressed through language-owned syntax. Shared recursion analysis
+    /// handles arithmetic and normalized structural projections; adapters may
+    /// add only native, strictly decreasing transformations.
+    fn recursive_call_argument_progress(
+        &self,
+        _method: &Node,
+        _call: &Node,
+        _parameters: &BTreeSet<String>,
+    ) -> Option<&'static str> {
+        None
+    }
+
     /// Whether a non-call SCIP occurrence can execute source-language code.
     /// Most field/property-shaped symbols are data access; adapters opt in
     /// only when their language gives that syntax callable semantics.
     fn scip_noncall_access_is_callable(&self, _symbol: &str) -> bool {
         false
+    }
+
+    fn scip_occurrence_matches_call(
+        &self,
+        _symbol: &str,
+        source_text: &str,
+        message: &str,
+    ) -> bool {
+        source_text == message
     }
 
     fn cfg_profile(&self) -> &'static ControlFlowProfile {
@@ -836,11 +1474,90 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Recover the collection binding that supplies an inferred element local
+    /// (`for (auto item : items)`, `auto item = items[i]`, or an iterator from
+    /// `items.begin()`). The adapter proves only the native syntax relation;
+    /// shared profile logic resolves the collection and element types.
+    fn collection_element_binding(&self, _source: &str, _local: &str) -> Option<String> {
+        None
+    }
+
+    /// Recover the collection binding from a native indexed receiver
+    /// expression. The shared profile resolves the binding's declared type;
+    /// adapters own the source/projection spelling.
+    fn indexed_receiver_collection_binding(&self, _receiver: &str) -> Option<String> {
+        None
+    }
+
+    /// Project a native dependent collection type to the value produced by
+    /// indexing it. Ordinary arrays/maps are handled through `TypeExpr`; this
+    /// hook is for language-specific wrapper/metafunction grammar.
+    fn indexed_collection_result_type(&self, _declared_type: &str) -> Option<String> {
+        None
+    }
+
+    /// Project a pointer-like declared type through native `receiver->member`
+    /// syntax. Adapters return the pointee type only when both the access
+    /// operator and a recognized pointer representation are proven.
+    fn pointer_member_receiver_type(
+        &self,
+        _source: &str,
+        _receiver: &str,
+        _message: &str,
+        _declared_type: &str,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Recover the local binding named by a receiver expression when native
+    /// syntax proves that the expression is only a dereference/parenthesized
+    /// view of that binding.
+    fn receiver_local_binding(&self, _receiver: &str) -> Option<String> {
+        None
+    }
+
+    /// Recover a receiver type explicitly written in native cast syntax.
+    /// Adapters must accept only casts whose grammar proves a type.
+    fn explicit_receiver_type(&self, _receiver: &str) -> Option<String> {
+        None
+    }
+
+    /// Recover the template parameter that owns or names a call. C++ uses
+    /// this for `Formatter::format()` and callable non-type parameters such as
+    /// `Compare(...)`; other languages keep the conservative default.
+    fn template_dependent_call_type(&self, _message: &str) -> Option<String> {
+        None
+    }
+
     fn collection_allocation_semantics(&self, _message: &str) -> CollectionAllocationSemantics {
         CollectionAllocationSemantics::None
     }
 
     fn block_call_semantics(&self, _message: &str) -> BlockCallSemantics {
+        BlockCallSemantics::Unknown
+    }
+
+    /// Refine block execution semantics when the normalized receiver spelling
+    /// is itself significant. The default remains language-neutral and falls
+    /// back to the message-only contract.
+    fn block_call_semantics_with_receiver(
+        &self,
+        _receiver: Option<&str>,
+        _receiver_type: Option<&TypeExpr>,
+        message: &str,
+    ) -> BlockCallSemantics {
+        self.block_call_semantics(message)
+    }
+
+    /// Refine block execution only after a semantic index proves the exact
+    /// callable identity. This is deliberately separate from receiver-text
+    /// heuristics so a shared SCIP join can consume language-owned runtime
+    /// semantics without recognizing language-specific symbols.
+    fn semantic_symbol_block_call_semantics(
+        &self,
+        _symbol: &str,
+        _message: &str,
+    ) -> BlockCallSemantics {
         BlockCallSemantics::Unknown
     }
 
@@ -968,6 +1685,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
             .and_then(|language| configured_intrinsic_call_complexity(language, receiver, message))
     }
 
+    fn intrinsic_parametric_call_cost(
+        &self,
+        receiver: Option<&str>,
+        message: &str,
+    ) -> Option<String> {
+        self.stdlib_language().and_then(|language| {
+            configured_intrinsic_parametric_call_cost(language, receiver, message)
+        })
+    }
+
     /// Whether an unqualified call inside an instance method may dispatch to
     /// another method on the implicit current receiver. Languages such as Go
     /// require an explicit receiver (`x.f()`), while Ruby/Java-style method
@@ -1045,6 +1772,26 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         Vec::new()
     }
 
+    /// Calls imposed by function-exit semantics rather than an explicit call
+    /// expression in the source body (for example, destruction of an owned
+    /// parameter). The extractor attributes these after entering the function
+    /// scope so they participate in the same CFG/DFG completeness proof.
+    fn implicit_function_exit_calls(
+        &self,
+        _node: &Node,
+        _function_name: &str,
+        _params: &[String],
+    ) -> Vec<NormalizedCallProjection> {
+        Vec::new()
+    }
+
+    /// Whether a normalized declaration contains an executable source body.
+    /// Adapters override this when abstract signatures share a function node
+    /// with concrete methods.
+    fn function_has_executable_body(&self, _node: &Node) -> bool {
+        true
+    }
+
     fn suppress_call_site(&self, _node: &Node, _call: &NormalizedCallProjection) -> bool {
         false
     }
@@ -1077,6 +1824,16 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Project a call result whose type is determined by an argument rather
+    /// than its receiver (for example an accumulator-returning iterator).
+    fn static_argument_dependent_return_type(
+        &self,
+        _message: &str,
+        _arguments: &[String],
+    ) -> Option<String> {
+        None
+    }
+
     fn static_call_return_type(
         &self,
         _node: &Node,
@@ -1098,6 +1855,122 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         None
     }
 
+    /// Reconstruct the adapter's native type spelling from a runtime value
+    /// domain. The shared runtime overlay owns propagation; an adapter only
+    /// translates its collection nominal/generic grammar.
+    fn runtime_value_domain_type(
+        &self,
+        owners: &[String],
+        _elements: &[String],
+        _keys: &[String],
+        _values: &[String],
+    ) -> Option<String> {
+        (owners.len() == 1).then(|| owners[0].clone())
+    }
+
+    /// Decode a canonical runtime type SCIP symbol into the adapter's native
+    /// normalized type identity. The shared overlay never parses descriptor
+    /// grammars or embeds language type names.
+    fn runtime_value_type_from_symbol(&self, _symbol: &str) -> Option<String> {
+        None
+    }
+
+    /// Decode a canonical singleton/module/class value SCIP symbol into the
+    /// adapter's native normalized singleton identity.
+    fn runtime_value_singleton_from_symbol(&self, _symbol: &str) -> Option<String> {
+        None
+    }
+
+    /// Whether a runtime receiver type can dispatch an implementation owned
+    /// by a normalized library interface or mixin. Concrete language adapters
+    /// own these relationships; the shared overlay never embeds native type
+    /// names.
+    fn runtime_dispatch_owner_matches(&self, _owner: &str, _receiver_type: &str) -> bool {
+        false
+    }
+
+    /// Convert a runtime-proven receiver identity into the language's
+    /// canonical stdlib symbol form. Adapters must return a target only when
+    /// that exact symbol has a reviewed cost or parametric contract.
+    fn runtime_value_semantic_target(
+        &self,
+        _receiver_type: &str,
+        _receiver_singleton: Option<&str>,
+        _message: &str,
+        _environment: &BTreeMap<String, String>,
+    ) -> Option<NormalizedRuntimeSemanticTarget> {
+        None
+    }
+
+    /// Runtime nominal identities for normalized container/type shapes. These
+    /// spellings belong to the language adapter; the shared evidence overlay
+    /// must not assume that an array is named `Array`, `list`, or anything
+    /// else in the consumer language.
+    fn runtime_nil_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn runtime_array_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn runtime_hash_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    fn runtime_set_type_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Map normalized callback parameter positions to collection value
+    /// projections. Yield/destructuring conventions are language semantics,
+    /// while applying these projections to runtime domains remains shared.
+    fn runtime_collection_callback_projections(
+        &self,
+        _receiver_type: Option<&str>,
+        _message: &str,
+        parameter_count: usize,
+    ) -> Vec<RuntimeValueProjection> {
+        (parameter_count > 0)
+            .then_some(vec![RuntimeValueProjection::Element])
+            .unwrap_or_default()
+    }
+
+    /// Prove the static type of a callback parameter supplied by one call
+    /// argument. The shared profile owns callback-region/DFG joins; adapters
+    /// own native yield order and literal/constructor grammar.
+    fn callback_argument_parameter_type(
+        &self,
+        _receiver: &str,
+        _receiver_type: Option<&str>,
+        _message: &str,
+        _position: usize,
+        _parameter_count: usize,
+        _arguments: &[String],
+    ) -> Option<String> {
+        None
+    }
+
+    fn runtime_call_result_projection(
+        &self,
+        _receiver_type: Option<&str>,
+        _message: &str,
+        _arguments: &[String],
+    ) -> Option<RuntimeCallResultProjection> {
+        None
+    }
+
+    fn collection_callback_parameter(&self, _message: &str) -> bool {
+        false
+    }
+
+    fn super_constructor_call_complexity(
+        &self,
+        _supertype: &str,
+    ) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
     fn is_noreturn_method(&self, _message: &str) -> bool {
         false
     }
@@ -1111,6 +1984,12 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     }
 
     fn emit_attribute_assignment_mutation(&self, _node: &Node, _field: Option<&str>) -> bool {
+        false
+    }
+
+    /// Whether attribute/index assignment dispatches an executable setter
+    /// call in this language, rather than being only a storage mutation.
+    fn attribute_assignment_dispatches(&self) -> bool {
         false
     }
 
@@ -1274,6 +2153,15 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         default_kind.to_string()
     }
 
+    /// Classify an implicit owner that the parser attached functions to but
+    /// did not emit as a complete owner node. Recovery-heavy preprocessor
+    /// layouts can produce this shape; concrete languages may consult their
+    /// own declaration grammar, while the shared profile remains vocabulary
+    /// free.
+    fn fallback_owner_kind(&self, _owner: &str, _source: &str) -> Option<String> {
+        None
+    }
+
     /// Direct native base/interface spellings owned by this language's
     /// declaration grammar. Shared consumers canonicalize and traverse them.
     fn owner_supertypes(&self, _node: &Node) -> Vec<String> {
@@ -1335,12 +2223,67 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
         self.function_dispatch_kind(name, owner)
     }
 
+    /// Project dispatch when a native modifier falls outside the normalized
+    /// declaration node. Adapters may consult the original source lines while
+    /// the shared extractor remains unaware of modifier spellings.
+    fn function_dispatch_kind_from_source(
+        &self,
+        name: &str,
+        node: &Node,
+        owner: &str,
+        _lines: &[String],
+    ) -> String {
+        self.function_dispatch_kind_from_node(name, node, owner)
+    }
+
+    /// Whether a function declaration binds an explicit instance receiver (a
+    /// method). Languages with top-level method syntax (Go, Rust) override this
+    /// so a method whose receiver type happens to match its file name is not
+    /// mistaken for a free function stored under the synthetic file owner.
+    fn function_defines_receiver(&self, _node: &Node) -> bool {
+        false
+    }
+
+    /// The cost of a bare call whose callee names a declared type. In languages
+    /// where `T(x)` is a representation conversion (Go) this is constant; a
+    /// language whose type-name call is a constructor returns None so it is
+    /// resolved as an ordinary call instead.
+    fn type_name_conversion_complexity(&self) -> Option<NormalizedCallComplexity> {
+        None
+    }
+
+    /// Whether an owner declared with this kind dispatches at runtime to an
+    /// implementation chosen elsewhere - an interface, trait, protocol, or
+    /// abstract class. A call to such a type's method has no single body, so it
+    /// is priced as a callback of unknown per-call cost (see the interface
+    /// dispatch design). Adapters name their abstract kinds.
+    fn type_kind_is_abstract_dispatch(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// The method names an abstract type requires, for structural satisfaction
+    /// (a concrete type implements it if its method set is a superset). Only
+    /// structurally-typed languages (Go) populate this; nominal languages express
+    /// conformance through `owner_supertypes`.
+    fn abstract_type_requirements(&self, _node: &Node) -> Vec<String> {
+        Vec::new()
+    }
+
     fn receiver_is_type_reference(&self, _receiver: &str) -> bool {
         false
     }
 
-    fn constructor_dispatch_name(&self, _receiver: &str, _message: &str) -> Option<String> {
+    fn constructor_dispatch_name(
+        &self,
+        _receiver: &str,
+        _message: &str,
+        _owner: &str,
+    ) -> Option<String> {
         None
+    }
+
+    fn constructor_delegation_excludes_self(&self) -> bool {
+        false
     }
 
     fn declarative_owner_constant_operations(&self, _node: &Node) -> Vec<String> {
@@ -1401,6 +2344,49 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
 
     fn property_read_call(&self, _node: &Node, _parts: &NormalizedCallParts) -> bool {
         false
+    }
+
+    /// Parse a declaration signature into normalized parts. The signature TEXT is
+    /// language-specific - a Sorbet `sig {}`, a Python annotation, a C-family
+    /// declarator, or a SCIP `signature_documentation` - so each adapter owns its
+    /// grammar; the returned shape is language-neutral.
+    ///
+    /// This is the single seam through which any signature, source-derived or
+    /// SCIP-supplied, becomes normalized type facts. The default handles the
+    /// `name(params) -> Ret` / `name(params): Ret` family.
+    fn parse_signature(&self, signature: &str) -> NormalizedSignature {
+        parse_arrow_or_colon_signature(signature)
+    }
+
+    /// Extract the declared type from a variable declaration as the indexer
+    /// renders it (SCIP emits one per local, e.g. Rust `let out: Output`, Go
+    /// `var uc *unleashCmd`, Java `Foo x`). Grammar is language-specific; the
+    /// returned type name is not. The default handles the `let x: T` / `var x: T`
+    /// colon form.
+    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+        let text = text.trim().trim_end_matches(';').trim();
+        let (_binding, declared) = text.split_once(':')?;
+        let declared = declared.trim();
+        (!declared.is_empty()).then(|| declared.to_string())
+    }
+
+    /// Whether SCIP occurrence selection should prefer the first *semantic*
+    /// occurrence at a call site. Languages whose indexer emits several
+    /// overlapping occurrences per call (Java) need this; most do not.
+    fn scip_prefers_first_semantic_occurrence(&self) -> bool {
+        false
+    }
+
+    /// Cost of a paren-less member access (`obj.field`) in the complexity path:
+    /// a constant-time field/property read, not a method call. Returns None when
+    /// the node is not such a read, or (Ruby) where `obj.foo` is itself a call.
+    /// Without this, property reads are recorded as unresolved typed operations
+    /// and wrongly block an otherwise-complete function.
+    fn complexity_member_read_complexity(&self, node: &Node) -> Option<NormalizedCallComplexity> {
+        (node.r#type == "CALL" && !node.text.contains('(')).then_some(NormalizedCallComplexity {
+            time: "O(1)",
+            space: "O(1)",
+        })
     }
 
     fn case_pattern_values(&self, pattern_values: Vec<String>) -> Vec<String> {
@@ -1503,6 +2489,18 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// Returned as (call message, reader?, writer?) tuples.
     fn accessor_declaration_methods(&self) -> &'static [(&'static str, bool, bool)] {
         &[]
+    }
+
+    /// Generated accessors whose declaration cannot be expressed by the
+    /// generic `attr_reader`/`attr_writer` shape.  This keeps macro syntax in
+    /// the language adapter while reusing the common generated-declaration
+    /// interface used by Ruby readers, Java/Kotlin properties, and similar
+    /// constructs.
+    fn generated_accessor_declarations(
+        &self,
+        _call: &CallSite,
+    ) -> Vec<NormalizedGeneratedAccessor> {
+        Vec::new()
     }
 
     fn protocol_read_label_from_state(&self, receiver: &str, field: &str) -> Option<String> {
@@ -1695,6 +2693,10 @@ pub(crate) fn behavior(language: Language) -> &'static dyn NormalizedLanguageBeh
     }
 }
 
+pub(crate) fn behavior_for_name(language: &str) -> Option<&'static dyn NormalizedLanguageBehavior> {
+    Language::parse(language).ok().map(behavior)
+}
+
 pub(crate) fn matching_paren_index(source: &str, open_index: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (index, ch) in source
@@ -1720,6 +2722,12 @@ pub(crate) fn method_param_types_from_signatures<B: NormalizedLanguageBehavior +
 ) -> BTreeMap<String, BTreeMap<String, String>> {
     functions
         .iter()
+        // A lambda's source line is its enclosing expression, not a callable
+        // declaration. Parsing the first parenthesized expression as a
+        // signature fabricates parameter types from surrounding syntax.
+        // Explicit/contextual lambda types are recovered from normalized
+        // parameters and their compiler/source-proven callback context.
+        .filter(|function| function.dispatch_kind != "lambda")
         .filter_map(|function| {
             let parse = |declaration: &str| {
                 let params = behavior.parameter_list_source(declaration);
@@ -1832,7 +2840,7 @@ pub(crate) fn type_after_parameter_colon(parameter: &str) -> Option<String> {
     (!type_name.is_empty()).then(|| type_name.to_string())
 }
 
-fn usable_declared_local_type(type_name: &str) -> Option<String> {
+pub(crate) fn usable_declared_local_type(type_name: &str) -> Option<String> {
     let type_name = type_name.trim();
     let lower = type_name.to_ascii_lowercase();
     (!type_name.is_empty()
@@ -1902,19 +2910,6 @@ pub(crate) fn type_after_local_colon(source: &str, name: &str) -> Option<String>
         .next()
         .unwrap_or_default()
         .trim();
-    usable_declared_local_type(type_name)
-}
-
-/// Shared parser for Go `var name Type` declarations. Short declarations are
-/// inferred values and intentionally remain outside the declared-type fact.
-pub(crate) fn type_after_go_local_name(source: &str, name: &str) -> Option<String> {
-    let declaration = source.trim().strip_prefix("var ")?.trim();
-    let suffix = declaration.strip_prefix(name)?.trim_start();
-    let boundary = declaration[name.len()..].chars().next();
-    if boundary.is_some_and(|character| character.is_alphanumeric() || character == '_') {
-        return None;
-    }
-    let type_name = suffix.split(['=', ';']).next().unwrap_or_default().trim();
     usable_declared_local_type(type_name)
 }
 

@@ -16,14 +16,15 @@ module NilKill
   class StaticEvidence
     TRACE_PLAN_FACT_KEYS = %w[
       tlet_sites struct_declarations state_type_records type_definitions
+      runtime_call_sites runtime_result_call_sites runtime_collection_receiver_sites
     ].freeze
 
-    # Runtime trace planning needs only enforceable declarations and T.let
-    # sites. Asking Espalier to construct the complete NilKill evidence bundle
-    # also computes CFG/DFG, protocols, shapes, aliases, call graphs, and
-    # pressure inputs that TracePlan immediately discards. Keep this narrow
-    # profile explicit so adding a new runtime-elision fact requires updating
-    # both this contract and its parity oracle.
+    # Runtime trace planning needs enforceable declarations plus FactMine's
+    # compact, language-neutral value-demand plan. It deliberately does not
+    # export full CFG/DFG, protocol, shape, alias, call-graph, or pressure
+    # facts; the collector only receives opaque source anchors selected by
+    # FactMine. Keep this narrow profile explicit so a new collection demand
+    # updates both this contract and its parity oracle.
     def self.build_trace_plan(targets = nil, root: NilKill::ROOT)
       files = Array(targets || NilKill.target_files)
       return { "methods" => [], "fields" => [], "facts" => {} } if files.empty?
@@ -57,6 +58,30 @@ module NilKill
         "fields" => Array(raw["fields"]),
         "facts" => facts,
       }
+    ensure
+      tmp&.unlink
+    end
+
+    # Canonical runtime semantic-evidence demand contract. Unlike the
+    # NilKill instrumentation plan above, this is a public cross-tool wire
+    # format owned and validated by FactMine.
+    def self.build_runtime_evidence_plan(targets = nil, root: NilKill::ROOT)
+      files = Array(targets || NilKill.target_files)
+      return unless files.any?
+
+      tmp = Tempfile.new(["fact-mine-runtime-plan", ".json"])
+      tmp.close
+      binary = Espalier::StaticEvidence::FACT_MINE_RUST_BINARY
+      ok = system(
+        binary,
+        "runtime-plan",
+        "--root", File.expand_path(root),
+        "--output", tmp.path,
+        *files
+      )
+      raise "fact-mine-rust runtime-plan failed with status #{$?.exitstatus}" unless ok
+
+      JSON.parse(File.read(tmp.path))
     ensure
       tmp&.unlink
     end

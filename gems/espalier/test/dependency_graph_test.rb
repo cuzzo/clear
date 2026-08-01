@@ -4,6 +4,16 @@ require "minitest/autorun"
 require_relative "../lib/espalier"
 
 class DependencyGraphTest < Minitest::Test
+  def test_markdown_output_renders_nested_manifest_records
+    markdown = Espalier::Formatter.to_markdown(service_manifest)
+
+    assert_includes markdown, "## Class: Service"
+    assert_includes markdown, "### State:"
+    assert_includes markdown, "#### - `run`"
+    assert_includes markdown, "always_calls: [`prepare`, `@repo.fetch`, `String.upcase`]"
+    assert_includes markdown, "internal_callers: [`run`]"
+  end
+
   def test_dot_output_renders_owner_function_and_dependency_edges
     dot = Espalier::Formatter.to_dot(service_manifest)
 

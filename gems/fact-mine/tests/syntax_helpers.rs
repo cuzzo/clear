@@ -208,3 +208,49 @@ fn nil_kill_profile_cli_is_deterministic_across_worker_counts() {
         .unwrap()
         .is_empty());
 }
+
+// `--fields` narrows what crosses the pipe without changing what is measured:
+// a consumer reading five of the forty document keys should get values
+// identical to the ones a full projection would have produced for those keys.
+#[test]
+fn fields_selects_document_keys_without_altering_their_values() {
+    use std::process::Command;
+    let bin_path = env!("CARGO_BIN_EXE_fact-mine-rust");
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/nullable_ruby.rb");
+
+    let project = |args: &[&str]| -> serde_json::Value {
+        let out = Command::new(bin_path)
+            .args(["syntax-facts", "--language", "ruby"])
+            .args(args)
+            .arg(fixture)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+
+    let full = project(&[]);
+    let selected = project(&["--fields=file,language,imports,functions,calls"]);
+
+    let full_document = full["documents"][0].as_object().unwrap();
+    let selected_document = selected["documents"][0].as_object().unwrap();
+
+    // The full projection carries far more than the selection asked for.
+    assert!(full_document.len() > selected_document.len());
+    let mut keys = selected_document.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    assert_eq!(keys, ["calls", "file", "functions", "imports", "language"]);
+
+    // Every retained key is byte-for-byte what the full projection emitted.
+    for (key, value) in selected_document {
+        assert_eq!(value, &full_document[key], "field {key} changed under --fields");
+    }
+
+    // An empty selection is a usage error, not a silently empty document.
+    let out = Command::new(bin_path)
+        .args(["syntax-facts", "--language", "ruby", "--fields=", fixture])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--fields requires at least one field name"));
+}

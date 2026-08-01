@@ -83,10 +83,19 @@ fn raw_presence_correlations(
         function: &str,
         rows: &mut Vec<RawPresenceCorrelation>,
     ) {
+        // A `func_literal` closure is normalized to a first-class lambda whose
+        // synthetic name is `<lambda@{1-based row}:{0-based col}>` of its start.
+        // Attribute presence correlations declared inside it to that same name
+        // so the normalized seed and this raw span reconcile by function.
+        let lambda_name;
         let function = if node.kind() == "function_declaration" {
             node.child_by_field_name("name")
                 .and_then(|name| text(name, source))
                 .unwrap_or(function)
+        } else if node.kind() == "func_literal" {
+            let start = node.start_position();
+            lambda_name = crate::syntax::lambda_function_name(start.row + 1, start.column);
+            lambda_name.as_str()
         } else {
             function
         };
@@ -294,6 +303,14 @@ const GO_EFFECT_LEXICON: EffectLexicon = EffectLexicon {
     ..EffectLexicon::empty()
 };
 
+// Go builtin operators, emitted as call messages by the normalizer. They carry
+// no overload in Go, so each is constant-time on primitive operands.
+const GO_BUILTIN_OPERATORS: &[&str] = &[
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "&^",
+    "&&", "||", "!",
+];
+// Fixed-arg predeclared builtins that reduce to a constant-time comparison.
+const GO_BUILTIN_FUNCTIONS: &[&str] = &["max", "min"];
 const GO_NIL_PREDICATES: &[&str] = &["isNull", "is_null", "nil"];
 const GO_NON_NIL_PREDICATES: &[&str] = &["isSome", "is_some", "present"];
 const GO_GUARD_MIDS: &[&str] = &["isNull", "is_null"];
@@ -308,6 +325,57 @@ const GO_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct GoNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for GoNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "go-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    fn canonical_symbol_scope(&self) -> bool {
+        true
+    }
+
+    fn canonical_project_namespace(&self, file: &std::path::Path, namespace: &str) -> String {
+        if namespace.is_empty() {
+            return String::new();
+        }
+        let directory = file
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_string_lossy();
+        format!("{directory}::{namespace}")
+    }
+
+    fn project_function_reconciliation_key(&self, symbol: &str) -> Option<(String, String)> {
+        let mut parts = symbol.rsplit("::");
+        let (name, package) = (parts.next()?, parts.next()?);
+        let package_leaf = package.rsplit('/').next().unwrap_or(package);
+        (!name.is_empty() && !package_leaf.is_empty())
+            .then(|| (package_leaf.to_string(), name.to_string()))
+    }
+
+    fn resolves_inherited_project_calls(&self) -> bool {
+        true
+    }
+
+    // The Go indexer renders a local as `var name Type` - the type trails.
+    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+        let text = text.trim().trim_start_matches("var ").trim();
+        let (_name, declared) = text.split_once(char::is_whitespace)?;
+        let declared = declared.trim();
+        (!declared.is_empty() && !declared.contains('=')).then(|| declared.to_string())
+    }
+
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         let (subject, operation_kind, nil_behavior) = match node.r#type.as_str() {
             "UNARY_EXPRESSION" if node.text.trim_start().starts_with('*') => (
@@ -384,6 +452,43 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         true
     }
 
+    /// Parameters whose type is a Go function type (`f func(...) ...`) are
+    /// callbacks: the function's cost is parametric in them, so a caller can
+    /// substitute the passed callable's cost. Parsed from the signature's
+    /// parameter list (Go params come from the signature, not `LASGN` nodes),
+    /// splitting on top-level commas so a `func(a, b) c` type is not torn apart.
+    fn callback_parameter_names(&self, function: &Node) -> Vec<String> {
+        let params_source = self.parameter_list_source(&function.text);
+        if params_source.is_empty() {
+            return Vec::new();
+        }
+        let mut depth = 0i32;
+        let mut start = 0usize;
+        let mut parts: Vec<&str> = Vec::new();
+        for (index, byte) in params_source.bytes().enumerate() {
+            match byte {
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => depth -= 1,
+                b',' if depth == 0 => {
+                    parts.push(&params_source[start..index]);
+                    start = index + 1;
+                }
+                _ => {}
+            }
+        }
+        parts.push(&params_source[start..]);
+        parts
+            .into_iter()
+            .filter_map(|part| {
+                let (name, ty) = part.trim().split_once(char::is_whitespace)?;
+                let ty = ty.trim_start();
+                (ty.starts_with("func(") || ty.starts_with("func "))
+                    .then(|| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+            })
+            .collect()
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
@@ -433,7 +538,7 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     }
 
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
-        super::normalized_behavior::type_after_go_local_name(source, name)
+        type_after_go_local_name(source, name)
     }
 
     fn stdlib_language(&self) -> Option<&'static str> {
@@ -593,6 +698,14 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
             .unwrap_or_else(|| current_owner.to_string())
     }
 
+    fn function_defines_receiver(&self, node: &Node) -> bool {
+        node.text
+            .trim_start()
+            .strip_prefix("func")
+            .and_then(receiver_owner_from_go_function)
+            .is_some()
+    }
+
     fn receiver_aliases_for_function(
         &self,
         node: &Node,
@@ -714,11 +827,44 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
         receiver: Option<&str>,
         message: &str,
     ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        // Unary operators carry a trailing `@` (e.g. `-@`); strip it so the
+        // same table matches unary and binary forms.
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if GO_BUILTIN_OPERATORS.contains(&operator) || GO_BUILTIN_FUNCTIONS.contains(&message) {
+            // Go has no operator overloading: arithmetic, comparison, bitwise
+            // and logical operators - and the fixed-arg builtins max/min - are
+            // constant-time on primitives. Without this they are recorded as
+            // unresolved call targets, wrongly marking O(1) functions incomplete.
+            return Some(super::normalized_behavior::NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            });
+        }
         configured_intrinsic_call_complexity("go", receiver, message)
     }
 
     fn supports_implicit_owner_dispatch(&self) -> bool {
         false
+    }
+
+    fn type_name_conversion_complexity(
+        &self,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        Some(super::normalized_behavior::NormalizedCallComplexity {
+            time: "O(1)",
+            space: "O(1)",
+        })
+    }
+
+    fn type_kind_is_abstract_dispatch(&self, kind: &str) -> bool {
+        kind == "interface"
+    }
+
+    fn abstract_type_requirements(&self, node: &Node) -> Vec<String> {
+        if !is_interface_declaration(&node.text) {
+            return Vec::new();
+        }
+        interface_method_names(&node.text)
     }
 
     fn split_case_source(&self, source: &str) -> Vec<String> {
@@ -752,9 +898,23 @@ impl NormalizedLanguageBehavior for GoNormalizedBehavior {
     fn suppress_state_read_for_call(
         &self,
         call: &NormalizedCallProjection,
-        _span_source: &str,
+        span_source: &str,
     ) -> bool {
-        call.receiver == "self" && matches!(call.message.as_str(), "callback" | "println")
+        if call.receiver != "self" {
+            return false;
+        }
+        // A bare builtin call (`make(...)`, `len(x)`, `string(x)`, `float64(x)`)
+        // has no receiver, so the normalizer attributes it to `self`. It is not
+        // a struct-field read; treating it as one fabricates state like
+        // `read:make`.
+        if is_go_builtin(call.message.as_str()) {
+            return true;
+        }
+        // `self.method(...)` (the message immediately followed by `(`) is a
+        // method invocation, not a field read; only bare `self.field` is state.
+        // It is already recorded as a call edge, so recording it as state too
+        // would double-count and fabricate `read:method`.
+        span_source.contains(&format!("{}(", call.message))
     }
 
     fn wrap_branch_predicate(&self, _branch: &Node) -> bool {
@@ -1033,6 +1193,15 @@ fn go_method_local_types(
         Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*make\s*\(\s*chan\s+([^\s,)]+)")
             .expect("valid Go channel construction regex")
     });
+    // `b := strings.Builder{}` / `b := &bytes.Buffer{}` - a composite literal
+    // names the variable's type directly. The `&?` is skipped so a pointer
+    // literal still yields the base type, which is how the stdlib registry
+    // keys its methods (`bytes.Buffer.WriteByte`, `sync.Mutex.Lock`).
+    static COMPOSITE: OnceLock<Regex> = OnceLock::new();
+    let composite = COMPOSITE.get_or_init(|| {
+        Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*&?\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\{")
+            .expect("valid Go composite literal regex")
+    });
     let receive = RECEIVE.get_or_init(|| {
         Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*<-\s*([A-Za-z_][A-Za-z0-9_]*)")
             .expect("valid Go channel receive regex")
@@ -1089,6 +1258,13 @@ fn go_method_local_types(
             let mut known = parameters.clone();
 
             for capture in var.captures_iter(&body) {
+                candidates
+                    .entry(capture[1].to_string())
+                    .or_default()
+                    .insert(capture[2].to_string());
+                known.insert(capture[1].to_string(), capture[2].to_string());
+            }
+            for capture in composite.captures_iter(&body) {
                 candidates
                     .entry(capture[1].to_string())
                     .or_default()
@@ -1217,6 +1393,28 @@ fn type_name(text: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The method names declared by a Go `interface { ... }` body. Embedded
+/// interfaces (a bare type name, no parameter list) are conformance edges, not
+/// methods, and are handled through `supertypes`.
+fn interface_method_names(text: &str) -> Vec<String> {
+    let Some(open) = text
+        .find("interface")
+        .and_then(|i| text[i..].find('{').map(|j| i + j + 1))
+    else {
+        return Vec::new();
+    };
+    let body = &text[open..];
+    let body = body.rfind('}').map(|close| &body[..close]).unwrap_or(body);
+    body.split([';', '\n'])
+        .filter_map(|spec| {
+            let spec = spec.trim();
+            let paren = spec.find('(')?;
+            let name = spec[..paren].trim();
+            simple_identifier(name).then(|| name.to_string())
+        })
+        .collect()
+}
+
 fn receiver_owner_from_go_function(source: &str) -> Option<String> {
     let source = source.trim_start();
     let receiver = source.strip_prefix('(')?.split_once(')')?.0;
@@ -1233,6 +1431,39 @@ fn receiver_owner_from_go_function(source: &str) -> Option<String> {
             .to_string(),
     )
     .filter(|value| !value.is_empty())
+}
+
+/// Parse a Go `var name Type` declaration for the local `name`'s declared type.
+/// Short declarations (`:=`) are inferred values and intentionally excluded.
+fn type_after_go_local_name(source: &str, name: &str) -> Option<String> {
+    let body = source.trim().strip_prefix("var ")?.trim();
+    // A grouped declaration `var ( a T1; b T2 )` holds one spec per line; a
+    // single declaration `var a T1` is the lone spec. Scan each spec for the
+    // target name so grouped blocks are not dropped.
+    let body = body
+        .strip_prefix('(')
+        .map(|inner| inner.trim_end_matches(')'))
+        .unwrap_or(body);
+    for spec in body.split([';', '\n']) {
+        let spec = spec.trim();
+        let Some(suffix) = spec.strip_prefix(name) else {
+            continue;
+        };
+        let boundary = spec[name.len()..].chars().next();
+        if boundary.is_some_and(|character| character.is_alphanumeric() || character == '_') {
+            continue;
+        }
+        let type_name = suffix
+            .trim_start()
+            .split(['=', ';'])
+            .next()
+            .unwrap_or_default()
+            .trim();
+        if let Some(resolved) = super::normalized_behavior::usable_declared_local_type(type_name) {
+            return Some(resolved);
+        }
+    }
+    None
 }
 
 fn receiver_name_from_go_function(source: &str) -> Option<String> {
@@ -1334,10 +1565,59 @@ fn simple_identifier(name: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
+/// Go's predeclared builtin functions and builtin type-conversion names. A bare
+/// call to one of these is not a struct-field access.
+fn is_go_builtin(message: &str) -> bool {
+    matches!(
+        message,
+        // builtin functions
+        "append" | "cap" | "clear" | "close" | "complex" | "copy" | "delete"
+            | "imag" | "len" | "make" | "max" | "min" | "new" | "panic"
+            | "print" | "println" | "real" | "recover"
+            // builtin type conversions (predeclared types)
+            | "bool" | "byte" | "complex64" | "complex128" | "error" | "float32"
+            | "float64" | "int" | "int8" | "int16" | "int32" | "int64" | "rune"
+            | "string" | "uint" | "uint8" | "uint16" | "uint32" | "uint64"
+            | "uintptr" | "any"
+            // legacy suppression retained
+            | "callback"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::syntax::Child;
+
+    #[test]
+    fn self_builtin_calls_are_not_state_reads() {
+        let profile = GoNormalizedBehavior;
+        let call = |message: &str, args: Vec<String>| NormalizedCallProjection {
+            receiver: "self".to_string(),
+            message: message.to_string(),
+            arguments: args,
+            access_span: [0, 0, 0, 0],
+            span: [0, 0, 0, 0],
+        };
+        // Bare builtins attributed to `self` must be suppressed so they do not
+        // fabricate state like `read:make` / `read:string` / `read:float64`.
+        for builtin in ["make", "len", "string", "float64", "append", "new", "cap"] {
+            assert!(
+                profile.suppress_state_read_for_call(&call(builtin, vec!["x".into()]), "make(x)"),
+                "expected {builtin} to be suppressed"
+            );
+        }
+        // A `self.method()` invocation is a call, not a field read (span shows
+        // the invoking paren); it is suppressed as state.
+        assert!(profile.suppress_state_read_for_call(
+            &call("populateFileSizes", vec![]),
+            "g.populateFileSizes()"
+        ));
+        // A real struct-field read on self (no invoking paren) is kept.
+        assert!(!profile.suppress_state_read_for_call(&call("count", vec![]), "c.count"));
+        assert!(is_go_builtin("make") && is_go_builtin("string"));
+        assert!(!is_go_builtin("count") && !is_go_builtin("populateFileSizes"));
+    }
 
     fn node(kind: &str, text: &str) -> Node {
         Node {
@@ -1390,6 +1670,11 @@ mod tests {
     #[test]
     fn test_go_behavior_uncovered_methods() {
         let behavior = GoNormalizedBehavior;
+
+        assert!(
+            behavior.function_has_executable_body(&node("DEFN", "func size() int { return 0 }"))
+        );
+        assert!(!behavior.function_has_executable_body(&node("DEFN", "Size() int")));
 
         // format_array_type etc
         assert_eq!(behavior.format_array_type("int"), "[]int");
@@ -1543,6 +1828,121 @@ mod tests {
             .is_none());
     }
 
+    /// The harness, path, filesystem and buffer surface is what actually
+    /// blocks Go completeness on real corpora, and each family resolves
+    /// through a different table: an embedded-struct owner (`testing.common`),
+    /// a package intrinsic (`filepath`), external latency (`os`), and a
+    /// parametric contract (`t.Run`, `t.Errorf`). Pin one of each against the
+    /// exact symbol scip-go emits, because a key that misses resolves to
+    /// nothing and silently leaves the caller unknown.
+    #[test]
+    fn scip_go_harness_and_filesystem_surface_is_priced() {
+        let go = |descriptor: &str| {
+            format!("scip-go gomod github.com/golang/go/src go1.22 {descriptor}")
+        };
+        let time_of = |descriptor: &str, message: &str| {
+            external_symbol_call_complexity(&go(descriptor), message)
+                .map(|complexity| complexity.time)
+        };
+
+        // Owner table reached through the embedded `common` base of *testing.T.
+        assert_eq!(time_of("testing/common#Helper().", "Helper"), Some("O(1)"));
+        // Package intrinsic.
+        assert_eq!(
+            time_of("`path/filepath`/Join().", "Join"),
+            Some("O(N)"),
+            "filepath.Join builds a new path from its arguments"
+        );
+        assert_eq!(time_of("`path/filepath`/Ext().", "Ext"), Some("O(N)"));
+        // Owner table on a pointer receiver.
+        assert_eq!(time_of("bytes/Buffer#Len().", "Len"), Some("O(1)"));
+        assert_eq!(time_of("bytes/Buffer#String().", "String"), Some("O(N)"));
+        assert_eq!(
+            time_of("`io/fs`/FileInfo#ModTime().", "ModTime"),
+            Some("O(1)")
+        );
+        assert_eq!(time_of("flag/FlagSet#Bool().", "Bool"), Some("O(1)"));
+        assert_eq!(time_of("bufio/Scanner#Text().", "Text"), Some("O(N)"));
+        assert_eq!(time_of("time/Time#Format().", "Format"), Some("O(N)"));
+        assert_eq!(time_of("time/Duration#Hours().", "Hours"), Some("O(1)"));
+        assert_eq!(time_of("bytes/TrimSpace().", "TrimSpace"), Some("O(N)"));
+        assert_eq!(time_of("strings/IndexByte().", "IndexByte"), Some("O(N)"));
+        assert_eq!(
+            time_of("strings/NewReplacer().", "NewReplacer"),
+            Some("O(N)")
+        );
+        assert_eq!(
+            time_of("regexp/Regexp#MatchString().", "MatchString"),
+            Some("O(N)")
+        );
+        assert_eq!(time_of("strconv/Atoi().", "Atoi"), Some("O(N)"));
+        assert_eq!(time_of("math/Round().", "Round"), Some("O(1)"));
+        assert_eq!(time_of("flag/String().", "String"), Some("O(1)"));
+        assert_eq!(time_of("flag/NewFlagSet().", "NewFlagSet"), Some("O(1)"));
+        assert_eq!(
+            GoNormalizedBehavior
+                .call_complexity(&TypeExpr::Primitive("os.FileInfo".to_string()), "Sys")
+                .map(|complexity| complexity.time),
+            Some("O(1)"),
+            "os.FileInfo is an alias of io/fs.FileInfo even without a platform SCIP document"
+        );
+
+        // External latency: priced, and flagged as excluding device time.
+        let write = external_symbol_call_complexity(&go("os/WriteFile()."), "WriteFile").unwrap();
+        assert_eq!(write.time, "O(N)");
+        assert_eq!(write.bound_quality, "upper_bound_external_latency_excluded");
+        assert!(write.assumption.is_some());
+        assert_eq!(time_of("os/Stat().", "Stat"), Some("O(1)"));
+        assert_eq!(time_of("os/Getuid().", "Getuid"), Some("O(1)"));
+        assert_eq!(time_of("syscall/Flock().", "Flock"), Some("O(1)"));
+        assert_eq!(
+            time_of("bufio/Reader#ReadString().", "ReadString"),
+            Some("O(N)")
+        );
+        assert_eq!(time_of("`os/exec`/Cmd#Output().", "Output"), Some("O(N)"));
+        assert_eq!(time_of("`os/exec`/Command().", "Command"), Some("O(N)"));
+        assert_eq!(
+            time_of("`os/exec`/Cmd#StdoutPipe().", "StdoutPipe"),
+            Some("O(1)")
+        );
+
+        // Parametric contracts must NOT return a closed cost here - they are
+        // reported through metadata so espalier keeps the open parameter.
+        for (descriptor, message, kind) in [
+            ("testing/T#Run().", "Run", "callback_once"),
+            ("testing/common#Errorf().", "Errorf", "reflective_once"),
+            ("`path/filepath`/WalkDir().", "WalkDir", "callback_linear"),
+            ("sort/Slice().", "Slice", "callback_sort"),
+            ("flag/FlagSet#Visit().", "Visit", "callback_linear"),
+            (
+                "`encoding/json`/Encoder#Encode().",
+                "Encode",
+                "reflective_once",
+            ),
+            (
+                "`encoding/xml`/Unmarshal().",
+                "Unmarshal",
+                "reflective_once",
+            ),
+            ("fmt/Print().", "Print", "reflective_once"),
+        ] {
+            assert_eq!(time_of(descriptor, message), None, "{descriptor}");
+            assert_eq!(
+                external_symbol_metadata(&go(descriptor))
+                    .parametric_cost
+                    .as_deref(),
+                Some(kind),
+                "{descriptor}"
+            );
+        }
+
+        // Anything still unmodeled must keep reporting itself as unmodeled.
+        assert_eq!(
+            external_symbol_metadata(&go("testing/common#Setenv().")).missing_cost_kind,
+            "stdlib_cost_model_missing"
+        );
+    }
+
     #[test]
     fn scip_go_symbols_use_proven_stdlib_identity() {
         let value_type = "scip-go gomod github.com/golang/go/src go1.22 reflect/Value#Type().";
@@ -1598,6 +1998,38 @@ mod tests {
                 "{symbol}"
             );
         }
+    }
+
+    #[test]
+    fn go_local_type_reads_single_and_grouped_var_blocks() {
+        assert_eq!(
+            type_after_go_local_name("var b Value", "b"),
+            Some("Value".to_string())
+        );
+        let grouped = "var (\n\tb   Value\n\tpos int\n)";
+        assert_eq!(
+            type_after_go_local_name(grouped, "b"),
+            Some("Value".to_string())
+        );
+    }
+
+    #[test]
+    fn go_builtin_operators_are_constant_time_intrinsics() {
+        let behavior = GoNormalizedBehavior;
+        for op in [
+            "<", "==", "+", "*", "&", "<<", "!=", "-@", "+@", "max", "min",
+        ] {
+            let complexity = behavior.intrinsic_call_complexity(Some("x"), op);
+            assert_eq!(
+                complexity.map(|c| c.time),
+                Some("O(1)"),
+                "operator {op} should be O(1)"
+            );
+        }
+        // A real method name is not an operator and stays unmodeled here.
+        assert!(behavior
+            .intrinsic_call_complexity(Some("x"), "Frobnicate")
+            .is_none());
     }
 
     #[test]

@@ -209,6 +209,47 @@
       },
       {
         "arguments": [
+          ":name",
+          "value"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "mutate",
+        "line": 12,
+        "message": "[]=",
+        "receiver": "target",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "item"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "add_item",
+        "line": 31,
+        "message": "<<",
+        "receiver": "items",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "key",
+          "[]"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "shape_hash",
+        "line": 18,
+        "message": "[]=",
+        "receiver": "hash",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
           "name"
         ],
         "block": false,
@@ -231,6 +272,19 @@
         "line": 6,
         "message": "call",
         "receiver": "callback",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "value"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "mutate",
+        "line": 13,
+        "message": "<<",
+        "receiver": "target.items",
         "safe_navigation": false
       },
       {
@@ -968,6 +1022,7 @@
       {},
       {},
       {},
+      {},
       {}
     ],
     "dispatch_sites": [],
@@ -998,6 +1053,7 @@
       {}
     ],
     "flow_types": [
+      {},
       {},
       {},
       {},
@@ -1522,6 +1578,7 @@
       },
       {
         "reads": [
+          "place:SourceFactSemanticEffects#perform:local:callback",
           "place:SourceFactSemanticEffects#perform:local:name"
         ],
         "writes": []
@@ -1794,6 +1851,7 @@
       {}
     ],
     "reaching_definitions": [
+      {},
       {},
       {},
       {},

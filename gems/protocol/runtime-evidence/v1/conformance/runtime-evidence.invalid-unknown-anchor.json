@@ -1,0 +1,33 @@
+{
+  "protocol_version": 1,
+  "producer": {
+    "name": "nil-kill",
+    "version": "1"
+  },
+  "authority": "MODELED_RUNS",
+  "trace_plan_digest": "XBhJ0x+SLVQJTrPUoapu3jQzr8Ayv4JOIvJV5sPUc6Q=",
+  "runs": [
+    {
+      "id": "run-1",
+      "status": "SUCCEEDED"
+    }
+  ],
+  "anchors": [
+    {
+      "anchor_symbol": "local call-not-in-the-plan",
+      "anchor_semantic_digest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "capture": {
+        "status": "COMPLETE_FOR_RUNS",
+        "run_ids": [
+          "run-1"
+        ],
+        "observed_executions": "1",
+        "dropped_executions": "0",
+        "complete_kinds": [
+          "RECEIVER_VALUE"
+        ]
+      },
+      "executions": []
+    }
+  ]
+}

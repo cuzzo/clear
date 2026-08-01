@@ -8,6 +8,7 @@
 
 require "json"
 require "optparse"
+require "pathname"
 require "set"
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
@@ -33,9 +34,20 @@ if repositories.empty?
   end.uniq.sort
 end
 prefixes = repositories.map { |repository| File.join(source_root, repository, "") }
-in_scope = ->(row) { prefixes.any? { |prefix| row.fetch("path", "").start_with?(prefix) } }
+absolute_profile_path = lambda do |path|
+  path = path.to_s
+  Pathname.new(path).absolute? ? path : File.expand_path(path, source_root)
+end
+in_scope = lambda do |row|
+  absolute = absolute_profile_path.call(row.fetch("path", ""))
+  prefixes.any? { |prefix| absolute.start_with?(prefix) }
+end
 
-methods = Array(profile["methods"]).select(&in_scope)
+scoped_methods = Array(profile["methods"]).select(&in_scope)
+method_roles = Espalier::StaticEvidence.method_source_roles(scoped_methods)
+methods = scoped_methods.select do |method|
+  method_roles.fetch(method.fetch("id").to_s) == "production"
+end
 method_ids = methods.to_h { |method| [method.fetch("id"), method] }
 calls = Array(profile["calls"]).select { |call| method_ids.key?(call["source"]) }
 facts = Array(profile["complexity_facts"]).select(&in_scope)
@@ -43,7 +55,9 @@ paths = methods.map { |method| method.fetch("path") }.uniq
 select_path = ->(rows) { Array(rows).select(&in_scope) }
 evidence = {
   "root" => source_root,
-  "files" => paths.map { |path| { "path" => path, "source_role" => "production" } },
+  "files" => paths.map do |path|
+    { "path" => path, "source_role" => Espalier::StaticEvidence.source_role(path) }
+  end,
   "owners" => select_path.call(profile["owners"]),
   "methods" => methods,
   "fields" => select_path.call(profile["fields"]),
@@ -90,6 +104,7 @@ external_category = lambda do |call|
   call["complexity_missing_kind"] || case call["external_symbol_scope"]
                                       when "stdlib" then "stdlib_cost_model_missing"
                                       when "dependency" then "dependency_cost_model_missing"
+                                      when "project" then "project_candidate_summary_missing"
                                       else "external_cost_model_missing"
                                       end
 end
@@ -101,8 +116,10 @@ call_resolution_category = lambda do |call|
     "modeled_nonproject_call"
   elsif !call["semantic_symbol"].to_s.empty?
     external_category.call(call)
-  else
+  elsif call["runtime_evidence_observed"] == true
     "semantic_identity_missing"
+  else
+    "runtime_callsite_unobserved"
   end
 end
 
@@ -138,7 +155,8 @@ incomplete_ids.each do |method_id|
     next if call["known_time_complexity"] || call["known_space_complexity"]
 
     category = if call["semantic_symbol"].to_s.empty?
-                 "semantic_identity_missing"
+                 call["runtime_evidence_observed"] == true ?
+                   "semantic_identity_missing" : "runtime_callsite_unobserved"
                else
                  external_category.call(call)
                end
@@ -183,6 +201,7 @@ incomplete_ids.each do |method_id|
 end
 
 priority = %w[
+  runtime_callsite_unobserved
   semantic_identity_missing
   callback_cost_missing
   reflective_target_cost_missing
@@ -225,11 +244,22 @@ category_rows = root_causes.values.flat_map(&:to_a).uniq.sort.to_h do |category|
       functions: symbol_calls.map { |call| call["source"] }.uniq.length
     }
   end.sort_by { |row| [-row[:functions], -row[:calls], row[:symbol].to_s] }.first(15)
+  call_examples = rows.first(options[:examples]).map do |call|
+    {
+      path: call["path"],
+      line: call["line"],
+      receiver: call["receiver"],
+      message: call["message"],
+      semantic_symbol: call["semantic_symbol"],
+      unresolved_reason: call["unresolved_reason"]
+    }
+  end
   [category, {
     affected_incomplete_functions: affected.length,
     direct_incomplete_functions: direct.length,
     direct_call_sites: rows.length,
     top_symbols: top_symbols,
+    call_examples: call_examples,
     examples: (direct.empty? ? affected : direct).first(options[:examples]).map(&location)
   }]
 end
@@ -284,7 +314,11 @@ end
 
 report = {
   schema: "espalier.big-o-gap-diagnostics.v1",
-  scope: { source_root: source_root, repositories: repositories },
+  scope: {
+    source_root: source_root,
+    repositories: repositories,
+    source_roles: ["production"]
+  },
   summary: {
     functions: results.length,
     complete_time_bounds: results.count { |_, result| result[:complete] },

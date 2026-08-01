@@ -31,7 +31,7 @@ require "open3"
 require "optparse"
 
 ROOT = File.expand_path("..", __dir__)
-CONVERTER = File.join(ROOT, "gems/lineage/tools/pprof_to_hotness.rb")
+CONVERTER = File.join(ROOT, "gems/gigasail/tools/pprof_to_hotness.rb")
 LINEAGE_BIN = File.join(ROOT, "gems/lineage/target/release/lineage")
 
 RUBY_GEM_TARGETS = {

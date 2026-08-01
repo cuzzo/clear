@@ -81,8 +81,90 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
             .map(|field| format!("@{field}"))
     }
 
-    fn call_node(&self, node: TreeSitterNode<'_>, _source: &str) -> bool {
-        matches!(node.kind(), "invocation_expression")
+    fn call_node(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        matches!(
+            node.kind(),
+            "invocation_expression" | "constructor_initializer"
+        ) && !csharp_attribute_invocation(node, source)
+    }
+
+    fn intrinsic_call_name(&self, node: TreeSitterNode<'_>, source: &str) -> Option<&'static str> {
+        if node.kind() != "constructor_initializer" {
+            return None;
+        }
+        let text = node_text(node, source).trim_start();
+        if text.starts_with(": this") {
+            Some("this")
+        } else if text.starts_with(": base") {
+            Some("base")
+        } else {
+            None
+        }
+    }
+
+    fn scoped_call_parts<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, String)> {
+        if node.kind() == "member_access_expression" {
+            let receiver = node.child_by_field_name("expression")?;
+            let name = node.child_by_field_name("name")?;
+            if name.kind() == "generic_name" {
+                let identifier = named_children(name)
+                    .into_iter()
+                    .find(|child| child.kind() == "identifier")?;
+                return Some((receiver, node_text(identifier, source).to_string()));
+            }
+        }
+        if node.kind() != "conditional_access_expression" {
+            return None;
+        }
+        let children = named_children(node);
+        let receiver = *children.first()?;
+        let binding = *children.last()?;
+        let method = named_children(binding)
+            .into_iter()
+            .last()
+            .map(|name| node_text(name, source))
+            .unwrap_or_else(|| node_text(binding, source))
+            .trim_start_matches(['.', '?'])
+            .to_string();
+        (!method.is_empty()).then_some((receiver, method))
+    }
+
+    fn member_read_excluded(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "member_access_expression"
+            && node
+                .child_by_field_name("name")
+                .is_some_and(|name| name.kind() == "generic_name")
+    }
+
+    fn type_argument_callee<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "generic_name")
+            .then(|| {
+                named_children(node)
+                    .into_iter()
+                    .find(|child| child.kind() == "identifier")
+            })
+            .flatten()
+    }
+
+    fn function_body_prefix_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        if node.kind() != "constructor_declaration" {
+            return Vec::new();
+        }
+        named_children(node)
+            .into_iter()
+            .filter(|child| child.kind() == "constructor_initializer")
+            .collect()
     }
 
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
@@ -93,11 +175,84 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         }
     }
 
+    fn loop_condition_node<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        (node.kind() == "foreach_statement")
+            .then(|| node.child_by_field_name("right"))
+            .flatten()
+    }
+
+    fn lambda_target<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        matches!(
+            node.kind(),
+            "lambda_expression" | "anonymous_method_expression"
+        )
+        .then_some(node)
+    }
+
+    fn normalize_block_parameters(&self) -> bool {
+        true
+    }
+
+    fn block_parameter_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        let parameters = node.child_by_field_name("parameters")?;
+        if parameters.kind() == "implicit_parameter" {
+            Some(vec![parameters])
+        } else {
+            Some(named_children(parameters))
+        }
+    }
+
+    fn is_parameter_name_kind(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "identifier"
+                | "implicit_parameter"
+                | "hash_splat_parameter"
+                | "splat_parameter"
+                | "block_parameter"
+                | "keyword_parameter"
+                | "optional_parameter"
+        )
+    }
+
+    fn local_identifier_text(&self, node: TreeSitterNode<'_>, source: &str) -> Option<String> {
+        (node.kind() == "implicit_parameter").then(|| node_text(node, source).to_string())
+    }
+
     fn function_kind(&self, kind: &str) -> bool {
         matches!(
             kind,
-            "method_declaration" | "constructor_declaration" | "property_declaration"
+            "method_declaration"
+                | "constructor_declaration"
+                | "property_declaration"
+                | "local_function_statement"
         )
+    }
+
+    fn valid_function_definition(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        csharp_split_preprocessor_method(node, source).is_none_or(|split| split.declaration != node)
+    }
+
+    fn function_declaration_span_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, TreeSitterNode<'tree>)> {
+        csharp_split_preprocessor_method(node, source)
+            .filter(|split| split.implementation == node)
+            .map(|split| (split.declaration, split.implementation))
     }
 
     fn function_body<'tree>(
@@ -135,25 +290,179 @@ impl AstNormalizationAdapter for CSharpAstAdapter {
         node: TreeSitterNode<'tree>,
         _source: &str,
     ) -> Option<Vec<TreeSitterNode<'tree>>> {
-        if node.kind() != "switch_section" {
+        match node.kind() {
+            "switch_section" => {
+                let body = named_children(node)
+                    .into_iter()
+                    .filter(|child| {
+                        !matches!(
+                            child.kind(),
+                            "case_switch_label"
+                                | "switch_label"
+                                | "case_pattern_switch_label"
+                                | "constant_pattern"
+                                | "default_switch_label"
+                                | "break_statement"
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                (!body.is_empty()).then_some(body)
+            }
+            "switch_expression_arm" => named_children(node)
+                .into_iter()
+                .rev()
+                .find(|child| child.kind() != "when_clause")
+                .map(|body| vec![body]),
+            _ => None,
+        }
+    }
+
+    fn case_arm(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        matches!(node.kind(), "switch_section" | "switch_expression_arm")
+            && !self.case_else_arm(node, source)
+    }
+
+    fn case_arm_pattern_nodes<'tree>(
+        &self,
+        node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        if node.kind() != "switch_expression_arm" {
             return None;
         }
-        let body = named_children(node)
+        named_children(node)
             .into_iter()
-            .filter(|child| {
-                !matches!(
-                    child.kind(),
-                    "case_switch_label"
-                        | "switch_label"
-                        | "case_pattern_switch_label"
-                        | "constant_pattern"
-                        | "default_switch_label"
-                        | "break_statement"
-                )
-            })
-            .collect::<Vec<_>>();
-        (!body.is_empty()).then_some(body)
+            .find(|child| child.kind() != "when_clause")
+            .map(|pattern| vec![pattern])
     }
+
+    fn case_arm_guard<'tree>(&self, node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
+        named_children(node)
+            .into_iter()
+            .find(|child| child.kind() == "when_clause")
+            .and_then(|clause| named_children(clause).into_iter().next())
+    }
+
+    fn case_else_arm(&self, node: TreeSitterNode<'_>, source: &str) -> bool {
+        node.kind() == "switch_expression_arm"
+            && named_children(node)
+                .first()
+                .is_some_and(|pattern| node_text(*pattern, source).trim() == "_")
+    }
+}
+
+fn csharp_has_any_ancestor(mut node: TreeSitterNode<'_>, kinds: &[&str]) -> bool {
+    while let Some(parent) = node.parent() {
+        if kinds.contains(&parent.kind()) {
+            return true;
+        }
+        node = parent;
+    }
+    false
+}
+
+#[derive(Clone, Copy)]
+struct CSharpSplitPreprocessorMethod<'tree> {
+    declaration: TreeSitterNode<'tree>,
+    implementation: TreeSitterNode<'tree>,
+}
+
+fn csharp_split_preprocessor_method<'tree>(
+    node: TreeSitterNode<'tree>,
+    source: &str,
+) -> Option<CSharpSplitPreprocessorMethod<'tree>> {
+    if node.kind() != "method_declaration" {
+        return None;
+    }
+    let parent = node.parent()?;
+    let structured = match parent.kind() {
+        "preproc_if" => Some(parent),
+        "preproc_else" => parent
+            .parent()
+            .filter(|parent| parent.kind() == "preproc_if"),
+        _ => None,
+    };
+    let structured_pair = structured.and_then(|wrapper| {
+        let declaration = named_children(wrapper)
+            .into_iter()
+            .find(|child| child.kind() == "method_declaration")?;
+        let alternative = named_children(wrapper)
+            .into_iter()
+            .find(|child| child.kind() == "preproc_else")?;
+        let implementation = named_children(alternative)
+            .into_iter()
+            .find(|child| child.kind() == "method_declaration")?;
+        implementation
+            .child_by_field_name("body")
+            .map(|_| (declaration, implementation))
+    });
+    let (declaration, implementation) = if let Some(pair) = structured_pair {
+        pair
+    } else {
+        let mut recovery = Some(parent);
+        while recovery.is_some_and(|candidate| candidate.kind() != "ERROR") {
+            recovery = recovery.and_then(|candidate| candidate.parent());
+        }
+        let methods = csharp_descendant_methods(recovery?);
+        let name = node.child_by_field_name("name")?;
+        let name = node_text(name, source);
+        let declaration = methods.iter().copied().find(|candidate| {
+            candidate.child_by_field_name("body").is_none()
+                && candidate
+                    .child_by_field_name("name")
+                    .is_some_and(|candidate_name| node_text(candidate_name, source) == name)
+        })?;
+        let implementation = methods.iter().copied().find(|candidate| {
+            candidate.child_by_field_name("body").is_some()
+                && candidate.start_position().row >= declaration.end_position().row
+                && candidate.start_position().row <= declaration.end_position().row + 3
+                && candidate
+                    .child_by_field_name("name")
+                    .is_some_and(|candidate_name| node_text(candidate_name, source) == name)
+                && source[declaration.end_byte()..candidate.start_byte()].contains("#else")
+        })?;
+        (declaration, implementation)
+    };
+    let declaration_name = declaration.child_by_field_name("name")?;
+    let implementation_name = implementation.child_by_field_name("name")?;
+    if node_text(declaration_name, source) != node_text(implementation_name, source)
+        || declaration.child_by_field_name("body").is_some()
+        || implementation.child_by_field_name("body").is_none()
+    {
+        return None;
+    }
+    Some(CSharpSplitPreprocessorMethod {
+        declaration,
+        implementation,
+    })
+}
+
+fn csharp_descendant_methods(node: TreeSitterNode<'_>) -> Vec<TreeSitterNode<'_>> {
+    let mut methods = Vec::new();
+    let mut stack = named_children(node);
+    while let Some(candidate) = stack.pop() {
+        if candidate.kind() == "method_declaration" {
+            methods.push(candidate);
+        } else {
+            stack.extend(named_children(candidate));
+        }
+    }
+    methods
+}
+
+fn csharp_attribute_invocation(node: TreeSitterNode<'_>, source: &str) -> bool {
+    if csharp_has_any_ancestor(node, &["attribute", "attribute_list"]) {
+        return true;
+    }
+    // Conditional-compilation recovery can detach an attribute's invocation
+    // node from its normal `attribute_list` ancestor. The source line remains
+    // definitive: C# attributes begin with `[` before the invocation.
+    let line_start = source[..node.start_byte()]
+        .rfind('\n')
+        .map_or(0, |offset| offset + 1);
+    source[line_start..node.start_byte()]
+        .trim_start()
+        .starts_with('[')
 }
 
 fn csharp_local_declaration(node: TreeSitterNode<'_>) -> bool {
@@ -213,6 +522,9 @@ fn collect_csharp_scope_locals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{profile, syntax, syntax::Language};
+    use anyhow::Result;
+    use std::fs;
     use tree_sitter::Parser;
 
     #[test]
@@ -231,5 +543,148 @@ mod tests {
             assert_eq!(namespace, "Demo.Core");
             assert!(imports.is_empty());
         }
+    }
+
+    #[test]
+    fn preserves_constructor_switch_foreach_and_lambda_calls() -> Result<()> {
+        let tmp = tempfile::Builder::new().suffix(".cs").tempfile()?;
+        fs::write(
+            tmp.path(),
+            r#"
+class Parent { public Parent(string value) {} }
+class Widget : Parent {
+  [System.Obsolete("metadata")]
+  public Widget(string value) : base(Normalize(value)) {}
+  static string Normalize(string value) => value;
+  string Render(string value, string[] items) {
+    foreach (var item in items.Where(candidate => Accept(candidate.ToString())))
+      Use(item);
+    return value switch {
+      "upper" => value.ToUpperInvariant(),
+      _ => value.ToLowerInvariant()
+    };
+  }
+  static bool Accept(string value) => true;
+  static void Use(string value) {}
+  void Notify(System.Action<string>? callback) {
+    callback?.Invoke("message");
+  }
+  string Transform(string value) {
+    string Local(string item) { return Normalize(item); }
+    return Local(value);
+  }
+}
+"#,
+        )?;
+        let document = syntax::parse_file(tmp.path().to_path_buf(), Language::CSharp)?;
+        let output = profile::extract(&document, profile::Profile::Espalier);
+        assert_eq!(
+            output
+                .call_resolution_coverage
+                .raw_calls_not_normalized_inside_function,
+            0
+        );
+        assert!(
+            output
+                .methods
+                .iter()
+                .any(|method| method.name.starts_with("<lambda@")
+                    && method.params == ["candidate"]),
+            "C# lambdas must be first-class project functions: {:?}",
+            output.methods
+        );
+        assert!(
+            output.calls.iter().any(|call| {
+                call.function.starts_with("<lambda@")
+                    && call.receiver == "candidate"
+                    && call.receiver_type.as_deref() == Some("String")
+                    && call.known_time_complexity.as_deref() == Some("O(1)")
+            }),
+            "C# collection callbacks must inherit their proven element type: {:?}",
+            output.calls
+        );
+        let messages = output
+            .calls
+            .iter()
+            .map(|call| call.message.as_str())
+            .collect::<BTreeSet<_>>();
+        for expected in [
+            "base",
+            "Normalize",
+            "Where",
+            "Accept",
+            "Use",
+            "ToUpperInvariant",
+            "ToLowerInvariant",
+            "Invoke",
+        ] {
+            assert!(messages.contains(expected), "calls={messages:?}");
+        }
+        assert!(!messages.contains("call"), "calls={messages:?}");
+        assert!(
+            output.methods.iter().any(|method| method.name == "Local"),
+            "methods={:?}",
+            output.methods
+        );
+        assert!(
+            output
+                .complexity_facts
+                .iter()
+                .any(|fact| fact.function == "Local"),
+            "C# local functions must receive CFG/DFG complexity facts"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn preprocessor_split_signature_keeps_one_callable_with_its_body() -> Result<()> {
+        let tmp = tempfile::Builder::new().suffix(".cs").tempfile()?;
+        fs::write(
+            tmp.path(),
+            r#"class Demo {
+#if FEATURE_SPAN
+  void Process(System.Span<object> values)
+#else
+  void Process(object[] values)
+#endif
+  { Use(values); }
+#if FEATURE_SPAN
+  void Render(System.ReadOnlySpan<object?> values)
+#else
+  void Render(object?[] values)
+#endif
+  { Use(values); }
+  void Use(object value) {}
+}"#,
+        )?;
+        let document = syntax::parse_file(tmp.path().to_path_buf(), Language::CSharp)?;
+        let output = profile::extract(&document, profile::Profile::Espalier);
+        let process = output
+            .methods
+            .iter()
+            .filter(|method| method.name == "Process")
+            .collect::<Vec<_>>();
+        assert_eq!(process.len(), 1, "methods={:?}", output.methods);
+        assert!(
+            output
+                .calls
+                .iter()
+                .any(|call| call.source == process[0].id && call.message == "Use"),
+            "calls={:?}",
+            output.calls
+        );
+        let span = process[0].span.expect("process span");
+        assert_eq!(span, [3, 2, 7, 18]);
+        assert_eq!(
+            output
+                .methods
+                .iter()
+                .filter(|method| method.name == "Render")
+                .count(),
+            1,
+            "methods={:?}",
+            output.methods
+        );
+        Ok(())
     }
 }

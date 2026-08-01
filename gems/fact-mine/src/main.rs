@@ -27,11 +27,16 @@ fn main() -> Result<()> {
 fn run() -> Result<()> {
     let command = parse_args(std::env::args().skip(1).collect())?;
     match command {
-        Command::SyntaxFacts { language, files } => {
+        Command::SyntaxFacts {
+            language,
+            files,
+            fields,
+        } => {
+            let fields = fields.as_ref();
             let facts = match language {
                 Some(language) => {
                     let language = Language::parse(&language)?;
-                    syntax_oracle::project_files(&files, language)
+                    syntax_oracle::project_selected_files(&files, language, fields)
                         .with_context(|| "failed to project syntax facts")?
                 }
                 None => {
@@ -55,7 +60,7 @@ fn run() -> Result<()> {
                     let mut merged: Option<serde_json::Value> = None;
                     for (language_name, batch) in batches {
                         let language = Language::parse(language_name)?;
-                        let chunk = syntax_oracle::project_files(&batch, language)
+                        let chunk = syntax_oracle::project_selected_files(&batch, language, fields)
                             .with_context(|| "failed to project syntax facts")?;
                         match merged.as_mut() {
                             None => merged = Some(chunk),
@@ -80,7 +85,9 @@ fn run() -> Result<()> {
             output,
             language_override,
             scip_indexes,
+            semantic_environments,
             complexity_summaries,
+            bundled_complexity_summaries,
             portable,
             incremental_cache,
             changed_files_only,
@@ -101,6 +108,7 @@ fn run() -> Result<()> {
                 && !changed_files_only
                 && !portable
                 && scip_indexes.is_empty()
+                && semantic_environments.is_empty()
                 && complexity_summaries.is_empty()
                 && !output.as_ref().is_some_and(|path| {
                     path.extension().and_then(|value| value.to_str()) == Some("gz")
@@ -128,8 +136,19 @@ fn run() -> Result<()> {
             for index in scip_indexes {
                 fact_mine_rust::scip::apply_json_file(&mut merged, &index)?;
             }
-            for summary in complexity_summaries {
-                fact_mine_rust::external_summary::apply_file(&mut merged, &summary)?;
+            fact_mine_rust::external_summary::apply_environment_files(
+                &mut merged,
+                semantic_environments.as_slice(),
+            )?;
+            if bundled_complexity_summaries {
+                fact_mine_rust::external_summary::apply_bundled(&mut merged)?;
+            }
+            fact_mine_rust::external_summary::apply_files(
+                &mut merged,
+                complexity_summaries.as_slice(),
+            )?;
+            if profile == Profile::TracePlan {
+                profile::refresh_runtime_call_sites(&mut merged);
             }
             if let Some(metrics) = merged.incremental_metrics.as_mut() {
                 metrics.external_enrichment_millis =
@@ -162,7 +181,9 @@ fn run() -> Result<()> {
             language_override,
             format,
             scip_indexes,
+            semantic_environments,
             complexity_summaries,
+            bundled_complexity_summaries,
         } => {
             let language_override = language_override
                 .as_deref()
@@ -172,9 +193,17 @@ fn run() -> Result<()> {
             for index in scip_indexes {
                 fact_mine_rust::scip::apply_json_file(&mut merged, &index)?;
             }
-            for summary in complexity_summaries {
-                fact_mine_rust::external_summary::apply_file(&mut merged, &summary)?;
+            fact_mine_rust::external_summary::apply_environment_files(
+                &mut merged,
+                semantic_environments.as_slice(),
+            )?;
+            if bundled_complexity_summaries {
+                fact_mine_rust::external_summary::apply_bundled(&mut merged)?;
             }
+            fact_mine_rust::external_summary::apply_files(
+                &mut merged,
+                complexity_summaries.as_slice(),
+            )?;
             let rendered = match format.as_str() {
                 "json" => serde_json::to_string_pretty(&merged.call_resolution_coverage)?,
                 "text" => render_call_resolution(&merged.call_resolution_coverage),
@@ -246,6 +275,447 @@ fn run() -> Result<()> {
                 println!("{}", rendered);
             }
         }
+        Command::NilKillTracePlan {
+            static_facts,
+            raw,
+            runtime_plan,
+            output,
+            root,
+            generated_at,
+            target_dirs,
+            exclude_dirs,
+        } => {
+            let facts: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&static_facts)?)
+                    .with_context(|| format!("failed to parse {}", static_facts.display()))?;
+            let evidence = match runtime_plan {
+                Some(path) => serde_json::from_str(&std::fs::read_to_string(&path)?)
+                    .with_context(|| format!("failed to parse {}", path.display()))?,
+                None => serde_json::Value::Null,
+            };
+            let facts = if raw {
+                fact_mine_rust::trace_plan::reshape_static_facts(&facts, &root)
+            } else {
+                facts
+            };
+            let plan = fact_mine_rust::trace_plan::TracePlan::build(&facts, &root);
+            let document =
+                plan.document(&generated_at, &target_dirs, &exclude_dirs, evidence);
+            if let Some(parent) = output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&output, serde_json::to_string_pretty(&document)?)?;
+        }
+        Command::NilKillCollect { commands, fast, continue_on_error, root } => {
+            let root = root.canonicalize().unwrap_or(root);
+            let mut config = fact_mine_rust::collect::Config::from_env(root, commands);
+            config.fast = fast;
+            config.continue_on_error = continue_on_error;
+            fact_mine_rust::collect::run(&config)?;
+        }
+        Command::NilKillCanonical { restore, state, paths } => {
+            if restore {
+                let raw = std::fs::read_to_string(&state)
+                    .with_context(|| format!("unreadable {}", state.display()))?;
+                fact_mine_rust::canonical_transaction::restore(&serde_json::from_str(&raw)?)?;
+            } else {
+                let saved = fact_mine_rust::canonical_transaction::save(
+                    &paths,
+                    &state.with_extension("d"),
+                )?;
+                fs::write(&state, serde_json::to_string(&saved)?)?;
+            }
+        }
+        Command::NilKillWorkloadPlan { targets, command, output, root } => {
+            // Null when no runner is recognizable: the caller then keeps one
+            // opaque shard per command, which is correct rather than a
+            // fallback -- nothing about such a command says which part of it a
+            // source change affects.
+            let plan = fact_mine_rust::workload_plan::build(&targets, &command, &root);
+            fs::write(&output, serde_json::to_string(&plan)?)?;
+        }
+        Command::NilKillRunShards { plan, output } => {
+            // To a file, not stdout: the traced programs are writing there,
+            // and their output belongs to the person watching it. The caller
+            // needs the failures by name to mark the snapshot stale, which an
+            // exit code cannot carry.
+            let failed = fact_mine_rust::shard_runner::run_file(&plan)?;
+            fs::write(&output, serde_json::to_string(&serde_json::json!({"failed": failed}))?)?;
+        }
+        Command::NilKillSelectIncrement { input, output } => {
+            let raw = std::fs::read_to_string(&input)
+                .with_context(|| format!("unreadable {}", input.display()))?;
+            let request: serde_json::Value = serde_json::from_str(&raw)?;
+            let selection = fact_mine_rust::snapshot::select(
+                &fact_mine_rust::snapshot::Increment {
+                    manifest: &request["manifest"],
+                    current_hashes: &request["current_hashes"],
+                    current_environment: &request["environment"],
+                    functions: &request["functions"],
+                    workload: &request["workload"],
+                    trace_plan_digest: request["trace_plan_digest"].as_str().unwrap_or_default(),
+                },
+            );
+            fs::write(&output, serde_json::to_string(&selection)?)?;
+        }
+        Command::NilKillShardBookkeeping { inventory, shards, output, root } => {
+            let raw = std::fs::read_to_string(&inventory)
+                .with_context(|| format!("unreadable inventory {}", inventory.display()))?;
+            let inventory: std::collections::BTreeMap<String, serde_json::Value> =
+                serde_json::from_str(&raw)?;
+            let mut answers = serde_json::Map::new();
+            for shard in &shards {
+                let (dependencies, callsites) =
+                    fact_mine_rust::function_inventory::shard_bookkeeping(
+                        &inventory, shard, &root,
+                    );
+                let id = shard
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                answers.insert(
+                    id,
+                    serde_json::json!({"dependencies": dependencies, "callsites": callsites}),
+                );
+            }
+            fs::write(&output, serde_json::to_string(&answers)?)?;
+            eprintln!("Bookkept {} shards", shards.len());
+        }
+        Command::NilKillFunctionInventory { files, plan, output, root } => {
+            let plan = plan
+                .as_deref()
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            let files = canonical_runtime_sources(&files, &root)?;
+            let profile = build_profile(&files, None, Profile::TracePlan)?;
+            let methods = serde_json::to_value(&profile.methods)?;
+            let count = fact_mine_rust::function_inventory::write(
+                methods.as_array().map_or(&[][..], Vec::as_slice),
+                &plan,
+                &root,
+                &output,
+            )?;
+            eprintln!("Inventoried {count} functions");
+        }
+        Command::NilKillMergeEvidence { inputs, output, plan } => {
+            let mut documents = inputs
+                .iter()
+                .map(|path| fact_mine_rust::runtime_protocol::read_runtime_evidence(path))
+                .collect::<Result<Vec<_>>>()?;
+            // An incremental collect mixes shards stored under an older plan
+            // with ones just collected, so each is brought onto the plan the
+            // merged document will claim.
+            if let Some(plan) = plan {
+                let plan = fact_mine_rust::runtime_trace::read_plan(&plan)?;
+                documents = documents
+                    .iter()
+                    .map(|document| {
+                        fact_mine_rust::runtime_trace::rebase_evidence(document, &plan)
+                    })
+                    .collect();
+            }
+            let merged = fact_mine_rust::runtime_trace::merge_evidence(&documents)?;
+            fact_mine_rust::runtime_trace::write_json(
+                &output,
+                &(fact_mine_rust::runtime_protocol::to_json_with_defaults(&merged)? + "\n"),
+            )?;
+            eprintln!("Merged {} evidence documents", inputs.len());
+        }
+        Command::NilKillScipIndex {
+            runtime_dir,
+            evidence,
+            plan,
+            output,
+            attestation,
+            files,
+            environment,
+            root,
+        } => {
+            let raw = fact_mine_rust::runtime_protocol::read_json(&plan)
+                .with_context(|| format!("unreadable plan {}", plan.display()))?;
+            let document: serde_json::Value = serde_json::from_str(&raw)?;
+            let runtime_plan = document
+                .get("runtime_evidence")
+                .filter(|value| value.is_object())
+                .cloned()
+                .unwrap_or(document);
+            let environment = environment
+                .iter()
+                .filter_map(|claim| claim.split_once('='))
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect::<std::collections::BTreeMap<_, _>>();
+
+            let emitted = fact_mine_rust::scip_emit::emit(
+                &root,
+                &runtime_dir,
+                &evidence,
+                &runtime_plan,
+                &files,
+                &environment,
+                |evidence_path, sources| {
+                    Ok(runtime_scip_overlay(&root, sources, &plan, evidence_path)?.index)
+                },
+            )?;
+            fs::write(&output, serde_json::to_string(&emitted.index)? + "\n")?;
+            fact_mine_rust::runtime_trace::write_json(
+                &attestation,
+                &(serde_json::to_string_pretty(&emitted.attestation)? + "\n"),
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "index": output,
+                    "attestation": attestation,
+                    "events": emitted.events,
+                    "inferred_events": emitted.inferred_events,
+                    "documents": emitted.documents,
+                    "occurrences": emitted.occurrences,
+                    "invalid_events": emitted.invalid_events,
+                    "excluded_events": 0,
+                    "runtime_evidence": evidence,
+                    "runtime_value_observations": emitted.observations,
+                }))?
+            );
+        }
+        Command::NilKillTraceDocument { runtime_dirs, plan, root } => {
+            let raw = fact_mine_rust::runtime_protocol::read_json(&plan)
+                .with_context(|| format!("unreadable plan {}", plan.display()))?;
+            let plan: serde_json::Value = serde_json::from_str(&raw)?;
+            let digest = plan["runtime_evidence"]["plan_digest"]
+                .as_str()
+                .or_else(|| plan["plan_digest"].as_str())
+                .unwrap_or_default()
+                .to_string();
+            let built = fact_mine_rust::parallel::map_ordered(&runtime_dirs, |directory| {
+                // The runtime that observed, and the run it observed under,
+                // both come from the shard's own document.
+                let (runtime, run_id) = fact_mine_rust::trace_document::runtime_of(directory)?;
+                let run_ids = if run_id.is_empty() { vec![] } else { vec![run_id] };
+                fact_mine_rust::trace_document::write(
+                    &root, directory, &digest, &runtime, &run_ids,
+                )?;
+                Ok(1usize)
+            })?;
+            eprintln!("Built {} trace documents", built.iter().sum::<usize>());
+        }
+        Command::NilKillCollectorPlan { plan, output, target_dirs, root } => {
+            fact_mine_rust::collector_plan::write(&plan, &output, &target_dirs, &root)?;
+        }
+        Command::NilKillCollectorExport { runtime_dirs, plan, source_roles, root } => {
+            let plan = plan
+                .as_deref()
+                .map(|path| -> Result<serde_json::Value> {
+                    let raw = fact_mine_rust::runtime_protocol::read_json(path)
+                        .with_context(|| format!("unreadable plan {}", path.display()))?;
+                    Ok(serde_json::from_str(&raw)?)
+                })
+                .transpose()?;
+            let anchors = fact_mine_rust::collector_export::anchors_by_key(plan.as_ref(), &root);
+            let nonproduction = read_nonproduction(source_roles.as_deref(), &root);
+            let project_name = std::env::var("NIL_KILL_PROJECT_NAME").unwrap_or_else(|_| {
+                root.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default()
+            });
+            let project_version = std::env::var("NIL_KILL_PROJECT_VERSION")
+                .unwrap_or_else(|_| "workspace".to_string());
+            let shaped = fact_mine_rust::parallel::map_ordered(&runtime_dirs, |directory| {
+                let mut written = 0;
+                let mut documents = std::fs::read_dir(directory)
+                    .with_context(|| format!("unreadable shard {}", directory.display()))?
+                    .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                    .filter(|path| {
+                        path.file_name().is_some_and(|name| {
+                            let name = name.to_string_lossy();
+                            name.starts_with("collector-raw-") && name.ends_with(".json.gz")
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                documents.sort();
+                for path in documents {
+                    let raw = fact_mine_rust::runtime_protocol::read_json(&path)
+                        .with_context(|| format!("unreadable {}", path.display()))?;
+                    let document: fact_mine_rust::collector_export::CollectorDocument =
+                        serde_json::from_str(&raw)
+                            .with_context(|| format!("invalid {}", path.display()))?;
+                    fact_mine_rust::collector_export::Export::new(
+                        &document,
+                        &anchors,
+                        nonproduction.clone(),
+                        project_name.clone(),
+                        project_version.clone(),
+                    )
+                    .write(directory)?;
+                    written += 1;
+                }
+                Ok(written)
+            })?;
+            eprintln!(
+                "Shaped {} collector documents across {} shards",
+                shaped.iter().sum::<usize>(),
+                runtime_dirs.len()
+            );
+        }
+        Command::NilKillDeriveDomains { inputs, source_roles, root } => {
+            // Which files hold non-production code is a fact about the collect,
+            // not about the traced program, so it is read here rather than
+            // carried through every observation.
+            let nonproduction =
+                read_nonproduction(source_roles.as_deref(), &root).into_iter().collect::<Vec<_>>();
+            let derived = fact_mine_rust::parallel::map_ordered(&inputs, |path| {
+                let raw = fact_mine_rust::runtime_protocol::read_json(path)
+                    .with_context(|| format!("unreadable collector document {}", path.display()))?;
+                let mut document: serde_json::Value = serde_json::from_str(&raw)
+                    .with_context(|| format!("invalid collector document {}", path.display()))?;
+                let count = fact_mine_rust::value_domain::derive_document(
+                    &mut document,
+                    nonproduction.clone(),
+                );
+                fact_mine_rust::runtime_trace::write_json(
+                    path,
+                    &serde_json::to_string(&document)?,
+                )?;
+                Ok(count)
+            })?;
+            eprintln!(
+                "Derived {} value domains across {} collector documents",
+                derived.iter().sum::<usize>(),
+                inputs.len()
+            );
+        }
+        Command::NilKillDecodeCalls { input, root } => {
+            let text = std::fs::read_to_string(&input)?;
+            let rows: Vec<serde_json::Value> = text
+                .lines()
+                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .map(|event| fact_mine_rust::runtime_decode::call(&event, &root))
+                .collect();
+            println!("{}", serde_json::to_string(&rows)?);
+        }
+        Command::RuntimePlan {
+            files,
+            output,
+            root,
+            language_override,
+        } => {
+            let language_override = language_override
+                .as_deref()
+                .map(Language::parse)
+                .transpose()?;
+            let root = root
+                .unwrap_or(std::env::current_dir().context("failed to determine project root")?);
+            let files = canonical_runtime_sources(&files, &root)?;
+            let profile = build_profile(&files, language_override, Profile::TracePlan)?;
+            let plan = fact_mine_rust::runtime_protocol::build_trace_plan(&profile, &files, &root)?;
+            let json = fact_mine_rust::runtime_protocol::to_json(&plan)?;
+            let rendered =
+                serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&json)?)?
+                    + "\n";
+            write_text_artifact(&rendered, output.as_ref())?;
+            eprintln!(
+                "Runtime plan: {} documents, {} exact evidence anchors",
+                plan.documents.len(),
+                plan.requests.len()
+            );
+        }
+        Command::RuntimeTrace {
+            plan,
+            traces,
+            output,
+            to_stdout,
+            merged,
+            root,
+        } => {
+            // The plan is parsed and digest-checked once however many traces are
+            // joined; paying that per shard cost more than the join itself. The
+            // shards themselves are independent, so they join concurrently --
+            // this loop was the largest sequential stage of a collect.
+            // Stage timing, off unless asked for, so this command can be
+            // accounted for the same way the collector's stages are.
+            let timed = std::env::var("NIL_KILL_STAGE_TIMING").as_deref() == Ok("1");
+            let mark = std::time::Instant::now();
+            let plan = fact_mine_rust::runtime_trace::read_plan(&plan)?;
+            if timed {
+                eprintln!("  rust plan-read      {:.2}s", mark.elapsed().as_secs_f64());
+            }
+            let root = std::fs::canonicalize(&root).unwrap_or(root);
+            let mark = std::time::Instant::now();
+            // Writing beside each trace is the default whatever the count.
+            // Making one trace behave differently from many meant a single-shard
+            // collect silently produced no evidence file at all.
+            let single = to_stdout;
+            let joined = fact_mine_rust::parallel::map_ordered(&traces, |path| {
+                let trace = fact_mine_rust::runtime_trace::read_trace(path)?;
+                let evidence =
+                    fact_mine_rust::runtime_trace::build_evidence(&root, &plan, &trace)?;
+                match (&output, single) {
+                    (Some(target), _) => {
+                        fact_mine_rust::runtime_trace::write_json(target, &evidence)?;
+                        Ok(None)
+                    }
+                    (None, true) => Ok(Some(evidence)),
+                    (None, false) if merged.is_some() => {
+                        let target = path.with_file_name("runtime-evidence.v1.json.gz");
+                        fact_mine_rust::runtime_trace::write_json(&target, &evidence)?;
+                        Ok(Some(evidence))
+                    }
+                    (None, false) => {
+                        let target = path.with_file_name("runtime-evidence.v1.json.gz");
+                        fact_mine_rust::runtime_trace::write_json(&target, &evidence)?;
+                        Ok(None)
+                    }
+                }
+            })?;
+            if timed {
+                eprintln!("  rust join+write     {:.2}s", mark.elapsed().as_secs_f64());
+            }
+            // Merging here saves writing every shard's document only for the
+            // collector to read them all back and merge them in Ruby.
+            if let Some(target) = &merged {
+                let mark = std::time::Instant::now();
+                let documents = joined
+                    .iter()
+                    .flatten()
+                    .map(|text| {
+                        fact_mine_rust::runtime_protocol::parse_runtime_evidence_json(text)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if timed {
+                    eprintln!("  rust merge-parse    {:.2}s", mark.elapsed().as_secs_f64());
+                }
+                let mark = std::time::Instant::now();
+                let document = fact_mine_rust::runtime_trace::merge_evidence(&documents)?;
+                if timed {
+                    eprintln!("  rust merge          {:.2}s", mark.elapsed().as_secs_f64());
+                }
+                let mark = std::time::Instant::now();
+                fact_mine_rust::runtime_trace::write_json(
+                    target,
+                    &fact_mine_rust::runtime_protocol::to_json_with_defaults(&document)?,
+                )?;
+                if timed {
+                    eprintln!("  rust canonical+write {:.2}s", mark.elapsed().as_secs_f64());
+                }
+            } else {
+                for evidence in joined.into_iter().flatten() {
+                    println!("{evidence}");
+                }
+            }
+            eprintln!(
+                "Runtime trace joined: {} anchors over {} trace(s)",
+                plan.requests.len(),
+                traces.len()
+            );
+        }
+        Command::RuntimeEvidenceValidate { plan, evidence } => {
+            let plan = fact_mine_rust::runtime_protocol::read_trace_plan(&plan)?;
+            let evidence = fact_mine_rust::runtime_protocol::read_runtime_evidence(&evidence)?;
+            fact_mine_rust::runtime_protocol::validate_runtime_evidence(&plan, &evidence)?;
+            eprintln!(
+                "Runtime evidence valid: {} runs, {} exact anchors",
+                evidence.runs.len(),
+                evidence.anchors.len()
+            );
+        }
         Command::LuaScip {
             files,
             output,
@@ -267,6 +737,63 @@ fn run() -> Result<()> {
                 generated.stats.project_definitions,
                 generated.stats.external_definitions,
                 generated.stats.unresolved_calls,
+            );
+        }
+        Command::RuntimeScip {
+            files,
+            plan,
+            evidence,
+            output,
+            root,
+            language_override,
+        } => {
+            let language_override = language_override
+                .as_deref()
+                .map(Language::parse)
+                .transpose()?;
+            let root = root
+                .unwrap_or(std::env::current_dir().context("failed to determine project root")?);
+            let files = canonical_runtime_sources(&files, &root)?;
+            let supplied_plan = fact_mine_rust::runtime_protocol::read_trace_plan(&plan)?;
+            let plan_files = supplied_plan
+                .documents
+                .iter()
+                .map(|document| root.join(&document.relative_path))
+                .collect::<Vec<_>>();
+            let (mut profile, plan_profile) =
+                build_profile_pair(&files, &plan_files, language_override)?;
+            // Runtime discovery may add workspace callees to the analysis
+            // corpus after collection. Those files are useful declaration
+            // context, but were never evidence anchors and therefore must not
+            // alter the trace-plan digest. Rebuild anchor bindings from the
+            // exact document set named by the validated plan.
+            let rebuilt = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+                &plan_profile,
+                &plan_files,
+                &root,
+            )?;
+            if supplied_plan.plan_digest != rebuilt.plan.plan_digest {
+                bail!("supplied runtime trace plan does not describe the current source snapshot");
+            }
+            let evidence = fact_mine_rust::runtime_protocol::read_runtime_evidence(&evidence)?;
+            let overlay = fact_mine_rust::runtime_evidence::apply_protocol_to_profile(
+                &mut profile,
+                &rebuilt,
+                &evidence,
+            )?;
+            let rendered = serde_json::to_string_pretty(&overlay.index)? + "\n";
+            if let Some(output) = output {
+                fs::write(&output, rendered)
+                    .with_context(|| format!("failed to write {}", output.display()))?;
+            } else {
+                print!("{rendered}");
+            }
+            eprintln!(
+                "Runtime SCIP: {} observed sites, {} inferred sites, {} typed receivers, {} occurrences",
+                overlay.stats.observed_call_sites,
+                overlay.stats.inferred_call_sites,
+                overlay.stats.typed_receivers,
+                overlay.stats.emitted_occurrences,
             );
         }
     }
@@ -316,6 +843,26 @@ fn write_profile_artifact(
     write_profile_json(output, portable, &mut writer)?;
     writer.write_all(b"\n")?;
     writer.flush()?;
+    Ok(())
+}
+
+fn write_text_artifact(contents: &str, destination: Option<&PathBuf>) -> Result<()> {
+    if let Some(path) = destination {
+        let file = fs::File::create(path)
+            .with_context(|| format!("failed to create {}", path.display()))?;
+        let buffered = BufWriter::new(file);
+        if path.extension().and_then(|extension| extension.to_str()) == Some("gz") {
+            let mut encoder = GzEncoder::new(buffered, Compression::fast());
+            encoder.write_all(contents.as_bytes())?;
+            encoder.finish()?.flush()?;
+        } else {
+            let mut writer = buffered;
+            writer.write_all(contents.as_bytes())?;
+            writer.flush()?;
+        }
+    } else {
+        print!("{contents}");
+    }
     Ok(())
 }
 
@@ -375,6 +922,150 @@ fn build_profile(
     };
     Ok(output)
 }
+
+/// The analysis profile and the trace-plan profile are extracted from the same
+/// sources, so parse each file once and run both extractions over it. Building
+/// them separately parsed the whole snapshot twice.
+/// Which files this collect was told hold non-production code. A fact about the
+/// collect, not about any traced program, so it is read once here.
+fn read_nonproduction(
+    source_roles: Option<&std::path::Path>,
+    root: &std::path::Path,
+) -> std::collections::BTreeSet<String> {
+    source_roles
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|roles| {
+            roles["nonproduction"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.as_str())
+                .map(|entry| root.join(entry).to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The overlay itself: parse the sources, rebuild the plan they describe, check
+/// it still names the same snapshot, and lay the observed values over it.
+fn runtime_scip_overlay(
+    root: &std::path::Path,
+    files: &[PathBuf],
+    plan: &std::path::Path,
+    evidence: &std::path::Path,
+) -> Result<fact_mine_rust::runtime_evidence::RuntimeScipOverlay> {
+    let files = canonical_runtime_sources(files, root)?;
+    let supplied = fact_mine_rust::runtime_protocol::read_trace_plan(plan)?;
+    let plan_files = supplied
+        .documents
+        .iter()
+        .map(|document| root.join(&document.relative_path))
+        .collect::<Vec<_>>();
+    let (mut profile, plan_profile) = build_profile_pair(&files, &plan_files, None)?;
+    let rebuilt = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+        &plan_profile,
+        &plan_files,
+        root,
+    )?;
+    if supplied.plan_digest != rebuilt.plan.plan_digest {
+        bail!("supplied runtime trace plan does not describe the current source snapshot");
+    }
+    let evidence = fact_mine_rust::runtime_protocol::read_runtime_evidence(evidence)?;
+    fact_mine_rust::runtime_evidence::apply_protocol_to_profile(&mut profile, &rebuilt, &evidence)
+}
+
+fn build_profile_pair(
+    analysis_files: &[PathBuf],
+    plan_files: &[PathBuf],
+    language_override: Option<Language>,
+) -> Result<(profile::ProfileOutput, profile::ProfileOutput)> {
+    let mut union = Vec::new();
+    for file in analysis_files.iter().chain(plan_files) {
+        if !union.contains(file) {
+            union.push(file.clone());
+        }
+    }
+    let wanted = |files: &[PathBuf], file: &PathBuf| files.contains(file);
+    let parsed = parallel::map_ordered(&union, |file| {
+        let language = if let Some(language) = language_override {
+            language
+        } else {
+            Language::for_path(file)
+                .with_context(|| format!("cannot detect language for {}", file.display()))?
+        };
+        let document = syntax::parse_file(file.clone(), language)?;
+        let analysis = wanted(analysis_files, file)
+            .then(|| profile::extract_local(&document, Profile::Espalier));
+        let plan =
+            wanted(plan_files, file).then(|| profile::extract_local(&document, Profile::TracePlan));
+        Ok((
+            analysis,
+            plan,
+            document.parse_recovered.then(|| profile::ParseRecovery {
+                path: file.to_string_lossy().to_string(),
+                spans: document.parse_recovery_spans,
+            }),
+        ))
+    })?;
+
+    // Each profile is finalized over its own files, in its own order, so the
+    // result is exactly what building it alone would have produced.
+    let position = |file: &PathBuf| union.iter().position(|entry| entry == file);
+    let mut analysis_shards = Vec::with_capacity(analysis_files.len());
+    let mut plan_shards = Vec::with_capacity(plan_files.len());
+    for file in analysis_files {
+        if let Some(shard) = position(file).and_then(|at| parsed[at].0.clone()) {
+            analysis_shards.push(shard);
+        }
+    }
+    for file in plan_files {
+        if let Some(shard) = position(file).and_then(|at| parsed[at].1.clone()) {
+            plan_shards.push(shard);
+        }
+    }
+    let recoveries = |files: &[PathBuf]| {
+        files
+            .iter()
+            .filter_map(|file| position(file).and_then(|at| parsed[at].2.clone()))
+            .collect::<Vec<_>>()
+    };
+    let finalize = |selected: Profile, files: &[PathBuf], shards: Vec<profile::LocalFactShard>| {
+        let recovered = recoveries(files);
+        let mut output = profile::ProjectFactFinalizer::new(selected).finalize(shards);
+        output.input_coverage = profile::InputCoverage {
+            selected_files: files.len(),
+            parsed_files: files.len(),
+            parse_recovery_files: recovered
+                .iter()
+                .map(|recovery| recovery.path.clone())
+                .collect(),
+            parse_recoveries: recovered,
+        };
+        output
+    };
+    Ok((
+        finalize(Profile::Espalier, analysis_files, analysis_shards),
+        finalize(Profile::TracePlan, plan_files, plan_shards),
+    ))
+}
+
+fn canonical_runtime_sources(files: &[PathBuf], root: &std::path::Path) -> Result<Vec<PathBuf>> {
+    files
+        .iter()
+        .map(|file| {
+            let source = if file.is_absolute() {
+                file.clone()
+            } else {
+                root.join(file)
+            };
+            source.canonicalize().with_context(|| {
+                format!("failed to canonicalize runtime source {}", file.display())
+            })
+        })
+        .collect()
+}
+
 
 fn build_requested_profile(
     files: &[PathBuf],
@@ -491,9 +1182,113 @@ fn percent(numerator: usize, denominator: usize) -> f64 {
 }
 
 enum Command {
+    /// Assemble the collector's instrumentation plan from static facts.
+    NilKillTracePlan {
+        static_facts: PathBuf,
+        /// True when the file is unreshaped `profile trace-plan` output.
+        raw: bool,
+        runtime_plan: Option<PathBuf>,
+        output: PathBuf,
+        root: PathBuf,
+        generated_at: String,
+        target_dirs: Vec<String>,
+        exclude_dirs: Vec<String>,
+    },
+    /// Collect runtime evidence: plan, trace, join, index.
+    NilKillCollect {
+        commands: Vec<Vec<String>>,
+        fast: bool,
+        continue_on_error: bool,
+        root: PathBuf,
+    },
+    /// Preserve a collect's canonical artifacts, or put them back.
+    NilKillCanonical {
+        restore: bool,
+        state: PathBuf,
+        paths: Vec<PathBuf>,
+    },
+    /// Split a workload into one shard per test file.
+    NilKillWorkloadPlan {
+        targets: Vec<PathBuf>,
+        command: Vec<String>,
+        output: PathBuf,
+        root: PathBuf,
+    },
+    /// Run one traced program per shard, several at a time.
+    NilKillRunShards {
+        plan: PathBuf,
+        output: PathBuf,
+    },
+    /// Which shards an incremental collect has to rerun.
+    NilKillSelectIncrement {
+        input: PathBuf,
+        output: PathBuf,
+    },
+    /// Which functions each shard exercised, and which callsites it reached.
+    NilKillShardBookkeeping {
+        inventory: PathBuf,
+        shards: Vec<PathBuf>,
+        output: PathBuf,
+        root: PathBuf,
+    },
+    /// Stable function identities and fingerprints for an incremental collect.
+    NilKillFunctionInventory {
+        files: Vec<PathBuf>,
+        plan: Option<PathBuf>,
+        output: PathBuf,
+        root: PathBuf,
+    },
+    /// Merge evidence documents into one canonical document.
+    NilKillMergeEvidence {
+        inputs: Vec<PathBuf>,
+        output: PathBuf,
+        plan: Option<PathBuf>,
+    },
+    /// Emit the runtime SCIP index for a collect, and attest what it covers.
+    NilKillScipIndex {
+        runtime_dir: PathBuf,
+        evidence: PathBuf,
+        plan: PathBuf,
+        output: PathBuf,
+        attestation: PathBuf,
+        files: Vec<PathBuf>,
+        environment: Vec<String>,
+        root: PathBuf,
+    },
+    /// Build each shard's trace document from the rows it holds.
+    NilKillTraceDocument {
+        runtime_dirs: Vec<PathBuf>,
+        plan: PathBuf,
+        root: PathBuf,
+    },
+    /// Write the flat plan a traced program reads.
+    NilKillCollectorPlan {
+        plan: PathBuf,
+        output: PathBuf,
+        target_dirs: Vec<String>,
+        root: PathBuf,
+    },
+    /// Shape the collector's documents into the rows the pipeline reads.
+    NilKillCollectorExport {
+        runtime_dirs: Vec<PathBuf>,
+        plan: Option<PathBuf>,
+        source_roles: Option<PathBuf>,
+        root: PathBuf,
+    },
+    /// Turn the collector's raw observations into value domains.
+    NilKillDeriveDomains {
+        inputs: Vec<PathBuf>,
+        source_roles: Option<PathBuf>,
+        root: PathBuf,
+    },
+    NilKillDecodeCalls {
+        input: PathBuf,
+        root: PathBuf,
+    },
     SyntaxFacts {
         language: Option<String>,
         files: Vec<PathBuf>,
+        fields: Option<std::collections::BTreeSet<String>>,
     },
     Profile {
         profile: String,
@@ -501,7 +1296,9 @@ enum Command {
         output: Option<PathBuf>,
         language_override: Option<String>,
         scip_indexes: Vec<PathBuf>,
+        semantic_environments: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
+        bundled_complexity_summaries: bool,
         portable: bool,
         incremental_cache: Option<PathBuf>,
         changed_files_only: bool,
@@ -512,13 +1309,41 @@ enum Command {
         language_override: Option<String>,
         format: String,
         scip_indexes: Vec<PathBuf>,
+        semantic_environments: Vec<PathBuf>,
         complexity_summaries: Vec<PathBuf>,
+        bundled_complexity_summaries: bool,
     },
     LuaScip {
         files: Vec<PathBuf>,
         output: Option<PathBuf>,
         root: Option<PathBuf>,
         server: Option<PathBuf>,
+    },
+    RuntimeScip {
+        files: Vec<PathBuf>,
+        plan: PathBuf,
+        evidence: PathBuf,
+        output: Option<PathBuf>,
+        root: Option<PathBuf>,
+        language_override: Option<String>,
+    },
+    RuntimePlan {
+        files: Vec<PathBuf>,
+        output: Option<PathBuf>,
+        root: Option<PathBuf>,
+        language_override: Option<String>,
+    },
+    RuntimeEvidenceValidate {
+        plan: PathBuf,
+        evidence: PathBuf,
+    },
+    RuntimeTrace {
+        plan: PathBuf,
+        traces: Vec<PathBuf>,
+        output: Option<PathBuf>,
+        to_stdout: bool,
+        merged: Option<PathBuf>,
+        root: PathBuf,
     },
 }
 
@@ -527,6 +1352,619 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
     let command = iter.next().unwrap_or_default();
 
     match command.as_str() {
+        "nil-kill-trace-plan" => {
+            let mut static_facts = None;
+            let mut raw = false;
+            let mut runtime_plan = None;
+            let mut output = None;
+            let mut root = None;
+            let mut generated_at = None;
+            let mut target_dirs = Vec::new();
+            let mut exclude_dirs = Vec::new();
+            while let Some(arg) = iter.next() {
+                let mut take = |name: &str| -> Result<String> {
+                    iter.next().with_context(|| format!("{name} requires a value"))
+                };
+                match arg.as_str() {
+                    "--static-facts" => static_facts = Some(PathBuf::from(take("--static-facts")?)),
+                    "--raw-facts" => {
+                        static_facts = Some(PathBuf::from(take("--raw-facts")?));
+                        raw = true;
+                    }
+                    "--runtime-plan" => runtime_plan = Some(PathBuf::from(take("--runtime-plan")?)),
+                    "--output" => output = Some(PathBuf::from(take("--output")?)),
+                    "--root" => root = Some(PathBuf::from(take("--root")?)),
+                    "--generated-at" => generated_at = Some(take("--generated-at")?),
+                    "--target-dir" => target_dirs.push(take("--target-dir")?),
+                    "--exclude-dir" => exclude_dirs.push(take("--exclude-dir")?),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillTracePlan {
+                static_facts: static_facts.context("--static-facts is required")?,
+                raw,
+                runtime_plan,
+                output: output.context("--output is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+                generated_at: generated_at.unwrap_or_default(),
+                target_dirs,
+                exclude_dirs,
+            })
+        }
+        "nil-kill-collect" => {
+            let mut commands = Vec::new();
+            let mut fast = false;
+            let mut continue_on_error = false;
+            let mut root = None;
+            let mut glob = None;
+            let mut template = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--fast" => fast = true,
+                    "--continue-on-error" => continue_on_error = true,
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    "--glob" => glob = Some(iter.next().context("--glob")?),
+                    "--template" => template = Some(iter.next().context("--template")?),
+                    "--cmd" => {
+                        commands.push(
+                            shell_words::split(&iter.next().context("--cmd")?)
+                                .context("--cmd is not a valid command")?,
+                        );
+                    }
+                    // One command per line, so a workload too long for a
+                    // command line can still be one collect.
+                    "--commands" => {
+                        let file = iter.next().context("--commands requires a file")?;
+                        let text = std::fs::read_to_string(&file)
+                            .with_context(|| format!("unreadable command file {file}"))?;
+                        for line in text.lines() {
+                            let line = line.trim();
+                            if line.is_empty() || line.starts_with('#') {
+                                continue;
+                            }
+                            commands.push(
+                                shell_words::split(line)
+                                    .with_context(|| format!("{file}: {line} is not a command"))?,
+                            );
+                        }
+                    }
+                    "--" => {
+                        commands.push(iter.by_ref().collect());
+                        break;
+                    }
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            // One command per matched file, which is what makes a shard per
+            // test possible without the caller writing them all out.
+            if let (Some(pattern), Some(template)) = (glob, template) {
+                let mut matched = glob::glob(&pattern)
+                    .context("--glob is not a valid pattern")?
+                    .filter_map(Result::ok)
+                    .collect::<Vec<_>>();
+                matched.sort();
+                for path in matched {
+                    let filled = template.replace("{file}", &path.to_string_lossy());
+                    commands.push(shell_words::split(&filled).context("--template")?);
+                }
+            }
+            Ok(Command::NilKillCollect {
+                commands,
+                fast,
+                continue_on_error,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "nil-kill-canonical" => {
+            let mut restore = false;
+            let mut state = None;
+            let mut paths = Vec::new();
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--restore" => restore = true,
+                    "--state" => state = Some(PathBuf::from(iter.next().context("--state")?)),
+                    "--path" => paths.push(PathBuf::from(iter.next().context("--path")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillCanonical {
+                restore,
+                state: state.context("--state is required")?,
+                paths,
+            })
+        }
+        "nil-kill-workload-plan" => {
+            let mut targets = Vec::new();
+            let mut command = Vec::new();
+            let mut output = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--target" => targets.push(PathBuf::from(iter.next().context("--target")?)),
+                    "--arg" => command.push(iter.next().context("--arg")?),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillWorkloadPlan {
+                targets,
+                command,
+                output: output.context("--output is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "nil-kill-run-shards" => {
+            let mut plan = None;
+            let mut output = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillRunShards {
+                plan: plan.context("--plan is required")?,
+                output: output.context("--output is required")?,
+            })
+        }
+        "nil-kill-select-increment" => {
+            let mut input = None;
+            let mut output = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--input" => input = Some(PathBuf::from(iter.next().context("--input")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillSelectIncrement {
+                input: input.context("--input is required")?,
+                output: output.context("--output is required")?,
+            })
+        }
+        "nil-kill-shard-bookkeeping" => {
+            let mut inventory = None;
+            let mut shards = Vec::new();
+            let mut output = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--inventory" => {
+                        inventory = Some(PathBuf::from(iter.next().context("--inventory")?));
+                    }
+                    "--shard" => shards.push(PathBuf::from(iter.next().context("--shard")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillShardBookkeeping {
+                inventory: inventory.context("--inventory is required")?,
+                shards,
+                output: output.context("--output is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "nil-kill-function-inventory" => {
+            let mut files = Vec::new();
+            let mut plan = None;
+            let mut output = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--file" => files.push(PathBuf::from(iter.next().context("--file")?)),
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillFunctionInventory {
+                files,
+                plan,
+                output: output.context("--output is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "nil-kill-merge-evidence" => {
+            let mut inputs = Vec::new();
+            let mut output = None;
+            let mut plan = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--input" => inputs.push(PathBuf::from(iter.next().context("--input")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            if inputs.is_empty() {
+                bail!("nil-kill-merge-evidence requires at least one --input");
+            }
+            Ok(Command::NilKillMergeEvidence {
+                inputs,
+                output: output.context("--output is required")?,
+                plan,
+            })
+        }
+        "nil-kill-scip-index" => {
+            let mut runtime_dir = None;
+            let mut evidence = None;
+            let mut plan = None;
+            let mut output = None;
+            let mut attestation = None;
+            let mut files = Vec::new();
+            let mut environment = Vec::new();
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--runtime-dir" => {
+                        runtime_dir = Some(PathBuf::from(iter.next().context("--runtime-dir")?));
+                    }
+                    "--evidence" => {
+                        evidence = Some(PathBuf::from(iter.next().context("--evidence")?));
+                    }
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--attestation" => {
+                        attestation = Some(PathBuf::from(iter.next().context("--attestation")?));
+                    }
+                    "--file" => files.push(PathBuf::from(iter.next().context("--file")?)),
+                    "--environment" => environment.push(iter.next().context("--environment")?),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillScipIndex {
+                runtime_dir: runtime_dir.context("--runtime-dir is required")?,
+                evidence: evidence.context("--evidence is required")?,
+                plan: plan.context("--plan is required")?,
+                output: output.context("--output is required")?,
+                attestation: attestation.context("--attestation is required")?,
+                files,
+                environment,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "nil-kill-trace-document" => {
+            let mut runtime_dirs = Vec::new();
+            let mut plan = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--runtime-dir" => {
+                        runtime_dirs.push(PathBuf::from(iter.next().context("--runtime-dir")?));
+                    }
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillTraceDocument {
+                runtime_dirs,
+                plan: plan.context("--plan is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "nil-kill-collector-plan" => {
+            let mut plan = None;
+            let mut output = None;
+            let mut target_dirs = Vec::new();
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--output" => output = Some(PathBuf::from(iter.next().context("--output")?)),
+                    "--target-dir" => target_dirs.push(iter.next().context("--target-dir")?),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillCollectorPlan {
+                plan: plan.context("--plan is required")?,
+                output: output.context("--output is required")?,
+                target_dirs,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "nil-kill-collector-export" => {
+            let mut runtime_dirs = Vec::new();
+            let mut plan = None;
+            let mut source_roles = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--runtime-dir" => {
+                        runtime_dirs.push(PathBuf::from(iter.next().context("--runtime-dir")?));
+                    }
+                    "--plan" => plan = Some(PathBuf::from(iter.next().context("--plan")?)),
+                    "--source-roles" => {
+                        source_roles = Some(PathBuf::from(iter.next().context("--source-roles")?));
+                    }
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            if runtime_dirs.is_empty() {
+                bail!("nil-kill-collector-export requires at least one --runtime-dir");
+            }
+            Ok(Command::NilKillCollectorExport {
+                runtime_dirs,
+                plan,
+                source_roles,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "nil-kill-derive-domains" => {
+            let mut inputs = Vec::new();
+            let mut source_roles = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--input" => inputs.push(PathBuf::from(iter.next().context("--input")?)),
+                    "--source-roles" => {
+                        source_roles = Some(PathBuf::from(iter.next().context("--source-roles")?));
+                    }
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            if inputs.is_empty() {
+                bail!("nil-kill-derive-domains requires at least one --input");
+            }
+            Ok(Command::NilKillDeriveDomains {
+                inputs,
+                source_roles,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "nil-kill-decode-calls" => {
+            let mut input = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--input" => input = Some(PathBuf::from(iter.next().context("--input")?)),
+                    "--root" => root = Some(PathBuf::from(iter.next().context("--root")?)),
+                    other => bail!("unsupported option: {other}"),
+                }
+            }
+            Ok(Command::NilKillDecodeCalls {
+                input: input.context("--input is required")?,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "runtime-plan" => {
+            let mut output = None;
+            let mut root = None;
+            let mut language_override = None;
+            let mut files = Vec::new();
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--output" => {
+                        output = Some(PathBuf::from(
+                            iter.next().with_context(|| "--output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--output=") => {
+                        output = Some(PathBuf::from(other.strip_prefix("--output=").unwrap()));
+                    }
+                    "--root" => {
+                        root = Some(PathBuf::from(
+                            iter.next().with_context(|| "--root requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--root=") => {
+                        root = Some(PathBuf::from(other.strip_prefix("--root=").unwrap()));
+                    }
+                    "--language" => {
+                        language_override =
+                            Some(iter.next().with_context(|| "--language requires a value")?);
+                    }
+                    other if other.starts_with("--language=") => {
+                        language_override =
+                            Some(other.strip_prefix("--language=").unwrap().to_string());
+                    }
+                    other if other.starts_with("--") => bail!("unsupported option: {other}"),
+                    path => files.push(PathBuf::from(path)),
+                }
+            }
+            if files.is_empty() {
+                bail!("runtime-plan requires at least one source file");
+            }
+            Ok(Command::RuntimePlan {
+                files,
+                output,
+                root,
+                language_override,
+            })
+        }
+        "runtime-trace" => {
+            let mut plan = None;
+            let mut traces: Vec<PathBuf> = Vec::new();
+            let mut output = None;
+            let mut to_stdout = false;
+            let mut merged = None;
+            let mut root = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--plan" => {
+                        plan = Some(PathBuf::from(
+                            iter.next().with_context(|| "--plan requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--plan=") => {
+                        plan = Some(PathBuf::from(other.strip_prefix("--plan=").unwrap()));
+                    }
+                    "--runtime-trace" => {
+                        traces.push(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--runtime-trace requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--runtime-trace=") => {
+                        traces.push(PathBuf::from(
+                            other.strip_prefix("--runtime-trace=").unwrap(),
+                        ));
+                    }
+                    "--stdout" => {
+                        to_stdout = true;
+                    }
+                    "--merged-output" => {
+                        merged = Some(PathBuf::from(
+                            iter.next().with_context(|| "--merged-output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--merged-output=") => {
+                        merged = Some(PathBuf::from(
+                            other.strip_prefix("--merged-output=").unwrap(),
+                        ));
+                    }
+                    "--output" => {
+                        output = Some(PathBuf::from(
+                            iter.next().with_context(|| "--output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--output=") => {
+                        output = Some(PathBuf::from(other.strip_prefix("--output=").unwrap()));
+                    }
+                    "--root" => {
+                        root = Some(PathBuf::from(
+                            iter.next().with_context(|| "--root requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--root=") => {
+                        root = Some(PathBuf::from(other.strip_prefix("--root=").unwrap()));
+                    }
+                    other => bail!("unsupported runtime-trace argument: {other}"),
+                }
+            }
+            if traces.is_empty() {
+                bail!("runtime-trace requires at least one --runtime-trace FILE");
+            }
+            if (output.is_some() || to_stdout) && traces.len() > 1 {
+                bail!("--output/--stdout name one document; joining several writes each beside its own");
+            }
+            Ok(Command::RuntimeTrace {
+                plan: plan.with_context(|| "runtime-trace requires --plan FILE")?,
+                traces,
+                output,
+                to_stdout,
+                merged,
+                root: root.unwrap_or_else(|| PathBuf::from(".")),
+            })
+        }
+        "runtime-evidence" => {
+            let operation = iter
+                .next()
+                .with_context(|| "runtime-evidence requires an operation; use validate")?;
+            if operation != "validate" {
+                bail!("unsupported runtime-evidence operation {operation:?}; use validate");
+            }
+            let mut plan = None;
+            let mut evidence = None;
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--plan" => {
+                        plan = Some(PathBuf::from(
+                            iter.next().with_context(|| "--plan requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--plan=") => {
+                        plan = Some(PathBuf::from(other.strip_prefix("--plan=").unwrap()));
+                    }
+                    "--evidence" => {
+                        evidence = Some(PathBuf::from(
+                            iter.next().with_context(|| "--evidence requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--evidence=") => {
+                        evidence =
+                            Some(PathBuf::from(other.strip_prefix("--evidence=").unwrap()));
+                    }
+                    other => bail!("unsupported runtime-evidence validate argument: {other}"),
+                }
+            }
+            Ok(Command::RuntimeEvidenceValidate {
+                plan: plan.with_context(|| "runtime-evidence validate requires --plan FILE")?,
+                evidence: evidence
+                    .with_context(|| "runtime-evidence validate requires --evidence FILE")?,
+            })
+        }
+        "runtime-scip" => {
+            let mut output = None;
+            let mut plan = None;
+            let mut evidence = None;
+            let mut root = None;
+            let mut language_override = None;
+            let mut files = Vec::new();
+            while let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--output" => {
+                        output = Some(PathBuf::from(
+                            iter.next().with_context(|| "--output requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--output=") => {
+                        output = Some(PathBuf::from(other.strip_prefix("--output=").unwrap()));
+                    }
+                    "--runtime-evidence" => {
+                        evidence = Some(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--runtime-evidence requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--runtime-evidence=") => {
+                        evidence = Some(PathBuf::from(
+                            other.strip_prefix("--runtime-evidence=").unwrap(),
+                        ));
+                    }
+                    "--trace-plan" => {
+                        plan = Some(PathBuf::from(
+                            iter.next().with_context(|| "--trace-plan requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--trace-plan=") => {
+                        plan = Some(PathBuf::from(
+                            other.strip_prefix("--trace-plan=").unwrap(),
+                        ));
+                    }
+                    "--root" => {
+                        root = Some(PathBuf::from(
+                            iter.next().with_context(|| "--root requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--root=") => {
+                        root = Some(PathBuf::from(other.strip_prefix("--root=").unwrap()));
+                    }
+                    "--language" => {
+                        language_override =
+                            Some(iter.next().with_context(|| "--language requires a value")?);
+                    }
+                    other if other.starts_with("--language=") => {
+                        language_override =
+                            Some(other.strip_prefix("--language=").unwrap().to_string());
+                    }
+                    other if other.starts_with("--") => bail!("unsupported option: {other}"),
+                    path => files.push(PathBuf::from(path)),
+                }
+            }
+            if files.is_empty() {
+                bail!("runtime-scip requires at least one source file");
+            }
+            let evidence =
+                evidence.with_context(|| "runtime-scip requires --runtime-evidence FILE")?;
+            let plan = plan.with_context(|| "runtime-scip requires --trace-plan FILE")?;
+            Ok(Command::RuntimeScip {
+                files,
+                plan,
+                evidence,
+                output,
+                root,
+                language_override,
+            })
+        }
         "scip-lua" => {
             let mut output = None;
             let mut root = None;
@@ -577,7 +2015,17 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
         }
         "syntax-facts" => {
             let mut language = None;
+            let mut fields: Option<std::collections::BTreeSet<String>> = None;
             let mut files = Vec::new();
+            let add_fields = |value: &str, fields: &mut Option<_>| {
+                let selected: std::collections::BTreeSet<String> = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|field| !field.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                *fields = Some(selected);
+            };
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
                     "--language" => {
@@ -587,6 +2035,13 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                     other if other.starts_with("--language=") => {
                         language = Some(other.strip_prefix("--language=").unwrap().to_string());
                     }
+                    "--fields" => {
+                        let value = iter.next().with_context(|| "--fields requires a value")?;
+                        add_fields(&value, &mut fields);
+                    }
+                    other if other.starts_with("--fields=") => {
+                        add_fields(other.strip_prefix("--fields=").unwrap(), &mut fields);
+                    }
                     other if other.starts_with("--") => bail!("unsupported option: {other}"),
                     path => files.push(PathBuf::from(path)),
                 }
@@ -594,7 +2049,14 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             if files.is_empty() {
                 bail!("syntax-facts requires at least one file");
             }
-            Ok(Command::SyntaxFacts { language, files })
+            if fields.as_ref().is_some_and(|fields| fields.is_empty()) {
+                bail!("--fields requires at least one field name");
+            }
+            Ok(Command::SyntaxFacts {
+                language,
+                files,
+                fields,
+            })
         }
         "profile" => {
             let profile = iter
@@ -604,7 +2066,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut language_override = None;
             let mut files = Vec::new();
             let mut scip_indexes = Vec::new();
+            let mut semantic_environments = Vec::new();
             let mut complexity_summaries = Vec::new();
+            let mut bundled_complexity_summaries = true;
             let mut portable = false;
             let mut incremental_cache = None;
             let mut changed_files_only = false;
@@ -636,6 +2100,17 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                         scip_indexes
                             .push(PathBuf::from(other.strip_prefix("--scip-index=").unwrap()));
                     }
+                    "--semantic-environment" => {
+                        semantic_environments.push(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--semantic-environment requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--semantic-environment=") => {
+                        semantic_environments.push(PathBuf::from(
+                            other.strip_prefix("--semantic-environment=").unwrap(),
+                        ));
+                    }
                     "--complexity-summary" => {
                         complexity_summaries.push(PathBuf::from(
                             iter.next()
@@ -646,6 +2121,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                         complexity_summaries.push(PathBuf::from(
                             other.strip_prefix("--complexity-summary=").unwrap(),
                         ));
+                    }
+                    "--no-bundled-complexity-summaries" => {
+                        bundled_complexity_summaries = false;
                     }
                     "--portable" => {
                         portable = true;
@@ -683,7 +2161,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 output,
                 language_override,
                 scip_indexes,
+                semantic_environments,
                 complexity_summaries,
+                bundled_complexity_summaries,
                 portable,
                 incremental_cache,
                 changed_files_only,
@@ -695,7 +2175,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             let mut format = "text".to_string();
             let mut files = Vec::new();
             let mut scip_indexes = Vec::new();
+            let mut semantic_environments = Vec::new();
             let mut complexity_summaries = Vec::new();
+            let mut bundled_complexity_summaries = true;
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
                     "--output" => {
@@ -724,6 +2206,17 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                         scip_indexes
                             .push(PathBuf::from(other.strip_prefix("--scip-index=").unwrap()));
                     }
+                    "--semantic-environment" => {
+                        semantic_environments.push(PathBuf::from(
+                            iter.next()
+                                .with_context(|| "--semantic-environment requires a value")?,
+                        ));
+                    }
+                    other if other.starts_with("--semantic-environment=") => {
+                        semantic_environments.push(PathBuf::from(
+                            other.strip_prefix("--semantic-environment=").unwrap(),
+                        ));
+                    }
                     "--complexity-summary" => {
                         complexity_summaries.push(PathBuf::from(
                             iter.next()
@@ -734,6 +2227,9 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                         complexity_summaries.push(PathBuf::from(
                             other.strip_prefix("--complexity-summary=").unwrap(),
                         ));
+                    }
+                    "--no-bundled-complexity-summaries" => {
+                        bundled_complexity_summaries = false;
                     }
                     "--format" => {
                         format = iter.next().with_context(|| "--format requires a value")?;
@@ -754,11 +2250,13 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                 language_override,
                 format,
                 scip_indexes,
+                semantic_environments,
                 complexity_summaries,
+                bundled_complexity_summaries,
             })
         }
         other => bail!(
-            "usage: fact-mine-rust {{syntax-facts|profile|call-resolution|scip-lua}} FILE... (got: {other})"
+            "usage: fact-mine-rust {{syntax-facts|profile|call-resolution|runtime-plan|runtime-evidence|runtime-scip|scip-lua}} FILE... (got: {other})"
         ),
     }
 }
@@ -817,6 +2315,182 @@ mod tests {
             "example.rb".to_string(),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn stdlib_producer_can_disable_bundled_summaries() {
+        let parsed = parse_args(vec![
+            "profile".to_string(),
+            "espalier".to_string(),
+            "--no-bundled-complexity-summaries".to_string(),
+            "stdlib.go".to_string(),
+        ])
+        .expect("parse stdlib producer profile");
+        match parsed {
+            Command::Profile {
+                bundled_complexity_summaries,
+                ..
+            } => assert!(!bundled_complexity_summaries),
+            _ => panic!("expected profile command"),
+        }
+    }
+
+    #[test]
+    fn profile_accepts_semantic_environment_sidecars() {
+        let parsed = parse_args(vec![
+            "profile".to_string(),
+            "espalier".to_string(),
+            "--semantic-environment=runtime.json".to_string(),
+            "--semantic-environment".to_string(),
+            "target.json".to_string(),
+            "example.cpp".to_string(),
+        ])
+        .expect("parse semantic environment profile");
+        match parsed {
+            Command::Profile {
+                semantic_environments,
+                files,
+                ..
+            } => {
+                assert_eq!(
+                    semantic_environments,
+                    vec![PathBuf::from("runtime.json"), PathBuf::from("target.json")]
+                );
+                assert_eq!(files, vec![PathBuf::from("example.cpp")]);
+            }
+            _ => panic!("expected profile command"),
+        }
+    }
+
+    #[test]
+    fn runtime_scip_requires_evidence_and_accepts_language_neutral_sources() {
+        let parsed = parse_args(vec![
+            "runtime-scip".to_string(),
+            "--trace-plan=runtime-plan.json".to_string(),
+            "--runtime-evidence=runtime-evidence.v1.json.gz".to_string(),
+            "--output".to_string(),
+            "runtime.scip.json".to_string(),
+            "one.rb".to_string(),
+            "two.py".to_string(),
+        ])
+        .expect("runtime SCIP command");
+        match parsed {
+            Command::RuntimeScip {
+                files,
+                plan,
+                evidence,
+                output,
+                root,
+                language_override,
+            } => {
+                assert_eq!(
+                    files,
+                    vec![PathBuf::from("one.rb"), PathBuf::from("two.py")]
+                );
+                assert_eq!(plan, PathBuf::from("runtime-plan.json"));
+                assert_eq!(evidence, PathBuf::from("runtime-evidence.v1.json.gz"));
+                assert_eq!(output, Some(PathBuf::from("runtime.scip.json")));
+                assert_eq!(root, None);
+                assert_eq!(language_override, None);
+            }
+            _ => panic!("expected runtime SCIP"),
+        }
+        assert!(parse_args(vec!["runtime-scip".to_string(), "one.rb".to_string()]).is_err());
+    }
+
+    #[test]
+    fn runtime_scip_rebuilds_anchor_bindings_from_plan_documents_not_discovered_callees() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let planned = directory.path().join("planned.rb");
+        let discovered = directory.path().join("discovered.rb");
+        std::fs::write(
+            &planned,
+            "class Planned\n  def run(value)\n    value.size\n  end\nend\n",
+        )
+        .expect("planned source");
+        std::fs::write(
+            &discovered,
+            "class Discovered\n  def helper\n    1\n  end\nend\n",
+        )
+        .expect("discovered source");
+        let planned_profile =
+            build_profile(std::slice::from_ref(&planned), None, Profile::TracePlan)
+                .expect("planned profile");
+        let supplied = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+            &planned_profile,
+            std::slice::from_ref(&planned),
+            directory.path(),
+        )
+        .expect("supplied plan");
+
+        // `discovered` exists and participates in the full analysis corpus, but
+        // only `planned` owns evidence anchors. Both profiles come out of one
+        // parse of the union, so this also proves the shared parse does not let
+        // the wider corpus reach the plan.
+        let plan_files = supplied
+            .plan
+            .documents
+            .iter()
+            .map(|document| directory.path().join(&document.relative_path))
+            .collect::<Vec<_>>();
+        let (analysis, plan_profile) = build_profile_pair(
+            &[planned.clone(), discovered.clone()],
+            &plan_files,
+            None,
+        )
+        .expect("profiles");
+        assert_eq!(analysis.input_coverage.selected_files, 2);
+        assert_eq!(plan_profile.input_coverage.selected_files, 1);
+        let rebuilt = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+            &plan_profile,
+            &plan_files,
+            directory.path(),
+        )
+        .expect("rebuild");
+
+        assert_eq!(rebuilt.plan.plan_digest, supplied.plan.plan_digest);
+        assert_eq!(rebuilt.plan.documents.len(), 1);
+        assert_eq!(rebuilt.plan.documents[0].relative_path, "planned.rb");
+        assert!(discovered.exists());
+    }
+
+    #[test]
+    fn runtime_commands_canonicalize_relative_sources_before_binding_calls() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let source = directory.path().join("worker.rb");
+        std::fs::write(
+            &source,
+            "class Worker\n  def run(value)\n    value.size\n  end\nend\n",
+        )
+        .expect("source");
+        let files = canonical_runtime_sources(&[PathBuf::from("worker.rb")], directory.path())
+            .expect("canonical runtime sources");
+        assert_eq!(
+            files,
+            vec![source.canonicalize().expect("canonical source")]
+        );
+
+        let plan_profile =
+            build_profile(&files, None, Profile::TracePlan).expect("trace-plan profile");
+        let built = fact_mine_rust::runtime_protocol::build_trace_plan_with_bindings(
+            &plan_profile,
+            &files,
+            directory.path(),
+        )
+        .expect("plan");
+        let overlay_profile =
+            build_profile(&files, None, Profile::Espalier).expect("overlay profile");
+        let overlay_call_ids = overlay_profile
+            .calls
+            .iter()
+            .map(|call| call.id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(built.bindings.values().all(|binding| match binding {
+            fact_mine_rust::runtime_protocol::AnchorBinding::Call { call_id } =>
+                overlay_call_ids.contains(call_id.as_str()),
+            _ => true,
+        }));
     }
 
     #[test]

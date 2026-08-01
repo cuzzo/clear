@@ -474,9 +474,10 @@ fn configuration_digest() -> Result<String> {
 }
 
 fn stdlib_registry_digest() -> Result<String> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config/stdlib_complexity");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config");
     let mut files = Vec::new();
-    collect_files(&root, &mut files)?;
+    collect_files(&root.join("stdlib_complexity"), &mut files)?;
+    collect_files(&root.join("complexity_summaries"), &mut files)?;
     files.sort();
     let mut hasher = Sha256::new();
     for file in files {

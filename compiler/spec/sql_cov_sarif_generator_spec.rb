@@ -14,7 +14,7 @@ RSpec.describe "SQL-COV SARIF generation" do
   it "uploads only native advisory hazards and reports unresolved facts" do
     Dir.mktmpdir("sql-cov-sarif-spec") do |dir|
       repo = File.join(dir, "repo")
-      sql_dir = File.join(repo, "gems/lineage/sql/storage")
+      sql_dir = File.join(repo, "gems/gigasail/giga-core/sql/storage")
       out_dir = File.join(dir, "out")
       fake_bin = File.join(dir, "fake-sql-cov")
       argv_log = File.join(dir, "argv.json")
@@ -55,7 +55,7 @@ RSpec.describe "SQL-COV SARIF generation" do
         generator,
         "--repo=#{repo}",
         "--out-dir=#{out_dir}",
-        "--setup=gems/lineage/sql/storage/init_schema.sql",
+        "--setup=gems/gigasail/giga-core/sql/storage/init_schema.sql",
         "--sql-cov-bin=#{fake_bin}"
       )
       expect(status).to be_success, stderr
@@ -68,7 +68,7 @@ RSpec.describe "SQL-COV SARIF generation" do
       expect(run.dig("properties", "scannedFiles")).to eq(1)
       expect(run.dig("properties", "skippedNonQueryFiles")).to be_empty
       expect(run.dig("results", 0, "locations", 0, "physicalLocation", "artifactLocation", "uri"))
-        .to eq("gems/lineage/sql/storage/query.sql")
+        .to eq("gems/gigasail/giga-core/sql/storage/query.sql")
 
       markdown = File.read(File.join(out_dir, "sql-cov.md"))
       expect(markdown).to include("1 unresolved schema facts")
@@ -80,7 +80,7 @@ RSpec.describe "SQL-COV SARIF generation" do
   it "normalizes generated identifiers, skips non-query SQL, and fails on scan errors" do
     Dir.mktmpdir("sql-cov-sarif-spec") do |dir|
       repo = File.join(dir, "repo")
-      sql_dir = File.join(repo, "gems/lineage/sql/storage")
+      sql_dir = File.join(repo, "gems/gigasail/giga-core/sql/storage")
       out_dir = File.join(dir, "out")
       fake_bin = File.join(dir, "fake-sql-cov")
       input_log = File.join(dir, "input.sql")
@@ -107,7 +107,7 @@ RSpec.describe "SQL-COV SARIF generation" do
         generator,
         "--repo=#{repo}",
         "--out-dir=#{out_dir}",
-        "--setup=gems/lineage/sql/storage/init_schema.sql",
+        "--setup=gems/gigasail/giga-core/sql/storage/init_schema.sql",
         "--sql-cov-bin=#{fake_bin}"
       )
       expect(status).to be_success, stderr
@@ -116,7 +116,7 @@ RSpec.describe "SQL-COV SARIF generation" do
       run = JSON.parse(File.read(File.join(out_dir, "sql-cov.sarif"))).fetch("runs").first
       expect(run.dig("properties", "scannedFiles")).to eq(1)
       expect(run.dig("properties", "skippedNonQueryFiles"))
-        .to eq(["gems/lineage/sql/storage/configure.sql"])
+        .to eq(["gems/gigasail/giga-core/sql/storage/configure.sql"])
 
       File.write(fake_bin, "#!/usr/bin/env ruby\nwarn 'cannot scan'\nexit 2\n")
       _stdout, stderr, status = Open3.capture3(
@@ -124,7 +124,7 @@ RSpec.describe "SQL-COV SARIF generation" do
         generator,
         "--repo=#{repo}",
         "--out-dir=#{out_dir}",
-        "--setup=gems/lineage/sql/storage/init_schema.sql",
+        "--setup=gems/gigasail/giga-core/sql/storage/init_schema.sql",
         "--sql-cov-bin=#{fake_bin}"
       )
       expect(status).not_to be_success

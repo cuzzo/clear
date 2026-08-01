@@ -235,6 +235,37 @@ const JAVASCRIPT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaScriptNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaScriptNormalizedBehavior {
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
+        super::typescript::parse_profile_signature(signature)
+    }
+
+    fn source_profile_signature(
+        &self,
+        lines: &[String],
+        function: &super::FunctionDef,
+    ) -> Option<String> {
+        lines
+            .get(function.line.saturating_sub(1))
+            .map(|line| line.trim().to_string())
+            .or_else(|| Some(String::new()))
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "typescript"
+    }
+
+    fn native_profile_literal_type(&self, value: &str) -> Option<String> {
+        if matches!(value, "true" | "false") {
+            Some("boolean".to_string())
+        } else if matches!(value, "null" | "undefined") {
+            Some("null".to_string())
+        } else if value.parse::<f64>().is_ok() {
+            Some("number".to_string())
+        } else {
+            None
+        }
+    }
+
     fn nested_function_is_local_callable(&self, _function: &Node) -> bool {
         true
     }

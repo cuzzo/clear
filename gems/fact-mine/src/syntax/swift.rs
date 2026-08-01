@@ -180,6 +180,22 @@ const SWIFT_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 struct SwiftNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for SwiftNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "swift-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,

@@ -166,6 +166,14 @@ const PHP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct PhpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for PhpNormalizedBehavior {
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,

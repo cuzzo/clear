@@ -2,7 +2,7 @@ use super::{
     normalized_behavior::{NormalizedLanguageBehavior, NormalizedSemanticEffect},
     CallSite, FunctionDef, SemanticEffectSite,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy)]
 pub(crate) struct EffectLexicon {
@@ -58,18 +58,29 @@ pub(crate) fn semantic_effect_sites_from_calls(
 }
 
 pub(crate) fn dedup_semantic_effect_sites(sites: &mut Vec<SemanticEffectSite>) {
-    let mut seen = HashSet::new();
-    sites.retain(|site| {
-        seen.insert((
+    let mut by_effect: HashMap<(String, String, String, String, usize, [usize; 4]), usize> =
+        HashMap::new();
+    let mut deduplicated: Vec<SemanticEffectSite> = Vec::with_capacity(sites.len());
+    for site in sites.drain(..) {
+        let key = (
             site.kind.clone(),
             site.detail.clone(),
-            site.receiver_scope.clone(),
             site.file.clone(),
             site.function.clone(),
             site.line,
             site.span,
-        ))
-    });
+        );
+        if let Some(index) = by_effect.get(&key).copied() {
+            let existing = &mut deduplicated[index];
+            if existing.receiver_scope == "unknown" && site.receiver_scope != "unknown" {
+                existing.receiver_scope = site.receiver_scope;
+            }
+        } else {
+            by_effect.insert(key, deduplicated.len());
+            deduplicated.push(site);
+        }
+    }
+    *sites = deduplicated;
 }
 
 fn local_self_call_to_known_function(
@@ -337,5 +348,24 @@ mod tests {
         let effect = effect_from_call_with_lexicon(&call2, &lexicon).unwrap();
         assert_eq!(effect.kind, "hidden_mutation");
         assert_eq!(effect.detail, "update!");
+    }
+
+    #[test]
+    fn duplicate_effects_keep_the_more_precise_receiver_scope() {
+        let effect = |receiver_scope: &str| SemanticEffectSite {
+            kind: "hidden_mutation".to_string(),
+            detail: "<<".to_string(),
+            receiver_scope: receiver_scope.to_string(),
+            file: "sample.rb".to_string(),
+            function: "append".to_string(),
+            line: 3,
+            span: [3, 2, 3, 15],
+        };
+        let mut sites = vec![effect("unknown"), effect("local")];
+
+        dedup_semantic_effect_sites(&mut sites);
+
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].receiver_scope, "local");
     }
 }

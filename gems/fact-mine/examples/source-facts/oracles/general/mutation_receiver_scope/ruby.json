@@ -28,7 +28,21 @@
   "syntax": {
     "branch_arms": [],
     "branch_decisions": [],
-    "calls": [],
+    "calls": [
+      {
+        "arguments": [
+          "item"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "append",
+        "line": 5,
+        "message": "<<",
+        "receiver": "items",
+        "safe_navigation": false
+      }
+    ],
     "clone_candidates": [
       {
         "child_fingerprints": [

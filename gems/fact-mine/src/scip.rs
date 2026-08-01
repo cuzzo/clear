@@ -5,14 +5,17 @@
 //! occurrence to the innermost emitted project method. Language-owned external
 //! symbol parsing is delegated back to the source adapter.
 
-use crate::profile::{summarize_call_resolution, CallRecord, MethodRecord, ProfileOutput};
+use crate::profile::{
+    summarize_call_resolution, CallRecord, MethodRecord, ProfileOutput, SemanticIndex,
+};
 use crate::syntax;
+use crate::type_inference::TypeExpr;
 use anyhow::{Context, Result};
+use protobuf::Message;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ImportStats {
@@ -30,12 +33,58 @@ struct Index {
     metadata: Option<Metadata>,
     #[serde(default)]
     documents: Vec<Document>,
+    /// FactMine's runtime-SCIP envelope carries normalized, exact source
+    /// anchors separately from SCIP semantic occurrences. An observed runtime
+    /// target may lose to a stronger static project target, but that must not
+    /// erase the fact that the source callsite executed.
+    #[serde(rename = "_runtimeEvidence", default)]
+    runtime_evidence: RuntimeEvidence,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+struct RuntimeEvidence {
+    #[serde(default, alias = "observedCallsiteAnchors")]
+    observed_callsite_anchors: Vec<ObservedCallsiteAnchor>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ObservedCallsiteAnchor {
+    #[serde(default, alias = "relativePath")]
+    relative_path: String,
+    #[serde(default)]
+    range: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct Metadata {
+    #[serde(default, alias = "toolInfo")]
+    tool_info: Option<ToolInfo>,
     #[serde(default, alias = "textDocumentEncoding")]
     text_document_encoding: TextDocumentEncoding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ToolInfo {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    arguments: Vec<String>,
+}
+
+const OBSERVED_OPEN_AUTHORITY_ARGUMENT: &str = "--fact-mine-index-authority=observed-open";
+const RUNTIME_MODELED_AUTHORITY_ARGUMENT: &str =
+    "--fact-mine-index-authority=runtime-modeled-world";
+const RUNTIME_MODELED_QUALITY: &str = "upper_bound_modeled_world";
+const RUNTIME_MODELED_ASSUMPTION: &str =
+    "observed call targets exhaust the attested workload and runtime environment";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IndexAuthority {
+    Compiler,
+    ObservedOpen,
+    RuntimeModeled,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -73,8 +122,25 @@ struct Document {
 #[derive(Debug, Deserialize)]
 struct SymbolInformation {
     symbol: String,
+    /// Historical SCIP indexers, including current scip-dotnet releases,
+    /// render declaration signatures as fenced code in `documentation`
+    /// instead of populating `signature_documentation`.
+    #[serde(default)]
+    documentation: Vec<String>,
     #[serde(default)]
     relationships: Vec<Relationship>,
+    /// The indexer's rendering of the declaration, e.g.
+    /// `func newRootCmd(ctx context.Context, version string) (*gremlinsCmd, error)`.
+    /// Its grammar is language-specific, so it is only ever read through the
+    /// adapter seam `NormalizedLanguageBehavior::parse_signature`.
+    #[serde(default, alias = "signatureDocumentation")]
+    signature_documentation: Option<SignatureDocumentation>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SignatureDocumentation {
+    #[serde(default)]
+    text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -180,35 +246,60 @@ struct Definition {
 }
 
 pub fn apply_json_file(output: &mut ProfileOutput, index_path: &Path) -> Result<ImportStats> {
-    let json = if index_path
+    if index_path
         .extension()
         .and_then(|extension| extension.to_str())
         == Some("scip")
     {
-        let binary = std::env::var("SCIP_BINARY").unwrap_or_else(|_| "scip".to_string());
-        let result = Command::new(&binary)
-            .args(["print", "--json"])
-            .arg(index_path)
-            .output()
-            .with_context(|| format!("failed to execute {binary} print --json"))?;
-        if !result.status.success() {
-            anyhow::bail!(
-                "{binary} print --json failed for {}: {}",
-                index_path.display(),
-                String::from_utf8_lossy(&result.stderr)
-            );
-        }
-        String::from_utf8(result.stdout).context("SCIP JSON output was not UTF-8")?
+        let bytes = fs::read(index_path).with_context(|| {
+            format!("failed to read binary SCIP index {}", index_path.display())
+        })?;
+        let protobuf = scip::types::Index::parse_from_bytes(&bytes).with_context(|| {
+            format!(
+                "failed to decode binary SCIP index {}",
+                index_path.display()
+            )
+        })?;
+        let index = index_from_protobuf(protobuf)
+            .with_context(|| format!("invalid binary SCIP index {}", index_path.display()))?;
+        apply_index(output, index)
+            .with_context(|| format!("failed to import SCIP index {}", index_path.display()))
     } else {
-        fs::read_to_string(index_path)
-            .with_context(|| format!("failed to read SCIP JSON index {}", index_path.display()))?
-    };
-    apply_json(output, &json)
-        .with_context(|| format!("failed to import SCIP JSON index {}", index_path.display()))
+        let json = fs::read_to_string(index_path)
+            .with_context(|| format!("failed to read SCIP JSON index {}", index_path.display()))?;
+        apply_json(output, &json)
+            .with_context(|| format!("failed to import SCIP JSON index {}", index_path.display()))
+    }
 }
 
 pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats> {
     let index: Index = serde_json::from_str(json)?;
+    apply_index(output, index)
+}
+
+/// Import an index the caller already holds. The runtime overlay builds its
+/// index as a `Value` and then imports it; printing that to a string only to
+/// lex it straight back is work neither side needs.
+pub fn apply_value(output: &mut ProfileOutput, value: &serde_json::Value) -> Result<ImportStats> {
+    let index: Index = serde_json::from_value(value.clone())?;
+    apply_index(output, index)
+}
+
+fn apply_index(output: &mut ProfileOutput, mut index: Index) -> Result<ImportStats> {
+    let authority = index_authority(&index)?;
+    let runtime_observed_callsite_anchors = (authority == IndexAuthority::RuntimeModeled)
+        .then(|| runtime_observed_callsite_anchors(&index))
+        .unwrap_or_default();
+    for information in index
+        .documents
+        .iter_mut()
+        .flat_map(|document| &mut document.symbols)
+    {
+        if information.signature_documentation.is_none() {
+            information.signature_documentation =
+                legacy_signature_documentation(&information.documentation);
+        }
+    }
     if index
         .metadata
         .as_ref()
@@ -218,9 +309,45 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
             "SCIP index uses non-UTF-8 text_document_encoding; column conversion is required"
         );
     }
-    assign_method_symbols(&mut output.methods, &index.documents);
+    if authority == IndexAuthority::Compiler {
+        assign_method_symbols(&mut output.methods, &index.documents);
+        apply_signature_types(output, &index);
+        apply_local_variable_types(output, &index);
+        apply_scalar_operator_types(output, &index);
+    }
     let methods_by_path = methods_by_document(&output.methods, &index.documents);
+    // An index that joins to no analyzed method contributes no identity, yet
+    // every downstream metric would still be stamped with the SCIP resolution
+    // tier. Indexers produce this silently: `scip-go .` on a multi-package
+    // module writes a valid, empty index and exits 0. Refuse it rather than
+    // degrade to source-only under a tier label that is no longer true.
+    if !output.methods.is_empty() && methods_by_path.values().all(|methods| methods.is_empty()) {
+        anyhow::bail!(
+            "SCIP index covers none of the {} analyzed methods ({} indexed documents); \
+             re-index the whole project (for example `scip-go ./...`, not `scip-go .`)",
+            output.methods.len(),
+            index.documents.len()
+        );
+    }
+    if let Some(tool_info) = index
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.tool_info.as_ref())
+        .filter(|tool_info| !tool_info.name.is_empty() && !tool_info.version.is_empty())
+    {
+        output.semantic_indexes.push(SemanticIndex {
+            tool: tool_info.name.clone(),
+            version: tool_info.version.clone(),
+        });
+        output.semantic_indexes.sort();
+        output.semantic_indexes.dedup();
+    }
     let definitions = definitions_by_symbol(&index.documents, &methods_by_path);
+    let indexed_roots = indexed_source_roots(&methods_by_path);
+    let indexed_sources =
+        indexed_document_sources(&index.documents, &methods_by_path, &indexed_roots);
+    let preprocessor_definitions =
+        indexed_preprocessor_definitions(&index.documents, &indexed_sources);
     let implementation_targets = implementation_targets(&index.documents, &definitions);
     let method_languages = output
         .methods
@@ -238,6 +365,9 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
             stats.unmatched_calls += 1;
             continue;
         };
+        call.runtime_evidence_observed |= runtime_observed_callsite_anchors
+            .get(&document.relative_path)
+            .is_some_and(|anchors| anchors.contains(&zero_based_span(call.span)));
         let source = fs::read_to_string(&call.path).unwrap_or_default();
         let Some(selected) = select_call_occurrences(call, document, &source, language) else {
             stats.unmatched_calls += 1;
@@ -260,6 +390,32 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
             })
             .filter_map(|definition| definition.method_id.as_deref())
             .collect::<BTreeSet<_>>();
+        let project_symbols = selected
+            .alternatives
+            .iter()
+            .filter(|candidate| {
+                let key = definition_key(&document.relative_path, &candidate.symbol);
+                definitions.get(&key).is_some_and(|rows| {
+                    rows.iter().any(|definition| definition.method_id.is_some())
+                })
+            })
+            .map(|candidate| candidate.symbol.as_str())
+            .collect::<BTreeSet<_>>();
+        if authority == IndexAuthority::ObservedOpen {
+            stats.matched_occurrences += 1;
+            if call.target.is_some() {
+                continue;
+            }
+            apply_observed_open_candidates(
+                call,
+                language,
+                occurrence,
+                &selected_symbols,
+                target_ids,
+                &mut stats,
+            );
+            continue;
+        }
         let candidate_costs = selected
             .alternatives
             .iter()
@@ -267,21 +423,122 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
                 syntax::external_symbol_call_complexity(language, &candidate.symbol, &call.message)
             })
             .collect::<Vec<_>>();
+        if authority == IndexAuthority::RuntimeModeled {
+            stats.matched_occurrences += 1;
+            if call.target.is_some() {
+                continue;
+            }
+            apply_runtime_modeled_candidates(
+                call,
+                language,
+                occurrence,
+                &selected_symbols,
+                &project_symbols,
+                target_ids,
+                &mut stats,
+            )?;
+            continue;
+        }
+        let compiler_macro = selected
+            .alternatives
+            .iter()
+            .all(|candidate| candidate.symbol.ends_with('!'));
+        let macro_costs = if call.preprocessor_callable || compiler_macro {
+            selected
+                .alternatives
+                .iter()
+                .filter_map(|candidate| {
+                    let definition = preprocessor_definitions
+                        .get(&candidate.symbol)
+                        .cloned()
+                        .or_else(|| {
+                            syntax::preprocessor_definition_location(language, &candidate.symbol)
+                                .and_then(|(path, line)| {
+                                    indexed_definition_at(
+                                        &indexed_sources,
+                                        &indexed_roots,
+                                        &path,
+                                        line,
+                                    )
+                                })
+                        });
+                    definition.as_deref().and_then(|definition| {
+                        syntax::preprocessor_definition_call_complexity(language, definition)
+                    })
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let converged_cost = (selected_symbols.len() == 1
             || (candidate_costs.len() == selected_symbols.len()
                 && candidate_costs
                     .windows(2)
                     .all(|pair| equivalent_external_cost(&pair[0], &pair[1]))))
         .then(|| candidate_costs.into_iter().next())
-        .flatten();
+        .flatten()
+        .or_else(|| {
+            (selected_symbols.len() == 1
+                || (macro_costs.len() == selected_symbols.len()
+                    && macro_costs
+                        .windows(2)
+                        .all(|pair| equivalent_external_cost(&pair[0], &pair[1]))))
+            .then(|| macro_costs.into_iter().next())
+            .flatten()
+        });
+
+        // A function-local import establishes a distinct lexical dispatch
+        // domain. A compiler occurrence that points the call back to its own
+        // enclosing definition contradicts that source fact (typically an
+        // unresolved dependent overload), so retain the adapter-proven import
+        // and its cost instead of manufacturing recursion.
+        if call.lexical_symbol_origin.as_deref() == Some("function_local_import")
+            && target_ids.len() == 1
+            && target_ids
+                .iter()
+                .next()
+                .is_some_and(|target| *target == call.source)
+        {
+            continue;
+        }
 
         stats.matched_occurrences += 1;
         call.semantic_symbol = Some(occurrence.symbol.clone());
         call.target_provenance = Some("scip".to_string());
+        call.preprocessor_callable |= compiler_macro;
         call.candidate_targets.clear();
         call.candidate_reason = None;
+        call.consumer_closed_candidate_set = true;
 
-        if target_ids.len() == 1 {
+        if target_ids.len() == 1
+            && compiler_proven_abstract_project_target(
+                &output.owners,
+                &output.methods,
+                target_ids.iter().next().copied().unwrap(),
+            )
+        {
+            // The symbol selects an abstract declaration, not an executable
+            // body. Keeping it as an exact project target makes the
+            // aggregator wait for a summary that can never exist. The
+            // compiler-proven dispatch boundary is instead one invocation of
+            // an implementation supplied by the caller.
+            let (time, space) = syntax::parametric_call_complexity("callback_once").unwrap();
+            call.target = None;
+            call.kind = "interface_call".to_string();
+            call.callback_receiver = true;
+            call.external_symbol_scope = Some("project_interface".to_string());
+            call.known_time_complexity = Some(time.to_string());
+            call.known_space_complexity = Some(space.to_string());
+            call.complexity_provenance =
+                Some("compiler_proven_abstract_project_contract".to_string());
+            call.complexity_bound_quality =
+                Some("upper_bound_parametric_callback_once".to_string());
+            call.complexity_missing_kind = None;
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            call.empty_domain_cause = None;
+            stats.modeled_external_symbols += 1;
+        } else if target_ids.len() == 1 {
             let target = target_ids.into_iter().next().unwrap().to_string();
             call.kind = "resolved_call".to_string();
             call.target = Some(target);
@@ -417,13 +674,20 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
         }
     }
 
-    reconcile_non_recursive_overload_calls(output);
+    if authority == IndexAuthority::Compiler {
+        reconcile_constructor_delegations(output);
+        reconcile_inactive_preprocessor_project_calls(output);
+        reconcile_non_recursive_overload_calls(output);
+    }
 
     let raw_parser_call_sites = output.call_resolution_coverage.raw_parser_call_sites;
     let raw_calls_not_normalized = output.call_resolution_coverage.raw_calls_not_normalized;
     let raw_calls_not_normalized_inside_function = output
         .call_resolution_coverage
         .raw_calls_not_normalized_inside_function;
+    let source_export_eligible_methods_overlapping_raw_call_loss = output
+        .call_resolution_coverage
+        .source_export_eligible_methods_overlapping_raw_call_loss;
     let raw_calls_not_normalized_outside_function = output
         .call_resolution_coverage
         .raw_calls_not_normalized_outside_function;
@@ -447,6 +711,10 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
         .raw_calls_not_normalized_inside_function = raw_calls_not_normalized_inside_function;
     output
         .call_resolution_coverage
+        .source_export_eligible_methods_overlapping_raw_call_loss =
+        source_export_eligible_methods_overlapping_raw_call_loss;
+    output
+        .call_resolution_coverage
         .raw_calls_not_normalized_outside_function = raw_calls_not_normalized_outside_function;
     output
         .call_resolution_coverage
@@ -462,7 +730,735 @@ pub fn apply_json(output: &mut ProfileOutput, json: &str) -> Result<ImportStats>
     // contract after that replacement so cross-file callable declarations are
     // not lost merely because the compiler correctly rejected the heuristic.
     crate::profile::reapply_declared_callback_costs(output);
+    // Runtime/native indexes may name generated source declarations (such as
+    // attribute readers) under a runtime symbol rather than the ordinary
+    // source-method identity. Reconcile those only through language-owned
+    // symbol parsing and declaration syntax, then apply the generic unique
+    // project join.
+    crate::profile::reapply_generated_callable_costs(output);
+    // A runtime type domain can close a generated project declaration even
+    // when no compiler symbol exists.  The shared candidate join is safe only
+    // for one exact, language-owned generated contract.
+    crate::profile::reapply_runtime_generated_candidate_costs(output);
+    // The closed candidate join above can promote one generated declaration
+    // to an exact project target. Re-run the exact-target contract so its
+    // canonical declaration cost replaces the intermediate candidate-max
+    // annotation.
+    crate::profile::reapply_generated_callable_costs(output);
+    // Runtime SCIP can likewise be the first source of a generated record
+    // reader's receiver identity. Re-run the same normalized declaration
+    // contract after semantic identities are imported.
+    crate::profile::reapply_generated_record_costs(output);
+    // SCIP may be the first proof of the producer call's exact project target.
+    // Re-run direct-result propagation after importing those identities so an
+    // `auto value = factory(); value.method()` chain can consume the declared
+    // return contract without guessing the local's type.
+    crate::profile::reapply_direct_call_result_costs(output);
+    apply_semantic_block_call_semantics(output);
+    apply_resolved_call_costs_to_contexts(output);
     Ok(stats)
+}
+
+fn index_authority(index: &Index) -> Result<IndexAuthority> {
+    let arguments = index
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.tool_info.as_ref())
+        .map(|tool_info| tool_info.arguments.as_slice())
+        .unwrap_or_default();
+    let declared = arguments
+        .iter()
+        .filter_map(|argument| argument.strip_prefix("--fact-mine-index-authority="))
+        .collect::<BTreeSet<_>>();
+    if declared.is_empty() {
+        Ok(IndexAuthority::Compiler)
+    } else if declared.len() == 1
+        && declared.contains(
+            OBSERVED_OPEN_AUTHORITY_ARGUMENT
+                .strip_prefix("--fact-mine-index-authority=")
+                .expect("authority argument prefix"),
+        )
+    {
+        Ok(IndexAuthority::ObservedOpen)
+    } else if declared.len() == 1
+        && declared.contains(
+            RUNTIME_MODELED_AUTHORITY_ARGUMENT
+                .strip_prefix("--fact-mine-index-authority=")
+                .expect("authority argument prefix"),
+        )
+    {
+        Ok(IndexAuthority::RuntimeModeled)
+    } else {
+        anyhow::bail!(
+            "unsupported or conflicting SCIP index authority declarations: {}",
+            declared.into_iter().collect::<Vec<_>>().join(", ")
+        )
+    }
+}
+
+fn runtime_observed_callsite_anchors(index: &Index) -> BTreeMap<String, BTreeSet<[usize; 4]>> {
+    let mut anchors = BTreeMap::<String, BTreeSet<[usize; 4]>>::new();
+    for anchor in &index.runtime_evidence.observed_callsite_anchors {
+        if anchor.relative_path.is_empty() {
+            continue;
+        }
+        let occurrence = Occurrence {
+            range: anchor.range.clone(),
+            typed_range: None,
+            symbol: String::new(),
+            symbol_roles: 0,
+        };
+        if let Some(span) = occurrence.span() {
+            anchors
+                .entry(anchor.relative_path.clone())
+                .or_default()
+                .insert(span);
+        }
+    }
+    anchors
+}
+
+fn zero_based_span(span: [usize; 4]) -> [usize; 4] {
+    [
+        span[0].saturating_sub(1),
+        span[1],
+        span[2].saturating_sub(1),
+        span[3],
+    ]
+}
+
+fn apply_runtime_modeled_candidates(
+    call: &mut CallRecord,
+    language: &str,
+    occurrence: &Occurrence,
+    selected_symbols: &BTreeSet<&str>,
+    project_symbols: &BTreeSet<&str>,
+    target_ids: BTreeSet<&str>,
+    stats: &mut ImportStats,
+) -> Result<()> {
+    call.target = None;
+    call.semantic_symbol = Some(occurrence.symbol.clone());
+    call.target_provenance = Some("runtime_scip_modeled".to_string());
+    call.candidate_targets.clear();
+    call.complexity_candidates = selected_symbols
+        .iter()
+        .map(|symbol| (*symbol).to_string())
+        .collect();
+    call.complexity_bound_quality = Some(RUNTIME_MODELED_QUALITY.to_string());
+    call.complexity_assumptions = vec![RUNTIME_MODELED_ASSUMPTION.to_string()];
+    call.empty_domain_cause = None;
+
+    let all_project = !selected_symbols.is_empty() && project_symbols == selected_symbols;
+    let all_external = project_symbols.is_empty();
+    let external_symbols = selected_symbols
+        .difference(project_symbols)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let external_upper_bound =
+        runtime_external_candidate_upper_bound(language, &external_symbols, &call.message)?;
+    if all_project {
+        call.kind = "unresolved_call".to_string();
+        call.external_symbol_scope = Some("project".to_string());
+        call.complexity_missing_kind = None;
+        call.known_time_complexity = None;
+        call.known_space_complexity = None;
+        call.complexity_provenance = Some("runtime_scip_modeled_project_set".to_string());
+        call.candidate_targets = target_ids.into_iter().map(str::to_string).collect();
+        call.candidate_reason = Some("runtime_modeled_observed_candidate_set".to_string());
+        call.consumer_closed_candidate_set = true;
+        call.unresolved_reason =
+            Some("runtime_modeled_project_candidate_set_requires_summary".to_string());
+        call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+        return Ok(());
+    }
+
+    if all_external {
+        let metadata = syntax::external_symbol_metadata(language, &occurrence.symbol);
+        call.kind = "external_call".to_string();
+        call.external_symbol_scope = Some(metadata.scope.to_string());
+        call.complexity_missing_kind = Some(metadata.missing_cost_kind);
+        call.candidate_reason = Some("runtime_modeled_observed_external_set".to_string());
+        call.consumer_closed_candidate_set = true;
+        stats.external_symbols += 1;
+
+        if let Some((time, space, assumptions)) = external_upper_bound {
+            call.known_time_complexity = Some(time);
+            call.known_space_complexity = Some(space);
+            call.complexity_provenance =
+                Some("runtime_scip_modeled:conservative_external_candidate_max".to_string());
+            call.complexity_assumptions.extend(assumptions);
+            call.complexity_assumptions.sort();
+            call.complexity_assumptions.dedup();
+            call.complexity_missing_kind = None;
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            stats.modeled_external_symbols += 1;
+            return Ok(());
+        }
+
+        // Preserve a language adapter's independently justified source model.
+        if call.known_time_complexity.is_some() && call.known_space_complexity.is_some() {
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            call.complexity_missing_kind = None;
+            stats.modeled_external_symbols += 1;
+        } else {
+            call.unresolved_reason = Some("runtime_modeled_external_symbol_unmodeled".to_string());
+            call.resolution_missing_proof =
+                Some("dependency_or_stdlib_symbol_known_cost_unavailable".to_string());
+        }
+        return Ok(());
+    }
+
+    if let Some((time, space, assumptions)) = external_upper_bound {
+        call.kind = "unresolved_call".to_string();
+        call.external_symbol_scope = Some("mixed".to_string());
+        call.complexity_missing_kind = None;
+        call.candidate_targets = target_ids.into_iter().map(str::to_string).collect();
+        call.candidate_reason = Some("runtime_modeled_mixed_candidate_set".to_string());
+        call.consumer_closed_candidate_set = true;
+        call.known_time_complexity = Some(time);
+        call.known_space_complexity = Some(space);
+        call.complexity_provenance =
+            Some("runtime_scip_modeled:mixed_project_external_candidate_max".to_string());
+        call.complexity_assumptions.extend(assumptions);
+        call.complexity_assumptions.sort();
+        call.complexity_assumptions.dedup();
+        call.unresolved_reason =
+            Some("runtime_modeled_mixed_candidate_set_requires_summary".to_string());
+        call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+        stats.external_symbols += external_symbols.len();
+        stats.modeled_external_symbols += external_symbols.len();
+        return Ok(());
+    }
+
+    // Retain every identity but do not claim closure when at least one
+    // external candidate has no reviewed or parametric cost.
+    call.kind = "unresolved_call".to_string();
+    call.external_symbol_scope = Some("mixed".to_string());
+    call.complexity_missing_kind = Some("mixed_project_external_cost_join_missing".to_string());
+    call.candidate_targets = target_ids.into_iter().map(str::to_string).collect();
+    call.candidate_reason = Some("runtime_observed_mixed_candidate_set".to_string());
+    call.consumer_closed_candidate_set = false;
+    call.known_time_complexity = None;
+    call.known_space_complexity = None;
+    call.unresolved_reason = Some("runtime_observed_mixed_candidate_set_open".to_string());
+    call.resolution_missing_proof =
+        Some("mixed_project_external_candidate_join_required".to_string());
+    Ok(())
+}
+
+fn runtime_external_candidate_upper_bound(
+    language: &str,
+    symbols: &BTreeSet<&str>,
+    message: &str,
+) -> Result<Option<(String, String, Vec<String>)>> {
+    if symbols.is_empty() {
+        return Ok(None);
+    }
+    if symbols
+        .iter()
+        .all(|symbol| crate::runtime_evidence::is_runtime_record_accessor_symbol(symbol, message))
+    {
+        return Ok(Some(("O(1)".to_string(), "O(1)".to_string(), Vec::new())));
+    }
+    let mut costs = Vec::new();
+    for symbol in symbols {
+        if let Some(complexity) = syntax::external_symbol_call_complexity(language, symbol, message)
+        {
+            costs.push((
+                complexity.time.to_string(),
+                complexity.space.to_string(),
+                complexity.assumption.into_iter().collect::<Vec<_>>(),
+            ));
+            continue;
+        }
+        let metadata = syntax::external_symbol_metadata(language, symbol);
+        let Some(parametric) = metadata.parametric_cost else {
+            return Ok(None);
+        };
+        let (time, space) = syntax::parametric_call_complexity(&parametric).ok_or_else(|| {
+            anyhow::anyhow!("unsupported parametric runtime cost {parametric} for {symbol}")
+        })?;
+        costs.push((time.to_string(), space.to_string(), Vec::new()));
+    }
+    let time = costs
+        .iter()
+        .max_by_key(|(time, _, _)| conservative_complexity_rank(time))
+        .map(|(time, _, _)| time.clone())
+        .expect("nonempty runtime candidate costs");
+    let space = costs
+        .iter()
+        .max_by_key(|(_, space, _)| conservative_complexity_rank(space))
+        .map(|(_, space, _)| space.clone())
+        .expect("nonempty runtime candidate costs");
+    let mut assumptions = costs
+        .into_iter()
+        .flat_map(|(_, _, assumptions)| assumptions)
+        .collect::<Vec<_>>();
+    assumptions.sort();
+    assumptions.dedup();
+    Ok(Some((time, space, assumptions)))
+}
+
+fn conservative_complexity_rank(complexity: &str) -> usize {
+    let normalized = complexity.replace([' ', '_'], "").to_ascii_uppercase();
+    if normalized == "O(1)" {
+        0
+    } else if normalized.contains('!') {
+        4_000_000
+    } else if normalized.contains("2^") {
+        3_000_000
+    } else if normalized.contains('N') || normalized.contains('C') || normalized.contains('R') {
+        let explicit_exponent = normalized.split('^').nth(1).and_then(|value| {
+            let digits = value
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>();
+            (!digits.is_empty())
+                .then(|| digits.parse::<usize>().ok())
+                .flatten()
+        });
+        let degree = explicit_exponent.unwrap_or_else(|| normalized.matches('*').count() + 1);
+        2_000_000 + degree * 100 + usize::from(normalized.contains("LOG"))
+    } else if normalized.contains("LOG") {
+        1_000_000
+    } else {
+        1
+    }
+}
+
+fn apply_observed_open_candidates(
+    call: &mut CallRecord,
+    language: &str,
+    occurrence: &Occurrence,
+    selected_symbols: &BTreeSet<&str>,
+    target_ids: BTreeSet<&str>,
+    stats: &mut ImportStats,
+) {
+    call.target = None;
+    call.semantic_symbol = Some(occurrence.symbol.clone());
+    call.target_provenance = Some("runtime_scip_observed".to_string());
+    call.consumer_closed_candidate_set = false;
+    call.candidate_targets
+        .extend(target_ids.iter().map(|target| (*target).to_string()));
+    call.candidate_targets.sort();
+    call.candidate_targets.dedup();
+    call.complexity_candidates
+        .extend(selected_symbols.iter().map(|symbol| (*symbol).to_string()));
+    call.complexity_candidates.sort();
+    call.complexity_candidates.dedup();
+    call.candidate_reason = Some("runtime_observed_candidate_set".to_string());
+    call.unresolved_reason = Some("runtime_observed_candidate_set_open".to_string());
+    call.resolution_missing_proof = Some("consumer_closed_candidate_set_required".to_string());
+    call.empty_domain_cause = None;
+    if target_ids.is_empty() {
+        let metadata = syntax::external_symbol_metadata(language, &occurrence.symbol);
+        call.kind = "external_call".to_string();
+        call.external_symbol_scope = Some(metadata.scope.to_string());
+        call.complexity_missing_kind = Some(metadata.missing_cost_kind);
+        stats.external_symbols += 1;
+    } else {
+        call.kind = "unresolved_call".to_string();
+        call.external_symbol_scope = Some("project".to_string());
+        call.complexity_missing_kind = None;
+    }
+}
+
+pub(crate) fn apply_resolved_call_costs_to_contexts(output: &mut ProfileOutput) -> usize {
+    let mut methods = BTreeMap::<(String, String, String, usize), BTreeSet<String>>::new();
+    for method in &output.methods {
+        methods
+            .entry((
+                method.path.clone(),
+                method.owner.clone(),
+                method.name.clone(),
+                method.line,
+            ))
+            .or_default()
+            .insert(method.id.clone());
+    }
+    let mut costs = BTreeMap::<(String, [usize; 4], String), BTreeSet<(String, String)>>::new();
+    for call in &output.calls {
+        let (Some(time), Some(space)) = (
+            call.known_time_complexity.as_deref(),
+            call.known_space_complexity.as_deref(),
+        ) else {
+            continue;
+        };
+        costs
+            .entry((
+                call.source.clone(),
+                call.span,
+                bare_message(&call.message).to_string(),
+            ))
+            .or_default()
+            .insert((time.to_string(), space.to_string()));
+    }
+
+    let mut applied = 0;
+    for fact in &mut output.complexity_facts {
+        let Some(method_ids) = methods.get(&(
+            fact.path.clone(),
+            fact.owner.clone(),
+            fact.function.clone(),
+            fact.line,
+        )) else {
+            continue;
+        };
+        if method_ids.len() != 1 {
+            continue;
+        }
+        let method_id = method_ids.iter().next().unwrap();
+        for context in &mut fact.call_contexts {
+            let Some(candidates) = costs.get(&(
+                method_id.clone(),
+                context.span,
+                bare_message(&context.message).to_string(),
+            )) else {
+                continue;
+            };
+            if candidates.len() != 1 {
+                continue;
+            }
+            let (time, space) = candidates.iter().next().unwrap();
+            if context.known_time_complexity.is_none() {
+                context.known_time_complexity = Some(time.clone());
+            }
+            if context.known_space_complexity.is_none() {
+                context.known_space_complexity = Some(space.clone());
+            }
+            if context.known_time_complexity.is_some() && context.known_space_complexity.is_some() {
+                context.evidence_gap = None;
+                applied += 1;
+            }
+        }
+    }
+    applied
+}
+
+/// Reconcile a conservative syntax-only block boundary after SCIP proves the
+/// exact callable. Language adapters own symbol interpretation; this shared
+/// join only applies their normalized execution contract to matching facts.
+fn apply_semantic_block_call_semantics(output: &mut ProfileOutput) -> usize {
+    use crate::syntax::normalized_behavior::BlockCallSemantics;
+
+    #[derive(Clone)]
+    struct Proof {
+        path: String,
+        line: usize,
+        span: [usize; 4],
+        message: String,
+        semantics: BlockCallSemantics,
+    }
+
+    let languages = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let proofs = output
+        .calls
+        .iter()
+        .filter_map(|call| {
+            let symbol = call.semantic_symbol.as_deref()?;
+            let language = languages.get(call.source.as_str()).copied()?;
+            let behavior = syntax::normalized_behavior::behavior_for_name(language)?;
+            let semantics =
+                behavior.semantic_symbol_block_call_semantics(symbol, bare_message(&call.message));
+            (semantics != BlockCallSemantics::Unknown).then(|| Proof {
+                path: call.path.clone(),
+                line: call.line,
+                span: call.span,
+                message: bare_message(&call.message).to_string(),
+                semantics,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut applied = 0;
+    for fact in &mut output.complexity_facts {
+        let mut remove = BTreeSet::new();
+        for iteration_index in 0..fact.iterations.len() {
+            let iteration = fact.iterations[iteration_index].clone();
+            if iteration.cardinality_relation != "unknown" {
+                continue;
+            }
+            let Some(message) = iteration.message.as_deref() else {
+                continue;
+            };
+            let matching = proofs
+                .iter()
+                .filter(|proof| {
+                    proof.path == fact.path
+                        && proof.line == iteration.line
+                        && proof.message == bare_message(message)
+                        && contains(iteration.span, proof.span)
+                })
+                .collect::<Vec<_>>();
+            let Some(first) = matching.first() else {
+                continue;
+            };
+            if matching
+                .iter()
+                .any(|proof| proof.semantics != first.semantics)
+            {
+                continue;
+            }
+            let Some(anchor) = fact.call_contexts.iter().find(|context| {
+                context.span == first.span && bare_message(&context.message) == first.message
+            }) else {
+                continue;
+            };
+            let anchor_symbolic = anchor.symbolic_execution.clone();
+            let anchor_power = anchor.power;
+            let anchor_multiplicity = anchor.execution_multiplicity.clone();
+            let local_factors = iteration
+                .symbolic_time
+                .iter()
+                .flat_map(|symbolic| &symbolic.factors)
+                .filter(|factor| {
+                    !anchor_symbolic.as_ref().is_some_and(|symbolic| {
+                        symbolic
+                            .factors
+                            .iter()
+                            .any(|anchor| anchor.domain_id == factor.domain_id)
+                    })
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if first.semantics == BlockCallSemantics::LogarithmicIteration
+                && (local_factors.len() != 1 || local_factors[0].exponent != 1)
+            {
+                continue;
+            }
+            if !matches!(
+                first.semantics,
+                BlockCallSemantics::Once | BlockCallSemantics::LogarithmicIteration
+            ) {
+                continue;
+            }
+            let local_domains = local_factors
+                .iter()
+                .map(|factor| factor.domain_id.clone())
+                .collect::<BTreeSet<_>>();
+
+            for context in &mut fact.call_contexts {
+                if context.span == first.span || !contains(iteration.span, context.span) {
+                    continue;
+                }
+                if let Some(symbolic) = &mut context.symbolic_execution {
+                    symbolic
+                        .factors
+                        .retain(|factor| !local_domains.contains(&factor.domain_id));
+                    if first.semantics == BlockCallSemantics::LogarithmicIteration {
+                        symbolic.logarithmic = true;
+                        symbolic.logarithmic_domain_id =
+                            Some(local_factors[0].domain_id.clone());
+                    }
+                    symbolic.complete = true;
+                    context.power = symbolic.factors.iter().map(|factor| factor.exponent).sum();
+                    context.execution_multiplicity =
+                        symbolic_multiplicity(context.power, symbolic.logarithmic);
+                } else {
+                    context.symbolic_execution = anchor_symbolic.clone();
+                    context.power = anchor_power;
+                    context.execution_multiplicity = anchor_multiplicity.clone();
+                }
+                if context.evidence_gap.as_deref() == Some("unresolved_iteration_cardinality") {
+                    context.evidence_gap = None;
+                }
+            }
+            if first.semantics == BlockCallSemantics::Once {
+                remove.insert(iteration_index);
+            } else {
+                let iteration = &mut fact.iterations[iteration_index];
+                let symbolic = iteration
+                    .symbolic_time
+                    .get_or_insert_with(Default::default);
+                symbolic
+                    .factors
+                    .retain(|factor| !local_domains.contains(&factor.domain_id));
+                symbolic.logarithmic = true;
+                symbolic.logarithmic_domain_id = Some(local_factors[0].domain_id.clone());
+                symbolic.complete = true;
+                iteration.power = symbolic.factors.iter().map(|factor| factor.exponent).sum();
+                iteration.execution_multiplicity =
+                    symbolic_multiplicity(iteration.power, true);
+                iteration.cardinality_relation = "logarithmic_of".to_string();
+                iteration.bound_classification = "input".to_string();
+                iteration.evidence_gap = None;
+            }
+            applied += 1;
+        }
+        if !remove.is_empty() {
+            fact.iterations = fact
+                .iterations
+                .drain(..)
+                .enumerate()
+                .filter_map(|(index, iteration)| (!remove.contains(&index)).then_some(iteration))
+                .collect();
+        }
+    }
+    applied
+}
+
+fn symbolic_multiplicity(power: usize, logarithmic: bool) -> String {
+    if !logarithmic {
+        return polynomial(power);
+    }
+    match power {
+        0 => "O(log N)".to_string(),
+        1 => "O(N log N)".to_string(),
+        _ => format!("O(N^{power} log N)"),
+    }
+}
+
+fn polynomial(power: usize) -> String {
+    match power {
+        0 => "O(1)".to_string(),
+        1 => "O(N)".to_string(),
+        _ => format!("O(N^{power})"),
+    }
+}
+
+fn index_from_protobuf(index: scip::types::Index) -> Result<Index> {
+    let metadata = index.metadata.as_ref().map(|metadata| Metadata {
+        tool_info: metadata.tool_info.as_ref().map(|tool_info| ToolInfo {
+            name: tool_info.name.clone(),
+            version: tool_info.version.clone(),
+            arguments: tool_info.arguments.clone(),
+        }),
+        text_document_encoding: TextDocumentEncoding::Number(
+            u32::try_from(metadata.text_document_encoding.value()).unwrap_or(u32::MAX),
+        ),
+    });
+    let documents = index
+        .documents
+        .into_iter()
+        .map(|document| {
+            let occurrences = document
+                .occurrences
+                .into_iter()
+                .map(occurrence_from_protobuf)
+                .collect::<Result<Vec<_>>>()?;
+            let symbols = document
+                .symbols
+                .into_iter()
+                .map(|information| {
+                    let documentation = information.documentation;
+                    let signature_documentation = information
+                        .signature_documentation
+                        .into_option()
+                        .map(|signature| SignatureDocumentation {
+                            text: signature.text,
+                        })
+                        .or_else(|| legacy_signature_documentation(&documentation));
+                    SymbolInformation {
+                        symbol: information.symbol,
+                        documentation,
+                        relationships: information
+                            .relationships
+                            .into_iter()
+                            .map(|relationship| Relationship {
+                                symbol: relationship.symbol,
+                                is_implementation: relationship.is_implementation,
+                            })
+                            .collect(),
+                        signature_documentation,
+                    }
+                })
+                .collect();
+            Ok(Document {
+                relative_path: document.relative_path,
+                occurrences,
+                symbols,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Index {
+        metadata,
+        documents,
+        runtime_evidence: RuntimeEvidence::default(),
+    })
+}
+
+/// SCIP historically allowed signatures in markdown documentation. Recover
+/// only a fenced code block, never prose, so an indexer's narrative docs cannot
+/// be mistaken for a native declaration.
+fn legacy_signature_documentation(documentation: &[String]) -> Option<SignatureDocumentation> {
+    documentation.iter().find_map(|markdown| {
+        let mut lines = markdown.lines();
+        while let Some(line) = lines.next() {
+            if !line.trim_start().starts_with("```") {
+                continue;
+            }
+            let signature = lines
+                .by_ref()
+                .take_while(|line| !line.trim_start().starts_with("```"))
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !signature.is_empty() {
+                return Some(SignatureDocumentation { text: signature });
+            }
+        }
+        None
+    })
+}
+
+fn occurrence_from_protobuf(occurrence: scip::types::Occurrence) -> Result<Occurrence> {
+    let range = occurrence
+        .range
+        .into_iter()
+        .map(|value| {
+            usize::try_from(value)
+                .with_context(|| format!("SCIP occurrence range contains negative value {value}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let typed_range = occurrence
+        .typed_range
+        .map(|range| -> Result<TypedRange> {
+            match range {
+                scip::types::occurrence::Typed_range::SingleLineRange(value) => {
+                    Ok(TypedRange::Single {
+                        value: SingleLineRange {
+                            line: nonnegative_position(value.line)?,
+                            start_character: nonnegative_position(value.start_character)?,
+                            end_character: nonnegative_position(value.end_character)?,
+                        },
+                    })
+                }
+                scip::types::occurrence::Typed_range::MultiLineRange(value) => {
+                    Ok(TypedRange::Multi {
+                        value: MultiLineRange {
+                            start_line: nonnegative_position(value.start_line)?,
+                            start_character: nonnegative_position(value.start_character)?,
+                            end_line: nonnegative_position(value.end_line)?,
+                            end_character: nonnegative_position(value.end_character)?,
+                        },
+                    })
+                }
+                _ => anyhow::bail!("SCIP occurrence uses an unsupported typed range"),
+            }
+        })
+        .transpose()?;
+    Ok(Occurrence {
+        range,
+        typed_range,
+        symbol: occurrence.symbol,
+        symbol_roles: u32::try_from(occurrence.symbol_roles).with_context(|| {
+            format!(
+                "SCIP occurrence symbol_roles contains negative value {}",
+                occurrence.symbol_roles
+            )
+        })?,
+    })
+}
+
+fn nonnegative_position(value: i32) -> Result<usize> {
+    usize::try_from(value).with_context(|| format!("SCIP range contains negative value {value}"))
 }
 
 fn compiler_proven_project_interface_call(
@@ -501,6 +1497,68 @@ fn compiler_proven_project_interface_call(
         == 1
 }
 
+fn compiler_proven_abstract_project_target(
+    owners: &[crate::profile::OwnerRecord],
+    methods: &[crate::profile::MethodRecord],
+    target_id: &str,
+) -> bool {
+    let Some(method) = methods.iter().find(|method| method.id == target_id) else {
+        return false;
+    };
+    let Ok(language) = syntax::Language::parse(&method.language) else {
+        return false;
+    };
+    // An abstract dispatch contract must denote a declaration without an
+    // executable implementation. The language adapter owns that syntax fact;
+    // a same-named interface elsewhere in the project must never turn a
+    // concrete method into a callback contract.
+    if method.source_export_eligible {
+        return false;
+    }
+    let behavior = syntax::normalized_behavior::behavior(language);
+    // Recovery around conditional default-interface bodies can preserve the
+    // exact compiler symbol while losing the normalized method's instance
+    // shape and owner ID. The SCIP descriptor still proves the declared owner;
+    // match it to one unique normalized abstract owner instead of discarding
+    // that stronger identity.
+    let semantic_abstract_owner = method
+        .semantic_symbol
+        .as_deref()
+        .and_then(|symbol| behavior.external_symbol_owner(symbol))
+        .map(|owner| {
+            owner
+                .rsplit(['.', ':', '/'])
+                .find(|part| !part.is_empty())
+                .unwrap_or(&owner)
+                .to_string()
+        })
+        .is_some_and(|semantic_owner| {
+            owners
+                .iter()
+                .filter(|owner| {
+                    owner.language == method.language
+                        && owner.name.rsplit("::").next() == Some(semantic_owner.as_str())
+                        && behavior.type_kind_is_abstract_dispatch(&owner.kind)
+                })
+                .count()
+                == 1
+        });
+    if semantic_abstract_owner {
+        return true;
+    }
+    if method.kind != "instance" {
+        return false;
+    }
+    let abstract_owner = owners.iter().any(|owner| {
+        owner.id == method.owner_id
+            && owner.language == method.language
+            && behavior.type_kind_is_abstract_dispatch(&owner.kind)
+    });
+    abstract_owner
+        && !method.raw_source.contains('{')
+        && method.raw_source.trim_end().ends_with(';')
+}
+
 fn equivalent_external_cost(
     left: &crate::syntax::ExternalCallComplexity,
     right: &crate::syntax::ExternalCallComplexity,
@@ -511,6 +1569,355 @@ fn equivalent_external_cost(
         && left.bound_quality == right.bound_quality
         && left.candidates == right.candidates
         && left.assumption == right.assumption
+}
+
+/// Adopt the indexer's declared signatures.
+///
+/// SCIP carries a `signature_documentation` for nearly every symbol - the
+/// compiler frontend's own rendering of the declaration, including parameter and
+/// return types. That is authoritative type information we would otherwise try
+/// to re-derive from source. The signature *text* is language-specific, so it is
+/// normalized exclusively through the adapter seam
+/// (`NormalizedLanguageBehavior::parse_signature`); nothing language-specific
+/// belongs here.
+///
+/// A method's own source-derived signature wins when it has one; this only fills
+/// the gaps, so a language whose extractor already recovers signatures is
+/// unaffected.
+fn apply_signature_types(output: &mut ProfileOutput, index: &Index) -> usize {
+    let signatures = index
+        .documents
+        .iter()
+        .flat_map(|document| &document.symbols)
+        .filter_map(|information| {
+            let text = information.signature_documentation.as_ref()?.text.trim();
+            (!text.is_empty()).then(|| (information.symbol.as_str(), text))
+        })
+        .collect::<BTreeMap<_, _>>();
+    if signatures.is_empty() {
+        return 0;
+    }
+    let mut adopted = 0;
+    for method in output.methods.iter_mut() {
+        if !method.signature.trim().is_empty() {
+            continue;
+        }
+        let Some(symbol) = method.semantic_symbol.as_deref() else {
+            continue;
+        };
+        let Some(text) = signatures.get(symbol) else {
+            continue;
+        };
+        // Only adopt a signature the adapter can actually normalize, so an
+        // unparsable rendering never becomes a bogus declared type.
+        let Ok(language) = crate::syntax::Language::parse(&method.language) else {
+            continue;
+        };
+        if crate::syntax::normalized_behavior::behavior(language)
+            .parse_signature(text)
+            .is_empty()
+        {
+            continue;
+        }
+        method.signature = (*text).to_string();
+        adopted += 1;
+    }
+    adopted
+}
+
+/// Adopt the indexer's local-variable types.
+///
+/// SCIP emits a `local N` symbol per local binding, carrying the frontend's own
+/// rendering of its declaration (`let out: Output`, `var uc *unleashCmd`). That
+/// is authoritative typing for exactly the receivers a source-only analysis
+/// cannot type. For every call whose receiver is a plain local, find that
+/// receiver's occurrence inside the call span and attach the local's declared
+/// type.
+///
+/// The declaration grammar is language-specific and is read only through
+/// `NormalizedLanguageBehavior::parse_variable_declaration`; a receiver that
+/// already carries a type is never overwritten.
+fn apply_local_variable_types(output: &mut ProfileOutput, index: &Index) -> usize {
+    let has_local_types = index
+        .documents
+        .iter()
+        .flat_map(|document| &document.symbols)
+        .any(|information| {
+            information.symbol.starts_with("local ")
+                && information
+                    .signature_documentation
+                    .as_ref()
+                    .is_some_and(|documentation| !documentation.text.trim().is_empty())
+        });
+    if !has_local_types {
+        return 0;
+    }
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| (method.id.clone(), (method.language.clone(), method.span)))
+        .collect::<BTreeMap<_, _>>();
+    let mut typed = 0;
+    for call in output.calls.iter_mut() {
+        let local_callable =
+            call.implicit_receiver && call.target.is_none() && call.semantic_symbol.is_none();
+        if (!local_callable && call.receiver_type.is_some()) || call.receiver.is_empty() {
+            continue;
+        }
+        let local_name = if local_callable {
+            call.message.as_str()
+        } else {
+            call.receiver.as_str()
+        };
+        let Some((language, method_span)) = methods.get(&call.source) else {
+            continue;
+        };
+        let Ok(language) = crate::syntax::Language::parse(language) else {
+            continue;
+        };
+        let Some(document) = select_document_for_path(&call.path, &index.documents) else {
+            continue;
+        };
+        let source = fs::read_to_string(&call.path).unwrap_or_default();
+        // Normalized syntax spans are one-based while SCIP ranges are
+        // zero-based. Keep this conversion at the importer boundary; comparing
+        // the two coordinate systems directly silently prevented every local
+        // receiver occurrence after the first source line from matching.
+        let call_span = [
+            call.span[0].saturating_sub(1),
+            call.span[1],
+            call.span[2].saturating_sub(1),
+            call.span[3],
+        ];
+        // The receiver's own occurrence: inside the call, spelled like the
+        // receiver, and bound to a local symbol.
+        let direct_symbol = document
+            .occurrences
+            .iter()
+            .filter(|occurrence| {
+                occurrence
+                    .span()
+                    .is_some_and(|span| contains(call_span, span))
+            })
+            .find(|occurrence| {
+                occurrence.symbol.starts_with("local ")
+                    && occurrence
+                        .span()
+                        .is_some_and(|span| occurrence_text(&source, span) == local_name)
+            })
+            .map(|occurrence| occurrence.symbol.as_str());
+        // An inactive C# preprocessor branch has no occurrence at the call
+        // itself. The binding still has indexed occurrences in the enclosing
+        // method (normally its declaration and active-branch uses). Adopt that
+        // compiler identity only when the method contains exactly one local
+        // symbol with this source name, preserving shadowing safety.
+        let enclosing_symbols = method_span
+            .map(|span| {
+                [
+                    span[0].saturating_sub(1),
+                    span[1],
+                    span[2].saturating_sub(1),
+                    span[3],
+                ]
+            })
+            .into_iter()
+            .flat_map(|span| {
+                document.occurrences.iter().filter(move |occurrence| {
+                    occurrence.symbol.starts_with("local ")
+                        && occurrence.span().is_some_and(|inner| contains(span, inner))
+                })
+            })
+            .filter(|occurrence| {
+                occurrence
+                    .span()
+                    .is_some_and(|span| occurrence_text(&source, span) == local_name)
+            })
+            .map(|occurrence| occurrence.symbol.as_str())
+            .collect::<BTreeSet<_>>();
+        let fallback_symbol = (!local_callable && enclosing_symbols.len() == 1)
+            .then(|| enclosing_symbols.into_iter().next())
+            .flatten();
+        let declaration = direct_symbol
+            .or(fallback_symbol)
+            .and_then(|symbol| {
+                document
+                    .symbols
+                    .iter()
+                    .find(|information| information.symbol == symbol)
+            })
+            .and_then(|information| information.signature_documentation.as_ref())
+            .map(|documentation| documentation.text.trim())
+            .filter(|text| !text.is_empty());
+        let Some(declaration) = declaration else {
+            continue;
+        };
+        let behavior = crate::syntax::normalized_behavior::behavior(language);
+        let Some(declared) = behavior.parse_variable_declaration(declaration) else {
+            continue;
+        };
+        if local_callable {
+            let Some(kind) = behavior.declared_callable_cost(&declared) else {
+                continue;
+            };
+            let Some((time, space)) = crate::syntax::parametric_call_complexity(&kind) else {
+                continue;
+            };
+            call.callback_receiver = true;
+            call.known_time_complexity = Some(time.to_string());
+            call.known_space_complexity = Some(space.to_string());
+            call.complexity_provenance = Some("scip_local_declared_callable_contract".to_string());
+            call.complexity_bound_quality = Some(format!("upper_bound_parametric_{kind}"));
+            call.complexity_missing_kind = None;
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+            call.empty_domain_cause = None;
+            typed += 1;
+            continue;
+        }
+        let receiver_type = TypeExpr::parse(&declared, language.as_str());
+        if call.known_time_complexity.is_none() && call.known_space_complexity.is_none() {
+            if let Some(complexity) = behavior.call_complexity(&receiver_type, &call.message) {
+                call.known_time_complexity = Some(complexity.time.to_string());
+                call.known_space_complexity = Some(complexity.space.to_string());
+                call.complexity_provenance =
+                    Some("scip_local_declared_receiver_registry".to_string());
+                call.complexity_bound_quality =
+                    Some("upper_bound_compiler_declared_receiver".to_string());
+                call.complexity_missing_kind = None;
+                call.unresolved_reason = None;
+                call.resolution_missing_proof = None;
+                call.empty_domain_cause = None;
+            } else if let Some(kind) = behavior.parametric_call_cost(&receiver_type, &call.message)
+            {
+                if let Some((time, space)) = crate::syntax::parametric_call_complexity(&kind) {
+                    call.callback_receiver = true;
+                    call.known_time_complexity = Some(time.to_string());
+                    call.known_space_complexity = Some(space.to_string());
+                    call.complexity_provenance =
+                        Some("scip_local_declared_receiver_contract".to_string());
+                    call.complexity_bound_quality = Some(format!("upper_bound_parametric_{kind}"));
+                    call.complexity_missing_kind = None;
+                    call.unresolved_reason = None;
+                    call.resolution_missing_proof = None;
+                    call.empty_domain_cause = None;
+                }
+            }
+        }
+        call.receiver_type = Some(declared);
+        call.receiver_type_origin = Some("scip_local_declaration".to_string());
+        typed += 1;
+    }
+    typed
+}
+
+/// Reconcile operator facts that are not emitted as ordinary call records.
+/// The first local occurrence in an operator span is its left operand; its SCIP
+/// declaration is authoritative. The language adapter still decides whether
+/// that exact type/operator pair is scalar and constant-time.
+fn apply_scalar_operator_types(output: &mut ProfileOutput, index: &Index) -> usize {
+    let has_local_types = index
+        .documents
+        .iter()
+        .flat_map(|document| &document.symbols)
+        .any(|information| {
+            information.symbol.starts_with("local ")
+                && information
+                    .signature_documentation
+                    .as_ref()
+                    .is_some_and(|documentation| !documentation.text.trim().is_empty())
+        });
+    if !has_local_types {
+        return 0;
+    }
+    let method_languages = output
+        .methods
+        .iter()
+        .map(|method| {
+            (
+                (
+                    method.path.as_str(),
+                    method.owner.as_str(),
+                    method.name.as_str(),
+                    method.line,
+                ),
+                method.language.as_str(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut applied = 0;
+    for fact in &mut output.complexity_facts {
+        let Some(language) = method_languages.get(&(
+            fact.path.as_str(),
+            fact.owner.as_str(),
+            fact.function.as_str(),
+            fact.line,
+        )) else {
+            continue;
+        };
+        let Ok(language_kind) = crate::syntax::Language::parse(language) else {
+            continue;
+        };
+        let behavior = crate::syntax::normalized_behavior::behavior(language_kind);
+        let Some(document) = select_document_for_path(&fact.path, &index.documents) else {
+            continue;
+        };
+        for context in &mut fact.call_contexts {
+            if context.known_time_complexity.is_some() || context.known_space_complexity.is_some() {
+                continue;
+            }
+            let span = [
+                context.span[0].saturating_sub(1),
+                context.span[1],
+                context.span[2].saturating_sub(1),
+                context.span[3],
+            ];
+            let declaration = document
+                .occurrences
+                .iter()
+                .filter(|occurrence| occurrence.symbol.starts_with("local "))
+                .filter(|occurrence| {
+                    occurrence
+                        .span()
+                        .is_some_and(|occurrence_span| contains(span, occurrence_span))
+                })
+                .min_by_key(|occurrence| occurrence.span())
+                .and_then(|occurrence| {
+                    document
+                        .symbols
+                        .iter()
+                        .find(|information| information.symbol == occurrence.symbol)
+                })
+                .and_then(|information| information.signature_documentation.as_ref())
+                .map(|documentation| documentation.text.trim())
+                .filter(|text| !text.is_empty());
+            let Some(declared) =
+                declaration.and_then(|text| behavior.parse_variable_declaration(text))
+            else {
+                continue;
+            };
+            let operand_type = TypeExpr::parse(&declared, language);
+            let Some(complexity) =
+                behavior.scalar_operator_complexity(&context.message, Some(&operand_type))
+            else {
+                continue;
+            };
+            context.known_time_complexity = Some(complexity.time.to_string());
+            context.known_space_complexity = Some(complexity.space.to_string());
+            context.evidence_gap = None;
+            applied += 1;
+        }
+    }
+    applied
+}
+
+/// Whether this language's indexer emits several overlapping occurrences per
+/// call site, so the first semantic one is the callee. Owned by the adapter -
+/// this file must not branch on language.
+fn prefers_first_semantic_occurrence(language: &str) -> bool {
+    crate::syntax::Language::parse(language).is_ok_and(|language| {
+        crate::syntax::normalized_behavior::behavior(language)
+            .scip_prefers_first_semantic_occurrence()
+    })
 }
 
 fn implementation_targets(
@@ -559,6 +1966,10 @@ fn assign_method_symbols(methods: &mut [MethodRecord], documents: &[Document]) {
             .occurrences
             .iter()
             .filter(|occurrence| occurrence.symbol_roles & 1 == 1)
+            // SCIP local symbols identify bindings, not callable project
+            // definitions. Joining a local declaration to its enclosing
+            // method makes a later variable read look like a self-call.
+            .filter(|occurrence| semantic_symbol(&occurrence.symbol))
         {
             let Some(span) = occurrence.span() else {
                 continue;
@@ -598,6 +2009,213 @@ fn assign_method_symbols(methods: &mut [MethodRecord], documents: &[Document]) {
             .filter(|candidates| candidates.len() == 1)
             .and_then(|candidates| candidates.into_iter().next());
     }
+}
+
+/// Constructor-initializer keywords (`this(...)`) have no callable occurrence
+/// in scip-dotnet. The normalized call nevertheless carries an exact owner and
+/// constructor dispatch name. C# rejects cyclic initializer chains, so close
+/// the call over every other constructor on that exact owner and join their
+/// summaries rather than leaving the compiler-valid delegation unidentified.
+fn reconcile_constructor_delegations(output: &mut ProfileOutput) -> usize {
+    let methods = output
+        .methods
+        .iter()
+        .map(|method| {
+            (
+                (
+                    method.language.as_str(),
+                    method.symbol_owner.as_deref(),
+                    method.dispatch_name.as_str(),
+                    method.kind.as_str(),
+                ),
+                (method.id.as_str(), method.id.clone()),
+            )
+        })
+        .fold(
+            BTreeMap::<(&str, Option<&str>, &str, &str), Vec<(&str, String)>>::new(),
+            |mut rows, (key, method)| {
+                rows.entry(key).or_default().push(method);
+                rows
+            },
+        );
+    let source_languages = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method.language.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut reconciled = 0;
+    for call in output.calls.iter_mut().filter(|call| {
+        call.target.is_none()
+            && call.candidate_targets.is_empty()
+            && call.constructor_target.is_some()
+    }) {
+        let Some(language) = source_languages.get(call.source.as_str()).copied() else {
+            continue;
+        };
+        let Ok(language_kind) = crate::syntax::Language::parse(language) else {
+            continue;
+        };
+        if !crate::syntax::normalized_behavior::behavior(language_kind)
+            .constructor_delegation_excludes_self()
+        {
+            continue;
+        }
+        let Some(owner) = call.receiver_symbol.as_deref() else {
+            continue;
+        };
+        let constructor = call.constructor_target.as_deref().expect("filtered");
+        let candidates = methods
+            .get(&(language, Some(owner), constructor, "instance"))
+            .into_iter()
+            .flatten()
+            .filter(|(id, _)| *id != call.source)
+            .map(|(_, id)| id.clone())
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            continue;
+        }
+        if candidates.len() == 1 {
+            call.target = candidates.into_iter().next();
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+        } else {
+            call.candidate_targets = candidates.into_iter().collect();
+            call.candidate_reason = Some("compiler_valid_constructor_delegation_set".to_string());
+            call.external_symbol_scope = Some("project".to_string());
+            call.complexity_missing_kind = None;
+            call.unresolved_reason =
+                Some("closed_constructor_candidate_set_requires_summary".to_string());
+            call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+            call.empty_domain_cause = None;
+        }
+        reconciled += 1;
+    }
+    reconciled
+}
+
+/// A compiler indexes only the active arm of a preprocessor conditional. The
+/// source analyzer still (correctly) retains calls from every arm, so an
+/// inactive overload call has no SCIP occurrence of its own. When an active
+/// sibling proves the exact project owner, close the inactive call over every
+/// same-owner/same-arity project overload and let Espalier join their costs by
+/// maximum. This is deliberately a candidate set, never an overload guess.
+fn reconcile_inactive_preprocessor_project_calls(output: &mut ProfileOutput) -> usize {
+    let methods_by_id = output
+        .methods
+        .iter()
+        .map(|method| (method.id.as_str(), method))
+        .collect::<BTreeMap<_, _>>();
+    let mut sources = BTreeMap::<String, String>::new();
+    let indexed_siblings = output
+        .calls
+        .iter()
+        .filter_map(|call| {
+            Some((
+                (
+                    call.source.clone(),
+                    call.receiver.clone(),
+                    call.message.clone(),
+                    call.argument_count,
+                ),
+                (call.line, call.target.clone()?),
+            ))
+        })
+        .fold(
+            BTreeMap::<(String, String, String, usize), Vec<(usize, String)>>::new(),
+            |mut rows, (key, sibling)| {
+                rows.entry(key).or_default().push(sibling);
+                rows
+            },
+        );
+    let mut reconciled = 0;
+    for call in output.calls.iter_mut().filter(|call| {
+        call.target.is_none() && call.semantic_symbol.is_none() && call.candidate_targets.is_empty()
+    }) {
+        let key = (
+            call.source.clone(),
+            call.receiver.clone(),
+            call.message.clone(),
+            call.argument_count,
+        );
+        let source = sources
+            .entry(call.path.clone())
+            .or_insert_with(|| fs::read_to_string(&call.path).unwrap_or_default());
+        let sibling_methods = indexed_siblings
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .filter(|(line, _)| preprocessor_alternate_lines(source, *line, call.line))
+            .filter_map(|(_, target)| methods_by_id.get(target.as_str()).copied())
+            .collect::<Vec<_>>();
+        if sibling_methods.is_empty() {
+            continue;
+        }
+        let owners = sibling_methods
+            .iter()
+            .map(|method| {
+                (
+                    method.language.as_str(),
+                    method.owner.as_str(),
+                    method.kind.as_str(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        if owners.len() != 1 {
+            continue;
+        }
+        let (language, owner, kind) = owners.into_iter().next().expect("one owner");
+        let candidates = output
+            .methods
+            .iter()
+            .filter(|method| {
+                method.language == language
+                    && method.owner == owner
+                    && method.kind == kind
+                    && method.dispatch_name == call.message
+                    && method.params.len() == call.argument_count
+            })
+            .map(|method| method.id.clone())
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            continue;
+        }
+        if candidates.len() == 1 {
+            call.target = candidates.into_iter().next();
+            call.kind = "resolved_call".to_string();
+            call.confidence = "high".to_string();
+            call.unresolved_reason = None;
+            call.resolution_missing_proof = None;
+        } else {
+            call.candidate_targets = candidates.into_iter().collect();
+            call.candidate_reason = Some("compiler_indexed_preprocessor_overload_set".to_string());
+            call.external_symbol_scope = Some("project".to_string());
+            call.complexity_missing_kind = None;
+            call.unresolved_reason =
+                Some("closed_preprocessor_project_candidate_set_requires_summary".to_string());
+            call.resolution_missing_proof = Some("closed_candidate_cost_join_required".to_string());
+            call.empty_domain_cause = None;
+        }
+        reconciled += 1;
+    }
+    reconciled
+}
+
+fn preprocessor_alternate_lines(source: &str, left_line: usize, right_line: usize) -> bool {
+    let start = left_line.min(right_line).saturating_sub(1);
+    let end = left_line.max(right_line);
+    source
+        .lines()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .map(str::trim_start)
+        .any(|line| {
+            line.starts_with("#if")
+                || line.starts_with("#elif")
+                || line.starts_with("#else")
+                || line.starts_with("#endif")
+        })
 }
 
 /// Syntax-only recursion extraction deliberately runs before corpus call
@@ -741,6 +2359,161 @@ fn definitions_by_symbol(
     definitions
 }
 
+fn indexed_preprocessor_definitions(
+    documents: &[Document],
+    sources: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut definitions = BTreeMap::<String, BTreeSet<String>>::new();
+    for document in documents {
+        let Some(source) = sources.get(&document.relative_path) else {
+            continue;
+        };
+        for occurrence in document
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.symbol_roles & 1 == 1)
+            .filter(|occurrence| occurrence.symbol.ends_with('!'))
+        {
+            let Some(span) = occurrence.span() else {
+                continue;
+            };
+            let Some(definition) = preprocessor_definition_source(source, span[0]) else {
+                continue;
+            };
+            definitions
+                .entry(occurrence.symbol.clone())
+                .or_default()
+                .insert(definition);
+        }
+    }
+    definitions
+        .into_iter()
+        .filter_map(|(symbol, candidates)| {
+            (candidates.len() == 1).then(|| (symbol, candidates.into_iter().next().unwrap()))
+        })
+        .collect()
+}
+
+fn indexed_document_sources(
+    documents: &[Document],
+    methods_by_path: &BTreeMap<String, Vec<&MethodRecord>>,
+    roots: &BTreeSet<PathBuf>,
+) -> BTreeMap<String, String> {
+    documents
+        .iter()
+        .filter_map(|document| {
+            let path = indexed_document_path(document, methods_by_path, roots)?;
+            let source = fs::read_to_string(path).ok()?;
+            Some((document.relative_path.clone(), source))
+        })
+        .collect()
+}
+
+fn indexed_definition_at(
+    sources: &BTreeMap<String, String>,
+    roots: &BTreeSet<PathBuf>,
+    path: &str,
+    one_based_line: usize,
+) -> Option<String> {
+    let matching = sources
+        .iter()
+        .filter(|(relative, _source)| {
+            path_ends_with(relative, path) || path_ends_with(path, relative)
+        })
+        .collect::<Vec<_>>();
+    let source = if matching.len() == 1 {
+        matching[0].1.clone()
+    } else if matching.is_empty() {
+        let relative = Path::new(path);
+        let candidates = roots
+            .iter()
+            .map(|root| root.join(relative))
+            .filter(|candidate| candidate.is_file())
+            .collect::<BTreeSet<_>>();
+        if candidates.len() != 1 {
+            return None;
+        }
+        fs::read_to_string(candidates.iter().next().unwrap()).ok()?
+    } else {
+        return None;
+    };
+    preprocessor_definition_source(&source, one_based_line.saturating_sub(1))
+}
+
+fn indexed_source_roots(
+    methods_by_path: &BTreeMap<String, Vec<&MethodRecord>>,
+) -> BTreeSet<PathBuf> {
+    let mut roots = BTreeSet::new();
+    for (relative, methods) in methods_by_path {
+        let relative = Path::new(relative);
+        let depth = relative.components().count();
+        for method in methods {
+            let actual = Path::new(&method.path);
+            if !actual.ends_with(relative) {
+                continue;
+            }
+            if let Some(root) = actual.ancestors().nth(depth) {
+                roots.insert(root.to_path_buf());
+            }
+        }
+    }
+    roots
+}
+
+fn indexed_document_path(
+    document: &Document,
+    methods_by_path: &BTreeMap<String, Vec<&MethodRecord>>,
+    roots: &BTreeSet<PathBuf>,
+) -> Option<PathBuf> {
+    let mut candidates = methods_by_path
+        .get(&document.relative_path)
+        .into_iter()
+        .flatten()
+        .map(|method| PathBuf::from(&method.path))
+        .filter(|path| path.is_file())
+        .collect::<BTreeSet<_>>();
+    let relative = Path::new(&document.relative_path);
+    if relative.is_absolute() && relative.is_file() {
+        candidates.insert(relative.to_path_buf());
+    } else {
+        candidates.extend(
+            roots
+                .iter()
+                .map(|root| root.join(relative))
+                .filter(|path| path.is_file()),
+        );
+    }
+    (candidates.len() == 1).then(|| candidates.into_iter().next().unwrap())
+}
+
+fn preprocessor_definition_source(source: &str, line: usize) -> Option<String> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut index = line;
+    let first = lines.get(index)?.trim_start();
+    let directive = first.strip_prefix('#')?.trim_start();
+    let Some(after_define) = directive.strip_prefix("define") else {
+        return None;
+    };
+    if after_define
+        .chars()
+        .next()
+        .is_some_and(|character| !character.is_whitespace())
+    {
+        return None;
+    }
+    let mut definition = String::new();
+    loop {
+        let row = *lines.get(index)?;
+        definition.push_str(row);
+        if !row.trim_end().ends_with('\\') {
+            break;
+        }
+        definition.push('\n');
+        index += 1;
+    }
+    Some(definition)
+}
+
 fn select_call_occurrences<'a>(
     call: &CallRecord,
     document: &'a Document,
@@ -759,19 +2532,74 @@ fn select_call_occurrences<'a>(
         .occurrences
         .iter()
         .filter(|occurrence| occurrence.symbol_roles & 1 == 0)
+        // Local occurrences remain available to the dedicated type-enrichment
+        // passes, but they cannot establish call identity. A closure/function
+        // value needs an explicit callable contract instead of borrowing the
+        // identity of the method that contains its binding.
+        .filter(|occurrence| semantic_symbol(&occurrence.symbol))
         .filter(|occurrence| {
             occurrence
                 .span()
                 .is_some_and(|span| contains(call_span, span))
         })
         .collect::<Vec<_>>();
+    // Runtime producers can use the exact normalized call range when the
+    // source language has no independently addressable selector token (Ruby
+    // attribute writers are one example). Equality with FactMine's call span
+    // is already an exact anchor; preserve all symbols at that range as the
+    // modeled dispatch alternatives instead of requiring the whole
+    // expression text to equal the selector spelling.
+    let exact_call_range = contained
+        .iter()
+        .copied()
+        .filter(|occurrence| {
+            occurrence.span() == Some(call_span)
+                && (callable_symbol(&occurrence.symbol)
+                    || syntax::scip_noncall_access_is_callable(language, &occurrence.symbol))
+        })
+        .collect::<Vec<_>>();
+    if !exact_call_range.is_empty() {
+        return selected_occurrences(&exact_call_range);
+    }
+    // A normalized writer includes its right-hand side in the call span.
+    // When that value is itself a call, the trace-plan anchor deliberately
+    // ends before the nested expression so collectors can bind the writer
+    // independently.  Accept that exact prefix only when the semantic symbol
+    // itself names the normalized writer; sharing the call start excludes the
+    // nested RHS and the language adapter prevents a receiver occurrence from
+    // masquerading as the setter.
+    if message.ends_with('=') {
+        let exact_writer_prefix = contained
+            .iter()
+            .copied()
+            .filter(|occurrence| {
+                occurrence.span().is_some_and(|span| {
+                    (span[0], span[1]) == (call_span[0], call_span[1])
+                        && syntax::scip_occurrence_matches_call(
+                            language,
+                            &occurrence.symbol,
+                            message,
+                            message,
+                        )
+                })
+            })
+            .collect::<Vec<_>>();
+        if !exact_writer_prefix.is_empty() {
+            return selected_occurrences(&exact_writer_prefix);
+        }
+    }
     let mut exact = contained
         .iter()
         .copied()
         .filter(|occurrence| {
-            occurrence
-                .span()
-                .is_some_and(|span| occurrence_text(source, span) == message)
+            occurrence.span().is_some_and(|span| {
+                syntax::scip_occurrence_matches_call(
+                    language,
+                    &occurrence.symbol,
+                    occurrence_text(source, span),
+                    message,
+                )
+            })
         })
         .collect::<Vec<_>>();
     exact.sort_by_key(|occurrence| occurrence.span());
@@ -792,12 +2620,51 @@ fn select_call_occurrences<'a>(
                     .is_some_and(|span| !contains(receiver_span, span))
             })
             .collect::<Vec<_>>();
-        if language == "java" {
+        if prefers_first_semantic_occurrence(language) {
             if let Some(selected) = first_semantic_occurrence(&outside_receiver) {
                 return selected_occurrences(&[selected]);
             }
         } else if !outside_receiver.is_empty() {
             return selected_occurrences(&outside_receiver);
+        }
+    }
+    if !exact.is_empty()
+        && exact
+            .windows(2)
+            .all(|pair| pair[0].span() == pair[1].span())
+    {
+        let callable_alternatives = exact
+            .iter()
+            .copied()
+            .filter(|occurrence| {
+                callable_symbol(&occurrence.symbol)
+                    || syntax::scip_noncall_access_is_callable(language, &occurrence.symbol)
+            })
+            .collect::<Vec<_>>();
+        if !callable_alternatives.is_empty() {
+            return selected_occurrences(&callable_alternatives);
+        }
+    }
+    // Index selectors have no parenthesized argument delimiter for the
+    // generic outer-selector matcher below. For a simple receiver the first
+    // exact `[` inside the normalized call span is the outer access; when the
+    // receiver is itself a call, `receiver_call_span` above has already
+    // removed its occurrences. Preserve every semantic alternative at that
+    // exact selector range so modeled-world dispatch remains conservative.
+    if matches!(message, "[]" | "[]=") {
+        if let Some(first_span) = exact
+            .iter()
+            .filter_map(|occurrence| occurrence.span())
+            .min()
+        {
+            let first_selector = exact
+                .iter()
+                .copied()
+                .filter(|occurrence| occurrence.span() == Some(first_span))
+                .collect::<Vec<_>>();
+            if !first_selector.is_empty() {
+                return selected_occurrences(&first_selector);
+            }
         }
     }
     // A normalized call span covers its arguments, so a nested call may
@@ -830,26 +2697,22 @@ fn select_call_occurrences<'a>(
         })
         .collect::<Vec<_>>();
     if !outer_selector.is_empty() {
-        let preferred = if call.preprocessor_callable {
-            let macros = outer_selector
-                .iter()
-                .copied()
-                .filter(|occurrence| occurrence.symbol.ends_with('!'))
-                .collect::<Vec<_>>();
-            (!macros.is_empty()).then_some(macros)
-        } else {
-            None
-        };
+        let macros = outer_selector
+            .iter()
+            .copied()
+            .filter(|occurrence| {
+                syntax::preprocessor_definition_location(language, &occurrence.symbol).is_some()
+            })
+            .collect::<Vec<_>>();
+        let preferred = (!macros.is_empty()).then_some(macros);
         return selected_occurrences(preferred.as_deref().unwrap_or(&outer_selector));
     }
     let callable = exact
         .iter()
         .copied()
-        .filter(|occurrence| {
-            callable_symbol(&occurrence.symbol) || occurrence.symbol.starts_with("local ")
-        })
+        .filter(|occurrence| callable_symbol(&occurrence.symbol))
         .collect::<Vec<_>>();
-    if language == "java" {
+    if prefers_first_semantic_occurrence(language) {
         if let Some(selected) = first_semantic_occurrence(&callable) {
             return selected_occurrences(&[selected]);
         }
@@ -1067,6 +2930,7 @@ fn method_span_size(method: &&MethodRecord) -> (usize, usize) {
 mod tests {
     use super::*;
     use crate::profile::{CallRecord, MethodRecord, OwnerRecord};
+    use protobuf::Message;
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -1091,6 +2955,9 @@ mod tests {
             local_complexity: 0.0,
             complexity_signals: BTreeMap::new(),
             params: Vec::new(),
+            callback_params: Vec::new(),
+            source_export_eligible: true,
+            generated_declaration: false,
             raw_source: String::new(),
             normalized_source: String::new(),
             untraceable_params: Vec::new(),
@@ -1109,6 +2976,7 @@ mod tests {
             target_provenance: None,
             candidate_targets: Vec::new(),
             candidate_reason: None,
+            consumer_closed_candidate_set: false,
             kind: "unresolved_call".into(),
             owner: "Demo".into(),
             function: "caller".into(),
@@ -1119,7 +2987,10 @@ mod tests {
             lexical_symbol: None,
             lexical_symbol_origin: None,
             receiver_call_span: None,
+            selector_span: None,
+            execution_span: None,
             receiver_definition_call_spans: Vec::new(),
+            receiver_definition_sequence_projection: None,
             receiver_symbol: None,
             receiver_type: None,
             receiver_type_origin: None,
@@ -1138,6 +3009,7 @@ mod tests {
             complexity_assumptions: Vec::new(),
             message: message.into(),
             argument_count: 0,
+            arguments: Vec::new(),
             path: path.into(),
             line: span[0],
             span,
@@ -1146,6 +3018,7 @@ mod tests {
             unresolved_reason: Some("receiver_requires_corpus_resolution".into()),
             resolution_missing_proof: None,
             empty_domain_cause: None,
+            runtime_evidence_observed: false,
         }
     }
 
@@ -1162,6 +3035,7 @@ mod tests {
             confidence: "high".into(),
             symbol: Some("/project.ants.Logger".into()),
             supertypes: Vec::new(),
+            requirements: Vec::new(),
         };
         let symbol =
             "scip-go gomod example.test/ants/v2 v1.0.0 `example.test/ants/v2`/Logger#Printf.";
@@ -1171,6 +3045,87 @@ mod tests {
             "go",
             symbol
         ));
+    }
+
+    #[test]
+    fn exact_java_interface_declarations_are_parametric_not_body_targets() {
+        let dir = tempdir().unwrap();
+        let source_path = dir.path().join("Demo.java");
+        let declaration = "interface Demo { String value(); }";
+        let caller = "class Caller { String run(Demo demo) { return demo.value(); } }";
+        fs::write(&source_path, format!("{declaration}\n{caller}\n")).unwrap();
+        let path = source_path.to_string_lossy().to_string();
+        let symbol = "semanticdb maven demo current Demo#value().";
+        let declaration_column = declaration.find("value").unwrap();
+        let call_column = caller.find("value").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "Demo.java",
+            "occurrences": [
+                occurrence(
+                    [0, declaration_column, declaration_column + "value".len()],
+                    symbol,
+                    1,
+                ),
+                occurrence(
+                    [1, call_column, call_column + "value".len()],
+                    symbol,
+                    8,
+                ),
+            ]
+        }]});
+
+        let mut abstract_method = method("value", &path, "value", [1, 17, 1, 32]);
+        abstract_method.owner_id = "owner:Demo".into();
+        abstract_method.owner = "Demo".into();
+        abstract_method.kind = "instance".into();
+        abstract_method.raw_source = "String value();".into();
+        abstract_method.source_export_eligible = false;
+        let mut caller_method = method("caller", &path, "run", [2, 0, 2, caller.len()]);
+        caller_method.owner_id = "owner:Caller".into();
+        caller_method.owner = "Caller".into();
+        let mut interface_call = call(
+            "caller",
+            &path,
+            "value",
+            [2, call_column, 2, call_column + "value".len() + 2],
+        );
+        interface_call.receiver = "demo".into();
+        interface_call.receiver_type = Some("Demo".into());
+        let mut output = ProfileOutput::default();
+        output.owners = vec![OwnerRecord {
+            id: "owner:Demo".into(),
+            name: "Demo".into(),
+            kind: "interface".into(),
+            language: "java".into(),
+            path: path.clone(),
+            line: 1,
+            span: [1, 0, 1, declaration.len()],
+            confidence: "high".into(),
+            symbol: Some("Demo".into()),
+            supertypes: Vec::new(),
+            requirements: vec!["value".into()],
+        }];
+        output.methods = vec![abstract_method, caller_method];
+        output.calls = vec![interface_call];
+
+        let stats = apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(stats.exact_project_targets, 0);
+        assert_eq!(stats.modeled_external_symbols, 1);
+        assert_eq!(output.calls[0].target, None);
+        assert_eq!(output.calls[0].kind, "interface_call");
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(C)")
+        );
+        assert_eq!(
+            output.calls[0].known_space_complexity.as_deref(),
+            Some("O(S)")
+        );
+        assert_eq!(
+            output.calls[0].complexity_provenance.as_deref(),
+            Some("compiler_proven_abstract_project_contract")
+        );
     }
 
     fn occurrence(range: [usize; 3], symbol: &str, roles: u32) -> serde_json::Value {
@@ -1190,6 +3145,91 @@ mod tests {
             "symbol": symbol,
             "symbol_roles": roles
         })
+    }
+
+    /// `scip-go .` on a multi-package module emits a well-formed 87-byte index
+    /// with zero documents, and exits 0. Accepting it degrades every result to
+    /// source-only while the run still reports the SCIP resolution tier, so the
+    /// import must fail instead of succeeding with nothing.
+    #[test]
+    fn an_index_that_covers_none_of_the_profile_is_rejected() {
+        let build = || {
+            let mut output = ProfileOutput::default();
+            output.methods = vec![method("callee", "/repo/demo.java", "callee", [1, 1, 1, 20])];
+            output
+        };
+
+        let empty = json!({"documents": []});
+        let error = apply_json(&mut build(), &empty.to_string()).unwrap_err();
+        assert!(
+            error.to_string().contains("covers none"),
+            "unexpected error: {error}"
+        );
+
+        let foreign = json!({"documents": [{
+            "relative_path": "other/Unrelated.java",
+            "occurrences": []
+        }]});
+        assert!(apply_json(&mut build(), &foreign.to_string()).is_err());
+
+        let covering = json!({"documents": [{
+            "relative_path": "demo.java",
+            "occurrences": []
+        }]});
+        assert!(apply_json(&mut build(), &covering.to_string()).is_ok());
+
+        // A profile with no methods has nothing to cover and must not be
+        // reported as an indexing failure.
+        assert!(apply_json(&mut ProfileOutput::default(), &empty.to_string()).is_ok());
+    }
+
+    #[test]
+    fn imports_binary_scip_without_an_external_printer() {
+        let dir = tempdir().unwrap();
+        let source_path = dir.path().join("Demo.java");
+        let index_path = dir.path().join("index.scip");
+        let declaration = "void callee() {}";
+        let caller = "void caller() { callee(); }";
+        fs::write(&source_path, format!("{declaration}\n{caller}\n")).unwrap();
+        let symbol = "scip-java maven demo current Demo#callee().";
+        let mut document = scip::types::Document::new();
+        document.relative_path = "Demo.java".into();
+        for (line, column, roles) in [
+            (0, declaration.find("callee").unwrap(), 1),
+            (1, caller.find("callee").unwrap(), 8),
+        ] {
+            let mut occurrence = scip::types::Occurrence::new();
+            occurrence.range = vec![
+                line,
+                i32::try_from(column).unwrap(),
+                i32::try_from(column + "callee".len()).unwrap(),
+            ];
+            occurrence.symbol = symbol.into();
+            occurrence.symbol_roles = roles;
+            document.occurrences.push(occurrence);
+        }
+        let mut index = scip::types::Index::new();
+        index.documents.push(document);
+        fs::write(&index_path, index.write_to_bytes().unwrap()).unwrap();
+
+        let path = source_path.to_string_lossy().to_string();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![
+            method("callee", &path, "callee", [1, 0, 1, declaration.len()]),
+            method("caller", &path, "caller", [2, 0, 2, caller.len()]),
+        ];
+        output.calls = vec![call(
+            "caller",
+            &path,
+            "callee",
+            [2, caller.find("callee").unwrap(), 2, caller.len()],
+        )];
+
+        let stats = apply_json_file(&mut output, &index_path).unwrap();
+
+        assert_eq!(1, stats.exact_project_targets);
+        assert_eq!(output.calls[0].target.as_deref(), Some("callee"));
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
     }
 
     #[test]
@@ -1432,6 +3472,124 @@ mod tests {
     }
 
     #[test]
+    fn local_import_proof_rejects_a_contradictory_scip_self_target() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.cpp");
+        let source = "void swap(){ using std::swap; swap(a,b); }\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "cxx . . $ demo#swap().";
+        let definition_column = source.find("swap").unwrap();
+        let call_column = source.rfind("swap").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "demo.cpp",
+            "occurrences": [
+                canonical_occurrence(
+                    [0, definition_column, definition_column + "swap".len()],
+                    symbol,
+                    1
+                ),
+                canonical_occurrence(
+                    [0, call_column, call_column + "swap".len()],
+                    symbol,
+                    0
+                )
+            ]
+        }]});
+        let mut output = ProfileOutput::default();
+        output.methods = vec![method(
+            "swap",
+            &path,
+            "swap",
+            [1, 0, 1, source.trim().len()],
+        )];
+        let mut imported = call(
+            "swap",
+            &path,
+            "swap",
+            [1, call_column, 1, call_column + "swap(a,b)".len()],
+        );
+        imported.lexical_symbol = Some("std::swap".to_string());
+        imported.lexical_symbol_origin = Some("function_local_import".to_string());
+        imported.known_time_complexity = Some("O(R)".to_string());
+        output.calls = vec![imported];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert!(output.calls[0].target.is_none());
+        assert!(output.calls[0].semantic_symbol.is_none());
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(R)")
+        );
+        assert_eq!(output.calls[0].lexical_symbol.as_deref(), Some("std::swap"));
+    }
+
+    #[test]
+    fn scip_project_targets_unlock_dependent_call_result_costs() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.cpp");
+        let source = r#"template<typename T>
+auto make_dependent() -> std::shared_ptr<Box<typename T::Value>> { return {}; }
+template<typename T>
+void run_dependent() {
+    auto box = make_dependent<T>();
+    box->work();
+}
+"#;
+        fs::write(&path, source).unwrap();
+        let document =
+            crate::syntax::parse_file(path.clone(), crate::syntax::Language::Cpp).unwrap();
+        let mut output = crate::profile::extract(&document, crate::profile::Profile::Espalier);
+        let work = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run_dependent" && call.message == "work")
+            .unwrap();
+        assert_eq!(work.known_time_complexity, None);
+
+        let definition_line = source.lines().nth(1).unwrap();
+        let call_line = source.lines().nth(4).unwrap();
+        let definition_column = definition_line.find("make_dependent").unwrap();
+        let call_column = call_line.find("make_dependent").unwrap();
+        let symbol = "cxx . demo v1$ make_dependent(abc).";
+        let index = json!({"documents": [{
+            "relative_path": "demo.cpp",
+            "occurrences": [
+                canonical_occurrence(
+                    [1, definition_column, definition_column + "make_dependent".len()],
+                    symbol,
+                    1,
+                ),
+                canonical_occurrence(
+                    [4, call_column, call_column + "make_dependent".len()],
+                    symbol,
+                    8,
+                ),
+            ]
+        }]});
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let producer = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run_dependent" && call.message == "make_dependent<T>")
+            .unwrap();
+        assert!(producer.target.is_some());
+        let work = output
+            .calls
+            .iter()
+            .find(|call| call.function == "run_dependent" && call.message == "work")
+            .unwrap();
+        assert_eq!(work.known_time_complexity.as_deref(), Some("O(R)"));
+        assert_eq!(
+            work.complexity_provenance.as_deref(),
+            Some("declared_call_result_candidate_join")
+        );
+    }
+
+    #[test]
     fn later_index_preserves_method_symbols_from_earlier_documents() {
         let dir = tempdir().unwrap();
         let first_path = dir.path().join("src/First.java");
@@ -1492,6 +3650,42 @@ mod tests {
 
         assert_eq!(stats.matched_occurrences, 0);
         assert!(output.calls[0].semantic_symbol.is_none());
+    }
+
+    #[test]
+    fn nested_index_selectors_keep_the_outer_exact_identity() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nested_index.rb");
+        let source = "def caller\n  method_name_counts[method[:name]]\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let line = source.lines().nth(1).unwrap();
+        let outer_open = line.find('[').unwrap();
+        let inner_open = line.rfind('[').unwrap();
+        let outer_end = line.rfind(']').unwrap() + 1;
+        let outer_symbol = "nil-kill-runtime ruby ruby 3.2.3 Hash#`[]`().";
+        let inner_symbol = "nil-kill-runtime ruby ruby 3.2.3 Array#`[]`().";
+        let index = json!({"documents": [{
+            "relative_path": "nested_index.rb",
+            "occurrences": [
+                canonical_occurrence([1, outer_open, outer_open + 1], outer_symbol, 0),
+                canonical_occurrence([1, inner_open, inner_open + 1], inner_symbol, 0)
+            ]
+        }]});
+        let mut output = ProfileOutput::default();
+        output.methods = vec![method("caller", &path, "caller", [1, 0, 3, 3])];
+        output.methods[0].language = "ruby".to_string();
+        output
+            .calls
+            .push(call("caller", &path, "[]", [2, 2, 2, outer_end]));
+
+        let stats = apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(stats.matched_occurrences, 1);
+        assert_eq!(
+            output.calls[0].semantic_symbol.as_deref(),
+            Some(outer_symbol)
+        );
     }
 
     #[test]
@@ -1991,6 +4185,398 @@ mod tests {
     }
 
     #[test]
+    fn scip_local_type_prices_only_scalar_operator_facts() {
+        let dir = tempdir().unwrap();
+        let scalar_path = dir.path().join("scalar.rs");
+        let vector_path = dir.path().join("vector.rs");
+        let scalar = "fn scalar(other: usize) -> bool { let opaque = factory(); opaque < other }\n";
+        let vector =
+            "fn vector(right: Vec<i32>) -> bool { let opaque = factory(); opaque == right }\n";
+        fs::write(
+            &scalar_path,
+            format!("fn factory() -> usize {{ 0 }}\n{scalar}"),
+        )
+        .unwrap();
+        fs::write(
+            &vector_path,
+            format!("fn factory() -> Vec<i32> {{ vec![] }}\n{vector}"),
+        )
+        .unwrap();
+        let scalar_document =
+            crate::syntax::parse_file(scalar_path, crate::syntax::Language::Rust).unwrap();
+        let vector_document =
+            crate::syntax::parse_file(vector_path, crate::syntax::Language::Rust).unwrap();
+        let mut output = crate::profile::merge(
+            vec![
+                crate::profile::extract(&scalar_document, crate::profile::Profile::Espalier),
+                crate::profile::extract(&vector_document, crate::profile::Profile::Espalier),
+            ],
+            crate::profile::Profile::Espalier,
+        );
+        let fact = output
+            .complexity_facts
+            .iter()
+            .find(|fact| fact.function == "scalar")
+            .unwrap();
+        assert_eq!(
+            fact.call_contexts
+                .iter()
+                .find(|context| context.message == "<")
+                .unwrap()
+                .known_time_complexity,
+            None,
+            "source DFG deliberately does not infer an arbitrary call result"
+        );
+        let scalar_column = scalar.rfind("opaque").unwrap();
+        let vector_column = vector.rfind("opaque").unwrap();
+        let index = json!({"documents": [
+            {
+                "relative_path": "scalar.rs",
+                "occurrences": [
+                    occurrence(
+                        [1, scalar_column, scalar_column + "opaque".len()],
+                        "local 0",
+                        0
+                    )
+                ],
+                "symbols": [{
+                    "symbol": "local 0",
+                    "signature_documentation": {"text": "let opaque: usize"}
+                }]
+            },
+            {
+                "relative_path": "vector.rs",
+                "occurrences": [
+                    occurrence(
+                        [1, vector_column, vector_column + "opaque".len()],
+                        "local 0",
+                        0
+                    )
+                ],
+                "symbols": [{
+                    "symbol": "local 0",
+                    "signature_documentation": {"text": "let opaque: Vec<i32>"}
+                }]
+            }
+        ]});
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let context = output
+            .complexity_facts
+            .iter()
+            .find(|fact| fact.function == "scalar")
+            .unwrap()
+            .call_contexts
+            .iter()
+            .find(|context| context.message == "<")
+            .unwrap();
+        assert_eq!(context.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(context.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(context.evidence_gap, None);
+        let vector_context = output
+            .complexity_facts
+            .iter()
+            .find(|fact| fact.function == "vector")
+            .unwrap()
+            .call_contexts
+            .iter()
+            .find(|context| context.message == "==")
+            .unwrap();
+        assert_eq!(
+            vector_context.known_time_complexity, None,
+            "the document-local Vec declaration must not inherit scalar pricing"
+        );
+    }
+
+    #[test]
+    fn scip_local_receiver_types_reconcile_one_based_syntax_spans() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Renderer.cs");
+        let source = "class Renderer {\n  string Render() {\n    StringBuilder sb = Factory();\n    return sb.ToString();\n  }\n}\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let receiver_column = source.lines().nth(3).unwrap().find("sb").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "Renderer.cs",
+            "occurrences": [
+                occurrence(
+                    [3, receiver_column, receiver_column + "sb".len()],
+                    "local 0",
+                    0
+                )
+            ],
+            "symbols": [{
+                "symbol": "local 0",
+                "signature_documentation": {"text": "StringBuilder? sb"}
+            }]
+        }]});
+        let mut output = ProfileOutput::default();
+        let mut caller = method("caller", &path, "Render", [2, 2, 5, 3]);
+        caller.language = "csharp".into();
+        output.methods.push(caller);
+        let mut to_string = call(
+            "caller",
+            &path,
+            "ToString",
+            [
+                4,
+                receiver_column,
+                4,
+                receiver_column + "sb.ToString()".len(),
+            ],
+        );
+        to_string.receiver = "sb".into();
+        output.calls.push(to_string);
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(
+            output.calls[0].receiver_type.as_deref(),
+            Some("StringBuilder?")
+        );
+        assert_eq!(
+            output.calls[0].receiver_type_origin.as_deref(),
+            Some("scip_local_declaration")
+        );
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(N)")
+        );
+    }
+
+    #[test]
+    fn scip_local_receiver_types_flow_into_unindexed_preprocessor_branches() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Renderer.cs");
+        let source = "class Renderer {\n  string Render() {\n    StringBuilder sb = Factory();\n    return sb.ToString();\n  }\n}\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let declaration_column = source.lines().nth(2).unwrap().find("sb").unwrap();
+        let receiver_column = source.lines().nth(3).unwrap().find("sb").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "Renderer.cs",
+            "occurrences": [
+                occurrence(
+                    [2, declaration_column, declaration_column + "sb".len()],
+                    "local 0",
+                    1
+                )
+            ],
+            "symbols": [{
+                "symbol": "local 0",
+                "documentation": ["```cs\nStringBuilder? sb\n```"]
+            }]
+        }]});
+        let mut output = ProfileOutput::default();
+        let mut caller = method("caller", &path, "Render", [2, 2, 5, 3]);
+        caller.language = "csharp".into();
+        output.methods.push(caller);
+        let mut to_string = call(
+            "caller",
+            &path,
+            "ToString",
+            [
+                4,
+                receiver_column,
+                4,
+                receiver_column + "sb.ToString()".len(),
+            ],
+        );
+        to_string.receiver = "sb".into();
+        output.calls.push(to_string);
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(
+            output.calls[0].receiver_type.as_deref(),
+            Some("StringBuilder?")
+        );
+        assert_eq!(
+            output.calls[0].receiver_type_origin.as_deref(),
+            Some("scip_local_declaration")
+        );
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(N)")
+        );
+    }
+
+    #[test]
+    fn legacy_fenced_scip_documentation_recovers_only_the_signature() {
+        assert_eq!(
+            legacy_signature_documentation(&[
+                "```cs\nStringBuilder? sb\n```\nA reusable buffer.".into()
+            ])
+            .map(|signature| signature.text),
+            Some("StringBuilder? sb".into())
+        );
+        assert!(
+            legacy_signature_documentation(&["Narrative documentation only.".into()]).is_none()
+        );
+    }
+
+    #[test]
+    fn inactive_preprocessor_calls_use_closed_project_overload_sets() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Renderer.cs");
+        fs::write(
+            &path,
+            "class Renderer {\n#if ACTIVE\n  Padding.Apply(output, builder, alignment);\n#else\n  Padding.Apply(output, builder.ToString(), alignment);\n#endif\n}\n",
+        )
+        .unwrap();
+        let path = path.to_string_lossy().to_string();
+        let mut string_overload = method("string", &path, "Apply", [10, 0, 10, 1]);
+        string_overload.language = "csharp".into();
+        string_overload.owner = "Padding".into();
+        string_overload.params = vec!["output".into(), "value".into(), "alignment".into()];
+        let mut builder_overload = method("builder", &path, "Apply", [20, 0, 20, 1]);
+        builder_overload.language = "csharp".into();
+        builder_overload.owner = "Padding".into();
+        builder_overload.params = vec!["output".into(), "value".into(), "alignment".into()];
+        let mut active = call("caller", &path, "Apply", [3, 2, 3, 45]);
+        active.receiver = "Padding".into();
+        active.argument_count = 3;
+        active.target = Some("builder".into());
+        active.semantic_symbol = Some("scip-dotnet nuget . . Padding#Apply(+1).".into());
+        let mut inactive = call("caller", &path, "Apply", [5, 2, 5, 56]);
+        inactive.receiver = "Padding".into();
+        inactive.argument_count = 3;
+        let mut output = ProfileOutput::default();
+        output.methods = vec![string_overload, builder_overload];
+        output.calls = vec![active, inactive];
+
+        assert_eq!(
+            reconcile_inactive_preprocessor_project_calls(&mut output),
+            1
+        );
+        assert_eq!(
+            output.calls[1].candidate_targets,
+            ["builder".to_string(), "string".to_string()]
+        );
+        assert_eq!(
+            output.calls[1].candidate_reason.as_deref(),
+            Some("compiler_indexed_preprocessor_overload_set")
+        );
+    }
+
+    #[test]
+    fn csharp_constructor_delegation_candidates_exclude_the_source() {
+        let mut first = method("first", "/project/Event.cs", "Event", [1, 0, 2, 1]);
+        first.language = "csharp".into();
+        first.kind = "instance".into();
+        first.symbol_owner = Some("Demo.Event".into());
+        let mut second = method("second", "/project/Event.cs", "Event", [3, 0, 4, 1]);
+        second.language = "csharp".into();
+        second.kind = "instance".into();
+        second.symbol_owner = Some("Demo.Event".into());
+        let mut delegation = call("first", "/project/Event.cs", "this", [1, 10, 1, 20]);
+        delegation.receiver_symbol = Some("Demo.Event".into());
+        delegation.constructor_target = Some("Event".into());
+        let mut output = ProfileOutput::default();
+        output.methods = vec![first, second];
+        output.calls = vec![delegation];
+
+        assert_eq!(reconcile_constructor_delegations(&mut output), 1);
+        assert_eq!(output.calls[0].target.as_deref(), Some("second"));
+        assert!(output.calls[0].candidate_targets.is_empty());
+    }
+
+    #[test]
+    fn scip_local_callable_invocations_are_parametric() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Conversions.cs");
+        let source = "class Conversions {\n  object Run(string value) {\n    Func<string, object>? convertor = Find();\n    return convertor(value);\n  }\n}\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let call_column = source.lines().nth(3).unwrap().find("convertor").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "Conversions.cs",
+            "occurrences": [
+                occurrence(
+                    [3, call_column, call_column + "convertor".len()],
+                    "local 0",
+                    0
+                )
+            ],
+            "symbols": [{
+                "symbol": "local 0",
+                "documentation": ["```cs\nFunc<string, object>? convertor\n```"]
+            }]
+        }]});
+        let mut output = ProfileOutput::default();
+        let mut caller = method("caller", &path, "Run", [2, 2, 5, 3]);
+        caller.language = "csharp".into();
+        output.methods.push(caller);
+        let mut invocation = call(
+            "caller",
+            &path,
+            "convertor",
+            [4, call_column, 4, call_column + "convertor(value)".len()],
+        );
+        invocation.receiver = "self".into();
+        invocation.implicit_receiver = true;
+        output.calls.push(invocation);
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert!(output.calls[0].callback_receiver);
+        assert_eq!(
+            output.calls[0].known_time_complexity.as_deref(),
+            Some("O(C)")
+        );
+        assert_eq!(
+            output.calls[0].complexity_provenance.as_deref(),
+            Some("scip_local_declared_callable_contract")
+        );
+    }
+
+    #[test]
+    fn csharp_recovery_methods_retain_compiler_proven_interface_dispatch() {
+        let owner = OwnerRecord {
+            id: "ilogger".into(),
+            name: "ILogger".into(),
+            kind: "interface".into(),
+            language: "csharp".into(),
+            path: "/project/ILogger.cs".into(),
+            line: 1,
+            span: [1, 0, 20, 1],
+            confidence: "high".into(),
+            symbol: Some("Serilog.ILogger".into()),
+            supertypes: Vec::new(),
+            requirements: Vec::new(),
+        };
+        let mut recovered = method(
+            "verbose",
+            "/project/ILogger.cs",
+            "FEATURE_DEFAULT_INTERFACE",
+            [10, 0, 15, 1],
+        );
+        recovered.language = "csharp".into();
+        recovered.kind = "top".into();
+        recovered.owner_id = "recovery-owner".into();
+        recovered.source_export_eligible = false;
+        recovered.semantic_symbol =
+            Some("scip-dotnet nuget . . Serilog/ILogger#Verbose(+4).".into());
+        assert_eq!(
+            syntax::external_symbol_owner("csharp", recovered.semantic_symbol.as_deref().unwrap()),
+            Some("ILogger".into())
+        );
+
+        assert!(compiler_proven_abstract_project_target(
+            &[owner],
+            &[recovered.clone()],
+            "verbose"
+        ));
+        recovered.source_export_eligible = true;
+        assert!(!compiler_proven_abstract_project_target(
+            &[],
+            &[recovered],
+            "verbose"
+        ));
+    }
+
+    #[test]
     fn imports_callback_cost_as_a_parametric_contract() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("src/Demo.java");
@@ -2034,6 +4620,27 @@ mod tests {
 
     #[test]
     fn compiler_proven_java_costs_distinguish_exact_and_modeled_world_bounds() {
+        assert_eq!(
+            syntax::external_symbol_call_complexity(
+                "java",
+                "semanticdb maven jdk 21 java/util/List#size().",
+                "size"
+            )
+            .map(|complexity| (complexity.time, complexity.space)),
+            Some(("O(1)", "O(1)")),
+            "real scip-java 0.12 indexes use the semanticdb symbol scheme"
+        );
+        assert_eq!(
+            syntax::external_symbol_metadata(
+                "java",
+                "semanticdb maven jdk 21 java/util/function/Function#apply().",
+            ),
+            syntax::ExternalSymbolMetadata {
+                scope: "stdlib",
+                missing_cost_kind: "callback_cost_missing".to_string(),
+                parametric_cost: Some("callback_once".to_string()),
+            }
+        );
         assert_eq!(
             syntax::external_symbol_call_complexity(
                 "java",
@@ -2191,7 +4798,7 @@ mod tests {
                 "hash",
             )
             .map(|complexity| (complexity.time, complexity.space)),
-            Some(("O(N)", "O(N)"))
+            Some(("O(N)", "O(1)"))
         );
         assert_eq!(
             syntax::external_symbol_call_complexity(
@@ -2261,6 +4868,109 @@ mod tests {
         let stats = apply_json(&mut output, &index.to_string()).unwrap();
         assert_eq!(stats.unmatched_calls, 1);
         assert_eq!(output.calls[0].semantic_symbol, None);
+    }
+
+    #[test]
+    fn local_binding_read_cannot_resolve_to_its_enclosing_method() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("visit.rs");
+        let source = "fn visit() -> bool { let found = true; found }\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let declaration = source.find("found").unwrap();
+        let read = source.rfind("found").unwrap();
+        let index = json!({"documents": [{
+            "relative_path": "visit.rs",
+            "occurrences": [
+                occurrence([0, declaration, declaration + "found".len()], "local 0", 1),
+                occurrence([0, read, read + "found".len()], "local 0", 0)
+            ]
+        }]});
+        let mut output = ProfileOutput::default();
+        output.methods = vec![method(
+            "visit",
+            &path,
+            "visit",
+            [1, 0, 1, source.trim_end().len()],
+        )];
+        output.calls = vec![call(
+            "visit",
+            &path,
+            "found",
+            [1, read, 1, read + "found".len()],
+        )];
+
+        let stats = apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(stats.unmatched_calls, 1);
+        assert_eq!(output.calls[0].semantic_symbol, None);
+        assert_eq!(output.calls[0].target, None);
+        assert_ne!(output.calls[0].kind, "resolved_call");
+    }
+
+    #[test]
+    fn imports_bounded_macro_cost_from_an_indexed_header_into_cfg_facts() {
+        let dir = tempdir().unwrap();
+        let header_path = dir.path().join("defs.h");
+        let source_path = dir.path().join("main.c");
+        let header = "#define VALUE_AT(buffer) ((buffer)->items[(buffer)->offset])\n";
+        let source = "#include \"defs.h\"\nint read_value(Buffer *buffer) {\n  return VALUE_AT(buffer);\n}\n";
+        fs::write(&header_path, header).unwrap();
+        fs::write(&source_path, source).unwrap();
+        let document =
+            crate::syntax::parse_file(source_path.clone(), crate::syntax::Language::C).unwrap();
+        let mut output = crate::profile::extract(&document, crate::profile::Profile::Espalier);
+        let macro_call = output
+            .calls
+            .iter()
+            .find(|call| call.message == "VALUE_AT")
+            .unwrap();
+        assert!(
+            !macro_call.preprocessor_callable,
+            "the source parser cannot see definitions from an included header"
+        );
+
+        let call_column = source.lines().nth(2).unwrap().find("VALUE_AT").unwrap();
+        let symbol = "cxx . . $ `defs.h:1:9`!";
+        let index = json!({"documents": [
+            {
+                "relative_path": "main.c",
+                "occurrences": [
+                    occurrence(
+                        [2, call_column, call_column + "VALUE_AT".len()],
+                        symbol,
+                        0
+                    )
+                ]
+            }
+        ]});
+
+        let stats = apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(stats.modeled_external_symbols, 1);
+        let call = output
+            .calls
+            .iter()
+            .find(|call| call.message == "VALUE_AT")
+            .unwrap();
+        assert!(call.preprocessor_callable);
+        assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(
+            call.complexity_provenance.as_deref(),
+            Some("compiler_indexed_macro_body")
+        );
+        let context = output
+            .complexity_facts
+            .iter()
+            .find(|fact| fact.function == "read_value")
+            .unwrap()
+            .call_contexts
+            .iter()
+            .find(|context| context.message == "VALUE_AT")
+            .unwrap();
+        assert_eq!(context.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(context.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(context.evidence_gap, None);
     }
 
     #[test]
@@ -2470,7 +5180,10 @@ mod tests {
     fn accepts_protobuf_json_camel_case_fields_and_utf8_name() {
         let mut output = ProfileOutput::default();
         let index = json!({
-            "metadata": {"textDocumentEncoding": "UTF-8"},
+            "metadata": {
+                "textDocumentEncoding": "UTF-8",
+                "toolInfo": {"name": "scip-java", "version": "0.12.3"}
+            },
             "documents": [{
                 "relativePath": "Demo.swift",
                 "occurrences": [],
@@ -2484,6 +5197,13 @@ mod tests {
             }]
         });
         assert!(apply_json(&mut output, &index.to_string()).is_ok());
+        assert_eq!(
+            output.semantic_indexes,
+            vec![SemanticIndex {
+                tool: "scip-java".into(),
+                version: "0.12.3".into(),
+            }]
+        );
     }
 
     #[test]
@@ -2530,6 +5250,601 @@ mod tests {
     }
 
     #[test]
+    fn runtime_scip_imports_observed_project_targets_as_an_open_candidate_set() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let declaration = "  def callee; 1; end";
+        let caller = "  def caller; callee; end";
+        fs::write(&path, format!("class Demo\n{declaration}\n{caller}\nend\n")).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "nil-kill-runtime workspace demo abc Demo#callee().";
+        let declaration_column = declaration.find("callee").unwrap();
+        let call_column = caller.find("callee").unwrap();
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [OBSERVED_OPEN_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "symbols": [{"symbol": symbol}],
+                "occurrences": [
+                    {"range": [1, declaration_column, declaration_column + 6], "symbol": symbol, "symbolRoles": 1},
+                    {"range": [2, call_column, call_column + 6], "symbol": symbol, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut callee = method("callee", &path, "callee", [2, 2, 2, declaration.len()]);
+        let mut caller_method = method("caller", &path, "caller", [3, 2, 3, caller.len()]);
+        callee.language = "ruby".into();
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call(
+            "caller",
+            &path,
+            "callee",
+            [3, call_column, 3, call_column + 8],
+        );
+        runtime_call.owner = "Demo".into();
+        runtime_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![callee, caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.target, None);
+        assert_eq!(call.semantic_symbol.as_deref(), Some(symbol));
+        assert_eq!(
+            call.target_provenance.as_deref(),
+            Some("runtime_scip_observed")
+        );
+        assert_eq!(call.candidate_targets, vec!["callee"]);
+        assert_eq!(
+            call.candidate_reason.as_deref(),
+            Some("runtime_observed_candidate_set")
+        );
+        assert!(!call.consumer_closed_candidate_set);
+        assert_eq!(
+            call.unresolved_reason.as_deref(),
+            Some("runtime_observed_candidate_set_open")
+        );
+        assert_eq!(output.methods[0].semantic_symbol, None);
+        assert!(output
+            .semantic_indexes
+            .iter()
+            .any(|index| { index.tool == "nil-kill-runtime" && index.version == "1" }));
+    }
+
+    #[test]
+    fn runtime_modeled_scip_closes_observed_project_targets_with_an_assumption() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let declaration = "  def callee; 1; end";
+        let caller = "  def caller; callee; end";
+        fs::write(&path, format!("class Demo\n{declaration}\n{caller}\nend\n")).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "nil-kill-runtime workspace demo abc Demo#callee().";
+        let declaration_column = declaration.find("callee").unwrap();
+        let call_column = caller.find("callee").unwrap();
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "symbols": [{"symbol": symbol}],
+                "occurrences": [
+                    {"range": [1, declaration_column, declaration_column + 6], "symbol": symbol, "symbolRoles": 1},
+                    {"range": [2, call_column, call_column + 6], "symbol": symbol, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut callee = method("callee", &path, "callee", [2, 2, 2, declaration.len()]);
+        let mut caller_method = method("caller", &path, "caller", [3, 2, 3, caller.len()]);
+        callee.language = "ruby".into();
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call(
+            "caller",
+            &path,
+            "callee",
+            [3, call_column, 3, call_column + 8],
+        );
+        runtime_call.owner = "Demo".into();
+        runtime_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![callee, caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.target, None);
+        assert_eq!(
+            call.target_provenance.as_deref(),
+            Some("runtime_scip_modeled")
+        );
+        assert_eq!(call.candidate_targets, vec!["callee"]);
+        assert_eq!(
+            call.candidate_reason.as_deref(),
+            Some("runtime_modeled_observed_candidate_set")
+        );
+        assert!(call.consumer_closed_candidate_set);
+        assert_eq!(
+            call.complexity_bound_quality.as_deref(),
+            Some(RUNTIME_MODELED_QUALITY)
+        );
+        assert_eq!(
+            call.complexity_assumptions,
+            vec![RUNTIME_MODELED_ASSUMPTION]
+        );
+        assert_eq!(
+            call.unresolved_reason.as_deref(),
+            Some("runtime_modeled_project_candidate_set_requires_summary")
+        );
+    }
+
+    #[test]
+    fn runtime_modeled_scip_accepts_an_exact_whole_call_anchor_for_a_ruby_writer() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(target)\n  target.format = :json\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let call_text = "target.format = :json";
+        let call_column = source.lines().nth(1).unwrap().find(call_text).unwrap();
+        let symbol = "nil-kill-runtime workspace demo abc Demo/FileCoverage#`format=`().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [{
+                    "range": [1, call_column, call_column + call_text.len()],
+                    "symbol": symbol,
+                    "symbolRoles": 0
+                }]
+            }]
+        });
+        let mut caller = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller.language = "ruby".into();
+        let mut writer = call(
+            "caller",
+            &path,
+            "format=",
+            [2, call_column, 2, call_column + call_text.len()],
+        );
+        writer.owner = "Demo".into();
+        writer.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller];
+        output.calls = vec![writer];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
+        assert_eq!(
+            output.calls[0].target_provenance.as_deref(),
+            Some("runtime_scip_modeled")
+        );
+    }
+
+    #[test]
+    fn runtime_modeled_scip_disambiguates_same_range_ruby_reader_and_writer_symbols() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(target)\n  target.format = :json\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let line = source.lines().nth(1).unwrap();
+        let call_column = line.find("target.format").unwrap();
+        let selector_column = line.find("format").unwrap();
+        let writer =
+            "nil-kill-runtime workspace demo abc Demo/FileCoverage#`format=`().";
+        let reader = "nil-kill-runtime workspace demo abc Demo/FileCoverage#format().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [
+                    {
+                        "range": [1, selector_column, selector_column + "format".len()],
+                        "symbol": writer,
+                        "symbolRoles": 0
+                    },
+                    {
+                        "range": [1, selector_column, selector_column + "format".len()],
+                        "symbol": reader,
+                        "symbolRoles": 0
+                    }
+                ]
+            }]
+        });
+        let mut caller = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller.language = "ruby".into();
+        let mut call = call(
+            "caller",
+            &path,
+            "format=",
+            [2, call_column, 2, line.len()],
+        );
+        call.owner = "Demo".into();
+        call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller];
+        output.calls = vec![call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(writer));
+        assert_eq!(
+            output.calls[0].target_provenance.as_deref(),
+            Some("runtime_scip_modeled")
+        );
+        assert!(
+            output.calls[0]
+                .complexity_candidates
+                .iter()
+                .all(|candidate| candidate != reader),
+            "the same-range reader must not survive as a writer alternative"
+        );
+    }
+
+    #[test]
+    fn runtime_modeled_scip_matches_an_opaque_ruby_project_symbol_at_a_bracket_selector() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(dataset)\n  dataset[\"file\"]\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let call_text = "dataset[\"file\"]";
+        let call_column = source.lines().nth(1).unwrap().find(call_text).unwrap();
+        let bracket_column = call_column + call_text.find('[').unwrap();
+        let symbol = "fact-mine workspace project . Method#opaque().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [{
+                    "range": [1, bracket_column, bracket_column + 1],
+                    "symbol": symbol,
+                    "symbolRoles": 0
+                }]
+            }]
+        });
+        let mut caller = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller.language = "ruby".into();
+        let mut index_call = call(
+            "caller",
+            &path,
+            "[]",
+            [2, call_column, 2, call_column + call_text.len()],
+        );
+        index_call.owner = "Demo".into();
+        index_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller];
+        output.calls = vec![index_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].semantic_symbol.as_deref(), Some(symbol));
+        assert_eq!(
+            output.calls[0].target_provenance.as_deref(),
+            Some("runtime_scip_modeled")
+        );
+    }
+
+    #[test]
+    fn runtime_modeled_scip_preserves_observed_anchor_when_static_target_outranks_it() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let declaration = "  def callee; 1; end";
+        let caller = "  def caller; callee; end";
+        fs::write(&path, format!("class Demo\n{declaration}\n{caller}\nend\n")).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "nil-kill-runtime workspace demo abc Demo#callee().";
+        let declaration_column = declaration.find("callee").unwrap();
+        let call_column = caller.find("callee").unwrap();
+        let runtime_call_span = [3, call_column, 3, call_column + "callee;".len()];
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "2",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "symbols": [{"symbol": symbol}],
+                "occurrences": [
+                    {"range": [1, declaration_column, declaration_column + 6], "symbol": symbol, "symbolRoles": 1},
+                    {"range": [2, call_column, call_column + 6], "symbol": symbol, "symbolRoles": 0}
+                ]
+            }],
+            "_runtimeEvidence": {
+                "observedCallsiteAnchors": [{
+                    "relativePath": "demo.rb",
+                    "range": [2, call_column, call_column + "callee;".len()]
+                }]
+            }
+        });
+        let mut callee = method("callee", &path, "callee", [2, 2, 2, declaration.len()]);
+        let mut caller_method = method("caller", &path, "caller", [3, 2, 3, caller.len()]);
+        callee.language = "ruby".into();
+        caller_method.language = "ruby".into();
+        let mut static_call = call("caller", &path, "callee", runtime_call_span);
+        static_call.owner = "Demo".into();
+        static_call.function = "caller".into();
+        static_call.kind = "internal_call".into();
+        static_call.target = Some("callee".into());
+        let mut output = ProfileOutput::default();
+        output.methods = vec![callee, caller_method];
+        output.calls = vec![static_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.target.as_deref(), Some("callee"));
+        assert!(call.semantic_symbol.is_none());
+        assert!(call.runtime_evidence_observed);
+    }
+
+    #[test]
+    fn runtime_modeled_scip_prices_native_ruby_symbols() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(values)\n  values.length\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "nil-kill-runtime ruby ruby 3.2.3 Array#length().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [
+                    {"range": [1, 9, 15], "symbol": symbol, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut caller_method = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call("caller", &path, "length", [2, 2, 2, 15]);
+        runtime_call.owner = "Object".into();
+        runtime_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(call.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(call.external_symbol_scope.as_deref(), Some("stdlib"));
+        assert_eq!(
+            call.complexity_provenance.as_deref(),
+            Some("runtime_scip_modeled:conservative_external_candidate_max")
+        );
+        assert_eq!(
+            call.complexity_bound_quality.as_deref(),
+            Some(RUNTIME_MODELED_QUALITY)
+        );
+        assert_eq!(
+            call.complexity_assumptions,
+            vec![RUNTIME_MODELED_ASSUMPTION]
+        );
+        assert!(call.consumer_closed_candidate_set);
+        assert_eq!(call.unresolved_reason, None);
+    }
+
+    #[test]
+    fn runtime_modeled_scip_reconciles_native_generated_readers_to_source_declarations() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "class Demo\n  attr_reader :value\n  def caller\n    value\n  end\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let symbol = "nil-kill-runtime ruby ruby 3.2.3 Demo#value().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [
+                    {"range": [3, 4, 9], "symbol": symbol, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut reader = method("reader", &path, "value", [2, 2, 2, 20]);
+        reader.language = "ruby".into();
+        reader.owner = "Demo".into();
+        reader.dispatch_name = "value".into();
+        reader.raw_source = "attr_reader :value".into();
+        let mut caller_method = method("caller", &path, "caller", [3, 2, 5, 5]);
+        caller_method.language = "ruby".into();
+        caller_method.owner = "Demo".into();
+        let mut runtime_call = call("caller", &path, "value", [4, 4, 4, 9]);
+        runtime_call.owner = "Demo".into();
+        runtime_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![reader, caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.target.as_deref(), Some("reader"));
+        assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(call.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(
+            call.target_provenance.as_deref(),
+            Some("semantic_generated_declaration")
+        );
+        assert_eq!(
+            call.complexity_provenance.as_deref(),
+            Some("generated_callable_declaration")
+        );
+    }
+
+    #[test]
+    fn runtime_modeled_scip_joins_ruby_operator_candidates() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller(values)\n  values[:x]\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let array = "nil-kill-runtime ruby ruby 3.2.3 Array#`[]`().";
+        let hash = "nil-kill-runtime ruby ruby 3.2.3 Hash#`[]`().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [RUNTIME_MODELED_AUTHORITY_ARGUMENT]
+                },
+                "textDocumentEncoding": 1
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "language": "ruby",
+                "occurrences": [
+                    {"range": [1, 8, 12], "symbol": array, "symbolRoles": 0},
+                    {"range": [1, 8, 12], "symbol": hash, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut caller_method = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call("caller", &path, "[]", [2, 2, 2, 12]);
+        runtime_call.owner = "Object".into();
+        runtime_call.function = "caller".into();
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        let call = &output.calls[0];
+        assert_eq!(call.known_time_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(call.known_space_complexity.as_deref(), Some("O(1)"));
+        assert_eq!(
+            call.complexity_candidates,
+            vec![array.to_string(), hash.to_string()]
+        );
+        assert!(call.consumer_closed_candidate_set);
+        assert_eq!(call.unresolved_reason, None);
+    }
+
+    #[test]
+    fn runtime_candidate_complexity_order_is_asymptotically_conservative() {
+        assert!(conservative_complexity_rank("O(N log N)") > conservative_complexity_rank("O(N)"));
+        assert!(
+            conservative_complexity_rank("O(N^20)") > conservative_complexity_rank("O(N^2 log N)")
+        );
+        assert!(conservative_complexity_rank("O(2^N)") > conservative_complexity_rank("O(N^20)"));
+        assert!(conservative_complexity_rank("O(N!)") > conservative_complexity_rank("O(2^N)"));
+    }
+
+    #[test]
+    fn resolved_static_identity_outranks_a_later_runtime_observation() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("demo.rb");
+        let source = "def caller\n  value.call\nend\n";
+        fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().to_string();
+        let runtime_symbol = "nil-kill-runtime rubygems demo 1 Other#call().";
+        let index = json!({
+            "metadata": {
+                "toolInfo": {
+                    "name": "nil-kill-runtime",
+                    "version": "1",
+                    "arguments": [OBSERVED_OPEN_AUTHORITY_ARGUMENT]
+                }
+            },
+            "documents": [{
+                "relativePath": "demo.rb",
+                "occurrences": [
+                    {"range": [1, 8, 12], "symbol": runtime_symbol, "symbolRoles": 0}
+                ]
+            }]
+        });
+        let mut caller_method = method("caller", &path, "caller", [1, 0, 3, 3]);
+        caller_method.language = "ruby".into();
+        let mut runtime_call = call("caller", &path, "call", [2, 2, 2, 12]);
+        runtime_call.target = Some("compiler-target".into());
+        runtime_call.semantic_symbol = Some("compiler symbol".into());
+        runtime_call.target_provenance = Some("source_exact".into());
+        let mut output = ProfileOutput::default();
+        output.methods = vec![caller_method];
+        output.calls = vec![runtime_call];
+
+        apply_json(&mut output, &index.to_string()).unwrap();
+
+        assert_eq!(output.calls[0].target.as_deref(), Some("compiler-target"));
+        assert_eq!(
+            output.calls[0].semantic_symbol.as_deref(),
+            Some("compiler symbol")
+        );
+        assert_eq!(
+            output.calls[0].target_provenance.as_deref(),
+            Some("source_exact")
+        );
+    }
+
+    #[test]
     fn accepts_typed_ranges_with_omitted_zero_coordinates() {
         // Protobuf JSON omits scalar fields whose value is zero. SCIP 0.9
         // therefore emits first-line ranges without a `line` member and
@@ -2541,5 +5856,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(occurrence.span(), Some([0, 0, 0, 4]));
+    }
+
+    #[test]
+    fn reads_indented_preprocessor_define_directives() {
+        let source = "#if ENABLED\n#   define WRAP(value) value\n#endif\n";
+        assert_eq!(
+            preprocessor_definition_source(source, 1).as_deref(),
+            Some("#   define WRAP(value) value")
+        );
     }
 }

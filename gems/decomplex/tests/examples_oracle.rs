@@ -34,8 +34,18 @@ fn shared_examples_match_oracles() -> Result<()> {
         }
 
         let oracle: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
+        let language = language_for_fixture(&fixture)?;
+        let language_key = format!("{language:?}").to_lowercase();
+        // One expectation per detector, because a detector should see the same
+        // shape whatever the source language. Where a language genuinely models
+        // something differently -- Kotlin's primary constructor is a function,
+        // and other languages have no such declaration -- it says so here
+        // rather than the detector losing the language or the shared number
+        // drifting to fit one of them.
         let expected = oracle
-            .get("expected")
+            .get("expected_by_language")
+            .and_then(|by_language| by_language.get(&language_key))
+            .or_else(|| oracle.get("expected"))
             .cloned()
             .with_context(|| format!("{} missing expected", oracle_path.display()))?;
         let detector_name = oracle
@@ -43,7 +53,6 @@ fn shared_examples_match_oracles() -> Result<()> {
             .and_then(Value::as_str)
             .with_context(|| format!("{} missing detector", oracle_path.display()))?;
         let options = oracle.get("options").cloned().unwrap_or_else(|| json!({}));
-        let language = language_for_fixture(&fixture)?;
         if matches!(language, Language::Swift) {
             continue;
         }
@@ -55,7 +64,15 @@ fn shared_examples_match_oracles() -> Result<()> {
 
         if std::env::var("UPDATE_ORACLES").is_ok() {
             let mut oracle: Value = serde_json::from_str(&fs::read_to_string(&oracle_path)?)?;
-            oracle["expected"] = projected_normalized;
+            if oracle
+                .get("expected_by_language")
+                .and_then(|by_language| by_language.get(&language_key))
+                .is_some()
+            {
+                oracle["expected_by_language"][&language_key] = projected_normalized;
+            } else {
+                oracle["expected"] = projected_normalized;
+            }
             fs::write(&oracle_path, serde_json::to_string_pretty(&oracle)?)?;
         } else if projected_normalized != expected_normalized {
             failures.push(format!(

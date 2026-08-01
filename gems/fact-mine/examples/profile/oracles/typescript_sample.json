@@ -105,12 +105,12 @@
   "fields": [
     {
       "declared_type": "public port: number = 5432",
-      "id": "state:bf9e0c74e6d34945",
+      "id": "state:a93cdf3c47ad143a",
       "language": "typescript",
       "line": 4,
       "name": "port",
       "owner": "Database",
-      "owner_id": "owner:7d2c51a8280a8ec5",
+      "owner_id": "owner:9516ca35bd69d700",
       "path": "examples/profile/typescript_sample.ts",
       "source": "syntax",
       "span": [
@@ -123,12 +123,12 @@
     },
     {
       "declared_type": "Database",
-      "id": "state:a502c0b8f885cf82",
+      "id": "state:1e0c9f18052b6f45",
       "language": "typescript",
       "line": 8,
       "name": "_db",
       "owner": "Greeter",
-      "owner_id": "owner:412c61b10a84d1c2",
+      "owner_id": "owner:9ed9e010a773c7a7",
       "path": "examples/profile/typescript_sample.ts",
       "source": "syntax",
       "span": [
@@ -142,7 +142,10 @@
   ],
   "flow_local_types": [
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/typescript_sample.ts",
       "function": "constructor",
       "line": 10,
@@ -170,12 +173,15 @@
       ]
     },
     {
+      "callback_binding_position": null,
       "complete": true,
+      "definition_call_sources": {},
+      "definition_sequence_projections": {},
       "file": "examples/profile/typescript_sample.ts",
       "function": "hello",
       "line": 14,
       "name": "name",
-      "node_id": "cfg:Greeter#hello:stmt:1:14:8",
+      "node_id": "cfg:Greeter#hello:return:0:14:8",
       "owner": "Greeter",
       "place_id": "place:Greeter#hello:local:name",
       "reaching_definitions": [
@@ -202,7 +208,8 @@
   "methods": [
     {
       "dispatch_name": "constructor",
-      "id": "fn:6a43a20e36918915",
+      "generated_declaration": false,
+      "id": "fn:f7ea68c88fbece5a",
       "key": [
         "Greeter",
         "constructor",
@@ -215,7 +222,7 @@
       "name": "constructor",
       "normalized_source": "constructor(db: Database) { this._db = db; }",
       "owner": "Greeter",
-      "owner_id": "owner:412c61b10a84d1c2",
+      "owner_id": "owner:9ed9e010a773c7a7",
       "params": [
         "db"
       ],
@@ -226,17 +233,20 @@
         "signature": "constructor(db: Database) {",
         "type_system": "typescript"
       },
+      "source_export_eligible": true,
       "span": [
         9,
         4,
         11,
         5
       ],
+      "symbol_owner": "examples/profile/typescript_sample.Greeter",
       "visibility": "public"
     },
     {
       "dispatch_name": "hello",
-      "id": "fn:96d27b98d810ce50",
+      "generated_declaration": false,
+      "id": "fn:1eacf03142d5eb15",
       "key": [
         "Greeter",
         "hello",
@@ -249,7 +259,7 @@
       "name": "hello",
       "normalized_source": "public hello(name: string): string { return `Hello ${name}`; }",
       "owner": "Greeter",
-      "owner_id": "owner:412c61b10a84d1c2",
+      "owner_id": "owner:9ed9e010a773c7a7",
       "params": [
         "name"
       ],
@@ -260,12 +270,14 @@
         "signature": "public hello(name: string): string {",
         "type_system": "typescript"
       },
+      "source_export_eligible": true,
       "span": [
         13,
         4,
         15,
         5
       ],
+      "symbol_owner": "examples/profile/typescript_sample.Greeter",
       "visibility": "public"
     }
   ],
@@ -274,7 +286,7 @@
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:7d2c51a8280a8ec5",
+      "id": "owner:9516ca35bd69d700",
       "kind": "class",
       "language": "typescript",
       "line": 3,
@@ -285,11 +297,12 @@
         0,
         5,
         1
-      ]
+      ],
+      "symbol": "examples/profile/typescript_sample.Database"
     },
     {
       "confidence": "high",
-      "id": "owner:412c61b10a84d1c2",
+      "id": "owner:9ed9e010a773c7a7",
       "kind": "class",
       "language": "typescript",
       "line": 7,
@@ -300,7 +313,8 @@
         0,
         16,
         1
-      ]
+      ],
+      "symbol": "examples/profile/typescript_sample.Greeter"
     }
   ],
   "presence_correlations": [],
@@ -314,8 +328,8 @@
       "confidence": "high",
       "field": "_db",
       "function": "constructor",
-      "function_id": "fn:6a43a20e36918915",
-      "id": "edge:6ecb5fbd9ccebc3f",
+      "function_id": "fn:f7ea68c88fbece5a",
+      "id": "edge:ef8c8dbc43fd43b3",
       "kind": "writes",
       "line": 10,
       "owner": "Greeter",
@@ -327,7 +341,7 @@
         10,
         21
       ],
-      "state_id": "state:a502c0b8f885cf82"
+      "state_id": "state:1e0c9f18052b6f45"
     }
   ],
   "state_param_origin_records": [

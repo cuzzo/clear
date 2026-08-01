@@ -4,11 +4,11 @@ use super::cfg::ControlFlowProfile;
 
 use super::effects::{effect_from_call_with_lexicon, EffectLexicon};
 use super::normalized_behavior::{
-    configured_collection_operation, configured_intrinsic_call_complexity,
-    configured_semantic_symbol_call_complexity, configured_semantic_symbol_kind,
-    configured_semantic_symbol_parametric_cost, eliminable_guard_from_call,
-    nil_guard_from_predicates, scip_descriptor_owner, scip_global_parts,
-    type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
+    configured_collection_operation, configured_external_latency_bound,
+    configured_intrinsic_call_complexity, configured_semantic_symbol_call_complexity,
+    configured_semantic_symbol_kind, configured_semantic_symbol_parametric_cost,
+    eliminable_guard_from_call, nil_guard_from_predicates, scip_descriptor_owner,
+    scip_global_parts, type_before_parameter_name, NormalizedCallParts, NormalizedCallProjection,
     NormalizedLanguageBehavior, NormalizedNilGuardFact, NormalizedNullableOperation,
     NormalizedSemanticEffect,
 };
@@ -20,7 +20,9 @@ use crate::type_inference::TypeExpr;
 const CSHARP_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
     strip_prefixes: &["readonly "],
     trim_prefix_chars: &[],
-    trim_suffix_chars: &[],
+    // Nullable reference/value annotations do not change the nominal receiver
+    // that owns a member. Nullability is tracked separately by CFG facts.
+    trim_suffix_chars: &['?'],
     array_names: &["List", "ArrayList", "Vector"],
     hash_names: &["Dictionary", "HashMap"],
     set_names: &["HashSet"],
@@ -90,7 +92,7 @@ pub(crate) fn external_symbol_call_complexity(
         return None;
     }
     let owner = descriptor_owner(descriptor);
-    let complexity = configured_semantic_symbol_call_complexity("csharp", descriptor)
+    if let Some(complexity) = configured_semantic_symbol_call_complexity("csharp", descriptor)
         .or_else(|| {
             owner.as_deref().and_then(|owner| {
                 configured_intrinsic_call_complexity("csharp", Some(owner), message)
@@ -101,14 +103,28 @@ pub(crate) fn external_symbol_call_complexity(
                 CSharpNormalizedBehavior
                     .call_complexity(&TypeExpr::Primitive(owner.to_string()), message)
             })
-        })?;
+        })
+    {
+        return Some(ExternalCallComplexity {
+            time: complexity.time,
+            space: complexity.space,
+            provenance: "csharp_scip_symbol_registry",
+            bound_quality: "upper_bound_exact_target",
+            candidates: Vec::new(),
+            assumption: None,
+        });
+    }
+    let complexity = configured_external_latency_bound("csharp", owner.as_deref()?, message)?;
     Some(ExternalCallComplexity {
         time: complexity.time,
         space: complexity.space,
-        provenance: "csharp_scip_symbol_registry",
-        bound_quality: "upper_bound_exact_target",
+        provenance: "csharp_external_effect_registry",
+        bound_quality: "upper_bound_external_latency_excluded",
         candidates: Vec::new(),
-        assumption: None,
+        assumption: Some(
+            "computational Big-O only; assembly loading, scheduling, and wait latency is excluded"
+                .to_string(),
+        ),
     })
 }
 
@@ -206,6 +222,64 @@ const CSHARP_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct CSharpNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        let source = node.text.trim_end();
+        source.ends_with('}') || source.contains("=>")
+    }
+
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "csharp-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    fn canonical_symbol_scope(&self) -> bool {
+        true
+    }
+
+    fn resolves_inherited_project_calls(&self) -> bool {
+        true
+    }
+
+    fn nested_function_is_local_callable(&self, _function: &Node) -> bool {
+        true
+    }
+
+    fn declared_callable_cost(&self, declared_type: &str) -> Option<String> {
+        let nominal = declared_type
+            .trim()
+            .trim_start_matches("readonly ")
+            .trim_start_matches("static ")
+            .trim_end_matches('?')
+            .rsplit('.')
+            .next()
+            .unwrap_or(declared_type);
+        (nominal == "Action" || nominal.starts_with("Action<") || nominal.starts_with("Func<"))
+            .then(|| "callback_once".to_string())
+            .or_else(|| {
+                super::normalized_behavior::configured_callable_type_cost("csharp", declared_type)
+            })
+    }
+
+    // C-family indexers render a local as `Type name` - the type leads.
+    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+        let text = text.trim().trim_end_matches(';').trim();
+        let (declared, _name) = text.rsplit_once(char::is_whitespace)?;
+        let declared = declared.trim();
+        (!declared.is_empty() && !declared.contains('=')).then(|| declared.to_string())
+    }
+
+    // C# declares `Ret name(T a)`, not `name(a: T) -> Ret`.
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
+        super::normalized_behavior::parse_prefix_return_declarator(signature)
+    }
+
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         (node.r#type == "CALL")
             .then(|| node.children.first().and_then(crate::ast::node))
@@ -250,8 +324,62 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
             .unwrap_or_default()
     }
 
+    fn owner_kind(&self, node: &Node, default_kind: &str) -> String {
+        if node.text.contains("interface ") {
+            "interface".to_string()
+        } else if node.text.contains("abstract class ") {
+            "abstract_class".to_string()
+        } else if node.text.contains("enum ") {
+            "enum".to_string()
+        } else if node.text.contains("record ") {
+            "record".to_string()
+        } else if node.text.contains("struct ") {
+            "struct".to_string()
+        } else {
+            default_kind.to_string()
+        }
+    }
+
+    fn type_kind_is_abstract_dispatch(&self, kind: &str) -> bool {
+        matches!(kind, "interface" | "abstract_class")
+    }
+
+    fn constructor_dispatch_name(
+        &self,
+        receiver: &str,
+        message: &str,
+        owner: &str,
+    ) -> Option<String> {
+        (receiver == "self" && message == "this")
+            .then(|| owner.rsplit("::").next().unwrap_or(owner).to_string())
+    }
+
+    fn constructor_delegation_excludes_self(&self) -> bool {
+        true
+    }
+
+    fn fallback_owner_kind(&self, owner: &str, source: &str) -> Option<String> {
+        let owner = owner.rsplit("::").next().unwrap_or(owner);
+        source.lines().find_map(|line| {
+            let tokens = line
+                .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
+                .filter(|token| !token.is_empty())
+                .collect::<Vec<_>>();
+            tokens
+                .windows(2)
+                .any(|pair| pair == ["interface", owner])
+                .then(|| "interface".to_string())
+                .or_else(|| {
+                    tokens
+                        .windows(3)
+                        .any(|triple| triple == ["abstract", "class", owner])
+                        .then(|| "abstract_class".to_string())
+                })
+        })
+    }
+
     fn declared_local_type(&self, source: &str, name: &str) -> Option<String> {
-        super::normalized_behavior::type_before_local_name(source, name)
+        csharp_declared_local_type(source, name)
     }
 
     fn stdlib_language(&self) -> Option<&'static str> {
@@ -356,7 +484,90 @@ impl NormalizedLanguageBehavior for CSharpNormalizedBehavior {
         receiver_type: &crate::type_inference::TypeExpr,
         message: &str,
     ) -> Option<super::normalized_behavior::NormalizedCollectionOperation> {
-        configured_collection_operation("csharp", receiver_type, message)
+        configured_collection_operation("csharp", receiver_type, message).or_else(|| {
+            let crate::type_inference::TypeExpr::Primitive(name) = receiver_type.strip_nilable()
+            else {
+                return None;
+            };
+            let runtime_name = match name.as_str() {
+                "bool" => "Boolean",
+                "byte" => "Byte",
+                "sbyte" => "SByte",
+                "short" => "Int16",
+                "ushort" => "UInt16",
+                "int" => "Int32",
+                "uint" => "UInt32",
+                "long" => "Int64",
+                "ulong" => "UInt64",
+                "float" => "Single",
+                "double" => "Double",
+                "decimal" => "Decimal",
+                "char" => "Char",
+                "string" => "String",
+                "object" => "Object",
+                _ => return None,
+            };
+            configured_collection_operation(
+                "csharp",
+                &crate::type_inference::TypeExpr::Primitive(runtime_name.to_string()),
+                message,
+            )
+        })
+    }
+
+    fn intrinsic_call_complexity(
+        &self,
+        receiver: Option<&str>,
+        message: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        let runtime_receiver = match receiver {
+            Some("bool") => Some("Boolean"),
+            Some("byte") => Some("Byte"),
+            Some("sbyte") => Some("SByte"),
+            Some("short") => Some("Int16"),
+            Some("ushort") => Some("UInt16"),
+            Some("int") => Some("Int32"),
+            Some("uint") => Some("UInt32"),
+            Some("long") => Some("Int64"),
+            Some("ulong") => Some("UInt64"),
+            Some("float") => Some("Single"),
+            Some("double") => Some("Double"),
+            Some("decimal") => Some("Decimal"),
+            Some("char") => Some("Char"),
+            Some("string") => Some("String"),
+            Some("object") => Some("Object"),
+            receiver => receiver,
+        };
+        configured_intrinsic_call_complexity("csharp", runtime_receiver, message)
+    }
+
+    fn propagated_collection_return_type(
+        &self,
+        message: &str,
+        receiver_type: Option<&str>,
+    ) -> Option<String> {
+        matches!(message, "Take" | "Skip" | "Where")
+            .then(|| receiver_type.map(str::to_string))
+            .flatten()
+    }
+
+    fn collection_callback_parameter(&self, message: &str) -> bool {
+        matches!(
+            message,
+            "Aggregate" | "All" | "Any" | "Count" | "First" | "FirstOrDefault" | "Select" | "Where"
+        )
+    }
+
+    fn super_constructor_call_complexity(
+        &self,
+        supertype: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        let owner = supertype
+            .trim()
+            .trim_start_matches("global::")
+            .rsplit(['.', ':'])
+            .find(|part| !part.is_empty())?;
+        configured_intrinsic_call_complexity("csharp", Some(owner), "ctor")
     }
 
     fn mutating_receiver_message(&self, message: &str) -> bool {
@@ -612,6 +823,39 @@ pub(crate) fn behavior() -> &'static dyn NormalizedLanguageBehavior {
     &BEHAVIOR
 }
 
+fn csharp_declared_local_type(source: &str, name: &str) -> Option<String> {
+    let name_start = source.match_indices(name).find_map(|(index, _)| {
+        let before = source[..index].chars().next_back();
+        let after = source[index + name.len()..].chars().next();
+        let boundary = |character: Option<char>| {
+            character.is_none_or(|character| !character.is_alphanumeric() && character != '_')
+        };
+        (boundary(before) && boundary(after)).then_some(index)
+    })?;
+    let prefix = source[..name_start].trim();
+    // C# type/declaration patterns bind the local after `is T` or `is not T`.
+    // Extract only the native type token; feeding the whole predicate into the
+    // shared leading-type parser produced fictional types such as
+    // `value is not byte[]`.
+    for marker in [" is not ", " is "] {
+        if let Some(pattern_type) = prefix.rsplit_once(marker).map(|(_, tail)| tail.trim()) {
+            if !pattern_type.is_empty()
+                && !pattern_type.contains(char::is_whitespace)
+                && !matches!(pattern_type, "var" | "dynamic")
+            {
+                return Some(pattern_type.to_string());
+            }
+        }
+    }
+    let declared = super::normalized_behavior::type_before_local_name(source, name)?;
+    (!declared.contains(['(', ')', '=', '!'])
+        && !declared.contains(" is ")
+        && !declared.contains(" in")
+        && !declared.starts_with("var ")
+        && !declared.ends_with(" var"))
+    .then_some(declared)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -632,6 +876,35 @@ mod tests {
     fn test_csharp_behavior_comprehensive() {
         let b = CSharpNormalizedBehavior;
         assert_eq!(b.self_member_receiver("Foo"), "Foo");
+        assert_eq!(
+            b.owner_kind(&node("CLASS", "public interface ILogger"), "owner"),
+            "interface"
+        );
+        assert_eq!(
+            b.owner_kind(&node("CLASS", "public abstract class Sink"), "owner"),
+            "abstract_class"
+        );
+        assert!(b.type_kind_is_abstract_dispatch("interface"));
+        assert!(b.type_kind_is_abstract_dispatch("abstract_class"));
+        assert!(!b.type_kind_is_abstract_dispatch("class"));
+        assert_eq!(
+            b.fallback_owner_kind(
+                "ILogger",
+                "namespace Demo;\npublic interface ILogger\n{\n}\n"
+            ),
+            Some("interface".to_string())
+        );
+        assert_eq!(
+            b.declared_local_type("if (value is not byte[] bytes)", "bytes"),
+            Some("byte[]".to_string())
+        );
+        assert_eq!(
+            b.declared_local_type(
+                "if (!properties.TryGetValue(key, out var propertyValue))",
+                "propertyValue"
+            ),
+            None
+        );
         assert_eq!(
             b.explicit_self_state_ref(&node("LVAR", "x"), "Foo"),
             "this.Foo"
@@ -825,5 +1098,120 @@ mod tests {
         assert_eq!(b.untyped_type(), "object");
         assert_eq!(b.untyped_array_type(), "List<object>");
         assert_eq!(b.untyped_hash_type(), "Dictionary<string, object>");
+        assert_eq!(
+            b.call_complexity(
+                &crate::type_inference::TypeExpr::Primitive("uint".to_string()),
+                "ToString",
+            )
+            .map(|cost| cost.time),
+            Some("O(N)")
+        );
+        assert_eq!(
+            b.call_complexity(&parse_declared_type("byte[]"), "Take")
+                .map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            b.parametric_call_cost(&parse_declared_type("byte[]"), "Select"),
+            Some("callback_linear".to_string())
+        );
+        assert_eq!(
+            b.intrinsic_call_complexity(Some("string"), "Concat")
+                .map(|cost| cost.time),
+            Some("O(N)")
+        );
+        assert_eq!(
+            b.propagated_collection_return_type("Take", Some("byte[]")),
+            Some("byte[]".to_string())
+        );
+        assert_eq!(
+            b.propagated_collection_return_type("Select", Some("byte[]")),
+            None
+        );
+        assert_eq!(
+            b.super_constructor_call_complexity("System.IO.StringWriter")
+                .map(|cost| cost.time),
+            Some("O(1)")
+        );
+        assert_eq!(
+            b.super_constructor_call_complexity("UserDefinedParent"),
+            None
+        );
+    }
+
+    #[test]
+    fn scip_dotnet_symbols_use_reviewed_exact_and_parametric_costs() {
+        let symbol =
+            |descriptor: &str| format!("scip-dotnet nuget System.Runtime 10.0.0.0 {descriptor}");
+        for (descriptor, message, expected) in [
+            ("IO/TextWriter#Write(+1).", "Write", "O(1)"),
+            ("IO/TextWriter#Write(+11).", "Write", "O(N)"),
+            ("System/Span#Slice(+1).", "Slice", "O(1)"),
+            (
+                "Reflection/MethodBase#GetParameters().",
+                "GetParameters",
+                "O(N)",
+            ),
+            ("Collections/Hashtable#Clear().", "Clear", "O(N)"),
+            ("System/Array#GetLength().", "GetLength", "O(1)"),
+            ("System/Array#GetValue(+3).", "GetValue", "O(1)"),
+            ("Linq/Enumerable#Any().", "Any", "O(N)"),
+            ("System/AppContext#TryGetSwitch().", "TryGetSwitch", "O(N)"),
+            ("System/Exception#ToString().", "ToString", "O(N)"),
+            ("RegularExpressions/Regex#IsMatch(+5).", "IsMatch", "O(N)"),
+            ("System/ReadOnlySpan#Slice(+1).", "Slice", "O(1)"),
+            (
+                "InteropServices/MemoryMarshal#CreateSpan().",
+                "CreateSpan",
+                "O(1)",
+            ),
+        ] {
+            let cost = external_symbol_call_complexity(&symbol(descriptor), message)
+                .unwrap_or_else(|| panic!("missing exact cost for {descriptor}"));
+            assert_eq!(cost.time, expected, "descriptor={descriptor}");
+            assert_eq!(cost.provenance, "csharp_scip_symbol_registry");
+        }
+
+        let callback = "scip-dotnet nuget System.Linq 10.0.0.0 Linq/Enumerable#Where().";
+        assert!(external_symbol_call_complexity(callback, "Where").is_none());
+        let metadata = external_symbol_metadata(callback);
+        assert_eq!(metadata.scope, "stdlib");
+        assert_eq!(metadata.parametric_cost.as_deref(), Some("callback_linear"));
+
+        let action = external_symbol_metadata(
+            "scip-dotnet nuget System.Runtime 10.0.0.0 System/Action#Invoke().",
+        );
+        assert_eq!(action.parametric_cost.as_deref(), Some("callback_once"));
+        let virtual_object = external_symbol_metadata(
+            "scip-dotnet nuget System.Runtime 10.0.0.0 System/Object#Equals(+1).",
+        );
+        assert_eq!(
+            virtual_object.parametric_cost.as_deref(),
+            Some("callback_once")
+        );
+        let string_create = external_symbol_metadata(
+            "scip-dotnet nuget System.Runtime 10.0.0.0 System/String#Create().",
+        );
+        assert_eq!(
+            string_create.parametric_cost.as_deref(),
+            Some("callback_linear")
+        );
+        assert_eq!(
+            CSharpNormalizedBehavior
+                .intrinsic_call_complexity(None, "nameof")
+                .map(|cost| cost.time),
+            Some("O(1)")
+        );
+        for (descriptor, message, expected) in [
+            ("Reflection/Assembly#Load(+2).", "Load", "O(N)"),
+            ("Tasks/Task#Delay(+2).", "Delay", "O(1)"),
+            ("Tasks/Task#Wait().", "Wait", "O(1)"),
+        ] {
+            let cost = external_symbol_call_complexity(&symbol(descriptor), message)
+                .unwrap_or_else(|| panic!("missing external-latency cost for {descriptor}"));
+            assert_eq!(cost.time, expected);
+            assert_eq!(cost.bound_quality, "upper_bound_external_latency_excluded");
+            assert!(cost.assumption.is_some());
+        }
     }
 }

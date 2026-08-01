@@ -6,13 +6,85 @@
 # excluded/generated/dependency methods into the product's reported corpus.
 
 require "json"
+require "digest"
+require "optparse"
+require "zlib"
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "espalier"
 
-abort "usage: export_complexity_summary.rb PROFILE.json [OUTPUT.json]" unless (1..2).cover?(ARGV.length)
+metadata = {
+  producer_version: Espalier.const_defined?(:VERSION) ? Espalier::VERSION : "unknown",
+  corpus: nil,
+  source_revision: nil,
+  indexer: nil,
+  consumer_indexers: [],
+  symbol_prefix_from: nil,
+  symbol_prefix_to: nil,
+  compatibility: nil,
+  symbol_map: nil
+}
+OptionParser.new do |opts|
+  opts.banner = "usage: export_complexity_summary.rb [options] PROFILE.json [OUTPUT.json[.gz]]"
+  opts.on("--corpus ID", "Stable corpus identity (for example go-stdlib)") { |value| metadata[:corpus] = value }
+  opts.on("--source-revision REV", "Source commit or release") { |value| metadata[:source_revision] = value }
+  opts.on("--indexer ID", "SCIP indexer and version") { |value| metadata[:indexer] = value }
+  opts.on("--consumer-indexer ID", "Compatible consumer SCIP indexer and version (repeatable)") do |value|
+    metadata[:consumer_indexers] << value
+  end
+  opts.on("--producer-version VERSION", "Override the Espalier producer version") { |value| metadata[:producer_version] = value }
+  opts.on("--symbol-prefix-from PREFIX", "Relocate producer symbols from this exact prefix") do |value|
+    metadata[:symbol_prefix_from] = value
+  end
+  opts.on("--symbol-prefix-to PREFIX", "Relocate producer symbols to this exact prefix") do |value|
+    metadata[:symbol_prefix_to] = value
+  end
+  opts.on("--compatibility FILE", "Semantic-environment sidecar required by consumers") do |value|
+    metadata[:compatibility] = value
+  end
+  opts.on("--symbol-map FILE", "Exact producer-to-consumer symbol bridge") do |value|
+    metadata[:symbol_map] = value
+  end
+end.parse!
+abort "usage: export_complexity_summary.rb [options] PROFILE.json [OUTPUT.json[.gz]]" unless (1..2).cover?(ARGV.length)
+if metadata[:symbol_prefix_from].nil? != metadata[:symbol_prefix_to].nil?
+  abort "--symbol-prefix-from and --symbol-prefix-to must be supplied together"
+end
+abort "--symbol-map cannot be combined with prefix relocation" if metadata[:symbol_map] && metadata[:symbol_prefix_from]
 
-profile = JSON.parse(File.read(ARGV.fetch(0)))
+compatibility_claims = {}
+if metadata[:compatibility]
+  environment = JSON.parse(File.read(metadata[:compatibility]))
+  unless environment["schema"] == "fact-mine.semantic-environment.v1"
+    abort "unsupported semantic environment schema: #{environment['schema'].inspect}"
+  end
+  compatibility_claims = environment.fetch("claims")
+  unless compatibility_claims.is_a?(Hash) &&
+      compatibility_claims.all? { |key, value| !key.to_s.empty? && !value.to_s.empty? }
+    abort "semantic environment claims must be a mapping of non-empty strings"
+  end
+end
+
+symbol_map = nil
+symbol_map_sha256 = nil
+if metadata[:symbol_map]
+  symbol_map_bytes = File.binread(metadata[:symbol_map])
+  bridge = JSON.parse(symbol_map_bytes)
+  unless bridge["schema"] == "fact-mine.symbol-bridge.v1"
+    abort "unsupported symbol bridge schema: #{bridge['schema'].inspect}"
+  end
+  symbol_map = bridge.fetch("symbols")
+  unless symbol_map.is_a?(Hash) && symbol_map.all? { |key, value|
+      targets = value.is_a?(Array) ? value : [value]
+      !key.to_s.empty? && !targets.empty? && targets.all? { |target| !target.to_s.empty? }
+    }
+    abort "symbol bridge symbols must map non-empty producer symbols to one or more non-empty consumer symbols"
+  end
+  symbol_map_sha256 = "sha256:#{Digest::SHA256.hexdigest(symbol_map_bytes)}"
+end
+
+profile_bytes = File.binread(ARGV.fetch(0))
+profile = JSON.parse(profile_bytes)
 paths = Array(profile["methods"]).map { |method| method.fetch("path") }.uniq
 evidence = {
   "root" => "/",
@@ -36,11 +108,22 @@ evidence = {
 results = Espalier::Aggregator.new.aggregate(Espalier::StaticEvidence.project_modules(evidence))
   .flat_map { |mod| Array(mod[:functions]) }
   .to_h { |function| [function[:id].to_s, function.fetch(:quality_metrics, {})] }
+facts_by_location = Array(profile["complexity_facts"]).group_by do |fact|
+  [fact["path"].to_s, fact["line"].to_i, fact["function"].to_s]
+end
+source_proven_ids = Array(profile["methods"]).filter_map do |method|
+  quality = results[method["id"].to_s]
+  facts = facts_by_location.fetch(
+    [method["path"].to_s, method["line"].to_i, method["name"].to_s],
+    []
+  )
+  method["id"].to_s if Espalier::ComplexitySummary.source_method_proven?(method, quality, facts)
+end.to_h { |id| [id, true] }
 
 symbols = Array(profile["methods"]).filter_map do |method|
   symbol = method["semantic_symbol"].to_s
   quality = results[method["id"].to_s]
-  next if symbol.empty? || !quality || quality[:big_o_complete] != true || quality[:big_o_space_complete] != true
+  next if symbol.empty? || !source_proven_ids[method["id"].to_s]
 
   source_qualities = Array(quality[:big_o_bound_qualities]).map(&:to_s).reject(&:empty?)
   source_assumptions = Array(quality[:big_o_assumptions]).map(&:to_s).reject(&:empty?)
@@ -61,20 +144,19 @@ symbols = Array(profile["methods"]).filter_map do |method|
   }]
 end
 
-# A compiler can attach an interface/trait declaration symbol to a call while
-# separately providing the closed implementation set visible in this index.
-# When every candidate has a complete analyzed bound, publish the conservative
-# maximum under that declaration symbol. This is language-neutral and retains
-# the closed-world assumption explicitly.
+# A compiler can attach a declaration symbol to a call while separately
+# providing candidate implementations visible in this index. Visibility in a
+# producer index is not proof that downstream consumers cannot add another
+# implementation. Publish a conservative candidate maximum only when the
+# profile carries a separate, explicit consumer-closure proof.
 candidate_symbols = Array(profile["calls"]).filter_map do |call|
   symbol = call["semantic_symbol"].to_s
   candidate_ids = Array(call["candidate_targets"]).map(&:to_s).reject(&:empty?).uniq.sort
   next if symbol.empty? || candidate_ids.empty?
+  next unless Espalier::ComplexitySummary.consumer_closed_candidate_set?(call)
 
   candidate_qualities = candidate_ids.map { |id| results[id] }
-  next if candidate_qualities.any? do |quality|
-    !quality || quality[:big_o_complete] != true || quality[:big_o_space_complete] != true
-  end
+  next unless candidate_ids.all? { |id| source_proven_ids[id] }
 
   worst_time = candidate_qualities.map { |quality| quality[:big_o] }
     .max_by { |value| Espalier::SymbolicComplexity.rank_string(value) }
@@ -93,6 +175,12 @@ candidate_symbols = Array(profile["calls"]).filter_map do |call|
   }]
 end
 symbols.concat(candidate_symbols)
+symbols = Espalier::ComplexitySummary.bridge_symbol_rows(
+  symbols,
+  symbol_map: symbol_map,
+  prefix_from: metadata[:symbol_prefix_from],
+  prefix_to: metadata[:symbol_prefix_to]
+)
 
 # A compiler symbol should identify one declaration. Omit conflicting symbols
 # instead of selecting by order if an index violates that contract; one
@@ -108,7 +196,33 @@ unless conflicts.empty?
 end
 
 output = {
-  "schema" => "fact-mine.external-complexity-summary.v1",
+  "schema" => "fact-mine.external-complexity-summary.v3",
+  "producer" => {
+    "name" => "espalier",
+    "version" => metadata[:producer_version].to_s
+  },
+  "source" => {
+    "profile_sha256" => "sha256:#{Digest::SHA256.hexdigest(profile_bytes)}",
+    "method_count" => Array(profile["methods"]).length,
+    "complete_symbol_count" => grouped.length,
+    "source_proven_method_count" => source_proven_ids.length,
+    "proof_policy" => "analyzed_bodies_exact_targets_cfg_dfg_v1",
+    "corpus" => metadata[:corpus],
+    "source_revision" => metadata[:source_revision],
+    "indexer" => metadata[:indexer],
+    "consumer_indexers" => metadata[:consumer_indexers].uniq.sort,
+    "symbol_relocation" => if metadata[:symbol_prefix_from] || metadata[:symbol_prefix_to]
+      {
+        "from" => metadata[:symbol_prefix_from],
+        "to" => metadata[:symbol_prefix_to]
+      }
+    end,
+    "symbol_bridge_sha256" => symbol_map_sha256,
+    "languages" => Array(profile["methods"]).map { |method| method["language"].to_s }.reject(&:empty?).uniq.sort
+  }.compact,
+  "compatibility" => {
+    "claims" => compatibility_claims
+  },
   "symbols" => grouped.to_h do |symbol, rows|
     merged = rows.first.last.dup
     merged["candidates"] = rows.flat_map { |row| Array(row.last["candidates"]) }.uniq.sort
@@ -118,7 +232,15 @@ output = {
 }
 rendered = JSON.pretty_generate(output)
 if ARGV[1]
-  File.write(ARGV[1], rendered)
+  if File.extname(ARGV[1]) == ".gz"
+    Zlib::GzipWriter.open(ARGV[1]) do |gzip|
+      gzip.mtime = 0
+      gzip.orig_name = ""
+      gzip.write(rendered)
+    end
+  else
+    File.write(ARGV[1], rendered)
+  end
 else
   puts rendered
 end

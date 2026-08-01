@@ -2,6 +2,8 @@
 # rendered Big-O strings: Fact-Mine emits the facts and Espalier owns algebra.
 Array:
   "[]": constant
+  "[]=": linear_materialize
+  "<<": constant
   each: linear_scan
   each_with_index: linear_scan
   each_index: linear_scan
@@ -38,17 +40,29 @@ Array:
   unshift: linear_scan
   count: linear_scan
   sum: linear_scan
+  min: linear_scan
+  max: linear_scan
+  product: pairwise
   delete: linear_scan
   insert: linear_scan
   clear: linear_scan
   freeze: constant
   sort: sort
   sort_by: sort
+  bsearch: logarithmic
+  bsearch_index: logarithmic
   "-": pairwise
   "&": pairwise
   "|": pairwise
+  uniq!: linear_scan
+  reject!: linear_scan
+  select!: linear_scan
+  map!: linear_scan
+  sort!: sort
+  sort_by!: sort
 Hash:
   "[]": constant
+  "[]=": constant
   key?: constant
   has_key?: constant
   include?: constant
@@ -71,12 +85,20 @@ Hash:
   merge: linear_materialize
   keys: linear_materialize
   values: linear_materialize
+  values_at: linear_materialize
   dup: linear_materialize
   to_set: linear_materialize
   transform_keys: linear_materialize
   transform_values: linear_materialize
   sort: sort
   sort_by: sort
+  to_a: linear_materialize
+  slice: linear_materialize
+  transform_values!: linear_scan
+OptionParser:
+  banner=: constant
+  parse!: linear_scan
+  to_s: linear_materialize
 Set:
   include?: constant
   contains: constant
@@ -84,6 +106,7 @@ Set:
   size: constant
   empty?: constant
   add: constant
+  "<<": constant
   delete: constant
   add?: constant
   merge: linear_scan
@@ -105,6 +128,7 @@ String:
   gsub: linear_materialize
   split: linear_materialize
   "+": linear_materialize
+  "<<": linear_materialize
   to_s: constant
   to_sym: linear_materialize
   strip: linear_materialize
@@ -124,6 +148,9 @@ String:
   delete_prefix: linear_materialize
   delete_suffix: linear_materialize
   downcase: linear_materialize
+  upcase: linear_materialize
+  capitalize: linear_materialize
+  casecmp: linear_scan
   inspect: linear_materialize
   reverse: linear_materialize
   lstrip: linear_materialize
@@ -136,6 +163,7 @@ String:
   to_i: linear_scan
   to_f: linear_scan
   tr: linear_materialize
+  delete: linear_materialize
 Symbol:
   to_s: linear_materialize
   inspect: linear_materialize
@@ -155,16 +183,52 @@ Kernel:
   binding: constant
   methods: linear_materialize
   hash: linear_scan
+  instance_variable_set: constant
+  __dir__: constant
+  frozen?: constant
+  method: constant
+  rand: constant
+  Integer: linear_scan
+  Float: linear_scan
 BasicObject:
   equal?: constant
 Integer:
+  "+": linear_materialize
+  "-": linear_materialize
+  "*": pairwise
+  "/": pairwise
+  "%": pairwise
+  "<": linear_scan
+  "<=": linear_scan
+  ">": linear_scan
+  ">=": linear_scan
+  "<=>": linear_scan
+  "==": linear_scan
   positive?: constant
   zero?: constant
   abs: constant
   to_s: linear_materialize
   to_f: constant
   chr: constant
+  modulo: pairwise
+  floor: constant
+  ceil: constant
 Float:
+  "+": constant
+  "-": constant
+  "*": constant
+  "/": constant
+  "%": constant
+  "<": constant
+  "<=": constant
+  ">": constant
+  ">=": constant
+  "<=>": constant
+  "==": constant
+  modulo: constant
+  floor: constant
+  ceil: constant
+  round: constant
   to_i: constant
 T:
   must: constant
@@ -179,17 +243,80 @@ File:
 Regexp:
   source: constant
   match: linear_scan
+  match?: exponential
+  last_match: constant
 MatchData:
   begin: constant
+  "[]": linear_materialize
 Class:
   name: constant
 Time:
   strftime: linear_materialize
+  now: constant
+Pathname:
+  to_s: constant
+  path: constant
+  absolute?: constant
+  relative_path_from: linear_materialize
+Process/Status:
+  success?: constant
+Process:
+  pid: constant
+Digest/Class:
+  new: constant
+  hexdigest: linear_materialize
+  file: linear_materialize
+Digest/Instance:
+  hexdigest: linear_materialize
+IO:
+  path: constant
+  close: constant
+  puts: linear_scan
+Tempfile:
+  path: constant
+  close: constant
+  unlink: linear_scan
 Enumerable:
+  each: linear_scan
+  each_with_index: linear_scan
+  each_with_object: linear_scan
+  map: linear_materialize
+  flat_map: linear_materialize
+  select: linear_materialize
+  reject: linear_materialize
+  compact: linear_materialize
+  to_h: linear_materialize
   to_a: linear_materialize
+  to_set: linear_materialize
   count: linear_scan
   first: constant
+  min: linear_scan
+  max: linear_scan
+  partition: linear_materialize
   include?: linear_scan
+  any?: linear_scan
+  all?: linear_scan
+  one?: linear_scan
+  sort: sort
+  sort_by: sort
+  tally: linear_materialize
+  grep: linear_materialize
+Numeric:
+  "+": linear_materialize
+  "-": linear_materialize
+  "*": pairwise
+  "/": pairwise
+  "%": pairwise
+  positive?: constant
+  negative?: constant
+  zero?: constant
+  to_i: constant
+  to_f: constant
+NilClass:
+  nil?: constant
+  to_i: constant
+  to_f: constant
+  to_a: constant
 StringScanner:
   "[]": constant
   eos?: constant
@@ -198,6 +325,23 @@ StringScanner:
 Intrinsic:
   "Array.new": linear_materialize
   "Hash.new": constant
+  "Set.new": linear_materialize
+  "Pathname.new": linear_materialize
+  "Dir.pwd": linear_materialize
+SemanticSymbol:
+  # CRuby installs one generated member surface per declared field. The C
+  # producer currently reports this registration path as incomplete because
+  # it crosses VM callbacks; this reviewed O(N) fallback is used only until
+  # the source proof can replace it.
+  'Struct.new().': linear_materialize
+  'Hash.`[]`().': linear_materialize
+  'JSON.parse().': linear_materialize
+  'JSON.generate().': linear_materialize
+  'JSON.pretty_generate().': linear_materialize
+  'Psych.safe_load().': linear_materialize
+  # Onigmo is a backtracking engine.  `match?` has an exponential worst case
+  # in the pattern/input pair and linear engine stack space.
+  'Regexp#`match?`().': exponential
 ExternalLatency:
   "File.exist?": linear_scan
   "File.read": linear_materialize
@@ -210,19 +354,53 @@ ExternalLatency:
   "IO.flush": constant
   "IO.popen": linear_scan
   "IO.foreach": linear_scan
+  "Zlib/GzipReader.read": linear_materialize
   "File.mtime": constant
   "File.delete": linear_scan
   "File.file?": linear_scan
+  "File.directory?": linear_scan
+  "File.size?": linear_scan
+  "File.rename": linear_scan
+  "File.extname": linear_materialize
+  "File.fnmatch?": linear_scan
   "File.symlink?": linear_scan
   "File.symlink": linear_scan
   "File.readlink": linear_materialize
   "Dir.exist?": linear_scan
   "Dir.glob": linear_materialize
+  "FileUtils.mkdir_p": linear_scan
+  "FileUtils.copy_file": linear_scan
+  "FileUtils.rm_rf": linear_scan
+  "Dir.mktmpdir": linear_materialize
+  "Tempfile.new": linear_materialize
+  "Open3.capture2": linear_materialize
+  "Open3.capture2e": linear_materialize
+  "Open3.capture3": linear_materialize
   "Dir.pwd": linear_materialize
   "Kernel.printf": linear_scan
   "Kernel.warn": linear_scan
   "Kernel.exit": constant
   "Kernel.system": linear_scan
+  # Activating a gem scans the installed specification/load-path surface.
+  # Filesystem latency is excluded; N is the activation search surface.
+  "Kernel.gem": linear_scan
+  # Loading YAML reads and parses input proportional to the file contents.
+  # Filesystem latency is excluded from the CPU/space bound.
+  "Psych.load_file": linear_materialize
+ExternalLatencyParametric:
+  # Native path APIs invoke Ruby's to_path before their bounded byte/path
+  # work.  C is that single coercion callback and N is the path/output size.
+  "File.realpath": coercive_linear_materialize
+  "File.executable?": coercive_linear_scan
+  "File.absolute_path?": coercive_linear_scan
+  "IO.read": coercive_linear_materialize
+  # A runtime receiver may have converged to IO or StringIO.  Both perform
+  # the same bounded coercion/read/materialization work, so the generic SCIP
+  # candidate join can retain the contract instead of dropping an otherwise
+  # complete observed IO.read callsite.
+  "StringIO.read": coercive_linear_materialize
+  "Dir.[]": coercive_linear_materialize
+  "Dir.chdir": coercive_linear_scan
 SemanticSymbolParametricCost:
   'Class#new().': reflective_once
   'Proc0#call().': callback_once
@@ -240,6 +418,17 @@ SemanticSymbolParametricCost:
   'Kernel#format().': reflective_once
   'Kernel#inspect().': reflective_once
   'Kernel#Array().': reflective_once
+  'Kernel#Hash().': reflective_once
+  # `require` selects and executes an arbitrary loader/body.  This is an open
+  # reflective target rather than a fabricated constant-time loader bound.
+  'Kernel#require().': loader_once
+  # CRuby's Exception#message uses rb_funcallv(exc, :to_s, ...).
+  'Exception#message().': callback_once
+  # Get_Double may call Numeric#to_f; a later runtime type proof can narrow
+  # Float to O(1), but the unspecialized source contract remains symbolic.
+  'Math.exp().': callback_once
+  # reg_operand calls to_str once before rb_reg_quote scans and materializes.
+  'Regexp.escape().': coercive_linear_materialize
   'Kernel#loop().': callback_linear
   'Range#each().': callback_linear
   'Array#each().': callback_linear
@@ -256,39 +445,62 @@ SemanticSymbolParametricCost:
   'Set#each().': callback_linear
   'Enumerable#`any?`().': callback_linear
   'Enumerable#`all?`().': callback_linear
+  'Enumerable#`one?`().': callback_linear
   'Enumerable#filter_map().': callback_linear
   'Enumerable#flat_map().': callback_linear
   'Enumerable#find().': callback_linear
   'Enumerable#map().': callback_linear
   'Enumerable#each().': callback_linear
   'Enumerable#each_with_object().': callback_linear
+  # each_slice drives #each and yields slices to an arbitrary block.
+  'Enumerable#each_slice().': callback_linear
   'Enumerable#select().': callback_linear
   'Enumerable#reduce().': callback_linear
   'Enumerable#group_by().': callback_linear
   'Enumerable#find_index().': callback_linear
   'Enumerable#`none?`().': callback_linear
+  'Enumerable#min_by().': callback_linear
+  'Enumerable#max_by().': callback_linear
+  'Enumerable#partition().': callback_linear
+  'Integer#times().': callback_linear
+  'Comparable#`between?`().': reflective_once
+  'Comparable#between?().': reflective_once
+  'Zlib/GzipReader.open().': callback_once
+  'Enumerator#with_index().': callback_linear
+  'Method#call().': callback_once
+  'Kernel#tap().': callback_once
 Namespace:
   Array: declaration
   BasicObject: declaration
   Class: declaration
   Dir: declaration
+  Digest: declaration
   Enumerable: declaration
   Enumerator: declaration
   File: declaration
+  FileUtils: declaration
   Float: declaration
   Hash: declaration
   IO: declaration
   Integer: declaration
   Kernel: declaration
   MatchData: declaration
+  Method: declaration
   Module: declaration
+  NilClass: declaration
+  Numeric: declaration
+  Open3: declaration
   Object: declaration
   Pathname: declaration
+  Process: declaration
   Proc: declaration
   Range: declaration
   Regexp: declaration
   Set: declaration
   String: declaration
+  StringIO: declaration
   Symbol: declaration
   T: declaration
   Time: declaration
+  Tempfile: declaration
+  Zlib: declaration

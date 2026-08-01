@@ -45,6 +45,7 @@ pub struct ControlFlowFacts {
     pub def_use: Vec<DefUseFact>,
     pub liveness: Vec<LivenessFact>,
     pub flow_types: Vec<FlowTypeFact>,
+    pub callback_bindings: Vec<CallbackBindingFact>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -56,6 +57,21 @@ pub struct Place {
     pub kind: String,
     pub name: String,
     pub declaration_span: Span,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct CallbackBindingFact {
+    pub node_id: String,
+    pub file: String,
+    pub function: String,
+    pub owner: String,
+    pub place_id: String,
+    pub position: usize,
+    /// Exact callback/iterator region that owns this positional binding.
+    /// Several nested callbacks can be normalized into one compound CFG node;
+    /// the region keeps their independent position-zero parameters distinct.
+    #[serde(default)]
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -80,6 +96,16 @@ pub struct NodeEffect {
     /// receiver text or guessing its return type in the CFG layer.
     #[serde(default)]
     pub write_call_sources: BTreeMap<String, Span>,
+    /// A sound producer set for a value-preserving expression such as a
+    /// language-owned short-circuit selection. Every span may produce the
+    /// assigned value; consumers must join all of them rather than choose one.
+    #[serde(default)]
+    pub write_call_source_sets: BTreeMap<String, Vec<Span>>,
+    /// Positional projection for a normalized destructuring write. The call
+    /// source identifies the producer; this index identifies which sequence
+    /// value reaches the written place.
+    #[serde(default)]
+    pub write_sequence_projections: BTreeMap<String, usize>,
     /// Reviewed exact call-result contracts keyed by their target place.
     /// This is not inferred from identifiers downstream of the adapter.
     #[serde(default)]

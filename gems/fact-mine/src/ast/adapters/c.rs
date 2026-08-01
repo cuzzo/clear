@@ -10,10 +10,18 @@ impl AstNormalizationAdapter for CAstAdapter {
         preprocessor_callable_names(root, source)
     }
 
+    fn preprocessor_callable_definitions(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+    ) -> Vec<(String, String)> {
+        preprocessor_callable_definitions(root, source)
+    }
+
     fn source_preprocessing(&self, source: &str) -> Option<String> {
-        Some(strip_native_nullability_annotations(
-            &strip_linkage_macros_before_type_name(source),
-        ))
+        let source = strip_linkage_macros_before_type_name(source);
+        let source = strip_calling_convention_macros_before_function_name(&source);
+        Some(strip_native_nullability_annotations(&source))
     }
 
     fn case_arm_body_nodes<'tree>(
@@ -61,6 +69,25 @@ impl AstNormalizationAdapter for CAstAdapter {
             .find(|child| child.kind() == "identifier")
             .map(|child| node_text(child, source).to_string())
     }
+}
+
+/// Calling-convention/export macros between a return type and the real
+/// function name can be consumed as the declarator by tree-sitter-c. Blank
+/// only convention-shaped tokens with reviewed suffixes, preserving offsets.
+fn strip_calling_convention_macros_before_function_name(source: &str) -> String {
+    let masked = mask_comments_and_strings(source);
+    let pattern = Regex::new(
+        r"\b([A-Z][A-Z0-9_]*(?:CDECL|CALLBACK|CALL|API|EXPORT|PUBLIC))[ \t]+[A-Za-z_]\w*[ \t]*\(",
+    )
+    .expect("static regex is valid");
+    let mut result = source.as_bytes().to_vec();
+    for caps in pattern.captures_iter(&masked) {
+        let convention = caps.get(1).expect("group 1 is present");
+        for byte in &mut result[convention.range()] {
+            *byte = b' ';
+        }
+    }
+    String::from_utf8(result).unwrap_or_else(|_| source.to_string())
 }
 
 /// A C/C++ linkage/visibility macro (`class MYLIB_API Foo`, `struct
@@ -215,6 +242,31 @@ pub(super) fn preprocessor_callable_names(root: TreeSitterNode<'_>, source: &str
     names
 }
 
+pub(super) fn preprocessor_callable_definitions(
+    root: TreeSitterNode<'_>,
+    source: &str,
+) -> Vec<(String, String)> {
+    fn visit(node: TreeSitterNode<'_>, source: &str, definitions: &mut Vec<(String, String)>) {
+        if node.kind() == "preproc_function_def" {
+            if let Some(name) = node.child_by_field_name("name") {
+                let name = super::super::node_text(name, source).trim();
+                let definition = super::super::node_text(node, source).trim();
+                if !name.is_empty() && !definition.is_empty() {
+                    definitions.push((name.to_string(), definition.to_string()));
+                }
+            }
+        }
+        for child in named_children(node) {
+            visit(child, source, definitions);
+        }
+    }
+    let mut definitions = Vec::new();
+    visit(root, source, &mut definitions);
+    definitions.sort();
+    definitions.dedup();
+    definitions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +291,24 @@ mod tests {
         // Everything after the macro token keeps its original byte offset.
         let real_name_pos = source.find("Logger").unwrap();
         assert_eq!(stripped.find("Logger"), Some(real_name_pos));
+    }
+
+    #[test]
+    fn strips_calling_convention_macro_before_function_name() {
+        let source =
+            "static void * CJSON_CDECL internal_malloc(size_t size) { return malloc(size); }\n";
+        let stripped = strip_calling_convention_macros_before_function_name(source);
+        assert_eq!(stripped.len(), source.len());
+        assert!(!stripped.contains("CJSON_CDECL"));
+        assert_eq!(
+            stripped.find("internal_malloc"),
+            source.find("internal_malloc")
+        );
+        let legitimate = "static MYTYPE factory(void) { return value; }\n";
+        assert_eq!(
+            strip_calling_convention_macros_before_function_name(legitimate),
+            legitimate
+        );
     }
 
     #[test]

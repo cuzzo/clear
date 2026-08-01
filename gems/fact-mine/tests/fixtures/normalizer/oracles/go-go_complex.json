@@ -44,15 +44,101 @@
                               "Node": {
                                 "children": [
                                   {
-                                    "String": "os"
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "String": "os"
+                                        },
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "runtime"
+                                                    }
+                                                  ],
+                                                  "first_column": 17,
+                                                  "first_lineno": 4,
+                                                  "last_column": 24,
+                                                  "last_lineno": 4,
+                                                  "text": "runtime",
+                                                  "type": "LVAR"
+                                                }
+                                              },
+                                              {
+                                                "Symbol": "GOOS"
+                                              },
+                                              "Nil"
+                                            ],
+                                            "first_column": 17,
+                                            "first_lineno": 4,
+                                            "last_column": 29,
+                                            "last_lineno": 4,
+                                            "text": "runtime.GOOS",
+                                            "type": "CALL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 11,
+                                      "first_lineno": 4,
+                                      "last_column": 29,
+                                      "last_lineno": 4,
+                                      "text": "os := runtime.GOOS",
+                                      "type": "LASGN"
+                                    }
+                                  },
+                                  {
+                                    "Node": {
+                                      "children": [
+                                        {
+                                          "Node": {
+                                            "children": [
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "String": "runtime"
+                                                    }
+                                                  ],
+                                                  "first_column": 17,
+                                                  "first_lineno": 4,
+                                                  "last_column": 24,
+                                                  "last_lineno": 4,
+                                                  "text": "runtime",
+                                                  "type": "LVAR"
+                                                }
+                                              },
+                                              {
+                                                "Symbol": "GOOS"
+                                              },
+                                              "Nil"
+                                            ],
+                                            "first_column": 17,
+                                            "first_lineno": 4,
+                                            "last_column": 29,
+                                            "last_lineno": 4,
+                                            "text": "runtime.GOOS",
+                                            "type": "CALL"
+                                          }
+                                        }
+                                      ],
+                                      "first_column": 17,
+                                      "first_lineno": 4,
+                                      "last_column": 29,
+                                      "last_lineno": 4,
+                                      "text": "runtime.GOOS",
+                                      "type": "EXPRESSION_LIST"
+                                    }
                                   }
                                 ],
-                                "first_column": 31,
+                                "first_column": 11,
                                 "first_lineno": 4,
-                                "last_column": 33,
+                                "last_column": 29,
                                 "last_lineno": 4,
-                                "text": "os",
-                                "type": "LVAR"
+                                "text": "os := runtime.GOOS",
+                                "type": "SHORT_VAR_DECLARATION"
                               }
                             },
                             {
@@ -62,84 +148,15 @@
                                     "Node": {
                                       "children": [
                                         {
-                                          "Node": {
-                                            "children": [
-                                              {
-                                                "String": "\"darwin\""
-                                              }
-                                            ],
-                                            "first_column": 9,
-                                            "first_lineno": 5,
-                                            "last_column": 17,
-                                            "last_lineno": 5,
-                                            "text": "\"darwin\"",
-                                            "type": "STR"
-                                          }
+                                          "String": "os"
                                         }
                                       ],
-                                      "first_column": 4,
-                                      "first_lineno": 5,
-                                      "last_column": 0,
-                                      "last_lineno": 7,
-                                      "text": "case \"darwin\":\n        fmt.Println(\"OS X.\")\n",
-                                      "type": "LIST"
-                                    }
-                                  },
-                                  {
-                                    "Node": {
-                                      "children": [
-                                        {
-                                          "Node": {
-                                            "children": [
-                                              {
-                                                "String": "fmt"
-                                              }
-                                            ],
-                                            "first_column": 8,
-                                            "first_lineno": 6,
-                                            "last_column": 11,
-                                            "last_lineno": 6,
-                                            "text": "fmt",
-                                            "type": "LVAR"
-                                          }
-                                        },
-                                        {
-                                          "Symbol": "Println"
-                                        },
-                                        {
-                                          "Node": {
-                                            "children": [
-                                              {
-                                                "Node": {
-                                                  "children": [
-                                                    {
-                                                      "String": "\"OS X.\""
-                                                    }
-                                                  ],
-                                                  "first_column": 20,
-                                                  "first_lineno": 6,
-                                                  "last_column": 27,
-                                                  "last_lineno": 6,
-                                                  "text": "\"OS X.\"",
-                                                  "type": "STR"
-                                                }
-                                              }
-                                            ],
-                                            "first_column": 8,
-                                            "first_lineno": 6,
-                                            "last_column": 28,
-                                            "last_lineno": 6,
-                                            "text": "fmt.Println(\"OS X.\")",
-                                            "type": "LIST"
-                                          }
-                                        }
-                                      ],
-                                      "first_column": 8,
-                                      "first_lineno": 6,
-                                      "last_column": 28,
-                                      "last_lineno": 6,
-                                      "text": "fmt.Println(\"OS X.\")",
-                                      "type": "CALL"
+                                      "first_column": 31,
+                                      "first_lineno": 4,
+                                      "last_column": 33,
+                                      "last_lineno": 4,
+                                      "text": "os",
+                                      "type": "LVAR"
                                     }
                                   },
                                   {
@@ -152,23 +169,23 @@
                                                 "Node": {
                                                   "children": [
                                                     {
-                                                      "String": "\"linux\""
+                                                      "String": "\"darwin\""
                                                     }
                                                   ],
                                                   "first_column": 9,
-                                                  "first_lineno": 7,
-                                                  "last_column": 16,
-                                                  "last_lineno": 7,
-                                                  "text": "\"linux\"",
+                                                  "first_lineno": 5,
+                                                  "last_column": 17,
+                                                  "last_lineno": 5,
+                                                  "text": "\"darwin\"",
                                                   "type": "STR"
                                                 }
                                               }
                                             ],
                                             "first_column": 4,
-                                            "first_lineno": 7,
+                                            "first_lineno": 5,
                                             "last_column": 0,
-                                            "last_lineno": 9,
-                                            "text": "case \"linux\":\n        fmt.Println(\"Linux.\")\n",
+                                            "last_lineno": 7,
+                                            "text": "case \"darwin\":\n        fmt.Println(\"OS X.\")\n",
                                             "type": "LIST"
                                           }
                                         },
@@ -183,9 +200,9 @@
                                                     }
                                                   ],
                                                   "first_column": 8,
-                                                  "first_lineno": 8,
+                                                  "first_lineno": 6,
                                                   "last_column": 11,
-                                                  "last_lineno": 8,
+                                                  "last_lineno": 6,
                                                   "text": "fmt",
                                                   "type": "LVAR"
                                                 }
@@ -200,32 +217,32 @@
                                                       "Node": {
                                                         "children": [
                                                           {
-                                                            "String": "\"Linux.\""
+                                                            "String": "\"OS X.\""
                                                           }
                                                         ],
                                                         "first_column": 20,
-                                                        "first_lineno": 8,
-                                                        "last_column": 28,
-                                                        "last_lineno": 8,
-                                                        "text": "\"Linux.\"",
+                                                        "first_lineno": 6,
+                                                        "last_column": 27,
+                                                        "last_lineno": 6,
+                                                        "text": "\"OS X.\"",
                                                         "type": "STR"
                                                       }
                                                     }
                                                   ],
                                                   "first_column": 8,
-                                                  "first_lineno": 8,
-                                                  "last_column": 29,
-                                                  "last_lineno": 8,
-                                                  "text": "fmt.Println(\"Linux.\")",
+                                                  "first_lineno": 6,
+                                                  "last_column": 28,
+                                                  "last_lineno": 6,
+                                                  "text": "fmt.Println(\"OS X.\")",
                                                   "type": "LIST"
                                                 }
                                               }
                                             ],
                                             "first_column": 8,
-                                            "first_lineno": 8,
-                                            "last_column": 29,
-                                            "last_lineno": 8,
-                                            "text": "fmt.Println(\"Linux.\")",
+                                            "first_lineno": 6,
+                                            "last_column": 28,
+                                            "last_lineno": 6,
+                                            "text": "fmt.Println(\"OS X.\")",
                                             "type": "CALL"
                                           }
                                         },
@@ -236,19 +253,28 @@
                                                 "Node": {
                                                   "children": [
                                                     {
-                                                      "String": "fmt"
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "String": "\"linux\""
+                                                          }
+                                                        ],
+                                                        "first_column": 9,
+                                                        "first_lineno": 7,
+                                                        "last_column": 16,
+                                                        "last_lineno": 7,
+                                                        "text": "\"linux\"",
+                                                        "type": "STR"
+                                                      }
                                                     }
                                                   ],
-                                                  "first_column": 8,
-                                                  "first_lineno": 10,
-                                                  "last_column": 11,
-                                                  "last_lineno": 10,
-                                                  "text": "fmt",
-                                                  "type": "LVAR"
+                                                  "first_column": 4,
+                                                  "first_lineno": 7,
+                                                  "last_column": 0,
+                                                  "last_lineno": 9,
+                                                  "text": "case \"linux\":\n        fmt.Println(\"Linux.\")\n",
+                                                  "type": "LIST"
                                                 }
-                                              },
-                                              {
-                                                "Symbol": "Printf"
                                               },
                                               {
                                                 "Node": {
@@ -257,30 +283,117 @@
                                                       "Node": {
                                                         "children": [
                                                           {
-                                                            "String": "\"%s.\\n\""
+                                                            "String": "fmt"
                                                           }
                                                         ],
-                                                        "first_column": 19,
-                                                        "first_lineno": 10,
-                                                        "last_column": 26,
-                                                        "last_lineno": 10,
-                                                        "text": "\"%s.\\n\"",
-                                                        "type": "STR"
+                                                        "first_column": 8,
+                                                        "first_lineno": 8,
+                                                        "last_column": 11,
+                                                        "last_lineno": 8,
+                                                        "text": "fmt",
+                                                        "type": "LVAR"
                                                       }
+                                                    },
+                                                    {
+                                                      "Symbol": "Println"
                                                     },
                                                     {
                                                       "Node": {
                                                         "children": [
                                                           {
-                                                            "String": "os"
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "String": "\"Linux.\""
+                                                                }
+                                                              ],
+                                                              "first_column": 20,
+                                                              "first_lineno": 8,
+                                                              "last_column": 28,
+                                                              "last_lineno": 8,
+                                                              "text": "\"Linux.\"",
+                                                              "type": "STR"
+                                                            }
                                                           }
                                                         ],
-                                                        "first_column": 28,
+                                                        "first_column": 8,
+                                                        "first_lineno": 8,
+                                                        "last_column": 29,
+                                                        "last_lineno": 8,
+                                                        "text": "fmt.Println(\"Linux.\")",
+                                                        "type": "LIST"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "first_column": 8,
+                                                  "first_lineno": 8,
+                                                  "last_column": 29,
+                                                  "last_lineno": 8,
+                                                  "text": "fmt.Println(\"Linux.\")",
+                                                  "type": "CALL"
+                                                }
+                                              },
+                                              {
+                                                "Node": {
+                                                  "children": [
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "String": "fmt"
+                                                          }
+                                                        ],
+                                                        "first_column": 8,
                                                         "first_lineno": 10,
-                                                        "last_column": 30,
+                                                        "last_column": 11,
                                                         "last_lineno": 10,
-                                                        "text": "os",
+                                                        "text": "fmt",
                                                         "type": "LVAR"
+                                                      }
+                                                    },
+                                                    {
+                                                      "Symbol": "Printf"
+                                                    },
+                                                    {
+                                                      "Node": {
+                                                        "children": [
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "String": "\"%s.\\n\""
+                                                                }
+                                                              ],
+                                                              "first_column": 19,
+                                                              "first_lineno": 10,
+                                                              "last_column": 26,
+                                                              "last_lineno": 10,
+                                                              "text": "\"%s.\\n\"",
+                                                              "type": "STR"
+                                                            }
+                                                          },
+                                                          {
+                                                            "Node": {
+                                                              "children": [
+                                                                {
+                                                                  "String": "os"
+                                                                }
+                                                              ],
+                                                              "first_column": 28,
+                                                              "first_lineno": 10,
+                                                              "last_column": 30,
+                                                              "last_lineno": 10,
+                                                              "text": "os",
+                                                              "type": "LVAR"
+                                                            }
+                                                          }
+                                                        ],
+                                                        "first_column": 8,
+                                                        "first_lineno": 10,
+                                                        "last_column": 31,
+                                                        "last_lineno": 10,
+                                                        "text": "fmt.Printf(\"%s.\\n\", os)",
+                                                        "type": "LIST"
                                                       }
                                                     }
                                                   ],
@@ -289,34 +402,34 @@
                                                   "last_column": 31,
                                                   "last_lineno": 10,
                                                   "text": "fmt.Printf(\"%s.\\n\", os)",
-                                                  "type": "LIST"
+                                                  "type": "CALL"
                                                 }
                                               }
                                             ],
-                                            "first_column": 8,
-                                            "first_lineno": 10,
-                                            "last_column": 31,
-                                            "last_lineno": 10,
-                                            "text": "fmt.Printf(\"%s.\\n\", os)",
-                                            "type": "CALL"
+                                            "first_column": 4,
+                                            "first_lineno": 7,
+                                            "last_column": 0,
+                                            "last_lineno": 9,
+                                            "text": "case \"linux\":\n        fmt.Println(\"Linux.\")\n",
+                                            "type": "WHEN"
                                           }
                                         }
                                       ],
                                       "first_column": 4,
-                                      "first_lineno": 7,
+                                      "first_lineno": 5,
                                       "last_column": 0,
-                                      "last_lineno": 9,
-                                      "text": "case \"linux\":\n        fmt.Println(\"Linux.\")\n",
+                                      "last_lineno": 7,
+                                      "text": "case \"darwin\":\n        fmt.Println(\"OS X.\")\n",
                                       "type": "WHEN"
                                     }
                                   }
                                 ],
                                 "first_column": 4,
-                                "first_lineno": 5,
-                                "last_column": 0,
-                                "last_lineno": 7,
-                                "text": "case \"darwin\":\n        fmt.Println(\"OS X.\")\n",
-                                "type": "WHEN"
+                                "first_lineno": 4,
+                                "last_column": 5,
+                                "last_lineno": 11,
+                                "text": "switch os := runtime.GOOS; os {\n    case \"darwin\":\n        fmt.Println(\"OS X.\")\n    case \"linux\":\n        fmt.Println(\"Linux.\")\n    default:\n        fmt.Printf(\"%s.\\n\", os)\n    }",
+                                "type": "CASE"
                               }
                             }
                           ],
@@ -325,7 +438,7 @@
                           "last_column": 5,
                           "last_lineno": 11,
                           "text": "switch os := runtime.GOOS; os {\n    case \"darwin\":\n        fmt.Println(\"OS X.\")\n    case \"linux\":\n        fmt.Println(\"Linux.\")\n    default:\n        fmt.Printf(\"%s.\\n\", os)\n    }",
-                          "type": "CASE"
+                          "type": "BEGIN"
                         }
                       },
                       {

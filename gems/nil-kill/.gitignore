@@ -1,0 +1,5 @@
+
+# Compiled native tracer artifacts
+ext/**/Makefile
+ext/**/*.o
+ext/**/*.so

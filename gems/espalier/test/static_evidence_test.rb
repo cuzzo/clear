@@ -304,7 +304,9 @@ class StaticEvidenceTest < Minitest::Test
 
   def test_source_roles_are_language_neutral_path_facts
     assert_equal "test", Espalier::StaticEvidence.source_role("src/widget_test.go")
+    assert_equal "test", Espalier::StaticEvidence.source_role("src/normalizer-test.rs")
     assert_equal "test", Espalier::StaticEvidence.source_role("tests/test_widget.py")
+    assert_equal "production", Espalier::StaticEvidence.source_role("gems/test-miser/lib/test_miser.rb")
     assert_equal "test", Espalier::StaticEvidence.source_role("Tests/ArgumentParserTests/AnyArgumentTests.swift")
     assert_equal "test", Espalier::StaticEvidence.source_role("src/jvmTest/kotlin/Foo.kt")
     assert_equal "test", Espalier::StaticEvidence.source_role("src/nonWasmTest/kotlin/Foo.kt")
@@ -312,6 +314,55 @@ class StaticEvidenceTest < Minitest::Test
     assert_equal "example", Espalier::StaticEvidence.source_role("examples/widget.rb")
     assert_equal "production", Espalier::StaticEvidence.source_role("rich/console.py")
     assert_equal "test", Espalier::StaticEvidence.source_role("Sources/ArgumentParserTestHelpers/Helpers.swift")
+  end
+
+  def test_method_source_roles_exclude_rust_inline_test_modules_and_their_lambdas
+    methods = [
+      {
+        "id" => "production",
+        "path" => "/project/src/lib.rs",
+        "language" => "rust",
+        "span" => [1, 0, 5, 1],
+        "semantic_symbol" => "rust-analyzer cargo demo 0.1.0 run()."
+      },
+      {
+        "id" => "test",
+        "path" => "/project/src/lib.rs",
+        "language" => "rust",
+        "span" => [10, 4, 20, 5],
+        "semantic_symbol" => "rust-analyzer cargo demo 0.1.0 tests/check()."
+      },
+      {
+        "id" => "test-lambda",
+        "path" => "/project/src/lib.rs",
+        "language" => "rust",
+        "kind" => "lambda",
+        "span" => [14, 20, 14, 32]
+      }
+    ]
+
+    assert_equal(
+      { "production" => "production", "test" => "test", "test-lambda" => "test" },
+      Espalier::StaticEvidence.method_source_roles(methods)
+    )
+  end
+
+  def test_generated_declarations_are_available_to_fact_mine_but_excluded_from_production_metrics
+    evidence = {
+      "methods" => [
+        { "id" => "authored", "name" => "render", "owner" => "Report", "kind" => "instance", "path" => "lib/report.rb", "line" => 1, "language" => "ruby" },
+        { "id" => "reader", "name" => "title", "owner" => "Report", "kind" => "instance", "path" => "lib/report.rb", "line" => 2, "language" => "ruby", "generated_declaration" => true }
+      ],
+      "fields" => [],
+      "facts" => { "calls" => [], "state_accesses" => [], "complexity_facts" => [], "struct_declarations" => [] }
+    }
+
+    assert_equal(
+      { "authored" => "production", "reader" => "generated" },
+      Espalier::StaticEvidence.method_source_roles(evidence.fetch("methods"))
+    )
+    methods = Espalier::StaticEvidence.project_modules(evidence).fetch(0).fetch(:methods)
+    assert_equal ["render"], methods.map { |method| method[:name] }
   end
 
   def test_project_modules_prefers_a_primary_owner_over_an_extension_and_never_gives_protocols_state

@@ -101,6 +101,19 @@
     "calls": [
       {
         "arguments": [
+          "(row.risk * row.multiplier).round(4)"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "apply",
+        "line": 9,
+        "message": "risk=",
+        "receiver": "row",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
           "4"
         ],
         "block": false,
@@ -110,6 +123,32 @@
         "line": 9,
         "message": "round",
         "receiver": "row.risk * row.multiplier",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "fact.count"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "apply",
+        "line": 8,
+        "message": "count=",
+        "receiver": "row",
+        "safe_navigation": false
+      },
+      {
+        "arguments": [
+          "fact.summary"
+        ],
+        "block": false,
+        "conditional": false,
+        "control": "always",
+        "function": "apply",
+        "line": 7,
+        "message": "status=",
+        "receiver": "row",
         "safe_navigation": false
       },
       {
@@ -887,11 +926,14 @@
           "fact.count",
           "fact.summary",
           "facts.status_for",
+          "row.count=",
           "row.file",
           "row.multiplier",
           "row.name",
           "row.risk",
-          "row.risk * row.multiplier.round"
+          "row.risk * row.multiplier.round",
+          "row.risk=",
+          "row.status="
         ],
         "writes": [
           "repo",
@@ -953,6 +995,12 @@
         "receiver": "fact"
       },
       {
+        "field": "count=",
+        "function": "apply",
+        "line": 8,
+        "receiver": "row"
+      },
+      {
         "field": "file",
         "function": "apply",
         "line": 5,
@@ -983,10 +1031,22 @@
         "receiver": "row"
       },
       {
+        "field": "risk=",
+        "function": "apply",
+        "line": 9,
+        "receiver": "row"
+      },
+      {
         "field": "round",
         "function": "apply",
         "line": 9,
         "receiver": "row.risk * row.multiplier"
+      },
+      {
+        "field": "status=",
+        "function": "apply",
+        "line": 7,
+        "receiver": "row"
       },
       {
         "field": "status_for",

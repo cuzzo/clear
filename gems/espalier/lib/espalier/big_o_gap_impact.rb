@@ -90,7 +90,14 @@ module Espalier
         categories << "dynamic_or_reflective_dispatch" unless boundary.empty?
         categories << "callback_origin_or_cost_missing" if value(call, :callback_receiver) == true
         symbol = value(call, :semantic_symbol).to_s
-        categories << "external_symbol_cost_missing" unless symbol.empty?
+        unless symbol.empty?
+          category = if value(call, :external_symbol_scope).to_s == "project"
+                       "project_candidate_summary_missing"
+                     else
+                       "external_symbol_cost_missing"
+                     end
+          categories << category
+        end
         reason = value(call, :resolution_missing_proof).to_s
         categories << "callback_origin_or_cost_missing" if reason.include?("callback")
       end

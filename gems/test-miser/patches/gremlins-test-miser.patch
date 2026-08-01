@@ -180,7 +180,7 @@ index cf13433..6442c6e 100644
  	UnleashCoverPkgKey           = "unleash.coverpkg"
  	UnleashWorkersKey            = "unleash.workers"
 diff --git a/internal/engine/executor.go b/internal/engine/executor.go
-index ecfd0e3..0f36287 100644
+index ecfd0e3..2a314d4 100644
 --- a/internal/engine/executor.go
 +++ b/internal/engine/executor.go
 @@ -17,12 +17,15 @@
@@ -272,11 +272,15 @@ index ecfd0e3..0f36287 100644
  
  	if m.testCPU != 0 {
  		args = append(args, "-cpu", fmt.Sprintf("%d", m.testCPU))
-@@ -244,0 +265,3 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+@@ -245,11 +265,36 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+ 	if m.integrationMode {
+ 		path = "./..."
+ 	}
 +	if m.testMiser {
 +		path = "./" + filepath.ToSlash(filepath.Dir(m.mutant.Position().Filename))
 +	}
-@@ -250,6 +273,28 @@ func (m *mutantExecutor) getTestArgs(pkg string) []string {
+ 	args = append(args, path)
+ 
  	return args
  }
  

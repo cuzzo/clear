@@ -48,7 +48,7 @@ pub(crate) fn external_symbol_call_complexity(
     symbol: &str,
     message: &str,
 ) -> Option<ExternalCallComplexity> {
-    if !symbol.starts_with("scip-java maven jdk ") {
+    if !is_jdk_symbol(symbol) {
         return None;
     }
 
@@ -128,7 +128,7 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
             parametric_cost: None,
         };
     };
-    if symbol.starts_with("scip-java maven jdk ") {
+    if is_jdk_symbol(symbol) {
         super::ExternalSymbolMetadata {
             scope: "stdlib",
             missing_cost_kind: configured_semantic_symbol_kind("java", descriptor)
@@ -142,6 +142,16 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
             parametric_cost: None,
         }
     }
+}
+
+fn is_jdk_symbol(symbol: &str) -> bool {
+    // scip-java 0.12.x writes SemanticDB-compatible symbols using the
+    // `semanticdb` scheme. Older fixtures and indexes used `scip-java`.
+    // Package manager/name/version still prove that the declaration is JDK
+    // owned; accept both producer spellings without weakening that check.
+    ["semanticdb maven jdk ", "scip-java maven jdk "]
+        .iter()
+        .any(|prefix| symbol.starts_with(prefix))
 }
 
 const JAVA_CONTEXT_PAIRS: &[(&str, &[&str])] = &[
@@ -214,6 +224,76 @@ const JAVA_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct JavaNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for JavaNormalizedBehavior {
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "java-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    fn canonical_symbol_scope(&self) -> bool {
+        true
+    }
+
+    fn resolves_inherited_project_calls(&self) -> bool {
+        true
+    }
+
+    fn project_call_candidate_compatible(
+        &self,
+        argument_count: usize,
+        parameter_count: usize,
+    ) -> bool {
+        argument_count == parameter_count
+    }
+
+    fn unbound_receiver_may_name_project_type(&self, receiver: &str) -> bool {
+        !receiver.is_empty() && !receiver.contains(['.', ':', '(', ')', '[', ']'])
+    }
+
+    fn declared_flow_type_fallback(&self, declared_type: &str) -> bool {
+        !declared_type.is_empty()
+            && declared_type
+                .chars()
+                .next()
+                .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+            && !declared_type.contains(['=', '(', ')', ';', '\n'])
+            && !declared_type.contains("//")
+            && !declared_type.contains("&&")
+    }
+
+    // C-family indexers render a local as `Type name` - the type leads.
+    fn parse_variable_declaration(&self, text: &str) -> Option<String> {
+        let text = text.trim().trim_end_matches(';').trim();
+        let (declared, _name) = text.rsplit_once(char::is_whitespace)?;
+        let declared = declared.trim();
+        (!declared.is_empty() && !declared.contains('=')).then(|| declared.to_string())
+    }
+
+    // java declares `Ret name(T a)`, not `name(a: T) -> Ret`.
+    fn parse_signature(&self, signature: &str) -> super::normalized_behavior::NormalizedSignature {
+        super::normalized_behavior::parse_prefix_return_declarator(signature)
+    }
+
+    // The Java indexer emits several overlapping occurrences per call site; the
+    // first semantic one is the callee.
+    fn scip_prefers_first_semantic_occurrence(&self) -> bool {
+        true
+    }
+
+    fn type_kind_is_abstract_dispatch(&self, kind: &str) -> bool {
+        kind == "interface"
+    }
+
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
     fn nullable_operation(&self, node: &Node) -> Option<NormalizedNullableOperation> {
         (node.r#type == "CALL")
             .then(|| node.children.first().and_then(crate::ast::node))
@@ -793,6 +873,9 @@ mod tests {
     #[test]
     fn test_java_behavior_comprehensive() {
         let b = JavaNormalizedBehavior;
+
+        assert!(b.function_has_executable_body(&node("DEFN", "default int size() { return 0; }")));
+        assert!(!b.function_has_executable_body(&node("DEFN", "int size();")));
 
         assert_eq!(
             b.collection_operation(&TypeExpr::Primitive("Set".to_string()), "add"),

@@ -388,6 +388,403 @@ class AggregatorTest < Minitest::Test
     refute fn[:quality_metrics].key?(:big_o_unknowns)
   end
 
+  def incomplete_recursive_module(language, owner, fn_name)
+    [
+      {
+        # project_modules disambiguates owners as "name@path"; the override
+        # must key on the bare leaf.
+        type: :class, name: "#{owner}@src/#{owner}.x", file: "src/#{owner}.x", states: Set.new,
+        language: language,
+        methods: [
+          {
+            name: fn_name, signature: "func #{fn_name}()",
+            parameters: ["data"], visibility: :public, line: 20, span: [20, 0, 40, 1],
+            effects: { reads: Set.new, writes: Set.new },
+            complexity_facts: [{
+              "line" => 20, "parameters" => ["data"], "collection_parameters" => ["data"],
+              "iterations" => [], "allocations" => [], "size_domains" => [],
+              "recursion" => { "calls" => 2, "unknown_progress_calls" => 2 },
+              "call_contexts" => []
+            }]
+          }
+        ]
+      }
+    ]
+  end
+
+  def test_manual_override_completes_only_incomplete_registered_functions
+    modules = incomplete_recursive_module(:go, "sort", "Sort")
+    fn = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+
+    assert_equal "O(N log N)", fn[:quality_metrics][:big_o]
+    assert_equal true, fn[:quality_metrics][:big_o_complete]
+    assert_equal :manual_override, fn[:quality_metrics][:big_o_provenance]
+    assert_equal :complete_override, fn[:quality_metrics][:big_o_status]
+    assert_equal "O(log N)", fn[:quality_metrics][:big_o_space]
+  end
+
+  def test_manual_override_ignores_unregistered_functions
+    # Same incomplete shape, but no registry entry for sort.Frobnicate.
+    modules = incomplete_recursive_module(:go, "sort", "Frobnicate")
+    fn = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+
+    refute_equal true, fn[:quality_metrics][:big_o_complete]
+    refute_equal :manual_override, fn[:quality_metrics][:big_o_provenance]
+    assert_equal :incomplete, fn[:quality_metrics][:big_o_status]
+  end
+
+  def test_manual_override_never_replaces_a_complete_bound
+    # A registered name (list.sort / python) but a COMPLETE derived bound:
+    # the override must not fire.
+    modules = [
+      {
+        type: :class, name: "list", file: "x.py", states: Set.new, language: :python,
+        methods: [{
+          name: "sort", signature: "def sort(self)", parameters: [], visibility: :public,
+          line: 1, span: [1, 0, 2, 1], effects: { reads: Set.new, writes: Set.new },
+          complexity_facts: [{
+            "line" => 1, "parameters" => [], "collection_parameters" => [],
+            "iterations" => [], "allocations" => [], "size_domains" => [],
+            "recursion" => { "calls" => 0 }, "call_contexts" => []
+          }]
+        }]
+      }
+    ]
+    fn = Espalier::Aggregator.new.aggregate(modules).first[:functions].first
+
+    assert_equal true, fn[:quality_metrics][:big_o_complete]
+    refute_equal :manual_override, fn[:quality_metrics][:big_o_provenance]
+    refute_equal "O(N log N)", fn[:quality_metrics][:big_o]
+    assert_equal :complete, fn[:quality_metrics][:big_o_status]
+  end
+
+  def test_big_o_status_distinguishes_parametric_from_complete
+    # The core "complete" vs "complete worst case" distinction. A bound carrying
+    # an open callback/reflective parameter (C/R) is complete only parametrically
+    # - it is the tier a worst-case substitution upgrades to :complete_worst_case
+    # and must NOT read as a plain (closed) :complete bound.
+    agg = Espalier::Aggregator.new
+    classify = ->(q) { agg.send(:classify_big_o_status, q) }
+
+    assert_equal :complete, classify.call(big_o: "O(N)", big_o_complete: true)
+    assert_equal :parametric, classify.call(big_o: "O(N * C)", big_o_complete: true)
+    assert_equal :parametric, classify.call(big_o: "O(R)", big_o_complete: true)
+    assert_equal :incomplete, classify.call(big_o: "unknown", big_o_complete: false)
+    assert_equal :complete_override,
+                 classify.call(big_o: "O(N log N)", big_o_complete: true,
+                               big_o_provenance: :manual_override)
+
+    # The open parameter can sit on the space axis alone: a parametric contract
+    # prices auxiliary space as O(S) / O(N*S), and substitution rewrites only
+    # the time expression. Reading only the time bound published those as closed.
+    assert_equal :parametric,
+                 classify.call(big_o: "O(N^2)", big_o_complete: true,
+                               big_o_space: "O(S)", big_o_space_complete: true)
+    assert_equal :parametric,
+                 classify.call(big_o: "O(N)", big_o_complete: true,
+                               big_o_space: "O(N*S)", big_o_space_complete: true)
+    assert_equal :complete,
+                 classify.call(big_o: "O(N)", big_o_complete: true, big_o_space: "O(N)")
+  end
+
+  def test_open_space_parameter_is_parametric_through_the_aggregation_pipeline
+    # The classifier is only correct if it runs against a quality record that
+    # already carries the space bound. A reflective contract closes no space,
+    # so the reported tier must be parametric even though the time bound is a
+    # closed O(N).
+    modules = [{
+      type: :class, name: "demo", file: "demo.go", states: Set.new, language: :go,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 1], parameters: ["xs"],
+        visibility: :public, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c1", receiver: "fmt", message: "Sprintf", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N)",
+          known_space_complexity: "O(S)"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["xs"], "collection_parameters" => ["xs"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [], "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "Sprintf",
+            "execution_multiplicity" => "O(1)", "power" => 0
+          }]
+        }]
+      }]
+    }]
+
+    quality = Espalier::Aggregator.new.aggregate(modules)
+      .first[:functions].find { |fn| fn[:name] == "run" }.fetch(:quality_metrics)
+
+    assert_equal "O(N)", quality[:big_o]
+    assert_equal "O(S)", quality[:big_o_space]
+    assert_equal :parametric, quality[:big_o_status]
+  end
+
+  def test_lambda_argument_closes_an_external_parametric_callback_bound
+    # A stdlib higher-order call is priced O(N*C) from its compiler symbol. The
+    # closure passed at that call site is analyzed like any other function, so C
+    # is not open - substituting it is what turns a partial bound into a closed
+    # one.
+    modules = [{
+      type: :class, name: "demo", file: "demo.rs", states: Set.new, language: :rust,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 1], parameters: ["xs"],
+        visibility: :public, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c1", receiver: "xs.iter()", message: "map", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N)",
+          complexity_bound_quality: "upper_bound_parametric_callback_linear"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["xs"], "collection_parameters" => ["xs"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "map",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "argument_size_domains" => [["param:xs"]],
+            "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }]
+          }]
+        }]
+      }, {
+        id: "lambda", name: "<lambda@2:20>", line: 2, span: [2, 20, 2, 34],
+        dispatch_kind: "lambda", parameters: ["x"], visibility: :private,
+        effects: { reads: Set.new, writes: Set.new }, delegations: [],
+        complexity_facts: [{
+          "line" => 2, "parameters" => ["x"], "collection_parameters" => [],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [], "call_contexts" => []
+        }]
+      }]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    quality = functions.find { |fn| fn[:name] == "run" }.fetch(:quality_metrics)
+
+    assert_equal "O(N)", quality[:big_o]
+    assert_equal :complete, quality[:big_o_status]
+  end
+
+  def test_costly_lambda_argument_keeps_its_own_cost_in_the_bound
+    # Substitution is not erasure: an O(M) callable multiplies in rather than
+    # dropping out, so O(N*C) becomes O(N*M), not O(N).
+    modules = [{
+      type: :class, name: "demo", file: "demo.rs", states: Set.new, language: :rust,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 1], parameters: ["xs"],
+        visibility: :public, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c1", receiver: "xs.iter()", message: "map", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N)",
+          complexity_bound_quality: "upper_bound_parametric_callback_linear"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["xs"], "collection_parameters" => ["xs"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "map",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "argument_size_domains" => [["param:xs"]],
+            "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }]
+          }]
+        }]
+      }, {
+        id: "lambda", name: "<lambda@2:20>", line: 2, span: [2, 20, 2, 34],
+        dispatch_kind: "lambda", parameters: ["y"], visibility: :private,
+        effects: { reads: Set.new, writes: Set.new }, delegations: [],
+        complexity_facts: [{
+          "line" => 2, "parameters" => ["y"], "collection_parameters" => ["y"],
+          "iterations" => [{
+            "line" => 2, "span" => [2, 20, 2, 34], "power" => 1,
+            "parameter_domains" => ["y"],
+            "symbolic_time" => { "factors" => [{ "domain_id" => "param:y", "exponent" => 1 }] }
+          }],
+          "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{ "id" => "param:y", "name" => "y", "source_kind" => "parameter" }],
+          "call_contexts" => []
+        }]
+      }]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    quality = functions.find { |fn| fn[:name] == "run" }.fetch(:quality_metrics)
+
+    assert_equal "O(N*M)", quality[:big_o]
+    assert_equal :complete, quality[:big_o_status]
+  end
+
+  def test_callable_of_unknown_cost_leaves_the_callback_parameter_open
+    # Substitution must never price an unproven callable as free. A closure
+    # whose own bound is not symbolically known keeps C open rather than
+    # silently dropping out of the caller's bound.
+    modules = [{
+      type: :class, name: "demo", file: "demo.rs", states: Set.new, language: :rust,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 1], parameters: ["xs"],
+        visibility: :public, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c1", receiver: "xs.iter()", message: "map", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N)",
+          complexity_bound_quality: "upper_bound_parametric_callback_linear"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["xs"], "collection_parameters" => ["xs"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "map",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "argument_size_domains" => [["param:xs"]],
+            "size_domains" => [{ "id" => "param:xs", "name" => "xs", "source_kind" => "parameter" }]
+          }]
+        }]
+      }, {
+        id: "lambda", name: "<lambda@2:20>", line: 2, span: [2, 20, 2, 34],
+        dispatch_kind: "lambda", parameters: ["x"], visibility: :private,
+        effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "c2", receiver: "sink", message: "consume", line: 2, span: [2, 24, 2, 33]
+        }],
+        complexity_facts: [{
+          "line" => 2, "parameters" => ["x"], "collection_parameters" => [],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 24, 2, 33], "message" => "consume",
+            "execution_multiplicity" => "O(1)", "power" => 0
+          }]
+        }]
+      }]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    caller = functions.find { |fn| fn[:name] == "run" }.fetch(:quality_metrics)
+    callable = functions.find { |fn| fn[:name] == "<lambda@2:20>" }.fetch(:quality_metrics)
+
+    refute callable[:big_o_complete], "the closure's own cost must be unproven for this case"
+    assert_equal "O(N*C)", caller[:big_o]
+    assert_equal :parametric, caller[:big_o_status]
+  end
+
+  def test_recursive_callback_component_stays_parametric_instead_of_expanding_forever
+    modules = [{
+      type: :class, name: "walker", file: "walker.rs", states: Set.new, language: :rust,
+      methods: [{
+        id: "visit", name: "visit", line: 1, span: [1, 0, 3, 1], parameters: ["children"],
+        visibility: :private, effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "walk", receiver: "children", message: "any", line: 2,
+          span: [2, 4, 2, 40], known_time_complexity: "O(N*C)",
+          complexity_bound_quality: "upper_bound_parametric_callback_linear"
+        }],
+        complexity_facts: [{
+          "line" => 1, "parameters" => ["children"], "collection_parameters" => ["children"],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [{
+            "id" => "param:children", "name" => "children", "source_kind" => "parameter"
+          }],
+          "call_contexts" => [{
+            "line" => 2, "span" => [2, 4, 2, 40], "message" => "any",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "argument_size_domains" => [["param:children"]]
+          }]
+        }]
+      }, {
+        id: "lambda", name: "<lambda@2:20>", line: 2, span: [2, 20, 2, 39],
+        dispatch_kind: "lambda", parameters: ["child"], visibility: :private,
+        effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          call_id: "recur", receiver: "self", message: "visit", line: 2,
+          span: [2, 22, 2, 38], candidate_target_ids: ["visit"],
+          consumer_closed_candidate_set: true,
+          candidate_reason: "scip_project_candidate_set"
+        }],
+        complexity_facts: [{
+          "line" => 2, "parameters" => ["child"], "collection_parameters" => [],
+          "iterations" => [], "allocations" => [], "recursion" => { "calls" => 0 },
+          "size_domains" => [], "call_contexts" => [{
+            "line" => 2, "span" => [2, 22, 2, 38], "message" => "visit",
+            "execution_multiplicity" => "O(1)", "power" => 0
+          }]
+        }]
+      }]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+    visit = functions.find { |function| function[:id] == "visit" }.fetch(:quality_metrics)
+
+    assert_equal "O(N*C)", visit[:big_o]
+    assert_equal :parametric, visit[:big_o_status]
+  end
+
+  def test_divergent_recursive_candidate_cycle_widens_to_unknown
+    method = lambda do |id, name, target, line|
+      {
+        id: id, name: name, line: line, span: [line, 0, line + 2, 1],
+        parameters: ["items"], effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "self", message: target, line: line + 1,
+          span: [line + 1, 2, line + 1, 12],
+          candidate_target_ids: [target], candidate_reason: "closed_candidate_set",
+          consumer_closed_candidate_set: true
+        }],
+        complexity_facts: [{
+          "line" => line, "parameters" => ["items"], "collection_parameters" => ["items"],
+          "iterations" => [], "allocations" => [], "size_domains" => [],
+          "recursion" => { "calls" => 0 }, "call_contexts" => [{
+            "line" => line + 1, "span" => [line + 1, 2, line + 1, 12],
+            "message" => target, "execution_multiplicity" => "O(N)", "power" => 1
+          }]
+        }]
+      }
+    end
+    modules = [{
+      type: :class, name: "Cycle", file: "cycle.rs", states: Set.new, language: :rust,
+      methods: [
+        method.call("left", "left", "right", 1),
+        method.call("right", "right", "left", 5)
+      ]
+    }]
+
+    functions = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+
+    functions.each do |function|
+      quality = function.fetch(:quality_metrics)
+      refute quality[:big_o_complete]
+      assert_includes quality[:big_o_evidence_gaps], "unresolved_recursive_progress"
+    end
+  end
+
+  def test_worst_callable_rule
+    worst = ->(rows) { Espalier::SymbolicComplexity.worst_callable(rows) }
+    linear = Espalier::SymbolicComplexity.from_fact(
+      { "factors" => [{ "domain_id" => "param:y", "exponent" => 1 }] },
+      [{ "id" => "param:y", "name" => "y", "source_kind" => "parameter" }]
+    )
+
+    assert_nil worst.call([])
+    # One unknown callable poisons the site.
+    assert_equal({ expression: nil, constant: false },
+                 worst.call([{ expression: linear, constant: false },
+                             { expression: nil, constant: false }]))
+    # Otherwise the costliest known cost wins, and constants alone close it.
+    assert_equal linear, worst.call([{ expression: linear, constant: false },
+                                     { expression: nil, constant: true }]).fetch(:expression)
+    assert_equal({ expression: nil, constant: true },
+                 worst.call([{ expression: nil, constant: true }]))
+  end
+
+  def test_complexity_overrides_lookup_semantics
+    assert_equal "O(N log N)",
+                 Espalier::ComplexityOverrides.lookup(:go, "sort", "Sort")["time"]
+    # Unknown function / wrong language / missing owner all miss.
+    assert_nil Espalier::ComplexityOverrides.lookup(:go, "sort", "Frobnicate")
+    assert_nil Espalier::ComplexityOverrides.lookup(:rust, "sort", "Sort")
+    assert_nil Espalier::ComplexityOverrides.lookup(:go, nil, nil)
+  end
+
   def test_big_o_joins_same_line_calls_by_exact_span
     method = {
       id: "caller", name: "run", line: 2,
@@ -1144,6 +1541,49 @@ class AggregatorTest < Minitest::Test
     assert caller[:quality_metrics][:big_o_complete]
   end
 
+  def test_unresolved_duplicate_short_name_is_not_an_internal_summary_edge
+    constant_fact = {
+      "parameters" => [], "collection_parameters" => [], "iterations" => [],
+      "allocations" => [], "size_domains" => [], "recursion" => { "calls" => 0 },
+      "call_contexts" => []
+    }
+    modules = [{
+      type: :class, name: "Duplicate", file: "duplicate.rs", states: Set.new,
+      methods: [{
+        id: "work-a", name: "work", line: 1, span: [1, 0, 2, 1],
+        effects: { reads: Set.new, writes: Set.new }, delegations: [],
+        complexity_facts: [constant_fact.merge("line" => 1)]
+      }, {
+        id: "work-b", name: "work", line: 4, span: [4, 0, 6, 1],
+        effects: { reads: Set.new, writes: Set.new }, delegations: [],
+        complexity_facts: [constant_fact.merge(
+          "line" => 4,
+          "iterations" => [{ "line" => 5, "power" => 1, "execution_multiplicity" => "O(N)" }]
+        )]
+      }, {
+        id: "caller", name: "run", line: 8, span: [8, 0, 10, 1],
+        effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "self", message: "work", line: 9, span: [9, 2, 9, 8]
+        }],
+        complexity_facts: [constant_fact.merge(
+          "line" => 8,
+          "call_contexts" => [{
+            "line" => 9, "span" => [9, 2, 9, 8], "message" => "work",
+            "execution_multiplicity" => "O(1)", "power" => 0,
+            "evidence_gap" => "ambiguous_project_call"
+          }]
+        )]
+      }]
+    }]
+
+    caller = Espalier::Aggregator.new.aggregate(modules).first[:functions]
+      .find { |function| function[:id] == "caller" }.fetch(:quality_metrics)
+
+    refute caller[:big_o_complete]
+    assert_includes caller[:big_o_evidence_gaps], "ambiguous_project_call"
+  end
+
   def test_scip_complete_call_graph_rejects_false_overload_recursion
     fact = {
       "line" => 2, "parameters" => ["value"], "collection_parameters" => [],
@@ -1345,7 +1785,8 @@ class AggregatorTest < Minitest::Test
         effects: { reads: Set.new, writes: Set.new }, complexity_facts: [caller_fact],
         delegations: [{
           receiver: "worker", message: "work", line: 3, type: :always,
-          candidate_target_ids: %w[fast slow], candidate_reason: "scip_implementation_set"
+          candidate_target_ids: %w[fast slow], candidate_reason: "scip_implementation_set",
+          consumer_closed_candidate_set: true
         }]
       }]
     }, {
@@ -1367,6 +1808,91 @@ class AggregatorTest < Minitest::Test
     assert caller[:quality_metrics][:big_o_complete]
     assert_includes caller[:quality_metrics][:big_o_bound_qualities], "upper_bound_closed_candidate_max"
     assert_includes caller[:quality_metrics][:big_o_assumptions].first, "implementation set is closed"
+  end
+
+  def test_big_o_does_not_certify_an_open_runtime_candidate_set
+    empty_fact = lambda do |line, contexts = []|
+      {
+        "line" => line, "parameters" => [], "collection_parameters" => [],
+        "iterations" => [], "allocations" => [], "call_contexts" => contexts,
+        "size_domains" => [], "recursion" => { "calls" => 0 }
+      }
+    end
+    modules = [{
+      type: :class, name: "RuntimeObserved", file: "runtime.rb", states: Set.new,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 3],
+        parameters: [], effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "worker", message: "work", line: 2,
+          candidate_target_ids: ["observed"], candidate_reason: "runtime_observed_candidate_set",
+          consumer_closed_candidate_set: false
+        }],
+        complexity_facts: [empty_fact.call(1, [{
+          "line" => 2, "message" => "work", "execution_multiplicity" => "O(1)",
+          "power" => 0, "evidence_gap" => "unknown_call_target"
+        }])]
+      }, {
+        id: "observed", name: "work", line: 5, span: [5, 0, 7, 3],
+        parameters: [], effects: { reads: Set.new, writes: Set.new },
+        delegations: [], complexity_facts: [empty_fact.call(5)]
+      }]
+    }]
+
+    caller = Espalier::Aggregator.new.aggregate(modules).first[:functions].find do |function|
+      function[:id] == "caller"
+    end
+
+    refute caller[:quality_metrics][:big_o_complete]
+    refute_includes Array(caller[:quality_metrics][:big_o_bound_qualities]), "upper_bound_closed_candidate_max"
+  end
+
+  def test_big_o_certifies_runtime_candidates_only_as_modeled_world
+    empty_fact = lambda do |line, contexts = []|
+      {
+        "line" => line, "parameters" => [], "collection_parameters" => [],
+        "iterations" => [], "allocations" => [], "call_contexts" => contexts,
+        "size_domains" => [], "recursion" => { "calls" => 0 }
+      }
+    end
+    closure_assumption =
+      "observed call targets exhaust the attested workload and runtime environment"
+    modules = [{
+      type: :class, name: "RuntimeObserved", file: "runtime.rb", states: Set.new,
+      methods: [{
+        id: "caller", name: "run", line: 1, span: [1, 0, 3, 3],
+        parameters: [], effects: { reads: Set.new, writes: Set.new },
+        delegations: [{
+          receiver: "worker", message: "work", line: 2,
+          candidate_target_ids: ["observed"],
+          candidate_reason: "runtime_modeled_observed_candidate_set",
+          consumer_closed_candidate_set: true,
+          complexity_bound_quality: "upper_bound_modeled_world",
+          complexity_assumptions: [closure_assumption]
+        }],
+        complexity_facts: [empty_fact.call(1, [{
+          "line" => 2, "message" => "work", "execution_multiplicity" => "O(1)",
+          "power" => 0, "evidence_gap" => "unknown_call_target"
+        }])]
+      }, {
+        id: "observed", name: "work", line: 5, span: [5, 0, 7, 3],
+        parameters: [], effects: { reads: Set.new, writes: Set.new },
+        delegations: [], complexity_facts: [empty_fact.call(5)]
+      }]
+    }]
+
+    caller = Espalier::Aggregator.new.aggregate(modules).first[:functions].find do |function|
+      function[:id] == "caller"
+    end
+
+    assert caller[:quality_metrics][:big_o_complete]
+    assert_includes caller[:quality_metrics][:big_o_bound_qualities],
+      "upper_bound_modeled_world"
+    assert_includes caller[:quality_metrics][:big_o_bound_qualities],
+      "upper_bound_closed_candidate_max"
+    assert_includes caller[:quality_metrics][:big_o_assumptions], closure_assumption
+    assert_equal :known_candidate_max,
+      Espalier::BigOProofMetrics.classify(caller[:quality_metrics])
   end
 
 end

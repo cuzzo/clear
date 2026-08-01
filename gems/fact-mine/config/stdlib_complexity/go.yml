@@ -32,6 +32,22 @@ reflect.Value:
   Convert: linear_materialize
   Type: constant
   Uint: constant
+  Addr: constant
+  Bytes: constant
+  CanInterface: constant
+  Cap: constant
+  IsZero: constant
+  MapRange: constant
+  NumMethod: constant
+  OverflowFloat: constant
+  OverflowInt: constant
+  OverflowUint: constant
+  Pointer: constant
+  SetBytes: constant
+  SetLen: constant
+  SetZero: constant
+  UnsafePointer: constant
+  Grow: linear_materialize
 reflect.Type:
   AssignableTo: constant
   Bits: constant
@@ -41,23 +57,39 @@ reflect.Type:
   Kind: constant
   Len: constant
   NumField: constant
+  NumMethod: constant
+  Implements: constant
   ConvertibleTo: constant
 reflect.StructTag:
   Get: linear_scan
 strings.Builder:
   Len: constant
+  Cap: constant
   String: constant
+  Reset: constant
+  Grow: constant
+  WriteByte: constant
+  WriteRune: constant
   WriteString: linear_materialize
+  Write: linear_materialize
 time.Time:
   Add: constant
   After: constant
   Before: constant
+  Format: linear_materialize
+  IsZero: constant
   Truncate: constant
   UnixNano: constant
   Unix: constant
   Sub: constant
   Nanosecond: constant
 time.Duration:
+  Hours: constant
+  Minutes: constant
+  Seconds: constant
+  Milliseconds: constant
+  Microseconds: constant
+  Nanoseconds: constant
   Truncate: constant
 crypto.Hash:
   Available: constant
@@ -70,6 +102,24 @@ context.Context:
 sync.Pool:
   Get: constant
   Put: constant
+# Go 1.19+ typed atomics: lock-free single-word ops, all O(1).
+atomic.Bool: &atomic_methods
+  Load: constant
+  Store: constant
+  Swap: constant
+  CompareAndSwap: constant
+  Add: constant
+atomic.Int32: *atomic_methods
+atomic.Int64: *atomic_methods
+atomic.Uint32: *atomic_methods
+atomic.Uint64: *atomic_methods
+atomic.Uintptr: *atomic_methods
+atomic.Pointer: *atomic_methods
+atomic.Value:
+  Load: constant
+  Store: constant
+  Swap: constant
+  CompareAndSwap: constant
 list.List:
   Back: constant
   Front: constant
@@ -90,6 +140,9 @@ list.Element:
 time.Ticker:
   Stop: constant
 regexp.Regexp:
+  FindStringSubmatch: linear_materialize
+  Match: linear_scan
+  MatchString: linear_scan
   ReplaceAll: linear_materialize
 http.Header:
   Get: linear_scan
@@ -105,6 +158,88 @@ base64.Encoding:
 big.Int:
   FillBytes: linear_materialize
   SetBytes: linear_materialize
+# `testing.common` is the embedded base of T/B/F, so t.Errorf resolves here.
+# Recording a failure is bounded by the message it formats; the variadic
+# formatting itself is reflective and lives in SemanticSymbolParametricCost.
+testing.common:
+  Helper: constant
+  Name: constant
+  Fail: constant
+  FailNow: constant
+  Failed: constant
+  SkipNow: constant
+  Skipped: constant
+  Cleanup: constant
+testing.T:
+  Parallel: constant
+  Setenv: constant
+  Deadline: constant
+bytes.Buffer:
+  Len: constant
+  Cap: constant
+  Reset: constant
+  Bytes: constant
+  Truncate: constant
+  String: linear_materialize
+  Grow: linear_materialize
+  Write: linear_materialize
+  WriteString: linear_materialize
+  WriteByte: constant
+  WriteRune: constant
+  Read: linear_scan
+  ReadString: linear_scan
+  Next: linear_scan
+# os.FileInfo is a public type alias for io/fs.FileInfo. Keep both canonical
+# spellings because build-tagged files may be parsed without a platform SCIP
+# document while their declared parameter type remains compiler syntax.
+fs.FileInfo: &file_info_methods
+  Name: constant
+  Size: constant
+  Mode: constant
+  ModTime: constant
+  IsDir: constant
+  Sys: constant
+os.FileInfo: *file_info_methods
+fs.DirEntry:
+  Name: constant
+  IsDir: constant
+  Type: constant
+os.ProcessState:
+  ExitCode: constant
+  Success: constant
+  Exited: constant
+  Pid: constant
+os.File:
+  Name: constant
+  Fd: constant
+# Registering a flag stores one descriptor; parsing walks the argument list.
+flag.FlagSet:
+  Bool: constant
+  BoolVar: constant
+  String: constant
+  StringVar: constant
+  Int: constant
+  IntVar: constant
+  Int64: constant
+  Uint: constant
+  Float64: constant
+  Float64Var: constant
+  Duration: constant
+  Var: constant
+  NArg: constant
+  NFlag: constant
+  Args: constant
+  Arg: constant
+  Lookup: constant
+  Parse: linear_scan
+  SetOutput: constant
+bufio.Scanner:
+  Text: linear_materialize
+  Bytes: constant
+  Err: constant
+  Scan: linear_scan
+  Buffer: constant
+  Split: constant
 Intrinsic:
   len: constant
   cap: constant
@@ -138,7 +273,9 @@ Intrinsic:
   "errors.Join": linear_materialize
   "hmac.Equal": linear_scan
   "math.Log10": constant
+  "math.Max": constant
   "math.Modf": constant
+  "math.Round": constant
   "reflect.Append": linear_materialize
   "reflect.ArrayOf": constant
   "reflect.MakeSlice": linear_materialize
@@ -154,6 +291,7 @@ Intrinsic:
   "runtime.Goexit": constant
   "runtime.Stack": linear_materialize
   "strconv.Itoa": linear_materialize
+  "strconv.Atoi": linear_scan
   "strconv.FormatFloat": linear_materialize
   "strconv.FormatInt": linear_materialize
   "strconv.FormatUint": linear_materialize
@@ -162,6 +300,7 @@ Intrinsic:
   "strconv.ParseInt": linear_scan
   "strconv.ParseUint": linear_scan
   "strings.SplitN": linear_materialize
+  "strings.NewReplacer": linear_materialize
   "time.NewTicker": constant
   "time.Until": constant
   "time.Parse": linear_scan
@@ -224,6 +363,118 @@ Intrinsic:
   "atomic.LoadUint64": constant
   "atomic.StoreUint32": constant
   "atomic.StoreUint64": constant
+  # internal/bytealg assembly primitives. The exported bytes/strings search and
+  # compare API bottoms out in these; they are pure linear scans (or an O(n)
+  # allocation), so mapping them lets the stdlib's own functions close.
+  "bytealg.Compare": linear_scan
+  "bytealg.Count": linear_scan
+  "bytealg.CountString": linear_scan
+  "bytealg.Equal": linear_scan
+  "bytealg.Index": linear_scan
+  "bytealg.IndexByte": linear_scan
+  "bytealg.IndexByteString": linear_scan
+  "bytealg.IndexString": linear_scan
+  "bytealg.IndexRabinKarp": linear_scan
+  "bytealg.IndexRabinKarpBytes": linear_scan
+  "bytealg.LastIndexByte": linear_scan
+  "bytealg.LastIndexByteString": linear_scan
+  "bytealg.HashStr": linear_scan
+  "bytealg.HashStrBytes": linear_scan
+  "bytealg.Cutover": constant
+  "bytealg.MakeNoZero": linear_materialize
+  # unsafe intrinsics: compile-time size/offset constants and zero-copy pointer
+  # or header construction. All O(1); no runtime work is a function of input.
+  "unsafe.Pointer": constant
+  "unsafe.Sizeof": constant
+  "unsafe.Offsetof": constant
+  "unsafe.Alignof": constant
+  "unsafe.Add": constant
+  "unsafe.Slice": constant
+  "unsafe.SliceData": constant
+  "unsafe.String": constant
+  "unsafe.StringData": constant
+  # runtime hints and bounded introspection: no-ops or stack-depth bounded,
+  # constant with respect to the caller's input.
+  "runtime.KeepAlive": constant
+  "runtime.SetFinalizer": constant
+  "runtime.GC": constant
+  "runtime.Caller": constant
+  "runtime.Callers": constant
+  "runtime.CallersFrames": constant
+  "runtime.NumCPU": constant
+  "runtime.NumGoroutine": constant
+  "runtime.Gosched": constant
+  # Race detector instrumentation: a no-op without -race; O(1).
+  "race.Enable": constant
+  "race.Disable": constant
+  "race.Acquire": constant
+  "race.Release": constant
+  "race.ReleaseMerge": constant
+  "race.Read": constant
+  "race.Write": constant
+  "race.ReadRange": constant
+  "race.WriteRange": constant
+  # math/bits: single-word bit operations, each O(1).
+  "bits.Add": constant
+  "bits.Add32": constant
+  "bits.Add64": constant
+  "bits.Sub": constant
+  "bits.Sub32": constant
+  "bits.Sub64": constant
+  "bits.Mul": constant
+  "bits.Mul32": constant
+  "bits.Mul64": constant
+  "bits.Div": constant
+  "bits.Div32": constant
+  "bits.Div64": constant
+  "bits.Len": constant
+  "bits.Len8": constant
+  "bits.Len16": constant
+  "bits.Len32": constant
+  "bits.Len64": constant
+  "bits.LeadingZeros": constant
+  "bits.LeadingZeros8": constant
+  "bits.LeadingZeros16": constant
+  "bits.LeadingZeros32": constant
+  "bits.LeadingZeros64": constant
+  "bits.TrailingZeros": constant
+  "bits.TrailingZeros32": constant
+  "bits.TrailingZeros64": constant
+  "bits.OnesCount": constant
+  "bits.OnesCount32": constant
+  "bits.OnesCount64": constant
+  "bits.RotateLeft": constant
+  "bits.RotateLeft8": constant
+  "bits.RotateLeft16": constant
+  "bits.RotateLeft32": constant
+  "bits.RotateLeft64": constant
+  "bits.ReverseBytes": constant
+  "bits.ReverseBytes32": constant
+  "bits.ReverseBytes64": constant
+  # Elementary math: constant-time numeric primitives.
+  "math.Float32bits": constant
+  "math.Float64bits": constant
+  "math.Float32frombits": constant
+  "math.Float64frombits": constant
+  "math.Log": constant
+  "math.Log2": constant
+  "math.Exp": constant
+  "math.Sqrt": constant
+  "math.Abs": constant
+  "math.Floor": constant
+  "math.Ceil": constant
+  "math.Trunc": constant
+  "math.Mod": constant
+  "math.Pow": constant
+  "math.Ldexp": constant
+  "math.Frexp": constant
+  # cmp: ordered comparison. Linear to bound the string operand case.
+  "cmp.Less": linear_scan
+  "cmp.Compare": linear_scan
+  "cmp.Or": constant
+  # internal/abi: compile-time layout constants.
+  "abi.FuncPCABI0": constant
+  "abi.FuncPCABIInternal": constant
   # Language builtins. These are syntax-proven by the Go adapter and do not
   # require a SCIP declaration. Materializing operations use worst-case upper
   # bounds, including allocation/copy during append growth.
@@ -261,6 +512,51 @@ Intrinsic:
   uintptr: constant
   print: declaration
   println: declaration
+  # Path manipulation is bounded by the path text. Join/Clean/Dir/Base build a
+  # new string; Ext and IsAbs only scan the argument.
+  filepath.Join: linear_materialize
+  filepath.Clean: linear_materialize
+  filepath.Dir: linear_materialize
+  filepath.Base: linear_materialize
+  filepath.Rel: linear_materialize
+  filepath.ToSlash: linear_materialize
+  filepath.FromSlash: linear_materialize
+  filepath.Split: linear_scan
+  filepath.SplitList: linear_materialize
+  filepath.Ext: linear_scan
+  filepath.IsAbs: linear_scan
+  filepath.Match: linear_scan
+  filepath.VolumeName: linear_scan
+  # Environment access scans the process environment block.
+  os.Getenv: linear_scan
+  os.LookupEnv: linear_scan
+  os.Setenv: linear_scan
+  os.Unsetenv: linear_scan
+  os.Environ: linear_materialize
+  os.IsNotExist: constant
+  os.IsExist: constant
+  os.IsPermission: constant
+  os.Getpid: constant
+  os.NewFile: constant
+  flag.Bool: constant
+  flag.String: constant
+  regexp.Compile: linear_materialize
+  exec.Command: linear_materialize
+  exec.CommandContext: linear_materialize
+  bytes.NewReader: constant
+  bytes.NewBuffer: constant
+  bytes.NewBufferString: linear_materialize
+  bytes.TrimSpace: linear_scan
+  bufio.NewScanner: constant
+  bufio.NewReader: constant
+  bufio.ScanLines: linear_scan
+  bufio.ScanWords: linear_scan
+  flag.NewFlagSet: constant
+  strings.IndexByte: linear_scan
+  strings.TrimLeft: linear_scan
+  time.Since: constant
+  time.Date: constant
+  errors.New: linear_materialize
 ParametricCall:
   # `error` is a predeclared open interface. The declared receiver proves one
   # dispatch, but the implementation cost remains the symbolic callback C.
@@ -268,6 +564,9 @@ ParametricCall:
 CallableType:
   "context.CancelFunc": callback_once
 ExternalLatency:
+  # Reader methods scan/materialize bytes supplied by an external stream. The
+  # byte-processing bound is complete while stream latency remains excluded.
+  "bufio.Reader.ReadString": linear_materialize
   "io.ReadAll": linear_materialize
   "os.ReadFile": linear_materialize
   "os.Open": linear_scan
@@ -288,13 +587,64 @@ ExternalLatency:
   "sync.WaitGroup.Done": constant
   "sync.WaitGroup.Wait": constant
   "time.Sleep": constant
+  # Filesystem and process syscalls. The computational bound is what the call
+  # does with the bytes it moves; device, scheduler, and network latency are
+  # excluded and declared as an assumption by the caller of this table.
+  "os.WriteFile": linear_scan
+  "os.Stat": constant
+  "os.Lstat": constant
+  "os.Mkdir": constant
+  "os.MkdirAll": linear_scan
+  "os.MkdirTemp": constant
+  "os.CreateTemp": constant
+  "os.Create": constant
+  "os.OpenFile": constant
+  "os.Remove": constant
+  "os.RemoveAll": linear_scan
+  "os.Rename": constant
+  "os.Chmod": constant
+  "os.Chtimes": constant
+  "os.Chdir": constant
+  "os.Getwd": linear_materialize
+  "os.UserHomeDir": linear_materialize
+  "os.UserCacheDir": linear_materialize
+  "os.ReadDir": linear_materialize
+  "os.Symlink": constant
+  "os.Readlink": linear_materialize
+  "os.Truncate": constant
+  "os.File.Write": linear_scan
+  "os.File.WriteString": linear_scan
+  "os.File.Read": linear_scan
+  "os.File.Sync": constant
+  "os.File.Stat": constant
+  "os.File.Seek": constant
+  "os.Getuid": constant
+  "os.Executable": linear_materialize
+  "syscall.Flock": constant
+  "syscall.Statfs": constant
+  "fs.DirEntry.Info": constant
+  "filepath.Abs": linear_materialize
+  "filepath.EvalSymlinks": linear_materialize
+  "filepath.Glob": linear_materialize
+  "exec.LookPath": linear_scan
+  "exec.Cmd.Run": constant
+  "exec.Cmd.Start": constant
+  "exec.Cmd.Wait": constant
+  "exec.Cmd.Output": linear_materialize
+  "exec.Cmd.CombinedOutput": linear_materialize
+  "exec.Cmd.String": linear_materialize
+  "exec.Cmd.StdoutPipe": constant
+  # Creating the harness temp dir registers a cleanup and makes one directory.
+  "testing.common.TempDir": constant
 SemanticSymbolParametricCost:
   'sort/Sort().': callback_sort
+  'sort/Slice().': callback_sort
   '`crypto/elliptic`/Curve#Params().': callback_once
   'crypto/Signer#Sign().': callback_once
   'flag/Usage.': callback_once
   'fmt/Errorf().': reflective_once
   'fmt/Fprintf().': reflective_once
+  'fmt/Print().': reflective_once
   'fmt/Printf().': reflective_once
   'fmt/Println().': reflective_once
   'fmt/Sprintf().': reflective_once
@@ -302,10 +652,37 @@ SemanticSymbolParametricCost:
   'reflect/Value#Call().': reflective_once
   '`encoding/json`/Marshal().': reflective_once
   '`encoding/json`/Unmarshal().': reflective_once
+  '`encoding/xml`/Unmarshal().': reflective_once
   '`encoding/json`/Decoder#Decode().': reflective_once
+  '`encoding/json`/Encoder#Encode().': reflective_once
   '`encoding/json`/MarshalIndent().': reflective_once
   'errors/Is().': reflective_once
   'flag/Parse().': reflective_once
+  'flag/FlagSet#Visit().': callback_linear
+  'flag/FlagSet#VisitAll().': callback_linear
+  # A subtest runs an arbitrary body, so its cost is the callback's.
+  'testing/T#Run().': callback_once
+  'testing/B#Run().': callback_once
+  # The harness failure/log calls format a variadic `...any` exactly the way
+  # fmt does, so they carry the same open reflective cost rather than a
+  # fabricated constant.
+  'testing/common#Errorf().': reflective_once
+  'testing/common#Error().': reflective_once
+  'testing/common#Fatalf().': reflective_once
+  'testing/common#Fatal().': reflective_once
+  'testing/common#Logf().': reflective_once
+  'testing/common#Log().': reflective_once
+  'testing/common#Skipf().': reflective_once
+  'testing/common#Skip().': reflective_once
+  'fmt/Fprintln().': reflective_once
+  'fmt/Sprint().': reflective_once
+  'fmt/Sprintln().': reflective_once
+  'fmt/Fprint().': reflective_once
+  'fmt/Sscanf().': reflective_once
+  'reflect/DeepEqual().': reflective_once
+  # Walking a tree runs the visitor once per entry.
+  '`path/filepath`/WalkDir().': callback_linear
+  '`path/filepath`/Walk().': callback_linear
   'flag/PrintDefaults().': reflective_once
   'flag/Var().': reflective_once
   '`net/http`/Request#ParseMultipartForm().': reflective_once

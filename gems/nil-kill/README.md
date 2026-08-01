@@ -85,6 +85,31 @@ added without changing Nil-kill's analyzer.
 > [Auto-Type](../auto-type/README.md) before collecting again, then prefer a
 > representative production replay or focused tests over repeatedly collecting
 > an entire suite.
+>
+> Big-O runtime-SCIP collection is a more expensive tier than Nil-Kill's type
+> tracing alone. On a representative SlopCop test, the untraced command takes
+> about **0.9s**, ordinary Nil-Kill runtime tracing about **5.3s** (roughly
+> **5x**), and runtime-SCIP value/call tracing about **11s** (roughly **12x**).
+> These are full-collection multipliers, not a claim that every suite has the
+> same event mix. Incremental collection normally selects only affected test
+> shards; when one change selects roughly 10% of the workload, its total
+> tracing work is correspondingly around 90% lower. Independent selected
+> shards run concurrently, bounded by `NIL_KILL_SHARD_JOBS`, so startup costs
+> do not accumulate serially.
+>
+> A full collection recognizes ordinary Minitest/RSpec commands and records
+> each test file as an independently replaceable evidence shard, with a unique
+> run identity and its executed production functions/callsites. Afterwards,
+> `nil-kill collect --fast` semantic-fingerprints production functions, tests,
+> and test support files. Changed tests run themselves; added tests always run;
+> changed functions run every test shard that previously entered them; deleted
+> tests subtract their shard. Every selected test traces all production
+> functions it reaches, including previously unchanged functions. Changes
+> whose impact cannot be closed precisely (shared helpers, function
+> additions/deletions, dependency/runtime changes, or opaque workloads)
+> automatically fall back to every shard. Only a fallback that cannot run is
+> allowed to remain explicitly stale; failed shards never replace canonical
+> evidence, including under `--continue-on-error`.
 
 Nil-Kill's trace plan omits method boundaries, T.let sites, and state fields
 whose contracts are already strong. Unknown and weak slots are retained
@@ -141,6 +166,7 @@ Here's a list of options for nil-kill:
 ```
 Usage:
   bundle exec tools/nil-kill collect -- <command...>
+  bundle exec tools/nil-kill collect --fast -- <focused command...>
   bundle exec tools/nil-kill collect --commands runtime-commands.txt
   bundle exec tools/nil-kill collect --cmd "bundle exec rspec" --cmd "./clear test transpile-tests"
   bundle exec tools/nil-kill collect --glob "lib/**/*.rb" --template "ruby {file}"
@@ -170,6 +196,48 @@ Config:
   NIL_KILL_ELEMENT_SAMPLE=20          container elements sampled by runtime tracing
   NIL_KILL_TRACE_PLAN=0               disable trace-plan pruning during collect
   NIL_KILL_TRACE_METHODS=0            disable TracePoint method collection
+  NIL_KILL_SHARD_JOBS=4               max independently traced test shards run concurrently
+```
+
+Ruby collection also writes consumer-compatible plain `runtime.scip.json`,
+compressed `runtime-attestation.json.gz`, canonical
+`runtime-evidence.v1.json.gz`, raw
+`*.jsonl.gz` under per-run/per-test directories, independently replaceable
+`shard-evidence/*.json.gz`, and `runtime-snapshot.json.gz` in the runtime
+output directory.
+Set `NIL_KILL_COMPRESS_EVIDENCE=0` only when plain raw JSONL is needed for
+debugging. NilKill serializes observed calls and values without parsing source
+or inferring flow. FactMine overlays that evidence on its normalized CFG/DFG
+and emits the SCIP index with `runtime-modeled-world` authority. Language
+providers only trace values and define genuine language semantics; the
+evidence contract, flow propagation, snapshot merge, and SCIP emission are
+language-neutral.
+
+Runtime Big-O evidence has one canonical v1 Protobuf contract at
+`gems/protocol/runtime-evidence/v1/runtime_evidence.proto`. FactMine first emits an
+exact trace plan. NilKill consumes that plan and records a capture status and
+correlated value/target bucket for every requested anchor. FactMine rebuilds
+the plan from the analyzed source, validates both digests and the complete
+anchor set, then joins evidence through exact internal IDs. The collector does
+not infer CFG/DFG relationships or accept the former path/name/line evidence
+shape. If a runtime only identifies a same-line event to multiple exact
+anchors, NilKill emits one candidate-correlation group instead of guessing or
+duplicating the event. FactMine alone may disambiguate that group using its
+normalized CFG/DFG; otherwise every candidate remains incomplete.
+
+The standalone validation and consumption flow is:
+
+```sh
+fact-mine-rust runtime-plan --root . --output runtime-plan.json <sources...>
+fact-mine-rust runtime-evidence validate \
+  --plan runtime-plan.json \
+  --evidence runtime-evidence.v1.json.gz
+fact-mine-rust runtime-scip \
+  --root . \
+  --trace-plan runtime-plan.json \
+  --runtime-evidence runtime-evidence.v1.json.gz \
+  --output runtime.scip.json \
+  <sources...>
 ```
 
 ## FAQ

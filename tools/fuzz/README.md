@@ -56,7 +56,7 @@ actually selected, rejects both baseline and semantic runs if any result is a
 timeout, compares individual surviving mutant IDs, and writes
 `semantic-mutant-delta/v1` facts.
 
-    bundle exec ruby gems/lineage/tools/mutant-converters/semantic_mutant.rb \
+    bundle exec ruby gems/gigasail/tools/mutant-converters/semantic_mutant.rb \
       --out /tmp/clear-semantic-mutants --timeout 60 --min-new-kills 1
 
 The final paired run selected the same 369 parser mutants on both sides and

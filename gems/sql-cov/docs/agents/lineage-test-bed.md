@@ -3,7 +3,7 @@
 ## Implemented slice
 
 Lineage's architecture subsystem now embeds 15 standalone `.sql` files from
-`gems/lineage/sql`. Lineage tests prepare those exact files against its real
+`gems/gigasail/giga-core/sql`. Lineage tests prepare those exact files against its real
 SQLite schema. SQL-COV separately parses all 15 and executes
 `architecture.owner_inventory.v1` against a focused fixture.
 

@@ -1,0 +1,66 @@
+schema: fact-mine.stdlib-map-support.v1
+languages:
+  go:
+    status: bundled
+    manifest: go-1.22.2.yml
+  rust:
+    status: bundled
+    manifest: rust-1.96.0.yml
+  java:
+    status: bundled
+    manifest: java-21.0.12.yml
+  python:
+    status: bundled
+    manifest: python-3.11.9.yml
+  csharp:
+    status: bundled
+    manifest: csharp-10.0.10.yml
+  kotlin:
+    status: bundled
+    manifest: kotlin-2.2.0.yml
+  c:
+    status: blocked
+    blocker: implementation_source_not_indexed
+    compatibility_probe: c/semantic_environment.rb
+    required_fix: A pinned glibc source/build recipe must expose executable libc bodies under the same compiler, ABI, headers, and scip-clang environment now captured by the compatibility probe.
+  cpp:
+    status: bundled
+    manifests:
+      - cpp-libstdcxx-13.3.0-cxx17-containers.yml
+      - cpp-libstdcxx-13.3.0-cxx17-strings.yml
+      - cpp-libstdcxx-13.3.0-cxx20-memory.yml
+  typescript:
+    status: blocked
+    blocker: declaration_only_standard_library
+    compatibility_probe: javascript/semantic_environment.rb
+    required_fix: A Node/V8 producer must bridge executable runtime implementations to TypeScript declaration symbols while preserving callback and reflective costs; the runtime identity is captured by the compatibility probe.
+  javascript:
+    status: blocked
+    blocker: declaration_only_standard_library
+    compatibility_probe: javascript/semantic_environment.rb
+    required_fix: A Node/V8 producer must bridge executable runtime implementations to TypeScript declaration symbols while preserving callback and reflective costs; the runtime identity is captured by the compatibility probe.
+  php:
+    status: blocked
+    blocker: parametric_runtime_callbacks_and_allocator_state
+    indexer_patch: php/scip-php-exact-version.patch
+    required_fix: Generated summaries must preserve and compose PHP weak-coercion callback costs and Zend allocator-state costs before C implementation symbols can be bridged to scip-php builtin declarations.
+  ruby:
+    status: bundled
+    manifest: ruby-3.2.3.yml
+  scala:
+    status: blocked
+    blocker: fact_mine_language_adapter_missing
+    indexer: scip-java
+    reusable_bundle: java-21.0.12.yml
+    required_fix: Add a Scala syntax/CFG/DFG adapter and validate scip-java's Scala symbols; JDK calls can then reuse the existing exact Java bundle before a scala-library manifest is added.
+  visual_basic:
+    status: blocked
+    blocker: fact_mine_language_adapter_missing
+    indexer: scip-dotnet
+    reusable_bundle: csharp-10.0.10.yml
+    required_fix: Add a Visual Basic syntax/CFG/DFG adapter and validate scip-dotnet's language-neutral assembly symbols; CoreLib calls can then reuse the existing exact C# producer bundle.
+  dart:
+    status: blocked
+    blocker: fact_mine_language_adapter_missing
+    indexer: scip-dart
+    required_fix: Add a Dart syntax/CFG/DFG adapter, pin a scip-dart and Dart SDK pair, and express the SDK source mapping as a standard manifest.

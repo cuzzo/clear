@@ -161,6 +161,11 @@
           "writes": []
         }
       ]
+    },
+    {
+      "boundaries": [],
+      "method": "class_method",
+      "statements": []
     }
   ],
   "path_condition": {
@@ -1501,6 +1506,9 @@
     ],
     "control_flow_edges": [
       {
+        "kind": "fallthrough"
+      },
+      {
         "kind": "entry"
       },
       {
@@ -1637,9 +1645,20 @@
       {},
       {},
       {},
+      {},
       {}
     ],
     "control_flow_nodes": [
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#class_method:entry:0:66:8",
+        "kind": "entry",
+        "line": 66
+      },
+      {
+        "id": "cfg:RubyCoverageParent::RubyCoverageChild#class_method:exit:1:68:11",
+        "kind": "exit",
+        "line": 68
+      },
       {
         "id": "cfg:RubyCoverageParent::RubyCoverageChild#initialize:entry:0:13:4",
         "kind": "entry",
@@ -1881,6 +1900,8 @@
       {},
       {},
       {},
+      {},
+      {},
       {}
     ],
     "flow_types": [
@@ -1973,9 +1994,16 @@
       {},
       {},
       {},
+      {},
+      {},
       {}
     ],
     "local_complexity_scores": [
+      {
+        "id": "RubyCoverageParent::RubyCoverageChild#class_method",
+        "score": 0.0,
+        "signals": {}
+      },
       {
         "id": "RubyCoverageParent::RubyCoverageChild#initialize",
         "score": 0.0,
@@ -2008,6 +2036,15 @@
       }
     ],
     "local_methods": [
+      {
+        "boundaries": [],
+        "id": "RubyCoverageParent::RubyCoverageChild#class_method",
+        "line": 66,
+        "local_contract_assignments": {},
+        "name": "class_method",
+        "owner": "RubyCoverageParent::RubyCoverageChild",
+        "statements": []
+      },
       {
         "boundaries": [],
         "id": "RubyCoverageParent::RubyCoverageChild#initialize",
@@ -2362,6 +2399,14 @@
     "node_effects": [
       {
         "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
+        "writes": []
+      },
+      {
+        "reads": [],
         "writes": [
           "place:RubyCoverageParent::RubyCoverageChild#initialize:global:$global_var"
         ]
@@ -2482,7 +2527,9 @@
       },
       {
         "reads": [],
-        "writes": []
+        "writes": [
+          "place:RubyCoverageParent::RubyCoverageChild#some_call:local:e"
+        ]
       },
       {
         "reads": [],
@@ -2765,6 +2812,8 @@
       }
     ],
     "reachability": [
+      {},
+      {},
       {},
       {},
       {},

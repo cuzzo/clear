@@ -505,45 +505,6 @@
           ]
         },
         {
-          "field": "audit",
-          "function": "Process",
-          "line": 66,
-          "owner": "GoSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            66,
-            4,
-            66,
-            11
-          ]
-        },
-        {
-          "field": "audit",
-          "function": "Process",
-          "line": 67,
-          "owner": "GoSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            67,
-            7,
-            67,
-            14
-          ]
-        },
-        {
-          "field": "children",
-          "function": "Process",
-          "line": 62,
-          "owner": "GoSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            62,
-            2,
-            62,
-            12
-          ]
-        },
-        {
           "field": "count",
           "function": "Process",
           "line": 65,
@@ -570,45 +531,6 @@
           ]
         },
         {
-          "field": "defaultCase",
-          "function": "Process",
-          "line": 51,
-          "owner": "GoSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            51,
-            2,
-            51,
-            15
-          ]
-        },
-        {
-          "field": "escalate",
-          "function": "Process",
-          "line": 47,
-          "owner": "GoSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            47,
-            2,
-            47,
-            12
-          ]
-        },
-        {
-          "field": "fallback",
-          "function": "Process",
-          "line": 49,
-          "owner": "GoSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            49,
-            2,
-            49,
-            12
-          ]
-        },
-        {
           "field": "lookup",
           "function": "Process",
           "line": 65,
@@ -619,32 +541,6 @@
             1,
             65,
             9
-          ]
-        },
-        {
-          "field": "publish",
-          "function": "Process",
-          "line": 56,
-          "owner": "GoSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            56,
-            2,
-            56,
-            11
-          ]
-        },
-        {
-          "field": "send",
-          "function": "audit",
-          "line": 74,
-          "owner": "GoSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            74,
-            1,
-            74,
-            7
           ]
         },
         {
@@ -671,19 +567,6 @@
             5,
             75,
             13
-          ]
-        },
-        {
-          "field": "warn",
-          "function": "Process",
-          "line": 58,
-          "owner": "GoSyntaxFactsCore",
-          "receiver": "self",
-          "span": [
-            58,
-            2,
-            58,
-            8
           ]
         }
       ],

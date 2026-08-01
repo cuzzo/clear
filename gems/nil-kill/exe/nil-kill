@@ -1,7 +1,26 @@
-#!/usr/bin/env ruby
-# typed: false
-# frozen_string_literal: true
+#!/usr/bin/env bash
+# `collect` is a Rust binary and loads no Ruby: the only Ruby a collect runs is
+# the workload it is tracing. Everything else still dispatches through the Ruby
+# CLI, which is where `infer` and the reporting commands live.
+set -euo pipefail
+# Resolved, because tools/nil-kill is a symlink into this directory and the
+# workspace root is found by walking up from the real file.
+self="$(readlink -f "${BASH_SOURCE[0]}")"
+here="$(dirname "$self")"
+root="$(cd "$here/../../.." && pwd)"
 
-require_relative "../lib/nil_kill"
+if [ "${1-}" = "collect" ]; then
+  shift
+  export NIL_KILL_COLLECTOR_EXTENSION="${NIL_KILL_COLLECTOR_EXTENSION:-$here/../ext/nil_kill_trace/nil_kill_trace.so}"
+  for candidate in release debug; do
+    binary="$root/gems/fact-mine/target/$candidate/fact-mine-rust"
+    [ -x "$binary" ] && exec "$binary" nil-kill-collect --root "${NIL_KILL_ROOT:-$root}" "$@"
+  done
+  echo "nil-kill: fact-mine-rust is not built; run 'cargo build --release' in gems/fact-mine" >&2
+  exit 1
+fi
 
-NilKill::CLI.new(ARGV).run
+# The Ruby side needs its gems, and nothing guarantees this was invoked from
+# inside a bundle -- `nil-kill collect --fast` reaches here from a shell.
+export BUNDLE_GEMFILE="${BUNDLE_GEMFILE:-$root/Gemfile}"
+exec bundle exec ruby "$here/nil-kill.rb" "$@"

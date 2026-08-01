@@ -55,7 +55,8 @@
   "methods": [
     {
       "dispatch_name": "initialize",
-      "id": "fn:ec941d71faca5951",
+      "generated_declaration": false,
+      "id": "fn:d81de45ef5aeaa40",
       "key": [
         "RubyShapes",
         "initialize",
@@ -68,12 +69,13 @@
       "name": "initialize",
       "normalized_source": "def initialize [1, \"two\", :three, true, nil, CustomClass] end",
       "owner": "RubyShapes",
-      "owner_id": "owner:b26fe4ac5692839d",
+      "owner_id": "owner:24675cda39b19392",
       "params": [],
       "path": "examples/profile/ruby_shapes.rb",
       "raw_source": "def initialize\n    [1, \"two\", :three, true, nil, CustomClass]\n  end",
       "signature": "",
       "source": {},
+      "source_export_eligible": true,
       "span": [
         13,
         2,
@@ -88,7 +90,7 @@
   "owners": [
     {
       "confidence": "high",
-      "id": "owner:b26fe4ac5692839d",
+      "id": "owner:24675cda39b19392",
       "kind": "class",
       "language": "ruby",
       "line": 3,

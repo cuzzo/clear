@@ -17,6 +17,11 @@ use crate::ast::{Node, Span};
 use crate::type_inference::languages::nominal::{self, NominalTypeSyntax};
 use crate::type_inference::TypeExpr;
 
+const RUST_PRIMITIVE_OPERATORS: &[&str] = &[
+    "==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "&&",
+    "||", "!",
+];
+
 fn scip_rust_parts(symbol: &str) -> Option<(&str, &str)> {
     let rest = symbol.strip_prefix("rust-analyzer cargo ")?;
     let mut fields = rest.splitn(3, ' ');
@@ -31,6 +36,25 @@ fn rust_stdlib_crate(krate: &str) -> bool {
 
 fn rust_semantic_constructor(descriptor: &str, message: &str) -> bool {
     !message.is_empty() && descriptor.ends_with(&format!("#{message}#"))
+}
+
+fn rust_semantic_parametric_cost(descriptor: &str) -> Option<&'static str> {
+    match configured_semantic_symbol_parametric_cost("rust", descriptor).as_deref() {
+        Some("callback_once") => Some("callback_once"),
+        Some("callback_linear") => Some("callback_linear"),
+        Some("reflective_once") => Some("reflective_once"),
+        Some(_) => None,
+        None => None,
+    }
+    // rust-analyzer emits the selected derived/manual Clone impl as an
+    // exact crate-local symbol. The target is proven, but cloning the
+    // fields may be non-constant, so retain its cost as one parametric
+    // implementation invocation rather than pretending it is O(1).
+    .or_else(|| {
+        descriptor
+            .ends_with("[Clone]clone().")
+            .then_some("reflective_once")
+    })
 }
 
 fn rust_descriptor_owner(descriptor: &str) -> Option<String> {
@@ -111,7 +135,7 @@ pub(crate) fn external_symbol_call_complexity(
             assumption: None,
         });
     }
-    if configured_semantic_symbol_parametric_cost("rust", descriptor).is_some() {
+    if rust_semantic_parametric_cost(descriptor).is_some() {
         return None;
     }
     let exact = configured_semantic_symbol_call_complexity("rust", descriptor);
@@ -181,7 +205,7 @@ pub(crate) fn external_symbol_metadata(symbol: &str) -> super::ExternalSymbolMet
                 }
             },
         ),
-        parametric_cost: configured_semantic_symbol_parametric_cost("rust", descriptor),
+        parametric_cost: rust_semantic_parametric_cost(descriptor).map(str::to_string),
     }
 }
 
@@ -200,6 +224,32 @@ const RUST_NOMINAL_TYPE_SYNTAX: NominalTypeSyntax = NominalTypeSyntax {
 
 pub(crate) fn parse_declared_type(source: &str) -> TypeExpr {
     nominal::parse(source, &RUST_NOMINAL_TYPE_SYNTAX)
+}
+
+fn rust_scalar_primitive(name: &str) -> bool {
+    let bare = name
+        .trim()
+        .trim_start_matches("&mut ")
+        .trim_start_matches('&')
+        .trim();
+    matches!(
+        bare,
+        "i8" | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "f32"
+            | "f64"
+            | "bool"
+            | "char"
+    )
 }
 
 const RUST_CONTEXT_PAIRS: &[(&str, &[&str])] = &[("SystemTime", &["now"]), ("Instant", &["now"])];
@@ -279,6 +329,54 @@ const RUST_CFG_PROFILE: ControlFlowProfile = ControlFlowProfile {
 pub(crate) struct RustNormalizedBehavior;
 
 impl NormalizedLanguageBehavior for RustNormalizedBehavior {
+    fn function_has_executable_body(&self, node: &Node) -> bool {
+        node.text.trim_end().ends_with('}')
+    }
+
+    fn uses_source_declaration_header(&self) -> bool {
+        true
+    }
+
+    fn profile_type_system(&self) -> &'static str {
+        "rust-types"
+    }
+
+    fn state_writes_require_declared_owner(&self) -> bool {
+        true
+    }
+
+    fn complexity_uses_invariant_flow_types(&self) -> bool {
+        true
+    }
+
+    fn intrinsic_call_complexity(
+        &self,
+        receiver: Option<&str>,
+        message: &str,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        // Enum-variant constructors (`Some`/`None`/`Ok`/`Err`) wrap a value in
+        // O(1); `transmute` is a reinterpret cast. These have no analyzable body
+        // in source-only mode, so without this they read as unresolved calls.
+        if matches!(message, "Some" | "None" | "Ok" | "Err" | "transmute")
+            // Rust's `pair.0`/`triple.2` syntax is a tuple-field projection,
+            // never method dispatch. The normalized call shape retains it so
+            // DFG can follow the receiver, but its operation cost is O(1).
+            || (receiver.is_some_and(|receiver| !receiver.is_empty())
+                && !message.is_empty()
+                && message.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return Some(super::normalized_behavior::NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            });
+        }
+        self.stdlib_language().and_then(|language| {
+            super::normalized_behavior::configured_intrinsic_call_complexity(
+                language, receiver, message,
+            )
+        })
+    }
+
     fn external_symbol_call_complexity(
         &self,
         symbol: &str,
@@ -297,6 +395,22 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
 
     fn stdlib_language(&self) -> Option<&'static str> {
         Some("rust")
+    }
+
+    fn scalar_operator_complexity(
+        &self,
+        message: &str,
+        operand_type: Option<&TypeExpr>,
+    ) -> Option<super::normalized_behavior::NormalizedCallComplexity> {
+        let operator = message.strip_suffix('@').unwrap_or(message);
+        if !RUST_PRIMITIVE_OPERATORS.contains(&operator) {
+            return None;
+        }
+        matches!(operand_type, Some(TypeExpr::Primitive(name)) if rust_scalar_primitive(name))
+            .then_some(super::normalized_behavior::NormalizedCallComplexity {
+                time: "O(1)",
+                space: "O(1)",
+            })
     }
 
     // CFG-SPECIFIC START: expose the Rust CFG profile.
@@ -330,6 +444,35 @@ impl NormalizedLanguageBehavior for RustNormalizedBehavior {
             }
         }
         call
+    }
+
+    fn implicit_function_exit_calls(
+        &self,
+        node: &Node,
+        function_name: &str,
+        params: &[String],
+    ) -> Vec<NormalizedCallProjection> {
+        if function_name != "drop" || !params.iter().any(|param| param == "_x") {
+            return Vec::new();
+        }
+
+        // `core::mem::drop<T>(_x: T) {}` has no explicit call expression, but
+        // Rust drops the owned parameter before returning. Keep the exit call
+        // unresolved unless a concrete destructor is proven; an empty body is
+        // therefore not misreported as complete O(1).
+        let exit = [
+            node.last_lineno,
+            node.last_column,
+            node.last_lineno,
+            node.last_column,
+        ];
+        vec![NormalizedCallProjection {
+            receiver: "_x".to_string(),
+            message: "drop".to_string(),
+            arguments: Vec::new(),
+            access_span: exit,
+            span: exit,
+        }]
     }
 
     fn property_read_call(&self, node: &Node, parts: &NormalizedCallParts) -> bool {
@@ -672,6 +815,15 @@ mod tests {
 
         assert_eq!(projected.receiver, "callback");
         assert_eq!(projected.message, "call");
+        let drop_node = node("DEFN", "pub const fn drop<T>(_x: T) {}");
+        let exit_calls =
+            behavior.implicit_function_exit_calls(&drop_node, "drop", &["_x".to_string()]);
+        assert_eq!(exit_calls.len(), 1);
+        assert_eq!(exit_calls[0].receiver, "_x");
+        assert_eq!(exit_calls[0].message, "drop");
+        assert!(behavior
+            .implicit_function_exit_calls(&drop_node, "drop", &["value".to_string()])
+            .is_empty());
         assert!(behavior.terminating_call_message("panic"));
         assert!(!behavior.terminating_call_message("recover"));
         assert_eq!(owner_after_keyword("enum Widget {}", "struct"), None);
@@ -779,6 +931,8 @@ mod tests {
     #[test]
     fn test_rust_behavior_uncovered_methods() {
         let behavior = RustNormalizedBehavior;
+        assert!(behavior.function_has_executable_body(&node("DEFN", "fn size() -> usize { 0 }")));
+        assert!(!behavior.function_has_executable_body(&node("DEFN", "fn size() -> usize;")));
         assert_eq!(behavior.format_array_type("i32"), "Vec<i32>");
         assert_eq!(
             behavior.format_hash_type("String", "i32"),
@@ -827,6 +981,19 @@ mod tests {
     }
 
     #[test]
+    fn rust_tuple_field_projections_are_constant_time_intrinsics() {
+        let behavior = RustNormalizedBehavior;
+        let projection = behavior
+            .intrinsic_call_complexity(Some("value.split_once(':')?"), "0")
+            .unwrap();
+        assert_eq!(projection.time, "O(1)");
+        assert_eq!(projection.space, "O(1)");
+        assert!(behavior
+            .intrinsic_call_complexity(Some("value"), "field")
+            .is_none());
+    }
+
+    #[test]
     fn rust_analyzer_term_symbols_prove_constant_enum_construction() {
         let some = "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core option/Option#Some#";
         let project = "rust-analyzer cargo demo 0.1.0 model/Result#Ready#";
@@ -839,6 +1006,172 @@ mod tests {
             assert_eq!(complexity.bound_quality, "upper_bound_exact_target");
         }
         assert!(external_symbol_call_complexity(project, "Other").is_none());
+    }
+
+    #[test]
+    fn reviewed_external_cost_models_resolve_through_every_registry_path() {
+        let core = "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core ";
+        let alloc = "rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc ";
+        let std = "rust-analyzer cargo std https://github.com/rust-lang/rust/library/std ";
+
+        // Owner table: the descriptor's `impl#[Path]` owner selects the Path map.
+        for (symbol, message, time) in [
+            (
+                format!("{std}path/impl#[Path]file_stem()."),
+                "file_stem",
+                "O(N)",
+            ),
+            (
+                format!("{std}ffi/os_str/impl#[OsStr]to_str()."),
+                "to_str",
+                "O(N)",
+            ),
+            (format!("{core}str/impl#[str]parse()."), "parse", "O(N)"),
+            (format!("{core}str/impl#[str]splitn()."), "splitn", "O(1)"),
+            (
+                format!("{std}collections/hash/set/impl#[`HashSet<T>`]new()."),
+                "new",
+                "O(1)",
+            ),
+            (
+                format!("{alloc}vec/impl#[`Vec<T, A>`]as_slice()."),
+                "as_slice",
+                "O(1)",
+            ),
+            (
+                format!("{alloc}collections/btree/set/impl#[`BTreeSet<T>`][`From<[T; N]>`]from()."),
+                "from",
+                "O(N log N)",
+            ),
+            (
+                format!("{alloc}collections/btree/map/impl#[`BTreeMap<K, V, A>`]get_mut()."),
+                "get_mut",
+                "O(log N)",
+            ),
+            (
+                format!("{core}slice/impl#[`[T]`]iter_mut()."),
+                "iter_mut",
+                "O(1)",
+            ),
+            (
+                format!("{alloc}collections/btree/map/impl#[`BTreeMap<K, V, A>`]values_mut()."),
+                "values_mut",
+                "O(1)",
+            ),
+            (
+                format!("{alloc}collections/btree/set/impl#[`BTreeSet<T, A>`]is_subset()."),
+                "is_subset",
+                "O(N log N)",
+            ),
+            (
+                format!(
+                    "{core}convert/num/ptr_try_from_impls/impl#[usize][`TryFrom<i32>`]try_from()."
+                ),
+                "try_from",
+                "O(1)",
+            ),
+            (format!("{core}iter/sources/once/once()."), "once", "O(1)"),
+            (
+                format!("{std}thread/builder/impl#[Builder]name()."),
+                "name",
+                "O(1)",
+            ),
+        ] {
+            let complexity = external_symbol_call_complexity(&symbol, message)
+                .unwrap_or_else(|| panic!("no cost model for {symbol}"));
+            assert_eq!(complexity.time, time, "{symbol}");
+            assert_eq!(complexity.provenance, "rust_stdlib_registry", "{symbol}");
+        }
+
+        // Exact descriptors: both map families name their entry type `Entry`, so
+        // the owner table cannot separate the tree cost from the table cost.
+        let btree_entry =
+            format!("{alloc}collections/btree/map/entry/impl#[`Entry<'a, K, V, A>`]or_default().");
+        let hash_entry = format!("{std}collections/hash/map/impl#[`Entry<'a, K, V>`]or_default().");
+        assert_eq!(
+            external_symbol_call_complexity(&btree_entry, "or_default").map(|c| c.time),
+            Some("O(log N)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(&hash_entry, "or_default").map(|c| c.time),
+            Some("O(1)")
+        );
+
+        // A dependency crate has no owner-table fallback: it is priced only by an
+        // exact reviewed descriptor.
+        let utf8_text = "rust-analyzer cargo tree-sitter 0.25.8 impl#[`Node<'tree>`]utf8_text().";
+        let node_id = "rust-analyzer cargo tree-sitter 0.25.8 impl#[`Node<'tree>`]id().";
+        assert_eq!(
+            external_symbol_call_complexity(utf8_text, "utf8_text").map(|c| c.time),
+            Some("O(N)")
+        );
+        assert_eq!(
+            external_symbol_call_complexity(node_id, "id").map(|c| c.provenance),
+            Some("rust_dependency_registry")
+        );
+
+        // Blanket trait dispatch and closure-running APIs must stay parametric:
+        // the symbol proves identity but never names the selected impl.
+        for (symbol, cost) in [
+            (
+                format!("{core}convert/impl#[T][`Into<U>`]into()."),
+                "reflective_once",
+            ),
+            (format!("{core}clone/Clone#clone()."), "reflective_once"),
+            (format!("{std}path/impl#[Path]new()."), "reflective_once"),
+            (
+                format!("{std}sync/once_lock/impl#[`OnceLock<T>`]get_or_init()."),
+                "callback_once",
+            ),
+            (
+                format!("{core}iter/traits/iterator/Iterator#fold()."),
+                "callback_linear",
+            ),
+            (
+                format!("{core}iter/traits/iterator/Iterator#partition()."),
+                "callback_linear",
+            ),
+            (
+                format!("{core}iter/adapters/map/impl#[`Map<I, F>`][Iterator]next()."),
+                "callback_once",
+            ),
+            (format!("{core}mem/drop()."), "reflective_once"),
+        ] {
+            assert_eq!(
+                external_symbol_metadata(&symbol).parametric_cost.as_deref(),
+                Some(cost),
+                "{symbol}"
+            );
+            assert!(
+                external_symbol_call_complexity(&symbol, "into").is_none(),
+                "{symbol} must not carry a closed bound"
+            );
+        }
+        let project_clone =
+            "rust-analyzer cargo fact-mine-rust 0.1.0 type_inference/impl#[TypeExpr][Clone]clone().";
+        assert_eq!(
+            external_symbol_metadata(project_clone)
+                .parametric_cost
+                .as_deref(),
+            Some("reflective_once")
+        );
+        assert!(external_symbol_call_complexity(project_clone, "clone").is_none());
+
+        // Filesystem entry points keep their excluded-latency assumption.
+        let read = format!("{std}fs/read().");
+        let complexity = external_symbol_call_complexity(&read, "read").unwrap();
+        assert_eq!(
+            complexity.bound_quality,
+            "upper_bound_external_latency_excluded"
+        );
+        assert!(complexity.assumption.is_some());
+        let create = format!("{std}fs/impl#[File]create().");
+        let complexity = external_symbol_call_complexity(&create, "create").unwrap();
+        assert_eq!(
+            complexity.bound_quality,
+            "upper_bound_external_latency_excluded"
+        );
+        assert!(complexity.assumption.is_some());
     }
 
     #[test]

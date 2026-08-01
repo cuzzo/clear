@@ -5,6 +5,7 @@ use super::{
 use crate::ast::normalize_tree_with_call_origins;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -19,7 +20,7 @@ pub(crate) fn parse_file_for_report(file: PathBuf, language: Language) -> Result
 }
 
 fn parse_file_with_options(file: PathBuf, language: Language) -> Result<Document> {
-    let profile = rust_profile_enabled();
+    let profile = parser_profile_enabled();
     let total_started = Instant::now();
     let file_label = file.to_string_lossy().to_string();
     let parsed_started = Instant::now();
@@ -53,19 +54,23 @@ fn parse_normalized_file(
         crate::ast::declaration_namespaces(parsed.tree.root_node(), &parsed.source, language);
     let preprocessor_callables =
         crate::ast::preprocessor_callable_names(parsed.tree.root_node(), &parsed.source, language);
-    if language == Language::Go && !namespace.is_empty() {
-        let directory = parsed
-            .file
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .to_string_lossy();
-        namespace = format!("{directory}::{namespace}");
-    }
-    if language == Language::Python {
-        namespace = python_module_namespace(&parsed.file);
-        for (_, target) in &mut explicit_imports {
-            *target = canonical_python_import(&parsed.file, &namespace, target);
-        }
+    let preprocessor_definitions = crate::ast::preprocessor_callable_definitions(
+        parsed.tree.root_node(),
+        &parsed.source,
+        language,
+    )
+    .into_iter()
+    .fold(
+        BTreeMap::<String, BTreeSet<String>>::new(),
+        |mut definitions, (name, definition)| {
+            definitions.entry(name).or_default().insert(definition);
+            definitions
+        },
+    );
+    let behavior = normalized_behavior::behavior(language);
+    namespace = behavior.canonical_project_namespace(&parsed.file, &namespace);
+    for (_, target) in &mut explicit_imports {
+        *target = behavior.canonical_project_import(&parsed.file, &namespace, target);
     }
     profile_parse_phase(profile, file_label, "normalized_root", started.elapsed());
 
@@ -74,23 +79,16 @@ fn parse_normalized_file(
         .lines()
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    let behavior = normalized_behavior::behavior(language);
-
     let started = Instant::now();
     let mut facts =
         passes::StatelessSyntaxPass::normalized(&parsed.file, &lines, &normalized_root, behavior)
             .run();
-    if language == Language::Go {
-        // Go function literals can normalize to a synthetic wrapper with the
-        // span of `return func`, rather than the comma-ok declaration. Keep
-        // source ownership in the Go adapter, which has the unmodified parser
-        // tree and can provide an exact node span without text recovery.
-        super::go::attach_raw_presence_correlation_spans(
-            parsed.tree.root_node(),
-            &parsed.source,
-            &mut facts.presence_correlation_seeds,
-        );
-    }
+    crate::ast::reconcile_presence_correlation_spans(
+        parsed.tree.root_node(),
+        &parsed.source,
+        language,
+        &mut facts.presence_correlation_seeds,
+    );
     let normalization_call_origins = parser_call_origins
         .into_iter()
         .map(
@@ -143,15 +141,13 @@ fn parse_normalized_file(
         parse_recovery_spans,
         raw_call_sites,
         symbol_scope: SymbolScope {
-            canonical: matches!(
-                language,
-                Language::Java | Language::Go | Language::CSharp | Language::Cpp | Language::Python
-            ),
+            canonical: behavior.canonical_symbol_scope(),
             unqualified_types_use_current_namespace:
                 crate::ast::unqualified_types_use_current_namespace(language),
             namespace,
             explicit_imports: explicit_imports.into_iter().collect(),
             preprocessor_callables: preprocessor_callables.into_iter().collect(),
+            preprocessor_definitions,
             declaration_namespaces: declaration_namespaces.into_iter().collect(),
         },
         function_defs: facts.function_defs,
@@ -159,7 +155,9 @@ fn parse_normalized_file(
         call_sites: facts.call_sites,
         normalization_call_origins,
         call_raw_origin_projections,
+        call_selector_projections: facts.call_selector_projections,
         call_receiver_projections: facts.call_receiver_projections,
+        call_execution_projections: facts.call_execution_projections,
         state_declarations: facts.state_declarations,
         state_reads: facts.state_reads,
         state_writes: facts.state_writes,
@@ -185,6 +183,7 @@ fn parse_normalized_file(
         def_use: metadata.control_flow.def_use,
         liveness: metadata.control_flow.liveness,
         flow_types: metadata.control_flow.flow_types,
+        callback_bindings: metadata.control_flow.callback_bindings,
         protocol_method_effects: metadata.protocol_method_effects,
         protocol_call_paths: metadata.protocol_call_paths,
         clone_candidates: metadata.clone_candidates,
@@ -200,6 +199,7 @@ fn parse_normalized_file(
         type_alias_lines: metadata.syntax.type_alias_lines,
         method_param_types: metadata.syntax.method_param_types,
         method_local_types: metadata.syntax.method_local_types,
+        method_template_types: metadata.syntax.method_template_types,
         state_param_origins: Vec::new(),
         hazard_sites: facts.hazard_sites,
         imports: Vec::new(),
@@ -249,55 +249,7 @@ fn parse_recovery_spans(root: tree_sitter::Node<'_>) -> Vec<[usize; 4]> {
     spans
 }
 
-fn python_module_namespace(file: &std::path::Path) -> String {
-    let mut package = Vec::new();
-    let mut directory = file.parent();
-    while let Some(current) = directory {
-        if !current.join("__init__.py").is_file() {
-            break;
-        }
-        let Some(name) = current.file_name().and_then(|name| name.to_str()) else {
-            break;
-        };
-        package.push(name.to_string());
-        directory = current.parent();
-    }
-    package.reverse();
-    let stem = file
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or_default();
-    if stem != "__init__" && !stem.is_empty() {
-        package.push(stem.to_string());
-    }
-    package.join(".")
-}
-
-fn canonical_python_import(file: &std::path::Path, namespace: &str, target: &str) -> String {
-    let dots = target
-        .chars()
-        .take_while(|character| *character == '.')
-        .count();
-    if dots == 0 {
-        return target.to_string();
-    }
-    let mut package = namespace.split('.').map(str::to_string).collect::<Vec<_>>();
-    if file.file_stem().and_then(|stem| stem.to_str()) != Some("__init__") {
-        package.pop();
-    }
-    for _ in 1..dots {
-        package.pop();
-    }
-    package.extend(
-        target[dots..]
-            .split('.')
-            .filter(|part| !part.is_empty())
-            .map(str::to_string),
-    );
-    package.join(".")
-}
-
-fn rust_profile_enabled() -> bool {
+fn parser_profile_enabled() -> bool {
     std::env::var_os("DECOMPLEX_RUST_PROFILE").is_some()
 }
 

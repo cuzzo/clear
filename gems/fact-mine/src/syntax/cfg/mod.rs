@@ -19,8 +19,8 @@ pub(crate) mod worklist;
 pub(crate) use cursor::MethodCursor;
 pub(crate) use facts::ControlFlowProfile;
 pub use facts::{
-    ControlFlowEdge, ControlFlowFacts, ControlFlowMetric, ControlFlowNode, DefUseFact,
-    DominatorFact, FlowTypeFact, LivenessFact, NodeEffect, Place, ReachabilityFact,
+    CallbackBindingFact, ControlFlowEdge, ControlFlowFacts, ControlFlowMetric, ControlFlowNode,
+    DefUseFact, DominatorFact, FlowTypeFact, LivenessFact, NodeEffect, Place, ReachabilityFact,
     ReachingDefinitionFact,
 };
 

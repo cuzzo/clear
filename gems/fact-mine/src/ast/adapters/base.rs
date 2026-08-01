@@ -11,6 +11,7 @@ use super::super::{
     LEADING_LOOP_WRAPPER_KINDS, LEADING_OWNER_WRAPPER_KINDS, LOOP_NODE_KINDS, OWNER_NODE_KINDS,
     OWNER_STATEMENT_NESTED_KINDS, QUESTION_COLON_TERNARY_KINDS,
 };
+use crate::syntax::nullable::PresenceCorrelationSeed;
 use tree_sitter::Node as TreeSitterNode;
 
 pub(crate) const COMMON_ASSIGNMENT_OPERATORS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%="];
@@ -30,6 +31,16 @@ pub(crate) struct ConditionalBranchParts<'tree> {
 
 use super::super::TreeSitterNormalizer;
 pub(crate) trait AstNormalizationAdapter: Sync {
+    /// Reconcile normalized presence correlations with exact raw parser spans
+    /// when the native grammar exposes stronger source ownership.
+    fn reconcile_presence_correlation_spans(
+        &self,
+        _root: TreeSitterNode<'_>,
+        _source: &str,
+        _seeds: &mut Vec<PresenceCorrelationSeed>,
+    ) {
+    }
+
     /// Language-native namespace and explicit-import facts used to form
     /// canonical symbol identities. The empty default deliberately means
     /// "not proven", rather than treating a filename or short owner as a
@@ -60,6 +71,25 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn preprocessor_callable_names(&self, _root: TreeSitterNode<'_>, _source: &str) -> Vec<String> {
         Vec::new()
+    }
+
+    fn preprocessor_callable_definitions(
+        &self,
+        _root: TreeSitterNode<'_>,
+        _source: &str,
+    ) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
+    fn variable_declarator_node(&self, node: TreeSitterNode<'_>) -> bool {
+        node.kind() == "variable_declarator"
+    }
+
+    fn variable_declarator_alternative<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
     }
 
     /// Pre-parse source transformation, fed to tree-sitter's `parse()` call
@@ -104,7 +134,7 @@ pub(crate) trait AstNormalizationAdapter: Sync {
                     | "assignment_statement"
                     | "annotated_assignment"
             ),
-            "variable_declarator" => kind == "variable_declarator",
+            "variable_declarator" => self.variable_declarator_node(node),
             "super" => kind == "super",
             "return_or_break" => matches!(
                 kind,
@@ -274,6 +304,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         node
     }
 
+    /// Start/end nodes for a callable whose declaration and executable body
+    /// are split by grammar recovery. Unlike `function_declaration_node`,
+    /// this preserves the exact union span without swallowing neighboring
+    /// declarations from a broad recovery wrapper.
+    fn function_declaration_span_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, TreeSitterNode<'tree>)> {
+        None
+    }
+
     /// Tree-sitter error recovery can occasionally label a malformed region
     /// as a function definition. Adapters with syntax that makes a reliable
     /// declaration check possible may reject that recovery node here.
@@ -313,6 +355,18 @@ pub(crate) trait AstNormalizationAdapter: Sync {
     /// retain it in the condition sequence so its calls and local writes are
     /// not silently lost.
     fn if_initializer<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
+    /// Some languages allow a statement before a switch/case value (for
+    /// example Go's `switch value := next(); value.Kind()`). Preserve it as
+    /// executable work instead of treating only the trailing case value as
+    /// the condition.
+    fn case_initializer<'tree>(
         &self,
         _node: TreeSitterNode<'tree>,
         _source: &str,
@@ -386,6 +440,10 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         None
     }
 
+    fn case_arm_guard<'tree>(&self, _node: TreeSitterNode<'tree>) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
     fn case_else_node<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -439,6 +497,41 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         &self,
         _node: TreeSitterNode<'tree>,
         _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
+    /// Executable nodes that precede the grammar's ordinary function body.
+    /// This is used for source constructs such as C# constructor delegation,
+    /// which tree-sitter stores beside (rather than inside) the body block.
+    fn function_body_prefix_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        Vec::new()
+    }
+
+    /// Split a path-qualified call callee (`Cell::new`, `Foo::bar`) into its
+    /// receiver node and method name, so the normalized call carries the real
+    /// method as its message instead of a generic `call` placeholder. Returns
+    /// None for languages/nodes that are not scope-path callees.
+    fn scoped_call_parts<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<(TreeSitterNode<'tree>, String)> {
+        None
+    }
+
+    /// Unwrap a callee that carries explicit type arguments (`parse::<i64>`,
+    /// `collect::<Vec<_>>`) to the callee itself. The type arguments are a
+    /// parametric annotation, never a message: leaving the wrapper in place
+    /// makes the normalizer read `<i64>` as the method name, which loses the
+    /// real call and leaves a callee no indexer can resolve.
+    fn type_argument_callee<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
         None
     }
@@ -1097,6 +1190,12 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         false
     }
 
+    /// Calls in compile-time-only syntax can look like ordinary call
+    /// expressions to tree-sitter without contributing runtime work.
+    fn nonruntime_call_node(&self, _node: TreeSitterNode<'_>, _source: &str) -> bool {
+        false
+    }
+
     fn call_argument_nodes<'tree>(
         &self,
         _node: TreeSitterNode<'tree>,
@@ -1116,6 +1215,17 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         _source: &str,
     ) -> Option<TreeSitterNode<'tree>> {
         None
+    }
+
+    /// Source declarations nested inside a call expression but not part of
+    /// its runtime argument list. The generic normalizer keeps these beside
+    /// the normalized call so declaration extraction remains lossless.
+    fn supplementary_call_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        Vec::new()
     }
 
     fn intrinsic_call_name(
@@ -1352,6 +1462,28 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         Vec::new()
     }
 
+    /// Identifies a source-declared constructor that a grammar represents as
+    /// part of the class header instead of as an ordinary function node.
+    /// The normalizer emits it as a first-class project function so compiler
+    /// indexes can join constructor calls to their definition.
+    fn class_constructor_node<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
+    /// Executable regions charged to a header-declared constructor, such as
+    /// delegation, property initializers, and explicit initializer blocks.
+    fn class_constructor_body_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Vec<TreeSitterNode<'tree>> {
+        Vec::new()
+    }
+
     fn loop_node_type(&self, kind: &str) -> Option<&'static str> {
         match kind {
             "while" | "while_statement" | "while_modifier" => Some("WHILE"),
@@ -1367,6 +1499,16 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         &self,
         _node: TreeSitterNode<'tree>,
         _source: &str,
+    ) -> Option<TreeSitterNode<'tree>> {
+        None
+    }
+
+    /// Supplies the binding/pattern for normalized `FOR` nodes. The canonical
+    /// shape is `[binding, iterable, body]`, which CFG and DFG consumers use
+    /// to connect each element to the collection it came from.
+    fn loop_binding_node<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
     ) -> Option<TreeSitterNode<'tree>> {
         None
     }
@@ -1478,6 +1620,17 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         ) && named_child_count == 1
     }
 
+    /// Language-owned expression wrappers whose only named child carries all
+    /// runtime behavior (for example Rust borrow/dereference expressions).
+    fn transparent_expression(
+        &self,
+        _node: TreeSitterNode<'_>,
+        _source: &str,
+        _named_child_count: usize,
+    ) -> bool {
+        false
+    }
+
     fn interpolated_string(
         &self,
         node: TreeSitterNode<'_>,
@@ -1500,6 +1653,16 @@ pub(crate) trait AstNormalizationAdapter: Sync {
         } else {
             None
         }
+    }
+
+    /// Supplies executable statements when a grammar keeps lambda bodies
+    /// directly under the lambda node instead of inside a body wrapper.
+    fn lambda_body_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
     }
 
     fn interpolation_node(&self, node: TreeSitterNode<'_>) -> bool {
@@ -1630,6 +1793,14 @@ pub(crate) trait AstNormalizationAdapter: Sync {
 
     fn normalize_block_parameters(&self) -> bool {
         false
+    }
+
+    fn block_parameter_nodes<'tree>(
+        &self,
+        _node: TreeSitterNode<'tree>,
+        _source: &str,
+    ) -> Option<Vec<TreeSitterNode<'tree>>> {
+        None
     }
 
     fn function_parameter_nodes<'tree>(

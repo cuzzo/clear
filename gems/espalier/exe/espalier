@@ -5,6 +5,12 @@ require "optparse"
 require_relative "../lib/espalier"
 require_relative "../lib/espalier/type_profile"
 
+if ARGV.first == "stdlib-map"
+  ARGV.shift
+  require_relative "../lib/espalier/stdlib_map"
+  exit Espalier::StdlibMap.run_cli(ARGV)
+end
+
 options = {
   format: :markdown,
   output: nil,
@@ -15,6 +21,8 @@ options = {
   exclude: [],
   fact_mine: nil,
   scip_indexes: [],
+  semantic_environments: [],
+  complexity_summaries: [],
   vcs: nil
 }
 
@@ -64,6 +72,14 @@ OptionParser.new do |opts|
 
   opts.on("--scip-index FILE", "Import a .scip or SCIP JSON index (repeatable)") do |f|
     options[:scip_indexes] << f
+  end
+
+  opts.on("--semantic-environment FILE", "Attach exact runtime/build compatibility claims (repeatable)") do |f|
+    options[:semantic_environments] << f
+  end
+
+  opts.on("--complexity-summary FILE", "Apply an exact-SCIP-symbol complexity summary (repeatable)") do |f|
+    options[:complexity_summaries] << f
   end
 end.parse!
 
@@ -149,11 +165,30 @@ evidence = Espalier::StaticEvidence.build(
   root: Dir.pwd,
   vcs: options[:vcs],
   scip_indexes: options[:scip_indexes],
+  semantic_environments: options[:semantic_environments],
+  complexity_summaries: options[:complexity_summaries],
   include_annotations: options[:format] != :architecture
 )
 
 if options[:format] == :architecture
-  output_contents = JSON.pretty_generate(Espalier::ArchitectureArtifact.build(evidence, root: Dir.pwd))
+  # Big-O complexity is computed by the aggregator (which needs the parsed
+  # modules), not the lean static-evidence pipeline the architecture artifact
+  # otherwise uses. Run it here and attach per-function Big-O to the nodes so
+  # Lineage can surface time/space complexity per function.
+  big_o_modules = Espalier::StaticEvidence.project_modules(evidence)
+  nil_kill_evidence.apply!(big_o_modules)
+  big_o_index = Espalier::ArchitectureArtifact.big_o_index(
+    Espalier::Aggregator.new(
+      decomplex_data: decomplex_data,
+      nil_kill_data: nil_kill_data,
+      risk_data: risk_data,
+      nil_kill_loops: nil_kill_evidence.loop_counts,
+      nil_kill_evidence: nil_kill_evidence
+    ).aggregate(big_o_modules)
+  )
+  output_contents = JSON.pretty_generate(
+    Espalier::ArchitectureArtifact.build(evidence, root: Dir.pwd, big_o: big_o_index)
+  )
   if options[:output]
     File.write(options[:output], output_contents)
   else

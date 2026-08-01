@@ -46,6 +46,19 @@
     "branch_decisions": [],
     "calls": [
       {
+        "arguments": [
+          "item.name"
+        ],
+        "block": false,
+        "conditional": true,
+        "control": "iterates",
+        "function": "collect",
+        "line": 7,
+        "message": "<<",
+        "receiver": "names",
+        "safe_navigation": false
+      },
+      {
         "arguments": [],
         "block": false,
         "conditional": true,

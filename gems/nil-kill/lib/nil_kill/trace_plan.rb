@@ -1,6 +1,9 @@
 # typed: false
 # frozen_string_literal: true
 
+require "open3"
+require "tempfile"
+
 module NilKill
   class TracePlan
     def self.write(path = TRACE_PLAN_PATH)
@@ -12,169 +15,58 @@ module NilKill
       @tlets = {}
       @struct_fields = {}
       @state_write_site_owners = {}
+      @runtime_call_sites = {}
+      @runtime_result_call_sites = {}
+      @runtime_collection_receiver_sites = {}
+      @runtime_native_activation_sites = {}
     end
 
+    # FactMine already decided what the source says; turning that into an
+    # instrumentation plan is the same arithmetic, so it happens there.
     def write(path)
       files = NilKill.target_files
-      unless files.empty?
-        static = StaticEvidence.build_trace_plan(files, root: ROOT)
-        static.fetch("methods", []).each { |method| add_static_method(method) }
-        facts = Hash(static["facts"])
-        tlet_types = Array(facts["tlet_sites"]).to_h do |site|
-          add_tlet(site)
-          [[File.expand_path(site["path"], ROOT), site["line"].to_i], site["type"]]
-        end
-        Array(facts["struct_declarations"]).each { |decl| add_struct_decl(decl) }
-        static.fetch("fields", []).each { |field| add_static_field(field, tlet_types) }
-        Array(facts["state_type_records"]).each { |field| add_static_state_type(field) }
-        # Flow-derived state records are intentionally conservative and may
-        # report T.untyped for assignments to a field whose declaration is
-        # already strong. The declaration is the enforceable Sorbet contract,
-        # so apply it last and let it suppress redundant runtime sampling.
-        Array(facts["type_definitions"]).each { |definition| add_static_type_definition(definition) }
-      end
       FileUtils.mkdir_p(File.dirname(path))
-      File.write(path, JSON.pretty_generate({
-        "version" => 1,
-        "generated_at" => Time.now.utc.iso8601,
-        "target_dirs" => NilKill.target_dirs.map { |dir| File.expand_path(dir, ROOT) }.sort,
-        "target_exclude_dirs" => NilKill.target_exclude_dirs.map { |dir| File.expand_path(dir, ROOT) }.sort,
-        "methods" => @methods,
-        "tlets" => @tlets,
-        "struct_fields" => @struct_fields,
-        "state_write_sites" => state_write_sites,
-      }))
+      static = files.empty? ? { "methods" => [], "fields" => [], "facts" => {} } :
+        StaticEvidence.build_trace_plan(files, root: ROOT)
+      evidence = files.empty? ? nil : StaticEvidence.build_runtime_evidence_plan(files, root: ROOT)
+
+      facts = Tempfile.new(["nil-kill-static-facts", ".json"])
+      facts.write(JSON.generate(static))
+      facts.close
+      written = nil
+      args = [Espalier::StaticEvidence::FACT_MINE_RUST_BINARY, "nil-kill-trace-plan",
+              "--static-facts", facts.path, "--output", path.to_s, "--root", ROOT,
+              "--generated-at", Time.now.utc.iso8601]
+      NilKill.target_dirs.each { |dir| args.concat(["--target-dir", File.expand_path(dir, ROOT)]) }
+      NilKill.target_exclude_dirs.each do |dir|
+        args.concat(["--exclude-dir", File.expand_path(dir, ROOT)])
+      end
+      if evidence
+        written = Tempfile.new(["nil-kill-runtime-plan", ".json"])
+        written.write(JSON.generate(evidence))
+        written.close
+        args.concat(["--runtime-plan", written.path])
+      end
+      _out, err, status = Open3.capture3(*args)
+      raise "fact-mine nil-kill-trace-plan failed: #{err}" unless status.success?
+
+      facts.unlink
+      written&.unlink
+      write_collector_plan(File.join(File.dirname(path), COLLECTOR_PLAN_NAME), evidence)
     end
 
     private
 
-    def add_method(method)
-      abs = File.expand_path(method["path"], ROOT)
-      key = [method["class"], method["method"], method["kind"], abs, method["line"]].join("\0")
-      param_types = NilKill.extract_param_entries(method["sig"]).to_h
-      params = {}
-      method["params"].each do |param|
-        name = param["name"].to_s
-        type = param_types[name] || param["type"]
-        params[name] = !NilKill.strong_trace_type?(type)
-      end
-      return_type = NilKill.extract_return_type(method["sig"])
-      sample_return = !void_signature?(method["sig"]) && !NilKill.strong_trace_type?(return_type)
-      sample_method = params.values.any? || sample_return
-      @methods[key] = {
-        "frame" => sample_method,
-        "params" => params,
-        "return" => sample_return,
-        "sample" => sample_method,
-      }
-    end
-
-    def add_static_method(method)
-      signature = method["signature"].to_s
-      param_types = NilKill.extract_param_entries(signature).to_h
-      untraceable = Array(method["untraceable_params"]).map(&:to_s).to_set
-      params = Array(method["params"]).reject { |name| untraceable.include?(name.to_s) }.to_h do |name|
-        type = param_types[name.to_s]
-        [name.to_s, !NilKill.strong_trace_type?(type)]
-      end
-      return_type = NilKill.extract_return_type(signature)
-      sample_return = !void_signature?(signature) && !NilKill.strong_trace_type?(return_type)
-      sample_method = params.values.any? || sample_return
-      name = method_name(method)
-      key = [
-        method["owner"].to_s,
-        name,
-        method_kind(method),
-        File.expand_path(method["path"], ROOT),
-        method["line"],
-      ].join("\0")
-      @methods[key] = {
-        "frame" => sample_method,
-        "params" => params,
-        "return" => sample_return,
-        "sample" => sample_method,
-      }
-    end
-
-    def add_tlet(site)
-      return unless site["tlet"]
-      type = site["type"]
-      return if NilKill.strong_trace_type?(type)
-      @tlets[[File.expand_path(site["path"], ROOT), site["line"]].join("\0")] = true
-    end
-
-    def add_struct_decl(decl)
-      field_types = Hash(decl["field_types"])
-      decl.fetch("fields", []).each do |field|
-        type = field_types[field.to_s]
-        @struct_fields[[decl["class"], field.to_s].join("\0")] =
-          type.to_s.empty? || !NilKill.strong_trace_type?(type)
-      end
-    end
-
-    def add_struct_static(field)
-      klass = field["class"].to_s
-      name = field["field"].to_s
-      type = field["type"] || field["candidate_type"]
-      key = [klass, name].join("\0")
-      @struct_fields[key] = !NilKill.strong_trace_type?(type)
-    end
-
-    def add_static_state_type(field)
-      klass = field["owner"].to_s
-      name = field["field"].to_s.sub(/\A@/, "")
-      type = field["declared_type"].to_s
-      return if klass.empty? || name.empty? || type.empty?
-
-      @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
-    end
-
-    def add_static_type_definition(definition)
-      return unless definition["kind"].to_s == "state_field"
-
-      klass = definition["owner"].to_s
-      name = definition["name"].to_s.sub(/\A@/, "")
-      type = definition["declared_type"].to_s
-      return if klass.empty? || name.empty? || type.empty?
-
-      @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
-    end
-
-    def add_static_field(field, tlet_types)
-      klass = field["owner"].to_s
-      name = (field["name"] || field["field"]).to_s.sub(/\A@/, "")
-      path = File.expand_path(field["path"], ROOT)
-      unless klass.empty? || name.empty?
-        site_key = [path, field["line"].to_i, name].join("\0")
-        @state_write_site_owners[site_key] = [klass, name].join("\0")
-      end
-      type = field["declared_type"]
-      type = tlet_types[[path, field["line"].to_i]] if type.to_s.empty?
-      return if klass.empty? || name.empty? || type.to_s.empty?
-
-      @struct_fields[[klass, name].join("\0")] = !NilKill.strong_trace_type?(type)
-    end
-
-    # Exact source sites let the rewriter omit the recorder call entirely for
-    # a state slot whose final enforceable contract is strong. Unknown sites
-    # are deliberately absent and therefore remain sampled.
-    def state_write_sites
-      @state_write_site_owners.to_h do |site_key, owner_key|
-        [site_key, @struct_fields.fetch(owner_key, true)]
-      end
-    end
-
-    def method_name(method)
-      method["name"].to_s.sub(/\Aself\./, "")
-    end
-
-    def method_kind(method)
-      raw = method["kind"].to_s
-      name = method["name"].to_s
-      return "class" if name.start_with?("self.") || raw == "class" || raw == "class_method"
-      return "function" if raw == "function" || method["owner"].to_s.empty?
-
-      "instance"
+    # The collector reads this instead of the plan above: flat records rather
+    # than a document plus the code to reshape it, because everything in it was
+    # already decided by the time the plan was built.
+    def write_collector_plan(path, _runtime_evidence_plan)
+      binary = NilKill::FactMineStaticFacts::FACT_MINE_RUST_BINARY
+      args = [binary, "nil-kill-collector-plan",
+              "--plan", TRACE_PLAN_PATH, "--output", path, "--root", ROOT]
+      NilKill.target_dirs.each { |dir| args.concat(["--target-dir", dir.to_s]) }
+      _out, err, status = Open3.capture3(*args)
+      raise "fact-mine nil-kill-collector-plan failed: #{err}" unless status.success?
     end
 
     def void_signature?(signature)

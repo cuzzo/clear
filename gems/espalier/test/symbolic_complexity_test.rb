@@ -100,6 +100,40 @@ class SymbolicComplexityTest < Minitest::Test
     assert_equal "O(log N)", Espalier::SymbolicComplexity.render(logarithmic).first
   end
 
+  def test_large_rendering_collapses_domains_to_a_conservative_parametric_bound
+    independent = 129.times.map do |index|
+      value = domain("param:f:value#{index}", "value#{index}", index + 1)
+      expression({ value["id"] => 1 }, [value])
+    end
+    callback = Espalier::SymbolicComplexity.parameterized_cost(
+      id: "callback:f:block",
+      name: "block",
+      source_kind: "callback_cost"
+    )
+
+    rendered, variables = Espalier::SymbolicComplexity.render(
+      Espalier::SymbolicComplexity.sum(independent, callback)
+    )
+
+    assert_equal "O(N*C)", rendered
+    assert_equal %w[N C], variables.map { |variable| variable[:symbol] }
+    assert_equal [129, 1], variables.map { |variable| variable[:domain_count] }
+    assert_equal %w[collapsed_upper_bound callback_cost],
+                 variables.map { |variable| variable[:source_kind] }
+  end
+
+  def test_domain_annotation_reuses_normalized_terms
+    xs = domain("param:f:xs", "xs", 1)
+    value = expression({ xs["id"] => 1 }, [xs])
+    annotated = Espalier::SymbolicComplexity.with_domains(
+      value,
+      value[:domains].transform_values { |entry| entry.merge("origin_function" => "callee") }
+    )
+
+    assert_same value[:terms], annotated[:terms]
+    assert_equal "callee", annotated[:domains].fetch(xs["id"]).fetch("origin_function")
+  end
+
 
   def test_canonical_dag_interns_equivalent_expressions
     xs = domain("param:f:xs", "xs", 1)

@@ -1,0 +1,44 @@
+diff --git a/build.gradle.kts b/build.gradle.kts
+index e9066a2..954d945 100644
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -65,7 +65,7 @@ allprojects {
+             compilerOptions {
+                 jvmTarget = JvmTarget.JVM_1_8
+             }
+             jvmToolchain {
+-                (this as JavaToolchainSpec).languageVersion.set(JavaLanguageVersion.of(8))
++                (this as JavaToolchainSpec).languageVersion.set(JavaLanguageVersion.of(21))
+             }
+         }
+diff --git a/semanticdb-kotlin/build.gradle.kts b/semanticdb-kotlin/build.gradle.kts
+index a4dfa19..cc678ac 100644
+--- a/semanticdb-kotlin/build.gradle.kts
++++ b/semanticdb-kotlin/build.gradle.kts
+@@ -34,12 +34,4 @@ afterEvaluate {
+     tasks.compileKotlin {
+         dependsOn(tasks.getByName("generateProto"))
+     }
+-
+-    tasks.withType<JavaCompile> {
+-        val sourceroot = rootDir.path
+-        val targetroot = this.project.buildDir.resolve( "semanticdb-targetroot")
+-        options.compilerArgs = options.compilerArgs + listOf(
+-            "-Xplugin:semanticdb -sourceroot:$sourceroot -targetroot:$targetroot"
+-        )
+-    }
+ }
+diff --git a/semanticdb-kotlinc/src/main/kotlin/com/sourcegraph/semanticdb_kotlinc/SymbolsCache.kt b/semanticdb-kotlinc/src/main/kotlin/com/sourcegraph/semanticdb_kotlinc/SymbolsCache.kt
+index 5f27dd3..20a2a96 100644
+--- a/semanticdb-kotlinc/src/main/kotlin/com/sourcegraph/semanticdb_kotlinc/SymbolsCache.kt
++++ b/semanticdb-kotlinc/src/main/kotlin/com/sourcegraph/semanticdb_kotlinc/SymbolsCache.kt
+@@ -183,6 +183,8 @@ class GlobalSymbolsCache(
+                 is FirClassSymbol ->
+                     (containingSymbol.fir as FirClass).declarations.map { it.symbol }
+-                is FirFileSymbol -> containingSymbol.fir.declarations.map { it.symbol }
++                is FirFileSymbol ->
++                    symbol.moduleData.session.symbolProvider.getTopLevelCallableSymbols(
++                        symbol.packageFqName(), symbol.name)
+                 null ->
+                     symbol.moduleData.session.symbolProvider.getTopLevelCallableSymbols(
+                         symbol.packageFqName(), symbol.name)

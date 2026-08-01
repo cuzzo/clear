@@ -8,7 +8,7 @@
 require 'fileutils'
 require 'open3'
 require 'optparse'
-require_relative '../../../gems/lineage/tools/mutant-converters/support'
+require_relative '../../../gems/gigasail/tools/mutant-converters/support'
 require_relative 'registry'
 
 opts = {

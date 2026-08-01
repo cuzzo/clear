@@ -907,11 +907,11 @@ func loadLineage(dbPath string, repoRoot string, only []string, top int, command
 		parts = append(parts, args...)
 		cmd = exec.Command(parts[0], parts[1:]...)
 	} else {
-		binary := filepath.Join(repoRoot, "gems", "lineage", "target", "release", "lineage")
+		binary := filepath.Join(repoRoot, "gems", "gigasail", "target", "release", "giga")
 		if _, err := os.Stat(binary); err == nil {
 			cmd = exec.Command(binary, args...)
 		} else {
-			cmd = exec.Command("cargo", "run", "--quiet", "--manifest-path", filepath.Join(repoRoot, "gems", "lineage", "Cargo.toml"), "--")
+			cmd = exec.Command("cargo", "run", "--quiet", "--manifest-path", filepath.Join(repoRoot, "gems", "gigasail", "Cargo.toml"), "--bin", "giga", "--")
 			cmd.Args = append(cmd.Args, args...)
 		}
 	}

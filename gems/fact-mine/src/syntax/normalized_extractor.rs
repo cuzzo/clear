@@ -21,7 +21,9 @@ pub(crate) struct NormalizedFacts {
     /// parser origin is joined later by the tree-sitter adapter; this pass
     /// never guesses a raw parser identity from a normalized span.
     pub(crate) call_node_projections: Vec<CallNodeProjection>,
+    pub(crate) call_selector_projections: Vec<super::CallSelectorProjection>,
     pub(crate) call_receiver_projections: Vec<super::CallReceiverProjection>,
+    pub(crate) call_execution_projections: Vec<super::CallExecutionProjection>,
     pub(crate) state_declarations: Vec<StateDeclaration>,
     pub(crate) state_reads: Vec<StateRead>,
     pub(crate) state_writes: Vec<StateWrite>,
@@ -134,6 +136,14 @@ impl<'a> Extractor<'a> {
             )
         });
         self.facts.call_node_projections.dedup();
+        self.facts
+            .call_execution_projections
+            .sort_by_key(|projection| (projection.call_span, projection.execution_span));
+        self.facts.call_execution_projections.dedup();
+        self.facts
+            .call_selector_projections
+            .sort_by_key(|projection| (projection.call_span, projection.selector_span));
+        self.facts.call_selector_projections.dedup();
         self.facts.semantic_effect_sites.sort_by_key(effect_key);
         self.facts
     }
@@ -159,6 +169,7 @@ impl<'a> Extractor<'a> {
             "AND" | "OR" => self.scan_boolean(node),
             "CALL" | "QCALL" | "FCALL" | "VCALL" => self.record_call_node(node, false),
             "ITER" => self.scan_iter(node),
+            "LAMBDA" => self.scan_lambda(node),
             "YIELD" => self.scan_yield(node),
             "XSTR" => self.scan_command_string(node),
             "SCLASS" => self.scan_singleton_class(node),
@@ -283,6 +294,7 @@ impl<'a> Extractor<'a> {
             kind: kind.to_string(),
             reopenable: self.behavior.reopenable_owner(node),
             supertypes: self.behavior.owner_supertypes(node),
+            requirements: self.behavior.abstract_type_requirements(node),
             line: owner_span[0],
             span: owner_span,
         }
@@ -304,21 +316,29 @@ impl<'a> Extractor<'a> {
             self.record_semantic_effect(node, &effect.kind, &effect.detail);
         }
         let params = function_params(node, self.behavior);
+        let implicit_exit_calls = self
+            .behavior
+            .implicit_function_exit_calls(node, &name, &params);
         let visibility = self.behavior.function_visibility(&name, node, &self.lines);
         self.facts.function_defs.push(FunctionDef {
             file: self.file.clone(),
             name: name.clone(),
             owner: owner.clone(),
-            dispatch_kind: if self.owners.is_empty() && owner == self.file_owner {
+            dispatch_kind: if self.owners.is_empty()
+                && owner == self.file_owner
+                && !self.behavior.function_defines_receiver(node)
+            {
                 // The extractor creates a stable file owner for lexical
                 // declarations. That storage identity is not an instance
                 // dispatch fact. A real declaration may legitimately have
                 // the same name as its file, so owner-stack context is the
-                // proof that distinguishes the two.
+                // proof that distinguishes the two -- unless the declaration
+                // binds an explicit receiver (a Go method on a type named
+                // after its file), which is an instance method regardless.
                 "top".to_string()
             } else {
                 self.behavior
-                    .function_dispatch_kind_from_node(&name, node, &owner)
+                    .function_dispatch_kind_from_source(&name, node, &owner, &self.lines)
             },
             line: node.first_lineno,
             span: span(node),
@@ -326,6 +346,7 @@ impl<'a> Extractor<'a> {
             visibility: Some(visibility),
             params: params.clone(),
             callback_params: self.behavior.callback_parameter_names(node),
+            source_export_eligible: self.behavior.function_has_executable_body(node),
             signature: String::new(),
         });
         if let Some(mut declaration) = self.behavior.state_declaration_from_function(node, &owner) {
@@ -355,6 +376,9 @@ impl<'a> Extractor<'a> {
         self.record_initializer_field_reads(node, &owner_name, &function_name);
         self.receiver_aliases
             .push(self.behavior.receiver_aliases_for_function(node));
+        for call in implicit_exit_calls {
+            self.append_call_site(call, node, false, false);
+        }
         let body_context = self.current_owner();
         let body_owner = self.behavior.body_owner_for_function(
             self.current_function().as_str(),
@@ -393,9 +417,66 @@ impl<'a> Extractor<'a> {
         }
     }
 
+    /// A lambda / function literal is analyzed as a first-class function so its
+    /// Big-O is computed with the same pipeline as a named function. It is owned
+    /// by the enclosing owner and given a synthetic, span-stable name; its body
+    /// is scanned as that function (its calls/loops attribute to the lambda, not
+    /// the enclosing function), which is what lets a passed callback carry its
+    /// own cost.
+    fn scan_lambda(&mut self, node: &Node) {
+        let owner = self.current_owner();
+        let lambda_span = span(node);
+        let name = crate::syntax::lambda_function_name(lambda_span[0], lambda_span[1]);
+        let params = function_params(node, self.behavior);
+        self.facts.function_defs.push(FunctionDef {
+            file: self.file.clone(),
+            name: name.clone(),
+            owner: owner.clone(),
+            dispatch_kind: "lambda".to_string(),
+            line: node.first_lineno,
+            span: lambda_span,
+            body: raw_from_normalized(node),
+            visibility: Some("private".to_string()),
+            params: params.clone(),
+            callback_params: self.behavior.callback_parameter_names(node),
+            source_export_eligible: true,
+            signature: String::new(),
+        });
+        self.functions.push(name);
+        self.function_params.push(params);
+        self.local_owned_values.push(BTreeSet::new());
+        self.receiver_aliases
+            .push(self.behavior.receiver_aliases_for_function(node));
+        if let Some(scope) = function_scope(node) {
+            if let Some(args) = scope_args(scope) {
+                self.scan(args);
+            }
+            if let Some(body) = scope_body(scope) {
+                self.scan(body);
+            }
+        } else {
+            self.scan_children(node);
+        }
+        self.receiver_aliases.pop();
+        self.local_owned_values.pop();
+        self.function_params.pop();
+        self.functions.pop();
+    }
+
     fn scan_iter(&mut self, node: &Node) {
         if let Some(call) = child_node(node, 0) {
+            // ITER is the complete executable expression for a call with an
+            // attached callback body. Preserve that range here so runtime
+            // collectors never need to parse language syntax to find it.
             self.record_call_node(call, true);
+            if let Some(call_span) = self.direct_emitted_receiver_call_span(call) {
+                self.facts
+                    .call_execution_projections
+                    .push(super::CallExecutionProjection {
+                        call_span,
+                        execution_span: span(node),
+                    });
+            }
         }
         if let Some(scope) = child_node(node, 1) {
             if let Some(body) = scope_body(scope) {
@@ -457,6 +538,15 @@ impl<'a> Extractor<'a> {
         self.decision_spans.push(span(node));
         self.with_control("conditional", |this| this.scan(condition));
         self.decision_spans.pop();
+        if let Some(mut truth) = self.behavior.constant_condition_truth(condition) {
+            if node.r#type == "UNLESS" {
+                truth = !truth;
+            }
+            if let Some(reachable) = child_node(node, if truth { 1 } else { 2 }) {
+                self.scan(reachable);
+            }
+            return;
+        }
         self.record_branch_decision(node, condition);
         self.record_if_arms(node, condition);
 
@@ -603,11 +693,15 @@ impl<'a> Extractor<'a> {
                 &receiver_scope,
             );
         }
-        if let Some(receiver) = child_node(node, 0) {
-            self.scan(receiver);
-        }
-        if let Some(args) = child_node(node, 2) {
-            self.scan(args);
+        if self.behavior.attribute_assignment_dispatches() {
+            self.record_call_node(node, false);
+        } else {
+            if let Some(receiver) = child_node(node, 0) {
+                self.scan(receiver);
+            }
+            if let Some(args) = child_node(node, 2) {
+                self.scan(args);
+            }
         }
     }
 
@@ -740,10 +834,15 @@ impl<'a> Extractor<'a> {
             self.scan_children(node);
             return;
         };
-        let receiver_call_span = parts.receiver_node.and_then(direct_receiver_call_span);
         if let Some(receiver) = parts.receiver_node {
             self.scan(receiver);
         }
+        // The normalized IR also represents non-call member projections as
+        // CALL nodes. Only link an outer receiver to a nested node that was
+        // actually emitted as an executable call while scanning the receiver.
+        let receiver_call_span = parts
+            .receiver_node
+            .and_then(|receiver| self.direct_emitted_receiver_call_span(receiver));
         if let Some(args) = parts.args_node {
             self.scan(args);
         }
@@ -808,6 +907,14 @@ impl<'a> Extractor<'a> {
         );
         if self.seen_calls.insert(key) {
             self.record_call_node_projection(node, call.span);
+            if projected.access_span != call.span {
+                self.facts
+                    .call_selector_projections
+                    .push(super::CallSelectorProjection {
+                        call_span: call.span,
+                        selector_span: projected.access_span,
+                    });
+            }
             if let Some(receiver_call_span) = receiver_call_span {
                 self.facts
                     .call_receiver_projections
@@ -849,6 +956,7 @@ impl<'a> Extractor<'a> {
         conditional: bool,
         block: bool,
     ) {
+        let selector_span = projected.access_span;
         let call = CallSite {
             receiver: self.behavior.clean_receiver(&projected.receiver),
             message: self.behavior.clean_identifier(&projected.message),
@@ -872,6 +980,14 @@ impl<'a> Extractor<'a> {
         );
         if self.seen_calls.insert(key) {
             self.record_call_node_projection(node, call.span);
+            if selector_span != call.span {
+                self.facts
+                    .call_selector_projections
+                    .push(super::CallSelectorProjection {
+                        call_span: call.span,
+                        selector_span,
+                    });
+            }
             self.record_call_receiver_projection(node, call.span);
             self.facts.call_sites.push(call);
         }
@@ -890,7 +1006,8 @@ impl<'a> Extractor<'a> {
     }
 
     fn record_call_receiver_projection(&mut self, node: &Node, outer_span: Span) {
-        let Some(receiver_call_span) = child_node(node, 0).and_then(direct_receiver_call_span)
+        let Some(receiver_call_span) = child_node(node, 0)
+            .and_then(|receiver| self.direct_emitted_receiver_call_span(receiver))
         else {
             return;
         };
@@ -900,6 +1017,36 @@ impl<'a> Extractor<'a> {
                 outer_span,
                 receiver_call_span,
             });
+    }
+
+    fn direct_emitted_receiver_call_span(&self, node: &Node) -> Option<Span> {
+        let normalized_span = span(node);
+        if matches!(node.r#type.as_str(), "CALL" | "FCALL" | "QCALL" | "VCALL") {
+            if let Some(projection) = self
+                .facts
+                .call_node_projections
+                .iter()
+                .rev()
+                .find(|projection| projection.normalized_node_span == normalized_span)
+            {
+                return Some(projection.emitted_call_span);
+            }
+        }
+        // `ITER` is a normalized wrapper around the call that owns its
+        // callback region.  It is transparent for receiver-result flow:
+        // in `source.select { ... }.map { ... }`, the outer receiver is the
+        // result of the inner `select`, not the callback body.  This is a
+        // property of the normalized IR, rather than a language-specific
+        // source rule.
+        if node.r#type == "ITER" {
+            return child_node(node, 0)
+                .and_then(|call| self.direct_emitted_receiver_call_span(call));
+        }
+        let children = child_nodes(node);
+        if children.len() != 1 {
+            return None;
+        }
+        self.direct_emitted_receiver_call_span(children[0])
     }
 
     fn record_state_write(&mut self, node: &Node) {
@@ -1747,7 +1894,7 @@ impl<'a> Extractor<'a> {
                     args_node,
                 })
             }
-            "CALL" | "QCALL" => {
+            "CALL" | "QCALL" | "ATTRASGN" => {
                 let receiver_node = child_node(node, 0);
                 let args_node = child_node(node, 2);
                 Some(CallParts {
@@ -2114,7 +2261,14 @@ fn function_name_with_behavior(
 }
 
 fn function_scope(node: &Node) -> Option<&Node> {
-    child_node(node, if node.r#type == "DEFS" { 2 } else { 1 })
+    child_node(
+        node,
+        match node.r#type.as_str() {
+            "LAMBDA" => 0,
+            "DEFS" => 2,
+            _ => 1,
+        },
+    )
 }
 
 fn scope_child(node: &Node) -> Option<&Node> {
@@ -2382,17 +2536,6 @@ fn state_receiver_field(receiver: &str) -> Option<String> {
         return simple_identifier(field).then(|| field.to_string());
     }
     None
-}
-
-fn direct_receiver_call_span(node: &Node) -> Option<Span> {
-    if matches!(node.r#type.as_str(), "CALL" | "FCALL" | "QCALL" | "VCALL") {
-        return Some(span(node));
-    }
-    let children = child_nodes(node);
-    if children.len() != 1 {
-        return None;
-    }
-    direct_receiver_call_span(children[0])
 }
 
 fn target_name_span(name: &str, node: &Node) -> Span {
@@ -2756,7 +2899,18 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
         }
     }
     let text = node.text.trim().trim_end_matches(';').trim();
-    if let Some(idx) = text.find(field_name) {
+    let field_offset = text
+        .match_indices(field_name)
+        .filter(|(index, _)| {
+            let before = text[..*index].chars().next_back();
+            let after = text[*index + field_name.len()..].chars().next();
+            before.is_none_or(|character| character != '_' && !character.is_ascii_alphanumeric())
+                && after
+                    .is_none_or(|character| character != '_' && !character.is_ascii_alphanumeric())
+        })
+        .map(|(index, _)| index)
+        .last();
+    if let Some(idx) = field_offset {
         let after_name = text[idx + field_name.len()..].trim_start();
         let after_name = after_name
             .strip_prefix(':')
@@ -2769,6 +2923,26 @@ fn extract_type_from_field_node(node: &Node, field_name: &str) -> Option<String>
             }
         }
         let before_name = text[..idx].trim_end();
+        let declarator_parts = super::normalized_behavior::split_top_level_commas(before_name);
+        if declarator_parts.len() > 1 {
+            let first_declarator = declarator_parts
+                .first()
+                .map(String::as_str)
+                .unwrap_or(before_name);
+            let declaration = first_declarator
+                .split('=')
+                .next()
+                .unwrap_or(first_declarator)
+                .trim();
+            if let Some(name_start) = declaration
+                .rfind(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            {
+                let shared_type = declaration[..=name_start].trim();
+                if is_valid_type_text(shared_type) {
+                    return Some(shared_type.to_string());
+                }
+            }
+        }
         if let Some(last_part) = before_name.split(['=', ':']).next_back() {
             let last_part = last_part.trim();
             let mut parts = last_part.split_whitespace().collect::<Vec<_>>();
@@ -2852,9 +3026,14 @@ mod tests {
         state_read_uses_access_span_impl: Option<fn(&NormalizedCallProjection) -> bool>,
         case_predicate_text_impl: Option<fn(&str) -> String>,
         suppress_call_site_impl: Option<fn(&Node, &NormalizedCallProjection) -> bool>,
+        constant_condition_truth_impl: Option<fn(&Node) -> Option<bool>>,
     }
 
     impl NormalizedLanguageBehavior for CustomBehavior {
+        fn constant_condition_truth(&self, node: &Node) -> Option<bool> {
+            self.constant_condition_truth_impl.and_then(|f| f(node))
+        }
+
         fn mutating_receiver_message(&self, message: &str) -> bool {
             self.mutating_receiver_message_impl
                 .map(|f| f(message))
@@ -2912,6 +3091,40 @@ mod tests {
             last_column: 0,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn compile_time_false_branch_does_not_emit_calls() {
+        let mut behavior = CustomBehavior::default();
+        behavior.constant_condition_truth_impl =
+            Some(|node| (node.text.trim() == "0").then_some(false));
+        let branch = mock_node(
+            "IF",
+            vec![
+                Child::Node(Box::new(mock_node("LIT", vec![], "0"))),
+                Child::Node(Box::new(mock_node(
+                    "VCALL",
+                    vec![Child::Symbol("dead".to_string())],
+                    "dead",
+                ))),
+                Child::Node(Box::new(mock_node(
+                    "VCALL",
+                    vec![Child::Symbol("live".to_string())],
+                    "live",
+                ))),
+            ],
+            "if (0) dead(); else live();",
+        );
+        let facts = extract(Path::new("test.c"), &[], &branch, &behavior);
+        assert_eq!(
+            facts
+                .call_sites
+                .iter()
+                .map(|call| call.message.as_str())
+                .collect::<Vec<_>>(),
+            ["live"]
+        );
+        assert!(!facts.call_sites[0].conditional);
     }
 
     #[test]

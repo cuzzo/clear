@@ -307,7 +307,16 @@ pub(crate) fn apply_refinements(
         // A node reachable from any unselected successor is a control-flow
         // join for this proof. Do not apply the selected-edge state at or
         // beyond it; the base state already joins both incoming paths.
-        let joins = reachable_nodes(&unselected_successors, &outgoing);
+        // Re-entering the same condition through a loop backedge starts a new
+        // evaluation of the guard. It is a boundary for this edge-local proof,
+        // not a route by which the unselected edge can retroactively reach the
+        // selected branch from the current evaluation.
+        let mut joins = reachable_nodes_until(
+            &unselected_successors,
+            &refinement.condition_node_id,
+            &outgoing,
+        );
+        joins.insert(refinement.condition_node_id.clone());
         let mut pending = selected_successors.into_iter().collect::<Vec<_>>();
         let mut visited = BTreeSet::new();
         while let Some(node_id) = pending.pop() {
@@ -346,13 +355,17 @@ pub(crate) fn apply_refinements(
     output.into_values().collect()
 }
 
-fn reachable_nodes(
+fn reachable_nodes_until(
     starts: &BTreeSet<String>,
+    boundary: &str,
     outgoing: &BTreeMap<&str, Vec<&ControlFlowEdge>>,
 ) -> BTreeSet<String> {
     let mut reachable = BTreeSet::new();
     let mut pending = starts.iter().cloned().collect::<Vec<_>>();
     while let Some(node_id) = pending.pop() {
+        if node_id == boundary {
+            continue;
+        }
         if !reachable.insert(node_id.clone()) {
             continue;
         }

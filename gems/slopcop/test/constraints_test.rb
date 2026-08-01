@@ -8,6 +8,32 @@ require "fileutils"
 require_relative "../lib/slopcop"
 
 class ConstraintsTest < Minitest::Test
+  # A served bundle is not source. giga-ui ships a content-hashed, minified
+  # diff viewer whose single 122,875-character line takes tree-sitter tens of
+  # minutes; scanning it exhausted the constraint job's 60-minute budget. The
+  # exclusion is shared by every provider, and must not swallow real code that
+  # merely sits near an assets directory.
+  def test_served_asset_directories_are_excluded_for_every_language
+    excluded = {
+      SlopCop::Constraints::JavascriptProvider =>
+        "gems/gigasail/giga-ui/src/ui/assets/diff/assets/index--_D05yx7.js",
+      SlopCop::Constraints::TypescriptProvider => "web/assets/vendor/bundle.ts",
+      SlopCop::Constraints::RubyProvider => "app/assets/config.rb",
+    }
+    excluded.each do |provider, path|
+      refute provider.source_path?(path), "#{provider} should skip served asset #{path}"
+    end
+
+    included = {
+      SlopCop::Constraints::JavascriptProvider => "gems/gigasail/giga-ui/src/ui/widget.js",
+      SlopCop::Constraints::TypescriptProvider => "web/src/model.ts",
+      SlopCop::Constraints::RubyProvider => "lib/assets_helper.rb",
+    }
+    included.each do |provider, path|
+      assert provider.source_path?(path), "#{provider} should still scan #{path}"
+    end
+  end
+
   def test_zig_provider_reports_changed_atomic_without_loom_evidence
     with_zig_file("value.store(1, .release);") do |dir, path|
       audit = audit_for(dir, { path => [1] })

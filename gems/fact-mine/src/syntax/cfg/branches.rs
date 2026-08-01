@@ -60,7 +60,7 @@ pub(crate) fn from_node(node: &Node) -> Option<Branch<'_>> {
 }
 
 pub(crate) fn find_by_span(node: &Node, target: Span) -> Option<&Node> {
-    if span(node) == target {
+    if span(node) == target && !matches!(node.r#type.as_str(), "SCOPE" | "BLOCK") {
         return Some(node);
     }
 
@@ -68,6 +68,7 @@ pub(crate) fn find_by_span(node: &Node, target: Span) -> Option<&Node> {
         .iter()
         .filter_map(ast::node)
         .find_map(|child| find_by_span(child, target))
+        .or_else(|| (span(node) == target).then_some(node))
 }
 
 fn body_nodes(body: Option<&Node>) -> Vec<&Node> {
@@ -108,6 +109,35 @@ mod tests {
         assert_eq!(branch.kind, BranchKind::Unless);
         assert_eq!(branch.kind.then_edge_kind(), "branch_false");
         assert_eq!(branch.kind.else_edge_kind(), "branch_true");
+    }
+
+    #[test]
+    fn find_by_span_prefers_the_statement_inside_an_equal_span_scope() {
+        let statement = node(
+            "ITER",
+            4,
+            4,
+            6,
+            7,
+            "rows.map { |row| row.kind }",
+            Vec::new(),
+        );
+        let scope = node(
+            "SCOPE",
+            4,
+            4,
+            6,
+            7,
+            "rows.map { |row| row.kind }",
+            vec![statement],
+        );
+
+        assert_eq!(
+            find_by_span(&scope, [4, 4, 6, 7])
+                .expect("exact statement")
+                .r#type,
+            "ITER"
+        );
     }
 
     fn branch_node(kind: &str) -> Node {

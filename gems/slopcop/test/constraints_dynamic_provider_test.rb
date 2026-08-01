@@ -104,6 +104,52 @@ class ConstraintsDynamicProviderTest < Minitest::Test
     end
   end
 
+  def test_dynamic_language_providers_share_the_fact_mine_contract
+    providers = [
+      [SlopCop::Constraints::PythonProvider, "sample.py", "python_metaprogramming"],
+      [SlopCop::Constraints::JavascriptProvider, "sample.js", "javascript_metaprogramming"],
+      [SlopCop::Constraints::TypescriptProvider, "sample.ts", "typescript_metaprogramming"],
+      [SlopCop::Constraints::LuaProvider, "sample.lua", "lua_metaprogramming"],
+      [SlopCop::Constraints::JavaProvider, "Sample.java", "java_metaprogramming"],
+      [SlopCop::Constraints::KotlinProvider, "Sample.kt", "kotlin_metaprogramming"],
+      [SlopCop::Constraints::SwiftProvider, "Sample.swift", "swift_metaprogramming"],
+      [SlopCop::Constraints::PhpProvider, "sample.php", "php_metaprogramming"]
+    ]
+
+    Dir.mktmpdir do |dir|
+      facts_path = File.join(dir, "facts.json")
+      facts = { "hazard_sites" => [] }
+      providers.each do |_provider, path, hazard_type|
+        File.write(File.join(dir, path), "dynamic call\n")
+        facts["hazard_sites"] << {
+          "path" => path,
+          "line" => 1,
+          "source" => "dynamic call",
+          "hazard_type" => hazard_type
+        }
+      end
+      File.write(facts_path, JSON.generate(facts))
+
+      old = ENV["FACT_MINE_FACTS_FILE"]
+      ENV["FACT_MINE_FACTS_FILE"] = facts_path
+      evidence = SlopCop::Constraints::Evidence.from_specs([], repo: dir)
+      providers.each do |provider, path, hazard_type|
+        assert_equal 1, provider.rules.length
+        assert provider.source_path?(path)
+        refute provider.source_path?("test/#{path}")
+
+        hazards = provider.scan_hazards(repo: dir, paths: [path])
+        assert_equal [hazard_type], hazards.map { |hazard| hazard[:hazard_type] }
+
+        findings = provider.findings(repo: dir, additions: { path => [1] }, evidence: evidence)
+        assert_equal 1, findings.length
+        assert_equal provider.rule_id_for(findings.first.required_evidence), findings.first.rule_id
+      end
+    ensure
+      old.nil? ? ENV.delete("FACT_MINE_FACTS_FILE") : ENV["FACT_MINE_FACTS_FILE"] = old
+    end
+  end
+
   private
 
   def with_file(name, contents)

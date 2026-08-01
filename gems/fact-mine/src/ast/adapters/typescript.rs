@@ -20,6 +20,53 @@ const TYPESCRIPT_TERNARY_KINDS: &[&str] = &[
 pub(crate) struct TypeScriptAstAdapter;
 
 impl AstNormalizationAdapter for TypeScriptAstAdapter {
+    /// Extract module imports so cross-file/module calls resolve. Mirrors the
+    /// Python adapter: emit `(local_name, "module\0exported_name")` for named
+    /// imports and `(local_name, "module")` for namespace imports; the module
+    /// path is left raw here and canonicalized against the importing file's
+    /// path in the tree-sitter adapter (see `canonical_ts_import`). The `\0`
+    /// keeps the module and the exported name unambiguously separable across
+    /// module paths that themselves contain dots.
+    fn symbol_scope(
+        &self,
+        root: TreeSitterNode<'_>,
+        source: &str,
+    ) -> (String, Vec<(String, String)>) {
+        let mut imports = Vec::new();
+        for child in named_children(root) {
+            if child.kind() != "import_statement" {
+                continue;
+            }
+            let text = node_text(child, source).trim();
+            let Some(module) = ts_import_module(text) else {
+                continue;
+            };
+            if let (Some(open), Some(close)) = (text.find('{'), text.rfind('}')) {
+                if open < close {
+                    for entry in text[open + 1..close].split(',') {
+                        let entry = entry.trim();
+                        if entry.is_empty() {
+                            continue;
+                        }
+                        let (exported, local) = entry
+                            .split_once(" as ")
+                            .map(|(exported, local)| (exported.trim(), local.trim()))
+                            .unwrap_or((entry, entry));
+                        if !local.is_empty() && !exported.is_empty() {
+                            imports.push((local.to_string(), format!("{module}\u{0}{exported}")));
+                        }
+                    }
+                }
+            } else if let Some(rest) = text.split("* as ").nth(1) {
+                let namespace = rest.split_whitespace().next().unwrap_or("").trim();
+                if !namespace.is_empty() {
+                    imports.push((namespace.to_string(), module.to_string()));
+                }
+            }
+        }
+        (String::new(), imports)
+    }
+
     fn named_field<'tree>(
         &self,
         node: TreeSitterNode<'tree>,
@@ -516,6 +563,17 @@ fn typescript_bound_callable_name(node: TreeSitterNode<'_>, source: &str) -> Opt
     let name = parent.child_by_field_name("name")?;
     let text = node_text(name, source).trim();
     (!text.is_empty()).then(|| text.to_string())
+}
+
+/// The module specifier of an `import ... from "<module>"` statement: the
+/// contents of the last quoted string in the statement text.
+fn ts_import_module(statement: &str) -> Option<String> {
+    let bytes = statement.as_bytes();
+    let close = statement.rfind(['"', '\''])?;
+    let quote = bytes[close];
+    let open = statement[..close].rfind(quote as char)?;
+    let module = statement[open + 1..close].trim();
+    (!module.is_empty()).then(|| module.to_string())
 }
 
 #[cfg(test)]

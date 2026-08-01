@@ -792,6 +792,65 @@ fn production_source(source: &str) -> String {
 }
 
 #[test]
+fn shared_analysis_does_not_own_concrete_language_policy() {
+    let checked = [
+        "ast.rs",
+        "ast/adapters/base.rs",
+        "incremental.rs",
+        "lsp_scip.rs",
+        "profile.rs",
+        "scip.rs",
+        "external_summary.rs",
+        "syntax/cfg/effects.rs",
+        "syntax/complexity_facts.rs",
+        "syntax/tree_sitter_adapter.rs",
+        "syntax/normalized_extractor.rs",
+        "syntax/local_flow.rs",
+        "syntax/protocols.rs",
+    ];
+    let languages = [
+        ("ruby", "Ruby"),
+        ("python", "Python"),
+        ("javascript", "JavaScript"),
+        ("typescript", "TypeScript"),
+        ("java", "Java"),
+        ("swift", "Swift"),
+        ("kotlin", "Kotlin"),
+        ("go", "Go"),
+        ("rust", "Rust"),
+        ("zig", "Zig"),
+        ("lua", "Lua"),
+        ("c", "C"),
+        ("cpp", "Cpp"),
+        ("csharp", "CSharp"),
+        ("php", "Php"),
+    ];
+    let mut offenders = Vec::new();
+    for relative in checked {
+        let path = crate_src().join(relative);
+        let source = production_source(&fs::read_to_string(&path).expect("read shared analysis"));
+        for (name, variant) in languages {
+            let mut tokens = vec![format!("\"{name}\""), format!("Language::{variant}")];
+            if name.len() > 1 {
+                tokens.push(format!("{name}_"));
+                tokens.push(format!("{name}::"));
+            }
+            for token in tokens {
+                if source.contains(&token) {
+                    offenders.push(format!("{}: {}", path.display(), token));
+                }
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "Shared analysis must call language-neutral adapter contracts; concrete language policy belongs in syntax/<language>.rs or ast/adapters/<language>.rs:\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
 fn generic_cfg_does_not_own_concrete_language_knowledge() {
     let cfg_dir = crate_src().join("syntax/cfg");
     let forbidden = [

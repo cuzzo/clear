@@ -124,6 +124,11 @@ fn protocol_call_variants(calls: Vec<(ProtocolCall, bool)>) -> Vec<Vec<ProtocolC
 }
 
 fn protocol_method_name(name: &str) -> String {
+    // A synthetic lambda name is already unqualified and its `:` separates row
+    // from column; splitting it would report `18>` as the method name.
+    if crate::syntax::is_lambda_function_name(name) {
+        return name.to_string();
+    }
     name.split(['.', ':'])
         .next_back()
         .unwrap_or(name)
