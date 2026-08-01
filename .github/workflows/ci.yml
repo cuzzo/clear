@@ -1630,23 +1630,32 @@ jobs:
           retention-days: 7
 
   architecture-sarif:
-    # Architecture findings on changed files: dependency cycles
-    # (espalier/tools/cycle_report.rb), cross-module private reach-through
-    # (espalier/tools/reach_through_report.rb), and cross-module change
-    # coupling (lineage/tools/change_coupling.rb). All three are advisory
-    # (warning/note level); they annotate PRs and feed the Lineage ledger via
-    # SARIF, they do not block merges.
+    # Cross-module change coupling (gigasail/tools/change_coupling.rb),
+    # advisory (warning/note level): it annotates PRs and feeds the Lineage
+    # ledger via SARIF, it does not block merges.
+    #
+    # cycle_report.rb and reach_through_report.rb are deliberately NOT run
+    # here. Both are WIP experiments (beb2fe8cf, "WIP anti-pattern experiment
+    # tools") and both cost a whole-corpus FactMine projection - together they
+    # were the entire runtime of this job.
+    #
+    # reach_through additionally cannot model package-scoped languages: it
+    # derives owners per file, so two files in one Go package read as a
+    # cross-module private call, which is what its 81 self-quarantined
+    # "suspect" findings are.
+    #
+    # cycle_report is the sounder of the two - its four findings here are real
+    # cycles, not artifacts - but it is off pending a measurement of whether
+    # those findings are worth acting on. If they are, it belongs inside
+    # Espalier as a library check next to privacy_analyzer.rb, not as a tool
+    # shelling out to a whole-corpus projection. The tools and their tests stay
+    # in the tree meanwhile.
     name: Architecture SARIF
     runs-on: ubuntu-latest
-    # FactMine performs whole-corpus structural analysis. Keep one bounded
-    # job-level deadline, rather than killing its Ruby parent mid-subprocess
-    # and leaving Open3 reader threads to report a misleading stream-closed
-    # error.
-    timeout-minutes: 75
+    timeout-minutes: 15
     needs:
       - changes
-      - sarif-rust-binaries
-    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') && needs.sarif-rust-binaries.result == 'success' }}
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (needs.changes.outputs.run_gems == 'true' || needs.changes.outputs.run_src == 'true') }}
     permissions:
       contents: read
       security-events: write
@@ -1658,33 +1667,13 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: sarif-rust-binaries
-          path: tmp/sarif-binaries
       - name: Generate architecture SARIFs
         run: |
-          chmod +x tmp/sarif-binaries/fact-mine-rust
           git fetch origin "+${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}"
           mkdir -p tmp
-          export FACT_MINE_RUST_BINARY=$PWD/tmp/sarif-binaries/fact-mine-rust
           base="origin/${{ github.event.pull_request.base.ref }}"
-          ruby gems/espalier/tools/cycle_report.rb . \
-            --base="$base" --sarif=tmp/arch-cycles.sarif
-          ruby gems/espalier/tools/reach_through_report.rb . \
-            --base="$base" --sarif=tmp/arch-reach-through.sarif
           ruby gems/gigasail/tools/change_coupling.rb . 8 \
             --base="$base" --sarif=tmp/arch-change-coupling.sarif
-      - name: Upload cycles SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/arch-cycles.sarif
-          category: architecture-cycles
-      - name: Upload reach-through SARIF
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: tmp/arch-reach-through.sarif
-          category: architecture-reach-through
       - name: Upload change-coupling SARIF
         uses: github/codeql-action/upload-sarif@v4
         with:
