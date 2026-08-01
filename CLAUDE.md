@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**CLEAR** is a memory-safe language compiling to Zig. Ruby compiler, arena memory (no GC), ownership semantics, separates **Types** from **Capabilities**.
+**CLEAR** is a memory-safe language compiling to Zig. Ruby compiler, affine ownership semantics, separates **Types** from **Capabilities** from **Tenses**.
 
 ## MiniVM Rules
 
@@ -110,16 +110,17 @@ A new feature is an escape scenario if a frame-allocated value could be read aft
 Reference docs: `mir-bugs.md` (known MIR violations), `alloc-bugs.md` (frame-then-promote gaps), `memory-safety.md` (full plan).
 
 ## Language Semantics
+**Sigils:** `$` pipeline/interp, `&` mutation, `|>` SMOOTH (safe pipeline w/ error prop), `_` placeholder.
 
-**Sigils:** `$` pipeline/interp, `&` explicit mutable call-site path, `|>` SMOOTH (safe pipeline w/ error prop), `_` placeholder, `TRY` explicit propagation.
+**Tense Sigils:** `!` = Error / Error handling, `?` = Option / nil handling, `~` = Stream / future handling.
 
 **Ownership / capabilities — bindings, not types.** Two sigil groups:
 - **Group 1 (sync / ownership wrappers):** `@locked`, `@writeLocked`, `@shared` (Arc), `@multiowned` (Rc), `@local`. Stored on `SymbolEntry#sync` and `#storage`. Composed via `MIR::CapWrap`.
-- **Group 2 (data shape):** `@pool`, `@list`, `@set`, `@map`, `@sharded`, `@striped`. Stored on `Type`.
+- **Group 2 (data shape):**  `@sharded`, `@striped`. Stored on `Type`.
 
-Chains: `pool: Env[N]@pool:shared:locked` = Pool<Env> wrapped in Arc<RwLock<…>>. `Type#bare_data_type` strips Group 1 for `ContainerInit`.
+Chains: `pool: [Pool(5)]@shared:locked Env` = Pool<Env> wrapped in Arc<RwLock<…>>. `Type#bare_data_type` strips Group 1 for `ContainerInit`.
 
-**Ownership transfer:** `GIVE` (caller → callee), `TAKES` (callee receives). Zero implicit copies. Rc/Arc bump refcounts (not copies). Primitives, strings, enums are Copy. Unions with heap variants (`@boxed`, `[]T` slices, collections) are non-Copy. Borrow state lives in `OwnershipGraph`; it is the single source of truth — do not inspect AST node types for borrow decisions.
+**Ownership transfer:** `GIVE` (caller → callee), `TAKES` (callee receives). Zero implicit copies. Rc/Arc bump refcounts (not copies). Primitives, strings, enums are Copy. Unions with heap variants (`@boxed`, `[]T` slices, collections) are non-Copy. Borrow state lives in `OwnershipGraph`; it is the single source of truth — do not inspect AST node types for borrow decisions. `KEEP` is used to retain / not move a `@shared` or `@multiOwned`.
 
 **`WITH` blocks** unwrap capabilities at the call site. `WITH ... AS alias { ... }` aliases are non-escaping — `RETURN alias` / `alias.field` rejected; `RETURN COPY alias` allowed (COPY breaks the borrow).
 
@@ -146,10 +147,6 @@ Same body works for `@shared:locked` (Arc<Locked<T>>) and bare T with zero runti
 - **Arena memory.** Scope-local; escapes via RVO or page handoff.
 - **Local reasoning.** `WITH RESTRICT` scopes mutable poisoning.
 - **Fortress APIs.** Public APIs strictly typed; all errors handled.
-
-## TODO
-
-- Lambda `USE` captures are borrows by default. Add `USE TAKES y` for move captures (like Rust's `move ||`).
 
 ## Contributing
 
