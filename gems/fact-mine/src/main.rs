@@ -27,11 +27,16 @@ fn main() -> Result<()> {
 fn run() -> Result<()> {
     let command = parse_args(std::env::args().skip(1).collect())?;
     match command {
-        Command::SyntaxFacts { language, files } => {
+        Command::SyntaxFacts {
+            language,
+            files,
+            fields,
+        } => {
+            let fields = fields.as_ref();
             let facts = match language {
                 Some(language) => {
                     let language = Language::parse(&language)?;
-                    syntax_oracle::project_files(&files, language)
+                    syntax_oracle::project_selected_files(&files, language, fields)
                         .with_context(|| "failed to project syntax facts")?
                 }
                 None => {
@@ -55,7 +60,7 @@ fn run() -> Result<()> {
                     let mut merged: Option<serde_json::Value> = None;
                     for (language_name, batch) in batches {
                         let language = Language::parse(language_name)?;
-                        let chunk = syntax_oracle::project_files(&batch, language)
+                        let chunk = syntax_oracle::project_selected_files(&batch, language, fields)
                             .with_context(|| "failed to project syntax facts")?;
                         match merged.as_mut() {
                             None => merged = Some(chunk),
@@ -1283,6 +1288,7 @@ enum Command {
     SyntaxFacts {
         language: Option<String>,
         files: Vec<PathBuf>,
+        fields: Option<std::collections::BTreeSet<String>>,
     },
     Profile {
         profile: String,
@@ -2009,7 +2015,17 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
         }
         "syntax-facts" => {
             let mut language = None;
+            let mut fields: Option<std::collections::BTreeSet<String>> = None;
             let mut files = Vec::new();
+            let add_fields = |value: &str, fields: &mut Option<_>| {
+                let selected: std::collections::BTreeSet<String> = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|field| !field.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                *fields = Some(selected);
+            };
             while let Some(arg) = iter.next() {
                 match arg.as_str() {
                     "--language" => {
@@ -2019,6 +2035,13 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
                     other if other.starts_with("--language=") => {
                         language = Some(other.strip_prefix("--language=").unwrap().to_string());
                     }
+                    "--fields" => {
+                        let value = iter.next().with_context(|| "--fields requires a value")?;
+                        add_fields(&value, &mut fields);
+                    }
+                    other if other.starts_with("--fields=") => {
+                        add_fields(other.strip_prefix("--fields=").unwrap(), &mut fields);
+                    }
                     other if other.starts_with("--") => bail!("unsupported option: {other}"),
                     path => files.push(PathBuf::from(path)),
                 }
@@ -2026,7 +2049,14 @@ fn parse_args(args: Vec<String>) -> Result<Command> {
             if files.is_empty() {
                 bail!("syntax-facts requires at least one file");
             }
-            Ok(Command::SyntaxFacts { language, files })
+            if fields.as_ref().is_some_and(|fields| fields.is_empty()) {
+                bail!("--fields requires at least one field name");
+            }
+            Ok(Command::SyntaxFacts {
+                language,
+                files,
+                fields,
+            })
         }
         "profile" => {
             let profile = iter

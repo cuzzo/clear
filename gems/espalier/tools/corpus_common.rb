@@ -80,12 +80,20 @@ module CorpusCommon
     merged || {}
   end
 
+  # The only document keys these reports read. A full projection of this
+  # repository is ~1.08 GB of JSON and this is 8% of it; the rest is dataflow
+  # (clone_candidates alone is a third) that gets serialized here and parsed
+  # back in Ruby only to be dropped. Ask for what we use.
+  SYNTAX_FACT_FIELDS = %w[file language imports functions calls].freeze
+
   # syntax-facts requires an explicit --language; batch files per language.
   def run_syntax_facts(repo, files)
     documents = []
     files.group_by { |f| EXT_LANGUAGE[File.extname(f)] }.each do |language, batch|
       next unless language
-      chunk = run_fact_mine("syntax-facts", repo, batch, extra_args: ["--language", language])
+      chunk = run_fact_mine("syntax-facts", repo, batch,
+                            extra_args: ["--language", language,
+                                         "--fields=#{SYNTAX_FACT_FIELDS.join(",")}"])
       documents.concat(chunk["documents"] || [])
     end
     { "documents" => documents }

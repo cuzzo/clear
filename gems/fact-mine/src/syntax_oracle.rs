@@ -9,6 +9,23 @@ pub const FORMAT: &str = "decomplex.syntax-facts.v1";
 pub const CFG_SCHEMA: &str = "fact-mine.cfg.v1";
 
 pub fn project_files(files: &[PathBuf], language: Language) -> Result<Value> {
+    project_selected_files(files, language, None)
+}
+
+/// `fields`, when given, keeps only those top-level document keys.
+///
+/// A full projection of this repository is ~1.08 GB of JSON, and a consumer
+/// like the architecture reports reads five keys of it - 8% - discarding the
+/// dataflow bulk (`clone_candidates` alone is a third). Emitting all of it
+/// costs serialization here and a matching `JSON.parse` in the caller, which
+/// together were most of that stage's runtime. Selection happens after the
+/// document is built, so the facts are identical to a full projection's;
+/// only what crosses the pipe shrinks.
+pub fn project_selected_files(
+    files: &[PathBuf],
+    language: Language,
+    fields: Option<&BTreeSet<String>>,
+) -> Result<Value> {
     let documents = syntax::parse_files(files, language)?;
     let metadata = SyntaxFactMetadata::from_documents(&documents);
     // Projection, not parsing, is the bulk of the work here: it derives the
@@ -17,7 +34,11 @@ pub fn project_files(files: &[PathBuf], language: Language) -> Result<Value> {
     // serial capped a whole-corpus run at ~1.5 cores no matter how many were
     // available. `map_ordered` keeps document order, so output stays byte-identical.
     let projected = parallel::map_ordered(&documents, |document| {
-        Ok(project_document_with_metadata(document, &metadata))
+        let mut value = project_document_with_metadata(document, &metadata);
+        if let (Some(fields), Some(object)) = (fields, value.as_object_mut()) {
+            object.retain(|key, _| fields.contains(key));
+        }
+        Ok(value)
     })?;
     Ok(json!({
         "format": FORMAT,
