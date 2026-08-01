@@ -10,10 +10,16 @@ require "set"
 module CorpusCommon
   module_function
 
+  # `assets` holds what a program serves rather than what it is: giga-ui's
+  # browser bundle is a hand-written app.js beside a content-hashed, minified
+  # diff viewer, and SimpleCov/RubyCritic ship JavaScript inside their HTML
+  # reports. A minified bundle is one 122k-character line, which tree-sitter
+  # takes tens of minutes to parse - it was the whole cost of the architecture
+  # SARIF job. The UI's own source is not under assets/ and stays in scope.
   EXCLUDE_DIRS = %w[
     test tests spec specs testing vendor node_modules examples example bench
     benchmark benchmarks dist build target third_party docs doc fixtures
-    __pycache__ scripts tools ci .git generated samples sample demo
+    __pycache__ scripts tools ci .git generated samples sample demo assets
     zig-out .zig-cache coverage tmp transpile-tests zig-mutants
   ].to_set.freeze
 
