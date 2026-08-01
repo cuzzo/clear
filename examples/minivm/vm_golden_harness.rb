@@ -18,7 +18,6 @@ $LOAD_PATH.unshift(File.join(src_root, "mir"))
 $LOAD_PATH.unshift(File.join(src_root, "backends"))
 $LOAD_PATH.unshift(File.join(src_root, "annotator-helpers"))
 
-require_relative "bc_emitter"
 require_relative "register_bc_emitter"
 require "compiler/compiler_frontend"
 require "compiler/module_importer"
@@ -66,27 +65,6 @@ module MiniVM
       end
     end
 
-    Bytecode = Struct.new(:ops, :consts, keyword_init: true) do
-      def snapshot
-        parts = ["instructions:"]
-        parts.concat(Disassembler.new(ops, consts).lines)
-        unless consts.empty?
-          parts << "consts:"
-          parts.concat(consts)
-        end
-        parts.join("\n")
-      end
-
-      def raw_snapshot
-        parts = ["ops:", ops.join(",")]
-        unless consts.empty?
-          parts << "consts:"
-          parts.concat(consts)
-        end
-        parts.join("\n")
-      end
-    end
-
     RegisterBytecode = Struct.new(:ops, :consts, keyword_init: true) do
       def snapshot
         parts = ["register instructions:"]
@@ -115,170 +93,6 @@ module MiniVM
       match ? match.first.to_f : nil
     end
     SnapshotResult = Struct.new(:test_case, :target, :path, :status, :message, keyword_init: true)
-
-    class Disassembler
-      OPCODE_NAMES = BcEmitter.constants.each_with_object({}) do |const_name, h|
-        value = BcEmitter.const_get(const_name)
-        h[value] = const_name.to_s if value.is_a?(Integer)
-      end.freeze
-
-      ARITIES = {
-        BcEmitter::LOAD_CONST => 1,
-        BcEmitter::LOAD_NAME => 1,
-        BcEmitter::STORE_NAME => 1,
-        BcEmitter::POP => 0,
-        BcEmitter::ADD => 0,
-        BcEmitter::SUB => 0,
-        BcEmitter::MUL => 0,
-        BcEmitter::DIV => 0,
-        BcEmitter::EQ => 0,
-        BcEmitter::LT => 0,
-        BcEmitter::GT => 0,
-        BcEmitter::LTE => 0,
-        BcEmitter::GTE => 0,
-        BcEmitter::NOT => 0,
-        BcEmitter::JUMP => 1,
-        BcEmitter::JUMP_IF_FALSE => 1,
-        BcEmitter::CALL => 1,
-        BcEmitter::SET_NAME => 1,
-        BcEmitter::NATIVE_CALL => 2,
-        BcEmitter::HALT => 0,
-        BcEmitter::LOAD_SLOT => 1,
-        BcEmitter::STORE_SLOT => 1,
-        BcEmitter::ADD_I64 => 0,
-        BcEmitter::SUB_I64 => 0,
-        BcEmitter::MUL_I64 => 0,
-        BcEmitter::LT_I64 => 0,
-        BcEmitter::EQ_I64 => 0,
-        BcEmitter::INT_TO_F64 => 0,
-        BcEmitter::F64_TO_INT => 0,
-        BcEmitter::MOD_I64 => 0,
-        BcEmitter::GTE_I64 => 0,
-        BcEmitter::GT_I64 => 0,
-        BcEmitter::LTE_I64 => 0,
-        BcEmitter::NEQ_I64 => 0,
-        BcEmitter::DIV_I64 => 0,
-        BcEmitter::JUMP_BACK => 1,
-        BcEmitter::CONCAT => 0,
-        BcEmitter::DEFINE_FN => 2,
-        BcEmitter::LOAD_SLOT_I64 => 1,
-        BcEmitter::STORE_SLOT_I64 => 1,
-        BcEmitter::LOAD_CONST_I64 => 1,
-        BcEmitter::JUMP_IF_FALSE_I => 1,
-        BcEmitter::LOAD_SLOT_F64 => 1,
-        BcEmitter::STORE_SLOT_F64 => 1,
-        BcEmitter::LOAD_CONST_F64 => 1,
-        BcEmitter::ADD_F64 => 0,
-        BcEmitter::SUB_F64 => 0,
-        BcEmitter::MUL_F64 => 0,
-        BcEmitter::DIV_F64 => 0,
-        BcEmitter::LT_F64 => 0,
-        BcEmitter::GT_F64 => 0,
-        BcEmitter::LTE_F64 => 0,
-        BcEmitter::GTE_F64 => 0,
-        BcEmitter::EQ_F64 => 0,
-        BcEmitter::NEQ_F64 => 0,
-        BcEmitter::I_TO_VAL => 0,
-        BcEmitter::F_TO_VAL => 0,
-        BcEmitter::BOOL_TO_VAL => 0,
-        BcEmitter::DEBUG_BREAK => 0,
-        BcEmitter::LOAD_ISLOT => 1,
-        BcEmitter::STORE_ISLOT => 1,
-        BcEmitter::LOAD_FSLOT => 1,
-        BcEmitter::STORE_FSLOT => 1,
-        BcEmitter::STRUCT_FIELD => 1,
-        BcEmitter::TYPED_FIELD_I64 => 1,
-        BcEmitter::TYPED_FIELD_F64 => 1,
-        BcEmitter::MAP_NEW => 0,
-        BcEmitter::MAP_PUT => 0,
-        BcEmitter::MAP_GET => 0,
-        BcEmitter::MAP_CONTAINS => 0,
-        BcEmitter::MAP_DELETE => 0,
-        BcEmitter::MAP_KEYS => 0,
-        BcEmitter::MAP_LENGTH => 0,
-        BcEmitter::SET_INSERT => 0,
-        BcEmitter::SET_CONTAINS => 0,
-        BcEmitter::SET_REMOVE => 0,
-        BcEmitter::SET_TOLIST => 0,
-        BcEmitter::BC_CALL => 3,
-        BcEmitter::BC_RET => 0,
-        BcEmitter::BC_RET_VOID => 0,
-        BcEmitter::MARK_MOVED => 1,
-        BcEmitter::FIBER_RET => 0,
-        BcEmitter::BG_SPAWN => 2,
-        BcEmitter::AWAIT => 0,
-        BcEmitter::VAL_TO_I64 => 0,
-        BcEmitter::VAL_TO_F64 => 0,
-        BcEmitter::IS_ERR => 0,
-        BcEmitter::PUSH_ERR => 0,
-        BcEmitter::RAISE_ERR => 0,
-        BcEmitter::GET_ERR_KIND => 0,
-        BcEmitter::WRAP_ADD_I64 => 0,
-        BcEmitter::WRAP_SUB_I64 => 0,
-        BcEmitter::WRAP_MUL_I64 => 0,
-        BcEmitter::LIST_REMOVE_AT => 0,
-        BcEmitter::LIST_POP_LAST => 0,
-        BcEmitter::MAP_VALUES => 0,
-        BcEmitter::WEAK_NEW => 0,
-        BcEmitter::WEAK_RESOLVE => 0,
-        BcEmitter::MAKE_BC_FN => 2,
-        BcEmitter::BOX_NEW => 0,
-        BcEmitter::BOX_LOAD => 0,
-        BcEmitter::BOX_STORE => 0,
-        BcEmitter::LIST_POP_FRONT => 1,
-        BcEmitter::GET_ERR_TYPE => 0,
-        BcEmitter::GET_ERR_MSG => 0,
-        BcEmitter::ERR_SET_KIND => 0,
-        BcEmitter::ERR_SET_TYPE => 0,
-        BcEmitter::ERR_SET_MSG => 0,
-        BcEmitter::SPLIT_STREAM_NEW => 0,
-        BcEmitter::SPLIT_STREAM_NEXT => 1,
-        BcEmitter::SPLIT_STREAM_CLONE => 0,
-        BcEmitter::LOCK_ACQUIRE => 2,
-        BcEmitter::LOCK_RELEASE => 1,
-        BcEmitter::SLEEP_MS => 0,
-        BcEmitter::STREAM_SPAWN => 2,
-        BcEmitter::STREAM_YIELD => 1,
-        BcEmitter::STREAM_NEXT => 1,
-        BcEmitter::STREAM_CLOSE => 1,
-      }.freeze
-
-      CONST_OPS = [
-        BcEmitter::LOAD_CONST,
-        BcEmitter::LOAD_CONST_I64,
-        BcEmitter::LOAD_CONST_F64,
-      ].freeze
-
-      def initialize(ops, consts)
-        @ops = ops
-        @consts = consts
-      end
-
-      def lines
-        out = []
-        ip = 0
-        while ip < @ops.length
-          opcode = @ops[ip]
-          name = OPCODE_NAMES.fetch(opcode, "OP_#{opcode}")
-          arity = ARITIES.fetch(opcode) do
-            raise "No bytecode disassembler arity for #{name} (opcode #{opcode}) at ip #{ip}"
-          end
-          args = @ops[(ip + 1)..(ip + arity)] || []
-          suffix = const_comment(opcode, args)
-          out << format("%04d %-18s%s%s", ip, name, args.join(" "), suffix)
-          ip += 1 + arity
-        end
-        out
-      end
-
-      private
-
-      def const_comment(opcode, args)
-        return "" unless CONST_OPS.include?(opcode)
-        const = @consts[args.first]
-        const ? " ; #{const}" : ""
-      end
-    end
 
     class RegisterDisassembler
       SPEC = MiniVM::Register::OpcodeSpec
@@ -501,75 +315,6 @@ module MiniVM
       end
     end
 
-    class StackTarget
-      attr_reader :name
-
-      def initialize
-        @name = :stack
-      end
-
-      def compile(source, source_dir: Dir.pwd)
-        source_dir = File.expand_path(source_dir)
-        importer = ModuleImporter.new(base_dir: source_dir)
-        fe_result = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
-        lowering = MIRLowering.new(input: MIRLoweringInput.new(
-          struct_schemas: fe_result.struct_schemas,
-          enum_schemas: fe_result.enum_schemas,
-          union_schemas: fe_result.union_schemas,
-          lifecycle_registry: fe_result.lifecycle_registry,
-          fn_sigs: fe_result.fn_sigs,
-          moved_guard_info: fe_result.moved_guard_info,
-          importer: importer,
-          source_dir: source_dir,
-          target: :bc
-        ))
-        program = lowering.lower_program(fe_result.ast)
-        mir_errors = MIRChecker.new.check_program!(program, strict: true)
-        raise "MIR validation errors: #{mir_errors.first}" unless mir_errors.nil? || mir_errors.empty?
-
-        emitter = BcEmitter.new(fe_result, source: source)
-        compiled = emitter.compile(program)
-        Bytecode.new(
-          ops: compiled.fetch(:ops),
-          consts: compiled.fetch(:consts).map { |c| emitter.send(:serialize_const, c) }
-        )
-      end
-
-      def run(source, source_dir: Dir.pwd, timeout_seconds: DEFAULT_RUN_TIMEOUT_SECONDS, optimized: false)
-        with_source_file(source, source_dir) do |path|
-          env = optimized ? { "BC_OPT" => "1" } : {}
-          raw, status = Open3.capture2e(env, "timeout", "--kill-after=2", timeout_seconds.to_s, "ruby", BC_RUN, path, "--run")
-          return RunResult.new(status: :timeout, output: "", raw_output: raw, bench_ms: nil) if status.exitstatus == 124
-
-          RunResult.new(
-            status: status.success? ? :pass : :error,
-            output: normalize_output(raw),
-            raw_output: raw,
-            bench_ms: MiniVM::Golden.bench_ms(raw)
-          )
-        end
-      end
-
-      private
-
-      def with_source_file(source, source_dir)
-        Tempfile.create(["minivm-golden-", ".clear"], source_dir) do |file|
-          file.write(source)
-          file.flush
-          yield file.path
-        end
-      end
-
-      def normalize_output(raw)
-        clean = raw.to_s.gsub(/\e\[[0-9;]*m/, "")
-        lines = clean.lines.reject do |line|
-          line.match?(/\A\[(Warning|Note|Info)\]/) ||
-            line.include?("Building bc_runner")
-        end
-        lines.join.sub(COMPLETION_MARKER, "").strip
-      end
-    end
-
     class RegisterTarget
       attr_reader :name
 
@@ -645,23 +390,19 @@ module MiniVM
       end
     end
 
-    def self.stack
-      @stack ||= StackTarget.new
-    end
-
     def self.register
       @register ||= RegisterTarget.new
     end
 
     def self.targets
-      { stack: stack, register: register }
+      { register: register }
     end
 
     def self.normalize_snapshot(text)
       text.to_s.lines.map(&:rstrip).join("\n").strip
     end
 
-    def self.update_snapshots(root: File.join(ROOT, "examples", "minivm", "vm-tests"), targets: [:stack], check: false)
+    def self.update_snapshots(root: File.join(ROOT, "examples", "minivm", "vm-tests"), targets: [:register], check: false)
       target_names = Array(targets).map(&:to_sym)
       unknown = target_names - self.targets.keys
       raise ArgumentError, "unknown VM golden target(s): #{unknown.join(", ")}" unless unknown.empty?

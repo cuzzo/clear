@@ -3,12 +3,12 @@
 # re-lowering the EXISTING corpus with target: :bc. Zero new programs.
 #
 # Feasibility: the `@target == :bc` branches in mir_lowering fire during
-# MIRLowering#lower_program (Ruby), which runs BEFORE the bytecode VM.
-# The MiniVM (_bc_runner) is incomplete, but that is irrelevant here --
-# we never execute, never even require BcEmitter to succeed. A program
-# that hits `raise Unimplemented` inside a :bc arm still EXECUTED that
-# arm (coverage is recorded up to the raise). So every per-file failure
-# is rescued and counted as "lowering attempted".
+# MIRLowering#lower_program (Ruby), which runs BEFORE any bytecode runs.
+# The register emitter is then driven over the same program so the
+# emitter's own arms are covered too; we never EXECUTE the bytecode. A
+# program that hits `raise Unimplemented` inside a :bc arm still EXECUTED
+# that arm (coverage is recorded up to the raise). So every per-file
+# failure is rescued and counted as "lowering attempted".
 #
 # Usage:
 #   COVERAGE=1 ruby tools/bc_lower_coverage.rb
@@ -124,6 +124,7 @@ require_relative '../compiler/spec/coverage_bootstrap'
 CoverageBootstrap.start('bc-lower')
 
 require_relative '../compiler/ruby/backends/transpiler'
+require_relative '../examples/minivm/register_bc_emitter'
 
 def line_count(path)
   count = 0
@@ -178,12 +179,19 @@ files.each_with_index do |path, index|
       source_dir:       dir,
       target:           :bc
     ))
-    lo.lower_program(fe.ast)
+    program = lo.lower_program(fe.ast)
     lowered += 1
+    begin
+      RegisterBcEmitter.new(fe, source: File.read(path), importer: imp).compile(program)
+    rescue StandardError, ScriptError
+      # Same accounting as lowering: reaching an unsupported arm still
+      # covered it. A file that lowers but does not emit stays "lowered".
+      nil
+    end
   rescue StandardError, ScriptError
     # A raise inside a :bc arm still covered that arm -- that is the
-    # point. Count and continue; do not let the incomplete VM / a
-    # bc-Unimplemented stop the batch.
+    # point. Count and continue; do not let a bc-Unimplemented stop the
+    # batch.
     raised += 1
   end
 end
