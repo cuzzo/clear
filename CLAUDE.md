@@ -6,9 +6,11 @@
 
 ## MiniVM Rules
 
-Active MiniVM: `examples/minivm/bc_emitter.rb` + `examples/minivm/_bc_runner.clear`.
+Active MiniVM: `examples/minivm/register_bc_emitter.rb` + `examples/minivm/register_debugger.clear`. The register machine is the only supported target. The stack machine is gone -- do not reintroduce a `--vm=stack` path, a `StackTarget`, or a `bc_emitter`.
 
-**NEVER parse Zig code strings in the MiniVM.** `MIR::InlineZig` and `MIR::RawZig` are Zig backend artifacts. The bc_emitter must use the AST fallback (`compile_ast_stmt` / `compile_ast_expr`); never inspect `.code`. If no AST is available, raise `Unimplemented`.
+`target: :bc` in `MIRLoweringInput` is the *bytecode* lowering mode and is what the register machine uses. It is not a stack-machine flag; `bc_target?` in MIR lowering stays.
+
+**NEVER parse Zig code strings in the MiniVM.** `MIR::InlineZig` and `MIR::RawZig` are Zig backend artifacts. The register emitter must use the AST fallback (`compile_ast_stmt` / `compile_ast_expr`); never inspect `.code`. If no AST is available, raise `Unimplemented`.
 
 ## Build & Test
 
