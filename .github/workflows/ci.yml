@@ -182,7 +182,11 @@ jobs:
         # The ingestion round-trip test below skips silently (not fails)
         # when this binary is absent, so without this step CI could report
         # green while that contract was never actually exercised.
-        run: cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
+        #
+        # --bin giga, not --workspace: the test resolves
+        # gems/gigasail/target/release/giga and nothing here wants giga-ui,
+        # whose axum/tower-lsp/askama stack is 47 crates giga never links.
+        run: cargo build --release --manifest-path gems/gigasail/Cargo.toml --bin giga
       - name: Verify runner adapters, dynamic planning, and canonical checkpoints
         run: bundle exec ruby -I gems/test-miser/test gems/test-miser/test/test_miser_test.rb
       - name: Verify PR step summary tallies
@@ -1656,7 +1660,7 @@ jobs:
           cargo build --release --manifest-path gems/decomplex/Cargo.toml
           cargo build --release --manifest-path gems/sql-cov/Cargo.toml
           cargo build --release --manifest-path gems/nil-kill/Cargo.toml
-          cargo build --release --manifest-path gems/gigasail/Cargo.toml --workspace
+          cargo build --release --manifest-path gems/gigasail/Cargo.toml --bin giga
           mkdir -p tmp/sarif-binaries
           install -m 755 gems/fact-mine/target/release/fact-mine-rust tmp/sarif-binaries/fact-mine-rust
           install -m 755 gems/decomplex/target/release/decomplex-rust tmp/sarif-binaries/decomplex-rust
