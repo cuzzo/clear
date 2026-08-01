@@ -1,3 +1,4 @@
+use crate::parallel;
 use crate::syntax::{self, Document, Language};
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -10,13 +11,18 @@ pub const CFG_SCHEMA: &str = "fact-mine.cfg.v1";
 pub fn project_files(files: &[PathBuf], language: Language) -> Result<Value> {
     let documents = syntax::parse_files(files, language)?;
     let metadata = SyntaxFactMetadata::from_documents(&documents);
+    // Projection, not parsing, is the bulk of the work here: it derives the
+    // per-function dataflow (liveness, dominators, reaching definitions,
+    // def-use, path conditions). Parsing was already parallel, so leaving this
+    // serial capped a whole-corpus run at ~1.5 cores no matter how many were
+    // available. `map_ordered` keeps document order, so output stays byte-identical.
+    let projected = parallel::map_ordered(&documents, |document| {
+        Ok(project_document_with_metadata(document, &metadata))
+    })?;
     Ok(json!({
         "format": FORMAT,
         "cfg_schema": CFG_SCHEMA,
-        "documents": documents
-            .iter()
-            .map(|document| project_document_with_metadata(document, &metadata))
-            .collect::<Vec<_>>(),
+        "documents": projected,
     }))
 }
 
