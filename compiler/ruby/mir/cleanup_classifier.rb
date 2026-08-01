@@ -944,6 +944,12 @@ module CleanupClassifier
       if ti.string? && !mutable_owning_slot?(ti, node, schema_lookup)
         return nil if facts.rodata_provenance
       end
+      # The same rodata fact one level out: a non-escaping list whose items are
+      # all literals lowers to a comptime `[N][]const u8{ "a", "b" }` of static
+      # slices and allocates nothing. Cleaning it hands .rodata addresses to
+      # the allocator -- an invalid free the moment that allocator writes to
+      # what it frees, which the arena hides and the testing allocator does not.
+      return nil if literal_only_list?(node)
     end
 
     # Binding lifecycle may intentionally differ from the surface type. A
@@ -1198,6 +1204,15 @@ module CleanupClassifier
     sym = node.respond_to?(:symbol) ? T.unsafe(node).symbol : nil
     container_alloc = container_alloc_from(sym, node)
     entry(:uniform, alloc: container_alloc, has_moved_guard: false)
+  end
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  private_class_method def self.literal_only_list?(node)
+    val = node.respond_to?(:value) ? T.unsafe(node).value : nil
+    return false unless val.is_a?(AST::ListLit)
+    items = val.items
+    return false if items.nil? || items.empty?
+    items.all? { |item| item.is_a?(AST::Literal) }
   end
 
   # Map binding storage to cleanup allocator. Heap-wrapper storage modes
