@@ -728,9 +728,18 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
+            examples/minivm/vm
+            examples/minivm/vm_opt
           key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+      # Build the register VM binary once, serially, before the suite fans
+      # out. bc_run.rb guards the build with an exclusive flock, so without
+      # this the first of 32 prspec workers builds it while the other 31
+      # block on the lock -- and a cache miss pays that cost inside the
+      # parallel run rather than ahead of it.
+      - name: Warm the register VM binary
+        run: bundle exec ruby examples/minivm/bc_run.rb examples/minivm/arith.clear --run
       - run: bundle exec prspec compiler/spec/ --tag integration
       # Collate workers + clear-CLI subprocess resultsets into a single
       # Cobertura XML, same as the unit job. Both unit and integration
@@ -796,6 +805,8 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
+            examples/minivm/vm
+            examples/minivm/vm_opt
           key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
@@ -898,9 +909,11 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'examples/**/*.clear', 'benchmarks/**/*.clear', 'Gemfile.lock') }}
+            examples/minivm/vm
+            examples/minivm/vm_opt
+          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
-            clear-examples-coverage-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+            clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: bundle exec ruby tools/corpus_transpile_coverage.rb --strict --shard ${{ matrix.shard }}/5
       - run: bundle exec ruby tools/corpus_runtime_coverage.rb --strict --shard ${{ matrix.shard }}/5
       - run: bundle exec ruby compiler/spec/collate_coverage.rb
@@ -978,9 +991,11 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'tools/fuzz/**', 'Gemfile.lock') }}
+            examples/minivm/vm
+            examples/minivm/vm_opt
+          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
-            clear-fuzz-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+            clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       # Ruby coverage records compile/lower/emit. ZIG_COVERAGE=1 also bundles
       # positive fuzz cells and runs that Zig test root under kcov; negative
       # cells stay compile-only so SimpleCov does not fan out through every
@@ -1110,6 +1125,8 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
+            examples/minivm/vm
+            examples/minivm/vm_opt
           key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
             clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
@@ -1228,9 +1245,11 @@ jobs:
           path: |
             zig/.clear-cache
             zig/.clear-transpile-cache
-          key: clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'benchmarks/**/*.clear', 'Gemfile.lock') }}
+            examples/minivm/vm
+            examples/minivm/vm_opt
+          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('compiler/ruby/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
           restore-keys: |
-            clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+            clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: ruby benchmarks/runner.rb --leak --all --shard=${{ matrix.shard }}/5 --cores=2 --bencher-json tmp/benchmark-leak-${{ matrix.shard }}.json
       - name: Validate Bencher JSON
         run: |
