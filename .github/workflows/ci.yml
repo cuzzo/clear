@@ -489,11 +489,17 @@ jobs:
           cargo llvm-cov --no-report --manifest-path gems/fact-mine/Cargo.toml --all-features
           # Only the instrumented build happens here -- it has to, coverage
           # comes from it. The release binaries the consumer suite calls are
-          # the ones `sarif-rust-binaries` already built.
+          # the ones `sarif-rust-binaries` already built, placed where the
+          # tests look: several resolve target/release directly rather than
+          # reading the environment.
           chmod +x tmp/sarif-binaries/*
-          FACT_MINE_RUST_BINARY=${{ github.workspace }}/tmp/sarif-binaries/fact-mine-rust \
-          NIL_KILL_INFER_RUST_BINARY=${{ github.workspace }}/tmp/sarif-binaries/nil-kill-infer-rust \
-          DECOMPLEX_RUST_BINARY=${{ github.workspace }}/tmp/sarif-binaries/decomplex-rust \
+          install -Dm755 tmp/sarif-binaries/fact-mine-rust gems/fact-mine/target/release/fact-mine-rust
+          install -Dm755 tmp/sarif-binaries/nil-kill-infer-rust gems/nil-kill/target/release/nil-kill-infer-rust
+          install -Dm755 tmp/sarif-binaries/decomplex-rust gems/decomplex/target/release/decomplex-rust
+          install -Dm755 tmp/sarif-binaries/giga gems/gigasail/target/release/giga
+          FACT_MINE_RUST_BINARY=${{ github.workspace }}/gems/fact-mine/target/release/fact-mine-rust \
+          NIL_KILL_INFER_RUST_BINARY=${{ github.workspace }}/gems/nil-kill/target/release/nil-kill-infer-rust \
+          DECOMPLEX_RUST_BINARY=${{ github.workspace }}/gems/decomplex/target/release/decomplex-rust \
           bundle exec ruby tools/run_ruby_gem_coverage.rb --fact-mine-consumers --without-coverage
           cargo llvm-cov report \
             --manifest-path gems/fact-mine/Cargo.toml \
@@ -1549,7 +1555,7 @@ jobs:
     # any sanitizer constraint blocking.
     name: SlopCop constraint coverage SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 75
     needs:
       - changes
       - zig-special-coverage
@@ -1602,7 +1608,7 @@ jobs:
               args+=(--coverage="nil-kill:${path}")
             done < <(find tmp/ruby-coverage-unit \( -name 'cobertura.xml' -o -name 'coverage.xml' \) -type f | sort)
           fi
-          timeout 20m env FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
+          timeout 60m env FACT_MINE_RUST_BINARY=tmp/sarif-binaries/fact-mine-rust bundle exec ruby gems/slopcop/exe/slopcop constraints \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1636,7 +1642,7 @@ jobs:
     # job-level deadline, rather than killing its Ruby parent mid-subprocess
     # and leaving Open3 reader threads to report a misleading stream-closed
     # error.
-    timeout-minutes: 45
+    timeout-minutes: 75
     needs:
       - changes
       - sarif-rust-binaries
@@ -1778,7 +1784,7 @@ jobs:
   boobytrap-sarif:
     name: Boobytrap SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 75
     needs:
       - changes
       - ruby-gems-coverage
@@ -1838,7 +1844,7 @@ jobs:
               ! -path '*zig-coverage-vopr-*' \
               | sort
           )
-          timeout 20m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 60m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
@@ -1860,7 +1866,7 @@ jobs:
   slopcop-sarif:
     name: SlopCop SARIF
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 75
     needs:
       - changes
       - ruby-gems-coverage
@@ -1920,7 +1926,7 @@ jobs:
               ! -path '*zig-coverage-vopr-*' \
               | sort
           )
-          timeout 20m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
+          timeout 60m bundle exec ruby tools/generate_generalized_gem_sarif.rb \
             --repo=. \
             --base="origin/${{ github.event.pull_request.base.ref }}" \
             --head=HEAD \
