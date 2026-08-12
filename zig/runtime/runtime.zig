@@ -389,6 +389,17 @@ pub const Runtime = struct {
 
     // Frame Allocator Backing
 
+    /// Safety builds validate what the frame allocator is asked to free.
+    /// Opt out with `pub const CLEAR_DISABLE_ARENA_FREE_CHECK = true;` in root.
+    const arena_free_check = blk: {
+        const mode = @import("builtin").mode;
+        if (mode != .Debug and mode != .ReleaseSafe) break :blk false;
+        if (@hasDecl(@import("root"), "CLEAR_DISABLE_ARENA_FREE_CHECK")) {
+            break :blk !@import("root").CLEAR_DISABLE_ARENA_FREE_CHECK;
+        }
+        break :blk true;
+    };
+
     pub const SmartAllocatorVTable = std.mem.Allocator.VTable{
         .alloc = smartAlloc,
         .resize = smartResize,
@@ -431,9 +442,24 @@ pub const Runtime = struct {
     fn smartFree(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
         // We don't actually free individual items in a Frame/Arena model.
         // We just let them accumulate and wipe the slate clean at the end.
-        // But for correctness, we can forward the call if needed.
-        _ = ctx;
-        _ = buf;
+        //
+        // Because the free itself is a no-op, it accepts ANY pointer without
+        // complaint -- .rodata behind a string literal or a `String@symbol`, a
+        // heap value whose binding picked the wrong allocator, a borrow into a
+        // container someone else owns. Those are exactly the cleanup bugs the
+        // compiler can emit, and this path is where they go to hide: no leak,
+        // no crash, nothing for a test to observe. In safety builds, reject a
+        // pointer this arena never handed out.
+        const self = @as(*Runtime, @ptrCast(@alignCast(ctx)));
+        if (arena_free_check and buf.len > 0 and !self.overflow_arena.owns(buf.ptr)) {
+            std.debug.print(
+                "\n[CLEAR] frame free of memory this arena never allocated: ptr={x} len={d}\n" ++
+                    "        A frame cleanup was emitted for a value the frame does not own.\n",
+                .{ @intFromPtr(buf.ptr), buf.len },
+            );
+            std.debug.dumpCurrentStackTrace(.{});
+            @panic("frame allocator asked to free foreign memory");
+        }
         _ = buf_align;
         _ = ret_addr;
     }

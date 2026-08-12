@@ -18,6 +18,9 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
         const MIN_PAGE_SIZE = 4 * 1024;
         const MAX_PAGE_SIZE = 256 * 1024;
 
+        const Range = struct { base: usize, len: usize };
+        const retired_capacity = 128;
+
         const LargeObject = struct {
             slice: []u8,
             alignment: std.mem.Alignment,
@@ -40,6 +43,20 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
         // An optional pre-allocated buffer (e.g. the 4KB Frame)
         static_block: []u8 = &[_]u8{},
 
+        // Safety builds only: address ranges this arena has handed out and
+        // since reclaimed. `owns` has to answer "was this ever mine?", not
+        // "is it mine right now" -- an arena rewinds and trims blocks while
+        // no-op cleanups for values inside them are still pending, and that
+        // sequence is legitimate.
+        // Fixed and inline: an arena that is trimmed but never deinit'd (a
+        // detached fiber's) would leak a growable list, and blocks grow
+        // geometrically so the count stays small. If it ever wraps we stop
+        // answering, rather than answer wrongly.
+        retired: if (is_debug) [retired_capacity]Range else void =
+            if (is_debug) @splat(.{ .base = 0, .len = 0 }) else {},
+        retired_len: if (is_debug) usize else void = if (is_debug) 0 else {},
+        retired_overflowed: if (is_debug) bool else void = if (is_debug) false else {},
+
         pub fn init(child_allocator: std.mem.Allocator, static_block: []u8) Self {
             return .{
                 .blocks = .empty,
@@ -47,6 +64,45 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
                 .child_allocator = child_allocator,
                 .static_block = static_block,
             };
+        }
+
+        /// Did this pointer come from this arena? Used by the frame allocator's
+        /// free path in safety builds: the arena frees nothing, so without this
+        /// a cleanup aimed at .rodata, the heap, or another fiber's arena is
+        /// silently accepted and the mistake only surfaces as a crash somewhere
+        /// unrelated -- or never.
+        fn retire(self: *Self, slice: []u8) void {
+            if (!is_debug) return;
+            if (self.retired_len == retired_capacity) {
+                self.retired_overflowed = true;
+                return;
+            }
+            self.retired[self.retired_len] = .{ .base = @intFromPtr(slice.ptr), .len = slice.len };
+            self.retired_len += 1;
+        }
+
+        pub fn owns(self: *Self, ptr: [*]u8) bool {
+            const addr = @intFromPtr(ptr);
+            if (is_debug) {
+                // History is incomplete, so "not found" proves nothing.
+                if (self.retired_overflowed) return true;
+                for (self.retired[0..self.retired_len]) |r| {
+                    if (addr >= r.base and addr < r.base + r.len) return true;
+                }
+            }
+            if (self.static_block.len > 0) {
+                const base = @intFromPtr(self.static_block.ptr);
+                if (addr >= base and addr < base + self.static_block.len) return true;
+            }
+            for (self.blocks.items) |block| {
+                const base = @intFromPtr(block.ptr);
+                if (addr >= base and addr < base + block.len) return true;
+            }
+            for (self.large_objects.items) |obj| {
+                const base = @intFromPtr(obj.slice.ptr);
+                if (addr >= base and addr < base + obj.slice.len) return true;
+            }
+            return false;
         }
 
         pub fn deinit(self: *Self) void {
@@ -217,6 +273,7 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
             if (!debug_mode) {
                 while (self.large_objects.items.len > mark.large_obj_count) {
                     const popped = self.large_objects.pop().?;
+                    self.retire(popped.slice);
                     self.child_allocator.rawFree(popped.slice, popped.alignment, @returnAddress());
                 }
             }
@@ -240,6 +297,7 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
                 _ = large_align;
                 while (self.large_objects.items.len > mark.large_obj_count) {
                     const popped = self.large_objects.pop().?;
+                    self.retire(popped.slice);
                     self.child_allocator.rawFree(popped.slice, popped.alignment, @returnAddress());
                 }
             }
@@ -263,12 +321,14 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
             // Free Large Objects
             while (self.large_objects.items.len > mark.large_obj_count) {
                 const popped = self.large_objects.pop().?;
+                self.retire(popped.slice);
                 self.child_allocator.rawFree(popped.slice, popped.alignment, @returnAddress());
             }
 
             // Trim Blocks
             while (self.blocks.items.len > keep_count) {
                 const popped = self.blocks.pop().?;
+                self.retire(popped);
                 self.child_allocator.rawFree(popped, large_align, @returnAddress());
             }
         }
