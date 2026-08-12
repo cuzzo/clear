@@ -1134,8 +1134,8 @@ class MIRLowering
   def widen_symbol_to_bytes(mir, source_node)
     return mir unless source_node
 
-    ti = Type.from_node(source_node)
-    return mir unless ti&.symbol?
+    ti = Type.from_node!(source_node, context: "symbol widening")
+    return mir unless ti.symbol?
 
     MIR::FieldGet.new(mir, "bytes")
   end
@@ -4846,7 +4846,7 @@ class MIRLowering
   sig { params(node: AST::FuncCall).returns(MIR::Call) }
   def lower_macro_print(node)
     formats = node.args.map { |arg| zig_format_for_type(arg.full_type!) }.join(" ")
-    args_mir = node.args.map { |a| hoist_alloc(lower(a), a) }
+    args_mir = node.args.map { |a| hoist_alloc(widen_symbol_to_bytes(lower(a), a), a) }
     format_lit = MIR::Lit.new("\"#{formats}\\n\"")
     tuple = MIR::TupleLiteral.new(args_mir)
     MIR::Call.new("std.debug.print", [format_lit, tuple], false, false, MIR::CallableContract.no_ownership(2))

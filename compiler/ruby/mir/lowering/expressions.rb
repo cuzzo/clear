@@ -413,8 +413,9 @@ module MIRLoweringExpressions
 
     # String concat (2-part) uses std.mem.concat
     if node.string_concat
-      left = hoist_alloc(T.cast(lower(node.left), MIR::Node), node.left)
-      right = hoist_alloc(T.cast(lower(node.right), MIR::Node), node.right)
+      # Concat consumes bytes; a Symbol operand widens to the bytes behind it.
+      left = hoist_alloc(widen_symbol_to_bytes(T.cast(lower(node.left), MIR::Node), node.left), node.left)
+      right = hoist_alloc(widen_symbol_to_bytes(T.cast(lower(node.right), MIR::Node), node.right), node.right)
       alloc = alloc_for_node(node)
       return MIR::ConcatStr.new([left, right], alloc, nil)
     end
@@ -2523,7 +2524,7 @@ module MIRLoweringExpressions
   sig { params(node: AST::StringConcat).returns(MIR::ConcatStr) }
   def lower_string_concat(node)
     T.bind(self, MIRLowering) rescue nil
-    parts = node.parts.map { |p| hoist_alloc(lower(p), p) }
+    parts = node.parts.map { |p| hoist_alloc(widen_symbol_to_bytes(lower(p), p), p) }
     alloc = alloc_for_node(node)
     MIR::ConcatStr.new(parts, alloc, runtime_binding_name)
   end

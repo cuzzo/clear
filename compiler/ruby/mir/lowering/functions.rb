@@ -1177,7 +1177,18 @@ module MIRLoweringFunctions
     # callee per carrier. Never detach a handle to a plain payload here -- that
     # would destroy the retained identity the contract exists to preserve. The
     # callee's universal comptime cleanup releases whatever carrier arrived.
-    if callee_param&.takes && callee_param.carrier_contract == :monomorphic
+        # A Symbol reaching a plain-String parameter widens to the bytes behind
+    # it, the same borrow CAST and placement perform: Zig will not coerce the
+    # distinct handle type. TAKES receives an owned COPY instead -- the callee
+    # frees its parameter, and interned bytes are nobody's to free. Skipped
+    # for MONOMORPHIC params, which thread the caller's carrier unchanged.
+    if ti&.symbol? && callee_param_type.string? && !callee_param_type.symbol? &&
+       callee_param&.carrier_contract != :monomorphic
+      widened = MIR::FieldGet.new(arg, "bytes")
+      return callee_param&.takes ? MIR::DupeSlice.new(widened, :heap) : widened
+    end
+
+if callee_param&.takes && callee_param.carrier_contract == :monomorphic
       return MIR::AddressOf.new(arg) if wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)
       return arg
     end
