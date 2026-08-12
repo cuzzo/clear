@@ -5,9 +5,21 @@
 set -uo pipefail
 cd /home/yahn/cheat
 
-if [ -e compiler/.ruby-original ]; then
-  echo "compiler/.ruby-original exists -- a previous run died mid-swap." >&2
-  echo "Inspect it, then: rm -rf compiler/ruby && mv compiler/.ruby-original compiler/ruby" >&2
+# An interrupted run leaves the Sorbet-stripped mirror sitting where
+# compiler/ruby belongs. The state is recognizable -- the mirror has no sigs --
+# and healing it is exactly what the EXIT trap would have done, so do that
+# rather than block every later build.
+if [ -f compiler/ruby/ast/type.rb ] && ! grep -q '^  sig {' compiler/ruby/ast/type.rb; then
+  echo "[selfhost] restoring compiler/ruby after an interrupted run" >&2
+  if [ -e compiler/.ruby-original ]; then
+    rm -rf compiler/ruby && mv compiler/.ruby-original compiler/ruby
+  else
+    # The saved copy is gone too; compiler/ruby is fully tracked, so git has it.
+    git checkout -- compiler/ruby || exit 1
+  fi
+elif [ -e compiler/.ruby-original ]; then
+  echo "compiler/.ruby-original exists and compiler/ruby is NOT the mirror." >&2
+  echo "Inspect both, then keep the one you want as compiler/ruby." >&2
   exit 1
 fi
 

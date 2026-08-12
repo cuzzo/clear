@@ -88,7 +88,11 @@ pub const MICRO_STACK_SIZE:    usize =   4 * 1024;   //   4 KB
 pub const STANDARD_STACK_SIZE: usize =  16 * 1024;   //  16 KB  (default)
 pub const LARGE_STACK_SIZE:    usize =  64 * 1024;   //  64 KB
 pub const XL_STACK_SIZE:       usize = 256 * 1024;   // 256 KB
-pub const HUGE_STACK_SIZE:     usize =   4 * 1024 * 1024; // 4 MB service stack
+// Heap-allocated on demand, so the cost is address space and the pages a
+// fiber actually touches. The self-hosted CLEAR parser needs well past 4 MB:
+// recursive descent alone reaches ~2.5 MB before a Locatable clone, whose own
+// Debug frame is ~2 MB (a union's clone reserves one temp per variant).
+pub const HUGE_STACK_SIZE:     usize =  32 * 1024 * 1024; // 32 MB service stack
 
 // Typed array aliases — each SlabAllocator is parameterized by a fixed-size type.
 const MicroArray    = [MICRO_STACK_SIZE]u8;

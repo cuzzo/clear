@@ -140,6 +140,9 @@ zig/transpile-test.zig
 zig/zig-out
 zig/.zig-cache
 zig/.zig-cache-*
+# Per-build Zig/CLEAR caches. 854 of these had been committed by accident.
+zig/.zig-global-cache
+zig/.clear-module-cache
 zig/.clear-cache
 zig/.clear-transpile-cache
 zig/fiber-stack-check/pass/build
@@ -219,3 +222,4 @@ compiler/.ruby-rbs/
 compiler/.ruby-original/
 # Local Spinel fork used for the AOT experiment
 tmp/spinel/
+

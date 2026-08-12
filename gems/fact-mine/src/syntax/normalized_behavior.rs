@@ -3,6 +3,7 @@ use super::{
     zig, CallSite, FunctionDef, Language, StateDeclaration,
 };
 use crate::ast::{Child, Node, Span};
+use crate::syntax::cfg::aliasing::{neutral_normalizer, AliasNormalizer};
 use crate::syntax::cfg::ControlFlowProfile;
 use crate::type_inference::TypeExpr;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1714,6 +1715,10 @@ pub(crate) trait NormalizedLanguageBehavior: Sync {
     /// language adapter must make the syntax-identity decision.
     fn array_literal_node(&self, _node: &Node) -> bool {
         true
+    }
+
+    fn alias_normalizer(&self) -> &'static dyn AliasNormalizer {
+        neutral_normalizer()
     }
     fn supports_parameter_normalization(&self) -> bool {
         false

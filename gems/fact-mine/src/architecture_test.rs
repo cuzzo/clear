@@ -291,6 +291,7 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         "clone_similarity.rs",
         "complexity.rs",
         "cfg/branches.rs",
+        "cfg/aliasing.rs",
         "cfg/builder.rs",
         "cfg/callbacks.rs",
         "cfg/cases.rs",
@@ -324,6 +325,7 @@ fn syntax_directory_does_not_gain_unreviewed_helper_files() {
         "php.rs",
         "python.rs",
         "ruby.rs",
+        "ruby_alias.rs",
         "rust.rs",
         "swift.rs",
         "typescript.rs",
@@ -977,6 +979,24 @@ fn language_cfg_additions_are_explicitly_demarcated() {
         report.join("\n"),
         total_marked_lines,
         total_vocabulary_entries
+    );
+}
+
+#[test]
+fn language_alias_additions_are_isolated_and_explicitly_demarcated() {
+    let path = crate_src().join("syntax/ruby_alias.rs");
+    let source = production_source(&fs::read_to_string(&path).expect("read Ruby alias adapter"));
+    assert!(
+        source.contains("ALIAS-SPECIFIC START:") && source.contains("ALIAS-SPECIFIC END"),
+        "Ruby alias normalization must remain visibly isolated from the shared fixed-point engine"
+    );
+    assert!(
+        !production_source(
+            &fs::read_to_string(crate_src().join("syntax/cfg/aliasing.rs"))
+                .expect("read shared alias engine")
+        )
+        .contains("Ruby"),
+        "the shared alias engine must not acquire Ruby-specific semantics"
     );
 }
 

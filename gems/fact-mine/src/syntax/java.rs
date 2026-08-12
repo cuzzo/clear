@@ -1240,7 +1240,6 @@ mod tests {
             )
             .unwrap();
         assert!(!mutable_field.immutable);
-
         assert!(b
             .state_declaration_from_node(&field_node, "MyClass", true)
             .is_none());

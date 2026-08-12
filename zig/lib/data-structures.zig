@@ -186,8 +186,20 @@ pub fn bind(comptime deps: type) type {
     // doesn't ripple through function signatures.
     // -----------------------------------------------------------------------
     pub fn StringMap(comptime V: type) type {
+        return StringMapImpl(V, true);
+    }
+
+    /// String map whose values are interned symbols. The intern table owns
+    /// them for the runtime's lifetime, so the map must never free a value —
+    /// doing so misaligned-frees intern-table storage.
+    pub fn InternedValueStringMap() type {
+        return StringMapImpl([]const u8, false);
+    }
+
+    fn StringMapImpl(comptime V: type, comptime owned_values: bool) type {
         return struct {
             const Self = @This();
+            pub const interned_values = !owned_values;
             inner: std.StringHashMapUnmanaged(V) = .{},
             alloc: std.mem.Allocator = std.heap.page_allocator, // overwritten at init
 
@@ -203,7 +215,7 @@ pub fn bind(comptime deps: type) type {
                 _ = bucket_alloc;
                 const stored_value = value;
                 if (self.inner.getPtr(key)) |val_ptr| {
-                    cleanup(V, self.alloc, val_ptr);
+                    if (comptime owned_values) cleanup(V, self.alloc, val_ptr);
                     val_ptr.* = stored_value;
                     return;
                 }
@@ -225,7 +237,7 @@ pub fn bind(comptime deps: type) type {
                 if (self.inner.fetchRemove(key)) |kv| {
                     self.alloc.free(kv.key);
                     var val = kv.value;
-                    cleanup(V, self.alloc, &val);
+                    if (comptime owned_values) cleanup(V, self.alloc, &val);
                 }
             }
 
@@ -239,7 +251,7 @@ pub fn bind(comptime deps: type) type {
                 var it = self.inner.iterator();
                 while (it.next()) |entry| {
                     self.alloc.free(entry.key_ptr.*);
-                    cleanup(V, self.alloc, entry.value_ptr);
+                    if (comptime owned_values) cleanup(V, self.alloc, entry.value_ptr);
                 }
                 self.inner.deinit(self.alloc);
             }

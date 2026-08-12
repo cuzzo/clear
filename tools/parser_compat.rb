@@ -7,6 +7,7 @@ rescue LoadError
 end
 
 require 'fileutils'
+require 'open3'
 require 'json'
 require 'msgpack'
 require 'optparse'
@@ -179,6 +180,11 @@ module ParserCompat
       pairs = value.map { |key, item| [canonical_encode(key), canonical_encode(item)] }
       pairs.sort_by! { |key, item| key + item }
       "H#{pairs.length}[#{pairs.flatten.join}]"
+    when Type
+      # Type memoizes derived state into ivars on demand, so encoding it by
+      # instance_variables makes the bytes depend on which accessors happened
+      # to run. Its resolved form is the stable identity both sides agree on.
+      canonical_object('Type', { 'resolved' => value.resolved })
     when T::Enum
       canonical_object(value.class.name.split('::').last, { 'value' => value.serialize })
     else
@@ -198,6 +204,10 @@ module ParserCompat
              end
     raise "unsupported parser value: #{value.class}" if fields.empty?
 
+    # Annotator stamps are not parser output. The CLEAR encoder omits them by
+    # construction; a Ruby Struct always carries its members, so drop them here
+    # too or the two sides disagree on a field neither parser populates.
+    fields = fields.reject { |field, _| STAMP_FIELDS.include?(field) }
     canonical_object(value.class.name.split('::').last, fields)
   end
 
@@ -220,7 +230,12 @@ module ParserCompat
   end
 
   def run_clear_payload(cases, options)
-    Dir.mktmpdir('parser-compat-', options[:out_dir]) do |dir|
+    # A fresh mktmpdir per run gave the emitted Zig a new path every time, so
+    # Zig's own cache never hit and every run paid the full link (tens of
+    # minutes). One stable directory lets an unchanged harness reuse it.
+    dir = File.join(options[:out_dir], 'build')
+    FileUtils.mkdir_p(dir)
+    begin
       source = File.join(dir, 'parser_compat.clear')
       binary = File.join(dir, 'parser_compat')
       File.write(source, clear_harness_source(cases, options[:generated_root]))
@@ -234,12 +249,26 @@ module ParserCompat
         LexerHarnessSupport::CLEAR, 'build', source,
         '-o', binary,
         '--no-stack-check',
+        # Recursive descent over a union whose clone frame is megabytes: the
+        # 64 KB debug default faults in the prologue.
+        '--main-tier', 'service',
+        # Zig's self-hosted x86_64 backend miscompiles the lexer's keyword
+        # comparison after the first parse in a process, so `END` lexes as a
+        # TYPE_ID and every parse but the first fails. Building through LLVM
+        # is correct; drop this once the default backend is fixed.
+        *ENV.fetch('PARSER_COMPAT_BUILD_FLAGS', '--safe').split,
         # '--force' removed: it defeated incremental compilation on every build
         *package_flags(options[:generated_root]),
         env: env
       )
-      stdout, stderr = LexerHarnessSupport.run!(binary)
+      # A case that crashes the process (rather than raising) still produced
+      # output for every case before it. Report those instead of losing the
+      # whole run to one bad case.
+      stdout, stderr, status = Open3.capture3(binary)
       stdout = stderr if stdout.empty?
+      unless status.success?
+        warn "parser_compat: CLEAR exited #{status.exitstatus || status.termsig}; reporting the cases it completed"
+      end
 
       if options[:keep]
         FileUtils.cp(source, File.join(options[:out_dir], 'parser_compat.clear'))
@@ -251,6 +280,8 @@ module ParserCompat
         'implementation' => 'clear',
         'cases' => parse_clear_output(stdout)
       }
+    ensure
+      FileUtils.rm_rf(dir) unless options[:keep] || ENV['PARSER_COMPAT_REUSE_BUILD']
     end
   end
 
@@ -365,10 +396,11 @@ module ParserCompat
   end
 
   def package_flags(generated_root)
+    groups = package_groups(generated_root)
     generated = generated_relatives(generated_root).flat_map do |relative|
       ['--pkg', "#{package_name(relative)}=#{File.join(generated_root, relative)}"]
     end
-    grouped = package_groups(generated_root).flat_map do |name, members|
+    grouped = groups.flat_map do |name, members|
       spec = members.map { |rel| File.join(generated_root, rel) }.join(',')
       ['--pkg', "#{name}=#{spec}"]
     end
@@ -380,6 +412,19 @@ module ParserCompat
 
   # The harness must enter the parser through whatever package actually owns
   # it: its SCC group when it is cyclic, otherwise the file itself.
+  # Type lives in a different SCC group than the parser, so the harness has to
+  # require it explicitly to call type__resolved.
+  def type_require_spec(generated_root)
+    group = package_groups(generated_root).find { |_name, members| members.include?('ast/type.clear') }
+    group ? "pkg:#{group.first}" : File.join(generated_root, 'ast', 'type.clear')
+  end
+
+  # The lexer is its own package; the harness tokenizes before parsing.
+  def lexer_require_spec(generated_root)
+    group = package_groups(generated_root).find { |_name, members| members.include?('ast/lexer.clear') }
+    group ? "pkg:#{group.first}" : "pkg:#{package_name('ast/lexer.clear')}"
+  end
+
   def parser_require_spec(generated_root)
     group = package_groups(generated_root).find { |_name, members| members.include?('ast/parser.clear') }
     return "pkg:#{group.first}" if group
@@ -387,20 +432,409 @@ module ParserCompat
     File.join(generated_root, 'ast', 'parser.clear')
   end
 
+  # --- generated node encoders -------------------------------------------
+  #
+  # The old hand-written encodeCompat() walked values with Ruby-style
+  # reflection (`object.class().members()`), which CLEAR does not have, so it
+  # never compiled. Instead, emit one encoder per node type: Ruby's Struct
+  # members define WHICH fields are encoded (matching canonical_ruby_object)
+  # and the CLEAR declarations define HOW each is encoded.
+
+  STAMP_FIELDS = %w[
+    can_fail coerced_type_object collection_return container_borrow error_kind
+    error_type implicit_layout_cost kept_edge_plan kept_edge_plans
+    layout_transport matched_signature matched_stdlib_def mutates_receiver
+    needs_heap_create needs_mut_ref resource_close_plan slot_size source_range
+    stdlib_allocates storage_override tense_plan type_object var_mutated
+    var_used was_moved zig_pattern symbol generic_params
+  ].freeze
+
+  def clear_struct_fields(generated_root)
+    @clear_struct_fields ||= begin
+      table = {}
+      Dir[File.join(generated_root, 'ast', '**', '*.clear')].each do |path|
+        File.read(path).scan(/^(?:PUB )?STRUCT (\w+) \{(.*?)\n\}/m) do |name, body|
+          # A field type can hold commas (`[]Tuple<A, B>`), so match to end of
+          # line and drop the trailing separator instead of stopping at `,`.
+          table[name] = body.scan(/^\s*(\w+):\s*(.+?),?\s*$/).to_h
+        end
+      end
+      table
+    end
+  end
+
+  # Union types the translated sources declare, as {name => [[variant, payload]]}.
+  # A union encodes as its ACTIVE variant's payload, which is exactly what the
+  # Ruby side wrote before the translation gave the slot a name.
+  def clear_union_variants(generated_root)
+    @clear_union_variants ||= begin
+      table = {}
+      # ast/ and the parser are the translation under test; a same-named union
+      # elsewhere (mir/, semantic/) is a different type and would collide with
+      # the struct encoder of that name.
+      Dir[File.join(generated_root, 'ast', '**', '*.clear')].each do |path|
+        File.read(path).scan(/^(?:PUB )?UNION (\w+) \{(.+?)\}$/) do |name, body|
+          table[name] = body.split(',').filter_map do |pair|
+            variant, payload = pair.split(':', 2).map(&:strip)
+            [variant, payload] if variant && payload && !variant.empty?
+          end
+        end
+      end
+      table
+    end
+  end
+
+  # Node classes actually produced by the corpus. Anything outside this set
+  # gets a loud panic rather than a silently wrong encoding.
+  # AST nodes are a mix of Ruby Structs and T::Structs.
+  def struct_member_names(klass)
+    klass.respond_to?(:members) ? klass.members.map(&:to_s) : klass.props.keys.map(&:to_s)
+  end
+
+  def corpus_node_classes(cases)
+    seen = {}
+    @never_populated = Hash.new { |h, k| h[k] = {} }
+    walk = lambda do |value, guard|
+      return if value.nil? || guard.include?(value.object_id)
+      guard << value.object_id
+      case value
+      when Array then value.each { |item| walk.call(item, guard) }
+      when Hash then value.each { |k, v| walk.call(k, guard); walk.call(v, guard) }
+      when Lexer::Token then nil
+      when Struct
+        name = value.class.name.split('::').last
+        seen[name] = value.class
+        value.members.each do |m|
+          @never_populated[name][m.to_s] = @never_populated[name].fetch(m.to_s, true) && value[m].nil?
+          walk.call(value[m], guard)
+        end
+      when Type, T::Enum
+        # Encoded by identity, not by walking their fields.
+        nil
+      when T::Struct
+        # AST nodes are not all plain Structs -- EffectSpan is a T::Struct, and
+        # missing it here marked the class dead, so the generated encoder was a
+        # panic stub that fired the moment a case populated it.
+        name = value.class.name.split('::').last
+        seen[name] = value.class
+        value.class.props.keys.each do |m|
+          member = value.public_send(m)
+          @never_populated[name][m.to_s] = @never_populated[name].fetch(m.to_s, true) && member.nil?
+          walk.call(member, guard)
+        end
+      end
+    end
+    cases.each do |entry|
+      ast = ClearParser.new(Lexer.new(entry['source']).tokenize, entry['source']).parse
+      walk.call(ast, Set.new)
+    end
+    seen
+  end
+
+  def clear_base_type(type)
+    type.to_s.sub(/@[\w:]+(\(\d+\))?/, '').strip
+  end
+
+  # Returns [prelude_statements, expression] encoding `expr`, which has
+  # declared type `type`. Collections need a loop, so they emit a prelude.
+  def clear_value_encoder(type, expr, fields, slot = 'v0')
+    bare = clear_base_type(type)
+    # A @boxed field holds its value indirectly (the AST's recursive edges are
+    # boxed so Zig can size the types). Copy the pointee out before encoding --
+    # the wire format describes the value, not the indirection.
+    # Only when the indirection is on THIS value, not nested inside a
+    # collection element -- `{String}T@multiowned` must recurse to the element,
+    # not copy the whole map.
+    if type.to_s =~ /\A\??[A-Za-z_][\w<>, ]*@boxed\z/
+      return clear_value_encoder(bare, "COPY #{expr}", fields, slot)
+    end
+    # A retained handle needs OWN COPY: plain COPY is a memcpy and is illegal
+    # on a live @multiowned value.
+    if type.to_s =~ /\A\??[A-Za-z_][\w<>, ]*@multiowned\z/
+      return clear_value_encoder(bare, "OWN COPY #{expr}", fields, slot)
+    end
+
+    # encodeTokenValue already takes the optional -- it is how Token#value is
+    # encoded on both sides -- so do not unwrap it first.
+    return ['', "encodeTokenValue(#{expr})"] if bare == '?TokenValue'
+
+    if bare.start_with?('?')
+      # Recurse on the ORIGINAL type minus the `?`, not on `bare`: clear_base_type
+      # has already dropped the capability, and `?String@symbol` must still encode
+      # as a symbol once unwrapped.
+      pre, inner = clear_value_encoder(type.to_s.sub(/\A\?/, ''), "#{slot}_some", fields, "#{slot}i")
+      body = pre.empty? ? "" : pre + "\n"
+      return [
+        "  MUTABLE #{slot} = \"N\";\n  IF #{expr} EXISTS AS #{slot}_some THEN\n#{body}    #{slot} = #{inner};\n  END",
+        slot
+      ]
+    end
+
+    # Ruby keys HashLit#pairs by AST node; CLEAR carries it as a list of pairs
+    # (a map keyed by the recursive Locatable union closes a type cycle Zig
+    # cannot size). The WIRE format stays Ruby's Hash encoding.
+    if (tup = bare[/\A\[\]Tuple<(.+?),\s*(.+)>\z/, 0])
+      kt = bare[/\A\[\]Tuple<(.+?),\s*(.+)>\z/, 1]
+      vt = bare[/\A\[\]Tuple<(.+?),\s*(.+)>\z/, 2]
+      kpre, kexp = clear_value_encoder(kt, "#{slot}_k", fields, "#{slot}k")
+      vpre, vexp = clear_value_encoder(vt, "#{slot}_v", fields, "#{slot}v")
+      kbody = kpre.empty? ? "" : kpre + "\n"
+      vbody = vpre.empty? ? "" : vpre + "\n"
+      return [
+        "  MUTABLE #{slot}_pairs: String[] = [];\n" \
+        "  MUTABLE #{slot}_n = 0;\n" \
+        "  WHILE #{slot}_n < #{expr}.length() DO\n" \
+        "    #{slot}_k, #{slot}_v = UNWRAP (#{expr}[#{slot}_n]);\n#{kbody}#{vbody}" \
+        "    &#{slot}_pairs.append(#{kexp} $+ #{vexp});\n" \
+        "    #{slot}_n += 1;\n" \
+        "  END\n" \
+        "  #{slot}_pairs = #{slot}_pairs |> ORDER_BY _;\n" \
+        "  MUTABLE #{slot} = \"H\" $+ #{slot}_pairs.length().toString() $+ \"[\" $+ #{slot}_pairs.join(\"\") $+ \"]\";",
+        slot
+      ]
+    end
+
+    if (elem = bare[/\A\[\](.+)\z/, 1])
+      pre, inner = clear_value_encoder(elem, "#{slot}_item", fields, "#{slot}i")
+      body = pre.empty? ? "" : pre + "\n"
+      return [
+        "  MUTABLE #{slot} = \"A\" $+ #{expr}.length().toString() $+ \"[\";\n" \
+        "  MUTABLE #{slot}_n = 0;\n" \
+        "  WHILE #{slot}_n < #{expr}.length() DO\n" \
+        "    #{slot}_item = #{expr}[#{slot}_n]?;\n#{body}" \
+        "    #{slot} = #{slot} $+ #{inner};\n" \
+        "    #{slot}_n += 1;\n" \
+        "  END\n" \
+        "  #{slot} = #{slot} $+ \"]\";",
+        slot
+      ]
+    end
+
+    # A `[Set]T` value has no canonical_encode case on the Ruby side, so there
+    # is no wire format to match. Panic rather than invent one; the smoke
+    # corpus leaves these slots empty, and a mismatch should be loud.
+    if bare.start_with?('[Set]')
+      return ["  panic(\"parser compat: no wire format for #{bare}\");", '""']
+    end
+
+    if (m = bare.match(/\A\{(.+?)\}(.+)\z/))
+      kpre, kexp = clear_value_encoder(m[1], "#{slot}_k", fields, "#{slot}k")
+      vpre, vexp = clear_value_encoder(m[2], "#{slot}_v", fields, "#{slot}v")
+      kbody = kpre.empty? ? "" : kpre + "\n"
+      vbody = vpre.empty? ? "" : vpre + "\n"
+      return [
+        "  MUTABLE #{slot}_pairs: String[] = [];\n" \
+        "  #{expr}.keys() |> EACH {\n" \
+        "    #{slot}_k = _;\n" \
+        "    #{slot}_v = #{expr}[_]?;\n#{kbody}#{vbody}" \
+        "    &#{slot}_pairs.append(#{kexp} $+ #{vexp});\n" \
+        "  };\n" \
+        "  #{slot}_pairs = #{slot}_pairs |> ORDER_BY _;\n" \
+        "  MUTABLE #{slot} = \"H\" $+ #{slot}_pairs.length().toString() $+ \"[\" $+ #{slot}_pairs.join(\"\") $+ \"]\";",
+        slot
+      ]
+    end
+
+    simple =
+      if bare == 'TokenValue' then "encodeTokenValue(#{expr})"
+      elsif bare == 'Token' then "encodeToken(#{expr})"
+      elsif bare == 'Type' then "encodeType(#{expr})"
+      elsif bare == 'Locatable' then "encodeLocatable(#{expr})"
+      elsif bare == 'ContractClauseValue' then "encodeContractClauseValue(#{expr})"
+      elsif bare == 'PassStateValue' then "encodePassStateValue(#{expr})"
+      elsif @generated_root && clear_union_variants(@generated_root).key?(bare)
+        (@union_encoders_needed ||= Set.new) << bare
+        "encode#{bare}(#{expr})"
+      elsif type.to_s.include?('@symbol') then "lengthEncoded(\"Y\", CAST(#{expr} AS String))"
+      elsif bare == 'String' then "lengthEncoded(\"S\", #{expr})"
+      elsif %w[Int64 UInt64].include?(bare) then "(\"I\" $+ #{expr}.toString() $+ \";\")"
+      elsif bare == 'Float64' then "(\"F\" $+ floatValueText(#{expr}) $+ \";\")"
+      elsif bare == 'Bool' then "(IF #{expr} THEN \"B1\" ELSE \"B0\" END)"
+      elsif fields.key?(bare) then "encode#{bare}(#{expr})"
+      end
+
+    simple ? ['', simple] : nil
+  end
+
+  def struct_class_for(name)
+    [AST, Object].each do |scope|
+      next unless scope.const_defined?(name, false)
+      candidate = scope.const_get(name, false)
+      next unless candidate.is_a?(Class)
+      return candidate if candidate < Struct || candidate.respond_to?(:props)
+    end
+    nil
+  end
+
+  # An emitted encoder can reference a struct the corpus never instantiated
+  # (an always-empty Capture list, say). Close over those so every referenced
+  # type has an encoder.
+  def close_over_referenced_types!(classes, fields)
+    loop do
+      added = false
+      classes.keys.each do |name|
+        (fields[name] || {}).each_value do |decl|
+          base = clear_base_type(decl).sub(/\A\?/, '').sub(/\A\[\]/, '').sub(/\A\{[^}]*\}/, '')
+          next if classes.key?(base) || !fields.key?(base)
+          klass = struct_class_for(base)
+          next unless klass
+          classes[base] = klass
+          (@closure_added ||= Set.new) << base
+          added = true
+        end
+      end
+      break unless added
+    end
+  end
+
+  def node_encoders(cases, generated_root)
+    @generated_root = generated_root
+    fields = clear_struct_fields(generated_root)
+    classes = corpus_node_classes(cases)
+    close_over_referenced_types!(classes, fields)
+    emitted = []
+    unsupported = []
+
+    classes.sort.each do |name, klass|
+      decls = fields[name]
+      next unless decls
+
+      # Reached only through a collection the corpus never populates, so this
+      # encoder is dead. Emit it so the referencing encoder compiles, and panic
+      # rather than invent an encoding that was never exercised.
+      if (@closure_added ||= Set.new).include?(name)
+        emitted << "PRIVATE FN encode#{name}(node: #{name}) RETURNS String EFFECTS REENTRANT ->\n" \
+                   "  panic(\"parser compat: #{name} reached but never encoded\");\n" \
+                   "  RETURN \"\";\nEND"
+        next
+      end
+
+      members = struct_member_names(klass).reject { |m| STAMP_FIELDS.include?(m) }.sort
+      parts = members.each_with_index.map do |member, slot_index|
+        decl = decls[member]
+        pair = decl && clear_value_encoder(decl, "node.#{member}", fields, "f#{slot_index}")
+        if pair.nil? && @never_populated[name][member]
+          # The translation left this field untyped (Any) and the corpus never
+          # populates it. Encode the nil Ruby also emits, but assert it rather
+          # than assume -- a populated field must fail loudly, not silently
+          # diverge.
+          # `== NIL` on an `Any@multiowned` slot compares the PAYLOAD (Any
+          # resolves to f64) rather than the optional, so ask with EXISTS.
+          # A NON-optional untyped slot cannot be asked at all -- it always
+          # holds something -- so encode the nil Ruby emits and say so.
+          pair = if clear_base_type(decl).to_s.start_with?('?')
+            ["  IF node.#{member} EXISTS AS untyped_#{member}_set THEN\n" \
+             "    ASSERT FALSE, \"parser compat: #{name}.#{member} is populated but untyped\";\n" \
+             "  END", '"N"']
+          else
+            ["  # #{name}.#{member} is untyped and non-optional: unaskable here.", '"N"']
+          end
+        end
+        unless pair
+          unsupported << "#{name}.#{member} (#{decl.inspect})"
+          next nil
+        end
+        prelude, expr = pair
+        line = "  out = out $+ lengthEncoded(\"S\", #{member.inspect}) $+ #{expr};"
+        prelude.empty? ? line : "#{prelude}\n#{line}"
+      end
+      next if parts.any?(&:nil?)
+
+      emitted << <<~FN.chomp
+        PRIVATE FN encode#{name}(node: #{name}) RETURNS String EFFECTS REENTRANT ->
+          MUTABLE out = "O#{name.bytesize}:#{name}#{members.length}[";
+        #{parts.join("\n")}
+          RETURN out $+ "]";
+        END
+      FN
+    end
+
+    raise "parser compat: cannot encode #{unsupported.join(', ')}" if unsupported.any?
+
+    [emitted.join("\n\n"), [locatable_dispatch(classes.keys, fields, generated_root),
+                             union_encoders(generated_root, fields, classes.keys.to_set)].reject(&:empty?).join("\n\n")]
+  end
+
+  # One encoder per declared union: dispatch on the active variant and encode
+  # its payload. Locatable keeps its hand-written dispatch (it names every AST
+  # node and only the corpus-reachable ones get encoders).
+  def union_encoders(generated_root, fields, encodable)
+    clear_union_variants(generated_root).filter_map do |name, variants|
+      next if name == 'Locatable'
+      next unless @union_encoders_needed&.include?(name)
+      # A union that already carries a Locatable variant does not need a
+      # per-node arm as well: encodeLocatable dispatches those. Keeping them
+      # expands one encoder into ~130 arms and pulls in every node encoder.
+      covers_nodes = variants.any? { |_, payload| payload == 'Locatable' }
+      node_variants = covers_nodes ? locatable_variants(generated_root) : Set.new
+      arms = variants.filter_map do |variant, payload|
+        next if covers_nodes && node_variants.include?(payload)
+        # A variant the corpus never produces has no encoder to call. Leaving
+        # its arm out drops it into the panic below, which is the same contract
+        # the never-populated struct encoders use.
+        bare = payload.sub(/\A\?/, '').sub(/\A\[\]/, '').sub(/\A\{[^}]*\}/, '').sub(/@\w+\z/, '')
+        next if fields.key?(bare) && !encodable.include?(bare)
+        slot = "u_#{name.downcase}_#{variant.downcase}"
+        pre, expr = clear_value_encoder(payload, slot, fields, "u#{name}#{variant}")
+        next if expr.nil?
+        body = pre.to_s.empty? ? "" : "#{pre}\n"
+        "  IF node IS_A #{name}.#{variant} AS #{slot} THEN\n#{body}    RETURN #{expr};\n  END"
+      end
+      "PRIVATE FN encode#{name}(node: #{name}) RETURNS String EFFECTS REENTRANT ->\n" \
+        "#{arms.join("\n")}\n" \
+        "  panic(\"parser compat: unsupported #{name} variant\");\nEND"
+    end.join("\n\n")
+  end
+
+  def locatable_variants(generated_root)
+    src = File.read(File.join(generated_root, 'ast', 'ast.clear'))
+    src[/^(?:PUB )?UNION Locatable \{(.*?)\}/m, 1].to_s.scan(/(\w+):/).flatten.to_set
+  end
+
+  def locatable_dispatch(names, fields, generated_root)
+    variants = locatable_variants(generated_root)
+    arms = names.select { |n| fields.key?(n) && variants.include?(n) }.sort.map do |n|
+      "  IF node IS_A Locatable.#{n} AS item THEN RETURN encode#{n}(item); END"
+    end
+    <<~FN.chomp
+      PRIVATE FN encodeLocatable(node: Locatable) RETURNS String EFFECTS REENTRANT ->
+      #{arms.join("\n")}
+        panic("parser compat: unsupported AST node");
+      END
+
+      PRIVATE FN encodePassStateValue(node: PassStateValue) RETURNS String EFFECTS REENTRANT ->
+        panic("parser compat: pass state reached but never populated by the parser");
+      END
+
+      PRIVATE FN encodeContractClauseValue(node: ContractClauseValue) RETURNS String EFFECTS REENTRANT ->
+        IF node IS_A String AS text THEN RETURN lengthEncoded("S", text); END
+        IF node IS_A Locatable AS item THEN RETURN encodeLocatable(item); END
+        panic("parser compat: unsupported contract clause value");
+      END
+    FN
+  end
+
   def clear_harness_source(cases, generated_root)
     parser_path = parser_require_spec(generated_root)
+    type_path = type_require_spec(generated_root)
+    lexer_path = lexer_require_spec(generated_root)
+    encoders, dispatch = node_encoders(cases, generated_root)
+    node_encoders_source = "#{encoders}\n\n#{dispatch}\n"
+
     calls = cases.each_with_index.map do |entry, index|
-      "  dumpCase(#{LexerHarnessSupport.clear_string_expr(entry['source'])}, #{index}, #{LexerHarnessSupport.clear_string_expr(entry['name'])}) OR_ELSE RAISE;"
+      "  dumpCase(#{LexerHarnessSupport.clear_string_expr(entry['source'])}, #{index}, #{LexerHarnessSupport.clear_string_expr(entry['name'])}) OR_ELSE reportCaseFailure(#{index}, #{LexerHarnessSupport.clear_string_expr(entry['name'])});"
     end.join("\n")
 
     <<~CLEAR
       REQUIRE #{LexerHarnessSupport.clear_string_literal(parser_path)};
+      REQUIRE #{LexerHarnessSupport.clear_string_literal(type_path)};
+      REQUIRE #{LexerHarnessSupport.clear_string_literal(lexer_path)};
 
       PRIVATE FN escapeCompat(value: String) RETURNS String ->
         MUTABLE out = "";
         MUTABLE i = 0;
         WHILE i < value.length() DO
-          ch = value.charAt(i);
+          MUTABLE ch = value.charAt(i);
           IF ch == "\\\\" THEN
             out = out $+ "\\\\\\\\";
           ELSE_IF ch == "\\n" THEN
@@ -460,14 +894,19 @@ module ParserCompat
         RETURN prefix $+ whole.toString() $+ "." $+ trimTrailingZeros(frac_text);
       END
 
-      PRIVATE FN encodeTokenValue(value: TokenValue) RETURNS String ->
-        RETURN MATCH value START
-          TokenValue.Nil -> "N",
-          TokenValue.Str AS item -> lengthEncoded("S", item),
-          TokenValue.Int AS item -> "I" $+ item.toString() $+ ";",
-          TokenValue.UInt AS item -> "I" $+ item.toString() $+ ";",
-          TokenValue.Float AS item -> "F" $+ floatValueText(item) $+ ";",
-        END;
+      PRIVATE FN encodeTokenValue(value: ?TokenValue) RETURNS String ->
+        IF value EXISTS AS payload THEN
+          IF payload IS_A TokenValue.StringValue AS item THEN RETURN lengthEncoded("S", item); END
+          IF payload IS_A TokenValue.Int64Value AS item THEN RETURN "I" $+ item.toString() $+ ";"; END
+          IF payload IS_A TokenValue.Float64Value AS item THEN RETURN "F" $+ floatValueText(item) $+ ";"; END
+          IF payload IS_A TokenValue.BoolValue AS item THEN RETURN IF item THEN "B1" ELSE "B0" END; END
+        END
+        RETURN "N";
+      END
+
+      PRIVATE FN encodeType(value: Type) RETURNS String ->
+        RETURN "O4:Type1[" $+ lengthEncoded("S", "resolved") $+
+          lengthEncoded("Y", CAST(type__resolved(value) AS String)) $+ "]";
       END
 
       PRIVATE FN encodeToken(token: Token) RETURNS String ->
@@ -479,62 +918,17 @@ module ParserCompat
           "]";
       END
 
-      PRIVATE FN encodeCompat(value: Any) RETURNS String EFFECTS REENTRANT ->
-        IF value == NIL THEN
-          RETURN "N";
-        ELSE_IF value IS_A Token AS token THEN
-          RETURN encodeToken(token);
-        ELSE_IF value IS_A String@symbol AS symbol_value THEN
-          RETURN lengthEncoded("Y", CAST(symbol_value AS String));
-        ELSE_IF value IS_A String AS string_value THEN
-          RETURN lengthEncoded("S", string_value);
-        ELSE_IF value IS_A Bool AS bool_value THEN
-          RETURN IF bool_value THEN "B1" ELSE "B0" END;
-        ELSE_IF value IS_A Int64 AS int_value THEN
-          RETURN "I" $+ int_value.toString() $+ ";";
-        ELSE_IF value IS_A UInt64 AS uint_value THEN
-          RETURN "I" $+ uint_value.toString() $+ ";";
-        ELSE_IF value IS_A Float64 AS float_value THEN
-          RETURN "F" $+ floatValueText(float_value) $+ ";";
-        ELSE_IF value IS_A Any[] AS items THEN
-          MUTABLE encoded = "A" $+ items.length().toString() $+ "[";
-          MUTABLE i = 0;
-          WHILE i < items.length() DO
-            encoded = encoded $+ encodeCompat(items[i]);
-            i += 1;
-          END
-          RETURN encoded $+ "]";
-        ELSE_IF value IS_A HashMap<Any> AS values THEN
-          MUTABLE pairs: String[] = [];
-          values.keys() |> EACH {
-            pairs.append(encodeCompat(_) $+ encodeCompat(values[_]));
-          };
-          pairs = pairs.sort();
-          RETURN "H" $+ pairs.length().toString() $+ "[" $+ pairs.join("") $+ "]";
-        ELSE_IF value IS_A Struct AS object THEN
-          MUTABLE members = object.class().members().sort();
-          MUTABLE encoded = "O" $+ object.class().name().length().toString() $+ ":" $+
-            object.class().name() $+ members.length().toString() $+ "[";
-          MUTABLE i = 0;
-          WHILE i < members.length() DO
-            member = members[i];
-            encoded = encoded $+ lengthEncoded("S", member) $+ encodeCompat(object[member]);
-            i += 1;
-          END
-          RETURN encoded $+ "]";
-        END
-        panic("unsupported parser compatibility value");
+#{node_encoders_source}
+      # One failing case used to abort the whole run, hiding every case after it.
+      PRIVATE FN reportCaseFailure(index: Int64, name: String) RETURNS Void ->
+        print("CASE|" $+ index.toString() $+ "|" $+ escapeCompat(name) $+ "|error|parse_failed");
+        print("ENDCASE");
+        RETURN;
       END
-
       PRIVATE FN dumpCase(source: String@raw, index: Int64, name: String) RETURNS !Void ->
-        tokens = tokenizeSource(source) OR_ELSE RAISE;
-        MUTABLE parser = clearParser__new(tokens, source);
-        program = parse(parser);
-        IF program == NIL THEN
-          panic("parser returned NIL");
-        END
+        program = clearParser__parse_source(CAST(source AS String)) OR_ELSE RAISE;
         print("CASE|" $+ index.toString() $+ "|" $+ escapeCompat(name) $+ "|ok|");
-        print("AST|" $+ escapeCompat(encodeCompat(program?)));
+        print("AST|" $+ escapeCompat(encodeProgram(program)));
         print("ENDCASE");
         RETURN;
       END
@@ -574,6 +968,12 @@ module ParserCompat
         current.delete('index')
         cases << current
         current = nil
+      when /\A\[Scheduler\]/, /\A(Segmentation fault|thread \d+ panic|Aborted)/
+        # The CLEAR side aborted partway -- a scheduler error, or a crash that
+        # takes the process down. Report what it DID produce so the cases that
+        # work can still be byte-compared.
+        warn "parser_compat: CLEAR aborted after #{cases.length} case(s): #{line}"
+        break
       else
         raise "unexpected CLEAR parser output: #{line}"
       end

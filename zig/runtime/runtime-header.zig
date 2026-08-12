@@ -1139,6 +1139,7 @@ pub const CheatLib = struct {
     pub const makeHashMap = DataStructures.makeHashMap;
     pub const mapPut = DataStructures.mapPut;
     pub const StringMap = DataStructures.StringMap;
+    pub const InternedValueStringMap = DataStructures.InternedValueStringMap;
     pub const mapPromote = DataStructures.mapPromote;
     pub const mapDeinit = DataStructures.mapDeinit;
     pub const mapGet = DataStructures.mapGet;
@@ -2767,6 +2768,17 @@ pub const CheatLib = struct {
         return buf;
     }
 
+    // capitalize(str) -> new string with the first ASCII byte uppercased and
+    // the rest lowered, matching Ruby's String#capitalize.
+    pub fn stringCapitalize(allocator: std.mem.Allocator, str: []const u8) ![]const u8 {
+        Runtime.profileAlloc(str.len);
+        const buf = try allocator.alloc(u8, str.len);
+        for (str, 0..) |c, idx| {
+            buf[idx] = if (idx == 0) std.ascii.toUpper(c) else std.ascii.toLower(c);
+        }
+        return buf;
+    }
+
     // shell
 
     pub fn shell(allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {
@@ -4158,6 +4170,13 @@ pub const CheatLib = struct {
             return if (value.len > 0) try alloc.dupe(u8, value) else value;
         }
 
+        // The mirror of the optional case below: a copy whose DESTINATION is a
+        // concrete T can be fed an already-narrowed `?T` source. The narrowing
+        // is the caller's proof of presence, so unwrap and copy the payload.
+        if (comptime info != .optional and @typeInfo(@TypeOf(value)) == .optional) {
+            return try dupeValue(T, value.?, alloc);
+        }
+
         // Copy and drop are one compiler-generated semantic contract. A type
         // with drop glue but no clone glue is linear; reaching this path means
         // annotation/lowering failed to reject an illegal COPY.
@@ -4433,9 +4452,10 @@ pub const CheatLib = struct {
             errdefer result.deinit(alloc, alloc);
             var src_mut = value;
             var it = src_mut.inner.iterator();
+            const map_interned = comptime @hasDecl(T, "interned_values") and T.interned_values;
             while (it.next()) |entry| {
                 const ValT = @TypeOf(entry.value_ptr.*);
-                const v = if (comptime needsCleanup(ValT))
+                const v = if (comptime !map_interned and needsCleanup(ValT))
                     try dupeValue(ValT, entry.value_ptr.*, alloc)
                 else
                     entry.value_ptr.*;

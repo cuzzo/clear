@@ -539,3 +539,50 @@ test "sharded getPtr reaches an aggregate payload without copying it" {
     try std.testing.expectEqual(@as(usize, 1), observed.edges.items.len);
     try std.testing.expectEqual(@as(i64, 5), observed.edges.items[0]);
 }
+test "InternedValueStringMap cleanup and dupeValue reuse value pointers" {
+    const allocator = std.testing.allocator;
+    var map: CheatLib.InternedValueStringMap() = .{};
+    map.alloc = allocator;
+    try map.put(allocator, allocator, "*", "MUL");
+
+    var copy = try CheatLib.dupeValue(CheatLib.InternedValueStringMap(), map, allocator);
+    try std.testing.expectEqual(map.get("*").?.ptr, copy.get("*").?.ptr);
+
+    // Generic cleanup path must free keys and buckets only.
+    CheatLib.cleanup(CheatLib.InternedValueStringMap(), allocator, &copy);
+    CheatLib.cleanup(CheatLib.InternedValueStringMap(), allocator, &map);
+}
+
+test "InternedValueStringMap never frees interned values (put/overwrite/remove/deinit)" {
+    const allocator = std.testing.allocator;
+    var map: CheatLib.InternedValueStringMap() = .{};
+    map.alloc = allocator;
+    defer map.deinit(allocator, allocator);
+
+    // Rodata literals stand in for intern-table symbols: any free would
+    // crash or corrupt, and std.testing.allocator would flag a non-owned
+    // pointer immediately.
+    try map.put(allocator, allocator, "+", "ADD");
+    try map.put(allocator, allocator, "-", "SUB");
+    try map.put(allocator, allocator, "+", "PLUS"); // overwrite: must NOT free "ADD"
+    try std.testing.expectEqual(@as(i64, 2), map.count());
+    try std.testing.expectEqualStrings("PLUS", map.get("+").?);
+
+    map.remove(allocator, "-"); // must NOT free "SUB"
+    try std.testing.expectEqual(@as(i64, 1), map.count());
+}
+
+test "owned-value StringMap still frees replaced and removed values" {
+    const allocator = std.testing.allocator;
+    var map: CheatLib.StringMap([]const u8) = .{};
+    map.alloc = allocator;
+    defer map.deinit(allocator, allocator);
+
+    try map.put(allocator, allocator, "k", try allocator.dupe(u8, "first"));
+    try map.put(allocator, allocator, "k", try allocator.dupe(u8, "second")); // frees "first"
+    try map.put(allocator, allocator, "j", try allocator.dupe(u8, "third"));
+    try std.testing.expectEqual(@as(i64, 2), map.count());
+
+    map.remove(allocator, "j"); // frees "third"
+    try std.testing.expectEqual(@as(i64, 1), map.count());
+}
